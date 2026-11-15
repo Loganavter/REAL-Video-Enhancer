@@ -34,3 +34,23 @@
 # 5. The stage-1 gate: the pipeline must sit under the bar it will be judged by.
 @below pipeline_share 0.1
 @below simulation_share 0.1
+
+@bar bar_share  0.1  %
+@bar bar_peak   20   levels
+
+# 6. A peak judged against the SHARE threshold: 8 is a share threshold, not the peak bar.
+@claim peak_value            7    levels "Chainsaw, int8 engine"
+@below peak_value bar_share
+
+# 7. A causal claim whose mechanism was never varied.
+@claim dram_write_bytes    184.6  MB     "block kernel, BM256, one launch"
+@claim dram_write_bytes_b  184.6  MB     "block kernel, BM256, one launch"
+@cause write_allocate "write-allocate" dram_write_bytes dram_write_bytes_b
+
+# 8. A verdict over claims from two sessions: each is true, the pair is not.
+@claim engine_ms_violet     51.4  ms     "Violet, session A" measured
+@claim engine_ms_other      56.3  ms     "anime, session B"  measured
+@verdict int8_speedup engine_ms_violet engine_ms_other
+
+# 9. A derived number with no derivation line.
+@claim triangle_bound       0.067  %      "Violet + anime, summed shares" derived
