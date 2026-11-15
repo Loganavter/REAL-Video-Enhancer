@@ -32,6 +32,7 @@ def main() -> int:
     ap.add_argument("--margin-all", type=float, default=1.0)
     ap.add_argument("--localize", action="store_true")
     ap.add_argument("--sym", action="store_true", help="force symmetric scales for A/B")
+    ap.add_argument("--per-tap", action="store_true", help="one weight scale per (channel, tap)")
     ap.add_argument("--fp16-tail", type=int, default=0,
                     help="leave the last N body pairs on the fp16 boundary")
     args = ap.parse_args()
@@ -48,7 +49,7 @@ def main() -> int:
     with torch.no_grad():
         ref = model(b).float()
 
-    inputs, outputs, _ = calibrate(model, [frame(p) for p in calib_paths])
+    inputs, outputs, _ = calibrate(model, [frame(p) for p in calib_paths], per_tap=args.per_tap)
     # the head conv's input is the image, clamped to [0,1] by the model itself: its range is a domain
     # constant and calibrating it on one frame made a dark frame clip a fifth of a different title
     inputs["body.0"] = (0.0, 1.0)

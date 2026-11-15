@@ -28,26 +28,31 @@ sys.path.insert(0, "scripts")
 from cut_channels_naive import load, statistic  # noqa: E402
 
 
-def quantise_weights(state):
-    """Per-output-channel symmetric int8, which is what the kernel multiplies with."""
+def quantise_weights(state, per_tap=False):
+    """Symmetric int8 weights: one scale per output channel, or per (output channel, tap).
+
+    The kernel can do per-tap exactly - it dequantises inside the tap loop and accumulates each tap in
+    int32 - so the tap dimension is a free axis that TensorRT does not have.
+    """
     out = {}
     scales = {}
     for name, tensor in state.items():
         if tensor.ndim == 4:
-            scale = tensor.abs().amax(dim=(1, 2, 3), keepdim=True) / 127.0
+            dims = (1,) if per_tap else (1, 2, 3)
+            scale = tensor.abs().amax(dim=dims, keepdim=True) / 127.0
             scale = scale.clamp_min(1e-8)
             q = torch.round(tensor / scale).clamp(-127, 127)
             out[name] = q * scale
-            scales[name] = scale.flatten()
+            scales[name] = scale.expand_as(tensor)
         else:
             out[name] = tensor
     return out, scales
 
 
-def calibrate(model, frames, device="cuda"):
+def calibrate(model, frames, device="cuda", per_tap=False):
     """Per-tensor input scales and per-channel output scales, from the quantised model's own activations."""
     state = model.state_dict()
-    qstate, wscales = quantise_weights(state)
+    qstate, wscales = quantise_weights(state, per_tap=per_tap)
     model.load_state_dict(qstate)
 
     inputs, outputs = {}, {}
