@@ -1175,8 +1175,32 @@ so 1.25 is the best point on that frame, 1.5 makes the share *worse*, and the pe
 whatever the margin is. That peak does not respond to step size at all, which is the same invariance the
 localization found - but on Violet it is 2x the bar rather than 1 level over it.
 
-Status, honestly: **the int8 picture passes on one title and fails on another, and the failure is not
-tuned away by scales.** Chainsaw reads 0.093-0.126% at peaks 14-17; Violet reads 0.078-0.174% at peaks
+**Recalibrating in-domain answers where that came from, and the answer is "both".** Same Violet frames,
+calibrated on Violet instead of Chainsaw:
+
+| held-out | cross-title calib (1.25) | in-domain calib (1.25) |
+|---|---|---|
+| Violet 1 s | 0.078% / peak 17 | **0.006% / peak 12** |
+| Violet 5 s | 0.174% / peak 35 (at 1.5) | **0.058% / peak 37** |
+| Violet 8 s | 0.162% / peak 20 | **0.059% / peak 23** |
+
+So the share is a calibration-coverage effect and it largely goes away: at margin 1.25 in-domain the
+share is 0.058%, **better than the 0.071% the shipping tile path documents**. The peak on the 5 s frame
+is not a coverage effect - it sits at 35-37 across margins 1.0-1.25 and only falls to 28 at 1.5, where
+the share climbs to 0.141%.
+
+**And that peak is on a bright edge, not a dark flat patch.** Localized at (1228, 1027) channel 2:
+reference 0.714, simulation 0.858 - +37 levels on a bright pixel in a neighbourhood of 0.476..0.911.
+Eight pixels above 20, 4771 above 8. The earlier localization found the opposite corner of the range (a
+dark patch at 0.048), so the two are not one mechanism: one is a level shift where the signal is small,
+the other is a bright-region excursion consistent with a top-end clipping event that the calibration set
+missed.
+
+Status, honestly: **with per-video calibration and margin 1.25 the int8 picture passes the statistic the
+project actually applies** - 0.058% against 0.1%, and better than the shipped opt-in's 0.071% - while
+reading peak 37 against that option's 23. Two frames of one title are still a narrow calibration set;
+the peak is the remaining open question and it is now a named bright-pixel event rather than an
+invariant. Chainsaw reads 0.093-0.126% at peaks 14-17; Violet reads 0.078-0.174% at peaks
 17-35 depending on the frame, with no margin recovering the peak. The speed is real (1.91 ms, 79-80
 TOPS); the picture is not established on a spread sample, and per this ledger's own rule a configuration
 that looks good on one pair is not measured.
