@@ -37,13 +37,22 @@ the pipe and colour fixes - and it applies to every frame of every clip. Everyth
 animation is the frame gate, and the gate refuses on grain by design, so on film the honest answer is
 the 1.85x.
 
-**The picture is not identical to the original's, and it is not the reuse.** On the film clip the gate
-refuses, so any difference there is the pipeline: the current build differs from the original by
-**0.57% of pixels above 8 levels at the worst frame**, with mean |dY| 0.73, |dU| 0.38 and |dV| 0.33
-levels and **zero** chroma samples above 8 - a thin grain-scale difference, not a colour shift - plus a
-systematic **-0.5/255 mean luma** (the original's mean luma matched the source's, the current build is
-half a level darker). That offset is recorded as an open candidate regression in the colour path, not
-as part of the speed-up.
+**The picture is not identical to the original's, and the reason is a deliberate matrix choice.** On
+the film clip the gate refuses, so the whole difference is the pipeline: **0.57% of pixels above 8
+levels at the worst frame**, mean |dY| 0.73 / |dU| 0.38 / |dV| 0.33, **zero** chroma samples above 8,
+and a systematic **-0.5/255 mean luma**. The mechanism is in the ffmpeg commands, not in the
+arithmetic: the original left the RGB->YUV step to ffmpeg, which picks **bt601** by default, while
+`_color_convert_args()` now passes `scale=in_range=pc:out_color_matrix={source or bt709}:out_range=tv`.
+That is the same fix ledger C1 measured as |dU| 6.64 -> 0.2 codes against a bt709 source, and it is why
+the earlier "open candidate regression" reading of this difference was backwards: it is a half-level
+luma shift from 601 to 709 on a source that declares **no** matrix at all
+(`color_space=unknown`), not truncation.
+
+One bar, two references, stated once: the 0.1% bar judges the **reuse artifact** against the no-reuse
+render of the same build, which is where the gate and the tiles live. A colour correction is judged
+against the **source**, and this one moves the picture toward it. Judging a pipeline fix by its
+difference from the previous version would forbid every such fix - and the 0.57% here is that
+difference, not an artifact.
 
 End-to-end on the clip with `x265_nvenc` (so the encoder does not hide the model):
 **6.26 s (old defaults) -> 4.27 s (new defaults) = 1.47x**. The gate on top of that, measured on

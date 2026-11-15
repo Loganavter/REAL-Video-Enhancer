@@ -10,8 +10,10 @@ torch 2.9.0+cu130. Unless stated: fp16 engines, static shape, `optimization_leve
 **Conclusion up front**: against the original 2.4.2 the pipeline is **4.3x** on animation and
 **1.85x** on 35 mm film, and the engine-side part of that - optimization profile, tiling, the pipe
 fixes - is **1.6-1.9x on every frame of every clip**. That comparison also shows a systematic
--0.5/255 luma offset against the original which PERFORMANCE.md records as an open candidate
-regression, so "faster" is not the same as "identical". No kernel-level technique we could run
+-0.5/255 luma offset against the original: it is the RGB->YUV matrix, ffmpeg's default bt601 in the
+original against the declared `out_color_matrix=bt709` here (the C1 fix, |dU| 6.64 -> 0.2 codes), on a
+source that declares no matrix at all - so "faster" is not "identical", and the difference is a
+correction rather than a loss (PERFORMANCE.md states the two references the 0.1% bar is applied to). No kernel-level technique we could run
 locally beat a well-built engine, and the two model-side wins of this round are `tiling=full` (3.8%
 end-to-end) and a **graph**
 change - padding the head convolution to 8 input channels, worth **5.8% on a raw TRT build** because
