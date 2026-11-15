@@ -14,6 +14,13 @@ bundled interpreter with torch lives outside the worker jail):
   here is evidence, not a tautology.  Measured: interior agreement ~1e-15,
   differences confined to the 2-pixel border ring where the reference clamps the
   *HR* sample index and the fused convolution replicate-pads in *LR* space;
+* **torch path, replayed on numpy (no torch)** - ``apply_tail`` itself, called
+  with a stand-in whose ``conv2d``/``pad``/``pixel_shuffle`` carry *torch's*
+  signatures over the numpy helpers: same block-diagonal/grouped ``conv_b``,
+  same border per convolution, and a parity assert against ``apply_tail_numpy``.
+  This layer exists because the cell that verifies the module has no torch: a
+  ``padding_mode=`` kwarg on ``F.conv2d`` and a dense weight behind ``groups=C``
+  both pass every numpy test and die on the first real frame;
 * **torch (skipped when torch is missing)** - the real thing: a spandrel
   ``Compact``/``SRVGGNetCompact``, ``fuse_tail`` on it, ``apply_tail`` against
   ``net(x)`` downsampled by the numpy reference, plus the identity
@@ -24,6 +31,7 @@ The border numbers are printed as well as asserted: ``pytest -s`` shows them.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import os
 import sys
@@ -468,6 +476,144 @@ def test_value_error_message_names_the_two_scales():
     with pytest.raises(ValueError) as excinfo:
         FT.derive_kernels(np.zeros((48, 4, 3, 3)), None, 4, 3)
     assert "4" in str(excinfo.value) and "3" in str(excinfo.value)
+
+
+# ======================================================================================
+# the torch path itself, without torch: torch's *signatures* over the numpy helpers
+# ======================================================================================
+class _NumpyFunctional:
+    """``torch.nn.functional``'s surface, implemented with the numpy helpers.
+
+    The signatures are torch's, which is the point: ``conv2d`` takes
+    ``(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1)`` and
+    has **no** ``padding_mode`` - that keyword belongs to ``nn.Conv2d``.  So a
+    ``padding_mode=`` call raises ``TypeError`` here exactly as it does in torch,
+    and the border has to be built with ``pad``.  Recording every call lets the
+    test assert *which* border each convolution gets.
+    """
+
+    def __init__(self):
+        self.pads: list[tuple[int, int, int, int, str]] = []   # replicate/constant
+
+    def pad(self, x, pad, mode="constant", value=None):
+        left, right, top, bottom = pad
+        self.pads.append((left, right, top, bottom, mode))
+        return np.pad(np.asarray(x), ((0, 0), (0, 0), (top, bottom), (left, right)),
+                      mode="edge" if mode == "replicate" else "constant")
+
+    def conv2d(self, x, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+        w, x = np.asarray(weight), np.asarray(x)
+        if groups == 1:
+            return FT._conv2d_numpy(x, w, bias, pad=padding, pad_mode="constant")
+        # torch's grouped layout: weight is (out, in // groups, kh, kw), so
+        # weight.shape[1] * groups must equal the input channel count.
+        assert w.shape[1] * groups == x.shape[1], (w.shape, x.shape, groups)
+        self.grouped_calls = getattr(self, "grouped_calls", []) + [w.shape[1]]
+        og, ig = w.shape[0] // groups, w.shape[1]
+        return np.concatenate([
+            FT._conv2d_numpy(x[:, g * ig:(g + 1) * ig], w[g * og:(g + 1) * og],
+                             None if bias is None else np.asarray(bias)[g * og:(g + 1) * og],
+                             pad=padding, pad_mode="constant")
+            for g in range(groups)
+        ], axis=1)
+
+    def pixel_shuffle(self, x, r):
+        return FT._pixel_shuffle_numpy(np.asarray(x), r)
+
+
+class _NumpyTorch:
+    """Stand-in for the ``torch`` module: ``inference_mode`` + ``pixel_shuffle``."""
+
+    def __init__(self):
+        self.F = _NumpyFunctional()
+
+    def inference_mode(self):
+        return contextlib.nullcontext()
+
+    def pixel_shuffle(self, x, r):
+        return self.F.pixel_shuffle(x, r)
+
+
+class _FakeTensor(np.ndarray):
+    """Just enough of a ``torch.Tensor`` for ``apply_tail``: ``.clamp(lo, hi)``."""
+
+    def clamp(self, lo, hi):
+        return _tensor(np.clip(np.asarray(self), lo, hi))
+
+
+def _tensor(x) -> _FakeTensor:
+    """Wrap a numpy array as the stand-in tensor (``ndarray.view`` needs this form)."""
+    return np.asarray(x).view(_FakeTensor)
+
+
+def _features_body(num_feat: int = 16):
+    """Token pre-tail module: widens the 3 model input channels to ``num_feat``."""
+
+    def body(v):
+        v = np.asarray(v)
+        return np.tile(v, (1, -(-num_feat // v.shape[1]), 1, 1))[:, :num_feat]
+
+    return body
+
+
+def test_apply_tail_pads_with_the_functional_api(monkeypatch):
+    """Pin the bug that the cell could not see: ``F.conv2d`` has no ``padding_mode``.
+
+    ``conv_a`` is the model's own ``conv_last`` and keeps its zero padding;
+    ``conv_b`` and ``down`` replicate-pad in LR space (the module docstring's
+    border convention).  A ``padding_mode=`` kwarg would raise ``TypeError``
+    against these signatures, so this fails loudly if the fold ever tries it.
+    """
+    rng = np.random.default_rng(SEED + 6)
+    fused = FT.derive_kernels(*_random_case(rng)[:2], 4, 2)
+    fused["body"] = (_features_body(),)                  # a token pre-tail module
+    fake = _NumpyTorch()
+    monkeypatch.setattr(FT, "_torch", lambda: (fake, fake.F))
+    with pytest.raises(TypeError):
+        fake.F.conv2d(np.zeros((1, 1, 3, 3)), np.zeros((1, 1, 3, 3)),
+                      padding=1, padding_mode="replicate")   # torch's own behaviour
+    FT.apply_tail(fused, _tensor(rng.random((1, 3, 8, 8))))
+    assert fake.F.pads == [(1, 1, 1, 1, "replicate"), (1, 1, 1, 1, "replicate")], \
+        fake.F.pads
+
+
+def test_apply_tail_matches_the_numpy_mirror_through_the_torch_path(monkeypatch):
+    """The torch call sequence, replayed on numpy helpers, must equal ``apply_tail_numpy``.
+
+    Same filter order, same border, same grouped ``conv_b``, same pixel shuffle -
+    so the two implementations can only agree if the torch path's conventions
+    are the ones the numpy algebra was proven with.
+    """
+    rng = np.random.default_rng(SEED + 7)
+    conv_w, conv_b, features, x = _random_case(rng)
+    fused = FT.derive_kernels(conv_w, conv_b, 4, 2)
+    body = (_features_body(),)
+    fused["body"] = body
+    fused["clamp_input"] = True
+    fake = _NumpyTorch()
+    monkeypatch.setattr(FT, "_torch", lambda: (fake, fake.F))
+
+    got = FT.apply_tail(fused, _tensor(x))
+    xc = np.clip(x, 0.0, 1.0)
+    want = FT.apply_tail_numpy(fused, body[0](xc), xc)
+    assert got.shape == want.shape == (1, 3, 32, 32)   # 16 LR px, target scale 2
+    assert np.abs(got - want).max() <= 1e-12
+
+
+def test_apply_tail_identity_runs_through_the_torch_path(monkeypatch):
+    """``target_scale == source_scale``: radius 0, so no padding at all and a 1x1 conv_b."""
+    rng = np.random.default_rng(SEED + 8)
+    conv_w, conv_b, features, x = _random_case(rng, source_scale=4, target_scale=4)
+    fused = FT.derive_kernels(conv_w, conv_b, 4, 4)
+    assert fused["radius"] == 0
+    body = (_features_body(),)
+    fused["body"] = body
+    fake = _NumpyTorch()
+    monkeypatch.setattr(FT, "_torch", lambda: (fake, fake.F))
+    got = FT.apply_tail(fused, _tensor(x))
+    assert fake.F.pads == []                     # 1x1 kernels need no border
+    want = FT.apply_tail_numpy(fused, body[0](x), x)
+    assert np.abs(got - want).max() <= 1e-12
 
 
 # ======================================================================================
