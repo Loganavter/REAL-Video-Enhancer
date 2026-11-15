@@ -937,6 +937,59 @@ by 48 channels and K = 432 is 14 steps of 32 against 18. The expectation is near
 of it is a time question, and it is measurable without asking anyone about the picture - which is what
 `scripts/probe_channel_width.py` does.
 
+## E30a: a channel cut is worth 1.23x, not 1.78x - measured
+
+Same architecture, same builder settings as the app (fp16, `tiling=full`, optimization level 5),
+synthesized weights (tactics depend on shapes, not values), 1920x1080, per-layer times from
+`trt.IProfiler`.
+
+| width | total | body | fusion | MAC ratio | **time ratio** |
+|---|---|---|---|---|---|
+| C=64 | 56.68 ms | 55.83 ms (22 myelin layers) | conv+PReLU fused throughout | 1.00x | 1.00x |
+| C=48 | 46.02 ms | 45.26 ms (22 fused) | preserved | 1.77x | **1.23x** |
+| C=32 | 46.10 ms | 20.09 ms (16 fused convs) | **PReLU breaks out**, 16 passes of 1.4-1.5 ms | 3.94x | **1.23x** |
+
+Two results, and the second one is the interesting one.
+
+**A 25% cut buys 1.23x, not 1.78x.** The body's per-block time goes 3.0-3.5 ms to 2.5-2.7 ms, i.e.
+exactly the 1.25 the N-tile arithmetic predicted: `tilesize128x64x32` means 48 channels fill 75% of a
+64-wide tile, so a quarter of the tensor-core work is spent on nothing. This is the second time on this
+engine that a change in FLOPs did not survive contact with the kernel class - E19 was the first (C=3 to
+8: +0.48% FLOPs, -3.36 ms).
+
+**C=32 removes 4x the MACs and buys nothing at all.** The 16 convolutions do become 2.78x cheaper -
+20.09 against 55.83 ms - and then myelin stops fusing the PReLU at that width: sixteen separate
+`PWN(/body.N/PRelu)` passes at 1.4-1.5 ms each put the 22 ms straight back, and the frame lands at
+46.10 ms, i.e. the same 1.23x as the 48-channel build. This is the **third** appearance of the same
+mechanism in one investigation: the fp16 build pays it unless myelin fuses, int8 pays it per hop
+(measured, E9'), and a narrower channel count pays it too. The binding constraint on this network is
+not the arithmetic and not the peak - it is the boundary between operators, and it is charged whether
+the saving comes from precision, from width, or from a different algorithm.
+
+**What that does to the plan.** A structural cut was the shortest route to 2x because it needs no
+plugin and no new precision: 1.78x of MACs at the fp16 peak, i.e. 27.3 ms. Measured, it is 1.23x, and
+it comes with a quality cost that the residual measurement does not license (the error is not
+proportional to the correction, because the correction is zero on flat patches by construction). So the
+picture half of E30 is dropped as well: 1.23x is below both the int8 ceiling (1.40x, measured) and the
+fp16 headroom (1.34x, measured), and it is the only one of the three that also risks the picture.
+
+Every lever measured so far therefore tops out between 1.23x and 1.40x:
+
+| lever | ceiling | status |
+|---|---|---|
+| fp16, any configuration | 1.34x | measured peak, 70% achieved |
+| int8 with a fused epilogue | 1.40x | measured with a scalar activation |
+| channel cut C=48 / C=32 | 1.23x | measured, time only |
+| Winograd | none available | measured through cuDNN, E26 |
+| low-rank | 1.15x | arithmetic on the same boundary mechanism |
+
+2x is not reachable through any of these, and the reason is now consistent across four independent
+measurements: the boundary is charged per hop and the arithmetic saving does not survive it. What
+remains is a kernel we control, where the epilogue lives in registers and the tiling is ours - and its
+ceiling is the int8 rate, 147 TOPS, i.e. 16.6 ms of body plus non-GEMM = 24.7 ms = 2.28x at peak,
+1.97x at 120 TOPS, 1.84x at 109. That is E27 extended into a real kernel project (CUTLASS or
+hand-written), weeks of work, with 2x at the very top of its range.
+
 ## What the literature closes, and the one item it reopens (2026-11-15)
 
 Written down because these are structural closures - true by the shape of our network, not measured

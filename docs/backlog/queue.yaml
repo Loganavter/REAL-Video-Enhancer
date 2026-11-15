@@ -128,8 +128,9 @@ tasks:
   - id: rve-channel-width-time-2026-11-15
     title: "E30a: time of the body at C=64/48/32 - no picture question, no owner"
     type: experiment
-    status: in_progress
+    status: done
     owner: "@supervisor"
+    resolution: "measured 2026-11-15: C=48 gives 1.23x (56.68 -> 46.02 ms) and C=32 gives the same 1.23x despite 3.94x fewer MACs, because myelin stops fusing the PReLU at that width and 16 separate passes (1.4-1.5 ms) put the gain back. MAC ratio 1.77x -> time 1.23x is the N-tile arithmetic (48 fills 75% of a 64-wide tile). Ledger E30a"
     priority: P0
     gpu: true
     cost: "30m"
@@ -141,10 +142,11 @@ tasks:
     acceptance: "Engine time at three widths, same builder settings as the app (fp16, tiling full, optimization level 5), per-layer body times from trt.IProfiler, 20 iterations. Output: measured time ratio against MAC ratio for each width."
     note: "Split from the pruning item on purpose: how much TIME a width costs is measurable on a synthesized model with random weights (tactics depend on shapes, not values), so it needs no reconstruction and no decision about the picture. The picture half only becomes interesting if this half shows a win."
   - id: rve-pruning-bounds-2026-11-15
-    title: "E30b: channel cut reconstruction - the picture half, gated on E30a"
+    title: "E30b (dropped): channel cut reconstruction - the time half killed it"
     type: code
-    status: todo
-    owner: null
+    status: dropped
+    owner: "@supervisor"
+    resolution: "dropped 2026-11-15 on E30a's measurement: a width cut is worth 1.23x at best, which is below the int8 ceiling (1.40x) and the fp16 headroom (1.34x), and it is the only one of the three that also costs picture quality. No reconstruction method can rescue a time win that small."
     priority: P2
     gpu: true
     cost: "1-2d"
