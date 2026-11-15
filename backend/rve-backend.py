@@ -447,7 +447,7 @@ class HandleApplication:
         parser.add_argument(
             "--trt_tiling_level",
             help="TensorRT tiling_optimization_level: none|moderate|full (default moderate).",
-            default="moderate",
+            default="full",
             type=str,
         )
         parser.add_argument(
