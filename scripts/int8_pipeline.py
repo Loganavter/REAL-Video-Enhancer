@@ -103,37 +103,42 @@ def main() -> int:
 
     # activations live on a PER-TENSOR grid so that scale * weight-scale folds into one per-channel
     # vector; a per-channel activation grid cannot be folded and would break the chain
-    s_act = float(act.abs().amax()) / 127.0
-    cur = torch.round(act / s_act).clamp(-127, 127).to(torch.int8).permute(0, 2, 3, 1).contiguous()
+    # per-channel activation grid: the whole point of the fold below
+    s_act_vec = (torch.maximum(act.amax(dim=(0, 2, 3)), -act.amin(dim=(0, 2, 3))).float()
+                 / 127.0).clamp_min(1e-8)
+    cur = torch.round(act / s_act_vec.view(1, -1, 1, 1)).clamp(-127, 127).to(torch.int8)
+    cur = cur.permute(0, 2, 3, 1).contiguous()
 
-    layers = []
-    for conv, prelu in zip(inner, prelus[1:]):
-        w_q, w_scale = quantise_weights(conv.weight.detach().float())
-        # settled empirically against _int_mm: the kernel wants [tap, cin, cout], and every permute
-        # variant of the same element count reshapes silently into something plausible and wrong
-        tap_w = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
-        s_out = float(prelu.weight.detach().abs().max()) and None
-        layers.append((tap_w, w_scale, prelu.weight.detach().float()))
-        del s_out
+    # the full float weights: the input scale is folded into them per build, see run_pipeline
+    layers = [(conv.weight.detach().float(), prelu.weight.detach().float())
+              for conv, prelu in zip(inner, prelus[1:])]
 
     # each layer's output grid: per-tensor, from the simulation's calibration of the PReLU output
     outs = []
-    for i, (tap_w, w_scale, slope) in enumerate(layers):
+    for i in range(len(layers)):
         key = f"body.{2 * (i + 1) + 1}"
         lo_c, hi_c = outputs[key]
         outs.append(float(torch.maximum(hi_c.abs(), lo_c.abs()).max()) / 127.0)
 
     def run_pipeline():
-        buf, s_in = cur.clone(), s_act
-        for (tap_w, w_scale, slope), s_out in zip(layers, outs):
-            vec = (torch.full_like(w_scale, s_in) * w_scale).contiguous()      # s_act * s_w[c]
-            ovec = torch.full_like(w_scale, s_out).contiguous()
+        """Per-channel activation grids throughout, with each layer's input scale folded into its weights.
+
+        The dot is integer, so a per-input-channel activation scale cannot be applied inside it without
+        leaving int8 MMA. Folding `s_in[cin]` into the weights at build time keeps the dot integer AND the
+        grid per-channel: acc * s_w[cout] = sum_cin x_q[cin] * (w*s_in)[cin,cout], which is the real value.
+        """
+        buf, s_in = cur.clone(), s_act_vec
+        for (w_full, slope), s_out in zip(layers, outs):
+            w_eff = w_full * s_in.view(1, -1, 1, 1)                  # absorb this layer's input grid
+            w_q, w_scale = quantise_weights(w_eff)
+            tap_w = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
+            ovec = torch.full_like(w_scale, float(s_out)).contiguous()
             out = torch.empty_like(buf)
             grid = (triton.cdiv(args.height * args.width, BLOCK_M),)
-            body_kernel[grid](buf, tap_w, vec, slope, ovec, out, args.height, args.width,
+            body_kernel[grid](buf, tap_w, w_scale.contiguous(), slope, ovec, out, args.height, args.width,
                               BLOCK_M=BLOCK_M, C=64, num_warps=2)
-            buf, s_in = out, s_out
-        return buf, s_in
+            buf, s_in = out, torch.full_like(s_in, float(s_out))
+        return buf, float(s_out)
 
     out_q, s_last = run_pipeline()
 

@@ -111,6 +111,20 @@ the vector the kernel loads today) - the same E9' mechanism, one level down.
 
 That is the next change, and it is a kernel change with a re-time attached, not a bookkeeping fix.
 
+**Tested, and refuted: the grid was not the cause.** Implemented per-channel activation grids with each
+layer's input scale folded into its weights (so the dot stays int8: `acc * s_w[cout] = sum_cin x_q[cin] *
+(w*s_in)[cin,cout]`, the real value). The pipeline reads **3.680%** against 3.589% for the per-tensor
+variant - a 2.5% relative change on a number that is 200x over the bar. So the grid granularity is not the
+cause, and neither is the fold.
+
+Which leaves one unambiguous discriminator, and it is cheap: compare the **pipeline's** intermediate tensor
+against the **simulation's** intermediate tensor for the same layer, in the same units. That splits "the
+kernel is fed the wrong data" from "the kernel's maths is wrong", which the fp16 comparison cannot do because
+both causes look identical there. It needs the simulation to expose its per-layer output, ~20 lines.
+
+Two things are already excluded by measurement: the kernel's dot orientation (exact against `_int_mm` when
+handed one tensor) and the scale granularity (this test).
+
 **Second pass, still failing, and the layout is the suspect.** Per-layer isolation on 256x256 says every
 layer is wrong on its own (ratio 0.12-3.7 against the fp16 activation, relative error 1.1-4.3), so it is not
 the chaining. The kernel was verified bit-exact in stage 0 only on **synthetic** weights already in the
