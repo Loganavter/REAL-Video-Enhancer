@@ -1374,6 +1374,39 @@ Two consequences of that composition are unmeasured:
   Violet). The fix is therefore a **floor**, not a comparison: certify the engine against fp16 on the
   calibration frames and treat that as the lower bound of what the bar will see.
 
+**But the reuse loss costs more than the engine wins.** Violet ships at 142/219 reused (64.8%) and 6.90 s,
+with 51.4 ms of engine on a drawn frame, so the engine averages 18.1 ms and everything else is 13.4 ms.
+At int8's 36.2 ms per drawn frame:
+
+| reuse under int8 | per frame | 219 frames | against 6.90 s |
+|---|---|---|---|
+| 64.8% (kept) | 26.1 ms | 5.72 s | 1.21x faster |
+| **50%** | 31.5 ms | 6.90 s | **break-even** |
+| 0% (gate refuses) | 49.6 ms | 10.86 s | **1.57x slower** |
+
+So int8 can afford to lose **15 points of reuse, not more** - and Violet already sits at 0.096% against a
+0.1% bar, i.e. 4% of margin, with the composition measuring 5.2x the engine's own error there. If that pair
+is representative of the title, the gate refuses and int8 is 1.57x *slower* than what ships on the material
+that is already the slowest (1.93x against anime's 3.3x). The first place in this lane where int8 loses on
+the metric that matters is therefore time, not the share.
+
+**A floor is not sufficient, and Violet is the proof.** The engine's own error there is 0.028% while the
+composition is 0.146% - 5.2x - so certifying the engine against fp16 would have approved a depth that
+fails the bar. The correction is that the composition does not decompose: certify
+`|int8(t-k) - fp16(t)|` for every reachable depth on the calibration frames, with both engines. Same cost
+(16 x (56 + 40) ms ~ 1.5 s per video), different justification. The static-pair blind spot then closes by
+construction - on a static pair `int8(t-k) == int8(t)` and the composition degenerates to the engine's own
+error, which is exactly what the bar sees - and the engine error survives as a cheap pre-filter, like the
+noise floor, rather than as an estimate.
+
+**And "our own executor" is transport for int8, not a lever of its own.** Our int8 kernel reaches 77.6 TOPS
+of a 147.4 peak - **53%** - while TensorRT's fp16 block reaches 52.2 TFLOP/s of a 71.6 peak - **73%**. The
+same kernel structure ported to fp16 would give 0.53 x 71.6 = 38 TFLOP/s, i.e. 4.0 ms per block against
+TRT's 2.93, a 1.38x regression. The win came from doubling the rate, not from a better kernel. An executor
+with an int8 body is 1.69x engine / 1.36x wall; an executor with an fp16 body is at best parity and
+probably slower. Removing the build path as a hidden variable is hygiene worth having, but it is not 0.12x
+of wall and it does not justify a kernel project on its own.
+
 **And architecture weighs more than the remaining accuracy.** At 1.97 ms per block, keeping the TRT head
 and tail gives 39.6 ms = 1.42x engine / 1.24x wall; doing head and tail as Triton memory-bound kernels
 (145 MB and 195 MB of traffic, floors 0.50 and 0.68 ms against the current 3.90 and 3.35) gives 33.2 ms =
