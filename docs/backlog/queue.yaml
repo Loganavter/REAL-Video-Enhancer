@@ -35,8 +35,9 @@ tasks:
   - id: rve-winograd-tactics-2026-11-15
     title: "E26: does Winograd exist and win for 64->64 3x3 at 2.07 Mpx in fp16 NHWC?"
     type: experiment
-    status: todo
-    owner: null
+    status: done
+    owner: "@supervisor"
+    resolution: "measured 2026-11-15: cuDNN full autotune 3.67 ms (41.7 TFLOP/s) against the engine's 3.05 (50.2) on the exact shape, flat 1080p->135x240, fp32 control no win. Negative; kernel identity unavailable (torch profiler 0 events under CUDA 13, nsys 2025.1.3 refuses CUDA 13). Ledger E26"
     priority: P0
     gpu: true
     cost: "1h"

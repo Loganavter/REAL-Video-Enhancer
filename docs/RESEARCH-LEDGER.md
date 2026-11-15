@@ -88,7 +88,7 @@ worst frame - rounding, not the padding. | **engine-level win measured, not ship
 | E13 | concurrent engine contexts (batch/streams) | vs-mlrt wiki: 1.65 -> 2.25x on a 2nd stream | up to 2x | no gain (4.25 -> 4.27 s) and output corrupt (25 dB) - because two `torch.jit.load` modules of one engine file are not independent contexts | **rejected as wired** (a wiring fault, not a GPU property) |
 | E14 | alternative tactics for the 16 body convs | our tactic dump: 17 of 18 convs get `sm75_` kernels on an sm89 part | unknown | **measured and closed.** With the tactic sources restricted to JIT convolutions only (no cuDNN, no cuBLAS) the winner is the *same* `sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x64x32`, at 49.97 ms against the baseline's 50.09 (0.998x). So there is no sm80/86/89 alternative being skipped for this shape at K=576 in this TRT build; the `sm75_` name is the name of the winner, not a symptom. Restricting to cuDNN alone is 10.7% **slower** (55.43 ms, stable across three rounds), so TRT's own kernels beat cuDNN here | **closed** (measured) |
 | E15 | crop the active picture area (letterbox bars) | - | up to 1.33x if 25% of the frame is black | **n/a on our material**: the film clip (1440x1080) and the anime clip (1920x1080) both have zero rows darker than 6/255, minimum row mean 59.9 and 124.8. Worth one row-histogram check per new source before rendering | open (source-dependent) |
-| E16 | Winograd F(2,3)/F(4,3) | cuDNN/CORE-TAG counter-precedent | F(2,3) cuts MACs 2.25x, inflates tensors ~4x | not measured. The ridge is **128 MAC/byte** at the borrowed 74 TF/s and 288 GB/s (257 FLOP/byte), not 42: 42 corresponds to a ~24 TF/s fp32-shader peak, so the earlier figure was off by 3x in the wrong direction. **The intensity objection was withdrawn 2026-11-15**: Winograd's transform stages are memory-bound at the shared-memory/L2 level, and that is a cache-blocking problem the literature fixes (PPoPP'20: b_k 32->64 raises intensity 8 -> 10.67 ops/byte; PKF fuses the stages by memory level), not a property of the algorithm on this GPU. The cuDNN-only build being 10.7% slower is E14's measurement of cuDNN's *default* algorithm, not of a forced Winograd kernel, so it does not close this row either. Cheapest test and the numbers behind the reclassification: §What the literature closes, and the one item it reopens | open (untested, and now the largest one) |
+| E16 | Winograd F(2,3)/F(4,3) | cuDNN/CORE-TAG counter-precedent | F(2,3) cuts MACs 2.25x, inflates tensors ~4x | not measured. The ridge is **128 MAC/byte** at the borrowed 74 TF/s and 288 GB/s (257 FLOP/byte), not 42: 42 corresponds to a ~24 TF/s fp32-shader peak, so the earlier figure was off by 3x in the wrong direction. **The intensity objection was withdrawn 2026-11-15**: Winograd's transform stages are memory-bound at the shared-memory/L2 level, and that is a cache-blocking problem the literature fixes (PPoPP'20: b_k 32->64 raises intensity 8 -> 10.67 ops/byte; PKF fuses the stages by memory level), not a property of the algorithm on this GPU. The cuDNN-only build being 10.7% slower is E14's measurement of cuDNN's *default* algorithm, not of a forced Winograd kernel, so it does not close this row either. Cheapest test and the numbers behind the reclassification: §What the literature closes, and the one item it reopens. **Measured 2026-11-15 (E26): no cuDNN-selected algorithm reaches our kernel** - full autotune on the exact shape gives 3.67 ms against the engine's 3.05, flat from 1080p down to 135x240. Closed as negative through cuDNN/TRT; what remains open is a hand-written kernel, i.e. E10's cost class | **closed (negative, measured)** |
 | E17 | rewrite PReLU as `a*x + (1-a)*Relu(x)` | TRT supported-op patterns | maybe changes tactic eligibility | **measured, as the unlock E9' was missing - and it is not one.** The rewrite does not remove the boundary: the `a*x` term still needs the pre-ReLU frame, and the `(1-a)*Relu(x)` term gives a second full-frame pass, so it trades one 1.8 ms PReLU pass for two. What would remove the boundary is a fused int8 conv+PReLU epilogue, and this build has none for a per-channel slope (measured: the int8 conv reports `HasReLU: 0, Activation: NONE` and the PReLU appears as its own `PointWiseV2` layer). The earlier guess that it was "cheap and near zero" was right about the cost and wrong about the mechanism | **closed together with E9'** |
 
 ## Precision / colour (10-bit)
@@ -729,6 +729,49 @@ one decimal was hiding the only thing that mattered: 0.1% of 502 frames is half 
 worst-frame metric **one frame is the entire result**. Published as counts, the three settings differ
 by 11 frames and the defect is flat at 0.015-0.016% - on `box(|diff|)` the threshold really is not
 the lever, and that now shows in the counts as well as in the defect.
+
+## E26: Winograd is not reachable through cuDNN on this card, and the margin is 20%
+
+The question the literature raised was whether our body convolution leaves a Winograd win unclaimed.
+Answered by measurement, and the answer is no - at least not through any algorithm cuDNN will select.
+
+Shape is the model's own body layer: 3x3, 64 -> 64, 1920x1080, fp16 NHWC, 152.9 GFLOP. The engine
+runs 16 of these in 48.72 ms, i.e. **3.05 ms and 50.2 TFLOP/s** each.
+
+| run | ms | TFLOP/s |
+|---|---|---|
+| cuDNN 9.13, heuristic (`benchmark=False`) | 4.06-4.12 | 37.2-37.7 |
+| cuDNN 9.13, full autotune (`benchmark=True`, every engine timed) | **3.67** | **41.7** |
+| cuDNN 9.13, fp32 NCHW control | 10.4 | 14.6 |
+| our engine (TRT, `implicit_gemm` myelin kernel) | **3.05** | **50.2** |
+
+Three rounds, interleaved, one process per mode so no benchmark result survives between them; the
+spread across rounds was under 1%. Autotune beats the heuristic by 10%, and still loses to our kernel
+by 20%. The fp32 control shows no win at all (14.6 TFLOP/s, autotune does not improve it), which is
+what a missing algorithmic shortcut looks like: Winograd's saving is largest exactly where it would
+have shown up there.
+
+Shape sweep, to rule out the possibility that Winograd exists but is only viable at small spatial
+sizes (`tiling=moderate` is a shipped option): 1080x1920 -> 41.7, 540x960 -> 41.4, 270x480 -> 38.8,
+135x240 -> 28.1 TFLOP/s. Efficiency is flat or worse, so there is no tile size at which a different
+algorithm takes over.
+
+**What this does not establish, stated plainly: the kernel NAME.** Trying to name it failed twice -
+`torch.profiler` returns zero CUDA events under this CUDA 13 / torch 2.9 pairing, and the nsys
+archive (2025.1.3) refuses to run against CUDA 13 (`hasn't been installed with CUDA Toolkit
+#CUDA_MAJOR#...`, its own template unexpanded). So we know that *whatever* cuDNN selects after timing
+every engine it has for this shape is 20% slower than our kernel, and not which engine that is.
+For the decision that is enough: either Winograd was among the timed engines and lost, or it was
+never offered as an engine for this shape. Both readings close the "cheap lever" framing. What they
+leave open is a hand-written Winograd F(2,3) with fused transforms, which is E10's cost class and
+carries E10's counter-precedent (a hand-written conv kernel measured 39.8 TFLOP/s where this engine
+holds 91 on a narrower precision).
+
+So the literature's claim does not transfer, and the reason is visible in the numbers: Welder's
+authors compared against TensorRT 8.x on an V100/3090 where an fp16 Winograd kernel existed and won.
+On an Ada part running TRT with an sm89 tensor-core GEMM, the convolution is already at 68% of the
+74 TFLOP/s peak the ledger borrows, and a 2.25x MAC reduction does not survive the transform traffic
+at that efficiency.
 
 ## What the literature closes, and the one item it reopens (2026-11-15)
 
