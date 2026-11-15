@@ -215,8 +215,18 @@ only 94 frames. The 502-frame run shows it directly: 22.72 x 502 = 11.40 s of lo
    content-adaptive default (enable tiles once the gate's own reuse share passes ~60% during
    calibration) is the way to get it without asking the user, and it is unbuilt.
 1. **The input conversion - 2.80 ms/frame** of the gated anime path, paid once per frame by
-   whichever stage reads the frame first (10-bit upload + GPU colour stage). The gate's own
-   arithmetic is 0.8 ms, so the lever is the input pipe, not the gate.
+   whichever stage reads the frame first. The gate's own arithmetic is 0.80 ms, so the lever is
+   the input pipe, not the gate. Where it goes, per `TorchUtils`: one H2D of the packed frame
+   (6.2 MB at 1080p 8-bit, 12.4 MB at 10-bit) followed by roughly fifteen elementwise kernels
+   that each materialise a full-resolution intermediate (`sub_`/`div_`, two bilinear chroma
+   upsamples, `r`, `b`, `g` computed through `r` and `b`, a three-channel `stack`, `clamp_`,
+   the dtype cast, and in the 8-bit path a `reshape -> permute -> contiguous` layout copy).
+   The bandwidth floor for that traffic is ~0.1 ms, so it is launch- and materialisation-bound
+   by roughly 30x. Two candidates, in order of payoff: give ffmpeg's decoder `gbrp` so the
+   planar frame arrives in the layout the tensor wants (kills the permute copy, 8-bit path
+   only, and the preview/cv2 consumers would need the interleaved view), and rewrite the 10-bit
+   conversion to write into one preallocated 3-channel buffer with `g` computed directly from
+   `y,u,v` instead of through `r` and `b`. Neither is measured yet.
 2. **E14 / E5' - the `sm75_` tactics.** Same experiment answers both: a quiet rebuild with an
    explicit workspace, then diff the tactic dump and A/B the alternatives through an editable
    timing cache. This is the only remaining kernel-level lead.
