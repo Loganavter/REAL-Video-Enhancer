@@ -543,11 +543,53 @@ def _body_modules(net: Any, conv_last: Any) -> list:
     return mods
 
 
-def _tail_conv(F, x, weight, bias, radius: int, groups: int = 1):
+def _tail_conv(F, x, weight, bias, radius: int, groups: int = 1,
+               pad_mode: str = "replicate"):
+    """Stride-1 convolution with the same border convention as :func:`_conv2d_numpy`.
+
+    ``pad_mode="replicate"`` is what ``conv_b``/``down`` need (the fold reads the
+    same sub-pixel of the edge LR pixel), ``"constant"`` is the model's own
+    zero padding for ``conv_a``.  ``F.conv2d`` only knows zero padding -
+    ``padding_mode=`` is a keyword of ``nn.Conv2d``, not of the functional API -
+    so the replicate border is materialised with :func:`torch.nn.functional.pad`
+    and the convolution then runs unpadded.
+    """
     kwargs = {"groups": groups} if groups > 1 else {}
-    if radius == 0:
+    if radius <= 0:
         return F.conv2d(x, weight, bias, **kwargs)
-    return F.conv2d(x, weight, bias, padding=radius, padding_mode="replicate", **kwargs)
+    if pad_mode == "replicate":
+        x = F.pad(x, (radius, radius, radius, radius), mode="replicate")
+        return F.conv2d(x, weight, bias, **kwargs)
+    if pad_mode != "constant":
+        raise ValueError(f"unknown pad_mode {pad_mode!r}; expected 'replicate' or 'constant'")
+    return F.conv2d(x, weight, bias, padding=radius, **kwargs)
+
+
+def _grouped_conv_b(fused: dict[str, Any], conv_b: Any, num_groups: int,
+                    source_scale: int, target_scale: int):
+    """Slice the block-diagonal ``conv_b`` into a ``groups=num_groups`` conv weight.
+
+    ``F.conv2d`` with ``groups=C`` wants ``(C*t^2, s^2, kh, kw)`` - the *per-group*
+    input channels, not the full ``C*s^2`` - so the dense tensor is cut along the
+    colour diagonal: group ``c`` keeps rows ``[c*t^2, (c+1)*t^2)`` and columns
+    ``[c*s^2, (c+1)*s^2)``.  (Passing the dense ``(C*t^2, C*s^2, kh, kw)`` with
+    ``groups=C`` is rejected: torch checks ``weight.size(1) * groups == in``.)
+
+    The result is cached on ``fused`` - it only depends on the weights, so
+    rebuilding it for every frame would be pure overhead.
+    """
+    cached = fused.get("conv_b_grouped")
+    if cached is not None:
+        return cached
+    t2, s2 = int(target_scale) ** 2, int(source_scale) ** 2
+    blocks = [conv_b[g * t2:(g + 1) * t2, g * s2:(g + 1) * s2] for g in range(num_groups)]
+    if hasattr(conv_b, "detach"):                      # torch tensor
+        torch, _ = _torch()
+        grouped = torch.cat(blocks, dim=0).contiguous()
+    else:
+        grouped = np.concatenate(blocks, axis=0)
+    fused["conv_b_grouped"] = grouped
+    return grouped
 
 
 def apply_tail(fused: dict[str, Any], x: Any) -> Any:
@@ -560,8 +602,9 @@ def apply_tail(fused: dict[str, Any], x: Any) -> Any:
 
     ``conv_b`` is block diagonal by construction (output sub-pixel ``(i', j')`` of
     colour ``c`` only reads the ``s^2`` sub-pixels of ``c``), so it runs as a
-    ``groups=num_out_ch`` convolution: three times fewer multiply-adds than the
-    dense tensor and bit-comparable to it.
+    ``groups=num_out_ch`` convolution over the colour-diagonal slices (see
+    :func:`_grouped_conv_b`): three times fewer multiply-adds than the dense
+    tensor and bit-comparable to it.
     """
     torch, F = _torch()
     radius = int(fused["radius"])
@@ -572,14 +615,21 @@ def apply_tail(fused: dict[str, Any], x: Any) -> Any:
         y = xc
         for m in fused["body"]:
             y = m(y)
+        # conv_a is the model's own conv_last: zero padding, never replicate
         z = _tail_conv(F, y, fused["conv_a"], fused.get("conv_a_bias"),
-                        conv_a_pad(fused))
+                       conv_a_pad(fused), pad_mode="constant")
         conv_b = fused["conv_b"]
-        if groups <= 1 or conv_b.shape[0] % groups or conv_b.shape[1] % groups:
+        num_groups = groups
+        if (num_groups > 1
+                and conv_b.shape[0] == num_groups * t * t
+                and conv_b.shape[1] == num_groups * int(fused["source_scale"]) ** 2):
+            weight_b = _grouped_conv_b(fused, conv_b, num_groups,
+                                       int(fused["source_scale"]), t)
+            groups_used = num_groups
+        else:                                          # not block diagonal: dense conv
+            weight_b = conv_b
             groups_used = 1
-        else:
-            groups_used = groups
-        acc = _tail_conv(F, z, conv_b, None, radius, groups_used)
+        acc = _tail_conv(F, z, weight_b, None, radius, groups_used)
         if fused.get("down") is not None:
             acc = acc + _tail_conv(F, xc, fused["down"], None, radius)
         return F.pixel_shuffle(acc, t)
