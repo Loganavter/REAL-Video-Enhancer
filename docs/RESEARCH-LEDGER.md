@@ -1280,6 +1280,26 @@ headroom is not needed once the weights are per-tap. At 0.008% the share is 12x 
 better than the tile path's 0.071%, with the median at 1.62 levels - and the peak sits at 33 whatever is
 done to it.
 
+**And it costs 2x the block time, not the 0.1 ms the arithmetic predicted.** The same kernel with the
+dequant inside the tap loop:
+
+| config | single scale | per-tap |
+|---|---|---|
+| BM 128, warps 4 | 2.355 ms (64.9 TOPS) | **3.117 ms (49.0)** |
+| BM 256, warps 4 | 1.970 ms (77.6 TOPS) | **4.093 ms (37.4)** |
+| BM 128, warps 2 | 2.358 ms | 4.419 ms |
+
+The prediction counted eight extra int32->fp32 conversions and FMAs per output element. What actually
+changed is the code path: a float accumulator replaces the int32 one, so every tap materialises a
+converted tile and the MMA sequence stops being the cheap thing it was. A 1.5-2x penalty buys 7x on the
+share, and at 3.1-4.1 ms per block the body would cost more than the fp16 engine it is meant to beat.
+
+So the lever is real for accuracy and unaffordable as written. The untested middle is **grouped taps** -
+three groups (rows, middle, columns) instead of nine, or per-tap only where the spread is largest - which
+would pay a fraction of the conversion cost for most of the gain. That is the next thing to try if the
+peak matters; if the share is what matters, per-channel already reads 0.058% and the shipped path reads
+0.071%.
+
 2.8x better on the share, five levels off the peak, and the median flat - so the gain is not a
 redistribution between the two statistics, it is a genuine reduction. This is exact rather than
 approximate in our own kernel: dequantise inside the tap loop, accumulate each tap in int32 over 64
