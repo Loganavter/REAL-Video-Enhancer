@@ -536,16 +536,22 @@ class AutoGateTuner:
         self.candidates = tuple(float(c) for c in candidates)
         self.clamp = (float(clamp[0]), float(clamp[1]))
         self.noise_floor_quiet = float(noise_floor_quiet)
-        # Calibrated on the acceptance bar (0.1% of pixels above 8 levels, worst frame), not on
-        # convenience. Four measured points, the floor against the worst-frame defect:
+        # Chosen to sit between the last passing and the first failing measurement, NOT as a
+        # calibrated boundary - the mapping is flat across the band the limit sits in, and two
+        # measured cases a tenth of a level apart straddle it. Four points, floor against
+        # worst-frame defect:
         #   0.95 -> 0.005%  (digital with added grain, Chainsaw Man)
         #   1.32 -> 0.097%  (clean digital, Violet Evergarden - inside, with 3% of margin)
         #   1.84 -> 0.105%  (clean anime clip + synthetic grain 4)
         #   2.27 -> 0.470%  (35 mm TV, Cowboy Bebop - the same at threshold 4 and at 2)
         # so the bar is crossed between 1.32 and 1.84 and the limit sits between them, not at the
-        # 2.0 that shipped first (which let the 1.84 clip through at 0.105%). Above it the gate
-        # refuses instead of tuning: on grainy material a 32 px block mean cannot tell "the grain
-        # changed" from "something moved a pixel", and lowering the threshold only costs reuse.
+        # 2.0 that shipped first (which let the 1.84 clip through at 0.105%). That separation is
+        # 0.008% of defect wide, i.e. the two cases straddle the limit rather than being decided by
+        # it, and a 48-frame Violet Evergarden run (floor 1.32) passed this guard AND the acceptance
+        # sample and still landed at 0.121% on the clip - the two guards share a failure mode.
+        # Known boundary, not a proof. Above it the gate refuses instead of tuning: on grainy
+        # material a 32 px block mean cannot tell "the grain changed" from "something moved one
+        # pixel", and lowering the threshold only costs reuse.
         self.noise_floor_refuse = float(noise_floor_refuse)
         # The number acceptance is actually judged by: per cent of pixels more than 8 levels off in
         # any RGB channel, on the worst frame of the sample. When the caller supplies it (the app
@@ -736,6 +742,8 @@ class AutoGateTuner:
                     f"(noise floor {self._noise_floor():.2f}), so reuse is OFF - "
                     f"{len(self._pairs)} calibration frames")
         reuse = 100.0 * sum(1 for pair in self._pairs if pair[0] <= self.chosen) / len(self._pairs)
+        chosen_value = next((v for depth, cand, v in self._certified
+                             if depth == self.chosen_chain and cand == self.chosen), None)
         label = "worst share" if self._uses_acceptance() else "p90"
         depths = ", ".join(f"d{depth} {label} {value:.2f} (limit {limit:g})"
                            for depth, value, limit in self._depth_p90)
@@ -743,4 +751,5 @@ class AutoGateTuner:
                 f"{self.chosen_chain or '?'}, veto {self.veto}, "
                 f"noise floor {self._noise_floor():.2f}, would reuse {reuse:.0f}% of the "
                 f"{len(self._pairs)} calibration frames"
+                + (f"; at this threshold {chosen_value:.2f}" if chosen_value is not None else "")
                 + (f"; certified {depths}" if depths else ""))
