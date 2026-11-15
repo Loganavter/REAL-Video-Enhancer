@@ -4,7 +4,8 @@ import torch
 _NO_PREVIEW = object()  # non-None marker: keeps the FPS/ETA printer alive, costs nothing
 import os
 import math
-from time import sleep, time
+from time import sleep
+from time import perf_counter as _perf_counter, time
 from typing import Optional
 import sys
 from multiprocessing import shared_memory
@@ -432,7 +433,9 @@ class Render:
 
         while True:
             if not self.informationHandler.get_is_paused():
+                _t_read = _perf_counter()
                 frame = self.readBuffer.get()
+                _read_ms = (_perf_counter() - _t_read) * 1000.0
                 #self.write_bytes_to_cv2_frame_debug(frame)
                 if frame is None:
                     pending = getattr(self.upscaleOption, "flush", None)
@@ -474,11 +477,16 @@ class Render:
                 
                 
 
+                _t_frame = _perf_counter()
+                _t_gate = _perf_counter()
                 if self.upscaleModel:
                     reuse = (
                         self.temporalReuse is not None
                         and self.temporalReuse.is_duplicate(frame.get_frame_tensor())
                     )
+                    if not hasattr(self, "_profile"):
+                        self._profile = {"frames": 0, "gate": 0.0, "infer": 0.0, "conv": 0.0, "frame": 0.0}
+                    self._profile["gate"] += (_perf_counter() - _t_gate) * 1000.0
                     if reuse and self._lastRenderedFrame is not None:
                         # re-emit the last rendered frame (the gate only decides *whether*)
                         frame = self._lastRenderedFrame
@@ -516,10 +524,30 @@ class Render:
                 else:
                     self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
                 frames_rendered += int(self.ceilInterpolateFactor)
+                if hasattr(self, "_profile"):
+                    self._profile["frames"] += 1
+                    self._profile["frame"] += (_perf_counter() - _t_frame) * 1000.0
+                    self._profile["read"] = self._profile.get("read", 0.0) + _read_ms
+                    up = getattr(self, "upscaleOption", None)
+                    # only count frames that actually ran the model: a reused frame leaves
+                    # the previous value in place, which used to double-count
+                    self._profile["infer"] += getattr(up, "last_inference_ms", 0.0)
+                    self._profile["conv"] += getattr(up, "last_convert_ms", 0.0)
+                    try:
+                        up.last_inference_ms = 0.0
+                        up.last_convert_ms = 0.0
+                    except Exception:
+                        pass
             else:
                 sleep(1)
         if self.temporalReuse is not None:
             log(self.temporalReuse.stats())
+        prof = getattr(self, "_profile", None)
+        if prof and prof["frames"]:
+            n = prof["frames"]
+            log(f"profile over {n} frames: gate {prof['gate']/n:.2f} ms, "
+                f"inference {prof['infer']/n:.2f} ms, input convert {prof['conv']/n:.2f} ms, "
+                f"read wait {prof.get('read', 0.0)/n:.2f} ms, frame total {prof['frame']/n:.2f} ms")
         if self.upscaleModel and getattr(self, "tileReuse", False):
             up = getattr(self, "upscaleOption", None)
             tu = getattr(up, "tile_upscaler", None)
