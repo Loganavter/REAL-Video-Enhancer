@@ -24,3 +24,8 @@
 
 # A verdict over the stage-1 gate: the two shares are the same frame, the same chain.
 @verdict stage1_gate pipeline_share simulation_share
+
+# Structural test: the prologue target taken from the simulation's per-tensor calibration instead of
+# max(per-channel grid) of the chain. No difference - the grid's SOURCE is not the difference either.
+@claim pipeline_share_simgrid 1.581 %  "1920x1080, same frame, same session" measured
+@below pipeline_share_simgrid bar_share

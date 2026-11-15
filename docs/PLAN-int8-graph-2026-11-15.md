@@ -252,6 +252,35 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**The grid's SOURCE is not the difference either.** Switching the prologue target to the simulation's own
+per-tensor calibration (`inputs[key]/127`, measured on the fp16 activation) reads **1.581%** against 1.569% for
+the chain-derived `max(per-channel grid)`. No difference, so the structural statement recorded last pass is
+refuted as well, and the claims file now carries both numbers.
+
+That closes the eleventh suspect. The list, all measured, all negative:
+
+| suspect | test | result |
+|---|---|---|
+| dot orientation | one tensor into both paths | exact (0) |
+| scale granularity | per-tensor / per-channel / fold | 3.589 / 1.693 / 2.765 |
+| prologue arithmetic | layer 1 vs reference, no clipping | 0.956 |
+| floor shift | rounding shift | 2.773% |
+| grid source | simulation's calibration | 1.581% |
+| grid value | percentile 100/99.9/99/95 | 1.910 / 1.783 / 1.838 / 2.064 |
+| grid margin | 1.5 / 2.0 / 3.0 | 2.476 / 2.905 / 3.121 |
+| collection strategy | float walk / kernel atomic max | 74% / 96% |
+| requant precision | SHIFT 12 / 16 / 20 | 1.910 / 1.926 / 1.935 |
+| frame size | 256 / 512 / 1024 / full | 0.000 / 0.452 / 2.276 / 1.783 |
+| head and tail | tail fed the simulation's body output | **bit-exact 0.0000%** |
+
+Eleven measurements, and the only thing still true is the sentence from two passes ago: one layer matches, the
+sixteen-hop chain does not, and the tail is exact. What has never been done is the one comparison that would
+separate "the chain is right and the simulation is measuring something else" from "the chain is wrong": run the
+**simulation's** sixteen hops with the pipeline's own quantise-dequantise at every hop but *without* the kernel,
+i.e. the same arithmetic in torch, and compare it to the pipeline. If torch-chain and kernel-chain agree, the
+kernel is fine and the simulation's 0.000% is measuring a different pipeline; if they differ, the kernel's hop
+is not doing what the pipeline's bookkeeping says.
+
 **The tail is exact, and a grid margin makes things worse.** Two results that close the remaining suspects.
 
 **Tail: exonerated.** The simulation's own body output pushed through the pipeline's tail code (the same three
