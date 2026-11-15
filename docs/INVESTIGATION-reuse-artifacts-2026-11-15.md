@@ -191,6 +191,33 @@ Consequence for the defaults: 10 bits at the encoder is free now (4.67 s against
 film clip), so a 10-bit source keeps its depth unless asked otherwise, and the "10-bit is opt-in
 for speed" row in PERFORMANCE.md is withdrawn.
 
+## The statistic has to be a box filter over |difference|, not a box compared across frames
+
+The gate compared `max |box(I) - box(I_ref)|`. That is invariant to a permutation of pixels inside
+a block, so a fist changing pose inside one 32 px block barely moves it - the same blindness as the
+`|mean(a) - mean(b)|` error that was already fixed once at the tile level. Swapping the order of
+operations to `max box(|I - I_ref|)` costs one subtraction, one abs and one pool per frame
+(**+0.1-0.3 ms**, gate 4.64 against 4.31 ms) and changes the numbers:
+
+| statistic | threshold | reuse | share above 8 levels (worst reused frame) |
+|---|---|---|---|
+| `max |box - box|` | 2 | 70.2% | 0.004% |
+| `max |box - box|` | 4 | 70.2% | 0.004% |
+| `max |box - box|` | 8 | 70.2% | **0.460%** |
+| `max box(|diff|)` | 2 | 70.2% | **0.000%** |
+| `max box(|diff|)` | 4 | 70.2% | 0.004% |
+| `max box(|diff|)` | 8 | 70.2% | 0.004% |
+
+So the new statistic is both more accurate at the same reuse and, more usefully, its safe range is
+three times wider: the old one falls off a cliff between 4 and 8, the new one is still fine at 8.
+That margin is what the tuner actually needs - the failure this investigation started with was a
+threshold that had drifted to 12.
+
+Whole-clip effect, 19 sampled frames, RGB, chip clip: worst frame goes from **0.045% / peak 13** to
+**0.009% / peak 14**, at 11.7 s against 11.3 s (3.7% slower for a 5x smaller defect area). The
+scene-cut logic still runs on the level grid, which is why `observe()` now takes the decision grid
+separately: the error field is already relative to the reference and must not be differenced twice.
+
 ## The two staleness sources mask each other
 
 The chain-depth conclusion above is only half the answer, and the way it was reached hid the

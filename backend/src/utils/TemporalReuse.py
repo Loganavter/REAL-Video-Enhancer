@@ -238,6 +238,7 @@ class ReferenceFrameGate:
     """
 
     def __init__(self, block: Optional[int] = None, threshold: float = REFERENCE_THRESHOLD,
+                 statistic: str = "mean_abs",
                  max_chain: int = REFERENCE_MAX_CHAIN,
                  luma_taps: Sequence[float] = REFERENCE_LUMA_TAPS,
                  scene_threshold: float = REFERENCE_SCENE_CUT,
@@ -260,7 +261,17 @@ class ReferenceFrameGate:
         self._weights: Dict[object, "torch.Tensor"] = {}
         self._ref = None                # block grid of the last KEPT frame, 8-bit levels
         self._ref_mean = 0.0            # its global level (mean of the block-mean grid)
-        self._ref_luma = None           # its full-res luma (only with a pixel veto)
+        # "block_mean": max |box(I) - box(ref)| - invariant to a permutation of pixels inside a
+        #   block, so a fist changing pose inside one 32 px block barely moves it.
+        # "mean_abs": max box(|I - ref|) - the box filter applied to the absolute difference,
+        #   which does see that change. Measured on the moving-fist segment at the same reuse
+        #   share (70.2%): 0.004% of HR pixels above 8 levels for block_mean, 0.000% for
+        #   mean_abs, and mean_abs stays at 0.004% up to threshold 8 where block_mean reaches
+        #   0.460%.
+        if statistic not in ("block_mean", "mean_abs"):
+            raise ValueError(f"statistic must be 'block_mean' or 'mean_abs', got {statistic!r}")
+        self.statistic = statistic
+        self._ref_luma = None           # its full-res luma (needed by mean_abs and by the veto)
         self._chain = 0                 # consecutive frames served from the reference
         self.processed = 0
         self.reused = 0
@@ -353,7 +364,7 @@ class ReferenceFrameGate:
         """``(1, C, H, W)`` in [0, 1] -> ``(1, 1, ceil(H/b), ceil(W/b))`` in 8-bit levels."""
         return self.blocks_of(self.luma(frame_tensor))
 
-    def observe(self, blocks, luma=None) -> bool:
+    def observe(self, blocks, luma=None, decision=None) -> bool:
         """The decision and the state update, given a block grid (torch or numpy).
 
         Kept separate from :meth:`blocks` so the state machine - reference keeping, chain
@@ -365,13 +376,21 @@ class ReferenceFrameGate:
         The global level used for the scene cut is the mean of the block-mean grid: exact
         when the block size divides both frame axes, off by a fraction of a level on the
         partial tail blocks, which is irrelevant against a 32 level cut threshold.
+
+        ``decision`` is the grid the threshold acts on. For ``statistic="mean_abs"`` it is
+        already ``box(|luma - ref_luma|)``, i.e. a non-negative error field measured against
+        the reference, so the delta is simply its maximum and no subtraction happens here.
         """
         self.processed += 1
         self.last_delta = float("inf")
         mean = float(blocks.mean().item())
         scene_cut = False
         delta = float("inf")
-        if self._ref is not None:
+        if decision is not None:
+            # the error field is already relative to the reference
+            delta = float(decision.max().item())
+            self.last_delta = delta
+        elif self._ref is not None:
             if tuple(blocks.shape) == tuple(self._ref.shape):
                 delta = float(abs(blocks - self._ref).max().item())
                 self.last_delta = delta
@@ -396,14 +415,22 @@ class ReferenceFrameGate:
                 self.scene_cuts += 1
             self._ref = blocks
             self._ref_mean = mean
-            self._ref_luma = luma if self.pixel_veto is not None else None
+            self._ref_luma = luma if (self.pixel_veto is not None
+                                      or self.statistic == "mean_abs") else None
             self._chain = 0
         return reuse
 
     def is_duplicate(self, frame_tensor) -> bool:
         """Feed the low-resolution frame: True means the reference's output may be emitted."""
         luma = self.luma(frame_tensor)
-        return self.observe(self.blocks_of(luma), luma)
+        levels = self.blocks_of(luma)
+        decision = None
+        ref = self._ref_luma
+        if (self.statistic == "mean_abs" and ref is not None
+                and tuple(ref.shape) == tuple(luma.shape)):
+            # box(|I - ref|): one subtraction, one abs, one pool over the frame
+            decision = self.blocks_of((luma - ref).abs())
+        return self.observe(levels, luma, decision)
 
     def delta(self, frame_tensor) -> float:
         """Worst block-mean delta of ``frame_tensor`` against the current reference.
