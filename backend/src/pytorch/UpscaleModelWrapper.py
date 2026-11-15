@@ -48,7 +48,16 @@ class PadInputConv(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.extra:
-            x = F.pad(x, (0, 0, 0, 0, 0, self.extra))
+            # `torch.cat` with a zero tensor, NOT `F.pad`. Both are the same function, but
+            # `aten.constant_pad_nd` has no converter in torch_tensorrt's dynamo path, so the node
+            # falls back to torch and splits the engine into a TRT sub-graph either side of a torch
+            # op: measured on the shipping model that is 26.76 ms/frame of engine time against 16.07
+            # unpadded, i.e. the padding's 5.8% turns into a 67% regression. With `cat` (an
+            # IConcatenationLayer) the same graph measures 15.43 ms - 4.0% better than unpadded,
+            # which is what 5.8% of a 67.6%-of-the-frame engine must give. See ledger E23.
+            zeros = torch.zeros((x.shape[0], self.extra, x.shape[2], x.shape[3]),
+                                dtype=x.dtype, device=x.device)
+            x = torch.cat((x, zeros), dim=1)
         return self.conv(x)
 
 
@@ -59,11 +68,16 @@ def pad_head_channels(model: torch.nn.Module, multiple: int = HEAD_PAD_MULTIPLE)
     engine cache key uses. Only a group-1 convolution with ``0 < in_channels % multiple`` is touched,
     and only in the spandrel path (the other loaders shape their inputs themselves).
     """
-    # OFF by default. The engine-level win is real and measured (ledger E19: 57.51 -> 54.15 ms on a
-    # raw TRT build), but through this app's build path - torch_tensorrt.dynamo.compile - the same
-    # graph came out 69% slower (inference 26.05 ms against 15.37), so the padding is opt-in until
-    # that path is shown to preserve the fusion. RVE_HEAD_PAD=1 enables it for experiments.
-    if os.environ.get("RVE_HEAD_PAD", "0") != "1":
+    # ON by default, RVE_NO_HEAD_PAD=1 disables it. Measured through this app's own build path,
+    # interleaved, three rounds, engines cached (ledger E19/E23):
+    #
+    #   no padding   11.79 s wall / 16.18 ms engine
+    #   padded       11.44 s wall / 15.61 ms engine     (-3.0% wall, -3.5% engine, 3/3 rounds)
+    #
+    # with the picture differing by 0.012% of pixels above 8 levels at the worst frame. It applies
+    # only to a plain 3-channel head, and a 32x32 probe forward reverts it for anything it breaks
+    # (the SPAN family fuses its 3x3 and 1x1 weights, so widening one branch breaks the sum).
+    if os.environ.get("RVE_NO_HEAD_PAD", "0") == "1":
         return model, 0
     first = None
     for name, module in model.named_modules():

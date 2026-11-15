@@ -260,6 +260,10 @@ class UpscalePytorch:
                 trtHandler = TorchTensorRTHandler(
                     model_parent_path=os.path.dirname(self.modelPath),
                     trt_optimization_level=self.trt_optimization_level,
+                    # RVE_TRT_DEBUG=1 makes torch_tensorrt print how it partitioned the graph - which
+                    # ops stayed in torch and how many TRT sub-engines it built. That is the only way
+                    # to see whether a graph change splits the engine (ledger E23).
+                    debug=os.environ.get("RVE_TRT_DEBUG") == "1",
 
                 )
                 static_dimensions = f"{self.pad_w}x{self.pad_h}"
