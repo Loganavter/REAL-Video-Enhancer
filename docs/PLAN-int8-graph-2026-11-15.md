@@ -159,9 +159,31 @@ So stage 1's gate as written - "reproduce the simulation's numbers" - cannot be 
 body: the simulation's 0.000% is bought with a free float requant that the hardware does not have. The gate
 has to be restated against what a chain can do, and 1.693% is what it does.
 
-That is the honest state, and it is a finding about the lane rather than a step towards its completion: the
-16-block int8 body, as measured, does not hold the 0.1% bar when chained, and the simulation that said it
-would was measuring a different pipeline.
+**The discriminating variable is the INPUT grid, not the fold.** Same float harness, same crop, three
+configurations:
+
+| chain | input grid | output grid | share |
+|---|---|---|---|
+| the simulation (`quantised_forward`) | **per-tensor** | per-channel | **0.000%** |
+| hand-rolled chain, no fold | per-channel | per-channel | **2.038%** |
+| hand-rolled chain, fold alpha=1 | per-channel | per-channel | **2.765%** |
+
+So the fold costs a factor of 1.36 (2.765 against 2.038) and the per-channel *input* grid costs a factor of
+infinity (2.038 against 0.000). The simulation's recipe is **per-tensor in, per-channel out**, and that is
+what a chain must reproduce - which is exactly what the prologue requant does: the layer writes int8 on its
+per-channel grid, and the NEXT layer's prologue requants per-channel -> per-tensor in registers, touching the
+operand before `tl.dot` and leaving the int32 accumulator alone.
+
+That also explains the pipeline's 3.589%: it chains per-channel output grids into per-channel inputs, which
+is the 2.038% configuration plus the head/tail.
+
+The plan's earlier claim that "no chainable int8 body can meet the gate" was wrong, and it was wrong for the
+reason this file keeps recording: it compared the pipeline against the simulation without isolating which of
+the two variables differed. The gate stands.
+
+Next: build the kernel with the prologue requant - integer requant `(q * M[c] + R[c]) >> S[c]` on load, one
+int32 temporary per element, no fp32 expansion - and check `ptxas -v` first: the kernel already sits at 255
+registers, so a hot spill would kill the variant in a minute, exactly as the 168-register cap did.
 
 **Second pass, still failing, and the layout is the suspect.** Per-layer isolation on 256x256 says every
 layer is wrong on its own (ratio 0.12-3.7 against the fp16 activation, relative error 1.1-4.3), so it is not
