@@ -31,6 +31,7 @@ def main() -> int:
     ap.add_argument("--margin", type=float, default=1.0)
     ap.add_argument("--margin-all", type=float, default=1.0)
     ap.add_argument("--localize", action="store_true")
+    ap.add_argument("--sym", action="store_true", help="force symmetric scales for A/B")
     ap.add_argument("--fp16-tail", type=int, default=0,
                     help="leave the last N body pairs on the fp16 boundary")
     args = ap.parse_args()
@@ -50,16 +51,17 @@ def main() -> int:
     inputs, outputs, _ = calibrate(model, [frame(p) for p in calib_paths])
     # the head conv's input is the image, clamped to [0,1] by the model itself: its range is a domain
     # constant and calibrating it on one frame made a dark frame clip a fifth of a different title
-    inputs["body.0"] = 1.0
+    inputs["body.0"] = (0.0, 1.0)
     # margin on the layer whose output still clips: the decisive knob between "calibration bug" and
     # "the int8 hop itself". 1.0 = the calibrated maximum, 2.0 = twice it.
     if args.margin != 1.0:
-        outputs["body.1"] = outputs["body.1"] * args.margin
+        lo, hi = outputs["body.1"]
+        outputs["body.1"] = (lo * args.margin, hi * args.margin)
     if args.margin_all != 1.0:
         # every scale, both sides: if the peak falls now, distributed clipping was the cause; if it
         # stays, the int8 grid itself is
-        inputs = {k: v * args.margin_all for k, v in inputs.items()}
-        outputs = {k: v * args.margin_all for k, v in outputs.items()}
+        inputs = {k: (v[0] * args.margin_all, v[1] * args.margin_all) for k, v in inputs.items()}
+        outputs = {k: (v[0] * args.margin_all, v[1] * args.margin_all) for k, v in outputs.items()}
 
     # per-layer clip rate on the held-out frame
     clipped = {}
@@ -67,12 +69,12 @@ def main() -> int:
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Conv2d):
             def pre(_m, inp, key=name):
-                lim = inputs[key]
+                lim = max(abs(inputs[key][0]), abs(inputs[key][1]))
                 clipped[key] = float((inp[0].abs() > lim).float().mean()) * 100
             handles.append(module.register_forward_pre_hook(pre))
         if isinstance(module, torch.nn.PReLU):
             def post(_m, _i, out, key=name):
-                lim = outputs[key].view(1, -1, 1, 1)
+                lim = torch.maximum(outputs[key][0].abs(), outputs[key][1].abs()).view(1, -1, 1, 1)
                 clipped[key] = float((out.abs() > lim).float().mean()) * 100
             handles.append(module.register_forward_hook(post))
     with torch.no_grad():
@@ -81,7 +83,8 @@ def main() -> int:
         h.remove()
 
     with torch.no_grad():
-        got = quantised_forward(model, b, inputs, outputs, {}, fp16_tail=args.fp16_tail).float()
+        got = quantised_forward(model, b, inputs, outputs, {}, fp16_tail=args.fp16_tail,
+                                asym=not args.sym).float()
     share, peak, median = statistic(ref, got)
 
     if args.localize:
