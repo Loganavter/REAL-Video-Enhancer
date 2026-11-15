@@ -117,3 +117,36 @@ def test_fast_preset_still_reuses_the_strictest_threshold():
 def test_an_unknown_fallback_is_refused():
     with pytest.raises(ValueError):
         AutoGateTuner(fallback="maybe")
+
+
+def test_chain_depth_is_certified_separately_from_the_threshold():
+    """A clip whose 4-frame drift is too large can still be certified two frames deep.
+
+    This is the anime case: the one-step error is ~1.6 levels and the four-step error ~9.3,
+    so the useful answer is "reuse, but never from a reference more than N frames old",
+    not "throw the gate away" and not "reuse four frames deep and live with it".
+    """
+    t = AutoGateTuner(min_pairs=6, budget=2.0)
+    for index in range(6):
+        # depth 1 calm, depth 2 calm, depth 3 and 4 drift past the budget
+        t.add(1.0, (1.5, 1.8, 6.0, 9.3))
+    assert t.ready
+    assert t.chosen_chain == 2
+    assert t.chosen == max(t.candidates)
+
+
+def test_a_scalar_delta_is_treated_as_depth_one():
+    t = AutoGateTuner(min_pairs=4, budget=2.0)
+    for _ in range(4):
+        t.add(1.0, 1.2)
+    assert t.ready
+    assert t.chosen_chain == 1
+    assert t.chosen is not None
+
+
+def test_no_depth_certifies_means_no_reuse_under_best():
+    t = AutoGateTuner(min_pairs=4, budget=2.0, fallback="off")
+    for _ in range(4):
+        t.add(1.0, (9.0, 9.0, 9.0, 9.0))
+    assert t.ready
+    assert t.chosen is None

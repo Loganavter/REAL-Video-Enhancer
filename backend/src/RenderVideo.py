@@ -537,11 +537,12 @@ class Render:
             history = self._hr_history = []
         depth = int(getattr(self.temporalReuse, "max_chain", 0) or 0)
         if history:
-            from .utils.TemporalReuse import worst_chain_delta
-            hr_delta = worst_chain_delta(grid, history, max(depth, 1))
-            if hr_delta != float("inf"):
-                lr_delta = float(getattr(self.temporalReuse, "last_delta", 0.0) or 0.0)
-                self.autoTuner.add(lr_delta, hr_delta)
+            # one delta per chain depth, so the tuner can certify "two frames deep" when
+            # "four" is too stale rather than throwing the gate away
+            deltas = [float(abs(grid - past).max().item())
+                      for past in reversed(history[-max(depth, 1):])]
+            lr_delta = float(getattr(self.temporalReuse, "last_delta", 0.0) or 0.0)
+            self.autoTuner.add(lr_delta, deltas)
         history.append(grid)
         if len(history) > max(1, depth):
             del history[:-max(1, depth)]
@@ -556,6 +557,8 @@ class Render:
                 return
             self.temporalReuse.threshold = self.autoTuner.chosen
             self.temporalReuse.pixel_veto = self.autoTuner.veto
+            if self.autoTuner.chosen_chain:
+                self.temporalReuse.max_chain = int(self.autoTuner.chosen_chain)
             log(self.autoTuner.stats())
 
     def render(self):

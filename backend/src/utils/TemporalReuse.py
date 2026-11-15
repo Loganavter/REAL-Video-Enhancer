@@ -470,7 +470,7 @@ class AutoGateTuner:
         self.candidates = tuple(float(c) for c in candidates)
         self.clamp = (float(clamp[0]), float(clamp[1]))
         self.noise_floor_quiet = float(noise_floor_quiet)
-        self._pairs: list[tuple[float, float]] = []
+        self._pairs: list[tuple[float, tuple[float, ...]]] = []
         if fallback not in ("strictest", "off"):
             raise ValueError(f"fallback must be 'strictest' or 'off', got {fallback!r}")
         # what to do when no candidate keeps the error inside the budget:
@@ -479,16 +479,32 @@ class AutoGateTuner:
         #                 nothing in its range is safe on this content)
         self.fallback = fallback
         self.chosen: float | None = None
+        self.chosen_chain: int | None = None
         self.veto: float | None = None
         # calibration is finished even when the verdict is "do not reuse", so this cannot
         # double as `chosen is not None`
         self.settled = False
 
-    def add(self, lr_delta: float, hr_delta: float) -> None:
+    def add(self, lr_delta: float, hr_deltas) -> None:
+        """Record one calibration frame.
+
+        ``hr_deltas`` is the error that reusing this frame would cost at every chain depth the
+        gate can reach: element 0 is "reuse it in place of the previous frame", element 1 is
+        "two frames back", and so on. A scalar is accepted and treated as depth 1.
+
+        The depth matters because the gate serves a frame from a reference up to ``max_chain``
+        frames old, and that is where the visible error lives: on the clean anime clip the
+        one-step delta is 1.6 levels while the four-step delta is 9.3, because four frames of
+        real motion sit between them.
+        """
         if self.settled or lr_delta <= 0:
             return
-        if hr_delta == hr_delta and hr_delta >= 0:  # not NaN
-            self._pairs.append((float(lr_delta), float(hr_delta)))
+        if isinstance(hr_deltas, (int, float)):
+            hr_deltas = (hr_deltas,)
+        clean = [float(d) for d in hr_deltas
+                 if d == d and d >= 0]          # drop NaN, keep inf as "usable nowhere"
+        if clean:
+            self._pairs.append((float(lr_delta), tuple(clean)))
         if len(self._pairs) >= self.min_pairs:
             self._decide()
 
@@ -505,28 +521,45 @@ class AutoGateTuner:
         return ordered[k // 2]
 
     def _decide(self) -> None:
-        if os.environ.get("RVE_TUNER_DEBUG"):
-            print(f"[tuner] budget {self.budget} fallback {self.fallback}", file=sys.stderr)
-            print("[tuner] pairs: " + ", ".join(f"({lr:.2f},{hr:.2f})"
-                                                for lr, hr in self._pairs), file=sys.stderr)
+        # Which chain depth can be certified? A deeper chain reuses more (down to
+        # max_chain frames per render) but serves staler references, so the answer can be
+        # "1 frame deep" on moving content where "4" was assumed.
+        deepest = max((len(deltas) for _, deltas in self._pairs), default=0)
+        certified: list[tuple[int, float, float]] = []      # (depth, threshold, p90)
+        for depth in range(1, deepest + 1):
+            best_cand = None
+            best_p90 = None
             for cand in self.candidates:
-                errs = sorted(hr for lr, hr in self._pairs if lr <= cand)
-                if not errs:
-                    print(f"[tuner] {cand}: no frames", file=sys.stderr)
+                errs = sorted(deltas[depth - 1] for lr, deltas in self._pairs
+                              if lr <= cand and len(deltas) >= depth)
+                if len(errs) < max(2, len(self._pairs) // 4):
                     continue
                 p90 = errs[min(len(errs) - 1, int(0.90 * (len(errs) - 1)))]
-                print(f"[tuner] {cand}: {len(errs)} frames p90 {p90:.2f} "
-                      f"{'ok' if p90 <= self.budget else 'OVER'}", file=sys.stderr)
+                if p90 <= self.budget:
+                    best_cand, best_p90 = cand, p90
+            if best_cand is not None:
+                certified.append((depth, best_cand, best_p90 or 0.0))
+
+        if os.environ.get("RVE_TUNER_DEBUG"):
+            print(f"[tuner] budget {self.budget} fallback {self.fallback} "
+                  f"pairs {len(self._pairs)}", file=sys.stderr)
+            for lr, deltas in self._pairs:
+                print(f"[tuner]   lr {lr:.2f} at depths "
+                      + ", ".join(f"{d:.2f}" for d in deltas), file=sys.stderr)
+            for depth, cand, p90 in certified:
+                print(f"[tuner] depth {depth}: threshold {cand}, p90 {p90:.2f}", file=sys.stderr)
+
+        if certified:
+            # Longest usable chain, then the widest threshold certified for it.
+            depth, cand, _ = max(certified, key=lambda row: (row[0], row[1]))
+            lo, hi = self.clamp
+            self.chosen = max(lo, min(hi, cand))
+            self.chosen_chain = depth
+            self.veto = None
+            self.settled = True
+            return
+
         best = None
-        for cand in self.candidates:
-            errs = [hr for lr, hr in self._pairs if lr <= cand]
-            if len(errs) < max(2, len(self._pairs) // 4):
-                # a candidate that would reuse almost nothing is not worth considering
-                continue
-            errs.sort()
-            p90 = errs[min(len(errs) - 1, int(0.90 * (len(errs) - 1)))]
-            if p90 <= self.budget:
-                best = cand
         if best is None:
             # Nothing qualified, i.e. no threshold in the range keeps the error inside the
             # budget. "strictest" reuses as little as the range allows; "off" refuses to reuse
@@ -556,6 +589,7 @@ class AutoGateTuner:
                     f"(noise floor {self._noise_floor():.2f}), so reuse is OFF - "
                     f"{len(self._pairs)} calibration frames")
         reuse = 100.0 * sum(1 for lr, _ in self._pairs if lr <= self.chosen) / len(self._pairs)
-        return (f"auto gate: threshold {self.chosen:.1f}/255, veto {self.veto}, "
+        return (f"auto gate: threshold {self.chosen:.1f}/255, chain "
+                f"{self.chosen_chain or '?'}, veto {self.veto}, "
                 f"noise floor {self._noise_floor():.2f}, would reuse {reuse:.0f}% of the "
                 f"{len(self._pairs)} calibration frames")
