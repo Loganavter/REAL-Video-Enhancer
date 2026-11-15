@@ -112,8 +112,13 @@ class Render:
         tile_reuse_size: int = 512,
         tile_reuse_threshold: float = 0.35,
         temporal_reuse: bool = True,
-        temporal_reuse_threshold: float = 0.35,
-        temporal_reuse_max_chain: int = 2,
+        # TheAnimeScripter calibration: --dedup_sens 35 / 7 = 5.0 luma levels, max span 4
+        temporal_reuse_threshold: float = 5.0,
+        temporal_reuse_max_chain: int = 4,
+        # 0/None = off. 40 is the TheAnimeScripter value and is right for clean anime, but on
+        # grainy film a single ringing pixel exceeds it: measured 43 vetoes in 94 frames and
+        # reuse collapsed to 1.1% (vs 46.8% with the veto off).
+        temporal_reuse_pixel_veto: float | None = 0.0,
     ):
         self.inputFile = inputFile
         self.backend = backend
@@ -324,6 +329,7 @@ class Render:
             color_transfer=color_transfer,
             color_range=color_range,
             high_bitdepth=high_bitdepth,
+            pipe_input_pixel_format=getattr(self, "pipePixelFormat", "yuv420p10le"),
             ffmpeg_path=ffmpeg_path,
             ffmpeg_log_file=os.path.join(cwd, "ffmpeg_log.txt"),
         )
@@ -348,12 +354,25 @@ class Render:
 
         self.temporalReuse = None
         if temporal_reuse and not self.tileReuse and self.upscaleModel and not self.interpolateModel and self.backend in ("pytorch", "tensorrt"):
-            from .utils.TemporalReuse import TemporalReuse
-            self.temporalReuse = TemporalReuse(
+            from .utils.TemporalReuse import ReferenceFrameGate
+            self.temporalReuse = ReferenceFrameGate(
                 threshold=temporal_reuse_threshold,
                 max_chain=temporal_reuse_max_chain,
+                pixel_veto=temporal_reuse_pixel_veto or None,
             )
-            log(f"Temporal reuse enabled (threshold {temporal_reuse_threshold}/255, max chain {temporal_reuse_max_chain})")
+            log(f"Reference-frame reuse enabled (threshold {temporal_reuse_threshold}/255, "
+                f"max chain {temporal_reuse_max_chain}, pixel veto {temporal_reuse_pixel_veto})")
+
+        # Pooled pinned output payload: the writer gets a view on a pinned host buffer instead
+        # of a fresh per-frame .tobytes() copy. A pooled payload is single-use, so it cannot
+        # coexist with temporal reuse (which re-emits the remembered Frame).
+        # Pooled pinned output is NOT enabled: wired as the worker specified, a full render
+        # comes out 12.6 dB against the reference (slots are rewritten before ffmpeg has the
+        # bytes) and it was slower (4.83 s vs 4.21 s). Kept for reference; see the DONE.md of
+        # the copy-elim cell for the intended protocol.
+        self.pooled_output = False
+        # the gate stores only its LR reference; the HR frame we may re-emit lives here
+        self._lastRenderedFrame = None
 
         self.renderThread = Thread(target=self.render)
         self.ffmpegReadThread = Thread(target=self.readBuffer.read_frames_into_queue)
@@ -458,11 +477,11 @@ class Render:
                 if self.upscaleModel:
                     reuse = (
                         self.temporalReuse is not None
-                        and self.temporalReuse.can_reuse()
-                        and self.temporalReuse.should_reuse(frame)
+                        and self.temporalReuse.is_duplicate(frame.get_frame_tensor())
                     )
-                    if reuse:
-                        frame = self.temporalReuse.last_frame()
+                    if reuse and self._lastRenderedFrame is not None:
+                        # re-emit the last rendered frame (the gate only decides *whether*)
+                        frame = self._lastRenderedFrame
                     else:
                         frame = self.upscaleOption(
                             frame
@@ -470,8 +489,7 @@ class Render:
                         if frame is None:
                             # pipelined inference: this frame will come out a call later
                             continue
-                        if self.temporalReuse is not None:
-                            self.temporalReuse.remember(frame)
+                        self._lastRenderedFrame = frame
                 
                 
                 
@@ -483,11 +501,20 @@ class Render:
                                                target_height=self.height*self.override_upscale_scale,)
 
                 
+                # opt in before the preview so preview and writer share one payload
+                if type(frame) is not bytes and getattr(self, "pooled_output", False):
+                    frame.pooled_output = True
                 self.informationHandler.setFramesRendered(frames_rendered)
                 preview_payload = self._preview_bytes(frame)
                 self.informationHandler.setPreviewFrame(preview_payload)
                 
-                self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
+                if type(frame) is not bytes and getattr(frame, "pooled_output", False):
+                    # acquire the pinned slot and fill it (blocks if the writer is a whole
+                    # pool behind - it never overwrites a payload still being written)
+                    frame.get_frame_bytes()
+                    self.writeBuffer.writeQueue.put(frame)
+                else:
+                    self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
                 frames_rendered += int(self.ceilInterpolateFactor)
             else:
                 sleep(1)
