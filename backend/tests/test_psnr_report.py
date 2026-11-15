@@ -11,6 +11,7 @@ encoder, skipped rather than failed when either is missing.
 
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import subprocess
@@ -145,6 +146,39 @@ def test_summarize_reports_the_indices_of_the_worst_frames():
     assert summary.worst == pytest.approx(44.0)
     assert [f.index for f in summary.worst_frames] == [2, 4, 1]
     assert summary.median == pytest.approx(55.0)
+
+
+def test_identical_frames_are_counted_not_averaged():
+    """A gated render re-emits frames byte for byte; their per-frame PSNR is infinite.
+
+    Averaging them in makes the mean infinite and the tool useless on exactly the
+    configurations this repo ships (measured on 502 anime frames: 18 identical, naive mean
+    `inf`, per-frame mean 52.81 dB, ffmpeg's own "average" 52.73 dB).
+    """
+    peak_squared = 1023.0 ** 2
+    frames = [
+        PR.FrameStats(index=1, psnr_avg=50.0, mse_avg=peak_squared / 10.0 ** 5),
+        PR.FrameStats(index=2, psnr_avg=float("inf"), mse_avg=0.0),
+        PR.FrameStats(index=3, psnr_avg=40.0, mse_avg=peak_squared / 10.0 ** 4),
+    ]
+    summary = PR.summarize(frames, worst_n=3)
+
+    assert summary.identical == 1
+    assert summary.worst == pytest.approx(40.0)      # the identical frame is not the worst
+    assert summary.median == pytest.approx(45.0)
+    assert summary.mean == pytest.approx(45.0)       # (50 + 40) / 2, not inf
+    # `average` is the PSNR of the mean MSE, which is a different (and finite) aggregate
+    mean_mse = (peak_squared / 10.0 ** 5 + 0.0 + peak_squared / 10.0 ** 4) / 3
+    assert summary.mean_over_mse == pytest.approx(10.0 * math.log10(peak_squared / mean_mse))
+
+
+def test_every_frame_identical_is_reported_as_infinite():
+    frames = [PR.FrameStats(index=i, psnr_avg=float("inf"), mse_avg=0.0) for i in (1, 2, 3)]
+    summary = PR.summarize(frames)
+    assert summary.identical == 3
+    assert math.isinf(summary.mean)
+    assert math.isinf(summary.mean_over_mse)
+    assert summary.worst_frames == ()
 
 
 def test_summarize_single_frame():
