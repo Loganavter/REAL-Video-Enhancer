@@ -1834,9 +1834,44 @@ tensor pipe at 51% means the MMA is idle half the time, so this is not a compute
 `num_stages` sweep confirms it: 1, 3 and 5 stages all land within 1% (1.855-1.871 ms), i.e. there is nothing
 to overlap.
 
-What that changes: **1.9 ms was a budget, not a wall.** At 90% of DRAM the block would be ~1.03 ms; at 90%
-of the tensor pipe ~1.15 ms. Even 1.3 ms per block puts the frame at 16 x 1.3 + non-GEMM ~ 27 ms, i.e. the
-2x the whole investigation was chasing, without touching the accuracy trade at all.
+**And the limiter is registers, not memory access patterns.** One run with the occupancy and stall
+sections says it outright:
+
+| counter | value |
+|---|---|
+| **registers per thread** | **255** (the architectural maximum) |
+| block limit by registers | **2 blocks per SM** |
+| **achieved occupancy** | **16.5%** (7.92 active warps per SM) |
+| warp cycles per issued instruction | 6.23 |
+| compute (SM) throughput | 69.2% |
+| memory throughput | 69.2% / DRAM 62.6% |
+
+So the kernel runs at 16.5% occupancy because 255 registers cap it at two blocks per SM, and with eight
+warps in flight neither pipe can be fed past ~69%. The earlier reading of "59% DRAM, 51% tensor, so at
+neither limit" was right about the symptom and wrong about the cause: both are held down by occupancy.
+
+The traffic figure corrects too: the excess is 47 MB (312 against 265), worth 0.16 ms of the 0.73 ms gap,
+and almost all of it is on the **write** side (170.1 MB written against 132.7 produced, 1.28x) while the
+read side is 141.6 against 132.7 (1.07x, i.e. the halo is fully absorbed by L2 at a 90% hit rate). So
+eliminating every byte of amplification buys 1.88 -> 1.72 ms, not 1.3.
+
+The sweep already pointed at this and I read it as "128 values per thread is good": the configs with 128
+accumulator values per thread (BM 128/warps 2, BM 256/warps 4) run at 1.91-1.925 ms, the ones with 64
+(BM 64/warps 2, BM 128/warps 4) at 2.36-2.45. What it actually shows is a frontier - 128 int32
+accumulators plus operands saturate the register file, so occupancy cannot be bought with more warps
+without handing back the per-thread ILP that the MMA shape needs. `num_stages` is flat for the same
+reason: staged buffers need registers that do not exist.
+
+The fix is therefore to **halve the per-thread accumulator**, not to widen the loads: split the 64 output
+channels into two blocks of 32, which doubles the blocks per SM and should let both pipes approach 90%.
+Success is measured in registers per thread and achieved occupancy, not in load width. At 90% of the
+measured traffic the block is 1.20 ms, at 90% of the tensor pipe 1.15 ms - both land near **1.2 ms**,
+i.e. 16 x 1.2 + non-GEMM ~ 25.4 ms = 2.22x of engine, which is **1.55x of wall** on gated anime (engine
+share 0.646) and 1.82x ungated. The owner will see 1.55x, not 2x.
+
+Extrapolating one block to sixteen is legitimate here for a specific reason: the output is 132.7 MB
+against 32 MB of L2, so it must reach DRAM between blocks and the single-block measurement is
+representative.
 
 Best measured so far, for the record: 1.854 ms and **82.5 TOPS** (BM 256, warps 4, one stage), against the
 147.4 TOPS K-major peak - 56%.
