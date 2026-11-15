@@ -1303,14 +1303,44 @@ the taps does not help.**
 | three groups (one per kernel row) | **3.050 ms** | 3.478 ms |
 | nine taps | 3.117 ms | 4.093 ms |
 
-Three conversions instead of nine costs the same as nine, which locates the price exactly: it is not the
-conversions, it is that **any** dequant inside the loop replaces the int32 accumulator with a float one,
-and that is what the MMA sequence was built around. There is no cheap slice of this lever - it is the
-accumulation strategy or nothing.
+Three conversions instead of nine costs the same as nine, and the slowdown locates the price better than
+the word "conversions" does: 1.58-1.77x at BM 256 and 1.30x at BM 128, against the measured **2.06x**
+separating int8 from fp16 tensor throughput (147.4 TOPS against 71.6 TFLOP/s). So a float accumulator
+inside the loop does not merely add work - it **takes the dot out of int8 mode**, which is the only
+reason the kernel was fast. The per-tap build at 3.1-4.1 ms is an fp16 kernel with extra steps, and its
+likeness to the 2.93 ms fp16 block is not a coincidence.
 
-Which leaves the lane at a clean place: per-channel weights, single-scale epilogue, 1.97 ms and 77.6 TOPS
-with a share of 0.058% (better than the shipped 0.071%) and a peak of 37 against that option's 23. The
-accuracy upgrade to 0.008% exists and costs 2x, so it is a product decision rather than a research one.
+The one untried variant - several int32 accumulators, converted only after the loop - keeps int8 MMA but
+costs 128 registers per accumulator per thread at BM 256 x BN 64; three of them is 384 against a 255
+limit, so it spills, and the tile would have to shrink to BM 128 which is already 20% slower. ~2.2-2.4 ms
+for a statistic that already passes with 1.7x margin is a bad trade, and it was not measured on purpose.
+
+**Where the lane actually stands, stated against the right alternative.** int8 does not replace the tile
+path; it goes *under the gate*. The shipped default is gate-only: **0.009%, peak 14**. int8 changes the
+engine beneath it, and the composition 1.42x of engine time / 1.24x of wall (16 Triton blocks plus the
+TRT head and tail) at a share better than the shipped opt-in's 0.071%.
+
+Two consequences of that composition are unmeasured:
+
+- **The errors add.** The output is `HR_int8(t-k)` against an `HR_fp16(t)` reference, so by the triangle
+  inequality the bound is 0.058% + 0.009% = 0.067% when the pixel sets are disjoint - inside the bar, as a
+  bound on one frame, not as a spread measurement.
+- **The tuner's certification identity breaks.** Today the tuner measures acceptance between two frames
+  of *its own* engine, and that is legitimate because the engine is the reference. With int8 it would
+  measure int8 against int8 while the bar judges int8 against fp16 - the same instrument gap that this
+  investigation closed at the cost of three false "quality walls", returning through a change of precision.
+  The cheap fix is to run both engines on the 16 calibration frames and certify against fp16 there (16 x
+  (56 + 40) ms ~ 1.5 s per video), leaving the other frames on int8 alone.
+
+**And architecture weighs more than the remaining accuracy.** At 1.97 ms per block, keeping the TRT head
+and tail gives 39.6 ms = 1.42x engine / 1.24x wall; doing head and tail as Triton memory-bound kernels
+(145 MB and 195 MB of traffic, floors 0.50 and 0.68 ms against the current 3.90 and 3.35) gives 33.2 ms =
+1.69x / 1.36x. That 0.12x of wall is larger than everything left in the accuracy lane.
+
+Finally, there is no tradable point: inside the bar *and* faster than fp16 there is exactly one
+configuration - per-channel weights, symmetric activations, 1.97 ms, 0.058%, peak 37. Everything that
+lowers the peak is slower than the fp16 engine it replaces. So the decision is binary, and the peak is a
+constant rather than a dial.
 
 2.8x better on the share, five levels off the peak, and the median flat - so the gain is not a
 redistribution between the two statistics, it is a genuine reduction. This is exact rather than
