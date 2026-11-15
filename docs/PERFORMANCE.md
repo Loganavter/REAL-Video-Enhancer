@@ -11,11 +11,12 @@ wall-clock for the whole render unless stated otherwise.
 | `--tensorrt_opt_profile` | 5 (was 3) | TRT builder optimization level | engine only: 94.3 -> 52.7 ms/frame (1.79x) |
 | `--trt_timing_iters` | 8 (was 4) | tactic timing iterations | included above |
 | `--trt_tiling_level` | `full` (was `moderate`) | keeps per-layer tiles in L2 across consecutive kernels | `moderate` -> `full` measured on anime, two runs each: 11.01 s -> 10.60/10.59 s (3.8%) |
-| `--temporal_reuse_threshold` | 5.0 (was 0.35) | max 32px-block mean delta vs the last KEPT frame | 62.4% of frames reused |
+| `--temporal_reuse_threshold` | chosen by the tuner (seed 5.0) | max 32 px-block mean delta vs the last KEPT frame. The tuner now scores a candidate at every chain depth the gate can reach, and falls back to the **strictest** candidate when nothing qualifies, instead of keeping the seed | anime 70.9% reused, worst frame 48.64 dB against ungated; film 18.1% reused, average 50.34 / worst 39.83 dB, 4.33 s against 4.66 s |
 | `--temporal_reuse_max_chain` | 4 (was 2) | cap on consecutive reuses | |
 | `--no_temporal_reuse_auto` | off (i.e. auto is ON) | automatic threshold: during the first 16 rendered frames the gate records both its own LR delta and the real HR delta it caused, then picks the widest candidate whose p90 HR error stays under 2 levels. During those 16 frames the gate is forced to render (otherwise the sample is biased to already-changed frames), so the cost is ~0.7 s once per video; measured on the same clip: 11.38/11.20 manual vs 11.40/11.32 auto. On anime it then picks 8.0 (73.5% reuse, 52.7 dB avg / 48.2 dB worst vs ungated) and on grainy film it keeps the 5.0 seed |
 | `--temporal_reuse_pixel_veto` | 0 (off) | full-res max delta that rescues a would-be duplicate. 40 is TheAnimeScripter's value and is right for clean anime; on grainy film a single pixel exceeds it and reuse collapses from 46.8% to 1.1% (measured, 43 vetoes in 94 frames) | |
-| 10-bit path | auto for >=10-bit sources | YUV420p10 packed on the GPU, colour matrix from the source | colour parity vs ffmpeg: Y-PSNR 49.7 dB |
+| 10-bit path | auto for >=10-bit sources | YUV420p10 packed on the GPU, colour matrix from the source, and the ffmpeg command declares the format the packer actually produced | colour parity vs a libx265 render: 46.11 dB at 8-bit output, 52.01 dB at 10-bit output |
+| output depth | the source's depth only if asked | `--video_pixel_format yuv420p` by default even for 10-bit sources: keeping 10 bits at the encoder is +6 dB but costs NVENC roughly twice the wall clock (3.84 s against 8.01 s on 94 frames of 2160p) | opt-in |
 
 End-to-end on the clip with `x265_nvenc` (so the encoder does not hide the model):
 **6.26 s (old defaults) -> 4.27 s (new defaults) = 1.47x**, and 62% frame reuse takes it to

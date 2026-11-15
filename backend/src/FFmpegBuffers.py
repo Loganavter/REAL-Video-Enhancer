@@ -177,15 +177,18 @@ def resolve_output_pixel_format(requested: str | None, high_bitdepth: bool,
                                 interpolating: bool = False) -> str:
     """Output pixel format when the caller did not choose one.
 
-    A 10-bit source fed to an 8-bit encoder loses the precision the 10-bit pipe exists to
-    keep, and keeping it costs nothing: measured on the 1440x1080 10-bit film clip, the 8-bit
-    round trip caps the agreement at about 44 dB against about 49.7 dB with the 10-bit path.
+    Stays 8-bit on purpose. Keeping 10 bits through the encoder is worth about 6 dB against
+    the 8-bit output on a 10-bit source (52.01 against 46.11 dB against the same reference),
+    but on this machine it costs the NVENC encoder roughly twice the wall clock: the same
+    94-frame 2160p render takes 3.84 s at 8-bit and 8.01 s at 10-bit, because at a fixed CQ
+    the 10-bit stream is both larger and slower to encode. Speed is the priority here, so
+    10 bits at the encoder is an explicit `--video_pixel_format yuv420p10le`, not a default.
     An explicit request always wins, and interpolated frames keep 8-bit because the
-    interpolator itself works in 8 bits.
+    interpolator works in 8 bits.
     """
     if requested:
         return requested
-    return "yuv420p10le" if (high_bitdepth and not interpolating) else "yuv420p"
+    return "yuv420p"
 
 
 class FFmpegWrite(Buffer):
@@ -292,15 +295,16 @@ class FFmpegWrite(Buffer):
 
 
     def _pipe_input_pixel_format(self) -> str:
-        """What the raw pipe carries from the renderer to ffmpeg."""
+        """What the raw pipe carries from the renderer to ffmpeg.
+
+        This MUST be what the renderer packed, not what the encoder would prefer. It used to
+        be derived from the encoder tag ("NVENC wants P010"), while the packer emits planar
+        `yuv420p10le` unless `RVE_P010` is set - so every 10-bit source rendered with NVENC fed
+        ffmpeg planar samples labelled P010 and came out at 12.7 dB against the reference.
+        A format disagreement here cannot fail loudly: both are 16-bit words at 3 bytes/pixel.
+        """
         if self.high_bitdepth and not self.hdr_mode:
-            # the GPU already produced packed YUV420p10 (see TorchUtils.tensor_to_yuv420p10);
-            # NVENC wants P010, libx265 wants planar - chosen from the encoder preset
-            try:
-                tag = self.video_encoder.getPresetTag()
-            except Exception:
-                tag = ""
-            return "p010le" if tag in ("x265_nvenc", "av1_nvenc") else "yuv420p10le"
+            return self.pipe_input_pixel_format or "yuv420p10le"
         return "rgb48le" if self.high_bitdepth else "rgb24"
 
     def _color_convert_args(self) -> list[str]:

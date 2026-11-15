@@ -5,8 +5,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.utils import TemporalReuse
 from src.utils.TemporalReuse import AutoGateTuner  # noqa: E402
 
 
@@ -15,12 +18,36 @@ def _feed(tuner, pairs):
         tuner.add(lr, hr)
 
 
-def test_busy_content_keeps_the_seed():
-    """If nothing qualifies under the error budget, do not drag the threshold to the minimum."""
+def test_busy_content_falls_back_to_the_strictest_candidate():
+    """If nothing qualifies under the error budget, reuse as little as the range allows.
+
+    Keeping the configured seed here was the old behaviour, and it is what let a grainy film
+    run at 5.0/255: the tuner had just proven that no threshold in its range holds the error
+    inside the budget, and then used one anyway. That produced frames at 34.7 dB against the
+    ungated render (measured on the film clip, chain 4).
+    """
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0)
     _feed(t, [(60.0 + i, 200.0) for i in range(10)])
     assert t.ready
-    assert t.chosen == 5.0
+    assert t.chosen == min(t.candidates)
+
+
+def test_chain_depth_is_what_the_tuner_has_to_score():
+    """A single-step delta understates a reuse: the gate can serve a 4-frame-old reference.
+
+    This is the rule the film clip needed - at threshold 5.0 with chain 4 its worst frames
+    were 34.7 dB against the ungated render while every one-step delta looked calm.
+    """
+    np = pytest.importorskip("numpy")
+    calm = np.zeros((4, 4))
+    drifted = np.full((4, 4), 3.0)
+
+    # the gate's reference is the frame `depth` steps back, not "any of the last `depth`"
+    assert TemporalReuse.worst_chain_delta(calm, [calm, drifted], 1) == pytest.approx(3.0)
+    # a shallow chain never sees the old drift at all
+    assert TemporalReuse.worst_chain_delta(calm, [calm, calm], 1) == pytest.approx(0.0)
+    assert TemporalReuse.worst_chain_delta(calm, [calm, calm, drifted], 3) == pytest.approx(3.0)
+    assert TemporalReuse.worst_chain_delta(calm, [], 4) == float("inf")
 
 
 def test_clean_content_takes_the_widest_threshold_that_fits():

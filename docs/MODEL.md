@@ -215,9 +215,10 @@ tried*.
 | scenario | frames through the model | measured |
 |---|---|---|
 | anime, ungated (502 frames, 1080p -> 2160p) | 100% | 16.3 fps |
-| anime, duplicate gate | **27.3%** | **47.4 fps** (10.54 s in one run, 10.60 in the A/B), median 52.6 dB / worst frame 48.1 dB vs ungated |
-| film, ungated (94 frames, 1440p -> 2880p) | 100% | 19-22 fps |
-| film, duplicate gate | 53.2% | 23.7 fps, 71 dB vs ungated |
+| anime, duplicate gate | 29.1% | 51.71 dB average / 48.64 dB worst frame against the ungated render, 70.9% reuse |
+| anime, gate + fitted tiles | 29.1% of frames, 57.5% of their tiles | **7.65 s against 38.85 s ungated** (5.1x) |
+| film, ungated (94 frames, 1440p -> 2880p) | 100% | 4.66 s |
+| film, duplicate gate | 81.9% | 4.33 s (1.08x), 50.34 dB average / 39.83 dB worst frame against ungated. The 71 dB this row used to claim came from comparing two renders that were both corrupted by the pipe-format bug in ledger C4 |
 | tile-level reuse, square 512 px cores (anime) | 65.8% of tiles | 1.44x faster than ungated (30.8 -> 21.4 s) but slower than the frame gate (10.6 s). The loss was **geometry**: 512 does not divide 1080, so 12 windows of 548x548 cover a frame of 1.55 Mpx = 1.74x its area |
 | tile-level reuse, cores fitted to the frame (anime, 480x540) | 65.6% of tiles | **18.14 s** ungated against 21.37 s for the 512 grid: the area model `area x (1 - reuse)` predicted 21.49 s for the 512 grid (measured 21.37, 0.6%) and 16.9 s for the fitted one (measured 18.14), so there is no per-tile launch penalty worth modelling |
 | gate **and** fitted tiles (anime) | 57.4% of tiles inside the 27% of frames the gate renders | **8.45 s** against 11.74 s for the gate alone = **1.39x**; 51.6 dB average / 47.5 dB worst frame against the ungated render (gate alone 52.7 / 48.2). The tile share falls from 65.6% to 57.4% because the frames the gate leaves are exactly the ones that changed, so the two levers compose at ~1.4x rather than multiplicatively |

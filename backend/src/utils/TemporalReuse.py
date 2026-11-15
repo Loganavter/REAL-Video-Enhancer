@@ -416,6 +416,23 @@ class ReferenceFrameGate:
         return float((blocks - self._ref).abs().max().item())
 
 
+def worst_chain_delta(grid, history, depth: int) -> float:
+    """Worst block delta between ``grid`` and the last ``depth`` entries of ``history``.
+
+    The gate serves a frame from a reference up to ``max_chain`` frames old, so a single-step
+    delta understates the error a reuse can cause. Plain arithmetic on whatever the caller
+    passes (torch tensor or numpy array), so the rule can be tested without tensors.
+    """
+    if not history or depth < 1:
+        return float("inf")
+    worst = 0.0
+    for past in history[-depth:]:
+        if tuple(getattr(past, "shape", ())) != tuple(getattr(grid, "shape", ())):
+            continue
+        worst = max(worst, float(abs(grid - past).max()))
+    return worst
+
+
 class AutoGateTuner:
     """Choosing the duplicate threshold from measurement instead of a constant.
 
@@ -485,7 +502,12 @@ class AutoGateTuner:
             if p90 <= self.budget:
                 best = cand
         if best is None:
-            best = self.seed
+            # Nothing qualified: the strictest candidate is the honest fallback, because the
+            # tuner just established that *no* threshold keeps the error inside the budget.
+            # Keeping the configured seed instead (the old behaviour) meant a grainy clip ran
+            # at whatever number happened to be set, and on the film clip that produced frames
+            # at 34.7 dB against the ungated render.
+            best = self.candidates[0]
         lo, hi = self.clamp
         self.chosen = max(lo, min(hi, best))
         # The veto is NOT enabled automatically: on grainy film it destroys reuse (43 vetoes in
