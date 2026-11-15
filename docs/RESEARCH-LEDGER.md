@@ -457,6 +457,36 @@ Two side results, both useful:
   refuses depth on this material), and it is also why the sample cannot be read as a smooth
   continuous quantity.
 
+## E22: the builder is worth more than the graph change (measured, 2026-11-15)
+
+Chasing the head padding to the product meant asking a question the ledger had never asked: does the
+way this app compiles an engine matter next to how the graph looks? One clip, one preset, three
+configurations, each one render, engines cached after their build:
+
+| run | wall | app's `inference` | picture against the app's default |
+|---|---|---|---|
+| app default (`torch_tensorrt.dynamo.compile`) | 11.92 s | 16.22 ms | - |
+| **raw `trt.Builder` from the same ONNX** | **11.01 s** | **15.04 ms** | **0.000% of pixels above 8 levels, peak 0 - identical** |
+| raw + head padding | 10.91 s | 14.96 ms | 0.003% median, 0.012% worst, peak 15 |
+
+So **the builder is worth 7.6% and the graph change is worth 0.9% on top of it**, and that re-qualifies
+E19: the 5.8% the padding measured was against a *slower* unpadded build (57.51 ms) than the raw path
+produces (55.1 ms), not against what ships. On the shipping baseline the padding is worth about half a
+percent, for a graph change, a cache-key marker and a wrapper - not worth it.
+
+The raw path ships behind `RVE_RAW_TRT=1`, deliberately:
+
+- engines are **static per resolution by default** (`tensorrt_dynamic_shapes` is off), which is exactly
+  the shape this path exports, so the common case is covered rather than excluded;
+- the opt-in dynamic mode is skipped, not broken - it falls back to torch_tensorrt with a log line;
+- any failure in the export or the build (an architecture whose ONNX export trips, a model with an
+  unusual input) falls back to torch_tensorrt and deletes the stale plan, so a build never costs a
+  render;
+- the picture is bit-identical on this model, which is the strongest form the acceptance rule has.
+
+What it would need to become the default: one more model architecture, the tile path (a second engine
+shape), and a decision about the ONNX export as a build artefact (it is written next to the plan).
+
 ## Is `tiling=none` faster than what ships? No - and the probe that said so measured a different engine
 
 A three-way engine-level probe of raw-TRT plans (round-robin, 7 rounds, 2250 MHz / 161 W) put `none`
