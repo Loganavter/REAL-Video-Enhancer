@@ -252,6 +252,29 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**The gain is present at the first layer, so it is a scale factor and not accumulation.**
+
+| layer | 1 | 2 | 3 | 4 | 8 | 16 |
+|---|---|---|---|---|---|---|
+| mean abs of the chain / of fp16 | **1.809** | 2.184 | 1.864 | 2.032 | 2.411 | 3.048 |
+
+Layer 1's *input* is bit-identical to the fp16 head, so a 1.8x ratio there cannot come from the chain drifting:
+the first layer alone computes about twice the value it should. That rules out accumulation and puts the defect
+in the kernel's scale bookkeeping, with two candidates:
+
+- the prologue's `(q * m) >> SHIFT` **floors** toward -inf for negative values, adding a -1 bias per element
+  per hop; over 576 accumulated terms that is a systematic magnitude increase, and it is the kind of bias that
+  shows as a gain rather than as noise;
+- or `s_t` vs `s_in` is applied twice somewhere. The algebra says it should not be: the prologue maps the
+  buffer from the `s_in` grid to `s_t`, and the epilogue multiplies by `w_scale * s_t`, which is the true value
+  `sum (a*s_t) * (w_q*w_scale)`. If the prologue were skipped, the ratio would be exactly `s_t/s_in` >= 1,
+  which on this frame is the 1.8-3x observed - so the failure looks like *the prologue not applying*, not like
+  it applying twice.
+
+The discriminating test for the first candidate is one line: replace `>> shift` with a rounding shift
+(`(q*m + half) >> shift` with the sign handled) and see whether the ratio moves toward 1.0. If it does, the
+bias is the cause; if it does not, the prologue is not being applied and the multiplier is wrong.
+
 **All three collection strategies now tried, and the last is the most informative.**
 
 | collection | share |
