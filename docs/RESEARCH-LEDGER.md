@@ -1862,9 +1862,31 @@ accumulators plus operands saturate the register file, so occupancy cannot be bo
 without handing back the per-thread ILP that the MMA shape needs. `num_stages` is flat for the same
 reason: staged buffers need registers that do not exist.
 
-The fix is therefore to **halve the per-thread accumulator**, not to widen the loads: split the 64 output
-channels into two blocks of 32, which doubles the blocks per SM and should let both pipes approach 90%.
-Success is measured in registers per thread and achieved occupancy, not in load width. At 90% of the
+**And the occupancy fix is closed by measurement before it was built.** Three configurations, same kernel:
+
+| config | registers/thread | blocks/SM | occupancy | warps/SM | time |
+|---|---|---|---|---|---|
+| BM 256, warps 4 | 255 | 2 | 16.5% | 7.92 | **1.910 ms** |
+| BM 128, warps 2 | 255 | 4 | 16.5% | 7.92 | 1.925 ms |
+| **BM 128, warps 4** | **138** | 3 | **24.8%** | **11.89** | **2.355 ms** |
+
+The one configuration that actually trades registers for occupancy - 138 registers, 24.8% occupancy, 12
+warps instead of 8 - is **23% slower**. So occupancy was already doubled once, and the price was the
+per-thread ILP that the MMA shape needs. Splitting the output channels into two blocks of 32 would land on
+exactly that configuration by the invariants (64 accumulators per thread, 8192 outputs per block, 16200
+blocks in the grid), so it is the same experiment with a different name, and it is already measured as a
+loss.
+
+Hence the honest number for this kernel as written: **1.49x of engine and 1.27x of wall** (block 1.97 ms,
+frame 37.7 ms), not 1.93x - that would need 1.43 ms, which needs 107 TOPS, which needs the pipeline to run
+at ~90% of the counter's "compute throughput" while the same counters say that buying occupancy at the cost
+of ILP is a net loss here.
+
+What stays independent of all this is the **write amplification** (170.1 MB stored against 132.7 produced,
+1.28x, worth 0.13 ms): NHWC int8 with 256 contiguous pixels per block should store perfectly coalesced, so
+the 28% points at a non-contiguous tile in the output or partial sectors, and it is measurable with
+`l1tex__t_sectors_pipe_lsu_mem_global_op_st` against the bytes produced. It is the last item on this lane
+that is neither closed nor explained. At 90% of the
 measured traffic the block is 1.20 ms, at 90% of the tensor pipe 1.15 ms - both land near **1.2 ms**,
 i.e. 16 x 1.2 + non-GEMM ~ 25.4 ms = 2.22x of engine, which is **1.55x of wall** on gated anime (engine
 share 0.646) and 1.82x ungated. The owner will see 1.55x, not 2x.
