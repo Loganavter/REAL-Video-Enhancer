@@ -77,6 +77,7 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--iters", type=int, default=0)
+    ap.add_argument("--sat", action="store_true", help="per-layer saturation share")
     ap.add_argument("--pct", type=float, default=99.9,
                     help="percentile for the grids; 100 means the maximum")
     args = ap.parse_args()
@@ -139,7 +140,7 @@ def main() -> int:
         # by factors across channels and a single scalar grid throws bits away on the narrow ones
         outs.append((torch.maximum(hi_c.abs(), lo_c.abs()).float() / 127.0).clamp_min(1e-8))
 
-    def run_pipeline(outs_used=None, collect=False):
+    def run_pipeline(outs_used=None, collect=False, sat=False):
         """Per-channel activation grids throughout, with each layer's input scale folded into its weights.
 
         The dot is integer, so a per-input-channel activation scale cannot be applied inside it without
@@ -148,7 +149,7 @@ def main() -> int:
         """
         buf, s_in = cur.clone(), s_act_vec
         measured = []
-        for (w_full, slope), s_out in zip(layers, outs_used or outs):
+        for idx, ((w_full, slope), s_out) in enumerate(zip(layers, outs_used or outs), 1):
             # prologue requant: the buffer is int8 on a per-channel grid, the dot wants one per-tensor
             # grid, so the ratio goes in as an integer multiplier and the accumulator stays int32
             s_t = float(s_in.max())
@@ -161,6 +162,9 @@ def main() -> int:
             grid = (triton.cdiv(args.height * args.width, BLOCK_M),)
             body_prologue_kernel[grid](buf, tap_w, m_int, SHIFT, vec, slope, ovec, out,
                                        args.height, args.width, BLOCK_M=BLOCK_M, C=64, num_warps=4)
+            if sat:
+                print(f"    layer {idx:2d}: saturated "
+                      f"{float((out.abs() >= 127).float().mean()) * 100:5.2f}%", flush=True)
             if collect:
                 # the chain's OWN per-channel maximum, which is what the next grid has to cover
                 measured.append((out.permute(0, 3, 1, 2).float() * s_out.view(1, -1, 1, 1))
@@ -181,7 +185,7 @@ def main() -> int:
         if drift < 0.01:
             break
     outs = [(m.float() / 127.0).clamp_min(1e-8) for m in measured]
-    out_q, s_last = run_pipeline(outs_used=outs)
+    out_q, s_last = run_pipeline(outs_used=outs, sat=args.sat)
 
     with torch.no_grad():
         last = out_q.permute(0, 3, 1, 2).float() * s_last.view(1, -1, 1, 1)
