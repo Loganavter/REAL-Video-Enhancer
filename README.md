@@ -11,11 +11,6 @@
 <a href="https://flathub.org/apps/io.github.tntwise.REAL-Video-Enhancer">
     <img src="https://dl.flathub.org/assets/badges/flathub-badge-en.svg" height="50px"/>
   </a>
-<br/>
-<strong> Download on Steam! </strong>
-<br/>
-[![Download on Steam](https://img.shields.io/badge/Steam-000000?style=for-the-badge&logo=steam&logoColor=white)](https://store.steampowered.com/app/4087640/)
-
 
 
 <p align=center>
@@ -42,7 +37,6 @@
 * **[Credits](#credits)**
   * [People](#people) 
   * [Software](#software)
-* **[Support Me!](#support-me)**
 
 # Introduction
 
@@ -194,8 +188,3 @@ python3 build.py --build BUILD_OPTION --copy_backend
 
 # Star History
 [![Star History Chart](https://api.star-history.com/svg?repos=tntwise/real-video-enhancer&type=Date)](https://star-history.com/#tntwise/real-video-enhancer&Date)
-
-
-# Support Me:
- * [Ko-Fi](https://ko-fi.com/tntwise)
- * [Steam](https://store.steampowered.com/app/4382640/REAL_Video_Enhancer_Donation/)
