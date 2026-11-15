@@ -365,12 +365,14 @@ class ReferenceFrameGate:
         partial tail blocks, which is irrelevant against a 32 level cut threshold.
         """
         self.processed += 1
+        self.last_delta = float("inf")
         mean = float(blocks.mean().item())
         scene_cut = False
         delta = float("inf")
         if self._ref is not None:
             if tuple(blocks.shape) == tuple(self._ref.shape):
                 delta = float(abs(blocks - self._ref).max().item())
+                self.last_delta = delta
             else:                       # resolution change: history is meaningless
                 scene_cut = True
             if abs(mean - self._ref_mean) > self.scene_threshold:
@@ -436,11 +438,15 @@ class AutoGateTuner:
     hundred microseconds per calibration frame for the HR statistic.
     """
 
-    def __init__(self, budget: float = 1.5, min_pairs: int = 12,
+    def __init__(self, budget: float = 2.0, min_pairs: int = 16, seed: float = 5.0,
                  candidates=(2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0),
                  clamp=(2.0, 12.0), noise_floor_quiet: float = 0.35):
         self.budget = float(budget)
         self.min_pairs = int(min_pairs)
+        # the value the pipeline was configured with: kept when no candidate qualifies, which
+        # happens on an unrepresentative opening (a busy first scene measured a "noise floor"
+        # of 62.9 levels and drove the choice to the bottom of the range)
+        self.seed = float(seed)
         self.candidates = tuple(float(c) for c in candidates)
         self.clamp = (float(clamp[0]), float(clamp[1]))
         self.noise_floor_quiet = float(noise_floor_quiet)
@@ -461,10 +467,11 @@ class AutoGateTuner:
         return self.chosen is not None
 
     def _noise_floor(self) -> float:
-        # the calmest fifth of the calibration frames is the content noise floor
+        # median of the calmest third: robust to a couple of wild frames at the start, while a
+        # mean over a fifth was effectively "the two calmest frames" and jumped to 62.9
         ordered = sorted(p[0] for p in self._pairs)
-        k = max(1, len(ordered) // 5)
-        return sum(ordered[:k]) / k
+        k = max(1, len(ordered) // 3)
+        return ordered[k // 2]
 
     def _decide(self) -> None:
         best = None
@@ -474,16 +481,18 @@ class AutoGateTuner:
                 # a candidate that would reuse almost nothing is not worth considering
                 continue
             errs.sort()
-            p95 = errs[min(len(errs) - 1, int(0.95 * (len(errs) - 1)))]
-            if p95 <= self.budget:
+            p90 = errs[min(len(errs) - 1, int(0.90 * (len(errs) - 1)))]
+            if p90 <= self.budget:
                 best = cand
         if best is None:
-            best = self.candidates[0]
+            best = self.seed
         lo, hi = self.clamp
         self.chosen = max(lo, min(hi, best))
-        # a clean source benefits from the full-res veto (mouth flaps, blinks); a grainy one is
-        # destroyed by it (measured: 43 vetoes in 94 frames, reuse collapses to 1.1%)
-        self.veto = 40.0 if self._noise_floor() <= self.noise_floor_quiet else None
+        # The veto is NOT enabled automatically: on grainy film it destroys reuse (43 vetoes in
+        # 94 frames, 1.1% left) and on clean anime it costs ~1 ms/frame for a difference we
+        # measured as invisible (52.6 dB median, 48.1 dB worst frame without it). The noise floor
+        # is still computed because it is the useful diagnostic when someone does want it.
+        self.veto = None
 
     def stats(self) -> str:
         if self.chosen is None:

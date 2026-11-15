@@ -120,6 +120,7 @@ class Render:
         # grainy film a single ringing pixel exceeds it: measured 43 vetoes in 94 frames and
         # reuse collapsed to 1.1% (vs 46.8% with the veto off).
         temporal_reuse_pixel_veto: float | None = 0.0,
+        temporal_reuse_auto: bool = True,
     ):
         self.inputFile = inputFile
         self.backend = backend
@@ -363,6 +364,12 @@ class Render:
             )
             log(f"Reference-frame reuse enabled (threshold {temporal_reuse_threshold}/255, "
                 f"max chain {temporal_reuse_max_chain}, pixel veto {temporal_reuse_pixel_veto})")
+            self.autoTuner = None
+            if temporal_reuse_auto:
+                from .utils.TemporalReuse import AutoGateTuner
+                self.autoTuner = AutoGateTuner(seed=float(temporal_reuse_threshold))
+                log("auto gate tuning: the threshold will be chosen from the first rendered "
+                    "frames (LR delta vs the real HR delta they cause)")
 
         # Pooled pinned output payload: the writer gets a view on a pinned host buffer instead
         # of a fresh per-frame .tobytes() copy. A pooled payload is single-use, so it cannot
@@ -372,6 +379,7 @@ class Render:
         # bytes) and it was slower (4.83 s vs 4.21 s). Kept for reference; see the DONE.md of
         # the copy-elim cell for the intended protocol.
         self.pooled_output = False
+        self._hr_grid_prev = None
         # the gate stores only its LR reference; the HR frame we may re-emit lives here
         self._lastRenderedFrame = None
 
@@ -419,6 +427,31 @@ class Render:
                 small = (tensor[0].permute(1, 2, 0).clamp(0, 1) * 255).to(torch.uint8)
                 return small.cpu().numpy().tobytes()
         return frame.get_frame_bytes()
+
+    def _calibrate_gate(self, hr_frame):
+        """Feed the auto tuner once per rendered frame: the gate's LR delta is free (it was
+        just computed) and the HR delta costs one 1/8 luma pool of the output."""
+        import torch.nn.functional as F
+        # no clone: the frame already owns the tensor and this runs before it is handed on
+        tensor = getattr(hr_frame, "_tensor", None)
+        if tensor is None:
+            tensor = hr_frame.get_frame_tensor()
+        block = 32 * max(1, int(self.modelScale or 1))
+        # stride-2 subsample first: the statistic is a block mean, so halving the grid changes
+        # it by well under a level while cutting the read by 4x
+        luma = tensor[:, :, ::2, ::2].mean(dim=1, keepdim=True).float()
+        k = max(1, block // 16)
+        grid = F.avg_pool2d(F.avg_pool2d(luma, 8), k, ceil_mode=True) * 255.0
+        prev = self._hr_grid_prev
+        if prev is not None and tuple(prev.shape) == tuple(grid.shape):
+            hr_delta = float((grid - prev).abs().max().item())
+            lr_delta = float(getattr(self.temporalReuse, "last_delta", 0.0) or 0.0)
+            self.autoTuner.add(lr_delta, hr_delta)
+        self._hr_grid_prev = grid
+        if self.autoTuner.ready:
+            self.temporalReuse.threshold = self.autoTuner.chosen
+            self.temporalReuse.pixel_veto = self.autoTuner.veto
+            log(self.autoTuner.stats())
 
     def render(self):
         frames_rendered = 0
@@ -480,10 +513,18 @@ class Render:
                 _t_frame = _perf_counter()
                 _t_gate = _perf_counter()
                 if self.upscaleModel:
+                    # during auto calibration every frame is rendered: otherwise the tuner only
+                    # ever sees frames that were already "changed", which biases it towards high
+                    # thresholds (measured on film: a noise floor of 74 levels out of a calm scene)
+                    calibrating = self.autoTuner is not None and not self.autoTuner.ready
                     reuse = (
                         self.temporalReuse is not None
+                        and not calibrating
                         and self.temporalReuse.is_duplicate(frame.get_frame_tensor())
                     )
+                    if calibrating:
+                        # still advance the gate's own state so it has a reference afterwards
+                        self.temporalReuse.is_duplicate(frame.get_frame_tensor())
                     if not hasattr(self, "_profile"):
                         self._profile = {"frames": 0, "gate": 0.0, "infer": 0.0, "conv": 0.0, "frame": 0.0}
                     self._profile["gate"] += (_perf_counter() - _t_gate) * 1000.0
@@ -498,6 +539,8 @@ class Render:
                             # pipelined inference: this frame will come out a call later
                             continue
                         self._lastRenderedFrame = frame
+                        if self.autoTuner is not None and not self.autoTuner.ready:
+                            self._calibrate_gate(frame)
                 
                 
                 
@@ -542,6 +585,8 @@ class Render:
                 sleep(1)
         if self.temporalReuse is not None:
             log(self.temporalReuse.stats())
+        if getattr(self, "autoTuner", None) is not None:
+            log(self.autoTuner.stats())
         prof = getattr(self, "_profile", None)
         if prof and prof["frames"]:
             n = prof["frames"]

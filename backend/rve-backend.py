@@ -185,6 +185,7 @@ class HandleApplication:
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
             temporal_reuse_pixel_veto=self.args.temporal_reuse_pixel_veto,
+            temporal_reuse_auto=not self.args.no_temporal_reuse_auto,
         )
         
 
@@ -485,6 +486,13 @@ class HandleApplication:
                  "of the last KEPT frame. Default 5.0 (TheAnimeScripter: sens 35 / 7).",
             default=5.0,
             type=float,
+        )
+        parser.add_argument(
+            "--no_temporal_reuse_auto",
+            help="Disable automatic threshold/veto tuning (it is chosen from the first ~12 "
+                 "rendered frames, where both the LR delta and the real HR delta are known).",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
             "--temporal_reuse_max_chain",

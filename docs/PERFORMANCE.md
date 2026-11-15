@@ -13,6 +13,7 @@ wall-clock for the whole render unless stated otherwise.
 | `--trt_tiling_level` | `full` (was `moderate`) | keeps per-layer tiles in L2 across consecutive kernels | `moderate` -> `full` measured on anime, two runs each: 11.01 s -> 10.60/10.59 s (3.8%) |
 | `--temporal_reuse_threshold` | 5.0 (was 0.35) | max 32px-block mean delta vs the last KEPT frame | 62.4% of frames reused |
 | `--temporal_reuse_max_chain` | 4 (was 2) | cap on consecutive reuses | |
+| `--no_temporal_reuse_auto` | off (i.e. auto is ON) | automatic threshold: during the first 16 rendered frames the gate records both its own LR delta and the real HR delta it caused, then picks the widest candidate whose p90 HR error stays under 2 levels. During those 16 frames the gate is forced to render (otherwise the sample is biased to already-changed frames), so the cost is ~0.7 s once per video; measured on the same clip: 11.38/11.20 manual vs 11.40/11.32 auto. On anime it then picks 8.0 (73.5% reuse, 52.7 dB avg / 48.2 dB worst vs ungated) and on grainy film it keeps the 5.0 seed |
 | `--temporal_reuse_pixel_veto` | 0 (off) | full-res max delta that rescues a would-be duplicate. 40 is TheAnimeScripter's value and is right for clean anime; on grainy film a single pixel exceeds it and reuse collapses from 46.8% to 1.1% (measured, 43 vetoes in 94 frames) | |
 | 10-bit path | auto for >=10-bit sources | YUV420p10 packed on the GPU, colour matrix from the source | colour parity vs ffmpeg: Y-PSNR 49.7 dB |
 
