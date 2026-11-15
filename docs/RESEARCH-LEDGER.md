@@ -1016,6 +1016,41 @@ ceiling is the int8 rate, 147 TOPS, i.e. 16.6 ms of body plus non-GEMM = 24.7 ms
 1.97x at 120 TOPS, 1.84x at 109. That is E27 extended into a real kernel project (CUTLASS or
 hand-written), weeks of work, with 2x at the very top of its range.
 
+## The int8 block with a per-channel epilogue: 1.91 ms and 80 TOPS, measured, not projected
+
+The whole int8 case rested on a number measured with a SCALAR activation fused into the epilogue (40.24
+ms) and on an accuracy figure from a build whose PReLU ran in fp16. Both were borrowed. This is the
+configuration the plugin would actually be, written as a kernel and measured:
+
+one 3x3 conv 64->64, int8 in, int8 out, in a single Triton kernel - nine taps accumulating into int32,
+then dequantise, per-channel PReLU, per-channel requant, clamp, store. NHWC activations, K-major weights.
+
+| block | warps | time | TOPS |
+|---|---|---|---|
+| 64 | 2 | 2.450 ms | 62.4 |
+| **128** | **2** | **1.925 ms** | **79.4** |
+| 256 | 4 | 1.910 ms | 80.0 |
+| 512 | 8 | 2.264 ms | 67.5 |
+| 256 | 2 | 80.1 ms | 1.9 (a cliff, not a trend) |
+
+Correctness first: the kernel output matches a shift-plus-`_int_mm` reference **exactly** (max |diff| 0
+on 96x96 and 32x32, all taps and center-only). That check also caught a bad reference - the first version
+mapped the weights with `permute(1,0,2)` and made a correct kernel look 40% wrong.
+
+**So the budget is met**: <=1.9-2.0 ms and >=76-80 TOPS, achieved at 1.91-1.93 ms and 79-80 TOPS. Against
+the fp16 fused block's 2.93 ms, a block is 1.53x cheaper while carrying the per-channel slope and a
+per-channel output scale - the two things TensorRT's epilogue could not take.
+
+Projection through the frame: 16 blocks at 1.91 ms = 30.6 ms, plus the measured 8.1 ms of non-GEMM work
+= **38.7 ms against 56.28, i.e. 1.45x of engine time and 1.25x of wall**. That is the best
+content-independent lever on the board, and it is now a kernel rather than an arithmetic hope.
+
+What it does not settle, in order of risk: the *accuracy* of a real quantisation (this probe runs exact
+float arithmetic inside the epilogue - the scales are the question, not the kernel), the seam structure
+when the block is inserted into the graph (target: the 40.24 ms build's four reformats and one pointwise),
+and the path from Triton to something TensorRT will load (QDP AOT since 10.7, or a plugin - the python
+wheel still ships no `NvInfer.h`).
+
 ## What bounds the routing lane, before it is measured further
 
 Four constraints, each of which decides whether a number is worth chasing.
