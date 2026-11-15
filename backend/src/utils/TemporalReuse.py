@@ -412,3 +412,83 @@ class ReferenceFrameGate:
         if self._ref is None or tuple(blocks.shape) != tuple(self._ref.shape):
             return float("inf")
         return float((blocks - self._ref).abs().max().item())
+
+
+class AutoGateTuner:
+    """Choosing the duplicate threshold from measurement instead of a constant.
+
+    Every frame that has to be rendered anyway yields both sides of the trade: ``lr_delta``
+    (the gate's own statistic, worst 32 px block mean) and ``hr_delta`` (how much the upscaled
+    result actually changed, same statistic shape at the output). Frames whose ``lr_delta`` is
+    under a candidate threshold *would* have been reused, and the error that reuse would have
+    cost is exactly their measured ``hr_delta``.
+
+    So after a handful of rendered frames we can score every candidate on real data:
+
+      - reuse share = fraction of calibration frames with ``lr_delta <= candidate``
+      - cost       = p95 of their ``hr_delta`` (levels of 255)
+
+    and pick the largest candidate whose p95 stays inside ``budget``. That is content-agnostic:
+    grainy film has a higher noise floor and lands on a larger threshold, clean anime on a
+    smaller one, without anyone typing a number.
+
+    The whole thing costs no extra inference (the frames are rendered regardless) and a few
+    hundred microseconds per calibration frame for the HR statistic.
+    """
+
+    def __init__(self, budget: float = 1.5, min_pairs: int = 12,
+                 candidates=(2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0),
+                 clamp=(2.0, 12.0), noise_floor_quiet: float = 0.35):
+        self.budget = float(budget)
+        self.min_pairs = int(min_pairs)
+        self.candidates = tuple(float(c) for c in candidates)
+        self.clamp = (float(clamp[0]), float(clamp[1]))
+        self.noise_floor_quiet = float(noise_floor_quiet)
+        self._pairs: list[tuple[float, float]] = []
+        self.chosen: float | None = None
+        self.veto: float | None = None
+
+    def add(self, lr_delta: float, hr_delta: float) -> None:
+        if self.chosen is not None or lr_delta <= 0:
+            return
+        if hr_delta == hr_delta and hr_delta >= 0:  # not NaN
+            self._pairs.append((float(lr_delta), float(hr_delta)))
+        if len(self._pairs) >= self.min_pairs:
+            self._decide()
+
+    @property
+    def ready(self) -> bool:
+        return self.chosen is not None
+
+    def _noise_floor(self) -> float:
+        # the calmest fifth of the calibration frames is the content noise floor
+        ordered = sorted(p[0] for p in self._pairs)
+        k = max(1, len(ordered) // 5)
+        return sum(ordered[:k]) / k
+
+    def _decide(self) -> None:
+        best = None
+        for cand in self.candidates:
+            errs = [hr for lr, hr in self._pairs if lr <= cand]
+            if len(errs) < max(2, len(self._pairs) // 4):
+                # a candidate that would reuse almost nothing is not worth considering
+                continue
+            errs.sort()
+            p95 = errs[min(len(errs) - 1, int(0.95 * (len(errs) - 1)))]
+            if p95 <= self.budget:
+                best = cand
+        if best is None:
+            best = self.candidates[0]
+        lo, hi = self.clamp
+        self.chosen = max(lo, min(hi, best))
+        # a clean source benefits from the full-res veto (mouth flaps, blinks); a grainy one is
+        # destroyed by it (measured: 43 vetoes in 94 frames, reuse collapses to 1.1%)
+        self.veto = 40.0 if self._noise_floor() <= self.noise_floor_quiet else None
+
+    def stats(self) -> str:
+        if self.chosen is None:
+            return f"auto gate: calibrating ({len(self._pairs)}/{self.min_pairs} frames)"
+        reuse = 100.0 * sum(1 for lr, _ in self._pairs if lr <= self.chosen) / len(self._pairs)
+        return (f"auto gate: threshold {self.chosen:.1f}/255, veto {self.veto}, "
+                f"noise floor {self._noise_floor():.2f}, would reuse {reuse:.0f}% of the "
+                f"{len(self._pairs)} calibration frames")
