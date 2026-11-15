@@ -270,7 +270,7 @@ What each knob actually costs, isolated:
 | gate, chain 4, tile reuse | 9.2 s | 0.287%, peak 98 |
 | gate, chain 4, tile reuse, threshold 12 | 8.4 s | 0.288%, peak 100 |
 | tile judge = worst block | 8.9 s | 1.174%, peak 42 |
-| film, any of the above | 4.3-4.6 s against 4.66 s ungated | the gate refuses at `best`; tile reuse off |
+| film, `best` | 4.67 s against 4.63 s ungated | the gate refuses and the render is **byte-identical** to the ungated one (94/94 frames) |
 
 `best` is the default and takes the certified depth - chain 4, once the chain budget is expressed
 on the proxy's own scale instead of the one-step bar; `fast` keeps the full chain unconditionally
