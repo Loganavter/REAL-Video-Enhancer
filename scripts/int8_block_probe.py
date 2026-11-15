@@ -63,6 +63,46 @@ def conv3x3_int8_prelu_kernel(
     tl.store(y_ptr + dst, q.to(tl.int8))
 
 
+@triton.jit
+def conv3x3_int8_prelu_pertap_kernel(
+    x_ptr, w_ptr, tap_scale_ptr, slope_ptr, out_scale_ptr,
+    y_ptr, H, W, in_scale,
+    BLOCK_M: tl.constexpr, C: tl.constexpr,
+):
+    """Same maths with the dequant INSIDE the tap loop: one weight scale per (channel, tap).
+
+    Exact, not an approximation - each tap accumulates 64 products in int32 (max 64*127*127 = 1.03M), the
+    taps are summed in fp32. TensorRT cannot do this: its dequant must follow the whole accumulation.
+    """
+    pid = tl.program_id(0)
+    rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    h = rows // W
+    w = rows % W
+    lanes = tl.arange(0, C)
+    acc = tl.zeros((BLOCK_M, C), dtype=tl.float32)
+
+    for tap in tl.static_range(9):
+        dy = tap // 3 - 1
+        dx = tap % 3 - 1
+        yy = h + dy
+        xx = w + dx
+        inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
+        src = (yy * W + xx)[:, None] * C + lanes[None, :]
+        a = tl.load(x_ptr + src, mask=inside[:, None], other=0)
+        b = tl.load(w_ptr + tap * C * C + lanes[:, None] * C + lanes[None, :])
+        part = tl.dot(a, b, out_dtype=tl.int32).to(tl.float32)
+        acc += part * (in_scale * tl.load(tap_scale_ptr + tap * C + lanes)[None, :])
+
+    v = acc
+    slope = tl.load(slope_ptr + lanes)[None, :]
+    v = tl.where(v >= 0, v, v * slope)
+    out_scale = tl.load(out_scale_ptr + lanes)[None, :]
+    q = tl.floor(v / out_scale + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    dst = rows[:, None] * C + lanes[None, :]
+    tl.store(y_ptr + dst, q.to(tl.int8))
+
+
 def reference(x, weight, slope, in_scale, w_scale, out_scale):
     """Shifts plus int8 matmul, deliberately not conv2d: the first version's conv2d weight layout was
     wrong and made a correct kernel look broken. This one has no layout opinions."""
@@ -90,6 +130,7 @@ def main() -> int:
     ap.add_argument("--check-size", type=int, default=64)
     ap.add_argument("--block", type=int, default=BLOCK_M)
     ap.add_argument("--warps", type=int, default=2)
+    ap.add_argument("--per-tap", action="store_true")
     args = ap.parse_args()
 
     torch.manual_seed(0)
@@ -124,10 +165,17 @@ def main() -> int:
     y = torch.empty_like(x)
     grid = (triton.cdiv(args.height * args.width, args.block),)
 
+    tap_scale = (torch.rand(9, C, device=dev) * 0.004 + 0.008)
+
     def run():
-        conv3x3_int8_prelu_kernel[grid](x, weight, slope, out_scale, y, args.height, args.width,
-                                        in_scale, w_scale, BLOCK_M=args.block, C=C,
-                                        num_warps=args.warps)
+        if args.per_tap:
+            conv3x3_int8_prelu_pertap_kernel[grid](x, weight, tap_scale, slope, out_scale, y,
+                                                   args.height, args.width, in_scale,
+                                                   BLOCK_M=args.block, C=C, num_warps=args.warps)
+        else:
+            conv3x3_int8_prelu_kernel[grid](x, weight, slope, out_scale, y, args.height, args.width,
+                                            in_scale, w_scale, BLOCK_M=args.block, C=C,
+                                            num_warps=args.warps)
 
     for _ in range(5):
         run()
