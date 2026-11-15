@@ -32,6 +32,7 @@ class FFmpegRead(Buffer):
             borderX, 
             borderY, 
             hdr_mode,
+            high_bitdepth: bool | None = None,
             backend: str = "pytorch",
             device: str = "cuda",
             gpu_id: int = 0,
@@ -52,6 +53,11 @@ class FFmpegRead(Buffer):
         self.borderX = borderX
         self.borderY = borderY
         self.hdr_mode = hdr_mode
+        # "high_bitdepth" is the DATA path (16-bit frames/pipe); "hdr_mode" is the COLOUR
+        # tagging (bt2020/PQ). A 10-bit SDR source needs the former without the latter,
+        # otherwise its precision is thrown away by an 8-bit rgb24 round trip (measured:
+        # the conversion caps at ~44 dB vs ~79.5 dB for the 16-bit path).
+        self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
         self.backend = backend
         self.device = device
         self.gpu_id = gpu_id
@@ -61,10 +67,10 @@ class FFmpegRead(Buffer):
         self.color_transfer = color_transfer
         self.color_range = color_range
         self.input_pixel_format = input_pixel_format
-        self.yuv420pMOD = self.input_pixel_format == "yuv420p" and not self.hdr_mode
+        self.yuv420pMOD = self.input_pixel_format == "yuv420p" and not self.high_bitdepth
         self.ffmpeg_path = ffmpeg_path
         #self.yuv420pMOD = False
-        if self.hdr_mode:
+        if self.high_bitdepth:
             self.inputFrameChunkSize = width * height * 6
         else:
             if self.yuv420pMOD:
@@ -108,7 +114,7 @@ class FFmpegRead(Buffer):
             "-f",
             "image2pipe",
             "-pix_fmt",
-            "rgb48le" if self.hdr_mode else (self.input_pixel_format if self.yuv420pMOD else "rgb24"),
+            "rgb48le" if self.high_bitdepth else (self.input_pixel_format if self.yuv420pMOD else "rgb24"),
             #"rgb48le" if self.hdr_mode else "rgb24",
             "-vcodec",
             "rawvideo",
@@ -145,7 +151,8 @@ class FFmpegRead(Buffer):
             chunk = self.read_frame()
             if chunk is None:
                 break
-            frame = Frame(self.backend, self.width, self.height, self.device, self.gpu_id, self.hdr_mode, self.dtype)
+            frame = Frame(self.backend, self.width, self.height, self.device, self.gpu_id, self.hdr_mode, self.dtype,
+                          high_bitdepth=self.high_bitdepth)
             frame.set_frame_bytes(chunk)
             self.readQueue.put(frame)
         self.readQueue.put(None)
@@ -184,6 +191,7 @@ class FFmpegWrite(Buffer):
         hdr_mode: bool,
         mpv_output: bool,
         merge_subtitles: bool,
+        high_bitdepth: bool | None = None,
         color_space: str = None,
         color_primaries: str = None,
         color_transfer: str = None,
@@ -217,6 +225,7 @@ class FFmpegWrite(Buffer):
         self.subtitle_encoder = subtitle_encoder
         self.mpv_output = mpv_output
         self.hdr_mode = hdr_mode
+        self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
         self.merge_subtitles = merge_subtitles
         self.writeQueue = queue.Queue(maxsize=25)
         self.previewFrame = None
@@ -250,6 +259,13 @@ class FFmpegWrite(Buffer):
 
 
 
+    def _pipe_input_pixel_format(self) -> str:
+        """What the raw pipe carries from the renderer to ffmpeg."""
+        if self.high_bitdepth and not self.hdr_mode:
+            # the GPU already produced packed YUV420p10 (see TorchUtils.tensor_to_yuv420p10)
+            return "yuv420p10le"
+        return "rgb48le" if self.high_bitdepth else "rgb24"
+
     def _color_convert_args(self) -> list[str]:
         """RGB pipe -> YUV with an explicit matrix.
 
@@ -259,6 +275,14 @@ class FFmpegWrite(Buffer):
         """
         if self.hdr_mode or self.custom_encoder is not None:
             return []
+        if self._pipe_input_pixel_format() == "yuv420p10le":
+            # already YUV in the source's own matrix/range - only the tags are needed
+            args = ["-colorspace", self.color_space or "bt709", "-color_range", self.color_range or "tv"]
+            if self.color_primaries:
+                args += ["-color_primaries", self.color_primaries]
+            if self.color_transfer:
+                args += ["-color_trc", self.color_transfer]
+            return args
         cs = self.color_space or "bt709"
         rng = self.color_range or "tv"
         args = [
@@ -283,7 +307,7 @@ class FFmpegWrite(Buffer):
                 "-f",
                 "rawvideo",
                 "-pix_fmt",
-                "rgb48le" if self.hdr_mode else "rgb24",
+                self._pipe_input_pixel_format(),
                 "-vcodec",
                 "rawvideo",
                 "-s",
@@ -347,7 +371,7 @@ class FFmpegWrite(Buffer):
                 "-f",
                 "rawvideo",
                 "-pix_fmt",
-                "rgb48le" if self.hdr_mode else "rgb24",
+                self._pipe_input_pixel_format(),
                 "-vcodec",
                 "rawvideo",
                 "-s",
@@ -470,7 +494,7 @@ class FFmpegWrite(Buffer):
                 "-video_size",
                 f"{self.width * self.upscaleTimes}x{self.upscaleTimes * self.height}",
                 "-pix_fmt",
-                "rgb48le" if self.hdr_mode else "rgb24",
+                self._pipe_input_pixel_format(),
                 "-r",
                 str(self.outputFPS),
                 "-i",

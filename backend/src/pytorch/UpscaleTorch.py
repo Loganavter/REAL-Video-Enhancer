@@ -81,6 +81,7 @@ class UpscalePytorch:
         backend: str = "pytorch",
         gpu_id: int = 0,
         hdr_mode: bool = False,
+        high_bitdepth: bool | None = None,
         override_upscale_scale: int | None = None,
         # trt options
         trt_workspace_size: int = 0,
@@ -91,7 +92,8 @@ class UpscalePytorch:
         trt_static_shape: bool = False,
 
     ):
-        self.torchUtils = TorchUtils(width=width, height=height,hdr_mode=hdr_mode,device_type=device)  
+        self.torchUtils = TorchUtils(width=width, height=height,hdr_mode=hdr_mode,device_type=device,
+                                     high_bitdepth=high_bitdepth)  
         device = self.torchUtils.handle_device(device, gpu_id=gpu_id)
         self.dtype = self.torchUtils.handle_precision(precision)
         self.tile_pad = tile_pad
@@ -110,6 +112,7 @@ class UpscalePytorch:
         self.trt_debug = trt_debug
         
         self.hdr_mode = hdr_mode         
+        self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
 
         self.trt_static_shape = trt_static_shape
 
@@ -312,7 +315,10 @@ class UpscalePytorch:
             else:
                 output = self.renderTiledImage(image_tensor)
             
-            retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale, device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype)
+            retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale, device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
+                             high_bitdepth=self.high_bitdepth)
+            # 10-bit SDR: hand ffmpeg ready-made yuv420p10le instead of RGB
+            retFrame.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
             
             retFrame.set_frame_tensor(output)
         
