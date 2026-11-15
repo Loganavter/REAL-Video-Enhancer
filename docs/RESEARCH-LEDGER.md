@@ -477,10 +477,12 @@ the lever, and that now shows in the counts as well as in the defect.
 - **The pooled payload corruption is explained but unverified.** The writer instrumentation
   shows the queue never fills (depth 4 of 25), so the mechanism must be a slot released before
   its last byte was copied. The feature is off; re-verifying it would buy 0.79 ms/frame.
-- **Does the chain-aware tuner over-tighten?** With the one-step budget applied at every depth it
-  certified only chain 1 on anime (11.5 s); with the chain budget on the proxy's own scale it
-  certifies chain 4 (11.7 s at the current statistic). The gap between those two budgets is what "over-tighten" means here,
-  and it is a calibration question rather than a correctness one.
+- ~~Does the chain-aware tuner over-tighten?~~ **Yes, and it was a correctness bug, not calibration.**
+  With the one-step budget at every depth it certified chain 1 on anime (11.5 s); with the chain
+  budget on the proxy's own scale it certifies chain 4 (11.7 s). That history turned out to be the
+  same over-strictness in a different place: the tuner also scored depths the gate cannot reach, and
+  fixing that (see the chain section above) moved the real Blu-rays from chain 1 to chain 2 and the
+  time from 9.94 s to 6.56 s with the same defect.
 - ~~Why does the P010 pipe diverge (31 dB)?~~ Answered: two faults, see C4. The packing was never
   the problem; the command declared a format the packer did not produce, and P010 additionally
   fell through to the RGB branch.

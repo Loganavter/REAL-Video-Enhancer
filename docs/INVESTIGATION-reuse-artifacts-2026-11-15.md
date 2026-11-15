@@ -53,7 +53,7 @@ seams, and its difference from a full-frame render is fp16-level noise. Two plau
 
 Same frame 383, share of pixels by error magnitude, 8-bit levels:
 
-| threshold | chain 4 (shipped) | chain 1 |
+| threshold | chain 4, tiles on | chain 1, tiles on |
 |---|---|---|
 | > 2 | 10.87% | 8.91% |
 | > 4 | 1.13% | 0.39% |
@@ -175,7 +175,9 @@ refuses tiles past a noise floor of ~0.45.
    different days; the difference is the machine, not the code.
 4. **A/A before A/B.** If two identical runs disagree, the measurement is the problem.
 5. **The tuner certifies the depth it can prove**, and refuses rather than reusing "the least bad"
-   when nothing certifies.
+   when nothing certifies. "Prove" includes reachability: a depth-`k` reuse only exists if the frames
+   in between were reused too, so a frame next to a flash cannot veto the chain by itself (that
+   rule cost 1.5x until it was fixed - see §5).
 6. **A pipe format must be declared by the packer, never inferred from the encoder.**
 
 ## Colour tags on the wrong side cost 62 ms/frame and five levels of chroma

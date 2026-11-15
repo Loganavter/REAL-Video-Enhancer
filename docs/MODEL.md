@@ -359,8 +359,10 @@ about *what we tried*.
 |---|---|---|
 | anime, ungated (502 frames, 1080p -> 2160p) | 100% | 16.3 fps |
 | anime, duplicate gate | 29.1% | 51.71 dB average / 48.64 dB worst frame against the ungated render, 70.9% reuse |
-| anime, gate only (default) | 29.1% of frames | **11.7 s against 38.85 s ungated (3.3x)**, 0.009% of pixels above 8 levels (RGB) on the worst of 19 sampled frames, peak 14 |
+| anime, gate only (default) | 29.1% of frames | **11.7 s against 38.85 s ungated (3.3x)**, 0.009% of pixels above 8 levels (RGB) on the worst of 19 sampled frames, peak 14. Re-taken after the chain-reachability fix: chain 4 still certified, the same **362/498** reuses, 11.93 s, 0.017% on a 13-frame sample (the sample changed, the configuration did not) |
 | anime, gate + tile reuse | 57.7% of tiles | 9.2 s, but **0.287%** above 8 levels and peaks of 98: the tile path has its own staleness, so it is off by default (see the investigation linked below) |
+| Chainsaw Man ep01 (1080p -> 2160p, 8 s) | 66.4% | **6.56 s against 13.50 s ungated (2.06x)**, 0.005% of pixels above 8 levels on the worst of 15 sampled frames, peak 14, chain 2 certified |
+| Violet Evergarden ep01 (1080p -> 2160p, 8 s) | 64.8% | **6.92 s against 13.31 s ungated (1.92x)**, 0.096%, peak 18, chain 2 - 4% of margin under the bar |
 | film, ungated (94 frames, 1440p -> 2880p) | 100% | 4.66 s |
 | film, duplicate gate | 100% rendered at the shipping preset | **the gate refuses** (noise floor 2.27, above the 1.5 limit), so the render is byte-identical to the ungated one: 4.67 s against 4.63 s for 94 frames. Before the noise-floor guard it reused 18.1% of frames for 4.33 s (1.08x) at 39.83 dB worst frame; the 71 dB this row used to claim came from comparing two renders that were both corrupted by the pipe-format bug in ledger C4 |
 | tile-level reuse, square 512 px cores (anime) | 65.8% of tiles | 1.44x faster than ungated (30.8 -> 21.4 s) but slower than the frame gate (10.6 s). The loss was **geometry**: 512 does not divide 1080, so 12 windows of 548x548 cover a frame of 1.55 Mpx = 1.74x its area |
