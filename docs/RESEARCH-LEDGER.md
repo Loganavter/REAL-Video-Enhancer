@@ -1196,6 +1196,24 @@ dark patch at 0.048), so the two are not one mechanism: one is a level shift whe
 the other is a bright-region excursion consistent with a top-end clipping event that the calibration set
 missed.
 
+**The ill-conditioning ratio is spread, not concentrated, so targeted migration is not the fix.** For
+every conv, per output channel: `sum_k |W[c,k]| * max|x_k| / max|out_c|` - how much weight-quantisation
+error that channel amplifies relative to what it produces.
+
+| layer | median ratio | worst channel |
+|---|---|---|
+| 0 (head) | 4.4 | 59.3 |
+| 30 | 18.3 | 43.5 |
+| 28 | 18.4 | 42.3 |
+| 26 | 19.3 | 39.3 |
+| **all 18 layers** | **17.9** | 37-59, only 1 above 50 |
+
+A handful of pathological channels would justify SmoothQuant-style migration targeted at them. The ratio
+is instead flat across the stack - median ~18 everywhere, worst channels all in the same 40-60 band - so
+the error is spread over all channels and the remaining levers are the ones that act on every channel:
+asymmetric scales (~0.7 of a bit, measured) and the fp16 boundary on the early layers (untested, and the
+tail experiment showed the last layers are not where it enters).
+
 Status, honestly: **with per-video calibration and margin 1.25 the int8 picture passes the statistic the
 project actually applies** - 0.058% against 0.1%, and better than the shipped opt-in's 0.071% - while
 reading peak 37 against that option's 23. Two frames of one title are still a narrow calibration set;
