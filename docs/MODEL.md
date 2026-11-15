@@ -162,9 +162,11 @@ counter is read (§6, item 2).
 
 ## 6. What is left to measure (short list)
 
-1. **Per-layer time**, not just names: `trtexec --loadEngine=... --dumpProfile
-   --separateProfileRun --useCudaGraph --noDataTransfers` on a quiet GPU, or `nsys` on the
-   in-process engine.
+1. ~~Per-layer time~~ **done without trtexec, via `trt.IProfiler`**: 23 layers, 51.95 ms total,
+   the top layer at 3.91 ms and the 18 fused conv subgraphs spread evenly at 2.2-3.9 ms each.
+   There is **no outlier** - so no single layer to fix, and the `sm75_` lead is a uniform tactic
+   choice rather than one bad kernel. What is still missing is the split of that time into
+   compute versus DRAM, which needs `nsys` (item 2).
 2. **nsys** tensor-active % and DRAM bytes with clocks pinned (`nvidia-smi -lgc`): that is the
    actual localisation of the gap; everything in §3 is inference.
 3. **A conv ceiling instead of a GEMM ceiling**: time one 3x3 conv at the same area
