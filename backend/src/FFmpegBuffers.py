@@ -173,6 +173,21 @@ class FFmpegRead(Buffer):
         self.readProcess.terminate()
 
 
+def resolve_output_pixel_format(requested: str | None, high_bitdepth: bool,
+                                interpolating: bool = False) -> str:
+    """Output pixel format when the caller did not choose one.
+
+    A 10-bit source fed to an 8-bit encoder loses the precision the 10-bit pipe exists to
+    keep, and keeping it costs nothing: measured on the 1440x1080 10-bit film clip, the 8-bit
+    round trip caps the agreement at about 44 dB against about 49.7 dB with the 10-bit path.
+    An explicit request always wins, and interpolated frames keep 8-bit because the
+    interpolator itself works in 8 bits.
+    """
+    if requested:
+        return requested
+    return "yuv420p10le" if (high_bitdepth and not interpolating) else "yuv420p"
+
+
 class FFmpegWrite(Buffer):
     def __init__(
         self,
@@ -297,8 +312,12 @@ class FFmpegWrite(Buffer):
         """
         if self.hdr_mode or self.custom_encoder is not None:
             return []
-        if self._pipe_input_pixel_format() == "yuv420p10le":
-            # already YUV in the source's own matrix/range - only the tags are needed
+        if self._pipe_input_pixel_format() in ("yuv420p10le", "p010le"):
+            # already YUV in the source's own matrix/range - only the tags are needed.
+            # P010 was missing from this branch, so it fell through to the RGB path and got
+            # `scale=in_range=pc:out_color_matrix=...`: a full-range reinterpretation of a
+            # limited-range P010 stream plus a second matrix conversion. That is what cost the
+            # P010 pipe 31 dB against the planar reference (ledger C4).
             args = ["-colorspace", self.color_space or "bt709", "-color_range", self.color_range or "tv"]
             if self.color_primaries:
                 args += ["-color_primaries", self.color_primaries]
