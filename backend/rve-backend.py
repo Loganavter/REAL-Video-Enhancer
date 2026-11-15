@@ -176,6 +176,7 @@ class HandleApplication:
             ensemble=self.args.ensemble,
             output_to_mpv=self.args.output_to_mpv,
             trt_timing_iters=self.args.trt_timing_iters,
+            trt_streams=self.args.trt_streams,
             trt_tiling_level=self.args.trt_tiling_level,
             tile_reuse=self.args.tile_reuse,
             tile_reuse_size=self.args.tile_reuse_size,
@@ -433,6 +434,13 @@ class HandleApplication:
             "--trt_timing_iters",
             help="TensorRT num_avg_timing_iters (default 8; the old behaviour was 4).",
             default=8,
+            type=int,
+        )
+        parser.add_argument(
+            "--trt_streams",
+            help="Number of independent TensorRT engine contexts to keep in flight (default 1). "
+                 "2 pipelines frames with one frame of latency; only for the tensorrt backend.",
+            default=1,
             type=int,
         )
         parser.add_argument(

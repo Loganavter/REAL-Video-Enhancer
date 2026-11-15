@@ -88,6 +88,7 @@ class UpscalePytorch:
         trt_optimization_level: int = 5,
         trt_tiling_level: str = "moderate",
         trt_timing_iters: int = 8,
+        trt_streams: int = 1,
         tile_reuse: bool = False,
         tile_lr: int = 512,
         tile_halo: int = 18,
@@ -115,6 +116,25 @@ class UpscalePytorch:
         self.trt_optimization_level = trt_optimization_level
         self.trt_tiling_level = trt_tiling_level
         self.trt_timing_iters = trt_timing_iters
+        # >1 loads that many independent engine contexts and pipelines frames through them:
+        # one execution context cannot be used from two CUDA streams, so the win has to come
+        # from separate contexts (the approach vs-mlrt reports as 1.7-2.0x on Ada).
+        # MEASURED DEAD END (2026-11-15): with 2 contexts on this app's torchscript engines the
+        # render time does not change (4.25 -> 4.27 s for 94 frames) and the output diverges
+        # from the single-stream one (Y-PSNR 25 dB, not a frame shift), i.e. two torch.jit.load
+        # modules of the same engine do not give independent execution contexts. Kept behind
+        # the flag for reference; anything >1 falls back to 1 with a warning.
+        self.num_streams = max(1, int(trt_streams))
+        if self.num_streams > 1:
+            from ..utils.Util import log as _log
+            _log("trt_streams > 1 is not supported (shared execution context corrupts output); using 1")
+            self.num_streams = 1
+        self._slot_models = []
+        self._slot_streams = []
+        self._slot_busy = []
+        self._slot_i = 0
+        self._pending = []          # [(tensor, event)] results not yet emitted
+        self._slot_models_ready = False
         self.tile_reuse = tile_reuse
         self.tile_threshold = tile_threshold
         self.tile_max_chain = tile_max_chain
@@ -130,6 +150,7 @@ class UpscalePytorch:
         
         self.hdr_mode = hdr_mode         
         self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
+        self.gpu_id = gpu_id
 
         self.trt_static_shape = trt_static_shape
 
@@ -312,6 +333,14 @@ class UpscalePytorch:
                             )
                 model = trtHandler.load_engine(trt_engine_name=self.trt_engine_name)
                 self.upscale_model_wrapper.load_model(model)
+                if self.num_streams > 1:
+                    engine_path = os.path.join(
+                        os.path.dirname(self.modelPath),
+                        self.trt_engine_name + TorchTensorRTHandler.trt_path_appendix,
+                    )
+                    self._slot_models = [model]
+                    for _ in range(self.num_streams - 1):
+                        self._slot_models.append(torch.jit.load(engine_path).eval())
                 
 
         self.torchUtils.clear_cache()
@@ -332,6 +361,76 @@ class UpscalePytorch:
     
     @torch.inference_mode()
     def __call__(self, image: Frame) -> Frame:
+        if self.num_streams > 1 and self.tile_upscaler is None and self.backend == "tensorrt":
+            return self._call_pipelined(image)
+        return self._call_single(image)
+
+    @torch.inference_mode()
+    def _call_pipelined(self, image: Frame) -> Frame:
+        """Run frames through N independent engine contexts, emitting N-1 frames late.
+
+        One execution context cannot serve two streams, so each slot owns its own engine.
+        Frame t goes to slot t % N; the frame emitted is t - (N-1), i.e. latency grows by
+        N-1 frames and the GPU keeps N inferences in flight. The last N-1 frames come out
+        through flush(), which RenderVideo calls when the reader ends.
+        """
+        dtype = image.dtype
+        gpu_id = image.gpu_id
+        device = image.device
+        with self.torchUtils.run_stream(self.f2tstream):  # type: ignore
+            image_tensor = image.get_frame_tensor()
+        del image
+        self.torchUtils.sync_stream(self.f2tstream)
+
+        if not self._slot_models_ready:
+            self._slot_streams = [self.torchUtils.init_stream(gpu_id=gpu_id)
+                                  for _ in range(self.num_streams)]
+            self._slot_busy = [False] * self.num_streams
+            self._slot_models_ready = True
+
+        slot = self._slot_i
+        self._slot_i = (self._slot_i + 1) % self.num_streams
+        stream = self._slot_streams[slot]
+        if self._slot_busy[slot]:
+            # the previous frame on this slot must be done with its input buffer
+            torch.cuda.current_stream().wait_stream(stream)
+        with self.torchUtils.run_stream(stream):
+            out = self._slot_models[slot](image_tensor)
+        event = torch.cuda.Event()
+        event.record(stream)
+        self._slot_busy[slot] = True
+        self._pending.append((out, event))
+
+        if len(self._pending) <= self.num_streams - 1:
+            # first passes: nothing has completed a full lap yet -> keep latency honest by
+            # returning nothing and letting RenderVideo skip the frame
+            return None
+        result, ev = self._pending.pop(0)
+        ev.synchronize()
+        retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale,
+                         device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
+                         high_bitdepth=self.high_bitdepth)
+        retFrame.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+        retFrame.set_frame_tensor(result)
+        return retFrame
+
+    @torch.inference_mode()
+    def flush(self):
+        """Emit frames still inside the pipeline. Returns a list of Frame objects."""
+        frames = []
+        while self._pending:
+            result, ev = self._pending.pop(0)
+            ev.synchronize()
+            f = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale,
+                      device=self.device, gpu_id=getattr(self, "gpu_id", 0), hdr_mode=self.hdr_mode,
+                      dtype=self.dtype, high_bitdepth=self.high_bitdepth)
+            f.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+            f.set_frame_tensor(result)
+            frames.append(f)
+        return frames
+
+    @torch.inference_mode()
+    def _call_single(self, image: Frame) -> Frame:
         dtype = image.dtype
         gpu_id = image.gpu_id
         device = image.device

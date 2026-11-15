@@ -106,6 +106,7 @@ class Render:
         ensemble: bool = False,
         output_to_mpv: bool = False,
         trt_timing_iters: int = 8,
+        trt_streams: int = 1,
         trt_tiling_level: str = "moderate",
         tile_reuse: bool = False,
         tile_reuse_size: int = 512,
@@ -147,6 +148,7 @@ class Render:
         self.trt_optimization_level = trt_optimization_level
         self.trt_tiling_level = trt_tiling_level
         self.trt_timing_iters = trt_timing_iters
+        self.trt_streams = trt_streams
         self.uncacheNextFrame = False
         self.UHD_mode = UHD_mode
         self.dynamic_scaled_optical_flow = dynamic_scaled_optical_flow
@@ -404,6 +406,12 @@ class Render:
                 frame = self.readBuffer.get()
                 #self.write_bytes_to_cv2_frame_debug(frame)
                 if frame is None:
+                    pending = getattr(self.upscaleOption, "flush", None)
+                    if pending is not None:
+                        for f in pending():
+                            self.informationHandler.setFramesRendered(frames_rendered)
+                            self.writeBuffer.writeQueue.put(f.get_frame_bytes())
+                            frames_rendered += int(self.ceilInterpolateFactor)
                     self.informationHandler.stopWriting()
                     break
 
@@ -449,6 +457,9 @@ class Render:
                         frame = self.upscaleOption(
                             frame
                         )
+                        if frame is None:
+                            # pipelined inference: this frame will come out a call later
+                            continue
                         if self.temporalReuse is not None:
                             self.temporalReuse.remember(frame)
                 
@@ -499,6 +510,7 @@ class Render:
             trt_optimization_level=self.trt_optimization_level,
             trt_tiling_level=self.trt_tiling_level,
             trt_timing_iters=self.trt_timing_iters,
+            trt_streams=self.trt_streams,
             hdr_mode=self.hdr_mode,
             high_bitdepth=getattr(self, "high_bitdepth", self.hdr_mode),
             tile_reuse=getattr(self, "tileReuse", False),
