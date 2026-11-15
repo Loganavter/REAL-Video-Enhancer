@@ -1045,11 +1045,37 @@ Projection through the frame: 16 blocks at 1.91 ms = 30.6 ms, plus the measured 
 = **38.7 ms against 56.28, i.e. 1.45x of engine time and 1.25x of wall**. That is the best
 content-independent lever on the board, and it is now a kernel rather than an arithmetic hope.
 
-What it does not settle, in order of risk: the *accuracy* of a real quantisation (this probe runs exact
-float arithmetic inside the epilogue - the scales are the question, not the kernel), the seam structure
-when the block is inserted into the graph (target: the 40.24 ms build's four reformats and one pointwise),
-and the path from Triton to something TensorRT will load (QDP AOT since 10.7, or a plugin - the python
-wheel still ships no `NvInfer.h`).
+**Accuracy, simulated with real scales: it holds the bar.** Weights per-output-channel symmetric int8,
+each conv input per-tensor int8, epilogue with per-channel PReLU and a **per-channel** output scale -
+the configuration E9' could not express. Measured on a real frame against the fp16 model:
+
+| statistic | value |
+|---|---|
+| share of pixels above 8 levels | **0.000%** (bar 0.1) |
+| peak | 7 levels |
+| median | 1.15 levels |
+
+So the design is admissible on this frame, and the margin is at the peak rather than in the share: 7
+against a bar of 8, where E9's per-tensor build measured 4. **That is the opposite of what was
+predicted** - per-channel output scales were expected to beat the per-tensor peak, and the simulation
+has them 3 levels worse. Two candidate reasons, both cheap to test: my activation scales are max-based
+(saturating) rather than percentile-based, and the calibration here is two frames including the test
+frame itself, which is exactly the kind of leak this investigation keeps catching. Either way the
+conclusion for the lane is unchanged (passes, thin at the peak) and the tuning question is named.
+
+What it does not settle: the seam structure when the block is inserted into the graph (target: the
+40.24 ms build's four reformats and one pointwise), and whether the 8.1 ms of non-GEMM survives the
+insertion - head-to-int8 and int8-to-tail conversions are new passes worth roughly 0.8 ms, which turns
+1.45x into 1.42x before anything else is won.
+
+The Triton-to-TensorRT path is not a risk worth carrying: sixteen Triton kernels between two small
+TensorRT engines on one stream under a CUDA graph need no plugin, no QDP and no headers. And once the
+body is ours, the head and tail stop being TensorRT's problem and become small memory-bound kernels of
+our own - the shapes that cost 3.90 and 3.35 ms in the fp16 engine are 145 MB and 195 MB of traffic,
+i.e. 0.50 and 0.68 ms at the floor, and the 0.81 ms of layout work disappears if everything stays NHWC.
+That is 8.11 ms of non-GEMM down to roughly 1.7, and a frame at 30.6 + 1.7 = 32.3 ms = 1.74x of engine
+time, 1.38x of wall - better than the plugin route and with less risk, at the price of owning the
+execution of the whole model instead of sixteen blocks.
 
 ## What bounds the routing lane, before it is measured further
 
