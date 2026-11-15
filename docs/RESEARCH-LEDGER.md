@@ -2124,6 +2124,29 @@ What is established: the register-capped cubin loads and runs, and the four cont
 is the lucky half; the scratch and the border are the quiet half, and the comparison caught them on the
 first try, which is why it exists.
 
+## A, step 1: the graph is bit-exact, and the fifth contract is subtler than "pass torch's stream"
+
+Sixteen launches captured into a CUDA graph and replayed, compared against the same sixteen run eagerly:
+
+    graph vs eager: max |diff| 0, share 0.000%
+
+Getting there needed one correction that is worth recording, because it fails **silently**. The stream has to
+be read *inside* the capture:
+
+    with torch.cuda.graph(g):
+        live = torch.cuda.current_stream().cuda_stream    # the capture side-stream
+        for _ in range(16):
+            launch(live)
+
+Reading it before the `with` and passing that handle produces an **empty graph** - torch warns
+"The CUDA Graph is empty", the capture still reports OK, and the replay does nothing at all, so the frame
+simply does not update. That is the third instance in this lane of a wrong picture with no error (after the
+reference ignoring its weight scale and the gate statistic in the wrong units), and the first one that would
+have shipped as "the graph made it faster" if nobody had compared the output.
+
+Capture works with raw `cuLaunchKernel` on the side-stream, so the 16 Triton kernels can live under a graph
+without a plugin, a QDP or a TensorRT header - the delivery path the lane needed.
+
 ## Film is the better target, and its accuracy question is one number (2026-11-15)
 
 Every composition measurement so far was taken on material the gate reuses, which is the hard case: the
