@@ -29,7 +29,8 @@ def main() -> int:
     cubin_path = sys.argv[1] if len(sys.argv) > 1 else "/var/tmp/opencode/k_s1.cubin"
     smem = 12288
     block = 128
-    H = W = 64
+    H = W = int(sys.argv[2]) if len(sys.argv) > 2 else 64
+    iters = int(sys.argv[3]) if len(sys.argv) > 3 else 0
     C = 64
 
     check(CUDA.cuInit(0), "cuInit")
@@ -88,13 +89,25 @@ def main() -> int:
         xs, xt = slice(max(0, dx), W + min(0, dx)), slice(max(0, -dx), W + min(0, -dx))
         sh[:, yt, xt, :] = x[:, ys, xs, :]
         acc += torch._int_mm(sh.reshape(H * W, C).contiguous(), w[tap].contiguous()).float()
-    v = acc * 1.0
+    v = acc * 1.0 * 0.01          # in_scale * w_scale, the same pair the kernel applies per tap
     v = torch.where(v >= 0, v, v * slope[None, :])
     want = torch.floor(v / oscale[None, :] + 0.5).clamp(-127, 127).to(torch.int8).reshape(1, H, W, C)
 
     diff = (y.int() - want.int()).abs()
     print(f"grid {grid} x {block} threads, smem {smem} B: max |diff| {int(diff.max())}, "
           f"share != 0 {float((diff != 0).float().mean()) * 100:.2f}%")
+    if iters:
+        import time
+        for _ in range(5):
+            CUDA.cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, ctypes.c_uint(smem), None, params, None)
+        CUDA.cuCtxSynchronize()
+        t0 = time.time()
+        for _ in range(iters):
+            CUDA.cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, ctypes.c_uint(smem), None, params, None)
+        CUDA.cuCtxSynchronize()
+        ms = (time.time() - t0) / iters * 1000
+        flops = 2.0 * C * C * 9 * H * W
+        print(f"block {H}x{W}: {ms:.3f} ms -> {flops / ms / 1e9:.1f} TOPS (capped cubin, 128 regs, 4 blocks)")
     return 0 if int(diff.max()) == 0 else 1
 
 

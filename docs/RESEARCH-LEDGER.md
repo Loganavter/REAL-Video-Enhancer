@@ -2055,7 +2055,22 @@ needed to get that far, both of the "silent contract" class:
   loaded into a second context cannot see tensors allocated in the first. Sharing torch's context
   (`cuCtxGetCurrent`) fixed it.
 
-With that, the launch succeeds and the answer is **max |diff| 126 on 0.66% of pixels** - not zero. So the
+And the 0.66% turned out to be the **reference's** bug, not the kernel's: it declared
+`wf = w * 0.01` and then accumulated the raw weights, so almost every output saturated at +-127 and only the
+handful of pixels near zero disagreed - "126 on 0.66%" is exactly what that looks like. With the scale
+applied the comparison reads **max |diff| 0, share 0.00%**: the capped cubin, loaded and launched by hand,
+reproduces the reference bit for bit. That is the second time this reference has caught a mistake (the first
+was `permute(1,0,2)`), which is why it exists.
+
+**Then the timing, and the register point does not win.** At 1080x1080 the capped cubin (128 registers,
+four blocks, 16 warps) runs at **1.272 ms = 67.6 TOPS**, against the uncapped BM 128 baseline's 64.9 and the
+BM 256 baseline's 77.6. So 16 warps buy about **4% over their own base** and remain **13% behind the best
+configuration**, which has half the warps and twice the per-thread work.
+
+That is the third of the three predictions: not parity, not the 1.766 ms the "warps hide latency" model
+wanted, but a small gain over the wrong base. **Warp switching does not replace per-thread load hoisting at
+this budget**, and the 64 registers left for operands are the reason. The branch is closed with its mechanism
+and with the launcher that outlives it. So the
 launcher works and the kernel it loads does not yet agree with the reference. By the plan this stops the
 work here: the timing is meaningless until the picture is bit-exact, and the two candidate causes are both
 invisible to a smoke test - the two trailing scratch pointers (Triton sizes them from
