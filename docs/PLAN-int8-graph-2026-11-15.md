@@ -1045,6 +1045,33 @@ them in place. The NCHW variant needed a contiguous tensor and the copy cost mor
 Picture agreement with the app's own fp16 engine: `>8 0.00004%, peak 8`. `certify()` reads 0.00000% at 256, 512
 and 1920.
 
+**At 3840x2160 the body LOSES, and the app render is now verified rather than assumed.**
+
+The 1.42x is a 1920x1080 number, so it was measured at the resolution the render actually used:
+
+| 3840x2160 | fp16 engine | int8 body | ratio |
+|---|---|---|---|
+| NVENC idle | 186.14 / 189.69 / 189.33 ms | 240.51 / 240.53 / 241.05 ms | **0.774 / 0.789 / 0.785** |
+| NVENC alongside | 198.68 / 200.29 / 200.64 ms | 259.74 / 259.90 / 260.16 ms | **0.765 / 0.771 / 0.771** |
+
+and the picture is **0.11579%, peak 25** against the engine - over the 0.1% bar as well. So the body is 25%
+*slower* and less accurate at 4K. The reason is structural: the engine is one fused TensorRT graph that scales
+with the frame, while this is sixteen launches plus three conversions whose per-launch cost does not shrink.
+
+**The app render was re-run with the whole log, and it answers the question the earlier one could not.** The
+log says, verbatim:
+
+    BACKEND: int8 probe unavailable (CUDA out of memory. Tried to allocate 1014.00 MiB ... ); int8 stays off
+    BACKEND:   probe failed
+
+So the body never served that pass - not because certification refused it, but because the **probe itself ran out
+of memory at 4K**, where the app already holds the 4K engine, the model and its own buffers. The render then ran
+the fp16 engine: 220 frames, 26.44 s, **120.18 ms/frame, inference 70.70 ms**. And refusing was the right outcome
+anyway: at 4K the body is 0.77x.
+
+`_int8_body` now refuses anything above 1080p-class frames *by size*, before the probe can OOM, with the measured
+reason in the log - so the outcome no longer depends on an allocation failing.
+
 **THE GATE IS CLEARED: 1.411x idle and 1.428x under NVENC, after fixing the fused kernel.**
 
 The 12.816 ms fused PReLU+quantise was a type bug, not a memory limit: the PReLU slope was passed as

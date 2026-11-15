@@ -102,3 +102,18 @@
 @derived gate_margin_nvenc "64.24 - 91.72/1.40 = -1.28 ms: the gate is met with NVENC alongside too"
 @below gate_margin zero_excess
 @below gate_margin_nvenc zero_excess
+
+# ---- 4K: the body LOSES, and the app render never used it (verified from the full log)
+@claim engine_4k_idle    186.14 ms "fp16 TensorRT engine, 3840x2160, NVENC idle" measured
+@claim body_4k_idle      240.51 ms "Int8Body, 3840x2160, same rounds" measured
+@claim ratio_4k_idle       0.774 x  "derived: 186.14 / 240.51" derived
+@derived ratio_4k_idle "186.14 / 240.51 = 0.774; rounds read 0.774 / 0.789 / 0.785 - the body is SLOWER at 4K"
+@claim engine_4k_nvenc   198.68 ms "fp16 engine at 4K with NVENC alongside" measured
+@claim body_4k_nvenc     259.74 ms "Int8Body at 4K with NVENC" measured
+@claim ratio_4k_nvenc      0.765 x  "derived: 198.68 / 259.74" derived
+@derived ratio_4k_nvenc "198.68 / 259.74 = 0.765; rounds read 0.765 / 0.771 / 0.771"
+@claim body_4k_share     0.11579 % "Int8Body vs the engine picture at 4K - also over the 0.1% bar" measured
+@claim render_frames        220 x   "app render, 1 s of a5_chainsaw at 4K, tensorrt backend" measured
+@claim render_ms         120.18 ms  "the same render, ms per frame" measured
+@claim render_inference   70.70 ms  "inference per frame in that render (engine 0.58)" measured
+@claim probe_oom            1 x     "'int8 probe unavailable (CUDA out of memory); int8 stays off' in the render log" measured
