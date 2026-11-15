@@ -199,6 +199,29 @@ pipeline's chain against the simulation's chain**, layer by layer, on the same f
 Six hypotheses have been tested against fp16 in isolation and five of them died; comparing the two chains to
 each other is the only test that cannot be satisfied by a coincidence of the final number.
 
+**The pipeline PASSES on a 256x256 crop and fails on the full frame, so the metric is frame-dependent.**
+Same chain code, same kernel, same calibration procedure, only the frame changes:
+
+| frame | pipeline vs fp16 | simulation vs fp16 | pipeline vs simulation |
+|---|---|---|---|
+| 256x256 crop | **0.000% / peak 5 / median 1.09** | 0.000% / peak 3 / 0.59 | 0.000% / peak 5 / 1.16 |
+| 1920x1080 | **1.870% / peak 34** | 0.000% | - |
+
+And on the crop the error is not a border artefact either: 0.0% of the >8 pixels lie in the outer 16 px band,
+mean error 1.25 levels interior against 1.30 at the border.
+
+So the chain is correct where it was measured and fails where the frame is 8x larger, with no localised
+structure. The only thing that changes with the frame is the **calibration maxima**: `max|activation|` over
+2073600 pixels is larger than over 65536, so every grid is coarser by whatever the tail of the distribution
+contributes, and the quantisation error scales with the grid. That is the mechanism the earlier variants were
+all fighting without naming: the grids are set by a maximum over the whole frame, and a full frame has a
+longer tail than a crop.
+
+The next step follows directly: decide the grids from a **percentile over the frame** rather than its maximum,
+or from a maximum over a spread of frames, and measure whether the full frame returns to the crop's 0.000%.
+That is a one-line change to the calibration and it is the first hypothesis in this stage that explains both
+observations at once.
+
 **Layer-by-layer, the chains part at the FIRST hop and drift.** Relative error of the pipeline's chain
 against the simulation's, per layer, same 256x256 crop:
 
