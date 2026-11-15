@@ -186,7 +186,7 @@ it is not a proof, and the difference matters: 25-35% of a borrowed ceiling is n
 |---|---|---|---|
 | builder opt level 5 + iters 8 | **yes** | 94.3 -> 57.5 ms (1.64x) | - |
 | L2 tiling `moderate` | **yes** | 57.5 -> 52.7 ms (1.09x) | this IS cross-kernel fusion; the earlier claim in this file that "fusing across layers is impossible because of PReLU" was wrong (PReLU is fused into the conv epilogue) |
-| L2 tiling `full` | **yes** | 11.01 -> 10.60 s end-to-end on 502 anime frames = **3.8%**, measured | adopted as default |
+| L2 tiling `full` | **yes** | 11.01 -> 10.60 s end-to-end on 502 anime frames = **3.8%**, measured (interleaved runs) | adopted as default. **Open contradiction:** three engines built from the same ONNX at `none` / `moderate` / `full` and timed once each read **51.27 / 54.39 / 56.31 ms** - the opposite order. That probe is n=1 per configuration and was taken right after each build, so the interleaved end-to-end A/B stands; but the engine-level ordering has not been re-measured interleaved, and it should be before anyone quotes the 3.8% as the size of the tiling win |
 | `l2_limit_for_tiling = 24 MiB` | **yes** | 67.4 and 103.2 ms against 48.6 (two overlapping runs) - harmful | leave the knob alone |
 | CUDA graphs | **yes** | ~0.3% | - |
 | parallel engine contexts | **yes** | 0%, and our wiring produced corrupt output | the corruption was an implementation fault (two `torch.jit.load` modules are not independent contexts), not a GPU property |
