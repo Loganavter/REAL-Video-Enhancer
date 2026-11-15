@@ -27,3 +27,12 @@
 # So the engine's own defect is not the criterion; composition is, exactly as the plan warned.
 # P(pass) = 0.6 is ABOVE the 0.3 kill threshold, so the lane survives; there is no 'above'
 # directive, so this is recorded rather than asserted.
+
+# ---- the body, wired but self-certifying (stage 6's first half)
+@claim body_share_256      0.00000 %  "Int8Body vs the fp16 model, 256x256" measured
+@claim body_share_512      1.22709 %  "Int8Body vs the fp16 model, 512x512" measured
+@claim body_share_1080     3.53381 %  "Int8Body vs the fp16 model, 1920x1080" measured
+@claim pipeline_share_1080 0.00000 %  "the validated pipeline, same frame, for contrast" measured
+@claim body_self_cert     3.5338  %  "Int8Body.certify() on its own calibration frame, bar 0.1%" measured
+# The body must certify before it may serve a frame. It does not, so the render keeps the fp16 engine.
+@below body_share_1080 bar_share

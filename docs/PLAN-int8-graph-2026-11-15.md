@@ -1147,6 +1147,44 @@ Claims: `docs/claims-int8-stage5.txt` fails on exactly the 4x shortfall, which i
 
 ## Stage 6 - own head and tail, only after stage 2
 
+**State (2026-11-16, first half): the body is in the app and wired into the upscale path, and it REFUSES to
+serve. No int8 frame has been rendered, and the 1.489x has NOT been confirmed inside the render.**
+
+`backend/src/pytorch/Int8Kernels.py` vendors the three kernels (the app does not ship `scripts/`), and
+`backend/src/pytorch/Int8Body.py` is a drop-in inference helper: clamp -> head conv + PReLU in fp16 -> sixteen
+int8 hops -> dequantise to fp16 -> the model's own `tail_conv` and `upsampler` -> plus the residual.
+
+`UpscaleTorch._call_single` consults `_int8_body()`, which calibrates on the **first frame of the render** and then
+runs `certify()` - the body must reproduce the fp16 model on that same frame within the bar before it serves a
+single pixel. Straight-line timing was already banked from the plan's stage 2 (1.489x idle, 1.505x under NVENC,
+0.00004% picture agreement) so the guard is what decides whether that win is real in this render.
+
+It is not, yet:
+
+| frame | Int8Body vs the fp16 model |
+|---|---|
+| 256x256 | **0.00000%** (peak 8) |
+| 512x512 | 1.22709% |
+| 1920x1080 | **3.53381%** |
+
+against `scripts/int8_pipeline.py` reading **0.00000%** on the same 1920x1080 frame. So the app-side body differs
+from the validated pipeline in something the pipeline gets right, and the difference grows with resolution - the
+same signature the pipeline had before the rounding-shift fix, which means the body is reproducing older
+behaviour, not new behaviour.
+
+One real bug was found and fixed on the way here, and it is the third instance of the same class: `_measure()`
+returned the calibration grids in **float16** because the model runs in half, so the requant multiplier
+`s_in/s_t * 2^SHIFT` overflowed half to infinity and cast to `INT32_MAX`. The first certification read 99.58%.
+Keeping the grids in float32 took it to 3.53%; the remaining factor is unexplained.
+
+Next probe, named rather than guessed: compare Int8Body's per-hop int8 codes against `int8_pipeline`'s on a 512x512
+frame, hop by hop - the same instrument that localised every other defect in this lane. Until that reads 0, the
+render keeps the fp16 engine, because enabling this body would trade a real 1.489x for a wrong picture and the
+picture is the thing the bar measures.
+
+## Stage 6 - the original text
+
+
 Prize is fixed: **+7% of wall on anime** (1.360x against 1.271x), stable against whatever the boundaries eat.
 Floors 0.50 and 0.68 ms against the current ~3.9 and ~3.35.
 

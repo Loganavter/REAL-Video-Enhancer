@@ -499,7 +499,11 @@ class UpscalePytorch:
                     )
                     self._prev_hr = output
             elif self.tilesize == 0:
-                output = self.upscale_model_wrapper(image_tensor)
+                body = self._int8_body()
+                if body is not None:
+                    output = body(image_tensor)
+                else:
+                    output = self.upscale_model_wrapper(image_tensor)
             else:
                 output = self.renderTiledImage(image_tensor)
 
@@ -529,6 +533,41 @@ class UpscalePytorch:
         self.last_inference_ms = (time.perf_counter() - _t_inf) * 1000.0
         return retFrame
  
+    def _int8_body(self):
+        """The int8 body for this render, or None. Certified once, on the first frame, or not at all.
+
+        The body is only a candidate: it calibrates on the first frame and then has to reproduce the fp16
+        model on that same frame within the bar before it may serve a single pixel. Today it does not -
+        3.53% at 1920x1080 against a 0.1% bar - so this returns None and the fp16 engine runs, with the
+        number in the log rather than an assumption. A body that cannot pass its own bar on its own
+        calibration frame is not a faster engine, it is a wrong picture.
+        """
+        if getattr(self, "_int8_decision", False):
+            return getattr(self, "int8_body", None)
+        self._int8_decision = True
+        body = getattr(self, "int8_body", None)
+        if body is None:
+            return None
+        try:
+            frame = getattr(self, "_int8_frame", None)
+            if frame is None:
+                return None
+            body.calibrate(frame)
+            share, ok = body.certify(frame)
+            import logging
+            logging.getLogger("RVE").warning(
+                "int8 body self-certification on the first frame: %.4f%% of pixels >8 levels (bar 0.1%%) "
+                "-> %s", share, "serving" if ok else "refusing, fp16 engine runs")
+            if not ok:
+                self.int8_body = None
+                return None
+            return body
+        except Exception as error:  # noqa: BLE001 - never let this cost a render
+            import logging
+            logging.getLogger("RVE").warning("int8 body refused to start (%s); fp16 engine runs", error)
+            self.int8_body = None
+            return None
+
     def getScale(self):
         return self.upscale_model_wrapper.get_scale()
 
