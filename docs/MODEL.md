@@ -11,10 +11,13 @@ torch 2.9.0+cu130. Unless stated: fp16 engines, static shape, `optimization_leve
 engine, and the one model-side win of this round is `tiling=full` (3.8% end-to-end). We do
 **not** have a trustworthy ceiling for this shape, so the size of the remaining gap is unknown:
 the model is at 65-73% of a *borrowed* sustained figure, which is not the same as "finished".
-The pipeline-side win of the round is bigger than any model work: the frame gate plus a tile
-grid fitted to the frame is 1.4x, and the tile grid was previously written off as a dead end
-(§7). One concrete lead from the tactic dump (Turing-generation kernels selected on an Ada
-part) is listed in §6 and has not been chased.
+The pipeline-side win of the round is bigger than any model work: the frame gate alone is
+**3.3x** (38.85 -> 11.7 s on 502 anime frames) at 0.009% of pixels above 8 levels. The tile grid
+fitted to the frame adds 1.39x on top *inside* the frames the gate renders, but it carries its
+own artifact (0.287% at 9.2 s), so it is **opt-in, not shipped** - §7 has the trade. The lead from
+the tactic dump (Turing-generation kernels selected on an Ada part) is closed in §6: restricting
+the tactic sources to JIT convolutions picks the *same* `sm75_` kernel, so the name is the name
+of the winner.
 
 ## 1. What the model computes
 
@@ -82,8 +85,10 @@ All rows: static engine, opt level 5, iters 8. Session-relative comparisons only
 
 ## 3. What the achieved rate means
 
-2.48 TFLOP in 45.7 ms = 54.3 TFLOP/s (tiling moderate), or ~58 TFLOP/s at the derived `full`
-figure.
+2.48 TFLOP in 45.7 ms = 54.3 TFLOP/s at `tiling=moderate`; the same measurement at the
+`tiling=full` default reads 48.3 TFLOP/s. (An earlier revision quoted "~58 TFLOP/s at the derived
+`full` figure"; that derivation assumed the whole 45.7 -> 42.7 ms step was the model, and direct
+measurement does not support it - see the withdrawn-derivation note below.)
 
 Peaks are fuzzy on a power-capped consumer part:
 
@@ -145,11 +150,11 @@ it is not a proof, and the difference matters: 25-35% of a borrowed ceiling is n
 |---|---|---|---|
 | builder opt level 5 + iters 8 | **yes** | 94.3 -> 57.5 ms (1.64x) | - |
 | L2 tiling `moderate` | **yes** | 57.5 -> 52.7 ms (1.09x) | this IS cross-kernel fusion; the earlier claim in this file that "fusing across layers is impossible because of PReLU" was wrong (PReLU is fused into the conv epilogue) |
-| L2 tiling `full` | **yes** | 11.01 -> 10.60 s end-to-end on 502 anime frames; ~6.6% of the model (derived) | adopted as default |
+| L2 tiling `full` | **yes** | 11.01 -> 10.60 s end-to-end on 502 anime frames = **3.8%**, measured | adopted as default |
 | `l2_limit_for_tiling = 24 MiB` | **yes** | 67.4 and 103.2 ms against 48.6 (two overlapping runs) - harmful | leave the knob alone |
 | CUDA graphs | **yes** | ~0.3% | - |
 | parallel engine contexts | **yes** | 0%, and our wiring produced corrupt output | the corruption was an implementation fault (two `torch.jit.load` modules are not independent contexts), not a GPU property |
-| duplicate-frame gate (pipeline level) | **yes** | 46.8% of film frames / **72.7% of anime frames** skipped; anime 16.3 -> 47.4 fps; 52.6 dB vs ungated | see §7 |
+| duplicate-frame gate (pipeline level) | **yes** | **70.9% of anime frames** / 18.1% of the film clip skipped; anime 16.3 -> 29.1% of frames rendered; 52.7 dB average vs ungated | see §7. The 46.8% / 72.7% pair this row used to quote came from two renders that were both corrupted by the pipe-format bug in ledger C4, and the film clip now trips the noise-floor guard rather than reusing |
 | INT8, implicit + fp16 fallback, entropy calibration on 8 real frames | **yes** | **slower**: 73.2 and 94.3 ms against 48-51; the two runs also overlapped on the card (29% spread), so treat the magnitude as indicative | this is the implicit-with-fallback configuration, i.e. a reformat-heavy graph. Explicit Q/DQ, fully-int8 NHWC, per-channel: **not tried**. The "2x for int8 on a 4090" note in issue #4081 does not transfer to C=64 implicit |
 | accumulator precision | **yes (closed)** | all 16 body convs run `f16f16_f16f16` = fp16 accumulator, per DETAILED tactic dump | no fp32-accumulate share exists to convert |
 | hand-written conv kernels | **no** | - | one public attempt was 4.7x slower than TRT, but there is a **counter-precedent**: for a 3x3 conv cuDNN chose Winograd at 74 ms while TRT's best tactic was 156 ms, i.e. TRT's tactic set is not the set of all algorithms. Recorded as untested, not as "slower" |
@@ -208,12 +213,35 @@ counter is read (§6, item 2).
    and buys 0.5%, i.e. noise; a JIT-only source set picks the *same* `sm75_` tactic, so there is no
    sm80/86/89 variant being skipped for this shape at K=576; cuDNN-only is 10.7% *slower*. The name
    `sm75_` is the name of the winner, not a symptom.
-5. ~~Explicit Q/DQ int8~~ **done**: calibrated on our own frames it is essentially lossless
-   (0.000% of pixels above 8 levels against the FP16 engine, peak 4 levels) and **slower** -
-   68.11 ms against 55.54 - because TRT picks an **NCHW** int8 kernel
-   (`sm80_xmma_..._i8f16_i8i32_f32_nchw_vect_c`) where the FP16 path is NHWC, and the 60 reformat
-   layers that needs cost more than int8 saves. The verdict is "no NHWC int8 kernel for this
-   shape", not "int8 does not work".
+5. ~~Explicit Q/DQ int8~~ **done, and the earlier verdict on it was wrong in its mechanism**:
+   calibrated on our own frames it is essentially lossless (0.000% of pixels above 8 levels against
+   the FP16 engine, peak 4 levels, PSNR 54.1 dB) and **slower** - 68.11 ms against 55.54. The first
+   explanation here was "TRT picked an NCHW int8 kernel where the FP16 path is NHWC, and the 60
+   reformat layers cost more than int8 saves". The layer dump says otherwise on both counts: the
+   tactic is `sm80_xmma_fprop_implicit_gemm_interleaved_i8f16_i8i32_f32_nchw_vect_c_...`, i.e. the
+   **interleaved NC/32HWC32 int8 tensor-core layout**, and the engine holds **21 reformat layers of
+   78** - "60" was the number of non-convolution layers. The real cost is the boundary. Per-layer,
+   with `trt.IProfiler`:
+
+   | group | count | ms/frame each | total |
+   |---|---|---|---|
+   | int8 `CaskConvolution` (int8 in, half out) | 16 | 1.56-1.88 (152.9 GFLOP / 1.68 ms = **91 TFLOP/s**) | 26.8 |
+   | `PointWiseV2` = the PReLU, a separate pass | 17 | 1.71-2.37 | 31.2 |
+   | head, tail, upsampler, Add, Clip, 21 reformats | - | - | 10.1 |
+
+   In FP16 the same 16 blocks are **one fused myelin kernel each** (`__myl_CorrMulLtSele` = conv +
+   mul + lt + select = conv + PReLU) at 2.93 ms, i.e. 52 TFLOP/s for the same FLOPs. Quantised,
+   the conv alone is 1.75x faster (1.68 ms) and
+   the PReLU becomes a pass of its own (1.80 ms), so the block costs 3.48 against 2.93. It is not
+   fused for a measurable reason: the int8 conv reports `HasReLU: 0, Activation: NONE`, and the
+   PReLU is a separate `PointWiseV2` that reads two tensors - the frame and the per-channel slope -
+   with 21 reformat layers for the slope broadcasts. A scalar slope would fit a per-tensor int8
+   epilogue, and there is none to be had here: the 1088 slopes span **-1.39..1.70** with a
+   per-channel coefficient of variation above 1. That is the whole gap. Quantising the conv output as
+   well, so the PReLU reads int8: **78.36 ms**, with 36 reformat layers instead of 21 and 16 `DQout`
+   passes at 1.64 ms - charging the boundary per hop makes it worse, not better. So the precision
+   path is closed as a TRT configuration. The verdict is therefore "the quantised block boundary costs more than int8
+   saves on this architecture", not "no int8 kernel exists".
 
 What is left is item (2) alone: `nsys` tensor-active-% and DRAM bytes with clocks pinned would turn
 §3 from inference into measurement. Until then, "per-frame is at its floor" remains a statement
@@ -228,13 +256,14 @@ about *what we tried*.
 | anime, gate only (default) | 29.1% of frames | **11.7 s against 38.85 s ungated (3.3x)**, 0.009% of pixels above 8 levels (RGB) on the worst of 19 sampled frames, peak 14 |
 | anime, gate + tile reuse | 57.7% of tiles | 9.2 s, but **0.287%** above 8 levels and peaks of 98: the tile path has its own staleness, so it is off by default (see the investigation linked below) |
 | film, ungated (94 frames, 1440p -> 2880p) | 100% | 4.66 s |
-| film, duplicate gate | 81.9% | 4.33 s (1.08x), 50.34 dB average / 39.83 dB worst frame against ungated. The 71 dB this row used to claim came from comparing two renders that were both corrupted by the pipe-format bug in ledger C4 |
+| film, duplicate gate | 100% rendered at the shipping preset | **the gate refuses** (noise floor 2.27, above the 1.5 limit), so the render is byte-identical to the ungated one: 4.67 s against 4.63 s for 94 frames. Before the noise-floor guard it reused 18.1% of frames for 4.33 s (1.08x) at 39.83 dB worst frame; the 71 dB this row used to claim came from comparing two renders that were both corrupted by the pipe-format bug in ledger C4 |
 | tile-level reuse, square 512 px cores (anime) | 65.8% of tiles | 1.44x faster than ungated (30.8 -> 21.4 s) but slower than the frame gate (10.6 s). The loss was **geometry**: 512 does not divide 1080, so 12 windows of 548x548 cover a frame of 1.55 Mpx = 1.74x its area |
 | tile-level reuse, cores fitted to the frame (anime, 480x540) | 65.6% of tiles | **18.14 s** ungated against 21.37 s for the 512 grid: the area model `area x (1 - reuse)` predicted 21.49 s for the 512 grid (measured 21.37, 0.6%) and 16.9 s for the fitted one (measured 18.14), so there is no per-tile launch penalty worth modelling |
 | gate **and** fitted tiles (anime) | 57.4% of tiles inside the 27% of frames the gate renders | **8.45 s** against 11.74 s for the gate alone = **1.39x**; 51.6 dB average / 47.5 dB worst frame against the ungated render (gate alone 52.7 / 48.2). The tile share falls from 65.6% to 57.4% because the frames the gate leaves are exactly the ones that changed, so the two levers compose at ~1.4x rather than multiplicatively |
 
-So the model costs 45.7 ms on the frames it sees at 1440x1080, and the pipeline pays
-45.7 x 0.273 = 12.5 ms per output frame on anime at that size. Tile-level reuse is not a dead
+So the model costs **45.7 ms at 1920x1080 and 35.1 ms at 1440x1080** (the two sizes in the table
+above; an earlier revision wrote 45.7 for the 1440x1080 clip). On the anime clip, which is
+1920x1080, the pipeline pays 45.7 x 0.273 = 12.5 ms per output frame. Tile-level reuse is not a dead
 end after all: with a grid that divides the frame it stacks on the gate for 1.39x (see the
 table above). What it cannot do is replace the gate, because the reuse it finds inside a frame
 is concentrated in frames the gate already skips.

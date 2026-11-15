@@ -64,15 +64,15 @@ or run the same pixels in a cheaper numeric format.
 | E7 | 2:4 structured sparsity | TRT docs; NVIDIA engineer on GitHub | 2x theoretical | needs pruned weights; TRT picks sparse tactics for 22/53 layers; up to 5% slower in fp16 | **rejected** |
 | E8 | FP8 on consumer Ada | TRT issue #4081; OwLite report | 1.4-1.8x | no gain vs FP16 on 4090/4060 Ti; L40S gets 1.7-1.9x. Consumer parts are firmware-capped | **rejected** |
 | E9 | INT8 PTQ, implicit with fp16 fallback | mmdeploy's ESRGAN benchmark | 2x ceiling | **slower**: 73.2 and 94.3 ms against 48-51 (the two runs overlapped on the card, so the magnitude is indicative) | **rejected as implemented** - this configuration is a reformat-heavy graph. Explicit Q/DQ NHWC per-channel is E9' |
-| E9' | INT8 with explicit Q/DQ, per-channel weights, calibrated on real frames | TRT PTQ docs | 2x of the arithmetic | **measured: accurate and slower.** Calibrated per-tensor activation scales from 8 real frames (max activation range across the 18 convs is 1.0..55.2, so per-tensor is not a formality), per-channel int8 weights, 16 body convs quantised, head and tail left in FP16: **0.000% of pixels above 8 levels against the FP16 engine, peak 4 levels, mean 0.66, PSNR 54.1 dB** - the format is essentially lossless here. But the engine takes **68.11 ms against 55.54 ms (0.82x)**: TRT picked `sm80_xmma_fprop_implicit_gemm_interleaved_i8f16_i8i32_f32_nchw_vect_c_*`, an **NCHW** int8 kernel, while the FP16 path runs `sm75_..._nhwckrsc_nhwc`. The layout change adds 60 of the engine's 78 layers as reformats, and those eat the int8 gain. So the verdict is not "INT8 does not work" but "this TRT build has no NHWC int8 kernel for this shape" | **rejected** (measured, with the mechanism) |
+| E9' | INT8 with explicit Q/DQ, per-channel weights, calibrated on real frames | TRT PTQ docs | 2x of the arithmetic | **measured: accurate, slower, and the mechanism is the boundary, not the kernel.** Calibrated per-tensor activation scales from 8 real frames, per-channel int8 weights, 16 body convs quantised, head and tail in FP16: **0.000% of pixels above 8 levels against the FP16 engine, peak 4, PSNR 54.1 dB** - the format is essentially lossless here. Time **68.11 ms against 55.54 (0.82x)**. Per-layer (`trt.IProfiler`): the 16 int8 convs are `sm80_xmma_..._interleaved_i8f16_i8i32_f32_nchw_vect_c_...` - the **interleaved NC/32HWC32 tensor-core layout, not plain NCHW** - at 1.56-1.88 ms each, i.e. 152.9 GFLOP / 1.68 ms = **91 TFLOP/s against 52 TFLOP/s for the fused fp16 block**; the PReLU runs as **17 separate `PointWiseV2` passes** of 1.71-2.37 ms (31.2 ms, 46% of the engine) because a per-channel slope (1088 values, -1.39..1.70, per-channel Cv > 1) does not fit an int8 epilogue. In fp16 those 16 blocks are one fused myelin kernel each (`__myl_CorrMulLtSele`, 2.93 ms). The engine holds **21 reformat layers of 78** - the "60 reformats" in earlier revisions was 78 minus 18 convs. Second build, quantising the conv output too so the PReLU reads int8: **78.36 ms**, 36 reformats, 16 `DQout` passes at 1.64 ms - the boundary pass is charged per hop, so adding a hop makes it worse | **rejected as quantised** (measured, with the mechanism): the per-channel PReLU forces one int8->fp16->int8 hop per conv, and each hop costs about what int8 saves on the conv. Precision path closed, pending a plugin that fuses conv+PReLU in int8 |
 | E10 | hand-written conv kernel / plugin | CORE-TAG/rtx50-realesrgan-video | - | 39.8 TFLOP/s vs the engine's 186.7 on a 5090. Counter-precedent: for a 3x3 conv cuDNN chose Winograd at 74 ms where TRT's best tactic was 156 ms, so TRT's tactic set is not the set of all algorithms | **untested** (was "rejected": the source is one attempt on another card, and it does not measure this GPU) |
-| E11 | L2 persistence window | blog measurement (H100/3090) | 1.02-1.20x | nothing to pin: 1.2 MB of weights. The old justification ("265 MB activation stream") predates the myelin fusion finding - the engine is 25 top-level layers, not 18 separate kernels with a full round trip each - so how much traffic actually remains is unknown; the verdict rests on the weights being 1.2 MB against 24 MB of L2, not on the traffic count | **rejected** (justification corrected) |
+| E11 | L2 persistence window | blog measurement (H100/3090) | 1.02-1.20x | nothing to pin: 1.2 MB of weights. The old justification ("265 MB activation stream") predates the myelin fusion finding - the engine is 25 top-level layers, not 18 separate kernels with a full round trip each - so how much traffic actually remains is unknown; the verdict rests on the weights being 1.2 MB against **32 MB** of L2 (AD106; 24 MB is the 4060 without Ti), not on the traffic count | **rejected** (justification corrected) |
 | E12 | per-layer precision constraints (force fp16 accumulate) | TRT docs | unknown | closed by measurement, not by an API limit: the DETAILED tactic dump shows all 16 body convs already running `f16f16_f16f16` (fp16 accumulation, NHWC). There is no fp32-accumulate share to convert | **closed (already in effect)** |
 | E13 | concurrent engine contexts (batch/streams) | vs-mlrt wiki: 1.65 -> 2.25x on a 2nd stream | up to 2x | no gain (4.25 -> 4.27 s) and output corrupt (25 dB) - because two `torch.jit.load` modules of one engine file are not independent contexts | **rejected as wired** (a wiring fault, not a GPU property) |
 | E14 | alternative tactics for the 16 body convs | our tactic dump: 17 of 18 convs get `sm75_` kernels on an sm89 part | unknown | **measured and closed.** With the tactic sources restricted to JIT convolutions only (no cuDNN, no cuBLAS) the winner is the *same* `sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x64x32`, at 49.97 ms against the baseline's 50.09 (0.998x). So there is no sm80/86/89 alternative being skipped for this shape at K=576 in this TRT build; the `sm75_` name is the name of the winner, not a symptom. Restricting to cuDNN alone is 10.7% **slower** (55.43 ms, stable across three rounds), so TRT's own kernels beat cuDNN here | **closed** (measured) |
 | E15 | crop the active picture area (letterbox bars) | - | up to 1.33x if 25% of the frame is black | **n/a on our material**: the film clip (1440x1080) and the anime clip (1920x1080) both have zero rows darker than 6/255, minimum row mean 59.9 and 124.8. Worth one row-histogram check per new source before rendering | open (source-dependent) |
 | E16 | Winograd F(2,3)/F(4,3) | cuDNN/CORE-TAG counter-precedent | F(2,3) cuts MACs 2.25x, inflates tensors ~4x | not measured. The ridge is **128 MAC/byte** at the borrowed 74 TF/s and 288 GB/s (257 FLOP/byte), not 42: 42 corresponds to a ~24 TF/s fp32-shader peak, so the earlier figure was off by 3x in the wrong direction. The conclusion is unchanged - Winograd inflates tensors ~4x, which drops intensity below the ridge - but it is a weaker argument than it looked, and cuDNN-only builds measuring 10.7% *slower* also weakens the counter-precedent | open (untested) |
-| E17 | rewrite PReLU as `a*x + (1-a)*Relu(x)` | TRT supported-op patterns | maybe changes tactic eligibility | not measured. PReLU is generic pointwise; the rewrite moves it into the natively supported Conv+ReLU / Conv+Scale / ElementWise patterns with identical maths. Cheap (an hour), expected near zero, but it also A/Bs the sm75 hypothesis | open (low confidence) |
+| E17 | rewrite PReLU as `a*x + (1-a)*Relu(x)` | TRT supported-op patterns | maybe changes tactic eligibility | **measured, as the unlock E9' was missing - and it is not one.** The rewrite does not remove the boundary: the `a*x` term still needs the pre-ReLU frame, and the `(1-a)*Relu(x)` term gives a second full-frame pass, so it trades one 1.8 ms PReLU pass for two. What would remove the boundary is a fused int8 conv+PReLU epilogue, and this build has none for a per-channel slope (measured: the int8 conv reports `HasReLU: 0, Activation: NONE` and the PReLU appears as its own `PointWiseV2` layer). The earlier guess that it was "cheap and near zero" was right about the cost and wrong about the mechanism | **closed together with E9'** |
 
 ## Precision / colour (10-bit)
 
@@ -212,14 +212,20 @@ only 94 frames. The 502-frame run shows it directly: 22.72 x 502 = 11.40 s of lo
 
 ## Backlog, ranked by expected gain on our pipeline
 
-Nothing in the model or the gate is a measured loss any more; what is left is either a
-precision experiment or an input-path rewrite.
+Nothing in the model is a measured loss any more, and the last precision row closed on measurement
+rather than on a hunch.
 
-1. **E9' - explicit Q/DQ INT8.** The only remaining precision row with 2x in its arithmetic and
-   no local measurement. Needs a Q/DQ ONNX (per-channel weights, per-tensor activations), a TRT
-   INT8 build, and an accuracy budget on real frames. Half a day, and the accuracy risk is the
-   whole question - the implicit-with-fallback attempt was *slower*, but that configuration is a
-   reformat-heavy graph, not a test of the format.
+1. ~~E9' - explicit Q/DQ INT8~~ **measured, and it is not 2x away: it is one epilogue away.** The
+   format is essentially lossless (0.000% of pixels above 8 levels, peak 4, 54.1 dB), the int8 conv
+   is fast (91 TFLOP/s against 52 for the fused fp16 block), and the build is still slower - 68.11
+   against 55.54 ms - because the per-channel PReLU cannot be fused into the int8 epilogue and
+   becomes a 1.8 ms pass between two int8 convs. Quantising the conv output as well (so the PReLU
+   reads int8) makes it worse, not better: 78.36 ms with 36 reformats and 16 `DQout` passes. The
+   arithmetic in this row was right and the conclusion was wrong: the 2x is in the convolution and
+   the gate is the *boundary*, which TRT charges per hop. Reachable only through a plugin that fuses
+   conv+PReLU in int8 (or a scalar-slope approximation, which the measured slopes rule out:
+   -1.39..1.70 with per-channel Cv > 1). So: closed as a TRT-path idea, open only as plugin work,
+   which is a different kind of project from the ones in this ledger.
 2. ~~The input conversion~~ **measured: it is PCIe-bound, not kernel-bound.** The 10-bit
    conversion is 1.42 ms standalone at 1080p for 6.2 MB of packed planes, and the H2D of those
    planes at ~6 GB/s is about 1 ms of that. Rewriting it to one preallocated buffer with `g`
@@ -229,10 +235,11 @@ precision experiment or an input-path rewrite.
    the earlier "30x above the bandwidth floor" estimate implied. That estimate counted GPU-side
    bandwidth and forgot the frame has to cross PCIe first. The `gbrp` idea (planar decoder, no
    permute) is the same order and does not justify reworking the preview and cv2 consumers.
-3. **E16 Winograd / E17 PReLU rewrite.** Both cheap, both expected near zero. E16's
-   counter-precedent is now weaker: restricting the build to cuDNN alone made the engine 10.7%
-   *slower*, so this TRT build's own kernels beat cuDNN's for this shape, whatever way cuDNN
-   wins a single-conv race elsewhere.
+3. **E16 Winograd.** Cheap, expected near zero, and its counter-precedent is weaker than it looked:
+   restricting the build to cuDNN alone made the engine 10.7% *slower*, so this TRT build's own
+   kernels beat cuDNN's for this shape, whatever way cuDNN wins a single-conv race elsewhere. (E17
+   used to be listed here as a micro-optimisation; it is now part of E9' above, where it turned out
+   not to unlock anything.)
 4. **P8 / P9 / N2 / N3 / N4** - quality-of-life and encoder-side, only if x265 or per-plane tile
    writes are kept.
 
@@ -283,7 +290,7 @@ different pose than in the ungated one. Five measurements, in the order that nar
    with no seams, and the halo is not the limit.
 5. **Chain depth**, same frame 383, share of pixels by error magnitude:
 
-| threshold | chain 4 (shipped) | chain 1 (what an over-tightened budget certifies) |
+| threshold | chain 4, tile reuse **on** | chain 1, tile reuse **on** |
 |---|---|---|
 | > 2 levels | 10.87% | 8.91% |
 | > 4 | 1.13% | 0.39% |
@@ -291,16 +298,31 @@ different pose than in the ungated one. Five measurements, in the order that nar
 | > 16 | 0.12% | **0.00%** |
 | peak in the worst block | 100 levels | **12 levels** |
 
-So the artifact is the **chain depth**: a reference four frames old moves a fist. The threshold and
-the tile path were both innocent, which is why "lower the threshold" and "raise the halo" were
-dead ends. `best` now certifies the depth itself (chain 4 once the chain budget is expressed on the
-proxy's own scale, chain 1 when it is held to the one-step bar) and `fast` keeps the full chain;
-the price is 11.7 s against 10.0 s on 502 anime frames (tile reuse off), and that is what the moved
-fist costs.
+So inside the tile configuration the artifact is the **chain depth**: a reference four frames old
+moves a fist, and this is the only place it shows at 0.29% of pixels, because the tile path's own
+staleness masks it everywhere else (0.288% against 0.287% across a tenfold threshold change).
+`best` certifies the depth itself (chain 4 once the chain budget is expressed on the proxy's own
+scale, chain 1 when it is held to the one-step bar) and `fast` keeps the full chain.
 
-Acceptance for this family of defects is therefore local and absolute, not a mean: **nothing above
-8 levels, and under 0.5% of pixels above 4**. Whole-frame PSNR and VMAF both pass a frame that
-fails this, because a fist is a fraction of a percent of the frame.
+Two honest limits on that paragraph, both found by re-reading the table against the shipping
+configuration:
+
+- The table's absolute column is **tiles on**. Shipped is tiles off, where chain 4 measures
+  **0.009%** of pixels above 8 on the worst of 19 sampled frames - so what the table isolates is
+  the depth's *contribution inside the tile path*, not its price on its own.
+- **There is no clean "chain 1, tiles off" measurement**, so the depth's price cannot be quoted
+  independently of the tile path. What exists: chain 1 with tiles on, 11.5 s at 0.105%; chain 4
+  with tiles on, 9.2 s at 0.287%; chain 4 with tiles off (shipped), 11.7 s at 0.009%. The
+  11.7-vs-10.0 pair that used to be here mixed a tiles-off number with a tiles-on-and-dilated one.
+
+Acceptance for this family of defects is therefore local and absolute, not a mean: **under 0.1%
+of pixels more than 8 levels off in any channel, on the worst frame of a spread sample, with a
+peak under 20 levels**. Whole-frame PSNR and VMAF both pass a frame that fails this, because a
+fist is a fraction of a percent of the frame. (Two stricter-sounding bars used to live here - "no
+pixel above 8" and "under 0.5% above 4" - and the first is contradicted by every render we have:
+the shipping configuration measures 0.009% of pixels above 8 on its worst frame, which is small but
+not zero, and 0.105% on material with mild grain. Both bars were written from an eyeball rather
+than from a measurement of the config that ships.)
 
 ## Three real Blu-rays, and the rule that did not transfer (2026-11-15)
 
@@ -312,6 +334,7 @@ The acceptance rule and the presets were derived from two clips. Three actual BD
 | Chainsaw Man ep01 (digital, added grain) | 0.95 | 4.0 / 1 | 37.7% | 1.38x | **0.005%** (peak 15) |
 | Violet Evergarden ep01 (clean digital) | 1.32 | 4.0 / 1 | 48.9% | 1.60x | **0.097%** (peak 20) |
 | Cowboy Bebop ep01 (35 mm TV, deinterlaced) | 2.27 | refused | 0% | 1.01x | **0.470%** at threshold 4, **0.469%** at threshold 2 |
+| clean anime clip + synthetic grain 4 (the sweep below) | 1.84 | refused at the current limit | 0% | 1.01x | **0.105%** when it was allowed |
 
 What this settled:
 
@@ -319,51 +342,86 @@ What this settled:
   threshold 4 and at threshold 2 (0.470% against 0.469%) while reuse halves, i.e. a 32 px block
   mean cannot tell "the grain changed" from "something moved one pixel". Lowering the threshold
   buys nothing and costs the reuse.
-- **The noise floor is the signal.** 0.95, 1.32, 2.27 line up with the material and with the
-  outcome, so the tuner now refuses outright above **2.0** instead of tuning there. On Bebop that
-  gives a render that is **byte-identical to the ungated one** (240/240 frames), which is the
-  honest outcome for 1.15x.
+- **The noise floor is the signal, and its limit sits where the bar is crossed.** Four points, floor
+  against worst-frame defect: **0.95 -> 0.005%, 1.32 -> 0.097%, 1.84 -> 0.105%, 2.27 -> 0.470%**.
+  So the 0.1% bar is crossed between 1.32 and 1.84, and the limit is **1.5**, not the 2.0 this row
+  first shipped with - 2.0 let the 1.84 clip through at 0.105%, i.e. past the bar by 5%. On Bebop
+  the refusal gives a render that is **byte-identical to the ungated one** (240/240 frames), which
+  is the honest outcome for 1.15x.
 - **The chain is the adaptive knob, not the threshold.** The clamp at 4 was hit on all three
   titles while the chain was cut to 1 on all three; that is the opposite of what the two-clip
   derivation suggested.
 - Violet at 0.097% sits just inside the 0.1% bar, so the margin on ordinary good material is
-  thin: the clean anime clip this was derived from (0.18 floor) was exceptionally clean.
+  thin - 3% of margin on one of three titles. The "0.18 floor" that made this look like a
+  comfort margin was the **retired statistic's** scale: the same family of clean 1080p anime
+  measures **0.77** under `box(|diff|)`, i.e. just below Chainsaw Man's 0.95, not an outlier.
 
-## Grain sweep (synthetic, 2026-11-15)
+## Grain sweep, re-measured on the statistic that ships (2026-11-15)
 
-The clean anime clip with `noise=alls=S:allf=t+u` layered on, then three renders per variant:
-ungated, `--quality_preset fast`, `--quality_preset best`. One GPU job at a time, same session.
+The first version of this section predates the change from `max |box - box|` to
+`max box(|I - I_ref|)`, and its central sentence - "grain does not stop frame reuse because a
+32 px block mean averages grain out" - is a statement about the **retired** statistic. `box(|diff|)`
+does not average: `E|d| = 0.8 * sigma * sqrt(2)` at any block size, so grain has to show. The same
+five variants, re-cut at 500 frames, `--quality_preset best` against an ungated render of the same
+clip, one GPU job at a time:
 
-| variant | noise floor | fast | reuse | avg dB vs ungated |
-|---|---|---|---|---|
-| clean | 0.18 | 8.30 s | 70.9% | 52.14 |
-| grain 4 | 0.40 | 8.96 s | 70.9% | 50.21 |
-| grain 8 | 0.51 | 13.99 s | 70.9% | 47.60 |
-| grain 12 | 0.67 | 12.54 s | 70.9% | 44.75 |
-| grain 16 | 0.96 | 13.47 s | 70.9% | 42.10 |
+| variant | noise floor | decision | reuse (integer) | gated | ungated | RGB > 8 levels, worst |
+|---|---|---|---|---|---|---|
+| clean | 0.77 | thr 4.0, chain 4 | 362/498 (72.7%) | 12.03 s | 30.93 s | 0.017% (peak 17) |
+| grain 4 | 1.84 | thr 4.0, chain 4 | 359/498 (72.1%) | 12.18 s | 31.11 s | **0.105% (peak 21)** - past the bar |
+| grain 8 | 3.49 | reuse OFF | 0 | 30.75 s | 30.97 s | 0.000% |
+| grain 12 | 5.17 | reuse OFF | 0 | 30.94 s | 30.94 s | 0.000% |
+| grain 16 | 6.89 | reuse OFF | 0 | 30.95 s | 30.71 s | 0.000% |
 
-Two results worth keeping:
+- **The share is not the indicator; the defect is.** Reuse barely moves (72.7% -> 72.1% at grain 4)
+  while the worst frame goes from 0.017% to **0.105%**, i.e. past the 0.1% bar, for the same 2.55x.
+  So "grain does not stop frame reuse" survives as a statement about the share and is false as a
+  statement about safety, which is the only thing it was ever used to argue.
+- **The floor tracks grain linearly** - 0.77, 1.84, 3.49, 5.17, 6.89 for grain 0/4/8/12/16, about
+  0.3 per grain unit - and the crossing of the bar sits between grain 0 and grain 4, which is the
+  four-point calibration recorded above (limit 1.5). Re-run with that limit, the grain-4 clip is
+  refused and the render is **byte-identical to its ungated pair (498/498 frames)**, as are grain 8,
+  12 and 16 - the rows above were produced under the old 2.0 limit, which is why grain 4 still
+  shows a reuse count there.
+- **"Grain stops tile reuse between 0.40 and 0.51" is on the retired scale** and is not comparable
+  with anything in this table. Tile reuse is off by default for its own reason (0.287% against
+  0.009%), so nothing here depends on that row.
 
-- **Grain does not stop frame reuse.** The share stays at 70.9% from clean to grain 16, because
-  the statistic is a 32 px block mean and grain averages out inside a block. What degrades is the
-  *quality* of the reuse: 52.1 -> 42.1 dB, because a reused frame suppresses the grain's own
-  frame-to-frame variation.
-- **Grain stops tile reuse.** The ungated render jumps from 17.6 s at grain 4 to 36.6 s at grain 8
-  and stays there: the tile probe refuses tiles on grainier material, so the render falls back to
-  the full-frame model. The boundary sits between noise floor 0.40 and 0.51 on this scale.
+`best` no longer refuses on the clean clip: it certifies chain 4 at threshold 4.0. An earlier
+revision of this section recorded that `best` refused on *every* variant including the clean one
+and called that "a bug in the preset wiring". That was true of that build - the two presets
+disagreed at the same budget - and the disagreement is what the chain-policy split fixed; the
+clean row above is the same clip certifying depth 4 today.
 
-`best` refused to reuse on every variant including the clean one, which cannot be right when
-`fast` certifies 81% of the same calibration frames at the same budget - that is a bug in the
-preset wiring, not a verdict about grain, and it is being chased before any of these rows are
-used to choose a default.
+**Timing spread within one session, on identical work.** The clean row (auto, threshold 4.0,
+chain 4, 362/498 reused) measured 12.03 s here and 9.97 s in the integer-count table below. Part of
+that is the tuner's 16 forced calibration frames (~0.7 s, which only the auto run pays); the rest is
+the machine's clock state. So an A/B below ~10% needs interleaved runs even inside one session -
+"ratios only within a session" is necessary, not sufficient.
+
+## Integer reuse counts at a fixed chain (why "70.2% at three thresholds" was unreadable)
+
+Same clip, tiles off, chain fixed at 4, threshold forced with `--no_temporal_reuse_auto`:
+
+| threshold | reuse | time | RGB > 8 levels, worst |
+|---|---|---|---|
+| 2 | 359/498 (72.1%) | 10.52 s | 0.016% |
+| 4 | 362/498 (72.7%) | 9.97 s | 0.016% |
+| 8 | 370/498 (74.3%) | 9.51 s | 0.015% |
+
+The published table reported 70.2% at thresholds 2, 4 and 8 while the worst-frame defect changed
+115x (0.004% -> 0.460%). If the same frames are reused the output is identical, so a share quoted to
+one decimal was hiding the only thing that mattered: 0.1% of 502 frames is half a frame, and under a
+worst-frame metric **one frame is the entire result**. Published as counts, the three settings differ
+by 11 frames and the defect is flat at 0.015-0.016% - on `box(|diff|)` the threshold really is not
+the lever, and that now shows in the counts as well as in the defect.
 
 ## Open questions
 
-- **Is the film gate worth its quality cost?** Measured: 18.1% reuse, 4.33 s against 4.66 s
-  ungated (1.08x), average 50.34 dB and **worst frame 39.83 dB**. That worst frame is not
-  transparent. The automation now picks the strictest threshold on this clip, so this is the best
-  the mechanism does here, not a tuning miss. The owner has to say whether 7% is worth a frame
-  at 40 dB, or whether film should run ungated.
+- ~~Is the film gate worth its quality cost?~~ **No, and the question is closed by the noise-floor
+  guard.** Measured before it: 18.1% reuse, 4.33 s against 4.66 s (1.08x), average 50.34 dB and
+  **worst frame 39.83 dB** - not transparent for 7%. The clip's floor is 2.27, i.e. above the 1.5
+  limit, so the gate now refuses and the render is byte-identical to ungated (94/94 frames).
 - **Does the tile probe generalise?** It reads 16 frames at 4 positions. On our two clips it
   classified both correctly after the margin rule, but the prediction is off in both directions
   (anime 33% predicted against 58% achieved, film 15% against 9.5%) and the sample is two titles.

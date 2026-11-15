@@ -61,13 +61,23 @@ def test_clean_content_takes_the_widest_threshold_that_fits():
     assert t.chosen == t.clamp[1] == 4.0
 
 
-def test_threshold_grows_with_grain():
-    """A noisy source needs a wider threshold to reach the same error budget."""
-    t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0)
-    # deltas are 1..10 luma levels, HR amplification ~0.2 levels per LR level
-    _feed(t, [(float(v), 0.2 * v) for v in range(1, 11)])
+def test_below_the_floor_limit_grain_costs_chain_depth_not_the_threshold():
+    """The threshold stays at the top of its clamp; what grain takes away is the chain depth.
+
+    Measured on the clean anime clip: floor 0.77 -> threshold 4.0 with chain 4 certified. The same
+    clip with synthetic grain 4 (floor 1.84) is refused outright by the floor limit, and the grain
+    sweep's defect was 0.105% against the 0.1% bar - i.e. below the limit there is no threshold
+    that separates "the grain changed" from "something moved", which is why the candidate range is
+    clamped to 2..4 and the depth is what the tuner has to give up.
+    """
+    t = AutoGateTuner(seed=5.0, min_pairs=8, budget=2.0, chain_budget=2.0)
+    # floor ~0.9 (calmest third is under the 1.5 limit), and four frames of motion sit between
+    # a reference and its reuse, so only depth 1 stays inside the chain budget
+    _feed(t, [(0.9, (0.4, 0.8, 9.0, 12.0)) for _ in range(10)])
     assert t.ready
-    assert t.chosen >= 4.0
+    assert t.chosen == t.clamp[1] == 4.0
+    # depth 2 (0.8) is inside the 2.0 chain budget, depth 3 (9.0) is not - so chain 2, not 4
+    assert t.chosen_chain == 2
 
 
 def test_no_auto_veto():
@@ -178,6 +188,24 @@ def test_a_grainy_source_refuses_at_any_threshold():
     assert t.ready
     assert t.chosen is None
     assert "above the" in t.stats()
+
+
+def test_the_floor_limit_sits_where_the_bar_is_crossed():
+    """1.84 was allowed at 0.105% by the first limit of 2.0; the bar is 0.1%.
+
+    Four measured points (worst-frame share of pixels above 8 levels against the noise floor):
+    0.95 -> 0.005%, 1.32 -> 0.097%, 1.84 -> 0.105%, 2.27 -> 0.470%. So a source at 1.84 must be
+    refused, and one at 1.32 must not be.
+    """
+    refused = AutoGateTuner(seed=5.0, min_pairs=8, budget=2.0)
+    _feed(refused, [(1.84, 0.4) for _ in range(10)])
+    assert refused.ready
+    assert refused.chosen is None, "1.84 measured 0.105% - past the 0.1% bar"
+
+    allowed = AutoGateTuner(seed=5.0, min_pairs=8, budget=2.0)
+    _feed(allowed, [(1.32, 0.4) for _ in range(10)])
+    assert allowed.ready
+    assert allowed.chosen is not None, "1.32 measured 0.097% - inside the bar"
 
 
 def test_a_clean_source_is_not_refused_by_the_floor():

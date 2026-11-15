@@ -474,9 +474,9 @@ class AutoGateTuner:
     So after a handful of rendered frames we can score every candidate on real data:
 
       - reuse share = fraction of calibration frames with ``lr_delta <= candidate``
-      - cost       = p95 of their ``hr_delta`` (levels of 255)
+      - cost       = p90 of their ``hr_delta`` (levels of 255)
 
-    and pick the largest candidate whose p95 stays inside ``budget``. That is content-agnostic:
+    and pick the largest candidate whose p90 stays inside ``budget``. That is content-agnostic:
     grainy film has a higher noise floor and lands on a larger threshold, clean anime on a
     smaller one, without anyone typing a number.
 
@@ -488,7 +488,7 @@ class AutoGateTuner:
                  candidates=(2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0),
                  clamp=(2.0, 4.0), noise_floor_quiet: float = 0.35,
                  fallback: str = "strictest", chain_budget: float = 12.0,
-                 noise_floor_refuse: float = 2.0,
+                 noise_floor_refuse: float = 1.5,
                  chain_policy: str = "certified"):
         self.budget = float(budget)
         # The clamp is load-bearing *once the tile path is out of the way*: with tile reuse
@@ -523,11 +523,16 @@ class AutoGateTuner:
         self.candidates = tuple(float(c) for c in candidates)
         self.clamp = (float(clamp[0]), float(clamp[1]))
         self.noise_floor_quiet = float(noise_floor_quiet)
-        # Measured on three real Blu-rays: noise floor 0.95 (digital with added grain, 0.005% of
-        # pixels above 8 levels at the worst frame), 1.32 (clean digital, 0.097%), 2.27 (35 mm TV,
-        # 0.470%). The last one fails the acceptance bar at every threshold - 4 and 2 measure the
-        # same - because on grainy film a 32 px block mean cannot tell "the grain changed" from
-        # "something moved a pixel". So above this floor the gate refuses rather than tuning.
+        # Calibrated on the acceptance bar (0.1% of pixels above 8 levels, worst frame), not on
+        # convenience. Four measured points, the floor against the worst-frame defect:
+        #   0.95 -> 0.005%  (digital with added grain, Chainsaw Man)
+        #   1.32 -> 0.097%  (clean digital, Violet Evergarden - inside, with 3% of margin)
+        #   1.84 -> 0.105%  (clean anime clip + synthetic grain 4)
+        #   2.27 -> 0.470%  (35 mm TV, Cowboy Bebop - the same at threshold 4 and at 2)
+        # so the bar is crossed between 1.32 and 1.84 and the limit sits between them, not at the
+        # 2.0 that shipped first (which let the 1.84 clip through at 0.105%). Above it the gate
+        # refuses instead of tuning: on grainy material a 32 px block mean cannot tell "the grain
+        # changed" from "something moved a pixel", and lowering the threshold only costs reuse.
         self.noise_floor_refuse = float(noise_floor_refuse)
         self._pairs: list[tuple[float, tuple[float, ...]]] = []
         if fallback not in ("strictest", "off"):
@@ -660,8 +665,8 @@ class AutoGateTuner:
             if self._noise_floor() > self.noise_floor_refuse:
                 return (f"auto gate: noise floor {self._noise_floor():.2f} is above the "
                         f"{self.noise_floor_refuse:.1f} limit for this material, so reuse is OFF "
-                        f"- measured on film of this grain: 0.47% of pixels above 8 levels at "
-                        f"every threshold")
+                        f"- at this noise the measured worst frame is 0.105-0.470% of pixels "
+                        f"above 8 levels, past the 0.1% acceptance bar")
             return (f"auto gate: no candidate kept the p90 error inside {self.budget} levels "
                     f"(noise floor {self._noise_floor():.2f}), so reuse is OFF - "
                     f"{len(self._pairs)} calibration frames")

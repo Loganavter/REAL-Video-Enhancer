@@ -106,9 +106,13 @@ ffmpeg planar samples labelled P010: **12.68 dB** against a reference, silently,
 Consequence for previous numbers: the film quality figures in this repo's docs (71 dB "vs ungated")
 were two equally corrupted renders agreeing with each other. They are replaced.
 
-**10-bit output is not free.** Keeping 10 bits at the encoder buys ~6 dB (52.01 against 46.11) and
-costs about twice the NVENC wall clock on this machine (8.01 s against 3.84 s for 94 frames of
-2160p), so it is opt-in.
+**10-bit output looked expensive and was not.** The first measurement said keeping 10 bits at the
+encoder buys ~6 dB and costs about twice the NVENC wall clock (8.01 s against 3.84 s for 94 frames
+of 2160p), and that is where the "10-bit is opt-in" decision came from. The bisection above shows
+what that 4.2 s actually was: swscale, inserted by the colour tags on the output side. With the
+tags on the input side the same render is **4.67 s against 4.64 s** at 8-bit - free - and the
+chroma matches the source instead of being 5.3 levels off. So 10 bits are now the default for a
+10-bit source.
 
 **Kernel-level work is closed by measurement.** Four engine builds of the same ONNX (explicit 8 GB
 workspace, baseline, cuDNN-only, JIT-only) with three interleaved timing rounds each:
@@ -173,8 +177,10 @@ Bisecting the exact command the app logs, at 2880x2160 10-bit:
 `-colorspace` after the input tells ffmpeg the *output* must be that space, so it inserts a
 swscale matrix conversion on every frame. Before the input it describes the raw pipe and no
 conversion happens. The container tags are identical either way (`color_range=tv`,
-`color_space=bt709`), so this was 62 ms/frame - 4.8x the encoder's own cost - paid for a metadata
-declaration.
+`color_space=bt709`), so this was **62.4 ms/frame** paid for a metadata declaration: 79.0 ms/frame
+with the tags on the output against 16.6 ms/frame with them on the input, i.e. **4.8x the whole
+pipe**, of which the encoder's own share is 9.4 ms/frame - so the tags cost **6.6x the encoder**.
+(Two ratios, both true, and an earlier revision of this file printed them as one.)
 
 And it was not only time: mean chroma against the source, 10-bit scale (0..1023), first 20 frames:
 
@@ -202,17 +208,31 @@ operations to `max box(|I - I_ref|)` costs one subtraction, one abs and one pool
 
 | statistic | threshold | reuse | share above 8 levels (worst reused frame) |
 |---|---|---|---|
-| `max |box - box|` | 2 | 70.2% | 0.004% |
-| `max |box - box|` | 4 | 70.2% | 0.004% |
-| `max |box - box|` | 8 | 70.2% | **0.460%** |
-| `max box(|diff|)` | 2 | 70.2% | **0.000%** |
-| `max box(|diff|)` | 4 | 70.2% | 0.004% |
-| `max box(|diff|)` | 8 | 70.2% | 0.004% |
+| `max \|box - box\|` | 2 | 70.2% | 0.004% |
+| `max \|box - box\|` | 4 | 70.2% | 0.004% |
+| `max \|box - box\|` | 8 | 70.2% | **0.460%** |
+| `max box(\|diff\|)` | 2 | 70.2% | **0.000%** |
+| `max box(\|diff\|)` | 4 | 70.2% | 0.004% |
+| `max box(\|diff\|)` | 8 | 70.2% | 0.004% |
 
-So the new statistic is both more accurate at the same reuse and, more usefully, its safe range is
-three times wider: the old one falls off a cliff between 4 and 8, the new one is still fine at 8.
-That margin is what the tuner actually needs - the failure this investigation started with was a
-threshold that had drifted to 12.
+That table cannot explain its own result, and the reason is the fourth significant figure. The same
+share appears at thresholds 2, 4 and 8 while the defect changes 115x; if the same frames were reused
+the renders would be identical, so "70.2%" is hiding the only thing that matters - 0.1% of 502
+frames is **half a frame**, and under a worst-frame metric one frame is the whole answer. Re-run on
+the shipping statistic with integer counts (same clip, tiles off, chain fixed at 4):
+
+| threshold | reuse | time | share above 8 levels, worst |
+|---|---|---|---|
+| 2 | 359/498 | 10.52 s | 0.016% |
+| 4 | 362/498 | 9.97 s | 0.016% |
+| 8 | 370/498 | 9.51 s | 0.015% |
+
+Eleven frames separate threshold 2 from threshold 8 and the defect is flat at 0.015-0.016%. So the
+new statistic is both more accurate at the same reuse and, more usefully, its safe range is three
+times wider: the old one falls off a cliff between 4 and 8, the new one is still fine at 8. That
+margin is what the tuner actually needs - the failure this investigation started with was a
+threshold that had drifted to 12. **Rule taken: reuse is published as a count of frames, never only
+as a percentage.**
 
 Whole-clip effect, 19 sampled frames, RGB, anime clip: worst frame goes from **0.045% / peak 13** to
 **0.009% / peak 14**, at 11.7 s against 11.3 s (3.7% slower for a 5x smaller defect area). The
@@ -229,7 +249,7 @@ share of pixels more than 8 levels off in any RGB channel, worst of 19 sampled f
 
 | configuration | median | worst frame | peak | time |
 |---|---|---|---|---|
-| tile reuse off, gate threshold 4, chain 4 (before the box|diff| change) | 0.001% | **0.045%** (f480) | **13** | 11.3 s |
+| tile reuse off, gate threshold 4, chain 4 (before the \|diff\| statistic) | 0.001% | **0.045%** (f480) | **13** | 11.3 s |
 | tile reuse off, gate threshold 12, chain 4 | 0.001% | 0.517% (f370) | 95 | 10.9 s |
 | tile reuse on, gate chain 1 | 0.002% | 0.105% (f390) | 20 | 11.5 s |
 | tile reuse on, gate chain 4, threshold 4 | 0.025% | 0.287% (f383) | 98 | 9.2 s |
@@ -286,23 +306,41 @@ Caveat on this whole framing: "the last 1.5x is the price of not moving objects"
 32 px block mean, which is exactly the reduction that also averages grain away - a fist of ~50 px
 survives a block mean almost intact, so the statistic cannot see what it is being asked to police,
 and the remedy (a shorter chain) is applied to the whole frame although the defect is one tile. A
-box-filtered intermediate statistic is being measured precisely to see whether that 1.5x can come
-back without the artifact; the rules below are therefore provisional.
+box-filtered intermediate statistic was proposed here to see whether that 1.5x can come back
+without the artifact. It has since been implemented and measured (`max box(|I - I_ref|)` instead
+of `max |box - box|`): on the same clip the worst frame goes **0.045% -> 0.009%** of pixels above
+8 levels on the worst frame for 11.3 -> 11.7 s, and the safe threshold range widens threefold
+(threshold 8: 0.460% with the old statistic, 0.004% with the new one). So the reduction was the
+other half of the bug, not only the chain depth. The rules below are measured against the new
+statistic.
 
 ## Still open
 
-- **INT8 (explicit Q/DQ)** is the only remaining numeric lever with 2x in its arithmetic, and it now
-  has an acceptance rule to be judged against. `onnxruntime` cannot be installed (no DNS for PyPI
-  or GitHub on this host); calibration can be done with torch hooks on the real model instead.
-- **The input conversion costs 2.80 ms/frame** (19% of the gated path): one H2D plus roughly
-  fifteen kernels that each materialise a full-resolution intermediate, against a ~0.1 ms
-  bandwidth floor. Two candidates are recorded (planar `gbrp` from the decoder, and one
-  preallocated buffer for the 10-bit conversion); neither is measured.
-- **Film does not justify the gate as it stands.** 1.08x (4.33 against 4.66 s) for 2.35% of pixels
-  above 8 levels is a bad trade, and `best` refuses it automatically; `fast` still offers it. Either
-  the local-statistic work above makes film cheap too, or film simply runs ungated.
+- ~~INT8 (explicit Q/DQ) is the only remaining numeric lever with 2x in its arithmetic~~ **measured:
+  the 2x is in the conv and the cost is at the boundary.** Q/DQ with per-channel weights and
+  per-tensor activation scales from 8 of our own frames is *lossless* by this investigation's own
+  rule (0.000% of pixels above 8 levels, peak 4, PSNR 54.1 dB) and slower: 68.11 against 55.54 ms.
+  The per-layer profile puts it where no summary would: 16 int8 convs at 91 TFLOP/s (twice the fp16
+  block's 52) plus **17 separate PReLU passes at 1.71-2.37 ms**, because the per-channel slope
+  (1088 values, -1.39..1.70) does not fit an int8 epilogue; in fp16 the conv and its PReLU are one
+  myelin kernel. Quantising the conv output as well so the PReLU reads int8 gives 78.36 ms - the
+  boundary is charged per hop. Closed as a TRT configuration; only a fused int8 conv+PReLU plugin
+  would reopen it. The accuracy figure for that second build is not quoted anywhere: the extra
+  output scales were mis-calibrated there and its output contained NaN, and the *timing* argument
+  does not depend on them (scales are constants).
+- ~~The input conversion costs 2.80 ms/frame against a ~0.1 ms bandwidth floor~~ **measured, and the
+  floor was wrong.** It is 1.42 ms standalone at 1080p for 6.2 MB of packed planes, of which ~1 ms
+  is the H2D itself, and the rewrite (one preallocated buffer, `g` from `y,u,v`, one chroma
+  upsample, no `stack`) takes it to 1.26 ms - 11%, not 10x. The "0.1 ms floor" counted GPU-side
+  bandwidth and forgot that the frame has to cross PCIe first; the link here is PCIe 3.0 x8 at
+  5.1-6.0 GB/s measured pageable *and* pinned, so no staging trick recovers it (PERFORMANCE.md has
+  the table).
+- ~~Film does not justify the gate as it stands~~ **closed by the noise-floor guard**: at 1.08x for
+  2.35% of pixels above 8 levels the trade was bad, and the clip's floor (2.27) is now above the
+  1.5 limit, so the render is byte-identical to ungated instead of "less bad".
 - **The tile probe reads 16 frames** and mispredicts in both directions (anime 33% predicted
   against 58% achieved, film 15% against 9.5%), held together by a margin rule. Needs two or three
   more titles with different grain.
-- **The GUI never passes any reuse flag**, so its renders inherit the backend defaults; the quality
-  preset is being wired into the window separately.
+- ~~The GUI never passes any reuse flag~~ **wired**: "Encoder Options" -> *Quality preset*
+  (`Best quality` / `Fast`) is in the window and merged; the GUI still inherits the backend default
+  for everything else (threshold, chain cap, tile reuse), which is the intended split.
