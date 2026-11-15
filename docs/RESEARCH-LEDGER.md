@@ -1882,11 +1882,33 @@ frame 37.7 ms), not 1.93x - that would need 1.43 ms, which needs 107 TOPS, which
 at ~90% of the counter's "compute throughput" while the same counters say that buying occupancy at the cost
 of ILP is a net loss here.
 
-What stays independent of all this is the **write amplification** (170.1 MB stored against 132.7 produced,
-1.28x, worth 0.13 ms): NHWC int8 with 256 contiguous pixels per block should store perfectly coalesced, so
-the 28% points at a non-contiguous tile in the output or partial sectors, and it is measurable with
-`l1tex__t_sectors_pipe_lsu_mem_global_op_st` against the bytes produced. It is the last item on this lane
-that is neither closed nor explained. At 90% of the
+**The write amplification is not the kernel's tile, and the counter says so in one number.** Store sectors
+at the LSU are 4,147,200 x 32 B = **132.7 MB, exactly the bytes produced** (1.000x). So the kernel writes
+the core and only the core - no halo on the output, which refutes the 18/16 hypothesis that predicted
+1.266x. The amplification appears one level down:
+
+| level | traffic | against produced |
+|---|---|---|
+| LSU store sectors | 132.7 MB | **1.000x** |
+| L2 write sectors | 323.6 MB | **2.44x** |
+| DRAM writes | 184.6 MB | 1.39x |
+
+So each 32-byte sector store turns into ~2.4 L2 sector operations and ~1.4 bytes at DRAM. That is
+write-allocate behaviour, not layout and not the tile: the stores are already exactly the right size, and
+1.39x of DRAM traffic is what the memory system does with them. Worth 0.13-0.2 ms, and **not fixable in
+the kernel** without changing how the output is consumed (e.g. writing straight into a buffer the next
+op reads, so the L2 lines are already owned).
+
+Where that leaves the lane, honestly: **int8 stops at 1.49x of engine time and 1.27x of wall** (block 1.97
+ms, frame 37.7 ms), and that is a measured local optimum in the tile space, not an assumption. Occupancy
+was bought and cost 23%; 255 registers is not a compiler accident but the state in which per-thread ILP is
+maximal; the traffic excess is 0.16 of the 0.73 ms gap; and the last 0.13 ms belongs to L2 write-allocate,
+which is outside the kernel.
+
+What is still unnamed is *why* the pipeline idles 6.24 cycles per issued instruction at 16.5% occupancy.
+The stall breakdown section did not produce the per-reason counters in that run, so the ledger records the
+surrounding evidence - not occupancy (measured), not DRAM bandwidth (62.6%), not conversions (num_stages
+flat), not traffic (0.16 of 0.73 ms) - and leaves the mechanism open rather than guessed. At 90% of the
 measured traffic the block is 1.20 ms, at 90% of the tensor pipe 1.15 ms - both land near **1.2 ms**,
 i.e. 16 x 1.2 + non-GEMM ~ 25.4 ms = 2.22x of engine, which is **1.55x of wall** on gated anime (engine
 share 0.646) and 1.82x ungated. The owner will see 1.55x, not 2x.
