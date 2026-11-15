@@ -6,6 +6,12 @@ before anything is built on top of them.
 
 Adapted to this machine at the end of each stage (`Tools`).
 
+**Outcome (2026-11-16): the lane does not pay, measured on one instrument.** Against the engine the app actually
+builds (tiled, head-fused, opt-5) the int8 body runs 56.56 ms against 46.40 ms for a 1920x1080 frame - **0.820x**,
+1.22x slower - and 0.774x at 3840x2160. Stages 2, 4 and 6 are closed as measured-does-not-pay and stage 5 is scoped
+out; `docs/claims-int8-stage{1,2,4,5}.txt` all pass with those verdicts asserted. No int8 frame was ever rendered,
+for two measured reasons recorded in Stage 6. The one lever left is a body kernel rewrite, sized in Stage 6.
+
 ## Facts the plan rests on
 
 | | measured |
@@ -1233,13 +1239,11 @@ it. That is precisely stage 6's subject ("own head and tail"), and it is the one
   48-channel model and a non-compact one cannot use the kernel at all; and the gate is model-dependent - 4x
   misses it by 1.70 ms even at the pre-fix speed. `docs/claims-int8-stage5.txt` passes with the 4x shortfall
   recorded rather than asserted.
-* **Stage 6 - half, and honestly so.** The head is NHWC-aware and the body is in the app, but the fp16 head and
-  tail are still torch, and that is exactly the 16.1 ms above. The int8 head/tail is the remaining work, with a
-  measured prize of up to 1.80x.
+* **Stage 6 - half, and honestly so.** (Superseded: the final closure is in the Stage 6 section, measured on one
+  instrument against the app's own engine at 0.820x, with both reasons no int8 frame was rendered.)
 
-**No int8 frame has been rendered by the app.** The body is accurate and pays, but it sits behind
-`int8FitBody=on` because the plan's gate for proceeding (1.40x) is not met - the honest default is the fp16
-engine plus a log line that states the measured ratio, so the decision is visible rather than assumed.
+**No int8 frame has been rendered by the app.** (Superseded: the two measured reasons are recorded in the Stage 6
+section - a 4K probe OOM and a tiled render path the body hook does not cover.)
 
 ## Stage 4 - calibration and the probe in the render path (one day)
 
@@ -1365,8 +1369,50 @@ Claims: `docs/claims-int8-stage5.txt` fails on exactly the 4x shortfall, which i
 
 ## Stage 6 - own head and tail, only after stage 2
 
-**State (2026-11-16, first half): the body is in the app and wired into the upscale path, and it REFUSES to
-serve. No int8 frame has been rendered, and the 1.489x has NOT been confirmed inside the render.**
+**State (2026-11-16): CLOSED - measured, does not pay. Nothing here is left half-done; what is missing is
+stated with its reason and its size.**
+
+**What was built and what it cost.** `Int8Kernels.py` vendors four inkernel conversions plus the prologue, and
+`Int8Body.py` is a drop-in inference helper: clamp -> head conv -> fused PReLU+quantise -> sixteen int8 hops ->
+dequantise -> the model's own tail conv, upsampler and residual. It certifies at `0.00000%` on 256, 512 and
+1920x1080 frames and agrees with the app's own engine to `>8 0.00000%, peak 7` on the same frame.
+
+**The ratio, measured on ONE instrument.** The body and the app's own tiled engine
+(`..._opt-5_tiling-full_headpad5_1920x1080`) were loaded into a single process, same frame, three interleaved
+rounds:
+
+| 1920x1080 | ms |
+|---|---|
+| the app's engine | 46.40 / 46.81 / 46.79 |
+| the int8 body | 56.56 / 56.73 / 56.84 |
+| **ratio** | **0.820 / 0.825 / 0.823** |
+
+0.820x, i.e. 1.22x slower, 16.20 ms past the plan's kill line. At 3840x2160 it is 0.774x and 0.116% off the
+picture. The fused comparison that preceded this one (1.489x, 1.505x, 1.411x, 1.428x, then a cross-instrument
+0.631x) is retired: every one of those was a ratio against a monolithic 80 ms engine the app never builds, or a
+division across two processes. This is the only number in the document that has both sides on one instrument.
+
+**No int8 frame was rendered by the app, and both reasons are measured:**
+
+* at 3840x2160 the probe dies before it decides - `int8 probe unavailable (CUDA out of memory ...); int8 stays
+  off` - because the app already holds the 4K engine, the model and its own buffers;
+* at 1920x1080 the probe works and admits the video (`int8 probe: engine 0.002% composition 0.003% peak 14
+  (7 pairs) -> int8`), but no certification line follows: `_int8_body` is consulted only on the whole-frame path
+  (`tilesize == 0`) and the app renders tiled. The tiled path never asks.
+
+So the hook is not "unfinished" - it is on the wrong branch of a renderer that tiles, and serving it there would
+have made every frame 1.22x slower.
+
+**Why the gap is a rewrite and not a tweak.** The body is 43.9 ms of the 56.6 - sixteen launches at 2.74 ms
+against the engine's fused convolution at roughly 1.6 ms per layer-equivalent. Closing 16.20 ms needs the body at
+<= 40.4 ms, i.e. 2.5 ms per launch: a 10% win on the kernel. The obvious transformation is to load the input tile
+once with a halo and reuse it across the nine taps instead of issuing nine masked gathers per launch, but Triton
+has no cheap way to shift a register tile by one column, so that becomes an im2col-style restructure - a rewrite
+of the kernel, with the same traffic in the naive form. That is the one lever left and its size is now stated in
+milliseconds rather than hoped at.
+
+**State (2026-11-16, first measurement): the body is in the app and wired into the upscale path, and it REFUSES
+to serve.**
 
 `backend/src/pytorch/Int8Kernels.py` vendors the three kernels (the app does not ship `scripts/`), and
 `backend/src/pytorch/Int8Body.py` is a drop-in inference helper: clamp -> head conv + PReLU in fp16 -> sixteen
