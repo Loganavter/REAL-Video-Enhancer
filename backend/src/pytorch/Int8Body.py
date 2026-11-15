@@ -113,11 +113,12 @@ class Int8Body:
 
         with torch.no_grad():
             head = torch.nn.functional.prelu(self.head_conv(x.clamp(0.0, 1.0)), self.head_prelu.weight)
-            # the head conversion is done in torch, exactly as the validated recipe does it. The fused
-            # Triton version was 0.49 ms faster and its codes matched on all but 0.0023% of elements when
-            # compared NHWC-to-NHWC, but fed through the same sixteen hops it produced a 1.23% picture
-            # against this path's 0.00000%. A 0.49 ms saving is not worth an unproven conversion, and the
-            # kernel can be re-fused once the discrepancy is understood.
+            # The fused Triton conversion is CORRECT once fed a contiguous tensor (the PReLU output is
+            # not, and the kernel indexes raw memory as ch * n_pix + pix - that mismatch was the 98.34%
+            # of differing codes), but making it contiguous costs more than the four torch passes it
+            # replaces: 89.25 ms against 72.49 ms for this path, both certified at 0.00000%. So the
+            # faster of the two correct versions is the torch one, and the measured win of the earlier
+            # fusion was entirely the wrong codes, not the fusion.
             buf = (torch.round(head / s_act.view(1, -1, 1, 1)).clamp(-127, 127)
                    .to(torch.int8).permute(0, 2, 3, 1).contiguous())
             # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair

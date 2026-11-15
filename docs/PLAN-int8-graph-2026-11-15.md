@@ -1177,6 +1177,26 @@ returned the calibration grids in **float16** because the model runs in half, so
 `s_in/s_t * 2^SHIFT` overflowed half to infinity and cast to `INT32_MAX`. The first certification read 99.58%.
 Keeping the grids in float32 took it to 3.53%; the remaining factor is unexplained.
 
+**ROOT CAUSE OF THE HEAD BUG: the PReLU output is not contiguous, and the kernel indexes raw memory.**
+
+`quantise_nchw_to_nhwc` computes `x_ptr + ch * n_pix + pix`, which is only true for a contiguous NCHW
+tensor. `act.is_contiguous()` is **False**, so the kernel read the wrong elements: 98.34% of codes differed
+from torch's with a mean offset of +16.92 (max 254), which looked exactly like a scale bug and was pure
+addressing. Feeding it `head.contiguous()` makes the fused conversion **bit-exact** - certified 0.00000% at
+256, 512 and 1080.
+
+And the fused conversion, now that it is correct, is **slower**:
+
+| head conversion | certify | body, 1920x1080 | vs engine |
+|---|---|---|---|
+| fused Triton, `head.contiguous()` | 0.00000% | **89.25 ms** | **0.893x** |
+| torch round/clamp/cast/permute | 0.00000% | **72.49 ms** | **1.103x** |
+
+The `.contiguous()` transposes a 64-channel 1080p half tensor for a non-coalesced access pattern, and that
+costs more than the four torch passes it replaces. So the earlier 0.49 ms "win" from fusing was the wrong codes,
+not the fusion - the same lesson as the dequantise fusion, in reverse: *there* the win came from deleting a
+530 MB float32 buffer, not from fusing as such.
+
 **The body is now CORRECT, and with the correct conversion the lane does not pay: 1.103x.**
 
 The bisect found it: feeding the sixteen hops the **torch** head codes gives `0.00000%` at 512x512, and feeding

@@ -58,3 +58,14 @@
 @derived kill_overspend "72.49 - 79.93/1.15 = +2.99 ms: the body is SLOWER than the kill line allows"
 # Speed is where this stage fails now, not accuracy.
 @below kill_overspend zero_excess
+
+# ---- the head conversion, resolved: it was addressing, not arithmetic
+@claim head_noncontiguous  0 x     "act.is_contiguous() is False, so ch*n_pix+pix read the wrong elements" measured
+@claim fused_contig_512  0.00000 % "fused Triton conversion fed head.contiguous(), 512x512" measured
+@claim fused_contig_1080 0.00000 % "the same at 1920x1080" measured
+@claim fused_body_ms    89.25 ms  "the fused path, correct, 1920x1080" measured
+@claim fused_ratio       0.893 x  "derived: 79.86 / 89.25 - the fusion is a LOSS when correct" derived
+@derived fused_ratio "79.86 / 89.25 = 0.893: .contiguous() on a 64-channel half tensor costs more than the four torch passes"
+@claim torch_head_ms    72.49 ms  "the torch head conversion, same rounds" measured
+@claim torch_head_ratio  1.103 x  "derived: 79.86 / 72.49" derived
+@derived torch_head_ratio "79.86 / 72.49 = 1.103, and 1.102/1.104/1.105 across the three rounds"
