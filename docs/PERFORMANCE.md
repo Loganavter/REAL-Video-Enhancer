@@ -19,6 +19,32 @@ wall-clock for the whole render unless stated otherwise.
 | 10-bit path | auto for >=10-bit sources | YUV420p10 packed on the GPU, colour matrix from the source, and the ffmpeg command declares the format the packer actually produced | colour parity vs a libx265 render: 46.11 dB at 8-bit output, 52.01 dB at 10-bit output |
 | output depth | **the source's depth** | a 10-bit source now stays 10-bit, and it is free: 4.67 s against 4.64 s for 94 frames of 2160p, ~6 dB better. The old "10-bit costs 2x NVENC" was measured and is wrong - the encoder costs 1.47x (9.4 against 6.4 ms/frame) and the rest was swscale, inserted because the colour tags were declared on the *output* side. Declared on the input side they produce the same container tags with no conversion, and the chroma now matches the source to 0.2 levels where the old path was 5 levels off | |
 
+### Against the original 2.4.2 (measured 2026-11-15)
+
+Everything else in this file measures the fork against its own baselines. The number that matters to
+an owner is against what he ran before, so: `base/2.4.2-build` - the upstream line plus the one commit
+that reproduces the installed 2.4.2 beta - against this branch, same clip, same model, same encoder,
+each with its own defaults.
+
+| clip | original 2.4.2 | now | ratio | frame gate |
+|---|---|---|---|---|
+| Bebop 35 mm TV, 240 frames (1080p -> 2160p) | 27.73 s | **14.95 s** | **1.85x** | refused (noise floor 2.27) |
+| anime, 498 frames, gate forced off | 53.94 s | **33.12 s** | **1.63x** | off by flag |
+| anime, 498 frames, defaults | 53.94 s | **12.51 s** | **4.31x** | 72.7% of frames reused |
+
+So the **engine-side work is 1.6-1.9x on its own** - optimization profile 3 -> 5, the tiling default,
+the pipe and colour fixes - and it applies to every frame of every clip. Everything above that on
+animation is the frame gate, and the gate refuses on grain by design, so on film the honest answer is
+the 1.85x.
+
+**The picture is not identical to the original's, and it is not the reuse.** On the film clip the gate
+refuses, so any difference there is the pipeline: the current build differs from the original by
+**0.57% of pixels above 8 levels at the worst frame**, with mean |dY| 0.73, |dU| 0.38 and |dV| 0.33
+levels and **zero** chroma samples above 8 - a thin grain-scale difference, not a colour shift - plus a
+systematic **-0.5/255 mean luma** (the original's mean luma matched the source's, the current build is
+half a level darker). That offset is recorded as an open candidate regression in the colour path, not
+as part of the speed-up.
+
 End-to-end on the clip with `x265_nvenc` (so the encoder does not hide the model):
 **6.26 s (old defaults) -> 4.27 s (new defaults) = 1.47x**. The gate on top of that, measured on
 502 anime frames at 1080p -> 2160p: **38.85 s ungated -> 11.7 s gated = 3.3x**, with 70.9% of
@@ -69,6 +95,8 @@ preset) before tuning anything else.
 | `--tile_reuse_mode` | **off** | tile-level reuse with its mask dilated (every tile adjacent to a recomputed one is recomputed too) takes **10.0 s** against 11.7 s on 502 anime frames at **0.071%** of pixels above 8 levels (RGB, worst frame, peak 23) against 0.009% without tiles. That passes the 0.1% bar but with eight times less margin, for 14% of wall clock, so it stays opt-in. Its per-tile mean cannot be tightened into safety: at threshold 0.10 reuse collapses from 57.7% to 3.0% and the render becomes slower than not using the tile path at all. `auto` keeps the pre-render probe (`utils/TileProbe.py`: 16 frames at 4 positions, tiles only when the predicted cost beats the halo tax) for material where the trade is wanted |
 | `--tile_reuse` | off | forces tiles on, equivalent to `--tile_reuse_mode on`; the core grid is still fitted to the frame (`divisor_tile`: 480x540 for 1920x1080, 8 windows, 1.147x the frame's area) |
 | `--tile_reuse_size` / `--tile_reuse_threshold` | 512 / 0.35 | the tile path's own knobs: LR core target and the worst low-passed delta under which a tile is reused |
+| `RVE_RAW_TRT=1` | off | builds engines with the raw `trt.Builder` from an ONNX export instead of `torch_tensorrt.dynamo.compile`. Engines are static per resolution by default, which is what this path exports; the opt-in dynamic mode falls back, and any export or build failure falls back to torch_tensorrt after deleting the stale plan. **No speed claim**: an earlier single pair read -7.6% and a later pair read +8%, and the interleaved A/B (three rounds each) shows raw winning the wall clock in all three rounds while the drift inside the experiment - 13% over three rounds - is larger than the effect. It stays as an independent build path, not as a lever |
+| `RVE_HEAD_PAD=1` | off | pads the head convolution to 8 input channels so myelin fuses it with its PReLU: -5.8% on a raw TRT build, but **+71% through this app's build path**, and only 0.9% on top of the raw builder. Only 3-channel heads are touched, and a 32x32 probe forward reverts anything it breaks (the SPAN family fuses its 3x3 and 1x1 weights, so widening one branch breaks it; 11 of the 78 models in the owner's collection) |
 | `RVE_P010=1` | off | the "diverges from the planar reference at 31 dB, unexplained" that used to be here was **three separate faults, all found and fixed** (ledger C4): P010 missing from the "already YUV" branch, `_pipe_input_pixel_format()` deriving the format from the *encoder* tag while the packer emitted planar `yuv420p10le`, and the colour tags declared on the output side. Corrected, an opt-in P010 render measures 52.01 dB (10-bit output) / 46.11 dB (8-bit) against a libx265 reference. It stays **off**, and that is now measured rather than left open: on a 10-bit source (`yuv420p10le`, 220 frames, same preset) the two paths are **byte-identical in picture (0.000% of pixels above 8 levels)** and P010 costs **+0.5 ms/frame** - frame total 28.16 against 27.65 ms, render 6.40 against 6.29 s. The 1.54 ms repack it was supposed to avoid was already gone once C4 stopped deriving the pipe format from the encoder tag, so packing on the GPU now adds a conversion and removes nothing |
 | `--trt_streams` | 1 | >1 falls back to 1 with a warning: two `torch.jit.load` modules of one engine do not give independent contexts and the output corrupts (25 dB). |
 

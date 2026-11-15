@@ -69,3 +69,32 @@ def test_a_grouped_or_non_three_channel_head_is_not_touched(monkeypatch):
     assert pad_head_channels(model.model if hasattr(model, "model") else model)[1] == 5
     grouped = torch.nn.Sequential(torch.nn.Conv2d(4, 8, 3, groups=2, padding=1))
     assert pad_head_channels(grouped)[1] == 0, "grouped convolutions change meaning under padding"
+
+
+def test_a_head_that_is_one_branch_of_a_fused_module_is_left_alone():
+    """SPAN's head is a Conv3XC: `torch.cat` of its 3x3 and 1x1 weights along the channel axis.
+
+    Widening only the 3x3 branch makes the concatenation 8 against 3 and the forward dies, so the
+    padding has to verify itself - the check cannot be written by inspection, and ten of the 78 models
+    in the owner's collection are this shape or add a copy of their input to their output.
+    """
+    class FusedHead(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.sk = torch.nn.Conv2d(3, 8, 3, padding=1)
+            self.sk1 = torch.nn.Conv2d(3, 8, 1)
+            self.last = torch.nn.Conv2d(8, 3, 3, padding=1)
+
+        def forward(self, x):
+            # what Conv3XC does: pad the 1x1 weight up to 3x3 and add it to the 3x3 one, so a single
+            # convolution carries both. Widening only `sk` makes that sum 8 against 3.
+            weight = self.sk.weight + torch.nn.functional.pad(self.sk1.weight, (1, 1, 1, 1))
+            out = torch.nn.functional.conv2d(x, weight, padding=1)
+            return self.last(out)
+
+    model = FusedHead().eval()
+    same, extra = pad_head_channels(model)
+    assert extra == 0, "the probe must refuse a head it cannot widen safely"
+    assert isinstance(same.sk, torch.nn.Conv2d) and same.sk.in_channels == 3
+    with torch.inference_mode():
+        assert same(torch.rand(1, 3, 16, 16)).shape[1] == 3

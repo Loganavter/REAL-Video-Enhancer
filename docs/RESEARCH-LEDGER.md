@@ -457,35 +457,47 @@ Two side results, both useful:
   refuses depth on this material), and it is also why the sample cannot be read as a smooth
   continuous quantity.
 
-## E22: the builder is worth more than the graph change (measured, 2026-11-15)
+## E22: is the raw builder faster? Not established - the drift is bigger than the effect
 
-Chasing the head padding to the product meant asking a question the ledger had never asked: does the
-way this app compiles an engine matter next to how the graph looks? One clip, one preset, three
-configurations, each one render, engines cached after their build:
+The head padding only reached the product through a question nobody had asked: does the way this app
+compiles an engine matter next to how the graph looks? One pair of single runs said yes, loudly -
+app 11.92 s against raw `trt.Builder` 11.01 s on the same clip, with a **bit-identical picture**
+(0.000% of pixels above 8 levels, peak 0) - and a second pair said the opposite (gate off: 33.12 s
+app against 36.02 s raw). So it went to the interleaved protocol, three rounds each:
 
-| run | wall | app's `inference` | picture against the app's default |
-|---|---|---|---|
-| app default (`torch_tensorrt.dynamo.compile`) | 11.92 s | 16.22 ms | - |
-| **raw `trt.Builder` from the same ONNX** | **11.01 s** | **15.04 ms** | **0.000% of pixels above 8 levels, peak 0 - identical** |
-| raw + head padding | 10.91 s | 14.96 ms | 0.003% median, 0.012% worst, peak 15 |
+| round | app (`torch_tensorrt.dynamo.compile`) | raw (`trt.Builder`) |
+|---|---|---|
+| 1 | 13.00 s / 15.44 ms engine | 12.81 s / 16.52 ms |
+| 2 | 14.65 s / 18.27 ms | 12.95 s / 17.33 ms |
+| 3 | 14.84 s / 20.01 ms | 14.55 s / 19.97 ms |
 
-So **the builder is worth 7.6% and the graph change is worth 0.9% on top of it**, and that re-qualifies
-E19: the 5.8% the padding measured was against a *slower* unpadded build (57.51 ms) than the raw path
-produces (55.1 ms), not against what ships. On the shipping baseline the padding is worth about half a
-percent, for a graph change, a cache-key marker and a wrapper - not worth it.
+Raw wins the wall clock in all three rounds and loses the engine number in one of them, while **both
+series climb 13-30% across the experiment** - the machine heats up and there is no thermal control on
+this host. An effect smaller than the drift inside its own measurement is not measured; the honest
+status is **no established difference**, and the 7.6% this row used to claim is withdrawn.
 
-The raw path ships behind `RVE_RAW_TRT=1`, deliberately:
+What survives is the *structural* result, which is worth keeping: the two builders produce a
+bit-identical picture on the shipping model, and the raw path covers **78 of 78** models in the
+owner's collection at the load/forward/ONNX-export stages (SPAN's 11 files are the only padding
+casualties, and they revert). So `RVE_RAW_TRT` stays as an independent build path with a fallback, not
+as a lever.
 
-- engines are **static per resolution by default** (`tensorrt_dynamic_shapes` is off), which is exactly
-  the shape this path exports, so the common case is covered rather than excluded;
-- the opt-in dynamic mode is skipped, not broken - it falls back to torch_tensorrt with a log line;
-- any failure in the export or the build (an architecture whose ONNX export trips, a model with an
-  unusual input) falls back to torch_tensorrt and deletes the stale plan, so a build never costs a
-  render;
-- the picture is bit-identical on this model, which is the strongest form the acceptance rule has.
+Two method notes, because this row cost two wrong headlines:
 
-What it would need to become the default: one more model architecture, the tile path (a second engine
-shape), and a decision about the ONNX export as a build artefact (it is written next to the plan).
+- a single pair is not a measurement for anything under ~10% on this host, and I quoted one;
+- cross-run drift over a session this long is now the dominant error term, not the configuration.
+
+## The head padding across the whole collection (78 models, 2026-11-15)
+
+Load -> pad -> forward -> ONNX export, CPU, no engine builds (a build is minutes per model and tactic
+choice is a property of the graph): **0 load failures, 0 forward failures, 0 ONNX export failures**.
+The padding applies to 60 models (5 zero channels each), reverts on **11 SPAN files** because their
+head is a `Conv3XC` that adds its 1x1 weight to its 3x3 one - widening a single branch makes that sum
+8 against 3 - and is skipped by rule on the 12-channel RRDB and on the already-aligned heads.
+
+That is the gate for any future "make it the default": the export prerequisite holds across six
+architectures, and the structures that break are caught by a 32x32 probe forward rather than by a
+render.
 
 ## Is `tiling=none` faster than what ships? No - and the probe that said so measured a different engine
 

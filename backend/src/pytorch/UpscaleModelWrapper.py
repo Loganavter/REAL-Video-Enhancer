@@ -74,7 +74,9 @@ def pad_head_channels(model: torch.nn.Module, multiple: int = HEAD_PAD_MULTIPLE)
         return model, 0
     name, conv = first
     channels = conv.in_channels
-    if conv.groups != 1 or channels <= 0 or channels % multiple == 0:
+    # Only the case that was measured: a plain 3-channel head. A 12-channel head (a multi-frame
+    # model) or an already aligned one is left alone.
+    if channels != 3 or conv.groups != 1:
         return model, 0
     extra = multiple - channels % multiple
     weight = conv.weight.data
@@ -90,7 +92,22 @@ def pad_head_channels(model: torch.nn.Module, multiple: int = HEAD_PAD_MULTIPLE)
     widened = widened.to(device=weight.device, dtype=weight.dtype)
     parent_path, _, attr = name.rpartition(".")
     parent = model.get_submodule(parent_path) if parent_path else model
+    original = conv
     setattr(parent, attr, PadInputConv(widened, extra))
+    # Verify on a tiny probe before anyone renders with it. Two structures break the idea and neither
+    # is detectable by inspection: SPAN's head is a Conv3XC that concatenates its 3x3 and 1x1 weights
+    # (`torch.cat` along the channel axis), so widening one branch makes the pair 8 against 3, and any
+    # model that adds a copy of its input to its output sees 8 channels against 3. Ten of the 78
+    # models in the owner's collection are one of those; reverting here costs a 32x32 forward.
+    try:
+        with torch.inference_mode():
+            model(torch.zeros(1, channels, 32, 32, dtype=widened.weight.dtype,
+                              device=widened.weight.device))
+    except Exception as error:
+        setattr(parent, attr, original)
+        log(f"head padding skipped for {name}: {type(error).__name__}: "
+            f"{str(error).splitlines()[0][:90]}")
+        return model, 0
     log(f"head convolution {name}: {channels} input channels -> {channels + extra} "
         f"(zeros, padded inside the head so the model's own residual keeps its 3 channels), "
         f"so the engine can fuse it with its PReLU")
