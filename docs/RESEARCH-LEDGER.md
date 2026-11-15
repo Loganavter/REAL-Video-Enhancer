@@ -1905,6 +1905,29 @@ was bought and cost 23%; 255 registers is not a compiler accident but the state 
 maximal; the traffic excess is 0.16 of the 0.73 ms gap; and the last 0.13 ms belongs to L2 write-allocate,
 which is outside the kernel.
 
+**The register cap is reachable after all, and the spill is tiny.** `maxnreg` as a Triton launch option is
+ignored, and `ptxas -maxrregcount` is ignored too while `.reqntid` is present in the PTX - ptxas keeps 138
+both ways. Strip the launch bounds and the cap applies:
+
+| PTX variant | cap | registers | spill stores / loads |
+|---|---|---|---|
+| as emitted | none | 138 | 0 / 0 |
+| as emitted | 128 | 138 (cap ignored) | 0 / 0 |
+| **`.reqntid` stripped** | **128** | **128** | **8 B / 16 B** |
+| `.reqntid` stripped | 168 | 168 | 0 / 0 |
+
+So the risk that killed the idea in the abstract - "forcing 128 spills the mainloop" - measures at **8 bytes
+of stack**, i.e. a handful of values, not a hot loop. At 128 registers and 128 threads a block needs 16,384
+registers, so **four blocks and 16 warps fit** where three blocks and 12 warps fit at 138. The total in-flight
+accumulator comes back to 16 x 64 = 1024, i.e. the same as the current best configuration, which is why the
+prediction for this point is **parity, not a win** - it buys warp-level latency hiding at constant ILP,
+which is exactly the unnamed 6.24 cycles.
+
+What remains is not a question of measurement but of plumbing: load the cubin through `cuModuleLoadData` and
+launch with the same 128-thread grid, bypassing Triton's launcher. That is the last untried point in this
+lane, and its prize is bounded by the lane's own ceiling: at best ~1.43 ms per block = 1.93x engine / 1.45x
+of wall against the 1.49x / 1.27x measured today.
+
 **The one flag that would have tested the register frontier is not reachable from Triton 3.5.** Passing
 `maxnreg=128` at BM 128/warps 4 changes nothing measurable (2.478 -> 2.459 ms) and, more to the point, the
 registers stay at **138** with occupancy at **24.77%** and the block limit still "3 by registers". So the
