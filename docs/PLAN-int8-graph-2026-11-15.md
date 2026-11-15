@@ -1177,6 +1177,44 @@ returned the calibration grids in **float16** because the model runs in half, so
 `s_in/s_t * 2^SHIFT` overflowed half to infinity and cast to `INT32_MAX`. The first certification read 99.58%.
 Keeping the grids in float32 took it to 3.53%; the remaining factor is unexplained.
 
+**The body is now CORRECT, and with the correct conversion the lane does not pay: 1.103x.**
+
+The bisect found it: feeding the sixteen hops the **torch** head codes gives `0.00000%` at 512x512, and feeding
+them the fused Triton head codes gives `1.22995%`. The kernel was the difference, and its output was not a rounding
+variant of torch's - compared NCHW-to-NCHW the codes differ on **98.34%** of elements with a mean signed offset of
+**+16.92 codes** (max 254). An earlier comparison of mine had read 0.0023% and comforted me; it compared NHWC to
+NHWC, and that was not the same question.
+
+With the head conversion back in torch, exactly as the validated recipe does it:
+
+| frame | certify |
+|---|---|
+| 256x256 | 0.00000% |
+| 512x512 | **0.00000%** |
+| 1920x1080 | **0.00000%** |
+| against the app's fp16 TensorRT engine, 1920x1080 | 0.00001%, peak 8 |
+
+So the render can now serve it, and the guard does. The cost of that correctness is the whole margin:
+
+| | ms |
+|---|---|
+| fp16 TensorRT engine | 79.93 / 79.99 / 80.55 |
+| the body, correct | 72.49 / 72.58 / 72.66 |
+| **ratio** | **1.103x** - below the plan's 1.15 kill line |
+
+Three interleaved rounds, quiet card. **`1.489x` was bought with a conversion that was putting the wrong codes into
+the body**; with codes that match the reference the body is 1.10x and the plan's own kill rule says the lane does
+not pay for integration at 1920x1080 on this model.
+
+That also reprices every earlier number in this document: the 1.489x/1.505x stage-2 gate, the 1.363x on the 4x
+model and the per-launch 2.771 ms were all measured with the fused head conversion in the path. The int8 body is
+genuinely bit-exact now, and genuinely worth 10% - which is exactly the "engine <= 1.15x" outcome the plan said
+kills it.
+
+The remaining value is entirely in that one conversion: fusing it **correctly** would return the body to ~54 ms and
+the ratio to ~1.48x. It is a bounded bug with a measured signature (98% of codes, mean +16.92, max 254), not a
+hypothesis, and it is the next thing to fix - but until it is fixed and re-certified, the honest number is 1.103x.
+
 **The hop-by-hop comparison was run, and it exonerated every part while the composite still disagrees.**
 
 Five separate comparisons, all in one process, all on the same 512x512 frame:

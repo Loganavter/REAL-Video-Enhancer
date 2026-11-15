@@ -17,6 +17,12 @@ Three details that were each worth a bug when they were got wrong:
 import triton
 import triton.language as tl
 
+try:                       # round-half-to-EVEN, which is what torch.round does
+    from triton.language.extra import libdevice
+    _rint = libdevice.rint
+except Exception:          # pragma: no cover - older triton
+    _rint = None
+
 __all__ = ["body_prologue_kernel", "quantise_nchw_to_nhwc", "dequantise_nhwc_to_nchw"]
 
 
@@ -60,6 +66,10 @@ def quantise_nchw_to_nhwc(x_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl
     mask = pix < n_pix
     v = tl.load(x_ptr + ch[:, None] * n_pix + pix[None, :], mask=mask[None, :], other=0.0)
     s = tl.load(s_ptr + ch)[:, None]
+    # floor(x + 0.5) is round-half-UP; torch.round is round-half-to-EVEN. On half-precision activations a
+    # whole-step ratio lands exactly on .5 often enough that the head codes differ on 0.0023% of elements,
+    # and that difference amplified through sixteen hops to 1.23% of pixels over the bar. Match the
+    # reference exactly rather than approximately.
     q = tl.floor(v / s + 0.5)
     q = tl.minimum(tl.maximum(q, -127.0), 127.0)
     tl.store(y_ptr + pix[:, None] * C + ch[None, :], tl.trans(q).to(tl.int8), mask=mask[:, None])

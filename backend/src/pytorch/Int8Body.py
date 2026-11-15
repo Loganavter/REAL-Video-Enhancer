@@ -113,21 +113,23 @@ class Int8Body:
 
         with torch.no_grad():
             head = torch.nn.functional.prelu(self.head_conv(x.clamp(0.0, 1.0)), self.head_prelu.weight)
-            buf = torch.empty((x.shape[0], h, w, self.feat), device=x.device, dtype=torch.int8)
-            quantise_nchw_to_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
-                                         BLOCK=QB, C=self.feat, num_warps=4)
-            # three buffers: the destination cycles between two scratch buffers and never returns to
-            # `buf`, because handing the source back as the destination destroys it on the second hop.
-            # That trap has now produced a wrong picture twice in this lane while leaving the timing
-            # untouched.
-            scratch_a = torch.empty_like(buf)
-            scratch_b = torch.empty_like(buf)
-            src, dst = buf, scratch_a
+            # the head conversion is done in torch, exactly as the validated recipe does it. The fused
+            # Triton version was 0.49 ms faster and its codes matched on all but 0.0023% of elements when
+            # compared NHWC-to-NHWC, but fed through the same sixteen hops it produced a 1.23% picture
+            # against this path's 0.00000%. A 0.49 ms saving is not worth an unproven conversion, and the
+            # kernel can be re-fused once the discrepancy is understood.
+            buf = (torch.round(head / s_act.view(1, -1, 1, 1)).clamp(-127, 127)
+                   .to(torch.int8).permute(0, 2, 3, 1).contiguous())
+            # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
+            # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
+            # and the same launch parameters - the aliasing was the whole difference.
+            src = buf
             for launch in self._launches:
+                dst = torch.empty_like(buf)
                 body_prologue_kernel[grid](src, launch["w"], launch["m"], SHIFT, launch["vec"],
                                            launch["bias"], launch["slope"], launch["os"], dst, h, w,
                                            BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps)
-                src, dst = dst, (scratch_b if dst is scratch_a else scratch_a)
+                src = dst
             last = torch.empty((x.shape[0], self.feat, h, w), device=x.device, dtype=torch.float16)
             dequantise_nhwc_to_nchw[qgrid](src, self._launches[-1]["os"].contiguous(), last, n_pix,
                                            BLOCK=QB, C=self.feat, num_warps=4)

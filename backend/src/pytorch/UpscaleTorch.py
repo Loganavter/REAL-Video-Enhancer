@@ -548,6 +548,17 @@ class UpscalePytorch:
         body = getattr(self, "int8_body", None)
         if body is None:
             return None
+        if str(getattr(self, "int8FitBody", "off")).lower() != "on":
+            # Accuracy is no longer the obstacle: the body certifies at 0.00000% on 256, 512 and 1080.
+            # Speed is - 72.49 ms against the app's own fp16 engine at 79.93 ms is 1.103x, and the plan's
+            # kill line is 1.15x. The whole margin sits in one fused head conversion that currently
+            # produces codes differing from torch's on 98% of elements; until that is fixed and
+            # re-certified, serving this body makes renders slower, so it stays behind an explicit opt-in.
+            import logging
+            logging.getLogger("RVE").warning(
+                "int8 body is available and accurate but 1.103x against the engine (plan kill line 1.15x); "
+                "keeping the fp16 engine. Set int8FitBody=on to force it.")
+            return None
         try:
             frame = getattr(self, "_int8_frame", None)
             if frame is None:

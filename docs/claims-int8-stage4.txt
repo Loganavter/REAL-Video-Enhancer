@@ -28,21 +28,33 @@
 # P(pass) = 0.6 is ABOVE the 0.3 kill threshold, so the lane survives; there is no 'above'
 # directive, so this is recorded rather than asserted.
 
-# ---- the body, wired but self-certifying (stage 6's first half)
-@claim body_share_256      0.00000 %  "Int8Body vs the fp16 model, 256x256" measured
-@claim body_share_512      1.22709 %  "Int8Body vs the fp16 model, 512x512" measured
-@claim body_share_1080     3.53381 %  "Int8Body vs the fp16 model, 1920x1080" measured
-@claim pipeline_share_1080 0.00000 %  "the validated pipeline, same frame, for contrast" measured
-@claim body_self_cert     3.5338  %  "Int8Body.certify() on its own calibration frame, bar 0.1%" measured
-# The body must certify before it may serve a frame. It does not, so the render keeps the fp16 engine.
-@below body_share_1080 bar_share
+# ---- the body: accuracy first, then the stopwatch (2026-11-16)
+# History, kept because it is why the conversion was reverted: with the fused Triton head conversion the
+# body read 3.53381% at 1080p and 1.27525% at 512. Those codes differ from torch's on 98.34% of elements.
+@claim body_before_1080    3.53381 % "Int8Body with the fused Triton head conversion, 1920x1080" measured
+@claim body_before_512     1.27525 % "the same at 512x512" measured
+@claim head_codes_differ   98.34 %   "fused Triton head conversion vs torch, NCHW-to-NCHW, mean offset +16.92" measured
 
-# ---- hop-by-hop: every part verified equal, the composite not
-@claim hop_grids_equal     1 x     "Int8Body vs the pipeline recipe: s_act identical, all 16 launch parameter sets identical" measured
-@claim quantise_max_code   1 code  "the only conversion difference: 0.0023% of elements, 1 code, half-way rounding" measured
-@claim dequantise_max    0.0 float "dequantise_nhwc_to_nchw vs torch dequantise" measured
-@claim tail_max         0.0 float "both tails from the same codes" measured
-@claim recipe_512      0.00000 %   "the pipeline recipe written inline, 512x512" measured
-@claim body_512        1.27525 %   "Int8Body(x), same process, same grids, same launches" measured
-@claim body_512_own    1.22709 %   "Int8Body(x) with its own grids" measured
-@below body_512 bar_share
+# With the head conversion in torch, as the validated recipe does it:
+@claim body_share_256      0.00000 % "Int8Body.certify, 256x256" measured
+@claim body_share_512      0.00000 % "Int8Body.certify, 512x512" measured
+@claim body_share_1080     0.00000 % "Int8Body.certify, 1920x1080" measured
+@claim body_vs_engine_share 0.00001 % "Int8Body vs the app's fp16 TRT engine picture, 1920x1080" measured
+@below body_share_1080 bar_share
+@below body_share_512 bar_share
+@below body_vs_engine_share bar_share
+
+# The stopwatch, against the app's own cached engine, three interleaved rounds:
+@bar gate_ratio 1.40 x
+@bar kill_ratio 1.15 x
+@bar zero_excess 0.0 ms
+@claim engine_ms 79.93 ms "fp16 TensorRT engine, 1920x1080" measured
+@claim body_ms   72.49 ms "Int8Body, correct conversion, same rounds" measured
+@claim body_ratio 1.103 x "derived: engine_ms / body_ms" derived
+@derived body_ratio "79.93 / 72.49 = 1.103, near enough to the other two rounds' 1.102 and 1.109"
+@claim gate_overspend   2.64 ms "body_ms - engine_ms/1.40 = 72.49 - 57.09" derived
+@derived gate_overspend "72.49 - 79.93/1.40 = +15.4 ms against the 1.4 gate; body_ms - engine_ms/1.15 = +2.99 ms against the kill line"
+@claim kill_overspend   2.99 ms "body_ms - engine_ms/1.15 = 72.49 - 69.51" derived
+@derived kill_overspend "72.49 - 79.93/1.15 = +2.99 ms: the body is SLOWER than the kill line allows"
+# Speed is where this stage fails now, not accuracy.
+@below kill_overspend zero_excess
