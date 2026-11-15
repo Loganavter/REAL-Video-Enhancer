@@ -513,6 +513,38 @@ class Render:
             log(f"tile probe failed ({error}); leaving tile reuse off")
             return None
 
+    def _probe_int8_fit(self):
+        """Ask the source whether the int8 body may serve it, before the first frame.
+
+        The question is composition - what the temporal gate shows when a frame is served from an int8
+        reference one frame old - not the engine's own defect: on the Violet pair the own defect passes
+        the bar (0.057%) and composition does not (0.170%), so certifying on own-defect would ship them.
+        A probe failure, or anything unexpected, leaves int8 off; the fp16 engine is the default path.
+        """
+        try:
+            from .utils.Int8Probe import probe
+            result = probe(
+                self.inputFile,
+                model_path=self.upscaleModel,
+                width=int(self.width),
+                height=int(self.height),
+                bar=float(getattr(self, "int8FitBar", 0.1)),
+            )
+            log(result.stats())
+            if not result.use_int8:
+                log(f"  {result.reason}")
+            verdict = "int8" if result.use_int8 else "fp16"
+            if verdict == "int8":
+                # say both things: the probe's answer, and the fact that the render still runs the fp16
+                # engine because the Triton body is not wired into the upscale path yet. A log that only
+                # said "int8" would be a promise the render does not keep.
+                log("int8 body: the probe admits this video, but the int8 body is not wired into the "
+                    "render path yet - the fp16 engine runs this pass")
+            return verdict
+        except Exception as error:  # a probe failure must never cost the render
+            log(f"int8 probe failed ({error}); staying on the fp16 engine")
+            return "fp16"
+
     def _calibrate_gate(self, hr_frame):
         """Feed the auto tuner once per rendered frame: the gate's LR delta is free (it was
         just computed) and the HR delta costs one 1/8 luma pool of the output."""
@@ -840,7 +872,11 @@ class Render:
                 self.tileReuse = bool(verdict and verdict.use_tiles)
 
             self.upscaleOption = self.upscalePytorchObject(self.upscaleModel)
-            self.modelScale = self.upscaleOption.getScale() 
+            self.modelScale = self.upscaleOption.getScale()
+            # the int8 body's verdict is taken ONCE, here, before the first frame. It is not a runtime
+            # switch: an engine swapped mid-render would mix two error histories inside one gate window.
+            if str(getattr(self, "int8Fit", "auto")).lower() == "auto":
+                self.int8Fit = self._probe_int8_fit()
             
 
         if self.backend == "ncnn":

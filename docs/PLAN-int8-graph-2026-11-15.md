@@ -1025,6 +1025,37 @@ verified), then the stopwatch.
 
 ## Stage 4 - calibration and the probe in the render path (one day)
 
+**The decision now lands in the render path, and porting it found two more instruments lying.**
+
+`backend/src/utils/Int8Probe.py` is the probe the render can actually call: torch-only, with the calibration
+and the quantised forward **vendored** rather than imported from `scripts/`, because `scripts/` is not shipped with
+the app and a probe that imports its measuring stick from a directory that is not there fails in the field. It
+returns a verdict plus both numbers; every exception path returns "no", so a probe failure costs only its own
+runtime.
+
+Two of my own bugs were caught by porting it, and both would have decided on garbage:
+
+* the `-vf scale=W:H` on the decoder, the same one the offline tool was missing - without it the vendored reader
+  takes the first `w*h*3` bytes of a 4K frame, exactly the 500x error recorded above;
+* the **gate filter**. A pair only reaches the composition if the gate would reuse it (its 32x32 block-mean
+  statistic has to clear the threshold). Without that filter the probe measured scene cuts: `composition 99.749%,
+  peak 255` on `a5_violet` and `0.223%, peak 210` on `a5_chainsaw`, against real values of 0.102% and 0.002%.
+
+With both in place the module reproduces the offline verdicts on every title tested:
+
+| title | engine | composition | verdict | offline verdict |
+|---|---|---|---|---|
+| a5_chainsaw | 0.001% | 0.002% | int8 | int8 |
+| adv_chainsaw | 0.001% | 0.015% | int8 | int8 |
+| c10_p010 | 0.002% | 0.002% | int8 | int8 |
+| a5_violet | 0.011% | **0.102%** | fp16 | fp16 |
+
+`RenderVideo.setupUpscale()` calls `_probe_int8_fit()` once, right after the model is loaded and before the first
+frame, and stores `self.int8Fit`. That placement is the "never switch mid-render" requirement made structural: the
+verdict is computed exactly once per render. The log says both halves of the truth - the probe's answer, and that
+the int8 body is **not wired into the render path yet**, so the fp16 engine runs this pass. A log that only said
+"int8" would be a promise the render does not keep.
+
 **State (2026-11-16): the probe runs, it discriminates, and it had been reading mangled frames.**
 
 `scripts/probe_int8_fit.py` assumes 1920x1080 input, but these clips are **3840x2160**: it took the first
@@ -1074,6 +1105,32 @@ renders - ~15 s of GPU for ten titles.
 the decision must land.
 
 ## Stage 5 - shapes and models (half a day)
+
+**State (2026-11-16): the sweep names the coverage boundary, and it is narrower than the plan assumed.**
+
+| model | feat | scale | shape | image vs engine | fp16 engine | int8 cycle | ratio |
+|---|---|---|---|---|---|---|---|
+| 2x-Futsuu-Anime(1) | 64 | 2 | 1920x1080 | 0.00004% | 80.47 ms | 54.03 ms | **1.489x** (pass) |
+| realesr-animevideov3(1) | 64 | 4 | 1920x1080 | 0.00058% | 87.60 ms | 64.27 ms | **1.363x** (misses by 1.70 ms) |
+| Archivist_AntiLines | **48** | 1 | 1440x1080 | - | - | - | not covered |
+| 2x_ModernSpanimationV1 | - | - | 1440x1080 | - | - | - | not covered |
+
+Two coverage walls, both structural rather than tunable:
+
+* the kernel's channel count is a `tl.constexpr` of 64, so a 48-channel model (`Archivist_AntiLines`) cannot use
+  it at all;
+* `2x_ModernSpanimationV1` has no `body.N.weight` keys - it is not a Compact architecture - so the sixteen-hop
+  assumption does not describe it.
+
+And the gate itself is **model-dependent**: the same body on the 4x model reads 1.363x against the 2x model's
+1.489x, because the 4x tail and upsampler are four times the area and both sides pay them. So "int8 pays" is a
+statement about a model and a shape, not about the lane - the same shape of answer the probe gives per video.
+
+Claims: `docs/claims-int8-stage5.txt` fails on exactly the 4x shortfall, which is the finding.
+
+## Stage 5 - the original plan text
+
+
 
 | what | why |
 |---|---|
