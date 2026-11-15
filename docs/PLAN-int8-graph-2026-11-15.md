@@ -122,8 +122,24 @@ against the **simulation's** intermediate tensor for the same layer, in the same
 kernel is fed the wrong data" from "the kernel's maths is wrong", which the fp16 comparison cannot do because
 both causes look identical there. It needs the simulation to expose its per-layer output, ~20 lines.
 
-Two things are already excluded by measurement: the kernel's dot orientation (exact against `_int_mm` when
-handed one tensor) and the scale granularity (this test).
+**And the kernel is exonerated against the simulation at layer level.** Fed the same quantised input and the
+same quantised weights, kernel and simulation agree to **0.0002 of the signal** (max 0.21 levels, mean 0.000):
+
+| | range | mean |
+|---|---|---|
+| kernel | -8.18 .. 26.80 | 1.32 |
+| simulation | -8.18 .. 26.80 | 1.32 |
+
+So the layer maths is right, the epilogue is right, and the 200x gap lives in **the chaining or in the head
+and tail** - not in the kernel. The next test follows from that and is one comparison: run the pipeline and
+compare it against the *chained* simulation on the same frame, rather than against fp16. If the two chains
+agree, both are correct and the fp16 comparison was measuring the int8 chain's own accumulated error (which
+would then be a finding about 16 hops, not a bug); if they diverge, the difference is in how the pipeline
+passes grids between layers - most likely the per-layer `s_out` coming from fp16 calibration while the chained
+activations drift away from it and clip.
+
+Three things are now excluded by measurement: the kernel's dot orientation (exact against `_int_mm`), the
+scale granularity (3.680 against 3.589), and the kernel's maths against the simulation (0.0002).
 
 **Second pass, still failing, and the layout is the suspect.** Per-layer isolation on 256x256 says every
 layer is wrong on its own (ratio 0.12-3.7 against the fp16 activation, relative error 1.1-4.3), so it is not
