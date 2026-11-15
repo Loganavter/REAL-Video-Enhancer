@@ -623,6 +623,16 @@ class ProcessTab:
                 "--tensorrt_dynamic_shapes",
             ]
 
+        # always explicit, even though "best" is the backend default, and tolerant of an
+        # older settings.txt that predates the key.
+        quality_preset = self.settings.settings.get("quality_preset", "best")
+        if quality_preset not in self.settings.allowedSettings["quality_preset"]:
+            quality_preset = "best"
+        command += [
+            "--quality_preset",
+            f"{quality_preset}",
+        ]
+
         if self.settings.settings["preview_enabled"] == "True":
             command += [
                 "--preview_shared_memory_id",
