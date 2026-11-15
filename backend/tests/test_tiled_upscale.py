@@ -573,17 +573,20 @@ def test_torch_changed_rectangle_recomputes_that_tile_and_its_neighbours(torch_m
 
 
 def test_torch_dilation_can_be_switched_off(torch_mod):
+    """Without dilation the decision is per tile again: one changed block, one recompute."""
     torch = torch_mod
     upscaler = TU.TiledUpscaler(tile_lr=96, halo_lr=HALO_LR, threshold=0.35, max_chain=2,
                                 dilate=False)
     lr = _frame(torch, 160, 288)
     upscaler.plan(lr)
-    upscaler.compose(2, _net(torch, 2), None, lr)
+    hr = upscaler.compose(2, _net(torch, 2), None, lr)
+    before = hr.clone()
 
     changed = lr.clone()
     changed[:, :, 20:60, 110:150] = 1.0
     assert upscaler.plan(changed) == [(0, 96, 96, 192)]
 
+    out = upscaler.compose(2, _net(torch, 2), hr, changed)
     write_y, write_x = TU.hr_write_slice((0, 96, 96, 192), 2)
     inside = torch.zeros_like(hr, dtype=torch.bool)
     inside[:, :, write_y, write_x] = True
