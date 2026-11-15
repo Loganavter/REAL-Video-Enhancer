@@ -1,0 +1,26 @@
+# Stage 1 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage1.txt
+# The point of this file is that every number below carries the population it was measured on.
+
+@bar bar_share 0.1  %
+@bar bar_peak  20   levels
+
+@claim pipeline_share   1.569  %      "1920x1080, same frame, same session" measured
+@claim simulation_share 0.000  %      "1920x1080, same frame, same session" measured
+@claim fp16_block_ms    2.93   ms     "1920x1080, same frame, same session" measured
+@claim int8_block_ms    1.97   ms     "1920x1080, same frame, same session" measured
+@claim block_speedup    1.487  x      "derived: fp16 block / int8 block" derived
+@derived block_speedup "2.93 / 1.97 = 1.487, same shape, same frame"
+
+@claim saturation_layer1 18.52 %      "layer 1, recalibrated chain, values at the clamp" measured
+@claim saturation_sim    0.00  %      "layer 1, simulation, same frame" measured
+
+# The gate: the pipeline must sit under the bar it will be judged by. This line is expected to FAIL -
+# that failure IS the stage-1 result, and the other checks in this file pass.
+@below pipeline_share bar_share
+@below simulation_share bar_share
+
+# A derived ratio must not mix populations: the block speed-up is measured on one frame for both engines.
+@ratio fp16_block_ms int8_block_ms 1.487 "1920x1080, both blocks"
+
+# A verdict over the stage-1 gate: the two shares are the same frame, the same chain.
+@verdict stage1_gate pipeline_share simulation_share

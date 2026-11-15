@@ -252,6 +252,25 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**All three collection strategies now tried, and the last is the most informative.**
+
+| collection | share |
+|---|---|
+| clipped self-calibration (grid from the kernel's own output) | **1.569%** |
+| float walk, pre-clamp maxima | 74.451% |
+| **kernel writes its own pre-clamp per-channel maximum (atomic max)** | **96.585%** |
+
+The third gives grid drift 79% -> 66% -> 324% across passes and a median of 23.81 levels: the feedback
+diverges. That is the informative part - in a chain that is already clipping, the *pre-clamp* maximum is the
+value the clamp was hiding, so the grid it produces is enormous, the next hop quantises against that enormous
+step, and the activations grow rather than settle.
+
+Which means the defect is not the choice of calibration at all: **the pipeline's chain is unstable in
+magnitude**, growing hop by hop, while the simulation's is stable at 0.000%. Calibration strategies only
+decide how fast the instability is discovered. That is where the next investigation starts, and it is a
+different question from every one asked in this stage: not "which grid" but "why does the quantised chain have
+gain > 1 when the float one has gain = 1".
+
 **Pre-clamp collection: tried, and it made things worse (74.451%).** Replacing the collect pass with a float
 walk that records each layer's pre-clamp maximum read `>8 74.451% peak 90` against 1.569% for the clipped
 self-calibration, and saturation rose to 23% by layer 3. The float walk quantises with a per-channel grid
