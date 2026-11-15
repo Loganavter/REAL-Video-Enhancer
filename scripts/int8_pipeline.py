@@ -121,7 +121,9 @@ def main() -> int:
         if isinstance(mod, torch.nn.PReLU):
             hooks.append(mod.register_forward_hook(
                 lambda _m, _i, out, k=name: qq.__setitem__(
-                    k, out.detach().float().abs().flatten(2).quantile(args.pct / 100.0, dim=2).cuda().flatten())))
+                    k, (out.detach().float().abs().flatten(2).amax(dim=2) if args.pct >= 100
+                        else out.detach().float().abs().flatten(2).quantile(args.pct / 100.0, dim=2)
+                        ).cuda().flatten())))
     with torch.no_grad():
         model(x)
     for h in hooks:
@@ -225,7 +227,7 @@ def main() -> int:
         got = (up.float() + torch.nn.functional.interpolate(x, scale_factor=scale_up, mode="nearest").float())
 
     share, peak, median = statistic(ref, got)
-    print(f"pipeline: >8 {share:.3f}% (bar 0.1)  peak {peak:.0f}  median {median:.2f} levels")
+    print(f"pipeline: >8 {share:.5f}% (bar 0.1)  peak {peak:.0f}  median {median:.2f} levels")
     print(f"          16 kernel launches, per-tensor input scales, per-channel output scales")
 
     if args.iters:
