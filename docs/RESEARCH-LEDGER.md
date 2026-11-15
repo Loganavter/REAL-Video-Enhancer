@@ -1228,11 +1228,36 @@ and fp16 models agree to the level (max 0 over the whole frame), so the 37 is no
 What is left is the quantisation, and the null test splits it: **weight quantisation alone accounts for 28
 of the 37 levels**; adding activation quantisation takes it to 37 and the median from 0.75 to 1.93.
 
-That reframes the next lever. The weights already carry per-output-channel scales, so the untried axis is
-the **input** channel dimension - per-input-channel scaling folded into the following weights, which is
-exactly SmoothQuant's migration. The conditioning ratio being flat said "no bad channels to target", not
-"nothing to migrate": the migration acts on the input axis, where no scaling exists at all today.
-Asymmetric activation scales then act on the remaining 9 levels and on the median.
+**And the attribution flips depending on which metric is read, which decides the order.**
+
+| configuration | share above 8 | peak | median |
+|---|---|---|---|
+| weights only | 0.005% | 28 | 0.75 |
+| weights + activations | 0.058% | 37 | 1.93 |
+| **activation contribution** | **+0.053 pp = 91% of the share** | +9 = 24% of the peak | x2.6 |
+
+By the peak the weights own 76%; by the **share** - the statistic the project actually applies, the one
+the shipping opt-in passes at peak 23 - the **activations own 91%**. So asymmetric activation scales are
+the *first* lever, not the remainder: they are free at runtime (the zero point folds into the bias), act
+on the dominant term of the binding metric, and are exact on the head's input where the clamp fixes the
+range to [0, 1].
+
+Two levers are now measured rather than argued:
+
+- **Per-tap weight scales: 2.47x finer at the median** (range 1.66-3.72 over 18 convs). One scale per
+  output channel currently covers all 576 entries of that channel, and the taps differ by more than 2x, so
+  the small taps lose bits. This is exact rather than approximate *in our own kernel*: dequantise inside
+  the tap loop, accumulate per tap in int32 over 64 channels (64*127*127 ~ 1.03M, no overflow) and sum the
+  taps in fp32. Cost is eight extra int32->fp32 conversions and FMAs per output element, ~0.1 ms on a
+  1.91 ms block, and it hits the 28 levels the weights own. TensorRT cannot express this - it may only
+  dequantise after the whole int32 accumulation - so the kernel probe is what opened it.
+- **SmoothQuant migration is a trade, not a free win, on this material**: the correlation between an input
+  channel's activation range and its weight magnitude is **+0.45** at the median across 17 body convs.
+  Correlated means shrinking the activation range inflates the weights, so alpha sets how much peak is
+  paid for share.
+
+The conditioning ratio being flat said "no bad channels to target", not "nothing to migrate": migration
+acts on the input axis, where no scaling exists at all today.
 
 A note for whoever repeats this: `margin` multiplies the calibration maxima, which **coarsens** the grid -
 it buys clipping headroom and pays in rounding. There is no "identity quantisation" direction in that
