@@ -108,10 +108,29 @@ other shapes; they are hypotheses about our case, not results.
 | model rate | **49.4 TF/s** with tiling off, i.e. **above** the fp32-accumulate GEMM peak - so fp16-accumulate kernels are already in use for part of the network |
 | engine built straight from ONNX (no torch-tensorrt), tiling off | 50.27 ms |
 | layer structure with tiling on | only 25 top-level layers, all `__myl_*`: TRT fuses the network into myelin subgraphs, i.e. cross-kernel fusion is happening (this is the mechanism that gave 57.5 -> 52.7 ms) |
-| per-layer tactic names | not readable through `IEngineInspector` in this build (the JSON carries names only); requires `profiling_verbosity=DETAILED` **at build time** |
+| per-layer tactic names | read with `profiling_verbosity=DETAILED` at build time (see below) |
 | `tiling=full` vs `moderate`, same build path | **full is faster**, 3.8% in the app (two runs each: 11.01 vs 10.60/10.59 s on 502 anime frames) and 2-6% in the ONNX audit path |
 | INT8 PTQ (entropy calibration on 8 real frames, INT8+FP16 fallback) | **slower than fp16 in every run**: 73.2 and 94.3 ms against 48-51 ms. Dequant/reformat at C=64 costs more than int8 saves - the "2x for int8 on a 4090" note from issue #4081 does not transfer to this shape |
 | `l2_limit_for_tiling = 24 MiB` | **harmful**: 67.4 and 103.2 ms against 48.6. TRT's own default budget is better; leave the knob alone |
+
+### The accumulator question is settled
+
+A DETAILED build (tiling full, fp16) reports the tactic for every convolution:
+
+```
+16x  sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x64x32
+ 1x  sm75_xmma_fprop_implicit_gemm_indexed_wo_smem_f16f16_f16f16_f16
+ 1x  sm80_xmma_fprop_implicit_gemm_indexed_wo_smem_f16f16_f16f16_f16
+```
+
+`f16f16_f16f16_f16` = fp16 inputs, **fp16 accumulator**. So all 16 body convolutions already run
+with fp16 accumulation: there is no fp32-accumulate share to convert, and the "switch the
+accumulator for ~1.4x" hypothesis is closed. What remains is efficiency against a sustained
+~74 TF/s (we are at ~51-54), and the only measured lever in that space is `tiling=full`
+(+3.8%), not precision.
+
+Also visible: the body uses `tilesize256x64x32`, i.e. a K tile of 32 for C=64 - two K steps per
+convolution, which is where the C=64 penalty shows up numerically.
 
 Caveat on the audit's absolute milliseconds: those engine builds overlapped each other on the
 card (see the measurement protocol in RESEARCH-LEDGER.md), so only the *ratios* and the
