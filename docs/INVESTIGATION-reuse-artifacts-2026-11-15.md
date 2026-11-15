@@ -254,6 +254,12 @@ What each knob actually costs, isolated:
 - **tile threshold 0.35 -> 0.10**: reuse collapses from 57.7% to 3.0% and the render becomes
   *slower* than not using the tile path at all (13.3 s against 11.4 s), so the tile statistic
   cannot be tightened into safety - it either pays for itself with the artifact or pays nothing.
+- **dilating the changed-tile mask** (every tile adjacent to a recomputed one is recomputed too):
+  0.287% -> **0.071%**, peak 98 -> 23, tile reuse 57.7% -> 41.7%, 9.2 -> 10.0 s. Spatial coherence
+  is real and worth 4x, exactly as predicted - neighbouring tiles referencing frames of different
+  ages was half the artifact - but at eight tiles per frame the dilation also eats a third of the
+  reuse, so tile reuse still lands 8x worse than not using it, for 1.7 s. It stays off by default
+  and the mechanism stays on for the opt-in.
 
 ## Result
 
