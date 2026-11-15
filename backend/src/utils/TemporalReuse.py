@@ -501,7 +501,8 @@ class AutoGateTuner:
                  clamp=(2.0, 4.0), noise_floor_quiet: float = 0.35,
                  fallback: str = "strictest", chain_budget: float = 12.0,
                  noise_floor_refuse: float = 1.5,
-                 chain_policy: str = "certified"):
+                 chain_policy: str = "certified",
+                 accept_bar: float = 0.1):
         self.budget = float(budget)
         # The clamp is load-bearing *once the tile path is out of the way*: with tile reuse
         # enabled, thresholds 12 and 4 measured the same (0.288% against 0.287% of pixels above
@@ -546,6 +547,12 @@ class AutoGateTuner:
         # refuses instead of tuning: on grainy material a 32 px block mean cannot tell "the grain
         # changed" from "something moved a pixel", and lowering the threshold only costs reuse.
         self.noise_floor_refuse = float(noise_floor_refuse)
+        # The number acceptance is actually judged by: per cent of pixels more than 8 levels off in
+        # any RGB channel, on the worst frame of the sample. When the caller supplies it (the app
+        # does), the depth and the threshold are certified against THIS, not against a block-mean
+        # proxy - the proxy's 2-level budget and this bar were two different instruments, and every
+        # false "price of quality" in the ledger came from certifying one and measuring the other.
+        self.accept_bar = float(accept_bar)
         self._pairs: list[tuple[float, tuple[float, ...]]] = []
         if fallback not in ("strictest", "off"):
             raise ValueError(f"fallback must be 'strictest' or 'off', got {fallback!r}")
@@ -561,7 +568,7 @@ class AutoGateTuner:
         # double as `chosen is not None`
         self.settled = False
 
-    def add(self, lr_delta: float, hr_deltas) -> None:
+    def add(self, lr_delta: float, hr_deltas, accept_deltas=None) -> None:
         """Record one calibration frame.
 
         ``hr_deltas`` is the error that reusing this frame would cost at every chain depth the
@@ -579,8 +586,14 @@ class AutoGateTuner:
             hr_deltas = (hr_deltas,)
         clean = [float(d) for d in hr_deltas
                  if d == d and d >= 0]          # drop NaN, keep inf as "usable nowhere"
+        if accept_deltas is not None and not isinstance(accept_deltas, (int, float)):
+            accept = [float(d) for d in accept_deltas if d == d and d >= 0]
+        elif accept_deltas is not None:
+            accept = [float(accept_deltas)]
+        else:
+            accept = []
         if clean:
-            self._pairs.append((float(lr_delta), tuple(clean)))
+            self._pairs.append((float(lr_delta), tuple(clean), tuple(accept)))
         if len(self._pairs) >= self.min_pairs:
             self._decide()
 
@@ -600,51 +613,64 @@ class AutoGateTuner:
         # Which chain depth can be certified? A deeper chain reuses more (down to
         # max_chain frames per render) but serves staler references, so the answer can be
         # "1 frame deep" on moving content where "4" was assumed.
-        deepest = max((len(deltas) for _, deltas in self._pairs), default=0)
-        certified: list[tuple[int, float, float]] = []      # (depth, threshold, p90)
+        deepest = max((len(deltas) for _, deltas, _ in self._pairs), default=0)
+        # Two instruments live here. The block-mean proxy is what the tuner has measured since the
+        # beginning (2-level budget at depth 1, 12 deeper); the acceptance statistic is what the
+        # pictures are actually judged by (per cent of pixels above 8 levels in RGB, worst frame).
+        # When the caller feeds the second one - the app does, from the same forced-render
+        # calibration frames - it decides, and the proxy is logged only. Every false "price of
+        # quality" in the ledger came from certifying one instrument and measuring the other.
+        has_accept = self._uses_acceptance()
+        certified: list[tuple[int, float, float]] = []      # (depth, threshold, worst)
         self._certified: list[tuple[int, float, float]] = certified
-        # The best p90 each depth can reach over the whole candidate range, certified or not: the
-        # rejected depths are the ones that decide the chain, so they need to be in the log too.
+        # The best value each depth can reach over the candidate range, certified or not: the
+        # rejected depths decide the chain, so they belong in the log too. The third element is
+        # the limit that applied, so the line reads "d2 worst share 0.20 (limit 0.1)".
         self._depth_p90: list[tuple[int, float, float]] = []
         for depth in range(1, deepest + 1):
-            limit = self.budget if depth == 1 else self.chain_budget
+            limit = self.accept_bar if has_accept else (
+                self.budget if depth == 1 else self.chain_budget)
             best_cand = None
-            best_p90 = None
-            floor_p90 = None
+            best_value = None
+            floor_value = None
             for cand in self.candidates:
-                errs = []
-                for index, (lr, deltas) in enumerate(self._pairs):
-                    if lr > cand or len(deltas) < depth:
+                values = []
+                for index, (lr, deltas, accept) in enumerate(self._pairs):
+                    if lr > cand:
+                        continue
+                    series = accept if has_accept else deltas
+                    if len(series) < depth:
                         continue
                     # Reachability: the reference is only `depth` frames old if the frames between
                     # it and this one were reused too, so a frame whose predecessor failed the
                     # threshold never costs a depth-2 reuse. Measured on Chainsaw Man ep01: calm
                     # frames read deltas of 0.2 at depth 1 and 16-35 at depths 2-4 because they
                     # sit next to a one-frame flash - a configuration the gate cannot build - and
-                    # the p90 of those unreachable reuses pinned the chain to 1 on every title with
-                    # that structure, while forcing chain 4 measured 0.005% at 1.7x.
+                    # the statistic of those unreachable reuses pinned the chain to 1 on every
+                    # title with that structure, while forcing chain 4 measured 0.005% at 1.7x.
                     if any(self._pairs[j][0] > cand
                            for j in range(max(0, index - depth + 1), index)):
                         continue
-                    errs.append(deltas[depth - 1])
-                errs.sort()
-                if len(errs) < max(2, len(self._pairs) // 4):
+                    values.append(series[depth - 1])
+                if len(values) < max(2, len(self._pairs) // 4):
                     continue
-                p90 = errs[min(len(errs) - 1, int(0.90 * (len(errs) - 1)))]
-                # The loosest candidate that still qualifies gives the smallest p90 at this depth:
-                # that is the number worth logging, whether or not it fits the limit.
-                floor_p90 = p90
-                if p90 <= limit:
-                    best_cand, best_p90 = cand, p90
-            if floor_p90 is not None:
-                self._depth_p90.append((depth, floor_p90, limit))
+                if has_accept:
+                    value = max(values)          # acceptance is a worst-frame rule
+                else:
+                    values.sort()
+                    value = values[min(len(values) - 1, int(0.90 * (len(values) - 1)))]
+                floor_value = value
+                if value <= limit:
+                    best_cand, best_value = cand, value
+            if floor_value is not None:
+                self._depth_p90.append((depth, floor_value, limit))
             if best_cand is not None:
-                certified.append((depth, best_cand, best_p90 or 0.0))
+                certified.append((depth, best_cand, best_value or 0.0))
 
         if os.environ.get("RVE_TUNER_DEBUG"):
             print(f"[tuner] budget {self.budget} fallback {self.fallback} "
                   f"pairs {len(self._pairs)}", file=sys.stderr)
-            for lr, deltas in self._pairs:
+            for lr, deltas, _accept in self._pairs:
                 print(f"[tuner]   lr {lr:.2f} at depths "
                       + ", ".join(f"{d:.2f}" for d in deltas), file=sys.stderr)
             for depth, cand, p90 in certified:
@@ -694,6 +720,9 @@ class AutoGateTuner:
         self.veto = None
         self.settled = True
 
+    def _uses_acceptance(self) -> bool:
+        return any(accept for _, _, accept in self._pairs)
+
     def stats(self) -> str:
         if not self.settled:
             return f"auto gate: calibrating ({len(self._pairs)}/{self.min_pairs} frames)"
@@ -706,9 +735,10 @@ class AutoGateTuner:
             return (f"auto gate: no candidate kept the p90 error inside {self.budget} levels "
                     f"(noise floor {self._noise_floor():.2f}), so reuse is OFF - "
                     f"{len(self._pairs)} calibration frames")
-        reuse = 100.0 * sum(1 for lr, _ in self._pairs if lr <= self.chosen) / len(self._pairs)
-        depths = ", ".join(f"d{depth} p90 {p90:.1f} (limit {limit:.0f})"
-                           for depth, p90, limit in self._depth_p90)
+        reuse = 100.0 * sum(1 for pair in self._pairs if pair[0] <= self.chosen) / len(self._pairs)
+        label = "worst share" if self._uses_acceptance() else "p90"
+        depths = ", ".join(f"d{depth} {label} {value:.2f} (limit {limit:g})"
+                           for depth, value, limit in self._depth_p90)
         return (f"auto gate: threshold {self.chosen:.1f}/255, chain "
                 f"{self.chosen_chain or '?'}, veto {self.veto}, "
                 f"noise floor {self._noise_floor():.2f}, would reuse {reuse:.0f}% of the "

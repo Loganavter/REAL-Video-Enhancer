@@ -14,8 +14,8 @@ from src.utils.TemporalReuse import AutoGateTuner  # noqa: E402
 
 
 def _feed(tuner, pairs):
-    for lr, hr in pairs:
-        tuner.add(lr, hr)
+    for pair in pairs:
+        tuner.add(*pair)
 
 
 def test_busy_content_falls_back_to_the_strictest_candidate():
@@ -246,3 +246,39 @@ def test_a_depth_is_only_scored_where_the_gate_could_actually_reach_it():
                   (0.5, (0.2, 9.0)), (0.6, (0.2, 9.0))])
     assert stale.ready
     assert stale.chosen_chain == 1
+
+
+def test_the_tuner_certifies_on_the_acceptance_statistic_when_it_has_one():
+    """The bar the pictures are judged by, not a proxy of it.
+
+    The tuner spent three rounds certifying a block-mean proxy (2 levels at depth 1, 12 deeper) while
+    acceptance is "under 0.1% of pixels more than 8 levels off in any RGB channel, worst frame".
+    Those are different instruments, and every false "price of quality" in the ledger came from
+    certifying one and measuring the other. When the caller supplies the acceptance shares - the app
+    computes them on the same forced-render calibration frames - they decide, and the proxy is only
+    logged.
+    """
+    # proxy says depth 2 is hopeless (30 levels against a 1.0 chain budget); the picture says 0.02%
+    # against a 0.1% bar. The picture wins.
+    picture_fine = AutoGateTuner(seed=5.0, min_pairs=6, budget=2.0, chain_budget=1.0,
+                                 accept_bar=0.1)
+    _feed(picture_fine, [(0.5, (0.2, 30.0), (0.004, 0.02)),
+                         (0.6, (0.2, 30.0), (0.004, 0.02)),
+                         (0.5, (0.2, 30.0), (0.004, 0.02)),
+                         (0.6, (0.2, 30.0), (0.004, 0.02)),
+                         (0.5, (0.2, 30.0), (0.004, 0.02)),
+                         (0.6, (0.2, 30.0), (0.004, 0.02))])
+    assert picture_fine.ready
+    assert picture_fine.chosen_chain == 2, "0.02% is under the 0.1% bar whatever the proxy says"
+
+    # and the converse: a calm proxy with 0.5% of pixels over the bar must not certify depth 2
+    picture_bad = AutoGateTuner(seed=5.0, min_pairs=6, budget=2.0, chain_budget=12.0,
+                                accept_bar=0.1)
+    _feed(picture_bad, [(0.5, (0.2, 0.3), (0.004, 0.5)),
+                        (0.6, (0.2, 0.3), (0.004, 0.5)),
+                        (0.5, (0.2, 0.3), (0.004, 0.5)),
+                        (0.6, (0.2, 0.3), (0.004, 0.5)),
+                        (0.5, (0.2, 0.3), (0.004, 0.5)),
+                        (0.6, (0.2, 0.3), (0.004, 0.5))])
+    assert picture_bad.ready
+    assert picture_bad.chosen_chain == 1, "0.5% is over the bar however calm the proxy looks"
