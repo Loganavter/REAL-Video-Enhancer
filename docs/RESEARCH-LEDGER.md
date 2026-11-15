@@ -26,20 +26,21 @@ Status: **adopted** (on by default), **opt-in** (code exists, off by default), *
 
 ## The model itself: what is left
 
-Per frame the network is 1.85 TFLOP at 1440x1080 (2.48 at 1920x1080) and runs at 35.1 /
-45.7 ms, i.e. **53-54 TFLOP/s**, or ~58 TFLOP/s at the `tiling=full` default (derived, see
-MODEL.md §2). That is ~78% of a *borrowed* 74 TF/s sustained fp16-accumulate figure, and we
-do **not** have a trustworthy ceiling for this conv shape - MODEL.md §3 explains why the
-standalone-conv experiments cannot supply one. So "kernel-level tuning is finished" is not
+Per frame the network is 1.85 TFLOP at 1440x1080 (2.48 at 1920x1080). Three same-configuration
+absolutes have been measured - 45.7, 51.37 and 57.37 ms - which is **43-54 TFLOP/s**, and the spread
+is the host (clock state, no pinning available), not the kernel. That is **58-73%** of a *borrowed*
+74 TF/s sustained fp16-accumulate figure. We do **not** have a trustworthy ceiling for this conv
+shape - MODEL.md §3 explains why the standalone-conv experiments cannot supply one. So "kernel-level tuning is finished" is not
 something the numbers say. What the numbers say is narrower, and still useful:
 
 - the model runs faster than any of its own convolutions measured standalone, and the only
   compute-dominated standalone conv (256->256, 49 TF/s) is *slower* than the whole network;
-- seven kernel-level ideas are closed by measurement (below: E5, E9', E12, E13, E14, E17, and E19's
-  tiling hypothesis), five are open and all five are quantified: E16 Winograd, E18 layout kernels
-  (0.81 ms), E19 the head convolution's 3-channel shape (2.40 ms), E20 head/tail tactics (1.31 ms),
-  E21 upsampler/reshape fusion (1.04 ms) - the last four are 5.56 ms, 9.8% of the frame, and E10
-  (hand-written kernels) is untested;
+- eight ideas are closed by measurement (E5, E9', E12, E13, E14, E17, E19 with its tiling
+  hypothesis, E24 with its tail hypothesis); what is left of the non-GEMM 8.11 ms of the frame is
+  **2.68 ms, 4.7%**: the layout kernels (E18, 0.81), the tail convolution's 0.83 against its 1.09
+  traffic floor (E20's tail half - its head half closed with E19), and the upsampler plus myelin's
+  reshape/add (E21, 1.04). E16 Winograd and E10 hand-written kernels are untested, and E22 is a build
+  path rather than a lever;
 - every per-layer time is spread evenly (1.3-3.1 ms over 18 conv subgraphs, top layer 3.15 ms), so
   no single layer is the lever - and `nsys` has since confirmed the shape: 25 launches, 48.7 of
   56.8 ms in the 16 body GEMMs, 8.1 ms in everything else, no launch gap.
@@ -486,6 +487,31 @@ Two method notes, because this row cost two wrong headlines:
 
 - a single pair is not a measurement for anything under ~10% on this host, and I quoted one;
 - cross-run drift over a session this long is now the dominant error term, not the configuration.
+
+## E24: the tail convolution does not fuse, and padding it makes things worse (measured)
+
+The x2 compact model's tail emits **12** channels (3 x scale^2) and 12 is not a multiple of 8 - the
+same alignment rule that kept the head out of myelin - so the obvious next move was to pad it to 16,
+trim the extra four before the `PixelShuffle`, and collect the same kind of win. Measured on the same
+model at 256x256, two raw TRT builds:
+
+| build | time | layers | fusion | correlation |
+|---|---|---|---|---|
+| head padding only (what ships) | **1.32 ms** | 25 | 16 | 2 |
+| head **and** tail padding | 1.35 ms (+2.1%) | 25 | **still 16** | 2 |
+
+So the tail never enters myelin even when it is aligned: the fusion count does not move, no new slice
+or shuffle layer appears, and the time gets worse rather than better. The alignment reason that
+explains the head does not transfer - the tail's consumers (`PixelShuffle` and the residual add) are
+themselves not myelin-friendly, so there is nothing for the epilogue to attach to.
+
+Recorded as a **negative result with the mechanism**: the hypothesis was "the same defect as the
+head", and the graph says the tail's defect is different. A 1080p confirmation was not run, because the
+indicator that refuted it (the fusion count) is a property of the graph, not of the pixel count.
+
+The tail's 1.92 ms against a 1.09 ms traffic floor is therefore **not** a padding problem, and the
+0.83 ms gap has no owner yet - which is why E20's "tail tactics" half stays open while its head half
+closed with E19.
 
 ## E23: the 71% regression was a graph break, and the fix is one operation
 

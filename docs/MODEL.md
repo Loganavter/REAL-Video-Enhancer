@@ -384,10 +384,13 @@ counter is read (§6, item 2).
    investigation, not as a recommendation. The verdict is therefore "the quantised block boundary costs more than int8
    saves on this architecture", not "no int8 kernel exists".
 
-6. ~~The non-GEMM 14% of the frame~~ **the largest piece of it is closed**: padding the head
-   convolution to 8 input channels moved it into myelin and removed the separate PReLU pass, worth
-   **5.8% of the model** with an unchanged picture (§4, ledger E19). What remains of the 8.11 ms is
-   E20's tail tactics and E21's upsample/reshape; the head half of E20 went with the fusion.
+6. ~~The non-GEMM 14% of the frame~~ **the largest piece of it is closed, and the rest is now one
+   number.** Padding the head convolution to 8 input channels moved it into myelin and removed the
+   separate PReLU pass: 5.8% of the model on a raw build, **3.5% of engine time through the app's
+   build path** (§4, ledger E19/E23). What is left of the 8.11 ms is **2.68 ms, 4.7% of the frame** -
+   layout kernels 0.81 (E18), the tail convolution's 0.83 gap over its 1.09 traffic floor (E20's tail
+   half), and the upsampler plus myelin's reshape/add 1.04 (E21). The tail was tried with the same
+   padding trick and **did not fuse** (E24), so its gap has no owner yet.
 7. **The non-GEMM 14% of the frame was mapped and quantified.** `nsys` puts 8.11 ms of the 56.8 ms
    outside the 16 body GEMMs, and four of the five pieces have a measured size and a named fix:
    the one unfused PReLU (E19, 2.40 ms - it sits behind the *head* convolution, and three builds at

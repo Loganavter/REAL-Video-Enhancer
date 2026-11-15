@@ -147,9 +147,11 @@ the opt-in dynamic mode falls back; any export or build failure falls back to to
 deleting the stale plan. The head padding on top of that is **-3.5% of engine time and -3.0% of wall** and ships **on**, once the
 pad was written as `torch.cat` instead of `F.pad`: `F.pad` has no dynamo converter, so the node fell
 back to torch and cut the engine into two TRT sub-graphs, which is where the "+71% through this app's
-build path" that an earlier revision of this file reported came from (ledger E23). What remains of
-the 8.11 ms: tail convolution tactics and the upsampler plus myelin's reshape/add, **~1.9 ms** once the
-head's share is gone, and the layout kernels **0.81 ms** (ledger E20-E21, E18).
+build path" that an earlier revision of this file reported came from (ledger E23). What remains of the
+8.11 ms is **2.68 ms, 4.7% of the frame**: the layout kernels 0.81 (E18), the tail convolution's 0.83
+gap over its 1.09 traffic floor (E20's tail half), and the upsampler plus myelin's reshape/add 1.04
+(E21). The tail does **not** respond to the head's padding trick - measured, the fusion count does not
+move and the time gets worse (E24).
 
 ### The link is PCIe 3.0 x8, and pinning is not the lever
 
