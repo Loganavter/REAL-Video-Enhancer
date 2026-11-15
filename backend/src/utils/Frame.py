@@ -43,6 +43,8 @@ class Frame:
         self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
         # set by the upscaler: emit yuv420p10le instead of RGB bytes (10-bit SDR path)
         self.yuv10_output = False
+        # set by the reader: the incoming bytes are packed yuv420p10le, not RGB
+        self.yuv10_input = False
         self.dtype = dtype
         
         self.tensor_conversions = 0
@@ -99,9 +101,14 @@ class Frame:
         
         if self._tensor is None:
             if self._bytes is not None:
-                self._tensor = _torch_utils.frame_to_tensor(
-                    self._bytes, _pytorch_stream, _pytorch_device, _pytorch_dtype, 
-                )
+                if getattr(self, "yuv10_input", False):
+                    self._tensor = _torch_utils.yuv420p10_to_tensor(
+                        self._bytes, _pytorch_stream, _pytorch_device, _pytorch_dtype,
+                    )
+                else:
+                    self._tensor = _torch_utils.frame_to_tensor(
+                        self._bytes, _pytorch_stream, _pytorch_device, _pytorch_dtype, 
+                    )
             elif self._np is not None:
                 self._tensor = _torch_utils.np_to_tensor(
                     self._np, _pytorch_device, _pytorch_dtype

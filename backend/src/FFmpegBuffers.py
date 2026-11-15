@@ -70,7 +70,10 @@ class FFmpegRead(Buffer):
         self.yuv420pMOD = self.input_pixel_format == "yuv420p" and not self.high_bitdepth
         self.ffmpeg_path = ffmpeg_path
         #self.yuv420pMOD = False
-        if self.high_bitdepth:
+        if self.high_bitdepth and not self.hdr_mode:
+            # 3 bytes/pixel: the GPU does YUV->RGB itself (see TorchUtils.yuv420p10_to_tensor)
+            self.inputFrameChunkSize = width * height * 3
+        elif self.high_bitdepth:
             self.inputFrameChunkSize = width * height * 6
         else:
             if self.yuv420pMOD:
@@ -95,7 +98,10 @@ class FFmpegRead(Buffer):
         ]
 
         filter_string = f"crop={self.width}:{self.height}:{self.borderX}:{self.borderY},scale=w=iw*sar:h=ih"
-        if not self.hdr_mode:
+        if self.high_bitdepth and not self.hdr_mode:
+            # YUV in, YUV out: only the SAR fix applies, no colour matrix involved
+            pass
+        elif not self.hdr_mode:
             # swscale defaults to bt601 when nothing says otherwise, which shifts chroma on
             # a bt709 source (measured |dU| ~6.6 levels without these two options).
             if self.color_space and not self.yuv420pMOD:
@@ -114,7 +120,8 @@ class FFmpegRead(Buffer):
             "-f",
             "image2pipe",
             "-pix_fmt",
-            "rgb48le" if self.high_bitdepth else (self.input_pixel_format if self.yuv420pMOD else "rgb24"),
+            ("yuv420p10le" if not self.hdr_mode else "rgb48le") if self.high_bitdepth
+            else (self.input_pixel_format if self.yuv420pMOD else "rgb24"),
             #"rgb48le" if self.hdr_mode else "rgb24",
             "-vcodec",
             "rawvideo",
@@ -153,6 +160,7 @@ class FFmpegRead(Buffer):
                 break
             frame = Frame(self.backend, self.width, self.height, self.device, self.gpu_id, self.hdr_mode, self.dtype,
                           high_bitdepth=self.high_bitdepth)
+            frame.yuv10_input = bool(self.high_bitdepth and not self.hdr_mode)
             frame.set_frame_bytes(chunk)
             self.readQueue.put(frame)
         self.readQueue.put(None)
