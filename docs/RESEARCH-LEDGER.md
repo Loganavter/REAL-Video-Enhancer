@@ -329,12 +329,17 @@ than from a measurement of the config that ships.)
 The acceptance rule and the presets were derived from two clips. Three actual BDs, 8 s cuts at
 5:00, `--quality_preset best` against an ungated render of the same cut:
 
-| title | noise floor | threshold / chain | reuse | time | RGB > 8 levels, worst of 15 frames |
-|---|---|---|---|---|---|
-| Chainsaw Man ep01 (digital, added grain) | 0.95 | 4.0 / 1 | 37.7% | 1.38x | **0.005%** (peak 15) |
-| Violet Evergarden ep01 (clean digital) | 1.32 | 4.0 / 1 | 48.9% | 1.60x | **0.097%** (peak 20) |
-| Cowboy Bebop ep01 (35 mm TV, deinterlaced) | 2.27 | refused | 0% | 1.01x | **0.470%** at threshold 4, **0.469%** at threshold 2 |
-| clean anime clip + synthetic grain 4 (the sweep below) | 1.84 | refused at the current limit | 0% | 1.01x | **0.105%** when it was allowed |
+| title | noise floor | decision, reuse as a count | time | RGB > 8 levels, worst of 15 frames |
+|---|---|---|---|---|
+| Chainsaw Man ep01 (digital, added grain) | 0.95 | thr 4.0, chain 1 - **83/220** (37.7%) | 9.94 s against 13.50 s (**1.36x**) | **0.005%** (peak 15) |
+| Violet Evergarden ep01 (clean digital) | 1.32 | thr 4.0, chain 1 - **107/219** (48.9%) | 8.58 s against 13.31 s (**1.55x**) | **0.097%** (peak 20) - 3% of margin |
+| Cowboy Bebop ep01 (35 mm TV, deinterlaced) | 2.27 | **refused** - 0/240 | 14.79 s against 14.93 s, **byte-identical 240/240** | 0.000% now; **0.470%** at threshold 4 and **0.469%** at 2 when it was still allowed |
+| clean anime clip + synthetic grain 4 (sweep below) | 1.84 | **refused** at the 1.5 limit - 0/498 | 31.61 s against 31.11 s, **byte-identical 498/498** | 0.000% now; **0.105%** when it was still allowed |
+
+Every row above was re-derived from the renders on disk while auditing this section, which moved two
+ratios by a few percent against their first run (Violet 1.60 -> 1.55, Chainsaw Man 1.38 -> 1.36):
+the defect numbers reproduced to the last digit, the times did not, which is the rule at the top of
+this file applied to itself.
 
 What this settled:
 
@@ -346,8 +351,8 @@ What this settled:
   against worst-frame defect: **0.95 -> 0.005%, 1.32 -> 0.097%, 1.84 -> 0.105%, 2.27 -> 0.470%**.
   So the 0.1% bar is crossed between 1.32 and 1.84, and the limit is **1.5**, not the 2.0 this row
   first shipped with - 2.0 let the 1.84 clip through at 0.105%, i.e. past the bar by 5%. On Bebop
-  the refusal gives a render that is **byte-identical to the ungated one** (240/240 frames), which
-  is the honest outcome for 1.15x.
+  the refusal gives a render that is **byte-identical to the ungated one** (240/240 frames) at
+  14.79 s against 14.93 s - an honest 1% instead of a visible 0.470% for a nominal 1.15x.
 - **The chain is the adaptive knob, not the threshold.** The clamp at 4 was hit on all three
   titles while the chain was cut to 1 on all three; that is the opposite of what the two-clip
   derivation suggested.

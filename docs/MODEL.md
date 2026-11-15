@@ -196,10 +196,12 @@ counter is read (§6, item 2).
 
 ## 6. What is left to measure (short list)
 
-1. ~~Per-layer time~~ **done without trtexec, via `trt.IProfiler`**: 23 layers, 51.95 ms total,
-   the top layer at 3.91 ms and the 18 fused conv subgraphs spread evenly at 2.2-3.9 ms each.
-   There is **no outlier** - so no single layer to fix, and the `sm75_` lead is a uniform tactic
-   choice rather than one bad kernel. What is still missing is the split of that time into
+1. ~~Per-layer time~~ **done without trtexec, via `trt.IProfiler`**: the fp16 engine has 25 layers,
+   23 of which report time (16 of them are the fused conv+PReLU myelin blocks, 2 the head and tail
+   convolutions). The top layer is 3.15 ms and the 18 conv subgraphs spread evenly at 1.3-3.1 ms;
+   there is **no outlier** - so no single layer to fix, and the `sm75_` lead is a uniform tactic
+   choice rather than one bad kernel. The session total reads 51.95 ms here and 55.3 in a later
+   one, so only the shape is portable. What is still missing is the split of that time into
    compute versus DRAM, which needs `nsys` (item 2).
 2. **nsys** tensor-active % and DRAM bytes with clocks pinned (`nvidia-smi -lgc`): that is the
    actual localisation of the gap; everything in §3 is inference.

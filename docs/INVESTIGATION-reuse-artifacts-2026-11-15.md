@@ -215,11 +215,20 @@ operations to `max box(|I - I_ref|)` costs one subtraction, one abs and one pool
 | `max box(\|diff\|)` | 4 | 70.2% | 0.004% |
 | `max box(\|diff\|)` | 8 | 70.2% | 0.004% |
 
-That table cannot explain its own result, and the reason is the fourth significant figure. The same
-share appears at thresholds 2, 4 and 8 while the defect changes 115x; if the same frames were reused
-the renders would be identical, so "70.2%" is hiding the only thing that matters - 0.1% of 502
-frames is **half a frame**, and under a worst-frame metric one frame is the whole answer. Re-run on
-the shipping statistic with integer counts (same clip, tiles off, chain fixed at 4):
+That table cannot explain its own result, and it took two attempts to see why - the share is doing
+two different jobs in it:
+
+- **Across statistics** (row 3 against row 6, both at threshold 8) the share is the same and the
+  defect differs 115x, which is not a contradiction: the statistic decides *which* frames are
+  deemed calm, so the same percentage is a different **set**. `|box - box|` accepted frames that had
+  moved inside a block, and those are the ones that cost 0.460%. The share cannot express that,
+  by construction.
+- **Within a statistic**, the share is rounded to one decimal, and 0.1% of 502 frames is **half a
+  frame**: two runs a frame apart print the same percentage. Under a worst-frame metric that one
+  frame is the entire answer.
+
+The first point is the statistic change itself; the second is a publication rule, and it is why the
+counts below exist (same clip, tiles off, chain fixed at 4):
 
 | threshold | reuse | time | share above 8 levels, worst |
 |---|---|---|---|
@@ -227,7 +236,9 @@ the shipping statistic with integer counts (same clip, tiles off, chain fixed at
 | 4 | 362/498 | 9.97 s | 0.016% |
 | 8 | 370/498 | 9.51 s | 0.015% |
 
-Eleven frames separate threshold 2 from threshold 8 and the defect is flat at 0.015-0.016%. So the
+Eleven frames separate threshold 2 from threshold 8, and the defect is flat at 0.015-0.016% -
+which is a real result here, not a rounding artefact, because the counts are the same order as the
+frame difference. So the
 new statistic is both more accurate at the same reuse and, more usefully, its safe range is three
 times wider: the old one falls off a cliff between 4 and 8, the new one is still fine at 8. That
 margin is what the tuner actually needs - the failure this investigation started with was a
