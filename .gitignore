@@ -4,8 +4,3 @@ github/
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Dev files
-build
-dist
-venv

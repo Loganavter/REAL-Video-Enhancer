@@ -511,6 +511,18 @@ tensorrtDenoiseModels = {
         "1",
         "drunet"
     ),
+    "DNcnn (Fast)": (
+        "dncnn_color_blind.pth",
+        "dncnn_color_blind.pth",
+        1,
+        "scunet",
+    ),
+    "SCUNet Color (Slow)": (
+        "scunet_color_real_psnr.pth",
+        "scunet_color_real_psnr.pth",
+        1,
+        "scunet",
+    ),
 }
 """"DeH264 RTMoSR Unshuffle (UltraFast)": (
         "1xDeH264_RTMoSR_Unshuffle.ncnn",

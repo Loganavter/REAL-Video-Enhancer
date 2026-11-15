@@ -7,8 +7,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange
-from einops.layers.torch import Rearrange
 
 from ....util import store_hyperparameters
 from ....util.timm import DropPath, trunc_normal_
@@ -74,13 +72,16 @@ class WMSA(nn.Module):
             return attn_mask
 
         s = p - shift
-        attn_mask[-1, :, :s, :, s:, :] = True
-        attn_mask[-1, :, s:, :, :s, :] = True
-        attn_mask[:, -1, :, :s, :, s:] = True
-        attn_mask[:, -1, :, s:, :, :s] = True
-        attn_mask = rearrange(
-            attn_mask, "w1 w2 p1 p2 p3 p4 -> 1 1 (w1 w2) (p1 p2) (p3 p4)"
-        )
+        # NOTE: negative indices (attn_mask[-1, ...]) trip up TensorRT's dynamo
+        # decomposition of the resulting `fill_` op ("upper bound and lower
+        # bound inconsistent with step sign"), so use explicit positive
+        # indices (h - 1 / w - 1) instead, which are equivalent here.
+        attn_mask[h - 1, :, :s, :, s:, :] = True
+        attn_mask[h - 1, :, s:, :, :s, :] = True
+        attn_mask[:, w - 1, :, :s, :, s:] = True
+        attn_mask[:, w - 1, :, s:, :, :s] = True
+        # equivalent to rearrange(attn_mask, "w1 w2 p1 p2 p3 p4 -> 1 1 (w1 w2) (p1 p2) (p3 p4)")
+        attn_mask = attn_mask.reshape(1, 1, h * w, p * p, p * p)
         return attn_mask
 
     def forward(self, x):
@@ -98,30 +99,29 @@ class WMSA(nn.Module):
                 dims=(1, 2),
             )
 
-        x = rearrange(
-            x,
-            "b (w1 p1) (w2 p2) c -> b w1 w2 p1 p2 c",
-            p1=self.window_size,
-            p2=self.window_size,
-        )
-        h_windows = x.size(1)
-        w_windows = x.size(2)
+        p = self.window_size
+        b, H, W, c = x.shape
+        h_windows = H // p
+        w_windows = W // p
         # square validation
         # assert h_windows == w_windows
 
-        x = rearrange(
-            x,
-            "b w1 w2 p1 p2 c -> b (w1 w2) (p1 p2) c",
-            p1=self.window_size,
-            p2=self.window_size,
-        )
+        # equivalent to rearrange(x, "b (w1 p1) (w2 p2) c -> b (w1 w2) (p1 p2) c", p1=p, p2=p)
+        x = x.view(b, h_windows, p, w_windows, p, c)
+        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+        x = x.reshape(b, h_windows * w_windows, p * p, c)
+
         qkv = self.embedding_layer(x)
-        q, k, v = rearrange(
-            qkv, "b nw np (threeh c) -> threeh b nw np c", c=self.head_dim
-        ).chunk(3, dim=0)
+        # equivalent to rearrange(qkv, "b nw np (threeh c) -> threeh b nw np c", c=self.head_dim)
+        nw, np_ = qkv.shape[1], qkv.shape[2]
+        threeh = qkv.shape[-1] // self.head_dim
+        qkv = qkv.view(b, nw, np_, threeh, self.head_dim)
+        qkv = qkv.permute(3, 0, 1, 2, 4).contiguous()
+        q, k, v = qkv.chunk(3, dim=0)
         sim = torch.einsum("hbwpc,hbwqc->hbwpq", q, k) * self.scale
         # Adding learnable relative embedding
-        sim = sim + rearrange(self.relative_embedding(), "h p q -> h 1 1 p q")
+        # equivalent to rearrange(self.relative_embedding(), "h p q -> h 1 1 p q")
+        sim = sim + self.relative_embedding().unsqueeze(1).unsqueeze(1)
         # Using Attn Mask to distinguish different subwindows.
         if self.type != "W":
             attn_mask = self.generate_mask(
@@ -131,14 +131,17 @@ class WMSA(nn.Module):
 
         probs = nn.functional.softmax(sim, dim=-1)
         output = torch.einsum("hbwij,hbwjc->hbwic", probs, v)
-        output = rearrange(output, "h b w p c -> b w p (h c)")
+        # equivalent to rearrange(output, "h b w p c -> b w p (h c)")
+        h_, b_, w_, p_, c_ = output.shape
+        output = output.permute(1, 2, 3, 0, 4).contiguous().reshape(b_, w_, p_, h_ * c_)
         output = self.linear(output)
-        output = rearrange(
-            output,
-            "b (w1 w2) (p1 p2) c -> b (w1 p1) (w2 p2) c",
-            w1=h_windows,
-            p1=self.window_size,
-        )
+        # equivalent to rearrange(output, "b (w1 w2) (p1 p2) c -> b (w1 p1) (w2 p2) c", w1=h_windows, p1=p)
+        b_, nw, np_, c_ = output.shape
+        w2 = nw // h_windows
+        p2 = np_ // p
+        output = output.view(b_, h_windows, w2, p, p2, c_)
+        output = output.permute(0, 1, 3, 2, 4, 5).contiguous()
+        output = output.reshape(b_, h_windows * p, w2 * p2, c_)
 
         if self.type != "W":
             output = torch.roll(
@@ -264,9 +267,9 @@ class ConvTransBlock(nn.Module):
             self.conv1_1(x), (self.conv_dim, self.trans_dim), dim=1
         )
         conv_x = self.conv_block(conv_x) + conv_x
-        trans_x = Rearrange("b c h w -> b h w c")(trans_x)
+        trans_x = trans_x.permute(0, 2, 3, 1).contiguous()  # b c h w -> b h w c
         trans_x = self.trans_block(trans_x)
-        trans_x = Rearrange("b h w c -> b c h w")(trans_x)
+        trans_x = trans_x.permute(0, 3, 1, 2).contiguous()  # b h w c -> b c h w
         res = self.conv1_2(torch.cat((conv_x, trans_x), dim=1))
         x = x + res
 
