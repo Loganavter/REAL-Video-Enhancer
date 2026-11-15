@@ -203,7 +203,7 @@ def test_get_frame_tensor_from_bytes_uses_cpu_mock(frame_module, monkeypatch):
 	arr = _make_sdr_np(width, height)
 	raw = arr.tobytes()
 
-	def _init_pytorch_stub(device, gpu_id, dtype, width, height, hdr_mode):
+	def _init_pytorch_stub(device, gpu_id, dtype, width, height, hdr_mode, high_bitdepth=None):
 		frame_module._torch = torch
 		frame_module._torch_utils = MockTorchUtilsCPU(width=width, height=height, hdr_mode=hdr_mode)
 		frame_module._pytorch_stream = None
@@ -235,7 +235,7 @@ def test_set_frame_tensor_type_check_with_mock(frame_module, monkeypatch):
 	torch = pytest.importorskip("torch")
 	Frame = frame_module.Frame
 
-	def _init_pytorch_stub(device, gpu_id, dtype, width, height, hdr_mode):
+	def _init_pytorch_stub(device, gpu_id, dtype, width, height, hdr_mode, high_bitdepth=None):
 		frame_module._torch = torch
 		frame_module._torch_utils = MockTorchUtilsCPU(width=width, height=height, hdr_mode=hdr_mode)
 		frame_module._pytorch_stream = None
