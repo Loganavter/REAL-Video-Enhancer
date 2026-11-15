@@ -44,28 +44,29 @@
 @below body_share_512 bar_share
 @below body_vs_engine_share bar_share
 
-# The stopwatch, against the app's own cached engine, three interleaved rounds:
+# The stopwatch, against the app's own cached engine, three interleaved rounds per condition:
 @bar gate_ratio 1.40 x
 @bar kill_ratio 1.15 x
 @bar zero_excess 0.0 ms
-@claim engine_ms 79.93 ms "fp16 TensorRT engine, 1920x1080" measured
-@claim body_ms   72.49 ms "Int8Body, correct conversion, same rounds" measured
-@claim body_ratio 1.103 x "derived: engine_ms / body_ms" derived
-@derived body_ratio "79.93 / 72.49 = 1.103, near enough to the other two rounds' 1.102 and 1.109"
-@claim gate_overspend   2.64 ms "body_ms - engine_ms/1.40 = 72.49 - 57.09" derived
-@derived gate_overspend "72.49 - 79.93/1.40 = +15.4 ms against the 1.4 gate; body_ms - engine_ms/1.15 = +2.99 ms against the kill line"
-@claim kill_overspend   2.99 ms "body_ms - engine_ms/1.15 = 72.49 - 69.51" derived
-@derived kill_overspend "72.49 - 79.93/1.15 = +2.99 ms: the body is SLOWER than the kill line allows"
-# Speed is where this stage fails now, not accuracy.
-@below kill_overspend zero_excess
 
-# ---- the head conversion, resolved: it was addressing, not arithmetic
-@claim head_noncontiguous  0 x     "act.is_contiguous() is False, so ch*n_pix+pix read the wrong elements" measured
-@claim fused_contig_512  0.00000 % "fused Triton conversion fed head.contiguous(), 512x512" measured
-@claim fused_contig_1080 0.00000 % "the same at 1920x1080" measured
-@claim fused_body_ms    89.25 ms  "the fused path, correct, 1920x1080" measured
-@claim fused_ratio       0.893 x  "derived: 79.86 / 89.25 - the fusion is a LOSS when correct" derived
-@derived fused_ratio "79.86 / 89.25 = 0.893: .contiguous() on a 64-channel half tensor costs more than the four torch passes"
-@claim torch_head_ms    72.49 ms  "the torch head conversion, same rounds" measured
-@claim torch_head_ratio  1.103 x  "derived: 79.86 / 72.49" derived
-@derived torch_head_ratio "79.86 / 72.49 = 1.103, and 1.102/1.104/1.105 across the three rounds"
+@claim engine_idle_ms   79.86 ms "fp16 TensorRT engine, 1920x1080, NVENC idle" measured
+@claim body_idle_ms     60.41 ms "Int8Body with the NHWC-aware head conversion, same rounds" measured
+@claim ratio_idle        1.322 x "derived: engine_idle_ms / body_idle_ms" derived
+@derived ratio_idle "79.86 / 60.41 = 1.322; the three rounds read 1.319 / 1.322 / 1.327"
+@claim engine_nvenc_ms  91.65 ms "fp16 engine, h264_nvenc encoding concurrently" measured
+@claim body_nvenc_ms    69.03 ms "Int8Body, same condition" measured
+@claim ratio_nvenc       1.328 x "derived: engine_nvenc_ms / body_nvenc_ms" derived
+@derived ratio_nvenc "91.65 / 69.03 = 1.328; rounds read 1.328 / 1.326 / 1.328"
+
+# The verdict: the lane PAYS, and misses the 1.40 gate by a measured amount.
+@claim kill_excess   -9.13 ms "body_idle_ms - engine_idle_ms/1.15 = 60.41 - 69.45" derived
+@derived kill_excess "60.41 - 79.86/1.15 = -9.13 ms: 9.13 ms FASTER than the kill line, so the lane pays"
+@claim gate_excess    3.34 ms "body_idle_ms - engine_idle_ms/1.40 = 60.41 - 57.04" derived
+@derived gate_excess "60.41 - 79.86/1.40 = +3.34 ms SHORT of the 1.40 gate; recorded, not asserted"
+@claim fixed_costs_ms 16.1 ms  "head 5.5 + quantise ~2 + dequantise/tail ~8.4: the non-body work the gate's own note blames" derived
+@derived fixed_costs_ms "60.41 - 16.1 = 44.3 ms of int8 body, which alone would be 1.80x against the engine"
+
+# The plan's kill line is the one that decides whether the lane pays at all. It passes.
+@below kill_excess zero_excess
+# The gate is NOT asserted: the measured shortfall is recorded above, because a claim file that fails
+# on a number it has already measured cannot also state the verdict.

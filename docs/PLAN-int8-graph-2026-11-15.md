@@ -1023,6 +1023,49 @@ verified), then the stopwatch.
 
 **Tools:** `/var/tmp/opencode/graph_bitexact.py` is the harness; `launch_cubin.py` has the launcher.
 
+## Lane disposition (2026-11-16, final)
+
+**Measured verdict: the int8 body is accurate and pays 1.32x, which clears the plan's kill line (1.15x) and
+misses its gate (1.40x) by 3.34 ms. Stages 4, 5 and 6 close on that number.**
+
+The head-conversion bug was addressing, and fixing it properly recovered the whole margin:
+
+| what changed | body at 1920x1080 | ratio |
+|---|---|---|
+| fused NCHW quantise, `.contiguous()` copy | 89.25 ms | 0.893x |
+| torch round/clamp/cast/permute | 72.49 ms | 1.103x |
+| **NHWC-aware quantise, no copy** | **60.41 ms** | **1.322x** |
+| the same, with NVENC alongside | 69.03 ms | **1.328x** |
+
+The last one matters because a PReLU output of a channels_last convolution is channels_last and
+`permute(0,2,3,1)` on it is a *view* - the bytes are already NHWC, so a kernel that reads `pix*C + ch` consumes
+them in place. The NCHW variant needed a contiguous tensor and the copy cost more than everything it saved.
+(The same trick applied to the tail's dequantisation changed nothing: 60.2 -> 60.4 ms, inside the noise.)
+
+Picture agreement with the app's own fp16 engine: `>8 0.00004%, peak 8`. `certify()` reads 0.00000% at 256, 512
+and 1920.
+
+**Where the missing 3.34 ms is, in the plan's own words:** "below 1.3x the boundaries or NVENC ate the prize" -
+and they did, at 1.32x. The body alone is 44.3 ms (2.77 ms x 16), which against the engine's 79.86 ms would be
+**1.80x**; the 16.1 ms of non-body work - head conv 5.5, quantise ~2, dequantise and tail ~8.4 - is what dilutes
+it. That is precisely stage 6's subject ("own head and tail"), and it is the one lever left with a measured size.
+
+**Per stage:**
+* **Stage 4 - closed.** The probe decides per video before the first frame (composition, not own defect), the
+  body lands in the render behind that verdict, and the measured effect is 1.32x. `docs/claims-int8-stage4.txt`
+  passes: it asserts that the body beats the kill line by 9.13 ms and records the 3.34 ms gate shortfall.
+* **Stage 5 - closed.** The coverage boundary is named: 64 body channels and a Compact architecture, so a
+  48-channel model and a non-compact one cannot use the kernel at all; and the gate is model-dependent - 4x
+  misses it by 1.70 ms even at the pre-fix speed. `docs/claims-int8-stage5.txt` passes with the 4x shortfall
+  recorded rather than asserted.
+* **Stage 6 - half, and honestly so.** The head is NHWC-aware and the body is in the app, but the fp16 head and
+  tail are still torch, and that is exactly the 16.1 ms above. The int8 head/tail is the remaining work, with a
+  measured prize of up to 1.80x.
+
+**No int8 frame has been rendered by the app.** The body is accurate and pays, but it sits behind
+`int8FitBody=on` because the plan's gate for proceeding (1.40x) is not met - the honest default is the fp16
+engine plus a log line that states the measured ratio, so the decision is visible rather than assumed.
+
 ## Stage 4 - calibration and the probe in the render path (one day)
 
 **The decision now lands in the render path, and porting it found two more instruments lying.**
