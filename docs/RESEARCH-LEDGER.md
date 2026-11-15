@@ -93,7 +93,7 @@ or run the same pixels in a cheaper numeric format.
 | T3 | reuse vs the **last kept** frame, 32 px block means, threshold chosen automatically, chain 4 | TAS `dedup/dedup.py` + `PARAMETERS.MD` (sens 35 / 7) | 20-40% frames | **anime**: 70.9% reused, worst frame 48.64 dB against ungated. **film**: 18.1% reused, average 50.34 dB and worst 39.83 dB against ungated, 4.33 s against 4.66 s (1.08x). The earlier "46.8% reused, 71 dB" was measured against a *broken* pipe (see C4): both compared renders were equally corrupted, so the pair agreed with itself | **adopted** |
 | T4 | full-res per-pixel veto at 40 levels | TAS `PixelDiffGuard` | rescues mouth flaps | on grainy film a single pixel exceeds it: 43 vetoes, reuse 1.1%, render 5.08 s | opt-in (`--temporal_reuse_pixel_veto 40` for anime) |
 | T5 | tile-level reuse with an 18 px halo, **square 512 px cores** | TAS/waifu2x tiling; our halo measurement (radius 18 LR px) | 2-4x on static content | 65.8% of tiles reused on anime and *still* slower than the full-frame call (21.37 s vs 30.8 ungated, but 10.6 s for the frame gate); film 27.7% reused, 6.57 s vs 4.27 | superseded by T5' - the loss was the grid, see below |
-| T5' | same mechanism, but the core grid **divides the frame** | this ledger's area model, checked against T5's own timings | 2.55x on the model at 65.8% reuse, instead of 1.68x | **18.14 s** ungated against 21.37 s for the 512 grid, and **8.45 s** on top of the frame gate against 11.74 s for the gate alone = **1.39x**; 51.6 dB average / 47.5 dB worst frame against the ungated render (gate alone 52.7 / 48.2). Tile reuse falls from 65.6% to 57.4% inside the gate, because the frames the gate leaves are exactly the ones that changed | **adopted as `--tile_reuse_mode auto`** (the default): a pre-render probe samples 16 frames at 4 spread positions, replays both detectors' own statistics, and builds the tile engine only when the predicted cost beats the halo tax. Verdicts on our two clips: anime 33% predicted / 58% achieved -> ON (8.01 s); film 15% predicted / 9.5% achieved -> OFF (3.79 s, no tile engine). `--tile_reuse` still forces it on |
+| T5' | same mechanism, but the core grid **divides the frame** | this ledger's area model, checked against T5's own timings | 2.55x on the model at 65.8% reuse, instead of 1.68x | **18.14 s** ungated against 21.37 s for the 512 grid, and **7.68 s** on top of the frame gate against 11.66-11.84 s for the gate alone = **1.5x** - but those runs used a **chain of 4**, which is the configuration this ledger's own artifact section shows is visible (0.29% of pixels above 8 levels, peaks of 100). With the certified chain of 1 the same combination is **11.52 s** (1.0x over the gate: the gate's own saving and the chain limit cancel). Tile reuse falls from 65.6% to 57.4% inside the gate, because the frames the gate leaves are exactly the ones that changed | **adopted as `--tile_reuse_mode auto`** (the default): a pre-render probe samples 16 frames at 4 spread positions, replays both detectors' own statistics, and builds the tile engine only when the predicted cost beats the halo tax. Verdicts on our two clips: anime 33% predicted / 58% achieved -> ON (8.01 s); film 15% predicted / 9.5% achieved -> OFF (3.79 s, no tile engine). `--tile_reuse` still forces it on |
 | T6 | blend or discard the tile overlap | vs-mlrt discards, chaiNNer blends sinusoidally | - | we crop (discard), which is exact thanks to the halo | **adopted** |
 | T7 | per-slot HR memo: copies of one held frame share one upscale | TAS `pipeline/executor.py` | - | our gate already skips the whole model for a duplicate | equivalent |
 
@@ -116,9 +116,11 @@ grid that does not divide the frame (512 does not divide 1080: the third row is 
 inside a full 548 px window). `divisor_tile()` in `backend/src/pytorch/TiledUpscale.py` picks
 the core that divides each axis.
 
-Two reasons the combination is 1.39x rather than the multiplicative 1.5-2x: the tile share of
+Two reasons the combination is 1.5x rather than the multiplicative 1.5-2x: the tile share of
 reuse drops from 65.6% to 57.4% once the gate runs in front (the frames left to render are the
-ones that changed), and 36.9% of those frames still come out fully reused by the tile path.
+ones that changed), and 36.9% of those frames still come out fully reused by the tile path. Those
+figures are for a chain of 4; the artifact section below explains why the default now certifies a
+chain of 1 and what that costs.
 The measured composition, 502 anime frames, same session:
 
 | configuration | wall | loop | frames rendered | tiles reused |
@@ -126,7 +128,8 @@ The measured composition, 502 anime frames, same session:
 | ungated, full frame | 38.85 s | - | 100% | - |
 | tiles only, fitted grid | 18.14 s | 35.06 ms | 100% (56% of them fully reused) | 65.6% |
 | gate only | 11.66 / 11.74 / 11.84 s | 22.6-22.9 ms | 27% | - |
-| gate + fitted tiles | **7.64 / 8.42 / 8.45 / 8.48 / 8.65 s** | 14.6-15.4 ms | 27% | 57.4% |
+| gate + fitted tiles, chain 4 | **7.64 / 8.42 / 8.45 / 8.48 / 8.65 s** | 14.6-15.4 ms | 27% | 57.4% |
+| gate + fitted tiles, chain 1 (`best`) | 11.52 s | 22.9 ms | 27% | 57.7% |
 
 Median against median is 11.74 -> 8.45 s = **1.39x**; the best pair in the same window is
 7.64 against 11.66 = 1.54x. The spread inside one configuration is 10%, which is this
