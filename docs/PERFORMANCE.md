@@ -98,12 +98,18 @@ preset) before tuning anything else.
 Per frame at 2880x2160 output: engine ~35 ms, **D2H 3.4 ms** (an 18.7 MB RGB frame over the link
 below), colour conversion ~1.3 ms, the rest is reading/writing and the encoder.
 
-Inside the engine, 8.11 ms of 56.8 ms is not the body GEMMs. The biggest single piece is now
-**fixed**: padding the head convolution to 8 input channels puts it into myelin and removes the
-separate PReLU pass, **57.51 -> 54.15 ms (-5.8%)** with an unchanged picture (0.000% of pixels above
-8 levels, 78.69 dB), and it needs no change outside the engine because the pad is internal and the
-input stays 3-channel. What remains of that 8.11 ms: tail convolution tactics and the upsampler plus
-myelin's reshape/add, **2.35 ms**, and the layout kernels **0.81 ms** (ledger E20-E21, E18).
+Inside the engine, 8.11 ms of 56.8 ms is not the body GEMMs. The largest single piece - the one
+unfused PReLU, 2.40 ms - **is fixable at the engine level and is not fixable through this app's build
+path**, which is worth stating as one sentence rather than two numbers apart. Padding the head
+convolution to 8 input channels (fp16 tensor cores want C % 8) puts it into myelin, removes the
+separate PReLU pass and measures **57.51 -> 54.15 ms (-5.8%)** on a raw TRT build with the picture
+unchanged (0.000% of pixels above 8 levels, 78.69 dB). The same graph compiled the way this app
+compiles - `torch.export` + `torch_tensorrt.dynamo.compile` - measures **15.42 -> 26.40 ms of engine
+time (+71%)** and **11.40 -> 16.75 s** of wall clock, three runs each, interleaved. So the win
+belongs to the builder: it ships **off** (`RVE_HEAD_PAD=1` enables it), and the way to it is to build
+this graph with the raw TRT builder or fix the partitioning, not a flag. What remains of the 8.11 ms:
+tail convolution tactics and the upsampler plus myelin's reshape/add, **2.35 ms**, and the layout
+kernels **0.81 ms** (ledger E20-E21, E18).
 
 ### The link is PCIe 3.0 x8, and pinning is not the lever
 

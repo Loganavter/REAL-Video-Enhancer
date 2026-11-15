@@ -285,6 +285,15 @@ class UpscalePytorch:
                         # tiling is not part of the plan's own metadata, so it has to be
                         # in the file name or a stale non-tiled engine would be reused
                         + (f"_tiling-{self.trt_tiling_level}" if self.trt_tiling_level != "none" else "")
+                        # the head padding is a graph change, not engine metadata: without it in the
+                        # name a cached unpadded engine would be served for a padded model (and the
+                        # other way round). Ledger E19.
+                        + (
+                            f"_headpad{self.upscale_model_wrapper.get_head_pad()}"
+                            if getattr(self, "upscale_model_wrapper", None) is not None
+                            and self.upscale_model_wrapper.get_head_pad()
+                            else ""
+                        )
                         + (
                             f"_workspace-{self.trt_workspace_size}"
                             if self.trt_workspace_size > 0
