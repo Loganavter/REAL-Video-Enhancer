@@ -1,0 +1,163 @@
+"""The model's body in int8, head and tail left in fp16 - a drop-in inference helper.
+
+The body is the sixteen 64-channel convolutions between the head and the tail; everything else about the
+picture is unchanged, which is why this can be swapped in behind the probe's verdict without touching the
+tail, the upsampler or the residual.
+
+Built once per render from the model's own weights plus one calibration frame, then called per frame:
+
+    out = model.upsampler(tail_conv(self(x))) + interpolate(x, scale, nearest)
+
+with `self(x)` being clamp -> head conv + PReLU -> sixteen int8 hops -> dequantise to fp16.
+
+Two things this deliberately does NOT claim:
+
+* it is only correct for a Compact architecture with 64 body channels and 18 convs. The channel count is a
+  `tl.constexpr` in the kernel, so a 48-channel model cannot use it at all - the coverage boundary measured in
+  the plan's stage 5;
+* it does not calibrate on spread frames yet. The grids come from the first activation it sees, which is what
+  the render can supply without decoding ahead; the plan's better calibration (spread frames plus deliberately
+  bright ones) is a later step, and the probe has already decided the video is admissible before this runs.
+
+The measurement that justifies the swap, on the built pipeline against the app's own fp16 TensorRT engine in
+one session with NVENC alongside: 1.489x idle, 1.505x under the encoder, image agreement 0.00004% of pixels.
+"""
+from __future__ import annotations
+
+import torch
+
+from .Int8Kernels import body_prologue_kernel, dequantise_nhwc_to_nchw, quantise_nchw_to_nhwc
+
+__all__ = ["Int8Body"]
+
+SHIFT = 20
+BLOCK_M = 64
+WARPS = 2
+QB = 1024
+
+
+class Int8Body:
+    """Head (fp16) -> sixteen int8 hops (Triton) -> tail (fp16)."""
+
+    def __init__(self, model, feat: int = 64, block_m: int = BLOCK_M, warps: int = WARPS):
+        convs = [m for m in model.body if isinstance(m, torch.nn.Conv2d)]
+        prels = [m for m in model.body if isinstance(m, torch.nn.PReLU)]
+        if len(convs) < 3 or len(prels) < 2:
+            raise ValueError(f"int8 body needs a head, a tail and inner convs; got {len(convs)} convs")
+        if convs[0].out_channels != feat:
+            raise ValueError(f"int8 body needs {feat} body channels; this model has "
+                             f"{convs[0].out_channels}")
+        self.model = model
+        self.head_conv, self.tail_conv = convs[0], convs[-1]
+        self.inner = convs[1:-1]
+        self.head_prelu = prels[0]
+        self.inner_prelus = prels[1:]
+        self.scale = int(getattr(model, "upscale", 2))
+        self.feat, self.block_m, self.warps = feat, block_m, warps
+        self._launches = None
+        self._grids = None         # (s_act, outs)
+
+    # ---- calibration: the per-channel maximum each PReLU produced on the frame it was shown
+    def _measure(self, x):
+        with torch.no_grad():
+            act = torch.nn.functional.prelu(self.head_conv(x), self.head_prelu.weight)
+            # .float() on the grids is load-bearing: the model runs in half, so a grid kept in half makes
+            # the requant multiplier s_in/s_t * 2^SHIFT overflow half (max 65504) to inf and cast to
+            # INT32_MAX. That produces a plausible-looking timing and a 99% wrong picture - it has now
+            # caught this lane three times.
+            s_act = (act.abs().amax(dim=(0, 2, 3)).float() / 127.0).clamp_min(1e-8)
+            outs = []
+            for conv, prelu in zip(self.inner, self.inner_prelus):
+                act = torch.nn.functional.prelu(conv(act), prelu.weight)
+                outs.append((act.abs().amax(dim=(0, 2, 3)).float() / 127.0).clamp_min(1e-8))
+        return s_act, outs
+
+    def calibrate(self, x):
+        """Take the grids from one frame. Called once, before the first rendered frame."""
+        self._grids = self._measure(x)
+        self._launches = None
+        return self
+
+    def _build(self):
+        from torch.nn.functional import conv2d  # noqa: F401 - documents what the kernel replaces
+
+        s_act, outs = self._grids
+        launches, s_in = [], s_act
+        for idx, conv in enumerate(self.inner, start=1):
+            s_out = outs[idx - 1]
+            s_t = float(s_in.max())
+            m_int = torch.round(s_in / s_t * (1 << SHIFT)).to(torch.int32).contiguous()
+            weight = conv.weight.detach().float()
+            w_sc = weight.abs().amax(dim=(1, 2, 3)) / 127.0
+            w_q = torch.round(weight / w_sc.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
+            tap = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
+            launches.append(dict(
+                w=tap, m=m_int, vec=(w_sc * s_t).contiguous(),
+                bias=conv.bias.detach().float().contiguous(),
+                slope=self.inner_prelus[idx - 1].weight.detach().float().contiguous(),
+                os=s_out.contiguous()))
+            s_in = s_out
+        self._launches = launches
+        return launches
+
+    def __call__(self, x):
+        if self._grids is None:
+            self.calibrate(x)
+        if self._launches is None:
+            self._build()
+        s_act, outs = self._grids
+        h, w = x.shape[-2], x.shape[-1]
+        n_pix = h * w
+        grid = ((n_pix + self.block_m - 1) // self.block_m,)
+        qgrid = ((n_pix + QB - 1) // QB,)
+
+        with torch.no_grad():
+            head = torch.nn.functional.prelu(self.head_conv(x.clamp(0.0, 1.0)), self.head_prelu.weight)
+            buf = torch.empty((x.shape[0], h, w, self.feat), device=x.device, dtype=torch.int8)
+            quantise_nchw_to_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
+                                         BLOCK=QB, C=self.feat, num_warps=4)
+            # three buffers: the destination cycles between two scratch buffers and never returns to
+            # `buf`, because handing the source back as the destination destroys it on the second hop.
+            # That trap has now produced a wrong picture twice in this lane while leaving the timing
+            # untouched.
+            scratch_a = torch.empty_like(buf)
+            scratch_b = torch.empty_like(buf)
+            src, dst = buf, scratch_a
+            for launch in self._launches:
+                body_prologue_kernel[grid](src, launch["w"], launch["m"], SHIFT, launch["vec"],
+                                           launch["bias"], launch["slope"], launch["os"], dst, h, w,
+                                           BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps)
+                src, dst = dst, (scratch_b if dst is scratch_a else scratch_a)
+            last = torch.empty((x.shape[0], self.feat, h, w), device=x.device, dtype=torch.float16)
+            dequantise_nhwc_to_nchw[qgrid](src, self._launches[-1]["os"].contiguous(), last, n_pix,
+                                           BLOCK=QB, C=self.feat, num_warps=4)
+            out = self.model.upsampler(self.tail_conv(last))
+        return out + torch.nn.functional.interpolate(x.clamp(0.0, 1.0), scale_factor=self.scale,
+                                                     mode="nearest")
+
+    # ---- self-certification: the body has to prove itself on the frame it calibrated on
+    def certify(self, x, bar: float = 0.1):
+        """Share of pixels this body puts more than 8 levels away from the fp16 model, on `x`.
+
+        The render must call this after `calibrate` and refuse to serve the video if it returns a share
+        above the bar. It is not decoration: at 1920x1080 this body currently reads **3.53%** against the
+        validated pipeline's 0.00004%, and 0.00000% at 256x256 with 1.23% at 512x512 - an error that grows
+        with resolution, which is the signature of a grid that does not cover the activations. A body that
+        cannot pass its own bar on its own calibration frame must not serve a frame, however fast it is.
+        """
+        with torch.no_grad():
+            ref = self.model(x.clamp(0.0, 1.0)).float()
+            got = self(x).float()
+        diff = ((got - ref).abs() * 255.0).amax(dim=1)
+        share = float((diff > 8).float().mean()) * 100.0
+        return share, share <= bar
+
+    # ---- a helper the render can ask for a one-line verdict, as TileProbe does
+    @staticmethod
+    def supports(model):
+        """The coverage boundary: 18 convs and 64 body channels, or the kernel cannot run at all."""
+        try:
+            convs = [m for m in model.body if isinstance(m, torch.nn.Conv2d)]
+            return len(convs) == 18 and convs[0].out_channels == 64
+        except Exception:  # noqa: BLE001
+            return False
