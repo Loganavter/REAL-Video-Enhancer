@@ -199,6 +199,26 @@ pipeline's chain against the simulation's chain**, layer by layer, on the same f
 Six hypotheses have been tested against fp16 in isolation and five of them died; comparing the two chains to
 each other is the only test that cannot be satisfied by a coincidence of the final number.
 
+**Percentile grids: refuted.** `--pct` sets every grid from a percentile instead of the maximum, and the
+full frame barely moves:
+
+| grids from | share |
+|---|---|
+| max (p100) | 1.910% |
+| p99.9 | 1.783% |
+| p99.0 | 1.838% |
+| p95.0 | 2.064% |
+
+Flat within 15%, so the coarsening that a full-frame maximum causes is not the mechanism - the crop's 0.000%
+is not bought by finer grids. That kills the only explanation offered so far and leaves the frame-size effect
+itself as the open question: the same chain code passes at 256x256 and fails at 1920x1080, and nothing about
+the grids distinguishes them.
+
+Next: a size sweep (256, 512, 1024, 1920x1080) on the same chain. If the failure appears at a threshold rather
+than growing smoothly, the mechanism is size-dependent (an index, a block count, the 4x tail at 3840x2160); if
+it grows smoothly, it is accumulation and the crop was simply lucky. That read distinguishes the two remaining
+stories in one run.
+
 **The pipeline PASSES on a 256x256 crop and fails on the full frame, so the metric is frame-dependent.**
 Same chain code, same kernel, same calibration procedure, only the frame changes:
 
