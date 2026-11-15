@@ -1813,6 +1813,39 @@ outside. Whatever restores the epilogue at C=32 has to beat those kernels while 
 that fuses, which is exactly what `scripts/force_tactic.py` scans by forcing one tactic index at a time
 and reading the resulting layer names.
 
+## The counters are unblocked, and the int8 kernel is not at any limit (2026-11-15)
+
+`RmProfilingAdminOnly` is 0 after the owner's modprobe line and reboot, so `ncu` runs. First measurement
+on the int8 block kernel (BM 256, warps 4), per launch at 1920x1080:
+
+| counter | value |
+|---|---|
+| duration | 1.88 ms |
+| DRAM read | 141.6 MB |
+| DRAM write | 170.1 MB |
+| DRAM throughput | **59.4% of peak** |
+| tensor pipe active | **51.2%** |
+| L2 sector hit rate | 90.0% |
+
+So the block sits at **59% of DRAM and 51% of the tensor pipe at the same time** - neither resource is
+saturated. Traffic is 312 MB against a 265 MB floor for one 64-channel int8 plane in and out (1.18x, which
+is the halo and some imperfect reuse), and at 288 GB/s the floor is 0.92 ms against 1.88 measured. The
+tensor pipe at 51% means the MMA is idle half the time, so this is not a compute limit either, and the
+`num_stages` sweep confirms it: 1, 3 and 5 stages all land within 1% (1.855-1.871 ms), i.e. there is nothing
+to overlap.
+
+What that changes: **1.9 ms was a budget, not a wall.** At 90% of DRAM the block would be ~1.03 ms; at 90%
+of the tensor pipe ~1.15 ms. Even 1.3 ms per block puts the frame at 16 x 1.3 + non-GEMM ~ 27 ms, i.e. the
+2x the whole investigation was chasing, without touching the accuracy trade at all.
+
+Best measured so far, for the record: 1.854 ms and **82.5 TOPS** (BM 256, warps 4, one stage), against the
+147.4 TOPS K-major peak - 56%.
+
+The likely limiter, given the counters: the nine *masked* loads (a predicate per tap per program) plus
+store amplification (170 MB written against 132.7 MB produced, 1.28x). The standard fix is a border-free
+fast path - compute the interior with unmasked, vectorised loads and handle the frame edges in a separate
+kernel or a separate branch - which is a kernel change, not a modelling one.
+
 ## The int8 fit probe (2026-11-15)
 
 `scripts/probe_int8_fit.py` answers the only product question left: does int8 fit *this* video? It takes N
