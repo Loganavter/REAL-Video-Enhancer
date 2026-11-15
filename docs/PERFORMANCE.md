@@ -10,7 +10,7 @@ wall-clock for the whole render unless stated otherwise.
 |---|---|---|---|
 | `--tensorrt_opt_profile` | 5 (was 3) | TRT builder optimization level | engine only: 94.3 -> 52.7 ms/frame (1.79x) |
 | `--trt_timing_iters` | 8 (was 4) | tactic timing iterations | included above |
-| `--trt_tiling_level` | `moderate` | keeps per-layer tiles in L2 | included above; tiling is the larger part |
+| `--trt_tiling_level` | `full` (was `moderate`) | keeps per-layer tiles in L2 across consecutive kernels | `moderate` -> `full` measured on anime, two runs each: 11.01 s -> 10.60/10.59 s (3.8%) |
 | `--temporal_reuse_threshold` | 5.0 (was 0.35) | max 32px-block mean delta vs the last KEPT frame | 62.4% of frames reused |
 | `--temporal_reuse_max_chain` | 4 (was 2) | cap on consecutive reuses | |
 | `--temporal_reuse_pixel_veto` | 0 (off) | full-res max delta that rescues a would-be duplicate. 40 is TheAnimeScripter's value and is right for clean anime; on grainy film a single pixel exceeds it and reuse collapses from 46.8% to 1.1% (measured, 43 vetoes in 94 frames) | |

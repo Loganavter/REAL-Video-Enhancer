@@ -109,6 +109,13 @@ other shapes; they are hypotheses about our case, not results.
 | engine built straight from ONNX (no torch-tensorrt), tiling off | 50.27 ms |
 | layer structure with tiling on | only 25 top-level layers, all `__myl_*`: TRT fuses the network into myelin subgraphs, i.e. cross-kernel fusion is happening (this is the mechanism that gave 57.5 -> 52.7 ms) |
 | per-layer tactic names | not readable through `IEngineInspector` in this build (the JSON carries names only); requires `profiling_verbosity=DETAILED` **at build time** |
+| `tiling=full` vs `moderate`, same build path | **full is faster**, 3.8% in the app (two runs each: 11.01 vs 10.60/10.59 s on 502 anime frames) and 2-6% in the ONNX audit path |
+| INT8 PTQ (entropy calibration on 8 real frames, INT8+FP16 fallback) | **slower than fp16 in every run**: 73.2 and 94.3 ms against 48-51 ms. Dequant/reformat at C=64 costs more than int8 saves - the "2x for int8 on a 4090" note from issue #4081 does not transfer to this shape |
+| `l2_limit_for_tiling = 24 MiB` | **harmful**: 67.4 and 103.2 ms against 48.6. TRT's own default budget is better; leave the knob alone |
+
+Caveat on the audit's absolute milliseconds: those engine builds overlapped each other on the
+card (see the measurement protocol in RESEARCH-LEDGER.md), so only the *ratios* and the
+direction of each effect are trustworthy; the app A/B above was measured on a quiet GPU.
 
 Consequence for the accumulator hypothesis: switching "everything" to fp16 accumulation is
 already partly done, so the realistic gap is from ~49 TF/s to a sustained ~74 TF/s, i.e.

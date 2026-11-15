@@ -87,7 +87,7 @@ class UpscalePytorch:
         # trt options
         trt_workspace_size: int = 0,
         trt_optimization_level: int = 5,
-        trt_tiling_level: str = "moderate",
+        trt_tiling_level: str = "full",
         trt_timing_iters: int = 8,
         trt_streams: int = 1,
         pipe_pixel_format: str = "yuv420p10le",

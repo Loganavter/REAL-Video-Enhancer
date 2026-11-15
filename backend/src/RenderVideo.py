@@ -108,7 +108,7 @@ class Render:
         output_to_mpv: bool = False,
         trt_timing_iters: int = 8,
         trt_streams: int = 1,
-        trt_tiling_level: str = "moderate",
+        trt_tiling_level: str = "full",
         tile_reuse: bool = False,
         tile_reuse_size: int = 512,
         tile_reuse_threshold: float = 0.35,
