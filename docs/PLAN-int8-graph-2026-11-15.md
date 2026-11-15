@@ -1330,14 +1330,23 @@ the decision must land.
 
 ## Stage 5 - shapes and models (half a day)
 
-**State (2026-11-16): the sweep names the coverage boundary, and it is narrower than the plan assumed.**
+**State (2026-11-16): CLOSED - the sweep names the coverage boundary, and the 4x model is scoped out with its
+reason. This section now carries the same disposition as `docs/claims-int8-stage5.txt`, so it no longer lives in
+only one of the two documents.**
 
-| model | feat | scale | shape | image vs engine | fp16 engine | int8 cycle | ratio |
+| model | feat | scale | shape | image vs engine | fp16 engine | int8 cycle | ratio (old baseline) |
 |---|---|---|---|---|---|---|---|
-| 2x-Futsuu-Anime(1) | 64 | 2 | 1920x1080 | 0.00004% | 80.47 ms | 54.03 ms | **1.489x** (pass) |
-| realesr-animevideov3(1) | 64 | 4 | 1920x1080 | 0.00058% | 87.60 ms | 64.27 ms | **1.363x** (misses by 1.70 ms) |
+| 2x-Futsuu-Anime(1) | 64 | 2 | 1920x1080 | 0.00004% | 80.47 ms | 54.03 ms | 1.489x |
+| realesr-animevideov3(1) | 64 | 4 | 1920x1080 | 0.00058% | 87.60 ms | 64.27 ms | 1.363x (+1.70 ms short) |
 | Archivist_AntiLines | **48** | 1 | 1440x1080 | - | - | - | not covered |
 | 2x_ModernSpanimationV1 | - | - | 1440x1080 | - | - | - | not covered |
+
+**The 4x model is OUT OF SCOPE, not pending, and that is the section's verdict.** Its +1.70 ms shortfall was
+measured against the same monolithic baseline the whole plan used, and against the engine the app actually builds
+(46.29 ms at 1080p, one process) the body loses by 8.30 ms *before* any model enters the picture. Closing 1.70 ms
+inside an 8.30 ms gap - which is itself inside a 1.062x ceiling below the 1.15 kill line - would change no
+decision, so it is scoped out rather than left as an open shortfall. What survives as the stage's finding is the
+coverage boundary: 64 body channels and a Compact architecture.
 
 Two coverage walls, both structural rather than tunable:
 

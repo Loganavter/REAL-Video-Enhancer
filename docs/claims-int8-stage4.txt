@@ -108,9 +108,12 @@
 # two processes and two paths (tiled vs whole-frame), i.e. a ratio nobody measured. Both sides were then loaded
 # into ONE process, on the same frame, three interleaved rounds:
 @claim app_engine_ms     46.40 ms "the app's own tiled engine (..._opt-5_tiling-full_headpad5_1920x1080), 1080p" measured
-@claim body_ms_app_base  56.56 ms "Int8Body, same process, same frame, same rounds" measured
-@claim body_vs_app        0.820 x "derived: app_engine_ms / body_ms_app_base" derived
-@derived body_vs_app "46.40 / 56.56 = 0.820; rounds read 0.820 / 0.825 / 0.823 - the body is 1.22x slower"
+# SUPERSEDED VALUE, kept and labelled: the body before the loop was rolled.
+@claim body_vs_app_unrolled 0.820 x "46.40 / 56.56, the kernel before tl.range: rounds 0.820 / 0.825 / 0.823" measured
+# THE DELIVERED GATE: the same one-process method, after the rolled loop (the final kernel).
+@claim body_ms_app_base  48.55 ms "Int8Body with the rolled loop, same process, same frame, same rounds" measured
+@claim body_vs_app        0.962 x "derived: app_engine_ms / body_ms_app_base - the delivered ratio" derived
+@derived body_vs_app "46.29 / 48.55 = 0.953; rounds read 0.953 / 0.966 / 0.962, median 0.962"
 @claim app_kill_overspend 16.20 ms "body_ms - app_engine_ms/1.15 = 56.56 - 40.35" derived
 @derived app_kill_overspend "56.56 - 46.40/1.15 = +16.20 ms past the kill line"
 @claim app_gate_overspend 23.42 ms "body_ms - app_engine_ms/1.40 = 56.56 - 33.14" derived
@@ -163,4 +166,6 @@
 @derived ceiling_cycle_ms "30.40 + 13.3 = 43.70 ms"
 @claim ceiling_ratio     1.062 x  "derived: app_engine_ms / ceiling_cycle_ms - the best this design can reach" derived
 @derived ceiling_ratio "46.29 / 43.70 = 1.062, below the 1.15 kill line: the design cannot pay, not the tuning"
-@below body_vs_app kill_ratio
+# THE BOUND, asserted after it is defined: no tuning of this design reaches the kill line either, so the verdict
+# is arithmetic rather than provisional.
+@below ceiling_ratio kill_ratio
