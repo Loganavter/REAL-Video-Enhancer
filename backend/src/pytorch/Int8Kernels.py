@@ -37,7 +37,10 @@ def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, bias_ptr, slop
     lanes = tl.arange(0, C)
     m = tl.load(m_ptr + lanes)                      # int32 per INPUT channel
     acc = tl.zeros((BLOCK_M, C), dtype=tl.int32)
-    for tap in tl.static_range(9):
+    # tl.range with one stage, NOT static_range: unrolling all nine taps costs registers and measured
+    # 2.919 ms per launch against 2.198 for the rolled loop at BM 128 / 4 warps. Pipelining it (stages 2-3)
+    # then made it worse again - 2.497 and 2.635 - because the gathers are already L2-resident.
+    for tap in tl.range(0, 9, num_stages=1):
         dy = tap // 3 - 1
         dx = tap % 3 - 1
         yy = h + dy
