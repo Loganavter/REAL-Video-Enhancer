@@ -96,6 +96,21 @@ anything else.
 Per the stage gate this stops the work here: build/simulation disagree far beyond 2x, so the cause is found
 first, not optimised around.
 
+**Third pass: the layout is settled and the pipeline is out of the garbage regime, but the gate still fails.**
+The diagnostic that settled it passed ONE tensor to both sides with the same epilogue: `[tap, cin, cout]`
+matches `_int_mm` exactly (max 0), the transpose differs by 254. Built that way the pipeline reads
+
+    >8 3.589%  peak 58  median 4.82 levels      (was 100% / 113 levels)
+
+200x off the simulation's 0.017% rather than nonsensical, which moves the cause from "wrong data" to "wrong
+grid". The remaining gap is explained by the one thing the build cannot express yet: the simulation quantises
+each PReLU output on a **per-channel** grid, while the pipeline uses a **per-tensor** grid because the kernel
+takes one scalar-activation scale. Chaining per-channel grids needs the kernel to apply a per-input-channel
+scale inside the dot (the weight scale is per-output-channel, so the product is rank-1 and will not fold into
+the vector the kernel loads today) - the same E9' mechanism, one level down.
+
+That is the next change, and it is a kernel change with a re-time attached, not a bookkeeping fix.
+
 **Second pass, still failing, and the layout is the suspect.** Per-layer isolation on 256x256 says every
 layer is wrong on its own (ratio 0.12-3.7 against the fp16 activation, relative error 1.1-4.3), so it is not
 the chaining. The kernel was verified bit-exact in stage 0 only on **synthetic** weights already in the

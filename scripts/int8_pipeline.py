@@ -109,7 +109,9 @@ def main() -> int:
     layers = []
     for conv, prelu in zip(inner, prelus[1:]):
         w_q, w_scale = quantise_weights(conv.weight.detach().float())
-        tap_w = w_q.permute(2, 3, 0, 1).reshape(9, conv.weight.shape[0], conv.weight.shape[1]).contiguous()
+        # settled empirically against _int_mm: the kernel wants [tap, cin, cout], and every permute
+        # variant of the same element count reshapes silently into something plausible and wrong
+        tap_w = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
         s_out = float(prelu.weight.detach().abs().max()) and None
         layers.append((tap_w, w_scale, prelu.weight.detach().float()))
         del s_out
