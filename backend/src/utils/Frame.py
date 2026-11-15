@@ -45,6 +45,8 @@ class Frame:
         self.yuv10_output = False
         # set by the reader: the incoming bytes are packed yuv420p10le, not RGB
         self.yuv10_input = False
+        # "yuv420p10le" (planar, libx265) or "p010le" (NVENC wants the interleaved one)
+        self.yuv10_format = "yuv420p10le"
         self.dtype = dtype
         
         self.tensor_conversions = 0
@@ -74,7 +76,7 @@ class Frame:
         self._bytes = frame
         return self
     
-    def set_frame_tensor(self, frame: Any, copy: bool = False) -> "Frame":
+    def set_frame_tensor(self, frame: Any, copy: bool = False, sync: bool = True) -> "Frame":
         # might need to sync streams here
         if _torch is not None and not isinstance(frame, _torch.Tensor):
             raise TypeError(f"Expected torch.Tensor, got {type(frame).__name__}")
@@ -83,7 +85,10 @@ class Frame:
         # and a full-HR copy costs ~4.6 ms/frame at 4x. Pass copy=True if the caller may
         # keep writing into the same buffer (e.g. preallocated/cudagraph outputs).
         self._tensor = frame.clone() if copy else frame
-        _torch_utils.sync_all_streams()
+        if sync:
+            # device-wide barrier; callers that already waited on their own stream pass
+            # sync=False (a full synchronize per frame costs 2-4 ms of lost overlap)
+            _torch_utils.sync_all_streams()
         return self
 
     def set_frame_np(self, frame: Any) -> "Frame":
@@ -123,7 +128,8 @@ class Frame:
             if self._tensor is not None:
                 if getattr(self, "yuv10_output", False):
                     # 10-bit SDR: pack YUV420p10 on the GPU so the pipe stays 3 bytes/px
-                    self._bytes = _torch_utils.tensor_to_yuv420p10(self._tensor)
+                    self._bytes = _torch_utils.tensor_to_yuv420p10(
+                        self._tensor, getattr(self, "yuv10_format", "yuv420p10le"))
                 else:
                     self._bytes = _torch_utils.tensor_to_frame(self._tensor)
             elif self._np is not None:

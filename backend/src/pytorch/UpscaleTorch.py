@@ -7,6 +7,7 @@ from .UpscaleModelWrapper import UpscaleModelWrapper
 import torch as torch
 import torch.nn.functional as F
 import sys
+import time
 from time import sleep
 
 from ..utils.Util import log, CudaChecker
@@ -89,6 +90,7 @@ class UpscalePytorch:
         trt_tiling_level: str = "moderate",
         trt_timing_iters: int = 8,
         trt_streams: int = 1,
+        pipe_pixel_format: str = "yuv420p10le",
         tile_reuse: bool = False,
         tile_lr: int = 512,
         tile_halo: int = 18,
@@ -151,6 +153,10 @@ class UpscalePytorch:
         self.hdr_mode = hdr_mode         
         self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
         self.gpu_id = gpu_id
+        self.pipe_pixel_format = pipe_pixel_format
+        # stage profiling (read by RenderVideo's summary)
+        self.last_inference_ms = 0.0
+        self.last_convert_ms = 0.0
 
         self.trt_static_shape = trt_static_shape
 
@@ -377,10 +383,12 @@ class UpscalePytorch:
         dtype = image.dtype
         gpu_id = image.gpu_id
         device = image.device
+        _t0 = time.perf_counter()
         with self.torchUtils.run_stream(self.f2tstream):  # type: ignore
             image_tensor = image.get_frame_tensor()
         del image
         self.torchUtils.sync_stream(self.f2tstream)
+        self.last_convert_ms = (time.perf_counter() - _t0) * 1000.0
 
         if not self._slot_models_ready:
             self._slot_streams = [self.torchUtils.init_stream(gpu_id=gpu_id)
@@ -439,6 +447,7 @@ class UpscalePytorch:
         del image
         self.torchUtils.sync_stream(self.f2tstream)
 
+        _t_inf = time.perf_counter()
         with self.torchUtils.run_stream(self.stream):
             while self.upscale_model_wrapper is None:
                 sleep(1)
@@ -457,12 +466,14 @@ class UpscalePytorch:
             else:
                 output = self.renderTiledImage(image_tensor)
             
+            self.last_inference_ms = (time.perf_counter() - _t_inf) * 1000.0
             retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale, device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                              high_bitdepth=self.high_bitdepth)
             # 10-bit SDR: hand ffmpeg ready-made yuv420p10le instead of RGB
             retFrame.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+            retFrame.yuv10_format = self.pipe_pixel_format
             
-            retFrame.set_frame_tensor(output)
+            retFrame.set_frame_tensor(output, sync=False)
         
         self.torchUtils.sync_stream(self.stream)
         return retFrame
