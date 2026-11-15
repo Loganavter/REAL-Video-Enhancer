@@ -828,16 +828,19 @@ iterations.
 | operation | TFLOP/s or TOPS |
 |---|---|
 | fp16 GEMM, fp32 accumulate (cuBLAS) | 42.1 |
+| fp16 GEMM, **fp16 accumulate** | **71.6** at 4096^3, 68.9 at 8192^3 |
 | int8 GEMM, B in the K-major layout | **147.4** |
 | int8 GEMM, B in the transposed layout | 39.3 |
 
 Two things follow, and the second one is the useful one.
 
-**Our body convolution is faster than cuBLAS fp16 because it accumulates in fp16.** The myelin kernel
-is named `f16f16_f16f16` - no fp32 accumulator - and reports 50.2 TFLOP/s, above the 42.1 that cuBLAS
-reaches with an fp32 accumulator. So the "74 TFLOP/s borrowed peak" was optimistic by roughly 1.7x for
-this class of kernel; the fp16 ceiling for what we run is nearer 88 TFLOP/s (fp16 accumulate), and 50.2
-is 57% of it.
+**The borrowed 74 TFLOP/s peak was right, but only for fp16 accumulate** - which is what our kernel
+does, and nobody had measured it here. cuBLAS with `allow_fp16_accumulation` reaches **71.6 TFLOP/s**
+against 42.1 with an fp32 accumulator, so the myelin kernel's 50.2 is **70% of its own class's peak**,
+not 68% of a borrowed number and not 57% of a guess. That closes the "the ceiling is unknown" question
+and it makes fp16 arithmetic final: the body is 2.446 TFLOP, so even at a perfect 71.6 the floor is
+**34.2 ms**, i.e. 42 ms for the frame, i.e. **1.34x is the entire fp16 headroom**. 2x is unreachable
+without leaving fp16.
 
 **int8 has a real 147 TOPS, so 2x is arithmetically reachable - at a price.** The body is 2.446 TFLOP,
 i.e. 16.6 ms at peak and 26.9 ms at the 91 TOPS our int8 convolution actually reports (62% of peak).
@@ -863,6 +866,47 @@ two independent grain fields differ by more than 8 levels on 72.4% of pixels, wh
 unreachable by construction rather than by a defect. The measured numbers on that clip stay in this
 ledger as history (the gate's floor of 2.27, the refusal, the 1.85x), and the 2-4x headline for anime
 material is unaffected.
+
+## The correction is 0.9 levels: what that licenses (2026-11-15)
+
+The model is residual by construction, and nobody in this ledger had measured the size of the residual.
+Measured on a real frame (Chainsaw Man, 1920x1080, x2 model `futsuu`, fp16 engine weights in torch):
+`correction = out - nearest_upsample(x)`, reduced with the acceptance rule's own "worst channel", in
+0..255 levels.
+
+| statistic | levels |
+|---|---|
+| median | **0.9** |
+| p90 | 2.1 |
+| p99 | 10.1 |
+| p99.9 | 19.4 |
+| max | 44.5 |
+| share below 8 levels | **98.43%** |
+| share below 2 levels | 88.69% |
+
+So for 88.7% of pixels the network adds less than two levels on top of a pixel repeat, and for 98.4%
+it adds less than the acceptance bar itself.
+
+**What this licenses, and it is the first thing in this investigation that widens the admissible set
+rather than narrowing it.** Any approximation whose error is a fraction `e` of the correction puts a
+pixel over the 8-level bar only where `|correction| > 8/e`. The bar allows 0.1% of pixels, and 0.1% of
+pixels sit above 19.4 levels, so `8/e = 19.4` gives **e ~ 0.4**: an approximation that is wrong by 40%
+*of the correction* still keeps the worst pixel of the frame at the bar. First-order, and it holds only
+where the error is proportional to the correction rather than a constant floor, but the order is the
+point.
+
+**What it costs: the 2x question is now an arithmetic question with a named route.** A structural
+channel cut from 64 to 48 removes 44% of the body's MACs (2*9*48*48 against 2*9*64*64), i.e. 1.78x.
+At the measured fp16-accumulate peak that is a body of 19.2 ms, and with the 8.1 ms of non-GEMM work
+the frame is **27.3 ms = 2.06x** - on dense kernels, no plugin, no int8 boundary, no graph surgery.
+The licence above is what makes it admissible: the error this introduces is a fraction of a correction
+that is itself 0.9 levels at the median.
+
+That inverts the plan's ordering. The int8 plugin was the critical path because int8 was the only way
+to raise the rate; a channel cut raises the *work*, not the rate, and the correction measurement says
+the picture can pay for it. What is unmeasured is how much error a 25% cut actually makes on the
+final frame - the old SVD test answered a different question (weight energy, 28.7 dB layer output)
+and answered it badly.
 
 ## What the literature closes, and the one item it reopens (2026-11-15)
 

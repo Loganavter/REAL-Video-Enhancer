@@ -126,21 +126,21 @@ tasks:
     acceptance: "Phase 1 is CPU arithmetic only: per-boundary buffer bytes, total, L2 residency argument, and the re-derived time decomposition (logical traffic 8.49 GB, L2 absorption ~1/3, DRAM 19.7 ms, compute floor 33.1 ms, measured 56.8 ms). Phase 2, only if phase 1 survives: a boundary search per the Welder model and one fused prototype."
     note: "MICRO'16 (Alwani et al.) removed intermediate tensors from off-chip entirely on the first five VGG layers: 77 MB -> 3.6 MB with 362 KB on-chip, and their recompute-vs-reuse fork is our fork too (full fusion of 19 layers would cost +9.6x arithmetic by recompute, but 1.4 MB by reuse). Our version: (K-S)=2 rows x 1920 x 64 ch x 2 B = 0.49 MB per boundary, 16 boundaries = 7.9 MB, which does not fit 100 KB shared memory but does fit 32 MB L2. This is the item that would give the ledger's 'the model has that headroom; the builder cannot collect it' a number."
   - id: rve-pruning-bounds-2026-11-15
-    title: "E30: training-free reconstruction + channel pruning - ASK THE OWNER FIRST (changes weights)"
-    type: decision
+    title: "E30: channel cut 64->48 at fp16 - the only route to 2x that needs no new kernel"
+    type: code
     status: todo
-    owner: "@owner"
-    priority: P3
-    gpu: false
-    cost: "1d after the answer"
-    tags: [pruning, asvd, snows, owner-decision]
+    owner: null
+    priority: P1
+    gpu: true
+    cost: "1-2d"
+    tags: [pruning, channels, asvd, snows, reconstruction]
     base_branch: perf/inference
-    relates_to: [docs/MODEL.md]
-    owns_files: []
-    refutes: "The owner's constraint is 'no weight changes', in which case this whole family is out of scope and the row is dropped, not deferred."
-    owner_ruling: "2026-11-15: weights may change when the change is practically meaningless. int8 rounding is in that class and is measured (0.000% of pixels above 8 levels, peak 4, 54.1 dB). A 25% channel cut is not in that class - it changes the picture - so what is left to decide is visible quality for speed, not the provenance of the weights."
-    acceptance: "An explicit yes/no from the owner on whether the picture may change for speed (a 25% channel cut will very likely break the 0.1%/8-level bar), recorded here before any code."
-    note: "The E-SVD test measured weight energy (77-91%) and layer output error (28.7 dB) and closed the direction. The LLM-compression literature closes exactly that gap training-free: ASVD scales weights by activation statistics before the decomposition so the OUTPUT error is what is minimised; SparseGPT prunes one-shot without retraining; SNOWS does the vision-network version (Hessian-free Newton, K-step layer reconstruction through conv+BN+ReLU+residual) with ResNet20 2:4 at 1.97x FLOPs for -0.64%. Two caveats: 2:4 needs sparse hardware and TRT already picks sparse tactics with no measured win (E7) - so the useful form is STRUCTURAL channel pruning (64->48 = 1.78x on dense kernels), not fine-grained sparsity. And 25% of channels will very likely break the 0.1%/8-level bar, which is why this is a question before it is a task."
+    relates_to: [docs/RESEARCH-LEDGER.md, docs/MODEL.md]
+    owns_files: [scripts/prune_channels.py]
+    refutes: "A reconstructed 64->48 cut puts more than 0.1% of pixels above 8 levels on the worst frame of a spread sample. That is the whole test, and the correction measurement says the picture has room (median correction 0.9 levels, 98.4% of pixels under the bar)."
+    acceptance: "Worst-frame statistic (share of pixels > 8 levels, RGB) against the unpruned engine on the spread sample, plus engine time. Admissible if the share stays under 0.1% and the frame drops toward 27 ms."
+    owner_ruling: "2026-11-15: weights may change when the change is practically meaningless. int8 rounding is in that class and is measured (0.000% of pixels above 8 levels, peak 4, 54.1 dB); a channel cut is admissible only while it also stays inside the bar, which is now a measurement rather than a judgement."
+    note: "The arithmetic: 2*9*48*48 against 2*9*64*64 is 1.78x fewer MACs, so at the measured fp16-accumulate peak (71.6 TFLOP/s) the body is 19.2 ms and the frame 27.3 ms = 2.06x - on dense kernels, no plugin, no int8 boundary. The licence comes from the correction measurement: 0.1% of pixels sit above 19.4 levels of correction, so an approximation wrong by 40% of the correction still keeps the worst pixel at the bar. The old SVD test (weight energy 77-91%, 28.7 dB layer output) answered a different question; what to do instead is reconstruction on calibration activations (ASVD scales weights by activation statistics so the OUTPUT error is minimised; SNOWS does the vision version with a K-step layer reconstruction through conv+BN+ReLU+residual). 2:4 sparsity is explicitly out: TRT picks sparse tactics with no measured win (E7) - structural channels keep dense kernels."
   - id: rve-film-gate-codec-2026-11-15
     title: "E31 (dropped): grain synthesis / motion-compensated reuse for film"
     type: research
@@ -155,6 +155,50 @@ tasks:
     relates_to: [docs/RESEARCH-LEDGER.md]
     owns_files: []
     note: "Kept as a row, not deleted, so the reasoning survives: motion-compensated reuse and AV1-style grain synthesis are standard and would plausibly take film from 1.85x to 2x+, but they change what the acceptance statistic sees, and the statistic is only valid when the reference is supposed to be identical apart from artefacts."
+  - id: rve-residual-scale-2026-11-15
+    title: "E34: how big is the correction the network actually adds?"
+    type: experiment
+    status: done
+    owner: "@supervisor"
+    resolution: "measured 2026-11-15 on a real 1080p frame: correction |out - nearest(x)| median 0.9 levels, p90 2.1, p99 10.1, p99.9 19.4, max 44.5; 98.43% of pixels under the 8-level bar. Licences approximations wrong by up to ~40% of the correction. Instrument: scripts/residual_scale.py"
+    priority: P0
+    gpu: true
+    cost: "10m"
+    tags: [residual, approximation, metric]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md, docs/MODEL.md]
+    owns_files: [scripts/residual_scale.py]
+    note: "Cheapest measurement in the queue and the only one that widened the admissible set instead of narrowing it. It also reorders the plan: a channel cut at fp16 is now the shortest route to 2x, and the int8 plugin is no longer the critical path."
+  - id: rve-stage-pipelining-2026-11-15
+    title: "E35: is there a stage>1 (pipelined) tactic for the body conv, or only stage1?"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P1
+    gpu: true
+    cost: "2h"
+    tags: [tactics, myelin, pipelining, nsys]
+    base_branch: perf/inference
+    relates_to: [docs/MODEL.md, backend/src/pytorch/RawTRTEngine.py]
+    owns_files: [scripts/probe_tactics.py]
+    refutes: "The engine inspector shows only stage1 variants for this shape and precision. Then the single-stage mainloop is TRT's whole menu for sm89 fp16 here and E14's 'same kernel' result is explained rather than merely observed."
+    acceptance: "Layer information from trt.IEngineInspector for the 16 body convolutions under three builder configs (default, tactic sources restricted, and a fresh timing cache), listing every tactic name seen and its time. E14 enumerated SOURCES; the stage count inside a source was never enumerated."
+    note: "The chosen kernel is tilesize128x64x32_stage1_warpsize2x2x1_tensor16x8x32. stage1 is a single-stage mainloop, i.e. no cp.async software pipeline over the K loop - the kernel loads a tile, syncs, computes, syncs. Ampere+ convolution kernels normally run stage3-5. If a pipelined variant exists in the same source and simply loses on TRT's heuristic, an editable timing cache or a forced tactic is a cheap 10-20%."
+  - id: rve-cone-recompute-2026-11-15
+    title: "E36: cone instead of cylinder - per-layer halo for partially changed frames"
+    type: research
+    status: todo
+    owner: null
+    priority: P2
+    gpu: false
+    cost: "phase 1: hours"
+    tags: [reuse, halo, spatial, literature]
+    base_branch: perf/inference
+    relates_to: [backend/src/utils/TemporalReuse.py, docs/RESEARCH-LEDGER.md]
+    owns_files: [scripts/cone_budget.py]
+    refutes: "The arithmetic does not survive contact with the gate: the changed region has to be estimated, and an underestimate is visible by construction (it recomputes less than the motion implies), which is the failure mode the pixel veto exists to catch."
+    acceptance: "Phase 1 only: work ratio for a changed region of radius r under {cylinder, cone} at 16 layers with halo k at layer k, for r in {5,10,20,40}, plus the per-frame launch cost of the extra regions. Phase 2 only if the ratio is above 2x at a radius the gate can actually certify."
+    note: "A different axis from the frame gate: the gate drops or reuses whole frames, while this recomputes only a cone (halo k at layer k) for the region that changed. The review's numbers: radius 10 -> 2.16x less work, radius 5 -> 2.6x. It is the layer-level analogue of a KV cache, and it is the only temporal idea on the list that this engine does not already have in some form."
   - id: rve-doc-literature-closures-2026-11-15
     title: "Record the literature closures so nobody re-enters them (PReLU zeros, 3x3->5x5, Strassen)"
     type: docs
