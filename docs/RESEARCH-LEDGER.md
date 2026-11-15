@@ -1833,6 +1833,38 @@ trivially. Each of the three looked like a result.
 Cost: ~1.5 s of forwards per video, against 0.7 s for the existing tile probe. At 1.42x of engine time the
 win saves 0.19*T, so the probe pays for itself when the render is longer than ~4.2 s.
 
+## The rule this investigation earned (2026-11-15)
+
+Eight separate conclusions in this file were wrong in the same way, and it is worth naming once:
+
+> **Before a number is called a result, name the population it was computed on and the population the
+> decision applies to. If they differ, the number is about something else.**
+
+The eight, for the record: pruning cost computed on the mask instead of `mask + 18`; the noise floor
+computed on the adversarial subset instead of the observed window; acceptance certified on a distribution
+of 16 marginal frames instead of the population the threshold serves; reachability checked on `lr` alone
+while the gate also depends on chain state and the pixel veto; the tile ruler applied to the wrong
+configuration (45.7 ms at 1440x1080); the probe pairing frames spread over a clip instead of adjacent ones;
+the probe comparing every pair instead of the pairs the gate would reuse; and the probe's gate statistic
+computed in 0..1 while the decision is in levels. The last three happened in one afternoon, in one script,
+each looking like a result.
+
+Two corollaries that this file already applies elsewhere and should apply here:
+
+- **A ratio is not a constant.** The composition's amplification over the sum of its parts measured 1.55x
+  on Chainsaw and 2.03x on Violet, against 3.9x on an earlier single Violet pair. That variability is the
+  argument for keeping the probe rather than deriving a formula.
+- **An enrichment is per-title too.** The reuse break-even is ~50% on Violet and ~52% on Chainsaw, from
+  their own 6.90 s / 142-of-219 and 6.61 s / 146-of-220 - not a universal number.
+
+And the amortisation, correctly based on the incremental cost: the probe adds ~0.8 s over the tuner's
+existing 0.7 s, and only passing titles earn the 1.42x, so `T > 4.2 / P(pass)`. On a 870 s episode that
+holds for any P; on a 6.9 s test clip it needs P > 0.61.
+
+What is still missing is `P(pass)` itself: two titles locally, one passing, i.e. 0.5 with an interval that
+means nothing. Ten titles is ~15 s of GPU and the probe is ready for it; the clips available here are
+three of the same two titles, and the 16-frame excerpts are too short to hold ten adjacent pairs.
+
 ## What the literature closes, and the one item it reopens (2026-11-15)
 
 Written down because these are structural closures - true by the shape of our network, not measured
