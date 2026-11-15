@@ -32,3 +32,10 @@
 @below futsuu_short zero_excess
 # The 4x model's shortfall is recorded, not asserted: it is the stage's finding, and asserting it would make
 # the file fail on a number it has already measured. Stage 5's answer is a coverage boundary, not a pass/fail.
+
+# ---- SCOPE DECISION (2026-11-16): the 4x model is OUT OF SCOPE, not pending.
+# Its +1.70 ms shortfall was measured against the same monolithic baseline the rest of the plan used; against
+# the engine the app builds (35.85 ms at 1080p) the body loses by 25.65 ms regardless of model, and the 4x tail
+# and upsampler quadruple the fixed non-body cost that already dominated. Fixing 1.70 ms inside a 25.65 ms gap
+# would not change any decision, so it is scoped out rather than left as an open shortfall.
+@claim four_x_out_of_scope 1 x "the 4x model's shortfall is inside a gap the body loses at every resolution" measured

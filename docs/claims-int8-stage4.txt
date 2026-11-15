@@ -97,11 +97,25 @@
 @derived ratio_nvenc2 "91.72 / 64.24 = 1.428; rounds read 1.428 / 1.425 / 1.426"
 @claim gate_margin       -0.78 ms  "cycle_idle_ms - engine_idle_ms/1.40 = 56.82 - 57.24" derived
 @derived gate_margin "56.82 - 80.14/1.40 = -0.42 ms; against the median 80.5/1.40 = 57.5 it is -0.68 ms: the gate is MET"
-# Both conditions clear 1.40x.
-@claim gate_margin_nvenc -1.28 ms "cycle_nvenc_ms - engine_nvenc_ms/1.40 = 64.24 - 65.51" derived
-@derived gate_margin_nvenc "64.24 - 91.72/1.40 = -1.28 ms: the gate is met with NVENC alongside too"
-@below gate_margin zero_excess
-@below gate_margin_nvenc zero_excess
+# SUPERSEDED: the 1.40x comparisons above are against the MONOLITHIC engine in my harness (80 ms), and the
+# app does not build that engine. Its own log shows a tiled, head-fused, opt-5 engine at 35.85 ms. The two
+# margins are kept as history and are NOT asserted.
+@claim gate_margin_nvenc -1.28 ms "cycled_nvenc - engine_nvenc/1.40, against the monolithic engine" derived
+@derived gate_margin_nvenc "64.24 - 91.72/1.40 = -1.28 ms against the monolithic engine; superseded below"
+
+# ---- THE GATE, RESTATED AGAINST THE ENGINE THE APP ACTUALLY BUILDS
+@claim app_engine_ms     35.85 ms "the app's own profile: tiled opt-5 headpad5 engine, 1920x1080, inference" measured
+@claim body_ms_app_base  56.82 ms "the int8 body, same shape, from the harness in this file" measured
+@claim body_vs_app        0.631 x "derived: app_engine_ms / body_ms_app_base" derived
+@derived body_vs_app "35.85 / 56.82 = 0.631: 1.58x SLOWER than the engine the app builds"
+@claim app_kill_overspend 25.65 ms "body_ms - app_engine_ms/1.15 = 56.82 - 31.17" derived
+@derived app_kill_overspend "56.82 - 35.85/1.15 = +25.65 ms past the kill line, not near it"
+@claim app_gate_overspend 31.21 ms "body_ms - app_engine_ms/1.40 = 56.82 - 25.61" derived
+@derived app_gate_overspend "56.82 - 35.85/1.40 = +31.21 ms past the 1.40x gate"
+
+# The verdict, asserted as the statement that is true: against its real baseline the body is BELOW the kill
+# line, i.e. the lane does not pay. This passes because it is the finding, not because the bar moved.
+@below body_vs_app kill_ratio
 
 # ---- 4K: the body LOSES, and the app render never used it (verified from the full log)
 @claim engine_4k_idle    186.14 ms "fp16 TensorRT engine, 3840x2160, NVENC idle" measured

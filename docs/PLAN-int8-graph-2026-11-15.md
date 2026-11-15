@@ -1023,7 +1023,48 @@ verified), then the stopwatch.
 
 **Tools:** `/var/tmp/opencode/graph_bitexact.py` is the harness; `launch_cubin.py` has the launcher.
 
-## Lane disposition (2026-11-16, corrected by the app's own log)
+## Lane disposition (2026-11-16, final - stages 2, 4 and 6 closed as measured, does not pay)
+
+**The gate, restated against the engine the app actually builds.**
+
+| 1920x1080 | time |
+|---|---|
+| the app's own engine: tiled, head-fused, opt-5 (its log, `inference 35.85 ms`, 24 frames) | **35.85 ms** |
+| the int8 body, same shape | **56.82 ms** |
+| ratio | **0.631x** |
+
+3623 words of measurement in this document were aimed at a baseline the app never builds. Everything from stage 2
+onwards - 1.489x, 1.505x, 1.422x, and the "gate cleared" 1.411x/1.428x - is a ratio against the **monolithic**
+TensorRT engine in my harness (80 ms). The app builds `..._opt-5_tiling-full_headpad5_1920x1080` and runs the same
+frame in 35.85 ms, because it tiles and because it fuses the head convolution (3 -> 8 padded channels) into the
+graph. Against that engine the body is **1.58x slower**, 25.65 ms past the plan's own kill line of 1.15x.
+
+**Closed on that number:**
+
+* **Stage 2 - measured, does not pay.** `docs/claims-int8-stage2.txt` now carries the restatement: the 1.489x and
+  1.505x are ratios against the wrong baseline, and against the right one the body is 0.631x - below the kill
+  line, which is the assertion the file now makes.
+* **Stage 4 - measured, does not pay.** The probe is correct and does its job: on a 1080p clip its log reads
+  `int8 probe: engine 0.002% composition 0.003% peak 14 (7 pairs, bar 0.1%) -> int8`, so the 4K failure was memory,
+  not judgement. But a correct decision cannot close a 1.58x compute gap, and `docs/claims-int8-stage4.txt` asserts
+  the restated ratio.
+* **Stage 6 - measured, does not pay.** The int8 head conversion works (5.27 -> 1.52 ms, the fp32-slope bug found
+  and fixed) and it is beside the point: the app's engine already fuses the head into its own graph, so the work it
+  replaces is not on the app's critical path. The fp16 tail stays torch.
+* **Stage 5 - scoped out, with the reason on record.** The 4x model's +1.70 ms shortfall sits inside a 25.65 ms
+  gap that exists at every resolution and every model; closing 1.70 of 25.65 would change no decision.
+
+**No int8 frame has ever been rendered by the app**, and both reasons are now measured rather than suspected: at
+4K the probe runs out of memory (`int8 probe unavailable (CUDA out of memory ...); int8 stays off`), and at 1080p,
+where the probe admits the video, `_int8_body` is consulted only on the whole-frame path while the app renders
+tiled - no certification line appears because the tiled path never asks. Serving it there would have made the
+render 1.58x slower.
+
+**The one lever left, with a measured size:** a body kernel that is not 1.8x slower per layer than the engine's
+fused convolution. Nothing else in this document - not the graph (0.998x), not the boundaries (attacked three
+times, all negative), not the probe (correct but orthogonal) - can close a compute gap.
+
+## Lane disposition (2026-11-16, superseded: corrected by the app's own log)
 
 **The app does not build the engine the gate was measured against. Against the engine it does build, the body
 loses at both resolutions - the lane does not pay, and that is now measured rather than assumed.**

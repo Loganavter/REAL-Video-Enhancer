@@ -38,3 +38,13 @@
 
 # The kill condition (<=1.15x) is not triggered: 1.492 and 1.504 are both above it, and there is no
 # "above" directive - so it is recorded here rather than asserted.
+
+# ---- RESTATED (2026-11-16): the gate above compares against a MONOLITHIC TensorRT engine (80 ms) that the
+# app never builds. Its own log shows a tiled, head-fused, opt-5 engine at 35.85 ms for the same 1920x1080
+# frame, so the 1.489x/1.505x are ratios against the wrong baseline. Against the right one:
+@claim app_engine_ms     35.85 ms "the app's own profile, tiled opt-5 engine, 1920x1080 inference" measured
+@claim body_ms           56.82 ms "the int8 cycle, same shape" measured
+@claim body_vs_app        0.631 x "derived: app_engine_ms / body_ms" derived
+@derived body_vs_app "35.85 / 56.82 = 0.631 - the body is 1.58x slower than the engine the app builds"
+# The stage-2 gate (>=1.40x) is therefore NOT met, and neither is the kill line. Asserted as the finding.
+@below body_vs_app kill_ratio
