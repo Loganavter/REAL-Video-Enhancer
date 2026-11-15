@@ -546,13 +546,30 @@ class Render:
         if getattr(self.temporalReuse, "last_scene_cut", False):
             history.clear()
         depth = int(getattr(self.temporalReuse, "max_chain", 0) or 0)
+        # The acceptance statistic, on the same calibration frames and for free: the tuner has been
+        # certifying a block-mean proxy (2 levels at depth 1, 12 deeper) while the pictures are
+        # judged by "share of pixels more than 8 levels off in any RGB channel, worst frame of the
+        # sample". Two instruments, so a rule that "proved" the error could still fail the bar -
+        # which is exactly the class of mistake this whole investigation is about. Stride-2 RGB at
+        # 8 bits is 6 MB per 4K frame and four of them fit in the gate's own budget.
+        accept = []
+        frames = getattr(self, "_hr_rgb8", None)
+        if frames is None:
+            frames = self._hr_rgb8 = []
+        rgb8 = (tensor[:, :, ::2, ::2].clamp(0.0, 1.0) * 255.0).round().to(torch.uint8)
+        for past in reversed(frames[-max(depth, 1):]):
+            delta = (rgb8.to(torch.int16) - past.to(torch.int16)).abs().max(dim=1).values
+            accept.append(float((delta > 8).float().mean()) * 100.0)
         if history:
             # one delta per chain depth, so the tuner can certify "two frames deep" when
             # "four" is too stale rather than throwing the gate away
             deltas = [float(abs(grid - past).max().item())
                       for past in reversed(history[-max(depth, 1):])]
             lr_delta = float(getattr(self.temporalReuse, "last_delta", 0.0) or 0.0)
-            self.autoTuner.add(lr_delta, deltas)
+            self.autoTuner.add(lr_delta, deltas, accept)
+        frames.append(rgb8)
+        if len(frames) > max(1, depth):
+            del frames[:-max(1, depth)]
         history.append(grid)
         if len(history) > max(1, depth):
             del history[:-max(1, depth)]
