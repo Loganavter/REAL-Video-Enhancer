@@ -488,6 +488,7 @@ class AutoGateTuner:
                  candidates=(2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0),
                  clamp=(2.0, 4.0), noise_floor_quiet: float = 0.35,
                  fallback: str = "strictest", chain_budget: float = 12.0,
+                 noise_floor_refuse: float = 2.0,
                  chain_policy: str = "certified"):
         self.budget = float(budget)
         # The clamp is load-bearing *once the tile path is out of the way*: with tile reuse
@@ -522,6 +523,12 @@ class AutoGateTuner:
         self.candidates = tuple(float(c) for c in candidates)
         self.clamp = (float(clamp[0]), float(clamp[1]))
         self.noise_floor_quiet = float(noise_floor_quiet)
+        # Measured on three real Blu-rays: noise floor 0.95 (digital with added grain, 0.005% of
+        # pixels above 8 levels at the worst frame), 1.32 (clean digital, 0.097%), 2.27 (35 mm TV,
+        # 0.470%). The last one fails the acceptance bar at every threshold - 4 and 2 measure the
+        # same - because on grainy film a 32 px block mean cannot tell "the grain changed" from
+        # "something moved a pixel". So above this floor the gate refuses rather than tuning.
+        self.noise_floor_refuse = float(noise_floor_refuse)
         self._pairs: list[tuple[float, tuple[float, ...]]] = []
         if fallback not in ("strictest", "off"):
             raise ValueError(f"fallback must be 'strictest' or 'off', got {fallback!r}")
@@ -602,6 +609,12 @@ class AutoGateTuner:
             for depth, cand, p90 in certified:
                 print(f"[tuner] depth {depth}: threshold {cand}, p90 {p90:.2f}", file=sys.stderr)
 
+        if self._noise_floor() > self.noise_floor_refuse:
+            self.settled = True
+            self.chosen = None
+            self.veto = None
+            return
+
         if certified:
             # Longest usable chain, then the widest threshold certified for it.
             depth, cand, _ = max(certified, key=lambda row: (row[0], row[1]))
@@ -644,6 +657,11 @@ class AutoGateTuner:
         if not self.settled:
             return f"auto gate: calibrating ({len(self._pairs)}/{self.min_pairs} frames)"
         if self.chosen is None:
+            if self._noise_floor() > self.noise_floor_refuse:
+                return (f"auto gate: noise floor {self._noise_floor():.2f} is above the "
+                        f"{self.noise_floor_refuse:.1f} limit for this material, so reuse is OFF "
+                        f"- measured on film of this grain: 0.47% of pixels above 8 levels at "
+                        f"every threshold")
             return (f"auto gate: no candidate kept the p90 error inside {self.budget} levels "
                     f"(noise floor {self._noise_floor():.2f}), so reuse is OFF - "
                     f"{len(self._pairs)} calibration frames")

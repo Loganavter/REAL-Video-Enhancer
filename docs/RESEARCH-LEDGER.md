@@ -302,6 +302,33 @@ Acceptance for this family of defects is therefore local and absolute, not a mea
 8 levels, and under 0.5% of pixels above 4**. Whole-frame PSNR and VMAF both pass a frame that
 fails this, because a fist is a fraction of a percent of the frame.
 
+## Three real Blu-rays, and the rule that did not transfer (2026-11-15)
+
+The acceptance rule and the presets were derived from two clips. Three actual BDs, 8 s cuts at
+5:00, `--quality_preset best` against an ungated render of the same cut:
+
+| title | noise floor | threshold / chain | reuse | time | RGB > 8 levels, worst of 15 frames |
+|---|---|---|---|---|---|
+| Chainsaw Man ep01 (digital, added grain) | 0.95 | 4.0 / 1 | 37.7% | 1.38x | **0.005%** (peak 15) |
+| Violet Evergarden ep01 (clean digital) | 1.32 | 4.0 / 1 | 48.9% | 1.60x | **0.097%** (peak 20) |
+| Cowboy Bebop ep01 (35 mm TV, deinterlaced) | 2.27 | refused | 0% | 1.01x | **0.470%** at threshold 4, **0.469%** at threshold 2 |
+
+What this settled:
+
+- **The threshold is not the knob on grainy material.** Bebop measures the same defect at
+  threshold 4 and at threshold 2 (0.470% against 0.469%) while reuse halves, i.e. a 32 px block
+  mean cannot tell "the grain changed" from "something moved one pixel". Lowering the threshold
+  buys nothing and costs the reuse.
+- **The noise floor is the signal.** 0.95, 1.32, 2.27 line up with the material and with the
+  outcome, so the tuner now refuses outright above **2.0** instead of tuning there. On Bebop that
+  gives a render that is **byte-identical to the ungated one** (240/240 frames), which is the
+  honest outcome for 1.15x.
+- **The chain is the adaptive knob, not the threshold.** The clamp at 4 was hit on all three
+  titles while the chain was cut to 1 on all three; that is the opposite of what the two-clip
+  derivation suggested.
+- Violet at 0.097% sits just inside the 0.1% bar, so the margin on ordinary good material is
+  thin: the clean anime clip this was derived from (0.18 floor) was exceptionally clean.
+
 ## Grain sweep (synthetic, 2026-11-15)
 
 The clean anime clip with `noise=alls=S:allf=t+u` layered on, then three renders per variant:
