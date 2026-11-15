@@ -1833,6 +1833,45 @@ trivially. Each of the three looked like a result.
 Cost: ~1.5 s of forwards per video, against 0.7 s for the existing tile probe. At 1.42x of engine time the
 win saves 0.19*T, so the probe pays for itself when the render is longer than ~4.2 s.
 
+## What int8 costs in reuse: a formula, not a table (2026-11-15)
+
+An engine that is `k` times faster can afford to lose this much reuse, and no derivation is needed beyond
+`T = N + E*r` against `T' = N + (E/k)*r'`:
+
+    margin (in reuse points) = (k - 1) * r      where r is the RENDERED fraction
+    applicability:  r <= 1/k  (0.704 at k = 1.42)
+
+| title | rendered | break-even reuse | margin | gate-only defect |
+|---|---|---|---|---|
+| Chainsaw | 33.64% | 52.24% | **14.13 pp** | 0.005% |
+| Violet | 35.16% | 50.07% | **14.77 pp** | 0.096% |
+
+Three things follow, and all three contradict the intuition the table was built on:
+
+- the margin depends **only** on the engine's speed-up and the rendered share - neither the engine's share
+  of the frame nor the non-engine time enters it;
+- it is **larger for titles that render more**, i.e. reuse less. "More reuse means more headroom" is false
+  here;
+- it is computed from one number the application already logs (reuse counts) - no probe, no int8 forwards.
+
+The margins are therefore **equal within 0.6 pp**, and the two verdicts cannot be explained by different
+reuse headroom. The discriminator is the picture: the fp16 gate alone reads 0.005% on Chainsaw (20x of
+margin) and 0.096% on Violet (1.04x), and the probe reproduces exactly that -
+`(0.005 + 0.006) * 1.55 = 0.017%` and `(0.096 + 0.031) * 2.03 = 0.258%`, both matching the measurement.
+
+Which gives a pre-filter that needs no int8 work at all: since the composition is roughly
+`(T_gate + E_engine) * amplification`, requiring it under the bar at an amplification of 2 gives
+**`T_gate <= 0.019%`**. Chainsaw qualifies at 0.005%; Violet is rejected at 0.096% without a single int8
+forward; the anime clip at 0.017% sits on the line with a measured composition of 0.006%, i.e. the estimate
+is conservative where the pixel sets overlap. As with the sample bar, one point does not calibrate the rule
+- it is a filter to decide whom to probe, not a verdict.
+
+**This is the ninth time in this file that a number was computed on one population (or scale, or column)
+and applied to another**: `mask` instead of `mask + 18`, the noise floor on the adversarial subset, the
+16 marginal frames, `lr` without chain state, the 1440x1080 tile ruler, frames spread instead of adjacent,
+all pairs instead of gated ones, 0..1 instead of levels, and now rendered subtracted from reuse. Hence the
+formula: a formula cannot be subtracted from the wrong column.
+
 ## The rule this investigation earned (2026-11-15)
 
 Eight separate conclusions in this file were wrong in the same way, and it is worth naming once:
