@@ -133,7 +133,13 @@ class TorchTensorRTHandler:
         """Checks if a TensorRT engine exists at the specified path."""
         trt_engine_name += self.trt_path_appendix
         trt_engine_path = os.path.join(self.model_parent_path, trt_engine_name)
+        if os.environ.get("RVE_RAW_TRT", "0") == "1":
+            return os.path.exists(trt_engine_path + ".plan")
         return os.path.exists(trt_engine_path)
+
+    def raw_trt_enabled(self) -> bool:
+        """Build with the raw TRT builder instead of torch_tensorrt (ledger E19)."""
+        return os.environ.get("RVE_RAW_TRT", "0") == "1"
 
     def build_engine(
         self,
@@ -153,6 +159,32 @@ class TorchTensorRTHandler:
         start_time = time.time()
         trt_engine_name += self.trt_path_appendix
         TorchUtils.clear_cache()
+        # The raw builder is faster on this graph (ledger E22: 11.01 s against 11.92 s on the same
+        # clip, picture bit-identical). Engines are static per resolution by default (tensorrt_
+        # dynamic_shapes is off), which is exactly the shape this path exports; the opt-in dynamic
+        # mode is skipped, and any failure falls through to torch_tensorrt rather than costing a
+        # render.
+        if self.raw_trt_enabled() and dynamic_shapes is None:
+            try:
+                from .RawTRTEngine import RawTRTEngine, build_plan, export_onnx
+                engine_path = os.path.join(self.model_parent_path, trt_engine_name)
+                onnx_path = engine_path + ".onnx"
+                export_onnx(model, example_inputs, onnx_path)
+                build_plan(onnx_path, engine_path + ".plan", fp16=(dtype == torch.float16),
+                           tiling=tiling_optimization_level,
+                           optimization_level=self.optimization_level)
+                print(f"TensorRT engine built in {time.time() - start_time:.2f} seconds "
+                      f"(raw builder).", file=sys.stderr)
+                TorchUtils.clear_cache()
+                return RawTRTEngine(engine_path + ".plan")
+            except Exception as error:
+                log(f"raw TensorRT path failed ({error}); falling back to torch_tensorrt")
+                for stale in (engine_path + ".plan", engine_path + ".onnx"):
+                    if os.path.exists(stale):
+                        os.remove(stale)
+        elif self.raw_trt_enabled():
+            log("raw TensorRT path exports one static shape; this engine asked for dynamic "
+                "(tensorrt_dynamic_shapes), so torch_tensorrt builds it")
         """Builds a TensorRT engine from the provided model."""
         print(
             f"Building TensorRT engine {os.path.basename(trt_engine_name)}. This may take a while...",
@@ -215,6 +247,11 @@ class TorchTensorRTHandler:
         trt_engine_name += self.trt_path_appendix
         trt_engine_path = os.path.join(self.model_parent_path, trt_engine_name)
 
+        from .RawTRTEngine import RawTRTEngine
+        if isinstance(trt_engine, RawTRTEngine):
+            # the plan is already on disk next to the engine name; nothing to serialise
+            log(f"raw TensorRT plan kept at {os.path.basename(trt_engine.plan_path)}")
+            return
         torch_tensorrt.save(
                 trt_engine,
                 trt_engine_path,
@@ -228,6 +265,10 @@ class TorchTensorRTHandler:
         
         trt_engine_name += self.trt_path_appendix
         trt_engine_path = os.path.join(self.model_parent_path, trt_engine_name)
+        if self.raw_trt_enabled() and os.path.exists(trt_engine_path + ".plan"):
+            from .RawTRTEngine import RawTRTEngine
+            print(f"Loading raw TensorRT plan from {trt_engine_path}.plan.", file=sys.stderr)
+            return RawTRTEngine(trt_engine_path + ".plan")
         print(f"Loading TensorRT engine from {trt_engine_path}.", file=sys.stderr)
         return torch.jit.load(trt_engine_path).eval()
 
