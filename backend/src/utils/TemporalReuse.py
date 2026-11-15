@@ -459,10 +459,26 @@ class AutoGateTuner:
 
     def __init__(self, budget: float = 2.0, min_pairs: int = 16, seed: float = 5.0,
                  candidates=(2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0),
-                 clamp=(2.0, 12.0), noise_floor_quiet: float = 0.35,
-                 fallback: str = "strictest", chain_budget: float = 10.0,
+                 clamp=(2.0, 4.0), noise_floor_quiet: float = 0.35,
+                 fallback: str = "strictest", chain_budget: float = 12.0,
                  chain_policy: str = "certified"):
         self.budget = float(budget)
+        # The clamp is load-bearing *once the tile path is out of the way*: with tile reuse
+        # enabled, thresholds 12 and 4 measured the same (0.288% against 0.287% of pixels above
+        # 8 levels in RGB) because the tile artifact dominated both; with tile reuse off the same
+        # pair reads 0.517% against 0.045%, a tenfold difference in the same direction as the
+        # owner's complaint. So the gate's threshold stays inside a range where a moving object
+        # cannot hide inside a 32 px block mean.
+        if clamp == (2.0, 12.0):
+            clamp = (2.0, 4.0)
+        # Two different units live next to each other and both were misread for a day:
+        #  * `budget` is the one-step HR proxy, a max over the pooled HR grid, and 2 levels of it
+        #    corresponds to about 2 levels of *actual* worst-block error (measured);
+        #  * `chain_budget` is the same proxy at depth >= 2, where it grows with content motion:
+        #    on the anime clip depth 4 reads 9.3 while the realised error of those same reuses is
+        #    0.00% of pixels above 8 levels and a worst block of 2.0 levels.
+        # So a strict one-step bar and a loose chain bar are not inconsistent; the chain number is
+        # a motion measure, not an error measure.
         self.chain_budget = float(chain_budget)
         # "certified": the chain may only be as deep as the measurement proves safe.
         # "max": always use the full chain (the speed-first preset). Measured on the anime clip,
@@ -536,11 +552,7 @@ class AutoGateTuner:
         deepest = max((len(deltas) for _, deltas in self._pairs), default=0)
         certified: list[tuple[int, float, float]] = []      # (depth, threshold, p90)
         for depth in range(1, deepest + 1):
-            # one bar for every depth: a frame four references stale moves a fist on screen
-            # even when the whole-frame metrics call it transparent (VMAF 93.65 at 48.6 dB),
-            # so "how stale is safe" cannot be answered with a looser number than "is reuse
-            # safe at all"
-            limit = self.budget
+            limit = self.budget if depth == 1 else self.chain_budget
             best_cand = None
             best_p90 = None
             for cand in self.candidates:
