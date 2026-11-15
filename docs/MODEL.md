@@ -254,7 +254,8 @@ counter is read (§6, item 2).
      budget at the same time.
 
    **`nsys` runs here and confirms the shape of that time** (its timeline needs no counters).
-   25 frames, 24 kernel launches per frame, 56.8 ms of kernel time against a 57.4 ms loop - i.e. the
+   25 frames, 25 kernel launches per frame (16 of them the same GEMM), 56.8 ms of kernel time
+   against a 57.4 ms loop - i.e. the
    GPU is busy for the whole frame and there is no launch gap to reclaim (which is also why CUDA
    graphs measured ~0.3%):
 
