@@ -4,7 +4,13 @@ Everything below was either measured on this machine or read from a named source
 without a source are ours. If an idea is not in this file, it was not considered.
 
 Measurement rig: RTX 4060 Ti 16 GB, Ryzen 5 5600 (6c/12t), TensorRT 10.12, torch 2.9,
-PyAV 19.0.2. Two clips: a 1440x1080 10-bit HEVC film excerpt (94 frames, "the clip") and a
+PyAV 19.0.2.
+
+**Measurement protocol - one GPU job at a time.** Two engine builds running next to a render
+inflate every number: in this session a `full_l2` engine measured 67.4 ms and 103.2 ms in two
+"identical" runs, and an app render measured 20.4 s against 11.5 s for the same configuration,
+purely because a second process was building engines on the same card. Check `pgrep -x python3`
+and `nvidia-smi` before quoting anything, and repeat the pair (same-session ratios only). Two clips: a 1440x1080 10-bit HEVC film excerpt (94 frames, "the clip") and a
 40 s window of the same film ("the window"). Unless stated, wall-clock for the whole render
 with `x265_nvenc` (so the encoder is not the bottleneck).
 
