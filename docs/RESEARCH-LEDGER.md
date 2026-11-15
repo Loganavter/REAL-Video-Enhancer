@@ -2062,10 +2062,30 @@ applied the comparison reads **max |diff| 0, share 0.00%**: the capped cubin, lo
 reproduces the reference bit for bit. That is the second time this reference has caught a mistake (the first
 was `permute(1,0,2)`), which is why it exists.
 
-**Then the timing, and the register point does not win.** At 1080x1080 the capped cubin (128 registers,
-four blocks, 16 warps) runs at **1.272 ms = 67.6 TOPS**, against the uncapped BM 128 baseline's 64.9 and the
-BM 256 baseline's 77.6. So 16 warps buy about **4% over their own base** and remain **13% behind the best
-configuration**, which has half the warps and twice the per-thread work.
+**Then the timing at the same frame, and the register point does not win.** 1920x1080, grid 16 200:
+
+| configuration | registers | blocks | warps | TOPS |
+|---|---|---|---|---|
+| BM 128, capped, hand-launched | 128 | 4 | **16** | **68.5** (2.232 ms) |
+| BM 128, uncapped | 138 | 3 | 12 | 64.9 (2.355 ms) |
+| **BM 256, uncapped** | 255 | 2 | 8 | **77.6** (1.970 ms) |
+
+So 16 warps buy **+5.5% over their own base** and stay **11.7% behind the best configuration**, which has
+half the warps and twice the per-thread work. (The first pass of this was measured at 1080x1080, where BM 128
+also straddles row boundaries - 1080/128 = 8.4375 against 1920/128 = 15 - so the same-frame rerun was needed;
+it moved 67.6 to 68.5 and changed nothing.)
+
+And the mechanism is not "not enough registers" but **ILP against TLP at fixed register-file capacity**:
+
+| config | threads/SM | accumulator | operands | total |
+|---|---|---|---|---|
+| BM 256, 255 regs | 256 | 32 768 | 32 512 | 65 280 |
+| BM 128, 128 regs | 512 | 32 768 | 32 768 | 65 536 |
+
+Both spend the whole file and split it identically; only the per-thread cut differs, 128/127 against 64/64
+at twice the threads. Both effects are real - warps helped by 5.5% - and ILP was worth 11.7%, which is why
+the branch closes. It closes because 16 warps is the ceiling at BN=64 (five blocks would need 102 registers,
+six 85), not because warp switching does nothing.
 
 That is the third of the three predictions: not parity, not the 1.766 ms the "warps hide latency" model
 wanted, but a small gain over the wrong base. **Warp switching does not replace per-thread load hoisting at

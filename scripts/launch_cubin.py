@@ -29,8 +29,9 @@ def main() -> int:
     cubin_path = sys.argv[1] if len(sys.argv) > 1 else "/var/tmp/opencode/k_s1.cubin"
     smem = 12288
     block = 128
-    H = W = int(sys.argv[2]) if len(sys.argv) > 2 else 64
-    iters = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    H = int(sys.argv[2]) if len(sys.argv) > 2 else 64
+    W = int(sys.argv[3]) if len(sys.argv) > 3 else H
+    iters = int(sys.argv[4]) if len(sys.argv) > 4 else 0
     C = 64
 
     check(CUDA.cuInit(0), "cuInit")
