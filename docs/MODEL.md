@@ -104,8 +104,10 @@ once a second with `nvidia-smi`:
 | power draw | **162 W** (max 163) | against the card's **165 W** cap |
 | temperature | 60 C | not thermal |
 
-The engine saturates the SMs, keeps the memory system 85% busy, and does both at **162 of 165 W**
-with the SM clock held below maximum. So the binding constraint is the power budget, not a kernel -
+It also moves **9.37 GiB of tensor traffic per frame**, which at the card's 288 GB/s is 36.5 ms of
+pure DRAM time (65% of peak while the engine runs) - so the traffic floor is 20 ms below the 57 ms
+it actually takes (§6 item 2 has the table). The engine saturates the SMs, keeps the memory system
+85% busy, and does both at **162 of 165 W** with the SM clock held below maximum. So the binding constraint is the power budget, not a kernel -
 which is consistent with everything in §4 and §6: no kernel-level lever moved the number, and the
 only two things that did were fewer DRAM round trips (`tiling=full`) and fewer frames (the gate).
 It is also why the int8 ceiling below is the only place in this report where a 1.5x exists: halving
@@ -228,8 +230,36 @@ counter is read (§6, item 2).
    choice rather than one bad kernel. The session total reads 51.95 ms here and 55.3 in a later
    one, so only the shape is portable. What is still missing is the split of that time into
    compute versus DRAM, which needs `nsys` (item 2).
-2. **nsys** tensor-active % and DRAM bytes with clocks pinned (`nvidia-smi -lgc`): that is the
-   actual localisation of the gap; everything in §3 is inference.
+2. ~~**nsys** tensor-active % and DRAM bytes with clocks pinned~~ **the byte count is computable
+   from the engine's own layer list, and that is most of the answer** (sum of input+output tensor
+   sizes over the 25 layers, `Format/Datatype`-aware):
+
+   | | fp16 engine | int8 engine (per-channel PReLU) |
+   |---|---|---|
+   | tensor traffic per frame | **9.37 GiB** (10.1 GB) | **14.48 GiB** (15.5 GB) |
+   | at the card's 288 GB/s that traffic alone takes | 36.5 ms | 56.0 ms |
+   | measured | 55-57 ms | 68-71 ms |
+   | fraction of peak DRAM it implies | 65% | 64% |
+
+   Two results, and the second is the int8 verdict in one number:
+
+   - The fp16 engine sits at **65% of the card's DRAM peak** while the SMs are 100% busy and the
+     draw is 162 of 165 W: a balanced, power-limited engine about 20 ms above its own traffic floor.
+   - The int8 build moves **55% more bytes than fp16** - 14.5 against 9.4 GiB - because every block
+     round-trips through a half-precision tensor for its PReLU. "Fewer bytes and fewer FLOPs" is
+     inverted by the boundary, which is the same fact the profile shows as 17 separate passes.
+   - Arithmetic intensity is **236 FLOP/byte**: under the 306 that the whitepaper peak (88 TF/s)
+     implies, over the 146 that our own measured GEMM (42.1 TF/s) implies. So "compute- or
+     memory-bound" has no single answer here: 65% of DRAM, a full SM pipe and an exhausted power
+     budget at the same time.
+
+   `ncu`/`nsys` would confirm the byte count and give tensor-pipe activity directly. Both are
+   **installable without root** - the CUDA redist ships them as plain archives
+   (`nsight_compute-linux-x86_64-...-archive.tar.xz`, `nsight_systems-...`) - but this host's driver
+   is loaded with **`RmProfilingAdminOnly: 1`** (`/proc/driver/nvidia/params`), so hardware counters
+   are refused to a non-root user. Unlocking it is one line in `/etc/modprobe.d/` -
+   `options nvidia NVreg_RestrictProfilingToAdminUsers=0` - plus a reboot, because the module cannot
+   be unloaded under a running desktop. Nothing else is missing.
 3. ~~A conv ceiling instead of a GEMM ceiling~~ **done, but the result is unusable for 64->64**
    (§3): the tactic search hit OOM and each standalone engine pays border reformats. It would
    need re-running with a constrained workspace and, ideally, NHWC input/output so the comparison
