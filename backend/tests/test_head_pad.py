@@ -30,7 +30,7 @@ class Tiny(torch.nn.Module):
 
 
 def test_the_padded_model_computes_the_same_function(monkeypatch):
-    monkeypatch.setenv("RVE_HEAD_PAD", "1")
+    monkeypatch.delenv("RVE_NO_HEAD_PAD", raising=False)
     torch.manual_seed(0)
     model = Tiny(3).eval()
     x = torch.rand(1, 3, 32, 32)
@@ -50,21 +50,21 @@ def test_the_padded_model_computes_the_same_function(monkeypatch):
 
 
 def test_a_model_that_is_already_aligned_is_left_alone(monkeypatch):
-    monkeypatch.setenv("RVE_HEAD_PAD", "1")
+    monkeypatch.delenv("RVE_NO_HEAD_PAD", raising=False)
     model = Tiny(8).eval()
     same, extra = pad_head_channels(model)
     assert extra == 0 and same is model
 
 
-def test_the_padding_is_off_by_default_and_opt_in(monkeypatch):
-    monkeypatch.delenv("RVE_HEAD_PAD", raising=False)
-    assert pad_head_channels(Tiny(3).eval())[1] == 0, "off unless asked"
-    monkeypatch.setenv("RVE_HEAD_PAD", "1")
-    assert pad_head_channels(Tiny(3).eval())[1] == 5, "on when asked"
+def test_the_padding_is_on_by_default_and_can_be_switched_off(monkeypatch):
+    monkeypatch.delenv("RVE_NO_HEAD_PAD", raising=False)
+    assert pad_head_channels(Tiny(3).eval())[1] == 5, "on unless disabled"
+    monkeypatch.setenv("RVE_NO_HEAD_PAD", "1")
+    assert pad_head_channels(Tiny(3).eval())[1] == 0, "off when asked"
 
 
 def test_a_grouped_or_non_three_channel_head_is_not_touched(monkeypatch):
-    monkeypatch.setenv("RVE_HEAD_PAD", "1")
+    monkeypatch.delenv("RVE_NO_HEAD_PAD", raising=False)
     model = torch.nn.Sequential(torch.nn.Conv2d(3, 8, 3, groups=1, padding=1))
     assert pad_head_channels(model.model if hasattr(model, "model") else model)[1] == 5
     grouped = torch.nn.Sequential(torch.nn.Conv2d(4, 8, 3, groups=2, padding=1))

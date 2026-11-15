@@ -96,7 +96,7 @@ preset) before tuning anything else.
 | `--tile_reuse` | off | forces tiles on, equivalent to `--tile_reuse_mode on`; the core grid is still fitted to the frame (`divisor_tile`: 480x540 for 1920x1080, 8 windows, 1.147x the frame's area) |
 | `--tile_reuse_size` / `--tile_reuse_threshold` | 512 / 0.35 | the tile path's own knobs: LR core target and the worst low-passed delta under which a tile is reused |
 | `RVE_RAW_TRT=1` | off | builds engines with the raw `trt.Builder` from an ONNX export instead of `torch_tensorrt.dynamo.compile`. Engines are static per resolution by default, which is what this path exports; the opt-in dynamic mode falls back, and any export or build failure falls back to torch_tensorrt after deleting the stale plan. **No speed claim**: an earlier single pair read -7.6% and a later pair read +8%, and the interleaved A/B (three rounds each) shows raw winning the wall clock in all three rounds while the drift inside the experiment - 13% over three rounds - is larger than the effect. It stays as an independent build path, not as a lever |
-| `RVE_HEAD_PAD=1` | off | pads the head convolution to 8 input channels so myelin fuses it with its PReLU: -5.8% on a raw TRT build, but **+71% through this app's build path**, and only 0.9% on top of the raw builder. Only 3-channel heads are touched, and a 32x32 probe forward reverts anything it breaks (the SPAN family fuses its 3x3 and 1x1 weights, so widening one branch breaks it; 11 of the 78 models in the owner's collection) |
+| `RVE_NO_HEAD_PAD=1` | the padding is **on** | pads the head convolution to 8 input channels so myelin fuses it with its PReLU: **-3.5% of engine time, -3.0% of wall**, interleaved three rounds, 3/3 on both numbers, picture 0.012% of pixels above 8 levels at the worst frame. Only 3-channel heads are touched; a 32x32 probe forward reverts anything it cannot widen safely (the SPAN family fuses its 3x3 and 1x1 weights, so widening one branch breaks the sum - 11 of the 78 models in the owner's collection), and the pad is written as `torch.cat` because `F.pad` has no dynamo converter and split the engine into two TRT sub-graphs (+67%, ledger E23) |
 | `RVE_P010=1` | off | the "diverges from the planar reference at 31 dB, unexplained" that used to be here was **three separate faults, all found and fixed** (ledger C4): P010 missing from the "already YUV" branch, `_pipe_input_pixel_format()` deriving the format from the *encoder* tag while the packer emitted planar `yuv420p10le`, and the colour tags declared on the output side. Corrected, an opt-in P010 render measures 52.01 dB (10-bit output) / 46.11 dB (8-bit) against a libx265 reference. It stays **off**, and that is now measured rather than left open: on a 10-bit source (`yuv420p10le`, 220 frames, same preset) the two paths are **byte-identical in picture (0.000% of pixels above 8 levels)** and P010 costs **+0.5 ms/frame** - frame total 28.16 against 27.65 ms, render 6.40 against 6.29 s. The 1.54 ms repack it was supposed to avoid was already gone once C4 stopped deriving the pipe format from the encoder tag, so packing on the GPU now adds a conversion and removes nothing |
 | `--trt_streams` | 1 | >1 falls back to 1 with a warning: two `torch.jit.load` modules of one engine do not give independent contexts and the output corrupts (25 dB). |
 
@@ -144,10 +144,12 @@ levels, peak 0), and the raw path covers 78 of 78 models in the owner's collecti
 load/forward/ONNX-export stages. It stays behind `RVE_RAW_TRT=1` as an independent build path - engines
 are static per resolution by default (`tensorrt_dynamic_shapes` is off), which is the shape it exports;
 the opt-in dynamic mode falls back; any export or build failure falls back to torch_tensorrt after
-deleting the stale plan. The head padding on top is 0.9% at best and ships off (`RVE_HEAD_PAD=1`), with
-a probe forward that reverts any head it cannot widen safely. What remains of the 8.11 ms: tail
-convolution tactics and the upsampler plus myelin's reshape/add, **2.35 ms**, and the layout kernels
-**0.81 ms** (ledger E20-E21, E18, E22).
+deleting the stale plan. The head padding on top of that is **-3.5% of engine time and -3.0% of wall** and ships **on**, once the
+pad was written as `torch.cat` instead of `F.pad`: `F.pad` has no dynamo converter, so the node fell
+back to torch and cut the engine into two TRT sub-graphs, which is where the "+71% through this app's
+build path" that an earlier revision of this file reported came from (ledger E23). What remains of
+the 8.11 ms: tail convolution tactics and the upsampler plus myelin's reshape/add, **~1.9 ms** once the
+head's share is gone, and the layout kernels **0.81 ms** (ledger E20-E21, E18).
 
 ### The link is PCIe 3.0 x8, and pinning is not the lever
 

@@ -15,9 +15,9 @@ regression, so "faster" is not the same as "identical". No kernel-level techniqu
 locally beat a well-built engine, and the two model-side wins of this round are `tiling=full` (3.8%
 end-to-end) and a **graph**
 change - padding the head convolution to 8 input channels, worth **5.8% on a raw TRT build** because
-it is the one convolution whose 3-channel shape kept it out of the myelin pattern compiler - which
-this app's build path turns into a **71% regression**, so it is measured, documented and switched
-off. The model has that headroom; the builder that ships cannot collect it. We do
+it is the one convolution whose 3-channel shape kept it out of the myelin pattern compiler, and
+**3.5% of engine time through the app's own build path** once the pad is written as `torch.cat`
+rather than `F.pad` (which has no dynamo converter and cut the engine in two - ledger E23). We do
 **not** have a trustworthy ceiling for this shape, so the size of the remaining gap is unknown:
 the model is at 58-73% of a *borrowed* sustained figure, which is not the same as "finished".
 The pipeline-side win of the round is bigger than any model work: the frame gate alone is

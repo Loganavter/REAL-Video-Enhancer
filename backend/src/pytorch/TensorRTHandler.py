@@ -235,6 +235,13 @@ class TorchTensorRTHandler:
                     **compile_kwargs,
                 )
         
+        # How many TRT sub-engines the partitioner produced. One means the whole graph is in TRT;
+        # more than one means something stayed in torch between them, which costs far more than the
+        # ops themselves (ledger E23: the padded head measured 71% slower and this is the number that
+        # says whether that is the graph or the partition).
+        engines = getattr(model_trt, "_trt_engines", None)
+        if engines is not None:
+            log(f"TensorRT partitioning: {len(engines)} sub-engine(s)")
         print(
             f"TensorRT engine built in {time.time() - start_time:.2f} seconds.",
             file=sys.stderr,
@@ -270,5 +277,9 @@ class TorchTensorRTHandler:
             print(f"Loading raw TensorRT plan from {trt_engine_path}.plan.", file=sys.stderr)
             return RawTRTEngine(trt_engine_path + ".plan")
         print(f"Loading TensorRT engine from {trt_engine_path}.", file=sys.stderr)
-        return torch.jit.load(trt_engine_path).eval()
+        loaded = torch.jit.load(trt_engine_path).eval()
+        engines = getattr(loaded, "_trt_engines", None)
+        if engines is not None:
+            log(f"TensorRT partitioning (loaded): {len(engines)} sub-engine(s)")
+        return loaded
 

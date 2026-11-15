@@ -73,7 +73,7 @@ or run the same pixels in a cheaper numeric format.
 | E10 | hand-written conv kernel / plugin | CORE-TAG/rtx50-realesrgan-video | - | 39.8 TFLOP/s vs the engine's 186.7 on a 5090. Counter-precedent: for a 3x3 conv cuDNN chose Winograd at 74 ms where TRT's best tactic was 156 ms, so TRT's tactic set is not the set of all algorithms | **untested** (was "rejected": the source is one attempt on another card, and it does not measure this GPU) |
 | E11 | L2 persistence window | blog measurement (H100/3090) | 1.02-1.20x | nothing to pin: 1.2 MB of weights. The old justification ("265 MB activation stream") predates the myelin fusion finding - the engine is 25 top-level layers, not 18 separate kernels with a full round trip each - so how much traffic actually remains is unknown; the verdict rests on the weights being 1.2 MB against **32 MB** of L2 (AD106; 24 MB is the 4060 without Ti), not on the traffic count | **rejected** (justification corrected) |
 | E12 | per-layer precision constraints (force fp16 accumulate) | TRT docs | unknown | closed by measurement, not by an API limit: the DETAILED tactic dump shows all 16 body convs already running `f16f16_f16f16` (fp16 accumulation, NHWC). There is no fp32-accumulate share to convert | **closed (already in effect)** |
-| E19 | make the one unfused PReLU fold into the convolution before it, by padding the head to 8 input channels | `nsys` per-kernel trace, then the engine's own subgraph metadata | 2.40 ms (4.2% of the frame) | **closed, positive: 57.51 -> 54.15 ms (-3.36 ms, -5.8%) on the real graph, picture unchanged.** The head convolution is the only one with 3 input channels, and at C=3 it does not enter myelin *at all* (a minimal Conv(3->64)->PReLU->Conv(64->64) builds as 2 `CaskConvolution` + a separate `PointWiseV2`); at C=8 the same graph becomes one `fusion __myl_CorrMulLtSele` covering the conv *and* its PReLU (11.21 -> 9.59 ms, -14.5%). On the real graph, padding the head's weights with five zero channels and inserting a `Pad` before it - the graph input stays 3-channel, so the global residual and the whole pipeline are untouched - turns three head layers (`__myl_Move`, `correlation /body_0/Conv`, `__myl_MulLtSele`) into **one fusion**, and the `Pad` itself folds away (no kernel for it in the 24-layer engine). Interleaved A/B, 7 rounds: **57.51 -> 54.15 ms**, +5.8%; two separate process runs read -5.2% and -6.7%. Picture against the shipping engine: **0.000% of pixels above 8 levels, peak under 0.5 level, mean 0.03, 78.69 dB** - not bit-identical (the dot product now sums eight terms, five of them zero) and not visible. Costs +0.48% of the model's FLOPs. The tiling hypothesis that failed before it, and the global residual that blocked the first attempt, are both in this row's history rather than in a footnote
+| E19 | make the one unfused PReLU fold into the convolution before it, by padding the head to 8 input channels | `nsys` per-kernel trace, then the engine's own subgraph metadata | 2.40 ms (4.2% of the frame) | **closed and shipping: -3.5% of engine time through this app's build path** (11.79 -> 11.44 s wall, 16.18 -> 15.61 ms engine, interleaved three rounds, 3/3 on both numbers; picture 0.003% median / 0.012% worst / peak 15). The mechanism was measured on a raw TRT build first: the head is the only 3-channel convolution and at C=3 it does not enter myelin at all (a minimal Conv(3->64)->PReLU->Conv(64->64) builds as 2 `CaskConvolution` + a separate `PointWiseV2`), while at C=8 the same graph becomes one `fusion __myl_CorrMulLtSele` covering the conv *and* its PReLU (11.21 -> 9.59 ms, -14.5%); on the real graph the three head layers collapse into that one fusion and the pad folds away. The route to the product was blocked for two rounds by the operation rather than the graph - `F.pad` has no dynamo converter and split the engine (+67%), `torch.cat` does not (E23). A probe forward reverts the padding for structures it cannot widen, and the 78-model sweep below says which those are. | **closed (shipped on by default; `RVE_NO_HEAD_PAD=1` disables)** |
 **BUT it does not survive this app's build path, and the difference is the builder, not the idea.** The same padded graph compiled
 the way the app compiles (`torch.export` + `torch_tensorrt.dynamo.compile`, the padding expressed as a `PadInputConv` wrapper inside the head so the
 model's own residual keeps its 3 channels) measures **15.42 -> 26.40 ms of engine time (+71%)** and **11.40 -> 16.75 s** of wall clock, three runs
@@ -486,6 +486,32 @@ Two method notes, because this row cost two wrong headlines:
 
 - a single pair is not a measurement for anything under ~10% on this host, and I quoted one;
 - cross-run drift over a session this long is now the dominant error term, not the configuration.
+
+## E23: the 71% regression was a graph break, and the fix is one operation
+
+`F.pad` in front of the head measured **26.76 ms** of engine time against 16.07 unpadded - a 67%
+regression from adding five zero channels to one convolution, which no arithmetic explains. The
+mechanism is the partitioner: `aten.constant_pad_nd` has no converter in torch_tensorrt's dynamo path,
+so the node falls back to torch and the engine is **cut into two TRT sub-graphs with a torch op between
+them**. The cost of that seam, not of the padding.
+
+Replacing the operation with `torch.cat` (an `IConcatenationLayer`, which has a converter) keeps the
+graph whole and gives the win that was predicted all along:
+
+| head input, app build path | wall | engine |
+|---|---|---|
+| no padding | 11.79 s | 16.18 ms |
+| `F.pad` (broken) | 16.87 s | 26.76 ms |
+| **`torch.cat` + zeros** | **11.44 s** | **15.61 ms** |
+
+Interleaved, three rounds, engines cached, clocks logged per run (no pinning on this host: `-lgc` needs
+root): padding wins **3/3 on both numbers**, medians **-3.0% wall and -3.5% engine**, with a 0.3% spread
+inside the padded runs. That is what Amdahl demands from a 5.8% engine win at a 67.6% engine share
+(3.9% wall predicted, 3.0% measured), and it retires the "0.9% on top of the raw builder" figure that
+was holding the flag off - a single pair, below this ledger's own noise threshold, and wrong.
+
+Picture on the same clip: `cat` against unpadded **0.003% median, 0.012% worst, peak 15** - the fp16
+rounding of summing eight terms instead of three, inside the 0.1% bar.
 
 ## The head padding across the whole collection (78 models, 2026-11-15)
 
