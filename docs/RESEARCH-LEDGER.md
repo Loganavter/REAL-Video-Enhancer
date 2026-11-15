@@ -1294,11 +1294,23 @@ changed is the code path: a float accumulator replaces the int32 one, so every t
 converted tile and the MMA sequence stops being the cheap thing it was. A 1.5-2x penalty buys 7x on the
 share, and at 3.1-4.1 ms per block the body would cost more than the fp16 engine it is meant to beat.
 
-So the lever is real for accuracy and unaffordable as written. The untested middle is **grouped taps** -
-three groups (rows, middle, columns) instead of nine, or per-tap only where the spread is largest - which
-would pay a fraction of the conversion cost for most of the gain. That is the next thing to try if the
-peak matters; if the share is what matters, per-channel already reads 0.058% and the shipped path reads
-0.071%.
+So the lever is real for accuracy and unaffordable as written. **And the middle is closed too: grouping
+the taps does not help.**
+
+| variant | BM 128, warps 4 | BM 256, warps 4 |
+|---|---|---|
+| one scale per channel | 2.355 ms | 1.970 ms |
+| three groups (one per kernel row) | **3.050 ms** | 3.478 ms |
+| nine taps | 3.117 ms | 4.093 ms |
+
+Three conversions instead of nine costs the same as nine, which locates the price exactly: it is not the
+conversions, it is that **any** dequant inside the loop replaces the int32 accumulator with a float one,
+and that is what the MMA sequence was built around. There is no cheap slice of this lever - it is the
+accumulation strategy or nothing.
+
+Which leaves the lane at a clean place: per-channel weights, single-scale epilogue, 1.97 ms and 77.6 TOPS
+with a share of 0.058% (better than the shipped 0.071%) and a peak of 37 against that option's 23. The
+accuracy upgrade to 0.008% exists and costs 2x, so it is a product decision rather than a research one.
 
 2.8x better on the share, five levels off the peak, and the median flat - so the gain is not a
 redistribution between the two statistics, it is a genuine reduction. This is exact rather than

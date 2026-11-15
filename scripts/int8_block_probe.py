@@ -103,6 +103,44 @@ def conv3x3_int8_prelu_pertap_kernel(
     tl.store(y_ptr + dst, q.to(tl.int8))
 
 
+@triton.jit
+def conv3x3_int8_prelu_grouped_kernel(
+    x_ptr, w_ptr, group_scale_ptr, slope_ptr, out_scale_ptr,
+    y_ptr, H, W, in_scale,
+    BLOCK_M: tl.constexpr, C: tl.constexpr,
+):
+    """Three int32 accumulators instead of nine: one dequant per row of the 3x3 kernel."""
+    pid = tl.program_id(0)
+    rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    h = rows // W
+    w = rows % W
+    lanes = tl.arange(0, C)
+    acc = tl.zeros((BLOCK_M, C), dtype=tl.float32)
+
+    for group in tl.static_range(3):
+        part = tl.zeros((BLOCK_M, C), dtype=tl.int32)
+        for inner in tl.static_range(3):
+            tap = group * 3 + inner
+            dy = group - 1
+            dx = inner - 1
+            yy = h + dy
+            xx = w + dx
+            inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
+            src = (yy * W + xx)[:, None] * C + lanes[None, :]
+            a = tl.load(x_ptr + src, mask=inside[:, None], other=0)
+            b = tl.load(w_ptr + tap * C * C + lanes[:, None] * C + lanes[None, :])
+            part += tl.dot(a, b, out_dtype=tl.int32)
+        acc += part.to(tl.float32) * (in_scale * tl.load(group_scale_ptr + group * C + lanes)[None, :])
+
+    slope = tl.load(slope_ptr + lanes)[None, :]
+    v = tl.where(acc >= 0, acc, acc * slope)
+    out_scale = tl.load(out_scale_ptr + lanes)[None, :]
+    q = tl.floor(v / out_scale + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    dst = rows[:, None] * C + lanes[None, :]
+    tl.store(y_ptr + dst, q.to(tl.int8))
+
+
 def reference(x, weight, slope, in_scale, w_scale, out_scale):
     """Shifts plus int8 matmul, deliberately not conv2d: the first version's conv2d weight layout was
     wrong and made a correct kernel look broken. This one has no layout opinions."""
@@ -131,6 +169,7 @@ def main() -> int:
     ap.add_argument("--block", type=int, default=BLOCK_M)
     ap.add_argument("--warps", type=int, default=2)
     ap.add_argument("--per-tap", action="store_true")
+    ap.add_argument("--band", action="store_true", help="one weight scale per kernel row")
     args = ap.parse_args()
 
     torch.manual_seed(0)
@@ -166,9 +205,14 @@ def main() -> int:
     grid = (triton.cdiv(args.height * args.width, args.block),)
 
     tap_scale = (torch.rand(9, C, device=dev) * 0.004 + 0.008)
+    group_scale = (torch.rand(3, C, device=dev) * 0.004 + 0.008)
 
     def run():
-        if args.per_tap:
+        if args.band:
+            conv3x3_int8_prelu_grouped_kernel[grid](x, weight, group_scale, slope, out_scale, y,
+                                                    args.height, args.width, in_scale,
+                                                    BLOCK_M=args.block, C=C, num_warps=args.warps)
+        elif args.per_tap:
             conv3x3_int8_prelu_pertap_kernel[grid](x, weight, tap_scale, slope, out_scale, y,
                                                    args.height, args.width, in_scale,
                                                    BLOCK_M=args.block, C=C, num_warps=args.warps)
