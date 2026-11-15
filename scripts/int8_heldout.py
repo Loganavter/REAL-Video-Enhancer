@@ -42,6 +42,9 @@ def main() -> int:
         ref = model(b).float()
 
     inputs, outputs, _ = calibrate(model, [a])
+    # the head conv's input is the image, clamped to [0,1] by the model itself: its range is a domain
+    # constant and calibrating it on one frame made a dark frame clip a fifth of a different title
+    inputs["body.0"] = 1.0
 
     # per-layer clip rate on the held-out frame
     clipped = {}

@@ -1087,6 +1087,30 @@ the next lever is the **asymmetric** boundary (scale + zero-point), where a one-
 negative PReLU slope spends half its codes on values it never produces: 60/256 = 0.234 against
 55/127 = 0.433 on a [-55, +5] channel, i.e. ~0.9 of a bit, folded into the bias as `z_a * sum(w)`.
 
+**The head's domain bound is the one-line fix, and it removes 87% of the failure.**
+
+| held-out | share above 8 levels | peak | worst clip rate |
+|---|---|---|---|
+| cross-title, head scale calibrated on one frame | 3.573% | 120 | body.0 23.8% |
+| cross-title, head scale = 1.0 (the clamp's own range) | **0.471%** | **72** | body.1 2.87% |
+| same title, disjoint frames (3 s -> 7 s), head pinned | **0.066%** | **40** | body.1 0.25% |
+
+So the third cell - which separates the format's price from the distribution shift - reads 0.066%, inside
+the share bar, with the peak at 40 against a bar of 20. The remaining defect is not the format either: it
+is `body.1`'s output clipping, the layer right after the head.
+
+**The analytic interval bound for that layer is rejected on measurement.** For a conv whose input is in
+[0,1] the output interval is exact - `[sum(min(W,0))+b, sum(max(W,0))+b]`, mapped through the PReLU - but
+it assumes all 27 taps are simultaneously extreme. Against the empirical per-channel maxima it is
+**10.3x wider at the median channel and up to 17000x on individual channels**, i.e. 3.4 bits spent to
+remove 2.87% of clipping. It is fine for the head's INPUT (that bound is the data's own [0,1]) and
+useless one layer later, which is exactly the distinction to carry forward.
+
+What is left is calibration coverage, and the app already renders the material for it: the gate observes
+the first frames of every video unconditionally, so the int8 scales can be calibrated per video from
+frames the pipeline is already producing. That is the honest form of "the scales must cover the material"
+- per collection is not enough, per video is what the data supports.
+
 Also checked before any of this could mislead a later step: the requant rounds to nearest
 (`floor(v/s + 0.5)` in both kernel and reference), so there is no coherent -0.5 LSB bias across the 16
 layers; and the model clips to [0,1] *before* the residual add, so the tail kernel reads one buffer, not
