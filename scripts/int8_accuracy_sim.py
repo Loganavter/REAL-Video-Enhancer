@@ -71,7 +71,7 @@ def calibrate(model, frames, device="cuda"):
     return inputs, outputs, wscales
 
 
-def quantised_forward(model, x, inputs, outputs, wscales):
+def quantised_forward(model, x, inputs, outputs, wscales, fp16_tail=0):
     """The same stack with every conv input and PReLU output snapped to an int8 grid.
 
     Mirrors SRVGGNetCompact.forward exactly: clamp, the body stack, pixel shuffle, residual add. The
@@ -79,11 +79,19 @@ def quantised_forward(model, x, inputs, outputs, wscales):
     """
     x = x.clamp(0.0, 1.0)
     out = x
+    convs = [n for n, m in model.body.named_children() if isinstance(m, torch.nn.Conv2d)]
+    # the last `fp16_tail` pairs keep the half-precision boundary: their error lands in the tail almost
+    # directly, while the early layers' error is mixed by everything downstream
+    stop_quantising = set(convs[len(convs) - fp16_tail:]) if fp16_tail else set()
     for name, module in model.body.named_children():
-        if isinstance(module, torch.nn.Conv2d):
+        if isinstance(module, torch.nn.Conv2d) and name in stop_quantising:
+            out = module(out)
+        elif isinstance(module, torch.nn.Conv2d):
             key = f"body.{name}"
             s_in = inputs[key] / 127.0
             out = torch.round(out / s_in).clamp(-127, 127) * s_in
+            out = module(out)
+        elif isinstance(module, torch.nn.PReLU) and str(int(name) - 1) in stop_quantising:
             out = module(out)
         elif isinstance(module, torch.nn.PReLU):
             key = f"body.{name}"
