@@ -171,6 +171,7 @@ def main() -> int:
     ap.add_argument("--per-tap", action="store_true")
     ap.add_argument("--band", action="store_true", help="one weight scale per kernel row")
     ap.add_argument("--stages", type=int, default=1)
+    ap.add_argument("--maxnreg", type=int, default=0)
     args = ap.parse_args()
 
     torch.manual_seed(0)
@@ -212,11 +213,13 @@ def main() -> int:
         if args.band:
             conv3x3_int8_prelu_grouped_kernel[grid](x, weight, group_scale, slope, out_scale, y,
                                                     args.height, args.width, in_scale,
-                                                    BLOCK_M=args.block, C=C, num_warps=args.warps, num_stages=args.stages)
+                                                    BLOCK_M=args.block, C=C, num_warps=args.warps, num_stages=args.stages,
+                                            **({'maxnreg': args.maxnreg} if args.maxnreg else {}))
         elif args.per_tap:
             conv3x3_int8_prelu_pertap_kernel[grid](x, weight, tap_scale, slope, out_scale, y,
                                                    args.height, args.width, in_scale,
-                                                   BLOCK_M=args.block, C=C, num_warps=args.warps, num_stages=args.stages)
+                                                   BLOCK_M=args.block, C=C, num_warps=args.warps, num_stages=args.stages,
+                                            **({'maxnreg': args.maxnreg} if args.maxnreg else {}))
         else:
             conv3x3_int8_prelu_kernel[grid](x, weight, slope, out_scale, y, args.height, args.width,
                                             in_scale, w_scale, BLOCK_M=args.block, C=C,

@@ -1905,6 +1905,25 @@ was bought and cost 23%; 255 registers is not a compiler accident but the state 
 maximal; the traffic excess is 0.16 of the 0.73 ms gap; and the last 0.13 ms belongs to L2 write-allocate,
 which is outside the kernel.
 
+**The one flag that would have tested the register frontier is not reachable from Triton 3.5.** Passing
+`maxnreg=128` at BM 128/warps 4 changes nothing measurable (2.478 -> 2.459 ms) and, more to the point, the
+registers stay at **138** with occupancy at **24.77%** and the block limit still "3 by registers". So the
+compiler ignores the request here; testing the frontier needs the PTX `.maxnreg` directive patched before
+cubin assembly, which is a different kind of work from a launch option.
+
+That leaves the frontier described but not crossed: **the register file holds the SM's total in-flight
+accumulator, and warps are bought in whole blocks.** The two measured configurations say it in one line -
+BM 256/w4 has 8 warps x 128 values = 1024 in flight and runs at 1.910 ms; BM 128/w4 has 12 warps x 64 = 768
+and runs at 2.355 ms. So the slower one lost 25% of the total in-flight work, not "ILP traded for
+occupancy", and the loss is block quantisation (138 registers give 3.71, i.e. 3 blocks, not 4).
+
+Corrections to the two counters I read too quickly: `lts__t_sectors_op_write` at 2.44x the produced bytes
+almost certainly counts stores **and writebacks** (4,147,200 + 5,768,750 = 9,915,950 against 10,111,279
+measured, a 2% match) rather than amplification per sector, and **write-allocate is refuted by the read
+counter**: a read-for-ownership over the output would add 132.7 MB of DRAM reads, and the measurement shows
+141.6 MB against an input floor of 132.7, i.e. +8.9. So DRAM writes at 1.39x are worth 0.18 ms, sit outside
+the kernel, and their mechanism is **not attributed** - which is the honest label, not "write-allocate".
+
 What is still unnamed is *why* the pipeline idles 6.24 cycles per issued instruction at 16.5% occupancy.
 The stall breakdown section did not produce the per-reason counters in that run, so the ledger records the
 surrounding evidence - not occupancy (measured), not DRAM bandwidth (62.6%), not conversions (num_stages
