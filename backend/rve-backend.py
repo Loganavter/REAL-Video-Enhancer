@@ -178,7 +178,7 @@ class HandleApplication:
             trt_timing_iters=self.args.trt_timing_iters,
             trt_streams=self.args.trt_streams,
             trt_tiling_level=self.args.trt_tiling_level,
-            tile_reuse=self.args.tile_reuse,
+            tile_reuse=("on" if self.args.tile_reuse else self.args.tile_reuse_mode),
             tile_reuse_size=self.args.tile_reuse_size,
             tile_reuse_threshold=self.args.tile_reuse_threshold,
             temporal_reuse=not self.args.no_temporal_reuse,
@@ -453,12 +453,21 @@ class HandleApplication:
         )
         parser.add_argument(
             "--tile_reuse",
-            help="Enable tile-level reuse (recompute only the LR tiles that changed). Off by "
-                 "default: on moving footage the 548px halo window costs more than the tiles "
-                 "saved (measured 6.57 s vs 4.27 s on a 94-frame clip). It needs a fully "
-                 "convolutional model and builds a separate tile engine.",
+            help="Force tile-level reuse on (recompute only the LR tiles that changed). "
+                 "Equivalent to --tile_reuse_mode on; the default is auto, which samples the "
+                 "source first and enables tiles only where they are cheaper than a "
+                 "full-frame call. Needs a fully convolutional model and builds a separate "
+                 "tile engine.",
             action="store_true",
             default=False,
+        )
+        parser.add_argument(
+            "--tile_reuse_mode",
+            help="auto (default): decode a few frames at a few positions, replay the gate's "
+                 "and the tile path's own statistics, and enable tiles only when the halo tax "
+                 "is smaller than the tiles saved. on: always. off: never.",
+            choices=("auto", "on", "off"),
+            default="auto",
         )
         parser.add_argument(
             "--tile_reuse_size",
@@ -504,7 +513,7 @@ class HandleApplication:
             "--temporal_reuse_pixel_veto",
             help="Full-res max |delta| (0-255) above which a would-be duplicate is kept anyway. "
                  "0 = off (default). Use 40 for clean anime (catches mouth flaps/blinks); on "
-                 "grainy film it rejects nearly every duplicate (measured 1.1% reuse vs 46.8%).",
+                 "grainy film it rejects nearly every duplicate (measured 1.1%% reuse vs 46.8%%).",
             default=0.0,
             type=float,
         )
