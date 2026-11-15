@@ -2083,9 +2083,31 @@ And the mechanism is not "not enough registers" but **ILP against TLP at fixed r
 | BM 128, 128 regs | 512 | 32 768 | 32 768 | 65 536 |
 
 Both spend the whole file and split it identically; only the per-thread cut differs, 128/127 against 64/64
-at twice the threads. Both effects are real - warps helped by 5.5% - and ILP was worth 11.7%, which is why
+at twice the threads. **And the last candidate point - 168 registers on BM 256, which would give three blocks and 12 warps while
+keeping 128 accumulator values - is dead on the compiler.** `ptxas -maxrregcount` on the same PTX:
+
+| cap | registers | stack frame | spill stores / loads |
+|---|---|---|---|
+| none | 255 | 176 B | 184 B / 196 B |
+| 170 | 170 | 1 336 B | 1 640 B / 2 128 B |
+| **168** | **168** | **1 496 B** | **1 788 B / 2 200 B** |
+| 160 | 160 | 1 720 B | 2 468 B / 2 896 B |
+
+A 1.5 KB stack frame is not the 8 bytes the BM 128 cap cost: this configuration genuinely needs the register
+file and spills ~1.8 KB per thread when it does not get it. So the window the arithmetic suggested is not a
+window - and the native 184 B of spill at 255 registers says the same thing more quietly: BM 256 already
+borrows a little against the file to hold its ILP.
+
+Both effects are real - warps helped by 5.5% - and ILP was worth 11.7%, which is why
 the branch closes. It closes because 16 warps is the ceiling at BN=64 (five blocks would need 102 registers,
 six 85), not because warp switching does nothing.
+
+**And what closed is this codegen's frontier, not the hardware's.** The accumulator-to-overhead ratio is about
+1:1 at 128 values per thread, while the MMA shape needs roughly 1:4 (four A fragments, two B, double
+buffering, ~32 registers of addresses and predicates). A kernel holding overhead near 32 would fit 49 152
+registers of accumulator per SM at the same warp count, and the frontier would move. Same class of statement
+as E14's "the name is the name of the winner, not a symptom": **77.6 TOPS is the ceiling of what the compiler
+chose, not of what the shape allows** - and a hand-written kernel would hit its own ceiling, not this one.
 
 That is the third of the three predictions: not parity, not the 1.766 ms the "warps hide latency" model
 wanted, but a small gain over the wrong base. **Warp switching does not replace per-thread load hoisting at
