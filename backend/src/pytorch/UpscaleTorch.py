@@ -562,6 +562,23 @@ class UpscalePytorch:
         if body is None:
             return None
         self._int8_frame = frame
+        # The body wins at 1920x1080 (1.411x idle, 1.428x under NVENC) and LOSES at 3840x2160 (0.774x idle,
+        # 0.771x under NVENC, and 0.116% off the engine against a 0.1% bar). The engine scales better because
+        # it is one fused graph while this is sixteen launches plus three conversions. Until a 4K measurement
+        # says otherwise, refuse anything above 1080p-class frames - a 25% regression is worse than the fp16
+        # path it replaces, and the probe decides content, not resolution.
+        try:
+            if frame is not None:
+                pixels = int(frame.shape[-2]) * int(frame.shape[-1])
+                if pixels > 2_500_000:
+                    import logging
+                    logging.getLogger("RVE").warning(
+                        "int8 body refused at %dx%d: measured 0.77x against the engine at 4K (1.41x at "
+                        "1080p). Keeping the fp16 engine.", frame.shape[-1], frame.shape[-2])
+                    self.int8_body = None
+                    return None
+        except Exception:  # noqa: BLE001 - a shape check must never cost a render
+            pass
         if str(getattr(self, "int8FitBody", "auto")).lower() == "off":
             # Measured: the body certifies at 0.00000% on 256, 512 and 1080, and runs 60.41 ms against the
             # app's own fp16 engine at 79.86 ms - 1.322x, or 1.328x with NVENC alongside. That clears the
