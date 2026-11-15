@@ -238,6 +238,13 @@ class FFmpegWrite(Buffer):
         self.pipe_input_pixel_format = pipe_input_pixel_format
         self.merge_subtitles = merge_subtitles
         self.writeQueue = queue.Queue(maxsize=25)
+        # Where the frame time actually goes on the writer side. `write_ms` is the part where
+        # the pipe blocks us (ffmpeg draining); `wait_ms` is the writer idling because the
+        # render loop has not produced anything. Comparing their sums against the render
+        # loop's own total answers "is the encoder serialized behind the model?" without
+        # guessing from a wall-clock difference that also contains startup and flush.
+        self.write_stats = {"frames": 0, "bytes": 0, "write_ms": 0.0, "wait_ms": 0.0,
+                            "max_write_ms": 0.0, "queue_max": 0}
         self.previewFrame = None
         self.framesRendered: int = 1
         self.writeProcess = None
@@ -543,21 +550,38 @@ class FFmpegWrite(Buffer):
     def write_out_frames(self):
         log("Rendering")
         self.startTime = time.time()
+        started_at = time.time()
 
         exit_code: int = 0
         try:
             while True:
+                _t_wait = time.perf_counter()
                 frame = self.writeQueue.get()
+                _wait_ms = (time.perf_counter() - _t_wait) * 1000.0
                 if frame is None:
                     break
                 
                 # A pooled-output item is the Frame itself (its payload is a live view on a
                 # pinned host slot); plain bytes still go through unchanged.
                 payload = frame.get_frame_bytes() if hasattr(frame, "get_frame_bytes") else frame
+                _t_write = time.perf_counter()
                 self.writeProcess.stdin.buffer.write(payload)
+                _write_ms = (time.perf_counter() - _t_write) * 1000.0
                 if hasattr(frame, "release_payload"):
                     # the bytes are in the pipe's own buffer now: the slot may be rewritten
                     frame.release_payload()
+
+                st = self.write_stats
+                st["frames"] += 1
+                st["bytes"] += (getattr(payload, "nbytes", None)
+                                or (len(payload) if payload is not None else 0))
+                st["write_ms"] += _write_ms
+                st["wait_ms"] += _wait_ms
+                st["max_write_ms"] = max(st["max_write_ms"], _write_ms)
+                try:
+                    st["queue_max"] = max(st["queue_max"], self.writeQueue.qsize())
+                except Exception:
+                    pass
 
             self.writeProcess.stdin.close()
             self.writeProcess.wait()
@@ -565,6 +589,13 @@ class FFmpegWrite(Buffer):
 
             renderTime = time.time() - self.startTime
             log(f"\nTime to complete render: {round(renderTime, 2)}")
+            st = self.write_stats
+            n = st["frames"] or 1
+            log(f"writer: {st['frames']} frames, write {st['write_ms']/n:.2f} ms/frame "
+                f"(max {st['max_write_ms']:.1f}), wait for frames "
+                f"{st['wait_ms']/n:.2f} ms/frame, {st['bytes']/1e6:.0f} MB total, "
+                f"busy {st['write_ms']/1000.0:.2f} s of {time.time()-started_at:.2f} s, "
+                f"queue max {st['queue_max']}")
             
         except Exception as e:
             log(str(e))

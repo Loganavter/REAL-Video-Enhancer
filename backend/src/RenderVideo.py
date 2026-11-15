@@ -1,4 +1,12 @@
+import time as _time
 from threading import Thread
+
+# Process-relative clock: the wall-clock "Time to complete render" starts in the writer
+# thread, so it hides everything before it (interpreter/import, engine build or deserialize,
+# ffmpeg + NVENC init) and the flush at the end. On a 94-frame clip that fixed part is
+# ~1.5 s, i.e. 16 ms/frame - large enough to be misread as per-frame overhead, which is
+# exactly what happened to the budget table. These marks split it out.
+_T0 = _time.time()
 import torch
 
 _NO_PREVIEW = object()  # non-None marker: keeps the FPS/ETA printer alive, costs nothing
@@ -355,7 +363,16 @@ class Render:
         
 
         self.temporalReuse = None
-        if temporal_reuse and not self.tileReuse and self.upscaleModel and not self.interpolateModel and self.backend in ("pytorch", "tensorrt"):
+        # always present: the render loop asks about it on every frame, including runs with
+        # --no_temporal_reuse where no gate is created (missing it crashed the render thread).
+        # This has to come BEFORE the gate block, which assigns the real tuner - placing it
+        # after silently disabled auto tuning for every configuration.
+        self.autoTuner = None
+        # The two detectors are complementary and stack: the gate decides whether this frame
+        # needs the model at all, the tile path then decides which tiles of that frame need it.
+        # Until now `not self.tileReuse` here made them alternatives, which is why every tile
+        # measurement was taken against an ungated render.
+        if temporal_reuse and self.upscaleModel and not self.interpolateModel and self.backend in ("pytorch", "tensorrt"):
             from .utils.TemporalReuse import ReferenceFrameGate
             self.temporalReuse = ReferenceFrameGate(
                 threshold=temporal_reuse_threshold,
@@ -511,22 +528,31 @@ class Render:
                 
 
                 _t_frame = _perf_counter()
+                if not hasattr(self, "_profile"):
+                    self._profile = {"frames": 0, "gate": 0.0, "infer": 0.0, "conv": 0.0,
+                                     "frame": 0.0, "to_tensor": 0.0}
                 _t_gate = _perf_counter()
                 if self.upscaleModel:
                     # during auto calibration every frame is rendered: otherwise the tuner only
                     # ever sees frames that were already "changed", which biases it towards high
                     # thresholds (measured on film: a noise floor of 74 levels out of a calm scene)
                     calibrating = self.autoTuner is not None and not self.autoTuner.ready
+                    # The gate is the first consumer of the frame, so `get_frame_tensor()`
+                    # here also pays the input conversion (for the 10-bit path: 12.4 MB upload
+                    # plus the GPU colour stage). Timing the call separately keeps the gate's
+                    # own cost from absorbing it - measured standalone at 0.80 ms, against
+                    # 4.3 ms for the whole stage in this profile.
+                    _t_conv = _perf_counter()
+                    frame_tensor = frame.get_frame_tensor() if self.temporalReuse is not None else None
+                    self._profile["to_tensor"] += (_perf_counter() - _t_conv) * 1000.0
                     reuse = (
                         self.temporalReuse is not None
                         and not calibrating
-                        and self.temporalReuse.is_duplicate(frame.get_frame_tensor())
+                        and self.temporalReuse.is_duplicate(frame_tensor)
                     )
                     if calibrating:
                         # still advance the gate's own state so it has a reference afterwards
-                        self.temporalReuse.is_duplicate(frame.get_frame_tensor())
-                    if not hasattr(self, "_profile"):
-                        self._profile = {"frames": 0, "gate": 0.0, "infer": 0.0, "conv": 0.0, "frame": 0.0}
+                        self.temporalReuse.is_duplicate(frame_tensor)
                     self._profile["gate"] += (_perf_counter() - _t_gate) * 1000.0
                     if reuse and self._lastRenderedFrame is not None:
                         # re-emit the last rendered frame (the gate only decides *whether*)
@@ -567,6 +593,10 @@ class Render:
                 else:
                     self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
                 frames_rendered += int(self.ceilInterpolateFactor)
+                if not hasattr(self, "_t_first_frame"):
+                    self._t_first_frame = _time.time()
+                    log(f"startup: first frame enqueued {self._t_first_frame - _T0:.2f} s "
+                        f"after process start (interpreter, engine, ffmpeg/NVENC init)")
                 if hasattr(self, "_profile"):
                     self._profile["frames"] += 1
                     self._profile["frame"] += (_perf_counter() - _t_frame) * 1000.0
@@ -576,13 +606,24 @@ class Render:
                     # the previous value in place, which used to double-count
                     self._profile["infer"] += getattr(up, "last_inference_ms", 0.0)
                     self._profile["conv"] += getattr(up, "last_convert_ms", 0.0)
+                    self._profile["model"] = self._profile.get("model", 0.0) + getattr(
+                        up, "last_model_ms", 0.0)
+                    self._profile["handover"] = self._profile.get("handover", 0.0) + getattr(
+                        up, "last_frame_ms", 0.0)
                     try:
                         up.last_inference_ms = 0.0
                         up.last_convert_ms = 0.0
+                        up.last_model_ms = 0.0
+                        up.last_frame_ms = 0.0
                     except Exception:
                         pass
             else:
                 sleep(1)
+        first = getattr(self, "_t_first_frame", None)
+        if first is not None:
+            log(f"render loop: {_time.time() - first:.2f} s for {frames_rendered} frames "
+                f"({1000.0 * (_time.time() - first) / max(1, frames_rendered):.2f} ms/frame), "
+                f"total {_time.time() - _T0:.2f} s since process start")
         if self.temporalReuse is not None:
             log(self.temporalReuse.stats())
         if getattr(self, "autoTuner", None) is not None:
@@ -590,8 +631,11 @@ class Render:
         prof = getattr(self, "_profile", None)
         if prof and prof["frames"]:
             n = prof["frames"]
-            log(f"profile over {n} frames: gate {prof['gate']/n:.2f} ms, "
-                f"inference {prof['infer']/n:.2f} ms, input convert {prof['conv']/n:.2f} ms, "
+            log(f"profile over {n} frames: gate {prof['gate']/n:.2f} ms "
+                f"(input to tensor {prof.get('to_tensor', 0.0)/n:.2f}), "
+                f"inference {prof['infer']/n:.2f} ms (engine {prof.get('model', 0.0)/n:.2f}, "
+                f"frame handover {prof.get('handover', 0.0)/n:.2f}), "
+                f"input convert {prof['conv']/n:.2f} ms, "
                 f"read wait {prof.get('read', 0.0)/n:.2f} ms, frame total {prof['frame']/n:.2f} ms")
         if self.upscaleModel and getattr(self, "tileReuse", False):
             up = getattr(self, "upscaleOption", None)
