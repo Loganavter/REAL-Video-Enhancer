@@ -2043,6 +2043,30 @@ store amplification (170 MB written against 132.7 MB produced, 1.28x). The stand
 fast path - compute the interior with unmasked, vectorised loads and handle the frame edges in a separate
 kernel or a separate branch - which is a kernel change, not a modelling one.
 
+## The direct launcher runs, and fails its own bit-exact check (2026-11-15)
+
+`scripts/launch_cubin.py` loads the capped cubin with `cuModuleLoadData`, launches 32 x 128 threads with
+`sharedMemBytes` from the metadata, and compares against the shift-plus-`_int_mm` reference. Two things were
+needed to get that far, both of the "silent contract" class:
+
+- `cuLaunchKernel` returned **400 (invalid value)** until the argument types were pinned. Without `argtypes`
+  ctypes passes Python ints as 32-bit C ints and the driver rejects the call.
+- It returned 400 again with a context I created myself: **torch already owns the context**, and a module
+  loaded into a second context cannot see tensors allocated in the first. Sharing torch's context
+  (`cuCtxGetCurrent`) fixed it.
+
+With that, the launch succeeds and the answer is **max |diff| 126 on 0.66% of pixels** - not zero. So the
+launcher works and the kernel it loads does not yet agree with the reference. By the plan this stops the
+work here: the timing is meaningless until the picture is bit-exact, and the two candidate causes are both
+invisible to a smoke test - the two trailing scratch pointers (Triton sizes them from
+`metadata.global_scratch_size`, and small stand-in buffers would corrupt exactly this way) and the frame
+border, where the kernel's masked loads and the reference's zero padding must agree.
+
+What is established: the register-capped cubin loads and runs, and the four contracts (grid 16 200 at BM
+128, block 128, `sharedMemBytes` 12 288, scratch) are all real - the first two produced hard failures, which
+is the lucky half; the scratch and the border are the quiet half, and the comparison caught them on the
+first try, which is why it exists.
+
 ## The int8 fit probe (2026-11-15)
 
 `scripts/probe_int8_fit.py` answers the only product question left: does int8 fit *this* video? It takes N
