@@ -1016,6 +1016,50 @@ ceiling is the int8 rate, 147 TOPS, i.e. 16.6 ms of body plus non-GEMM = 24.7 ms
 1.97x at 120 TOPS, 1.84x at 109. That is E27 extended into a real kernel project (CUTLASS or
 hand-written), weeks of work, with 2x at the very top of its range.
 
+## E30b closed: 32 channels cannot hold the stack's features, and that is a bound, not a method failure
+
+Three diagnostics and then the refit that settles it.
+
+**The error is on edges, not in flat regions, and it is not a DC shift.** Measured with the acceptance
+reduction on a real frame at C=32: flat pixels read **0.060%** above 8 levels - i.e. at the bar - while
+edge pixels read **26.1%**; the signed mean is **0.01 levels** and a per-channel affine refit moves the
+total from 1.573% to 1.553%. So the plateau is not the stack losing its balance; the cut loses
+structure exactly where structure lives.
+
+**The control rules out wiring.** Zeroing K channels in place (width unchanged) costs about what
+removing them costs - 0.87% against 1.57% at eight, 1.64% against 1.59% at thirty-two - so the slicing,
+the channel propagation and the PReLU indexing are doing what they claim to.
+
+**The refit answers the only question left: can this width represent the teacher at all?** Sequential
+layer-wise least squares (each layer fitted to the teacher's pre-activation, restricted to the kept
+channels, on the already-refitted student's input, ridge 0.05) leaves a per-layer fit residual of
+**14-37% of the target**, worst in the middle of the stack:
+
+| layer | fit residual |
+|---|---|
+| body.2 | 14.3% |
+| body.10 | 21.8% |
+| body.14 | 37.0% |
+| body.22 | 19.8% |
+| body.32 | 32.6% |
+
+A perfect fit is available in principle: the layer has 289 free parameters and 260k samples, so 14% is
+not underdetermination - it is the part of the teacher's activation this width cannot express. And it
+composes as it must: the output statistic stays at 1.58% no matter how many layers are refitted
+(1.584% after body.2, 1.585% after body.16, 1.580% after body.32).
+
+That bound applies to ASVD, SNOWS and K-step reconstruction alike, because they all end at the same
+width. Widening the method does not widen the layer.
+
+So the pruning lane closes on a measurement rather than on a disappointment: **C=32 buys 2.07-2.36x of
+time and cannot pay for it in features; C=48 buys 1.2x and has the same picture as C=32** (the error
+does not scale with the cut, and 48 is the same cut on this metric). Nothing between them is worth the
+attempt.
+
+What is left for 2x is the int8 kernel: 1.40x measured ceiling for a fused epilogue, 1.6-1.8x realistic
+at 91-110 TOPS, and 1.9x+ only if 120 TOPS and the whole non-GEMM remainder are won at once.
+
+
 ## E30b first look: a naive channel cut is 16x over the bar, and the error does not shrink with width
 
 Real frame, real x2 model, worst-channel reduction (the acceptance rule), reference is the uncut model:

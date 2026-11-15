@@ -111,7 +111,7 @@ def cut_model(model, keep):
             nsd[name] = tensor[out] if out is not None else tensor
 
     new.load_state_dict(nsd)                                 # strict: a mismatch is a bug, not a detail
-    return new.eval()
+    return new.eval(), sel
 
 
 def statistic(a, b, bar=8.0):
@@ -139,7 +139,8 @@ def main() -> int:
     with torch.no_grad():
         ref = model(x.cuda().half()).float()
 
-    small = cut_model(model, args.keep).cuda().half()
+    small, _ = cut_model(model, args.keep)
+    small = small.cuda().half()
     with torch.no_grad():
         got = small(x.cuda().half()).float()
 
