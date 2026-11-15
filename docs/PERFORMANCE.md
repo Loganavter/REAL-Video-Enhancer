@@ -22,7 +22,9 @@ wall-clock for the whole render unless stated otherwise.
 End-to-end on the clip with `x265_nvenc` (so the encoder does not hide the model):
 **6.26 s (old defaults) -> 4.27 s (new defaults) = 1.47x**. The gate on top of that, measured on
 502 anime frames at 1080p -> 2160p: **38.85 s ungated -> 11.7 s gated = 3.3x**, with 70.9% of
-frames reused and 0.009% of pixels above 8 levels on the worst of 19 sampled frames. (Earlier
+frames reused and **0.017%** of pixels above 8 levels on the worst of 13 sampled frames (an earlier
+19-frame sample of the same configuration read 0.009%; both are inside the bar, and the difference is
+which frames were sampled, not which configuration ran). (Earlier
 revisions put "62% frame reuse -> 3.84 s" here; 3.84 s is the 94-frame 2160p clip at 8-bit output
 from the depth comparison in the investigation, not the 502-frame run.)
 
@@ -82,7 +84,7 @@ preset) before tuning anything else.
 | CUDA graphs on the engine | ~0.3% at 35-45 ms/frame |
 | L2 persistence window | nothing to pin: **1.2 MB of weights against 32 MB of L2** (AD106, not the 24 MB of a 4060 without Ti). The "265 MB activation stream" that used to justify this row predates the myelin-fusion finding - the engine is 25 top-level layers, not 18 kernels each paying a full round trip - so the traffic that remains is unmeasured; the verdict rests on the weights |
 | SVD/low-rank post-training compression | energy at rank 32 is 77-91%; layer output error 28.7 dB - unusable |
-| hand-written conv kernels | 39.8 TFLOP/s vs the engine's 186.7 on a 5090 (CORE-TAG) |
+| hand-written conv kernels | **untested here.** The one public attempt measured 39.8 TFLOP/s against a 5090's 186.7 (CORE-TAG), but there is a counter-precedent: for a 3x3 conv cuDNN chose Winograd at 74 ms where TRT's best tactic was 156 ms, so TRT's tactic set is not the set of all algorithms (ledger E10) |
 | exact-duplicate frame gating | 0% bit-identical frames on encoded video |
 | concurrent engine contexts (this app) | no gain and corrupt output |
 

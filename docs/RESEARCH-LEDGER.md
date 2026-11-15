@@ -35,19 +35,21 @@ something the numbers say. What the numbers say is narrower, and still useful:
 
 - the model runs faster than any of its own convolutions measured standalone, and the only
   compute-dominated standalone conv (256->256, 49 TF/s) is *slower* than the whole network;
-- five kernel-level ideas were measured as dead ends (below), two are open (E14, E16);
-- every per-layer time is spread evenly (2.2-3.9 ms over 18 subgraphs), so no single layer is
-  the lever, and the remaining gap needs `nsys` to localise (compute vs DRAM).
+- six kernel-level ideas were measured as dead ends or closed by measurement (below: E5, E9',
+  E12, E13, E14, E17), two are open (E16 Winograd, E18 layout kernels);
+- every per-layer time is spread evenly (1.3-3.1 ms over 18 conv subgraphs, top layer 3.15 ms), so
+  no single layer is the lever - and `nsys` has since confirmed the shape: 25 launches, 48.7 of
+  56.8 ms in the 16 body GEMMs, 8.1 ms in everything else, no launch gap.
 
 The ways to make a frame cheaper are therefore: do fewer frames, do fewer pixels per frame,
 or run the same pixels in a cheaper numeric format.
 
 | lever | status | measured |
 |---|---|---|
-| skip frames that are duplicates of the last rendered one | **adopted** | 46.8% of frames skipped on the clip, 71.1 dB vs the ungated render; anime 73.5% (auto threshold) |
+| skip frames that are duplicates of the last rendered one | **adopted** | anime **362/498 frames (72.7%)** reused, 11.7-11.9 s against 38.85 s ungated, 0.009-0.017% of pixels above 8 levels; two digital BDs 146/220 and 142/219 (2.06x, 1.92x); the film clip and 35 mm now **refuse** via the noise floor (byte-identical to ungated). The "46.8% / 71.1 dB" this row used to carry came from two renders both corrupted by C4 |
 | recompute only changed tiles, grid fitted to the frame | **open** (was "opt-in, not recommended") | the 512 px grid was a loss because 512 does not divide 1080 (T5); with a fitted 480x540 grid the same mechanism is a win - see T5/T5' |
-| batching 2-4 frames per enqueue | rejected | the model is compute-bound at ~78% of a borrowed sustained figure, so batching is at best linear, and the measured dead end was *concurrent contexts*, not batching: no gain and corrupt output (E13). `nvidia-smi` "util 96-100%" was used as the argument for "already saturated" and does not mean that - it means at least one kernel is alive |
-| lower precision (INT8/FP8) | **open for explicit Q/DQ**, closed for implicit and for FP8 | E9, E8 |
+| batching 2-4 frames per enqueue | rejected | there is no launch gap to fill (`nsys`: 56.8 ms of kernel time in a 57.4 ms loop, 25 launches), so batching can only be linear, and the measured dead end was *concurrent contexts*, not batching: no gain and corrupt output (E13). `nvidia-smi` "util 96-100%" was used as the argument for "already saturated" and does not mean that - it means at least one kernel is alive |
+| lower precision (INT8/FP8) | **closed by measurement** | implicit and FP8 were dead ends (E9, E8); explicit Q/DQ is lossless (0.000% above 8, peak 4) and slower - 68.11 against 55.54 ms - because the per-channel PReLU cannot join an int8 epilogue (E9'). The ceiling with a fusible scalar slope is 40.24 ms (1.40x), and that form destroys the picture (-2.02 dB), so the only route left is a plugin with its own int8 convolution |
 | a cheaper published model | not applicable | the owner keeps his ESRGAN model set |
 
 ## Engine / kernels
@@ -94,7 +96,7 @@ or run the same pixels in a cheaper numeric format.
 | T3 | reuse vs the **last kept** frame, 32 px block means, threshold chosen automatically, chain 4 | TAS `dedup/dedup.py` + `PARAMETERS.MD` (sens 35 / 7) | 20-40% frames | **anime**: 70.9% reused, worst frame 48.64 dB against ungated. **film**: 18.1% reused, average 50.34 dB and worst 39.83 dB against ungated, 4.33 s against 4.66 s (1.08x). The earlier "46.8% reused, 71 dB" was measured against a *broken* pipe (see C4): both compared renders were equally corrupted, so the pair agreed with itself | **adopted** |
 | T4 | full-res per-pixel veto at 40 levels | TAS `PixelDiffGuard` | rescues mouth flaps | on grainy film a single pixel exceeds it: 43 vetoes, reuse 1.1%, render 5.08 s | opt-in (`--temporal_reuse_pixel_veto 40` for anime) |
 | T5 | tile-level reuse with an 18 px halo, **square 512 px cores** | TAS/waifu2x tiling; our halo measurement (radius 18 LR px) | 2-4x on static content | 65.8% of tiles reused on anime and *still* slower than the full-frame call (21.37 s vs 30.8 ungated, but 10.6 s for the frame gate); film 27.7% reused, 6.57 s vs 4.27 | superseded by T5' - the loss was the grid, see below |
-| T5' | same mechanism, but the core grid **divides the frame** | this ledger's area model, checked against T5's own timings | 2.55x on the model at 65.8% reuse, instead of 1.68x | **18.14 s** ungated against 21.37 s for the 512 grid: the geometry fix alone is 1.18x on the tile path. On top of the frame gate it reads 7.68-9.15 s against 11.7 s for the gate alone = up to **1.4x**, but every one of those runs has tile reuse enabled, which is what the artifact section shows is visible (0.287% of pixels above 8 levels, peaks of 98). Tile reuse falls from 65.6% to 57.4% inside the gate, because the frames the gate leaves are exactly the ones that changed | **opt-in, off by default.** With the frame gate out of the way the trade is explicit: 9.2 s against 11.7 s on 502 anime frames, at **0.287%** of pixels above 8 levels (RGB, worst frame, peaks of 98) against 0.009%. Its per-tile mean cannot be tightened into safety - at threshold 0.10 reuse falls from 57.7% to 3.0% and the render ends up slower than not using the tile path at all - and switching the judge to the worst block made the clip worse (1.174%). `--tile_reuse_mode auto` keeps the pre-render probe for material where the trade is wanted |
+| T5' | same mechanism, but the core grid **divides the frame** | this ledger's area model, checked against T5's own timings | 2.55x on the model at 65.8% reuse, instead of 1.68x | **18.14 s** ungated against 21.37 s for the 512 grid: the geometry fix alone is 1.18x on the tile path. On top of the frame gate it reads 7.68-9.15 s against 11.7 s for the gate alone = up to **1.4x**, but every one of those runs has tile reuse enabled, which is what the artifact section shows is visible (0.287% of pixels above 8 levels, peaks of 98). Tile reuse falls from 65.6% to 57.4% inside the gate, because the frames the gate leaves are exactly the ones that changed. Those 7.68-9.15 s figures predate the mask **dilation**, which is what actually ships in `--tile_reuse_mode auto`: dilated, the same path reads **10.0 s at 0.071%** (peak 23) | **opt-in, off by default.** With the frame gate out of the way the trade is explicit: undilated 9.2 s against 11.7 s on 502 anime frames, at **0.287%** of pixels above 8 levels (RGB, worst frame, peaks of 98) against 0.009%; dilated - the shipping opt-in - **10.0 s at 0.071%**, still eight times the defect area for 14% of the clock. Its per-tile mean cannot be tightened into safety - at threshold 0.10 reuse falls from 57.7% to 3.0% and the render ends up slower than not using the tile path at all - and switching the judge to the worst block made the clip worse (1.174%). `--tile_reuse_mode auto` keeps the pre-render probe for material where the trade is wanted |
 | T6 | blend or discard the tile overlap | vs-mlrt discards, chaiNNer blends sinusoidally | - | we crop (discard), which is exact thanks to the halo | **adopted** |
 | T7 | per-slot HR memo: copies of one held frame share one upscale | TAS `pipeline/executor.py` | - | our gate already skips the whole model for a duplicate | equivalent |
 
@@ -120,8 +122,8 @@ the core that divides each axis.
 Two reasons the combination is 1.5x rather than the multiplicative 1.5-2x: the tile share of
 reuse drops from 65.6% to 57.4% once the gate runs in front (the frames left to render are the
 ones that changed), and 36.9% of those frames still come out fully reused by the tile path. Those
-figures are for a chain of 4; the artifact section below explains why the default now certifies a
-chain of 1 and what that costs.
+figures are for a chain of 4, which is what `best` certifies on this clip; on the two digital BDs it
+certifies chain 2 and the artifact section below explains why the third one (35 mm) refuses outright.
 The measured composition, 502 anime frames, same session:
 
 | configuration | wall | loop | frames rendered | tiles reused |
@@ -168,7 +170,7 @@ the halo tax - instead of the bare break-even.
 | P8 | reflect-pad to a bucket instead of one engine per resolution | TAS `upscale/tensorrt.py`; chaiNNer `remove_padding` | avoids rebuilds | not measured | open |
 | P9 | write tiles straight into the destination plane | waifu2x `postproc.comp` | saves a pass | we composite on GPU already; per-plane write untested | open |
 | P10 | `F_SETPIPE_SZ` 1 MB, one `os.write` per frame | pipe throughput reports | 2-5 ms claimed | with ffmpeg as the reader: +6% (noise) | **rejected** |
-| P11 | in-app model time vs the isolated benchmark | our profile | - | **split measured**: with `RVE_TRT_SPLIT=1` the engine alone costs **14.67 ms/frame** averaged over all frames = **54.3 ms on the 27% that run**, against 42.7-45.7 ms isolated for the same shape (+19-27%). Without the forced sync the same block measures 16.10 ms/frame = 59.6 ms, i.e. the output Frame's construction and handover add ~5 ms and **overlap with the kernels**, which is why the reported "inference" was never the engine time. `last_inference_ms` = enqueue + ctor + sync (engine 0.30 ms at enqueue); `last_model_ms`/`last_frame_ms` now separate them | open - the 19-27% gap is the largest unexplained number in the pipeline; next: same engine with an NVENC encode alongside, clocks sampled both ways |
+| P11 | in-app model time vs the isolated benchmark | our profile | - | **answered** (see the open question below: 51.37 ms standalone against 54.3 in-app). **split measured**: with `RVE_TRT_SPLIT=1` the engine alone costs **14.67 ms/frame** averaged over all frames = **54.3 ms on the 27% that run**, against 42.7-45.7 ms isolated for the same shape (+19-27%). Without the forced sync the same block measures 16.10 ms/frame = 59.6 ms, i.e. the output Frame's construction and handover add ~5 ms and **overlap with the kernels**, which is why the reported "inference" was never the engine time. `last_inference_ms` = enqueue + ctor + sync (engine 0.30 ms at enqueue); `last_model_ms`/`last_frame_ms` now separate them | open - the 19-27% gap is the largest unexplained number in the pipeline; next: same engine with an NVENC encode alongside, clocks sampled both ways |
 | P12 | cheaper gate: no clone, block means without a full-frame fp32 luma | our profile | 1-2 ms/frame | **rejected as a lever.** The stage reads 4.37 ms/frame, but 2.80 ms of that is `get_frame_tensor()` (the 10-bit upload + colour stage), which every configuration pays on its first read of the frame; the gate's own statistic measures **0.80 ms** standalone (clone 0.017, luma fp32 0.43, pool 0.40, `max().item()` 0.03). So the clone is worth ~0.02 ms and the whole optimisation ~0.7 ms of a 22.6 ms frame = 3%. The number that looked like a 19% block was mostly the input pipe | **rejected** (measured) |
 
 ## Encoder
@@ -190,7 +192,7 @@ Two configurations, because they answer different questions.
 | stage | ms/frame | note |
 |---|---|---|
 | duplicate gate | 4.37 | of which **2.80 is `get_frame_tensor()`**: the 10-bit upload + colour stage, paid once per frame by whoever reads it first. The gate's own statistic is 0.80 ms standalone (P12) |
-| model + stream sync | 16.31 | over all frames, i.e. **61.5 ms on the 26.5% that run** |
+| model + stream sync | 16.31 | over all frames; of that the **engine alone is 14.67 (P11), i.e. 54.3 ms on the running share** - the remaining 1.64 is stream sync and the output Frame's construction, and it overlaps with the kernels |
 | read wait | 0.26 | the decoder is not a factor |
 | render loop total | **22.72** | |
 | writer blocked in `write()` | 12.34 | concurrent with the loop, 10.63 ms/frame idle - not on the critical path |
@@ -396,6 +398,22 @@ What this settled:
   thin - 3% of margin on one of three titles. The "0.18 floor" that made this look like a
   comfort margin was the **retired statistic's** scale: the same family of clean 1080p anime
   measures **0.77** under `box(|diff|)`, i.e. just below Chainsaw Man's 0.95, not an outlier.
+
+## Provenance of the rows in this file
+
+Three defects were fixed after most of these numbers were taken, and it is worth knowing which rows
+predate which fix:
+
+- **the `mean_abs` statistic** - every row below is post-change unless it says `|box - box|`;
+- **the noise-floor limit (2.0 -> 1.5)** - rows measured at 2.0 say so (the grain-4 row above does);
+- **the tuner's chain reachability** - subtle: the gate's own reuse decisions did not change with it,
+  so counts and floors measured before stay valid; what changed is *which depth the tuner certifies*.
+  The three-BD table and the anime clip were therefore **re-measured after** the fix (chain 2 and
+  chain 4 respectively), while the grain sweep and the film rows predate it and are unaffected
+  because those clips either certify the same depth or refuse;
+- the dead scene-cut guard (it had not run since the statistic changed) did **not** alter any reuse
+  decision either - a cut frame misses the threshold by 255 levels regardless - but it fed the tuner
+  a history spanning the cut, which is part of what the reachability fix addresses.
 
 ## Grain sweep, re-measured on the statistic that ships (2026-11-15)
 

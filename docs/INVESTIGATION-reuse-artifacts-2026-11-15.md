@@ -145,11 +145,14 @@ An explicit workspace changes the tactic mix (one tail conv moves from sm80 to s
 nothing; restricting to JIT sources picks the same `sm75` tactic, so no sm80/86/89 alternative is
 being skipped; cuDNN alone is slower, which does not reproduce the Winograd counter-precedent.
 
-**Grain does not stop frame reuse, it stops tile reuse.** Clean anime with synthetic grain
-(`noise=alls=S:allf=t+u`), gate on: the reuse share stays at 70.9% from clean to grain 16 because
-the statistic is a 32 px block mean and grain averages out inside a block; the quality cost grows
-(52.14 -> 42.10 dB) and the ungated render jumps from 17.6 s to 36.6 s because the tile probe
-refuses tiles past a noise floor of ~0.45.
+**Grain does not stop frame reuse - it destroys the quality of it, and then the floor stops it.**
+Re-measured on `box(|diff|)` (the statistic this investigation ends up shipping) rather than on the
+retired `|box - box|`: the share barely moves (**362/498 clean against 359/498 at grain 4**), while
+the worst frame goes **0.017% -> 0.105%** of pixels above 8 levels - past the acceptance bar - and
+the noise floor climbs 0.77 -> 1.84 -> 3.49 -> 5.17 -> 6.89 for grain 0/4/8/12/16. Past the bar the
+gate now refuses outright (byte-identical to ungated at grain 8 and above). The earlier sentence
+here - "grain averages out inside a 32 px block mean" - was true of `|box - box|` and false of the
+statistic that replaced it.
 
 ## Rules adopted
 

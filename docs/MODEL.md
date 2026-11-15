@@ -10,9 +10,10 @@ torch 2.9.0+cu130. Unless stated: fp16 engines, static shape, `optimization_leve
 **Conclusion up front**: no kernel-level technique we could run locally beat a well-built
 engine, and the one model-side win of this round is `tiling=full` (3.8% end-to-end). We do
 **not** have a trustworthy ceiling for this shape, so the size of the remaining gap is unknown:
-the model is at 65-73% of a *borrowed* sustained figure, which is not the same as "finished".
+the model is at 58-73% of a *borrowed* sustained figure, which is not the same as "finished".
 The pipeline-side win of the round is bigger than any model work: the frame gate alone is
-**3.3x** (38.85 -> 11.7 s on 502 anime frames) at 0.009% of pixels above 8 levels. The tile grid
+**3.3x** (38.85 -> 11.7 s on 502 anime frames) at **<=0.017%** of pixels above 8 levels (worst
+of 13-19 sampled frames; the two samples read 0.017% and 0.009%, and both are inside the 0.1% bar). The tile grid
 fitted to the frame adds 1.39x on top *inside* the frames the gate renders, but it carries its
 own artifact (0.287% at 9.2 s), so it is **opt-in, not shipped** - §7 has the trade. The lead from
 the tactic dump (Turing-generation kernels selected on an Ada part) is closed in §6: restricting
@@ -90,7 +91,7 @@ All rows: static engine, opt level 5, iters 8. Session-relative comparisons only
 `full` figure"; that derivation assumed the whole 45.7 -> 42.7 ms step was the model, and direct
 measurement does not support it - see the withdrawn-derivation note below.)
 
-### The card is at its power cap, and that is most of the answer
+### What the card is doing, and what that does and does not explain
 
 An isolated engine loop (490 runs in 28.1 s = 57.37 ms/frame, no host pipeline, no encoder) sampled
 once a second with `nvidia-smi`:
@@ -98,24 +99,32 @@ once a second with `nvidia-smi`:
 | what | measured | note |
 |---|---|---|
 | SM utilisation | **100%** in all 23 samples | not a stall, not idle lanes |
-| memory-controller utilisation | 85% (max 88) | busy, not saturated |
+| memory-controller utilisation | 85% (max 88) | *share of time*, not share of bandwidth |
 | SM clock | **2130 MHz** (max 2295) | 7% below the part's maximum |
 | memory clock | 8751 MHz | at its rating |
 | power draw | **162 W** (max 163) | against the card's **165 W** cap |
 | temperature | 60 C | not thermal |
 
-It also moves **9.37 GiB of tensor traffic per frame**, which at the card's 288 GB/s is 36.5 ms of
-pure DRAM time (65% of peak while the engine runs) - so the traffic floor is 20 ms below the 57 ms
-it actually takes (§6 item 2 has the table). The engine saturates the SMs, keeps the memory system
-85% busy, and does both at **162 of 165 W** with the SM clock held below maximum. So the binding constraint is the power budget, not a kernel -
-which is consistent with everything in §4 and §6: no kernel-level lever moved the number, and the
-only two things that did were fewer DRAM round trips (`tiling=full`) and fewer frames (the gate).
-It is also why the int8 ceiling below is the only place in this report where a 1.5x exists: halving
-the FLOPs is the only lever that does not fight the cap.
+**What this explains: at most 7.7%.** The clock is 2295/2130 = 1.077 below its maximum because the
+165 W budget is spent, so removing the cap entirely is worth +7.7% and no more. It does not explain
+a 25-35% gap, and the honest statement is that the engine saturates the SMs and the power budget
+while ~7.7% of headroom is locked behind that cap - the rest of the gap to a borrowed peak is
+unexplained, not explained.
 
-What the sampling does **not** give is the DRAM-byte and tensor-active-% split - that is what `nsys`
-would add. The 85% memory-controller figure says the memory system is working hard; it does not say
-how much of the 57 ms is spent waiting on it.
+**What it does not give: bytes.** 9.37 GiB is the **sum of input and output tensor sizes over the 25
+layers** (§6 item 2) - the traffic the graph would move if every layer did a full round trip. That
+is exactly the picture this document rejects elsewhere for the unfused engine, and cross-kernel
+tiling plus myelin fusion exist to avoid it. So it is an **upper bound**, and the internal check
+proves it is not the DRAM figure: the int8 build's logical traffic is 1.545x the fp16 build's while
+its measured time is only 1.226x, i.e. the model over-predicts the slowdown by 26%, and the slope
+between the two builds (2.46 ms/GiB) is two thirds of the 3.73 ms/GiB that pure DRAM would require.
+About a third of the logical traffic never reaches DRAM - which is L2 doing its job. Real DRAM bytes
+need `ncu`, and `ncu` is blocked on this host (`ERR_NVGPUCTRPERM`, §6 item 2).
+
+So: no kernel-level lever in §4/§6 moved the number, and the two things that did were fewer DRAM
+round trips (`tiling=full`, 3.8%) and fewer frames (the gate, 3.3x). The int8 ceiling is still the
+only place in this report where a 1.5x exists, because halving the FLOPs is the only lever that does
+not fight the memory system or the cap.
 
 Peaks are fuzzy on a power-capped consumer part:
 
@@ -167,7 +176,7 @@ end on:
   C=64.
 
 Honest summary: 48-54 TFLOP/s depending on the session's clock state (the spread is the
-machine, not the kernel); no trustworthy conv ceiling; the model is at 65-73% of a *borrowed*
+machine, not the kernel); no trustworthy conv ceiling; the model is at 58-73% of a *borrowed*
 sustained figure and above every standalone conv we could build. That is close to a floor, but
 it is not a proof, and the difference matters: 25-35% of a borrowed ceiling is not "finished".
 
@@ -205,19 +214,26 @@ Three things, in order of importance:
 1. **`f16f16_f16f16_f16`** = fp16 inputs with fp16 accumulation, NHWC. There is no fp32-acc share
    to convert; the accumulator hypothesis is closed.
 2. **`sm75_` kernels on an sm89 part.** **17 of 18** convolutions get Turing-generation kernels
-   (the head conv included; only the last conv is sm80); the
-   names carry no `stage*` / `warpsize*` / `tensor16x8x16` suffixes typical of Ampere+ xmma.
-   This is not proof of a loss, but it is the one concrete lead in the dump and it is testable
-   with an editable timing cache (§6, item 4).
+   (the head conv included; only the last conv is sm80). This section used to argue from the absence
+   of `stage*` / `warpsize*` / `tensor16x8x16` suffixes that these are Turing kernels *without*
+   Ampere features - that reasoning is withdrawn: the `nsys` trace of the shipping engine (§6) shows
+   the same family with `tilesize128x64x32_stage1_warpsize2x2x1_tensor16x8x32`, i.e. the suffixes are
+   there once the engine is built rather than the standalone plan this dump came from. The name is a
+   label, not a capability list; only the timing cache test (core idea E14) can settle whether a
+   different tactic is faster, and it measured 0.998x.
 3. **GEMM geometry, not a C=64 penalty.** The body runs `tilesize256x64x32`, so for fprop
    implicit GEMM K = C*R*S = 576 and a K-tile of 32 means **18 mainloop steps** - a normal
    length, not a defect. The task is M = 2,073,600, N = 64, K = 576: with a 256x64 tile that is
    ~8100 blocks and ~238 waves over 34 SMs, i.e. plenty of parallelism. (An earlier revision
    claimed "two K steps" and a "short tile grid"; both were wrong.)
 
-Also: the tiled engine has **25 top-level layers, all `__myl_*`** (23 in the `IProfiler` run of
-§6 - a different build, same shape) - TRT fuses the network into myelin subgraphs. So the old picture "18 separate kernels, each with a full 530 MB round trip"
-is wrong. How much DRAM traffic actually remains after fusion is **unknown**; the
+Also: the tiled engine has **25 top-level layers, 18 of them myelin subgraphs** named `__myl_*` (23
+report time in the `IProfiler` run of §6 - a different build, same shape). The GPU does not execute
+them as myelin, though: `nsys` (§6) shows each of the 16 body subgraphs arriving as one
+`sm75_xmma_..._nhwckrsc_nhwc` GEMM, alongside `cuInt8::nchwTonchw`, a cuTENSOR permute and
+`ResizeNearest2D` kernels that belong to no layer. So the old picture "18 separate kernels, each with
+a full 530 MB round trip" is wrong - and so is the opposite reading, "myelin moves no intermediate
+bytes": what actually moves between those GEMMs is **unmeasured**. How much DRAM traffic actually remains after fusion is **unknown**; the
 arithmetic-intensity/ridge argument therefore stays a hypothesis, not a result, until the
 counter is read (§6, item 2).
 
@@ -236,22 +252,30 @@ counter is read (§6, item 2).
 
    | | fp16 engine | int8 engine (per-channel PReLU) |
    |---|---|---|
-   | tensor traffic per frame | **9.37 GiB** (10.1 GB) | **14.48 GiB** (15.5 GB) |
-   | at the card's 288 GB/s that traffic alone takes | 36.5 ms | 56.0 ms |
+   | logical traffic per frame (upper bound) | **9.37 GiB** = 10.06 GB | **14.48 GiB** = 15.55 GB |
+   | if all of it reached DRAM at 288 GB/s | 34.9 ms | 54.0 ms |
    | measured | 55-57 ms | 68-71 ms |
-   | fraction of peak DRAM it implies | 65% | 64% |
 
-   Two results, and the second is the int8 verdict in one number:
+   **This is a bound, not a measurement.** It is the traffic the graph would move if every layer did
+   a full round trip, which §5 says is exactly what the fused engine does *not* do. Two internal
+   checks say how far from the truth it is, and both point the same way:
 
-   - The fp16 engine sits at **65% of the card's DRAM peak** while the SMs are 100% busy and the
-     draw is 162 of 165 W: a balanced, power-limited engine about 20 ms above its own traffic floor.
-   - The int8 build moves **55% more bytes than fp16** - 14.5 against 9.4 GiB - because every block
-     round-trips through a half-precision tensor for its PReLU. "Fewer bytes and fewer FLOPs" is
-     inverted by the boundary, which is the same fact the profile shows as 17 separate passes.
-   - Arithmetic intensity is **236 FLOP/byte**: under the 306 that the whitepaper peak (88 TF/s)
-     implies, over the 146 that our own measured GEMM (42.1 TF/s) implies. So "compute- or
-     memory-bound" has no single answer here: 65% of DRAM, a full SM pipe and an exhausted power
-     budget at the same time.
+   | check | value | what it means |
+   |---|---|---|
+   | logical traffic ratio, int8 / fp16 | **1.545x** | - |
+   | measured time ratio, int8 / fp16 | **1.226x** | the model over-predicts the slowdown by 26% |
+   | slope between the two builds | 2.46 ms/GiB | against 3.73 ms/GiB for pure DRAM at 288 GB/s |
+
+   So about a third of the logical traffic never leaves L2, and the "65% of peak DRAM" that an
+   earlier revision of this section computed was an artefact of treating the bound as bytes. What
+   survives is the second result, which does not depend on the absolute traffic:
+
+   - The int8 build's logical traffic is **55% higher than fp16's** - 14.5 against 9.4 GiB - because
+     every block round-trips through a half-precision tensor for its PReLU. "Fewer bytes and fewer
+     FLOPs" is inverted by the boundary, which is the same fact the profile shows as 17 passes.
+   - Arithmetic intensity computed from the same bound is 236 FLOP/byte, under the 306 the
+     whitepaper peak implies and over the 146 our measured GEMM implies - a bound-derived number, so
+     it cannot settle "compute or memory" either way.
 
    **`nsys` runs here and confirms the shape of that time** (its timeline needs no counters).
    25 frames, 25 kernel launches per frame (16 of them the same GEMM), 56.8 ms of kernel time
