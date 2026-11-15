@@ -137,8 +137,15 @@ class Render:
         # decided here, before setupUpscale() builds the engine (tile reuse changes its shape)
         self.tileReuseSize = tile_reuse_size
         self.tileReuseThreshold = tile_reuse_threshold
+        self.tileReusePad = 18            # LR halo the tile path uses (receptive radius)
+        self.tileReuseMaxChain = 2
+        self.temporalReuseThreshold = temporal_reuse_threshold
+        self.temporalReuseMaxChain = temporal_reuse_max_chain
+        self.ffmpegPath = ffmpeg_path
+        self.tileReuseMode = tile_reuse if isinstance(tile_reuse, str) else (
+            "on" if tile_reuse else "off")
         self.tileReuse = bool(
-            tile_reuse and self.upscaleModel and not self.interpolateModel
+            self.tileReuseMode != "off" and self.upscaleModel and not self.interpolateModel
             and self.backend in ("pytorch", "tensorrt")
         )
         self.tilesize = tile_size
@@ -445,6 +452,46 @@ class Render:
                 return small.cpu().numpy().tobytes()
         return frame.get_frame_bytes()
 
+    def _probe_ffmpeg_path(self) -> str:
+        """ffmpeg for the probe: the app's bundled one when it is there, else PATH."""
+        import os as _os
+        candidates = [getattr(self, "ffmpegPath", None), "./bin/ffmpeg", "bin/ffmpeg"]
+        for candidate in candidates:
+            if candidate and _os.path.exists(candidate):
+                return candidate
+        return "ffmpeg"
+
+    def _probe_tile_reuse(self, ffmpeg_path):
+        """Ask the source whether tiles pay, before an engine is built for them.
+
+        The engine shape follows the verdict (a tile engine is built for the tile window, not
+        for the frame), so this has to happen before the upscaler exists. The probe replays
+        the gate's and the tile path's own statistics on a handful of decoded frames and
+        returns "would tiles be cheaper than one full-frame call" - see
+        `utils/TileProbe.py` for why that question is answerable from a sample.
+        """
+        try:
+            from .utils.TileProbe import probe
+            result = probe(
+                self.inputFile,
+                width=int(self.width),
+                height=int(self.height),
+                tile_size=int(getattr(self, "tileReuseSize", 512)),
+                halo=int(self.tileReusePad),
+                ffmpeg_path=ffmpeg_path,
+                gate_threshold=float(getattr(self, "temporalReuseThreshold", 5.0)),
+                tile_threshold=float(getattr(self, "tileReuseThreshold", 0.35)),
+                gate_max_chain=int(getattr(self, "temporalReuseMaxChain", 4)),
+                tile_max_chain=int(getattr(self, "tileReuseMaxChain", 2)),
+            )
+            log(result.stats())
+            if not result.use_tiles:
+                log(f"  {result.reason}")
+            return result
+        except Exception as error:  # a probe failure must never cost the render
+            log(f"tile probe failed ({error}); leaving tile reuse off")
+            return None
+
     def _calibrate_gate(self, hr_frame):
         """Feed the auto tuner once per rendered frame: the gate's LR delta is free (it was
         just computed) and the HR delta costs one 1/8 luma pool of the output."""
@@ -711,6 +758,12 @@ class Render:
     def setupUpscale(self):
         log("Setting up Upscale")
         if self.backend == "pytorch" or self.backend == "tensorrt":
+            # the tile engine is built for the tile window, so the verdict has to be in
+            # before upscalePytorchObject() builds anything
+            if self.tileReuse and self.tileReuseMode == "auto":
+                verdict = self._probe_tile_reuse(
+                    getattr(self, "ffmpegPath", None) or self._probe_ffmpeg_path())
+                self.tileReuse = bool(verdict and verdict.use_tiles)
 
             self.upscaleOption = self.upscalePytorchObject(self.upscaleModel)
             self.modelScale = self.upscaleOption.getScale() 

@@ -93,7 +93,7 @@ or run the same pixels in a cheaper numeric format.
 | T3 | reuse vs the **last kept** frame, 32 px block means, threshold chosen automatically (seed 5.0), chain 4 | TAS `dedup/dedup.py` + `PARAMETERS.MD` (sens 35 / 7) | 20-40% frames | **46.8%** reused on film, 3.97 s vs 4.92 s, 71.1 dB; anime 73.5% at the auto threshold, 10.6 s vs 30.8 s ungated, 52.7 dB avg / 48.2 dB worst frame | **adopted** |
 | T4 | full-res per-pixel veto at 40 levels | TAS `PixelDiffGuard` | rescues mouth flaps | on grainy film a single pixel exceeds it: 43 vetoes, reuse 1.1%, render 5.08 s | opt-in (`--temporal_reuse_pixel_veto 40` for anime) |
 | T5 | tile-level reuse with an 18 px halo, **square 512 px cores** | TAS/waifu2x tiling; our halo measurement (radius 18 LR px) | 2-4x on static content | 65.8% of tiles reused on anime and *still* slower than the full-frame call (21.37 s vs 30.8 ungated, but 10.6 s for the frame gate); film 27.7% reused, 6.57 s vs 4.27 | superseded by T5' - the loss was the grid, see below |
-| T5' | same mechanism, but the core grid **divides the frame** | this ledger's area model, checked against T5's own timings | 2.55x on the model at 65.8% reuse, instead of 1.68x | **18.14 s** ungated against 21.37 s for the 512 grid, and **8.45 s** on top of the frame gate against 11.74 s for the gate alone = **1.39x**; 51.6 dB average / 47.5 dB worst frame against the ungated render (gate alone 52.7 / 48.2). Tile reuse falls from 65.6% to 57.4% inside the gate, because the frames the gate leaves are exactly the ones that changed | **adoptable** - the grid defaults to a fitted one; the flag stays opt-in because the win is content-dependent (on the moving film clip the tile share collapses) |
+| T5' | same mechanism, but the core grid **divides the frame** | this ledger's area model, checked against T5's own timings | 2.55x on the model at 65.8% reuse, instead of 1.68x | **18.14 s** ungated against 21.37 s for the 512 grid, and **8.45 s** on top of the frame gate against 11.74 s for the gate alone = **1.39x**; 51.6 dB average / 47.5 dB worst frame against the ungated render (gate alone 52.7 / 48.2). Tile reuse falls from 65.6% to 57.4% inside the gate, because the frames the gate leaves are exactly the ones that changed | **adopted as `--tile_reuse_mode auto`** (the default): a pre-render probe samples 16 frames at 4 spread positions, replays both detectors' own statistics, and builds the tile engine only when the predicted cost beats the halo tax. Verdicts on our two clips: anime 33% predicted / 58% achieved -> ON (8.01 s); film 15% predicted / 9.5% achieved -> OFF (3.79 s, no tile engine). `--tile_reuse` still forces it on |
 | T6 | blend or discard the tile overlap | vs-mlrt discards, chaiNNer blends sinusoidally | - | we crop (discard), which is exact thanks to the halo | **adopted** |
 | T7 | per-slot HR memo: copies of one held frame share one upscale | TAS `pipeline/executor.py` | - | our gate already skips the whole model for a duplicate | equivalent |
 
@@ -136,6 +136,16 @@ On the moving film clip (94 frames, 1440x1080) the same combination is **neutral
 the gate against 4.14 s with tiles, tile reuse only 9.5%, quality 68.46 dB average against
 69.29 (worst frame 65.2 against 65.3). That is the selection effect in its purest form: the
 frames the gate renders on this clip have essentially no unchanged area left.
+
+That is why the default is a measurement rather than a flag: `TileProbe` decodes 16 frames at
+4 spread positions, replays the gate's and the tile path's statistics on them, and reports the
+predicted cost of the tile path as a fraction of one full-frame call. Two things make it
+dependable. The tile statistic has to be the mean of the *absolute* block deltas, not the
+difference of the tile's two means: the latter lets local changes cancel and predicted 38%
+reuse where the render then achieved 9.5%. And equality is not a safe threshold, because a
+16-frame sample mispredicts by a few points in both directions (anime 33% predicted / 58%
+achieved, film 15% / 9.5%), so tiles must clear `1 / area_tax` - a saving at least as large as
+the halo tax - instead of the bare break-even.
 
 ## Pipeline / IO
 
