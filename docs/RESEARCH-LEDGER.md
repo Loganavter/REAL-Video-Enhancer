@@ -1923,6 +1923,24 @@ accumulator comes back to 16 x 64 = 1024, i.e. the same as the current best conf
 prediction for this point is **parity, not a win** - it buys warp-level latency hiding at constant ILP,
 which is exactly the unnamed 6.24 cycles.
 
+Three checks on data already collected, and all three favour the point:
+
+| check | result | consequence |
+|---|---|---|
+| shared memory per block | **0 bytes** (ptxas reports 1 barrier, no smem) | nothing caps the fourth block; smem was never the constraint, the 3-block limit was registers alone |
+| `.reqntid` stripped, **no cap** | **138 registers** | removing the directive is neutral on its own, so the 128 variant isolates the register count and nothing else |
+| where the spill sits | **6 LDL/STL in the whole kernel**, scattered at five addresses, none in a hot loop | cold spill, ~50 MB of traffic at worst, 0.17 ms - not a mainloop disaster |
+
+And the prize is bounded by the mechanism that actually binds: with 16 warps the figure is linear in warps,
+`1.97 x 12/16 = 1.48 ms` (pipeline 92.3% of the 69.2% it runs at today), not the 1.43 ms that saturation
+would need, because saturation requires more than 16 warps. In frames: 16 x 1.478 + 6.2 = 29.85 ms = 1.885x
+of engine, **1.435x of wall** against today's 1.49x / 1.27x - +13% of wall, not more.
+
+Three distinguishable outcomes are recorded in advance, so the result reads unambiguously: ~1.97 ms means the
+register-frontier model holds and occupancy does not matter (branch closed with its mechanism); ~1.48 ms
+means latency was the binder and 12 warps were not enough; worse than 1.97 means the hypothesis was not
+tested (a hot spill, since smem is now known to be zero).
+
 What remains is not a question of measurement but of plumbing: load the cubin through `cuModuleLoadData` and
 launch with the same 128-thread grid, bypassing Triton's launcher. That is the last untried point in this
 lane, and its prize is bounded by the lane's own ceiling: at best ~1.43 ms per block = 1.93x engine / 1.45x
