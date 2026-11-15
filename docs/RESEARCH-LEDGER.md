@@ -1016,6 +1016,47 @@ ceiling is the int8 rate, 147 TOPS, i.e. 16.6 ms of body plus non-GEMM = 24.7 ms
 1.97x at 120 TOPS, 1.84x at 109. That is E27 extended into a real kernel project (CUTLASS or
 hand-written), weeks of work, with 2x at the very top of its range.
 
+## What bounds the routing lane, before it is measured further
+
+Four constraints, each of which decides whether a number is worth chasing.
+
+**The lane's own ceiling is the thin model, and it is already at 72% of the cost.** In the 1.59x row,
+`c = 0.4545` of `0.6295` is the thin pass itself; as the change rate goes to zero the cost goes to `c`,
+i.e. **2.2x of engine time is the absolute limit** of this scheme. Another 1.38x at most, and only at
+zero change.
+
+**The wall is much lower than the engine number.** The engine is 64.6% of the render cycle
+(14.67/22.72), so 1.40x of engine time is **1.23x** of wall clock and 1.59x is **1.32x**. For scale: the
+existing tile path already measures 1.17x of wall at 0.071%.
+
+**The change rate has to be conditional on the gate rendering the frame.** The measured 1.2-2.3% is an
+average over all pairs, and ~73% of pairs are reuse. If those are near-zero, the rate on the frames that
+actually reach this mechanism is ~4-5%, and with the measured 17x dilation factor (1.5% -> 26.1%) the
+recomputed region approaches the whole frame. Break-even is at `0.4545 + k*delta = 1` with `k ~ 12-17`,
+i.e. **delta ~ 3-4%**. This is the third time a "do less work" lane is decided by a selection effect
+(tile reuse fell from 65.6% to 57.4% inside the gate for the same reason), so it belongs in the ledger
+as a rule rather than as a coincidence: *a saving measured on all frames is not a saving on the frames
+the gate leaves*.
+
+**`delta` must be a content difference, not a mask difference.** The mask is a gradient threshold; the
+pixels under it can drift without moving it (slow brightness, grain, dithering), and a cached full answer
+then ages silently. It is the same defect that moved the gate from `|box-box|` to `box(|diff|)`, and it
+returns here in regional form. On grain the content changes everywhere while the mask stands still, so
+the grain sweep is a required part of the measurement, not an optional one.
+
+Two consequences that follow from the geometry rather than from tuning:
+
+- **The seam creeps.** The boundary of F moves with the change mask, so the composite's step (thin's own
+  error, up to 8 levels) travels across the frame - and a moving contour on a flat gradient is far more
+  visible than a static one. The safe fix is free: feather the composite across the halo, where the error
+  lies between 0 and thin's error and thin reads 0.060% above the bar on flat material. One blend, no
+  extra pass, and the step stops existing.
+- **This halo is not the int8 boundary tax.** The int8 boundary is an implementation artefact and fusion
+  removes it (E19, -5.8%). The 18-pixel halo is the network's receptive field: it cannot be removed
+  without fewer layers or a **cone instead of a cylinder** (E36). For a linear change of width 2 px and
+  length L, the cylinder costs 16*38*L and the cone L*sum(2+2k) = 304L - exactly 2x less work, i.e.
+  26.1% -> ~13% and 1.40x -> 1.71x. That is the only lever on this lane's numerator.
+
 ## Spatial routing survives the oracle: 1.6-1.95x on a mask a router can actually compute
 
 The pruning post-mortem ended on a split worth more than the pruning attempt: at C=32 the error sits on
