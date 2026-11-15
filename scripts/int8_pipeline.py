@@ -79,6 +79,9 @@ def main() -> int:
     ap.add_argument("--iters", type=int, default=0)
     ap.add_argument("--sat", action="store_true", help="per-layer saturation share")
     ap.add_argument("--margin", type=float, default=1.0, help="safety factor on every grid")
+    ap.add_argument("--dump", default=None, help="write the output image as fp16 raw")
+    ap.add_argument("--per-tensor", action="store_true",
+                    help="one scalar grid per layer, as the simulation does, instead of per channel")
     ap.add_argument("--recal", action="store_true",
                     help="the chain self-calibration; OFF by default because it is worse on both populations")
     ap.add_argument("--sim-grids", action="store_true",
@@ -133,6 +136,8 @@ def main() -> int:
     # each layer's output grid: per-tensor, from the simulation's calibration of the PReLU output
     # per-channel activation grid: the whole point of the fold below
     s_act_vec = (qq["body.1"] / 127.0).clamp_min(1e-8)
+    if args.per_tensor:
+        s_act_vec = s_act_vec.max().expand_as(s_act_vec).contiguous()
     cur = torch.round(act / s_act_vec.view(1, -1, 1, 1)).clamp(-127, 127).to(torch.int8)
     cur = cur.permute(0, 2, 3, 1).contiguous()
 
@@ -147,7 +152,8 @@ def main() -> int:
         lo_c, hi_c = outputs[key]
         # per CHANNEL, not per tensor: the PReLU slopes span -1.39..1.70, so the post-PReLU range differs
         # by factors across channels and a single scalar grid throws bits away on the narrow ones
-        outs.append((torch.maximum(hi_c.abs(), lo_c.abs()).float() / 127.0).clamp_min(1e-8) * args.margin)
+        _o = (torch.maximum(hi_c.abs(), lo_c.abs()).float() / 127.0).clamp_min(1e-8) * args.margin
+        outs.append(_o.max().expand_as(_o).contiguous() if args.per_tensor else _o)
 
     def run_pipeline(outs_used=None, collect=False, sat=False):
         """Per-channel activation grids throughout, with each layer's input scale folded into its weights.
@@ -227,6 +233,10 @@ def main() -> int:
         up = model.upsampler(tail_conv(last.half()))
         got = (up.float() + torch.nn.functional.interpolate(x, scale_factor=scale_up, mode="nearest").float())
 
+    if args.dump:
+        (got[0].permute(1, 2, 0).contiguous().cpu().numpy().astype(np.float16)
+         .tofile(args.dump))
+        print(f"dumped {got.shape[2]}x{got.shape[3]} to {args.dump}")
     share, peak, median = statistic(ref, got)
     print(f"pipeline: >8 {share:.5f}% (bar 0.1)  peak {peak:.0f}  median {median:.2f} levels")
     print(f"          16 kernel launches, per-tensor input scales, per-channel output scales")

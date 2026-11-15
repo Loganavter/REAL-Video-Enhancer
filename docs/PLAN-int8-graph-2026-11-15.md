@@ -252,6 +252,40 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**STAGE 1 PASSES ON BOTH POPULATIONS. The 6.72x and the 2.90x were my instrument, not the build.**
+
+Dumping both images and comparing them to **one** reference exposed it:
+
+| | vs the true fp16 reference | vs a quantised-weight reference |
+|---|---|---|
+| build, Violet 3840x2160 | **0.03065%** | 0.00355% |
+| simulation, same frame | **0.05550%** | 0.01059% |
+
+`simnum.py` computed `ref = model(x)` **after** `calibrate(model, ...)` had replaced the weights with their int8
+rounding, so it was scoring the simulation against a quantised-weight picture while the build was scored against
+the true fp16 one. `int8_accuracy_sim.main()` computes the reference *before* calibrate (line 145 against 152) -
+my harness had the two lines the other way round. Against one reference the build is **1.81x better than the
+simulation at 4K**, not 2.9x worse, and the ratio the plan's kill rule cares about is **0.552x**.
+
+That retires every 4K number recorded before this pass: 6.72x, 2.90x, and the "Violet 0.028-0.031% band" in the
+gate all came from comparisons of two different populations. What actually holds, measured now on the same frame
+and the same reference:
+
+| | build | simulation |
+|---|---|---|
+| anime 1920x1080 | 0.00000% (peak 7, median 1.08) | 0.00000% (peak 8, median 1.23) |
+| Violet 3840x2160 | 0.03065% (peak 17, median 1.39) | 0.05550% (peak 21, median 1.62) |
+
+`claim_check` now reads **PASS** on `docs/claims-int8-stage1.txt`, the anime gate and the 2x rule both green.
+
+Two artefacts were added so this comparison is repeatable rather than reconstructed: `--dump` on the build and on
+the simulation, so the two images can be differenced directly. Doing that showed the build and the simulation
+differ on 8200 of 33 177 600 pixels at 4K, spread evenly across the frame (29 of 8200 fall in the 8-pixel border,
+the rest on content), which is what a rounding difference looks like and not what an edge or block bug looks like.
+
+Also measured and refuted in this pass: per-tensor activation grids, which is the simulation's own choice, are
+worse at 4K (0.04100% against 0.03065%) - so the build's per-channel grids plus the prologue requant stay.
+
 **The per-hop instrument is rebuilt and it agrees with its own end-to-end result; and what it exposed first is a
 unit error in my own reading.** The new instrument marches both chains in lockstep, keeps the chain state as int8
 codes plus a grid (so a 4K frame fits), and processes the frame in row strips with a one-row halo - exact for each
