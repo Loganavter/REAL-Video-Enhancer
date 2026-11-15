@@ -1256,6 +1256,23 @@ Two levers are now measured rather than argued:
   Correlated means shrinking the activation range inflates the weights, so alpha sets how much peak is
   paid for share.
 
+**Asymmetric activation scales were expected to take 91% of the binding metric and instead trade one
+against the other.** Same held-out frame, same calibration (two Violet frames), margin 1.25:
+
+| scales | share above 8 | peak | median |
+|---|---|---|---|
+| symmetric (per-tensor / per-channel max) | **0.058%** | 37 | 1.93 |
+| **asymmetric (256 codes over [min, max])** | 0.102% | **32** | 2.68 |
+
+The peak improves as predicted and the share gets worse, so it does not dominate - it is a trade, and the
+trade runs against the metric the project applies. The median moving from 1.93 to 2.68 is the part that
+does not fit the theory: over a one-sided channel a 256-code asymmetric grid is strictly finer than a
+127-code symmetric one, so the median should have improved with everything else. Either the
+implementation has a wrinkle to find (zero-point handling on the two-sided channels, where [lo, hi] with
+both signs gives a step of (hi-lo)/255 that equals max/127.5 - no gain - while the margin widens the span
+it is fitted to), or the activation distributions are two-sided enough that the theoretical gain never
+materialises. **Unresolved, and the number is recorded as measured rather than as expected.**
+
 The conditioning ratio being flat said "no bad channels to target", not "nothing to migrate": migration
 acts on the input axis, where no scaling exists at all today.
 

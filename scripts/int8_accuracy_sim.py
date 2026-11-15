@@ -55,13 +55,16 @@ def calibrate(model, frames, device="cuda"):
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Conv2d):
             def pre_hook(_m, inp, key=name):
-                inputs[key] = max(inputs.get(key, 0.0), float(inp[0].abs().max()))
+                lo, hi = float(inp[0].min()), float(inp[0].max())
+                prev = inputs.get(key)
+                inputs[key] = (min(prev[0], lo), max(prev[1], hi)) if prev else (lo, hi)
             handles.append(module.register_forward_pre_hook(pre_hook))
         if isinstance(module, torch.nn.PReLU):
             def post_hook(_m, _inp, out, key=name):
-                per = out.abs().amax(dim=(0, 2, 3))
+                pair = (out.amin(dim=(0, 2, 3)), out.amax(dim=(0, 2, 3)))
                 prev = outputs.get(key)
-                outputs[key] = per if prev is None else torch.maximum(prev, per)
+                outputs[key] = pair if prev is None else (torch.minimum(prev[0], pair[0]),
+                                                          torch.maximum(prev[1], pair[1]))
             handles.append(module.register_forward_hook(post_hook))
     with torch.no_grad():
         for frame in frames:
@@ -71,7 +74,7 @@ def calibrate(model, frames, device="cuda"):
     return inputs, outputs, wscales
 
 
-def quantised_forward(model, x, inputs, outputs, wscales, fp16_tail=0):
+def quantised_forward(model, x, inputs, outputs, wscales, fp16_tail=0, asym=True):
     """The same stack with every conv input and PReLU output snapped to an int8 grid.
 
     Mirrors SRVGGNetCompact.forward exactly: clamp, the body stack, pixel shuffle, residual add. The
@@ -88,16 +91,28 @@ def quantised_forward(model, x, inputs, outputs, wscales, fp16_tail=0):
             out = module(out)
         elif isinstance(module, torch.nn.Conv2d):
             key = f"body.{name}"
-            s_in = inputs[key] / 127.0
-            out = torch.round(out / s_in).clamp(-127, 127) * s_in
+            lo, hi = inputs[key]
+            if asym:                      # 256 codes over the observed span instead of 127 symmetric
+                step = (hi - lo) / 255.0
+                zp = lo / step
+                out = (torch.round(out / step - zp).clamp(0, 255) + zp) * step
+            else:
+                s_in = max(abs(lo), abs(hi)) / 127.0
+                out = torch.round(out / s_in).clamp(-127, 127) * s_in
             out = module(out)
         elif isinstance(module, torch.nn.PReLU) and str(int(name) - 1) in stop_quantising:
             out = module(out)
         elif isinstance(module, torch.nn.PReLU):
             key = f"body.{name}"
             out = module(out)
-            s_out = (outputs[key] / 127.0).view(1, -1, 1, 1).clamp_min(1e-8)
-            out = torch.round(out / s_out).clamp(-127, 127) * s_out
+            lo, hi = outputs[key]
+            if asym:
+                step = ((hi - lo) / 255.0).view(1, -1, 1, 1).clamp_min(1e-8)
+                zp = (lo / step.squeeze()).view(1, -1, 1, 1)
+                out = (torch.round(out / step - zp).clamp(0, 255) + zp) * step
+            else:
+                s_out = (torch.maximum(lo.abs(), hi.abs()) / 127.0).view(1, -1, 1, 1).clamp_min(1e-8)
+                out = torch.round(out / s_out).clamp(-127, 127) * s_out
         else:
             out = module(out)
     out = model.upsampler(out)
