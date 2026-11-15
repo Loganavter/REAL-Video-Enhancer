@@ -222,8 +222,30 @@ drift away from the fp16 ones those maxima were taken on. A large activation tha
 the range lands outside it after sixteen hops, clips at +-127, and the error appears exactly in the busy
 tiles.
 
-The next measurement is one counter per layer on both chains - the share of quantised values at |q| == 127 -
-and the first layer where the pipeline's saturation exceeds the simulation's is the one that starts the drift.
+**Measured, and it is saturation from the first hop:**
+
+| layer | saturated, simulation | saturated, pipeline |
+|---|---|---|
+| 1 | **0.00%** | **12.63%** |
+| 2 | 0.00% | 5.26% |
+| 3 | 0.00% | 3.58% |
+| 5 | 0.00% | 1.55% |
+| 8 | 0.00% | 1.15% |
+
+Twelve percent of the first layer's quantised values sit at the clamp, against none in the simulation, and the
+chain then carries that clipping forward. So the defect is not the grid, the requant or the size: the
+pipeline's own output is **larger than the range it is being quantised against**, from the first layer onward.
+
+Which makes sense of the whole stage: every grid is a maximum taken on the **fp16** model's activations
+(`outputs[key]` from a calibration pass), while the pipeline quantises the values its **own chain** produces.
+Those two distributions agree at the head and part company immediately after, because the chain re-quantises
+and the fp16 activations never see that. A grid fitted to the wrong distribution clips by construction.
+
+The fix is therefore not another knob but a different calibration: fit the grids to the **chain's** activations,
+not the fp16 model's - i.e. run the fp16 pass to seed a first set of grids, then recalibrate from the
+quantised chain's own outputs (one extra pass per frame), or simply widen each grid by the ratio the chain
+actually reaches. The measurement that decides between those two: the ratio of the chain's per-channel maximum
+to the fp16 maximum, per layer, which is the amount the fp16 calibration was too tight.
 
 **The size sweep was read wrong, and the requant precision is refuted too.**
 
