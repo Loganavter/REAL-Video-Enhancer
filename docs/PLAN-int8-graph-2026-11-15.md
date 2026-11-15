@@ -79,7 +79,22 @@ diverges, and which side is right is then unknown.
 **Kills it:** build/simulation disagree by more than 2x on the share. Stop and find out, do not optimise.
 
 **Tools:** `int8_accuracy_sim.py` is the reference implementation to reproduce; `TensorRTHandler.py` is where
-the three-segment dispatch goes.
+the three-segment dispatch goes. `scripts/int8_pipeline.py` is the build.
+
+**State (2026-11-16): the pipeline runs end to end and its gate FAILS.** Sixteen kernel launches with real
+handoffs, head and tail in torch: `>8 100.000%, peak 236, median 113 levels` against a bar of 0.1%. Two
+confounds are already fixed and did not change the number - the calibration mutating the model it is given
+(now runs on a copy, so head and tail keep their original weights), and a debug script that derived the
+output scale from the PReLU *slope* instead of the PReLU *output* range.
+
+A median of 113 levels is the signature of a saturated picture rather than a scale that is slightly off: the
+tail receives a dequantised body output on a grid that is too coarse and clamps. The next diagnostic is to
+print, per layer, the ratio of the kernel's dequantised output to the fp16 reference's activation - the
+first layer whose ratio leaves 1.0 names the layer where the scale bookkeeping breaks - before touching
+anything else.
+
+Per the stage gate this stops the work here: build/simulation disagree far beyond 2x, so the cause is found
+first, not optimised around.
 
 ## Stage 2 - the first real numbers (half a day)
 
