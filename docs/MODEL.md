@@ -391,13 +391,12 @@ counter is read (§6, item 2).
    layout kernels 0.81 (E18), the tail convolution's 0.83 gap over its 1.09 traffic floor (E20's tail
    half), and the upsampler plus myelin's reshape/add 1.04 (E21). The tail was tried with the same
    padding trick and **did not fuse** (E24), so its gap has no owner yet.
-7. **The non-GEMM 14% of the frame was mapped and quantified.** `nsys` puts 8.11 ms of the 56.8 ms
-   outside the 16 body GEMMs, and four of the five pieces have a measured size and a named fix:
-   the one unfused PReLU (E19, 2.40 ms - it sits behind the *head* convolution, and three builds at
-   different tiling levels leave it there, so the fix is graph surgery on the head's 3-channel
-   shape, not a tactic), head and tail tactics (E20, 1.31 ms), `ResizeNearest2D` + the myelin
-   reshape/add (E21, 1.04 ms), and the layout kernels (E18, 0.81 ms). Together **5.56 ms = 9.8% of
-   the frame**, which is now the largest quantified per-frame headroom in this report.
+7. **The non-GEMM 14% of the frame was mapped, and the map is now historical.** `nsys` put 8.11 ms
+   of 56.8 ms outside the 16 body GEMMs. The largest piece - the one unfused PReLU behind the head
+   convolution - is **closed** (E19, -3.5% of engine time through the app's build path), and three
+   builds at different tiling levels had already shown the fix was graph surgery on the head's
+   3-channel shape rather than a tactic. What that leaves is **2.68 ms, 4.7% of the frame** (item 6):
+   layout kernels 0.81, the tail's 0.83 gap, the upsampler/reshape 1.04.
 
 What is left is byte counting: `ncu` needs `RmProfilingAdminOnly=0` (one line plus a reboot), and
 until then the DRAM split stays a bound (§6 item 2) rather than a measurement.
