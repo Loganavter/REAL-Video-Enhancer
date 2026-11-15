@@ -252,6 +252,39 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**THE DEFECT: the pipeline dropped the conv bias.** The A/A said my hop returned 3.3x the simulation's
+magnitude at layer 1 with the same input and the same weights. Instrumenting the module itself:
+
+    module: Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    bias is None: False   |bias| mean 4.28992
+    module(captured input) |mean| 1.5006   == captured 1.5006   (max|diff| 0.000000)
+    my conv2d, no bias     |mean| 3.8041
+    my conv2d + bias       |mean| 1.4987
+
+Every one of the 18 body convs carries a bias, and the bias is not a rounding detail: its mean absolute value is
+2.1-4.3 while the activations are ~0.5, so **dropping it is a different network**, not a quantisation choice.
+`grep -n bias scripts/int8_pipeline.py scripts/int8_prologue_kernel.py` returned **nothing** before this pass -
+the whole int8 lane was measuring an unbiased model.
+
+Carrying the bias in the epilogue (after dequantisation, before PReLU - one extra per-channel load and add, the
+accumulator stays int32 so int8-MMA is untouched):
+
+| pct | share |
+|---|---|
+| 100 | 1.569% -> **0.789%** |
+| 99.9 | 0.180% |
+| **99** | **0.089% - first time under the 0.1 bar** |
+| 98 | 0.186% |
+| 97 | 0.270% |
+| 95 | 0.422% |
+| 90 | 0.607% |
+
+And the A/A magnitudes now agree: my hop 0.578 against the simulation's 0.526 at layer 1 (was 1.754 vs 0.526).
+
+The rounding shift was re-tested **with** the bias in place, because every knob sweep in this stage had been run
+against an unbiased chain and was therefore invalid: 4.091% at pct 100 and 0.172% at pct 99, both worse than the
+flooring shift's 0.789/0.089. Flooring stays.
+
 **A/A run: the two hops diverge at the FIRST layer, by 3.3x in magnitude.**
 
 | layer | mean abs, my hop | mean abs, simulation | relative |

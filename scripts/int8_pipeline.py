@@ -132,7 +132,8 @@ def main() -> int:
     cur = cur.permute(0, 2, 3, 1).contiguous()
 
     # the full float weights: the input scale is folded into them per build, see run_pipeline
-    layers = [(conv.weight.detach().float(), prelu.weight.detach().float())
+    # the conv bias travels with the layer: dropping it changes the network, not the rounding
+    layers = [(conv.weight.detach().float(), conv.bias.detach().float(), prelu.weight.detach().float())
               for conv, prelu in zip(inner, prelus[1:])]
 
     outs = []
@@ -152,7 +153,7 @@ def main() -> int:
         """
         buf, s_in = cur.clone(), s_act_vec
         measured = []
-        for idx, ((w_full, slope), s_out) in enumerate(zip(layers, outs_used or outs), 1):
+        for idx, ((w_full, bias, slope), s_out) in enumerate(zip(layers, outs_used or outs), 1):
             # prologue requant: the buffer is int8 on a per-channel grid, the dot wants one per-tensor
             # grid, so the ratio goes in as an integer multiplier and the accumulator stays int32
             # the simulation's own per-tensor input grid (calibrated on the fp16 activation) instead of
@@ -165,7 +166,7 @@ def main() -> int:
             ovec = s_out.contiguous()
             out = torch.empty_like(buf)
             grid = (triton.cdiv(args.height * args.width, BLOCK_M),)
-            body_prologue_kernel[grid](buf, tap_w, m_int, SHIFT, vec, slope, ovec, out,
+            body_prologue_kernel[grid](buf, tap_w, m_int, SHIFT, vec, bias, slope, ovec, out,
                                        args.height, args.width, BLOCK_M=BLOCK_M, C=64, num_warps=4)
             if sat:
                 print(f"    layer {idx:2d}: saturated "
