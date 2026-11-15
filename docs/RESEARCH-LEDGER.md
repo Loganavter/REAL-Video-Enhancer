@@ -1132,9 +1132,27 @@ mechanism that made the tile path measure 0.287% before dilation: parts of the r
 different ages. Dilation fixes the mask's spatial coherence and says nothing about the cache's age.
 
 So the lane closes numerically, not by prior: **the only passing configuration is the fresh one, and at
-1.15x of wall clock it is a little slower than the tile path already shipping at 1.17x** (with a better
-defect, 0.03% against 0.071%). Paying 1.15x for a defect improvement that a 1.17x path already delivers
-differently is not a lane worth a two-engine architecture.
+1.15x of wall clock it is slightly slower than the tile path at 1.17x** while measuring 0.030% of pixels
+against 0.071% - 2.4x better defect for 1.7% less speed, against 0.009% for the shipping default. That
+trade is real, and the reason to refuse it is the cost of the mechanism (two engines, a mask, a new code
+path) for an option that is only a little better than one that already exists; it is not that nothing
+new was found.
+
+Three things from the closure worth keeping, because they will be proposed again:
+
+- **Fragmentation is why the cache failed, and it is the general case.** The 0.423-0.648% came from a
+  reused area fragmented across thousands of independent cell ages; the tile path's 0.287% came from
+  eight coarse cells. The number of age boundaries grows with the number of units, so the tile result
+  was the *coarse* case and not the typical one. Any future "cache the expensive part" idea inherits
+  this: count the boundaries, not the area.
+- **Caching only on the frames the gate renders makes it worse, not better** (0.485 against 0.423%).
+  That closes the loophole "update the cache only where the gate is drawing anyway" - the frames the
+  gate leaves are exactly the changed ones, the same selection effect that dropped tile reuse from
+  65.6% to 57.4% inside the gate.
+- **F in the tables above is a compute area, not a mask area**: the full region is computed with the
+  18-pixel halo on its input and cropped on output, which is why thr 8 r2 and r18 reach the same
+  quality at 33.8% and 45.6%. Reading F as the mask would make the fresh variant slower, not faster,
+  so the closure holds either way - but the surviving number has to carry its label.
 
 For reference, int8's measured ceiling is 1.40x engine / 1.23x wall, content-independent, 0.000% of
 pixels, no masks, no cache, no seam.
@@ -1199,8 +1217,25 @@ time and cannot pay for it in features; C=48 buys 1.2x and has the same picture 
 does not scale with the cut, and 48 is the same cut on this metric). Nothing between them is worth the
 attempt.
 
-What is left for 2x is the int8 kernel: 1.40x measured ceiling for a fused epilogue, 1.6-1.8x realistic
-at 91-110 TOPS, and 1.9x+ only if 120 TOPS and the whole non-GEMM remainder are won at once.
+What is left for 2x is the int8 kernel: **1.40x measured ceiling for a SCALAR fused epilogue** - a
+per-channel epilogue that loads a slope vector and an output-scale vector per tile, and requantises,
+has never been measured here, so 1.40x is an upper bound and not an expectation. Judge the probe by
+block time (<=1.9-2.0 ms for 64->64 at 2.07 Mpx including the epilogue), not by TOPS.
+
+**And the int8 accuracy figure does not transfer to the plugin.** The 0.000% / peak 4 / 54.1 dB was
+measured on a build where the PReLU ran in fp16 with a dequantise/quantise hop either side, and with
+**no requant after the PReLU**. The plugin does something that build never did: int32 -> per-channel
+PReLU -> requant to int8. The one build that attempted it is invalid as an accuracy reference (its
+output contained NaN from mis-calibrated output scales). So the accuracy of the design is **unmeasured,
+not good**. Two quantitative reasons to expect pressure: slopes span -1.39..1.70, so the per-channel
+range after PReLU varies by factors and flips sign; a per-tensor output scale spanning that union costs
+the narrow channels on the order of a bit, and the measured headroom was peak 4 against a bar of 8.
+Per-channel output scales are therefore probably mandatory rather than a checkbox.
+
+Fourth criterion for the same probe: **do not break the fusion at the seams.** E19's head padding works
+inside an fp16 graph; a plugin changes partitioning. The target structure is the one the 40.24 ms build
+had - four reformat layers and one pointwise - and any more means the boundaries are eating the win even
+if the block itself is fast. Read layer names and reformat counts, not just TFLOP/s.
 
 
 ## E30b first look: a naive channel cut is 16x over the bar, and the error does not shrink with width
