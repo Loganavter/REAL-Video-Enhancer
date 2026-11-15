@@ -1177,8 +1177,33 @@ returned the calibration grids in **float16** because the model runs in half, so
 `s_in/s_t * 2^SHIFT` overflowed half to infinity and cast to `INT32_MAX`. The first certification read 99.58%.
 Keeping the grids in float32 took it to 3.53%; the remaining factor is unexplained.
 
-Next probe, named rather than guessed: compare Int8Body's per-hop int8 codes against `int8_pipeline`'s on a 512x512
-frame, hop by hop - the same instrument that localised every other defect in this lane. Until that reads 0, the
+**The hop-by-hop comparison was run, and it exonerated every part while the composite still disagrees.**
+
+Five separate comparisons, all in one process, all on the same 512x512 frame:
+
+| component | result |
+|---|---|
+| activation grids (`s_act`) | **identical** (`torch.equal`) |
+| launch parameters, all six per hop, with the same grids | **identical** (no field differs at any of the 16 hops) |
+| `quantise_nchw_to_nhwc` vs torch round/clamp/cast/permute | differs on 0.0023% of elements by **1 code** (half-way rounding) |
+| `dequantise_nhwc_to_nchw` vs torch dequantise | **bit-identical** (max diff 0.00000000) |
+| both tails from the same codes | **bit-identical**, and both read 1.23053% |
+
+And yet, in that same process, with the same grids and the same launches:
+
+| | share at 512x512 |
+|---|---|
+| the pipeline's recipe, written out inline | **0.00000%** (median 0.36) |
+| `Int8Body(x)` | **1.27525%** (median 1.57) |
+
+So the defect is not the grids, not the launches, not the kernels, not the conversions and not the tail - it is in
+`__call__`'s own assembly. The one structural difference left untested is that `__call__` reuses two ping-pong
+buffers while the recipe allocates a fresh destination per hop; the next probe is to make `__call__` do exactly what
+the recipe does (fresh buffer per hop) and see whether the number collapses. Everything else on the list above is
+now measured rather than assumed, which is why this is a two-line experiment rather than another sweep.
+
+Next probe, named rather than guessed: run `__call__` with a per-hop destination and compare, then bisect what is
+left of the assembly. Until that reads 0, the
 render keeps the fp16 engine, because enabling this body would trade a real 1.489x for a wrong picture and the
 picture is the thing the bar measures.
 

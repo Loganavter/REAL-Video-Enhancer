@@ -36,3 +36,13 @@
 @claim body_self_cert     3.5338  %  "Int8Body.certify() on its own calibration frame, bar 0.1%" measured
 # The body must certify before it may serve a frame. It does not, so the render keeps the fp16 engine.
 @below body_share_1080 bar_share
+
+# ---- hop-by-hop: every part verified equal, the composite not
+@claim hop_grids_equal     1 x     "Int8Body vs the pipeline recipe: s_act identical, all 16 launch parameter sets identical" measured
+@claim quantise_max_code   1 code  "the only conversion difference: 0.0023% of elements, 1 code, half-way rounding" measured
+@claim dequantise_max    0.0 float "dequantise_nhwc_to_nchw vs torch dequantise" measured
+@claim tail_max         0.0 float "both tails from the same codes" measured
+@claim recipe_512      0.00000 %   "the pipeline recipe written inline, 512x512" measured
+@claim body_512        1.27525 %   "Int8Body(x), same process, same grids, same launches" measured
+@claim body_512_own    1.22709 %   "Int8Body(x) with its own grids" measured
+@below body_512 bar_share
