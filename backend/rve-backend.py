@@ -175,7 +175,9 @@ class HandleApplication:
             dynamic_scaled_optical_flow=self.args.dynamic_scaled_optical_flow,
             ensemble=self.args.ensemble,
             output_to_mpv=self.args.output_to_mpv,
-            tile_reuse=not self.args.no_tile_reuse,
+            trt_timing_iters=self.args.trt_timing_iters,
+            trt_tiling_level=self.args.trt_tiling_level,
+            tile_reuse=self.args.tile_reuse,
             tile_reuse_size=self.args.tile_reuse_size,
             tile_reuse_threshold=self.args.tile_reuse_threshold,
             temporal_reuse=not self.args.no_temporal_reuse,
@@ -428,9 +430,23 @@ class HandleApplication:
             default=False,
         )
         parser.add_argument(
-            "--no_tile_reuse",
-            help="Disable tile-level reuse (recompute only the LR tiles that changed). On by "
-                 "default; it needs the model to be fully convolutional and builds a tile engine.",
+            "--trt_timing_iters",
+            help="TensorRT num_avg_timing_iters (default 8; the old behaviour was 4).",
+            default=8,
+            type=int,
+        )
+        parser.add_argument(
+            "--trt_tiling_level",
+            help="TensorRT tiling_optimization_level: none|moderate|full (default moderate).",
+            default="moderate",
+            type=str,
+        )
+        parser.add_argument(
+            "--tile_reuse",
+            help="Enable tile-level reuse (recompute only the LR tiles that changed). Off by "
+                 "default: on moving footage the 548px halo window costs more than the tiles "
+                 "saved (measured 6.57 s vs 4.27 s on a 94-frame clip). It needs a fully "
+                 "convolutional model and builds a separate tile engine.",
             action="store_true",
             default=False,
         )

@@ -87,6 +87,7 @@ class UpscalePytorch:
         trt_workspace_size: int = 0,
         trt_optimization_level: int = 5,
         trt_tiling_level: str = "moderate",
+        trt_timing_iters: int = 8,
         tile_reuse: bool = False,
         tile_lr: int = 512,
         tile_halo: int = 18,
@@ -113,6 +114,7 @@ class UpscalePytorch:
         self.trt_workspace_size = trt_workspace_size
         self.trt_optimization_level = trt_optimization_level
         self.trt_tiling_level = trt_tiling_level
+        self.trt_timing_iters = trt_timing_iters
         self.tile_reuse = tile_reuse
         self.tile_threshold = tile_threshold
         self.tile_max_chain = tile_max_chain
@@ -267,6 +269,8 @@ class UpscalePytorch:
                             example_inputs=self.tensorrt_example_inputs,
                             trt_engine_name=self.trt_engine_name,
                             trt_multi_precision_engine=False,
+                            num_avg_timing_iters=self.trt_timing_iters,
+                            tiling_optimization_level=self.trt_tiling_level,
                             dynamic_shapes=dynamic_shapes,
                         )
                         trtHandler.save_engine(
@@ -293,6 +297,8 @@ class UpscalePytorch:
                                     example_inputs=self.tensorrt_example_inputs,
                                     trt_engine_name=self.trt_engine_static_name,
                                     trt_multi_precision_engine=False,
+                            num_avg_timing_iters=self.trt_timing_iters,
+                            tiling_optimization_level=self.trt_tiling_level,
                                 )
                                 trtHandler.save_engine(
                                     trt_engine,
