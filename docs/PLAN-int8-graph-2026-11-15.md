@@ -287,6 +287,13 @@ which is the plan's own kill condition ("build/simulation disagree by more than 
 stage 1 holds where the gate is defined and does not hold at 4K; the 4K gap is the next thing to close, not a
 rounding question.
 
+Context for the 4K number, because the share alone misleads: this plan's own composition table already expects
+Violet at **0.258%**, over the 0.1 bar, with the fp16 fallback covering it. The build now reads 0.07115% there -
+**under the bar and 3.6x better than the composition table** - so the open item is not "Violet is unusable", it is
+"the build is 6.7x the simulation on the same frame". And the 4K run has no saturation at any hop either (0.00%
+from layer 5 up), so it is accumulation, not a grid that is too tight; the per-hop instrument needed to localise
+it has to be rebuilt first, because the one built in this stage disagrees with its own end-to-end result.
+
 Two side results: at pct 100 the grid now uses `amax` instead of `quantile` (identical value, no sort buffer,
 which is what let the 4K frame run at all instead of OOM), and measuring the grids on the quantised model instead
 of the fp16 one moves 1080p 0.00043 -> 0.00047 and 4K 0.07115 -> 0.06436, so the grid source is not the mechanism.
