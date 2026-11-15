@@ -51,7 +51,7 @@ preset) before tuning anything else.
 | idea | result |
 |---|---|
 | FP8 on consumer Ada | no speedup vs FP16 (NVIDIA issue #4081; L40S gets 1.7-1.9x, Ada does not) |
-| INT8 PTQ for this net | 12.45 ms vs 12.42 ms fp16 (mmdeploy, same 16-conv class) |
+| INT8 PTQ for this net | 12.45 ms vs 12.42 ms fp16 (mmdeploy, same 16-conv class). And with explicit Q/DQ calibrated on our own frames: 54.1 dB (peak 4 levels, 0.000% of pixels above 8) but **68.11 ms against 55.54 ms** - TRT picks an NCHW int8 kernel where the fp16 path is NHWC, and the 60 reformat layers it needs cost more than int8 saves |
 | 2:4 structured sparsity | needs pruned weights (retraining) and TRT itself picks sparse tactics for 22 of 53 eligible layers |
 | dynamic activation sparsity | no GPU win without custom kernels |
 | CUDA graphs on the engine | ~0.3% at 35-45 ms/frame |
