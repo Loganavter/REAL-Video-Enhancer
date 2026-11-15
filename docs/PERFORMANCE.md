@@ -32,7 +32,7 @@ preset) before tuning anything else.
 
 | knob | why not default |
 |---|---|
-| `--tile_reuse` (+ `--tile_reuse_size`, `--tile_reuse_threshold`) | recomputing a tile needs the 548px halo window (+15% area), which ate the 27.7% it saved on moving footage: 6.57 s vs 4.27 s. Expect it to pay only on mostly-static content. |
+| `--tile_reuse` (+ `--tile_reuse_size`, `--tile_reuse_threshold`) | **1.39x on anime on top of the frame gate** (8.45 s against 11.74 s, 502 frames at 1080p->2160p), quality 51.6 dB average / 47.5 dB worst frame against the ungated render (the gate alone: 52.7 / 48.2). The core grid is fitted to the frame (`divisor_tile`: 480x540 for 1920x1080, 8 windows, 1.147x the frame's area) and the two detectors stack: the gate decides whether a frame needs the model at all, the tile path which tiles of that frame do. Still opt-in because the win is content-dependent: on the moving film clip its tile share drops and it loses. The earlier "548 px halo ate the saving" reading was wrong - see docs/MODEL.md §7. |
 | `RVE_P010=1` | the P010 packing is bit-exact in isolation but a full `hevc_nvenc` render diverges from the planar reference (31 dB) - unexplained, so off. |
 | `--trt_streams` | >1 falls back to 1 with a warning: two `torch.jit.load` modules of one engine do not give independent contexts and the output corrupts (25 dB). |
 
@@ -40,7 +40,7 @@ preset) before tuning anything else.
 
 | item | result |
 |---|---|
-| pooled pinned output payload | wired as specified, a full render comes out 12.6 dB against the reference (slots rewritten before ffmpeg has the bytes) and slower (4.83 vs 4.21 s) - disabled |
+| pooled pinned output payload | wired as specified, a full render comes out 12.6 dB against the reference (slots rewritten before ffmpeg has the bytes) and slower (4.83 vs 4.21 s) - disabled. The later writer instrumentation shows the queue never fills (depth 4 of 25), so "a whole pool behind" cannot be the mechanism: a slot was released before its last byte had been copied |
 
 ## Measured dead ends - do not re-litigate
 
@@ -61,6 +61,22 @@ preset) before tuning anything else.
 
 Per frame at 2880x2160 output: engine ~35 ms, colour pack + D2H + bytes ~10 ms, the rest is
 reading/writing and the encoder.
+
+### The encoder already overlaps the model (measured)
+
+The writer thread reports its own split now. On the 502-frame anime render it is **blocked in
+`write()` 12.34 ms/frame** (ffmpeg draining at NVENC speed) and **idle 10.63 ms/frame** waiting
+for frames, with the queue at depth 4 of 25: the loop (22.72 ms/frame) is the producer and the
+encoder has slack. So there is nothing to win by moving encoding in-process or by
+double-buffering harder - the "~13 ms/frame not covered by the render loop" that the budget
+table used to show is **fixed startup** (engine build/deserialize, ffmpeg + NVENC init,
+flush), which is 1.5 s on a 94-frame clip and invisible on 502 frames. The log prints
+`startup:` and `render loop:` so the split is visible per run.
+
+Note on this host: `nvidia-smi` reports 17-47% utilisation while nothing of ours runs, because
+the desktop's GPU clients (gnome-remote-desktop, sunshine, VS Code) submit small copies. They
+do not take meaningful throughput (23-26 W idle against 164 W under load), so "one GPU job at
+a time" means "no other render or benchmark process", not "utilisation 0".
 
 ### In-process encoding: measured, not worth it in this stack
 

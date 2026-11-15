@@ -66,7 +66,8 @@ def np_net(array, scale: int = 2):
     return out
 
 
-def np_composite(frame, scale: int, tile_lr: int, halo: int, given_cores=None):
+def np_composite(frame, scale: int, tile_lr: int, halo: int, given_cores=None,
+                 tile_w=None):
     """Render ``given_cores`` (default: the whole grid) through ``np_net`` and paste back.
 
     Uses the module's own geometry helpers - the point of the test is that those helpers
@@ -74,11 +75,12 @@ def np_composite(frame, scale: int, tile_lr: int, halo: int, given_cores=None):
     """
     np = pytest.importorskip("numpy")
     height, width = frame.shape
-    cores = TU.tile_grid(height, width, tile_lr) if given_cores is None else given_cores
+    cores = (TU.tile_grid(height, width, tile_lr, tile_w) if given_cores is None
+             else given_cores)
     out = np.zeros((height * scale, width * scale), dtype=np.float64)
     written = np.zeros((height * scale, width * scale), dtype=np.int32)
     for core in cores:
-        window = TU.tile_window(core, halo, height, width, tile_lr)
+        window = TU.tile_window(core, halo, height, width, tile_lr, tile_w)
         tile_in = frame[np.ix_(list(window.rows), list(window.cols))]
         tile_out = np_net(tile_in, scale)
         read_y, read_x = TU.hr_read_slice(window, scale)
@@ -131,6 +133,47 @@ def test_tile_grid_partitions_frame(height, width, tile_lr):
     # row-major order (plan() reports cores in this order)
     assert cores[0][0] == 0 and cores[0][2] == 0
     assert cores == sorted(cores, key=lambda c: (c[0], c[2]))
+
+
+# --------------------------------------------------------------------------------------
+# geometry: the divisor grid (cores that divide the frame exactly)
+# --------------------------------------------------------------------------------------
+@pytest.mark.parametrize("size,target,expected", [
+    (1080, 512, 540),       # 2 rows: the user's 480x540 grid for 1920x1080
+    (1920, 512, 480),       # 4 columns
+    (1440, 512, 480),       # 3 columns
+    (1080, 96, 108),        # nearest tile *count* wins: 10 tiles of 108
+    (1081, 512, 1081),      # prime height: one tile, never a clipped tail
+    (2160, 512, 540),
+])
+def test_divisor_tile_lands_on_a_divisor(size, target, expected):
+    side = TU.divisor_tile(size, target)
+    assert side == expected
+    assert size % side == 0, f"{side} does not divide {size}"
+
+
+def test_divisor_grid_removes_the_tail_area():
+    """1920x1080 at a 512 target: 8 exact windows of 516x576 instead of 12 of 548x548."""
+    th, tw = TU.divisor_tile(1080, 512), TU.divisor_tile(1920, 512)
+    cores = TU.tile_grid(1080, 1920, th, tw)
+    assert len(cores) == 8
+    assert all(c[1] - c[0] == th and c[3] - c[2] == tw for c in cores)
+    windows = [TU.tile_window(c, HALO_LR, 1080, 1920, th, tw) for c in cores]
+    assert {w.window_height for w in windows} == {th + 2 * HALO_LR}
+    assert {w.window_width for w in windows} == {tw + 2 * HALO_LR}
+    exact = len(windows) * (th + 2 * HALO_LR) * (tw + 2 * HALO_LR)
+    square = len(TU.tile_grid(1080, 1920, 512)) * (512 + 2 * HALO_LR) ** 2
+    assert exact / (1080 * 1920) < 1.16, exact / (1080 * 1920)
+    assert square / (1080 * 1920) > 1.7, square / (1080 * 1920)
+    print(f"\n[area] divisor grid {exact / (1080 * 1920):.3f}x vs square-512 "
+          f"{square / (1080 * 1920):.3f}x the frame")
+
+
+def test_rectangular_window_is_fixed_shape():
+    window = TU.tile_window((100, 260, 40, 200), HALO_LR, 1080, 1920, 160, 160 + 24)
+    assert window.window_height == 160 + 2 * HALO_LR
+    assert window.window_width == 184 + 2 * HALO_LR
+    assert window.core_height == 160 and window.core_width == 160
 
 
 def test_tile_grid_rejects_empty_input():
@@ -307,6 +350,25 @@ def test_composite_matches_whole_frame_within_one_level(height, width, tile_lr):
     print(f"\n[seam] {height}x{width} tile={tile_lr} halo={HALO_LR}: "
           f"interior max |composite - whole-frame| = {interior_error * 255:.4f}/255, "
           f"frame-border band ({DUMMY_RADIUS} LR px) = {border_error * 255:.2f}/255")
+
+
+def test_rectangular_tiles_composite_without_seams():
+    """Non-square cores (a divisor grid) must place tiles exactly like square ones."""
+    np = pytest.importorskip("numpy")
+    rng = np.random.default_rng(4242)
+    height, width = 192, 320
+    frame = rng.random((height, width))
+
+    whole = np_net(frame, scale=2)
+    composite, written = np_composite(frame, scale=2, tile_lr=48, tile_w=80, halo=HALO_LR)
+
+    assert written.min() == 1 and written.max() == 1
+    error = np.abs(composite - whole)
+    interior = _interior(*error.shape, margin=DUMMY_RADIUS * 2)
+    interior_error = float(error[interior].max())
+    assert interior_error <= SEAM_TOL, f"seam error {interior_error * 255:.3f}/255"
+    print(f"\n[seam] 192x320 rectangular 48x80 halo={HALO_LR}: interior max error "
+          f"{interior_error * 255:.4f}/255")
 
 
 def test_halo_is_load_bearing():

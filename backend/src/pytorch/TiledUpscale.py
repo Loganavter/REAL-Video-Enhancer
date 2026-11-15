@@ -54,6 +54,7 @@ __all__ = [
     "Rect",
     "TileWindow",
     "tile_grid",
+    "divisor_tile",
     "halo_window",
     "replicate_window",
     "tile_window",
@@ -73,21 +74,57 @@ Rect = Tuple[int, int, int, int]
 # --------------------------------------------------------------------------------------
 # pure geometry (no torch - unit-tested directly)
 # --------------------------------------------------------------------------------------
-def tile_grid(height: int, width: int, tile_lr: int) -> List[Rect]:
+def divisor_tile(size: int, target: int) -> int:
+    """Largest tile side <= ``size`` that divides it, as close to ``target`` as possible.
+
+    A tile grid whose cores do not divide the frame pays for a full halo window on a
+    clipped tail: at 1920x1080 with a 512 px core every tile is a 548x548 window, 12 of
+    them, i.e. 1.74x the frame's area for 1.0x of its pixels. Sizing the cores to
+    ``size / n`` makes the grid cover the frame exactly: 1920x1080 -> 480x540, 8 windows,
+    1.15x.
+
+    ``n`` is the divisor of ``size`` nearest to ``round(size / target)``, i.e. the tile
+    count the caller asked for, snapped to one that divides. Ties go to the fewer, larger
+    tiles because every extra tile costs another ``2 * halo`` of border. An axis with no
+    divisor near the wanted count keeps one tile (a prime height is one window), which is
+    correct but coarse - the caller sees it in the logged tile count.
+    """
+    if size <= 0:
+        raise ValueError(f"size must be positive, got {size}")
+    if target <= 0:
+        raise ValueError(f"target must be positive, got {target}")
+    wanted = max(1, round(size / target))
+    best = 1
+    best_key = (abs(1 - wanted), 1)
+    for n in range(2, min(size, 64) + 1):
+        if size % n:
+            continue
+        key = (abs(n - wanted), n)
+        if key < best_key:
+            best, best_key = n, key
+    return size // best
+
+
+def tile_grid(height: int, width: int, tile_lr: int,
+              tile_w: Optional[int] = None) -> List[Rect]:
     """Cores of the LR tile grid, row-major, end-exclusive.
 
-    The last row/column is clipped to the frame, so the cores never overlap and their union
-    covers the frame exactly.
+    ``tile_lr`` is the vertical core size, ``tile_w`` the horizontal one (square when it is
+    omitted or ``None``). The last row/column is clipped to the frame, so the cores never
+    overlap and their union covers the frame exactly. Feeding sizes from
+    :func:`divisor_tile` makes the clipping a no-op.
     """
-    if tile_lr <= 0:
-        raise ValueError(f"tile_lr must be positive, got {tile_lr}")
+    tile_h = int(tile_lr)
+    tile_w = tile_h if tile_w is None else int(tile_w)
+    if tile_h <= 0 or tile_w <= 0:
+        raise ValueError(f"tile sizes must be positive, got {tile_h}x{tile_w}")
     if height <= 0 or width <= 0:
         raise ValueError(f"empty frame {height}x{width}")
     cores: List[Rect] = []
-    for y0 in range(0, height, tile_lr):
-        y1 = min(y0 + tile_lr, height)
-        for x0 in range(0, width, tile_lr):
-            x1 = min(x0 + tile_lr, width)
+    for y0 in range(0, height, tile_h):
+        y1 = min(y0 + tile_h, height)
+        for x0 in range(0, width, tile_w):
+            x1 = min(x0 + tile_w, width)
             cores.append((y0, y1, x0, x1))
     return cores
 
@@ -135,11 +172,20 @@ class TileWindow:
 
     @property
     def window_size(self) -> int:
+        """Vertical window size (kept for callers that only ever used square tiles)."""
         return len(self.rows)
 
+    @property
+    def window_height(self) -> int:
+        return len(self.rows)
+
+    @property
+    def window_width(self) -> int:
+        return len(self.cols)
+
     def __post_init__(self) -> None:
-        if len(self.rows) != len(self.cols):
-            raise ValueError("window must be square")
+        if not self.rows or not self.cols:
+            raise ValueError("empty window")
         if self.top < 0 or self.left < 0:
             raise ValueError("negative window offset")
         if self.top + self.core_height > len(self.rows):
@@ -148,16 +194,19 @@ class TileWindow:
             raise ValueError("core does not fit inside the window")
 
 
-def tile_window(core: Rect, halo: int, height: int, width: int,
-                tile_lr: int) -> TileWindow:
-    """Fixed ``T x T`` LR input window for ``core`` (``T = tile_lr + 2 * halo``)."""
+def tile_window(core: Rect, halo: int, height: int, width: int, tile_lr: int,
+                tile_w: Optional[int] = None) -> TileWindow:
+    """Fixed ``Th x Tw`` LR input window for ``core`` (``T = tile + 2 * halo`` per axis)."""
     y0, y1, x0, x1 = core
-    window = tile_lr + 2 * halo
+    tile_h = int(tile_lr)
+    tile_w = tile_h if tile_w is None else int(tile_w)
+    window_h = tile_h + 2 * halo
+    window_w = tile_w + 2 * halo
     hy0, _, hx0, _ = halo_window(y0, y1, x0, x1, halo, height, width)
     return TileWindow(
         core=core,
-        rows=tuple(replicate_window(hy0, window, height)),
-        cols=tuple(replicate_window(hx0, window, width)),
+        rows=tuple(replicate_window(hy0, window_h, height)),
+        cols=tuple(replicate_window(hx0, window_w, width)),
         top=y0 - hy0,
         left=x0 - hx0,
     )
@@ -271,9 +320,12 @@ class TiledUpscaler:
 
     def __init__(self, tile_lr: int = 512, halo_lr: int = 18, threshold: float = 0.35,
                  max_chain: int = 2, downscale: int = 8,
-                 scene_threshold: float = 32.0, tile_stat: str = "mean") -> None:
+                 scene_threshold: float = 32.0, tile_stat: str = "mean",
+                 tile_w: Optional[int] = None) -> None:
         if tile_lr <= 0:
             raise ValueError(f"tile_lr must be positive, got {tile_lr}")
+        if tile_w is not None and tile_w <= 0:
+            raise ValueError(f"tile_w must be positive, got {tile_w}")
         if halo_lr < 0:
             raise ValueError(f"halo_lr must be >= 0, got {halo_lr}")
         if downscale <= 0:
@@ -281,6 +333,7 @@ class TiledUpscaler:
         if max_chain < 0:
             raise ValueError(f"max_chain must be >= 0, got {max_chain}")
         self.tile_lr = int(tile_lr)
+        self.tile_w = int(tile_lr if tile_w is None else tile_w)
         self.halo_lr = int(halo_lr)
         self.threshold = float(threshold)
         self.max_chain = int(max_chain)
@@ -307,13 +360,19 @@ class TiledUpscaler:
     # -- configuration ------------------------------------------------------------
     @property
     def tile(self) -> int:
-        """Static network input size ``T = tile_lr + 2 * halo_lr``."""
+        """Static network input height ``Th = tile_lr + 2 * halo_lr``."""
         return self.tile_lr + 2 * self.halo_lr
 
+    @property
+    def tile_shape(self) -> Tuple[int, int]:
+        """Static network input ``(height, width)`` - the engine is built for exactly this."""
+        return (self.tile_lr + 2 * self.halo_lr, self.tile_w + 2 * self.halo_lr)
+
     def configure(self, tile_lr: int, halo_lr: int, threshold: float, max_chain: int,
-                  downscale: int = 8) -> None:
+                  downscale: int = 8, tile_w: Optional[int] = None) -> None:
         """Apply a quality change: re-plan sizes and forget the history."""
         self.tile_lr = int(tile_lr)
+        self.tile_w = int(tile_lr if tile_w is None else tile_w)
         self.halo_lr = int(halo_lr)
         self.threshold = float(threshold)
         self.max_chain = int(max_chain)
@@ -345,13 +404,14 @@ class TiledUpscaler:
         return (f"tiled reuse: {self.tiles_reused}/{self.tiles_planned} tiles reused "
                 f"({tile_pct:.1f}%), {self.frames_reused}/{self.frames} frames fully reused "
                 f"({frame_pct:.1f}%), {self.scene_cuts} scene cuts, "
-                f"threshold={self.threshold}/255, tile={self.tile_lr}+{2 * self.halo_lr} halo, "
+                f"threshold={self.threshold}/255, "
+                f"tile={self.tile_lr}x{self.tile_w}+{2 * self.halo_lr} halo, "
                 f"max chain={self.max_chain}")
 
     def tile_windows(self, height: int, width: int) -> List[TileWindow]:
         """Windows of the whole grid (useful for warm-up / diagnostics)."""
-        return [tile_window(core, self.halo_lr, height, width, self.tile_lr)
-                for core in tile_grid(height, width, self.tile_lr)]
+        return [tile_window(core, self.halo_lr, height, width, self.tile_lr, self.tile_w)
+                for core in tile_grid(height, width, self.tile_lr, self.tile_w)]
 
     # -- detector -----------------------------------------------------------------
     def _indices(self, start: int, length: int, limit: int,
@@ -455,7 +515,7 @@ class TiledUpscaler:
         """
         _require_torch()
         _, height, width = self._frame_shape(lr_tensor)
-        cores = tile_grid(height, width, self.tile_lr)
+        cores = tile_grid(height, width, self.tile_lr, self.tile_w)
         blocks = self._luma_blocks(lr_tensor)
         mask = self._decide(blocks, cores, height, width)
         self._account(mask)
@@ -499,7 +559,7 @@ class TiledUpscaler:
             if prev_hr is not None:
                 self.reset()
             blocks = self._luma_blocks(lr_tensor)
-            cores = tile_grid(height, width, self.tile_lr)
+            cores = tile_grid(height, width, self.tile_lr, self.tile_w)
             mask = [True] * len(cores)
             out = lr_tensor.new_zeros(out_shape)
             if not consumed:
@@ -510,25 +570,25 @@ class TiledUpscaler:
         else:
             # compose() without plan(): decide here so the state stays consistent
             blocks = self._luma_blocks(lr_tensor)
-            grid = tile_grid(height, width, self.tile_lr)
+            grid = tile_grid(height, width, self.tile_lr, self.tile_w)
             mask = self._decide(blocks, grid, height, width)
             self._account(mask)
             cores = [core for core, must in zip(grid, mask) if must]
             out = prev_hr if reuse_prev else prev_hr.clone()
 
-        tile_size = self.tile
-        expected = (tile_size * scale, tile_size * scale)
+        tile_h, tile_w = self.tile_shape
+        expected = (tile_h * scale, tile_w * scale)
         for core in cores:
-            window = tile_window(core, self.halo_lr, height, width, self.tile_lr)
-            rows = self._indices(window.rows[0], tile_size, height, 0, lr_tensor.device)
-            cols = self._indices(window.cols[0], tile_size, width, 1, lr_tensor.device)
+            window = tile_window(core, self.halo_lr, height, width, self.tile_lr, self.tile_w)
+            rows = self._indices(window.rows[0], tile_h, height, 0, lr_tensor.device)
+            cols = self._indices(window.cols[0], tile_w, width, 1, lr_tensor.device)
             crop = lr_tensor.index_select(2, rows).index_select(3, cols)
             rendered = upscale_fn(crop)
             if tuple(int(v) for v in rendered.shape[-2:]) != expected:
                 raise ValueError(
                     f"upscale_fn returned {tuple(rendered.shape[-2:])} for a "
                     f"{tuple(crop.shape[-2:])} input, expected {expected} "
-                    f"(fixed T x T contract, T={tile_size}, scale={scale})")
+                    f"(fixed Th x Tw contract, {tile_h}x{tile_w}, scale={scale})")
             read_y, read_x = hr_read_slice(window, scale)
             write_y, write_x = hr_write_slice(core, scale)
             out[:, :, write_y, write_x] = rendered[:, :, read_y, read_x]

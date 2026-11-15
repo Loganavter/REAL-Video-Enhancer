@@ -7,12 +7,14 @@ Rig: RTX 4060 Ti 16 GB (AD106, 34 SM, 165 W cap), Ryzen 5 5600, TensorRT 10.12.0
 torch 2.9.0+cu130. Unless stated: fp16 engines, static shape, `optimization_level=5`,
 `num_avg_timing_iters=8`, `tiling_optimization_level=full` (the new default).
 
-**Conclusion up front**: no technique we could run locally beat a well-built engine, and the one
-real win of this round is `tiling=full` (~6.6% on the model, 3.8% end-to-end). We do **not** have
-a trustworthy ceiling for this shape, so the size of the remaining gap is unknown; what we can
-say is that the model already runs faster than any of its own convolutions measured standalone
-(§3). One concrete lead from the tactic dump (Turing-generation kernels selected on an Ada part)
-is listed in §6 and has not been chased.
+**Conclusion up front**: no kernel-level technique we could run locally beat a well-built
+engine, and the one model-side win of this round is `tiling=full` (3.8% end-to-end). We do
+**not** have a trustworthy ceiling for this shape, so the size of the remaining gap is unknown:
+the model is at 65-73% of a *borrowed* sustained figure, which is not the same as "finished".
+The pipeline-side win of the round is bigger than any model work: the frame gate plus a tile
+grid fitted to the frame is 1.4x, and the tile grid was previously written off as a dead end
+(§7). One concrete lead from the tactic dump (Turing-generation kernels selected on an Ada
+part) is listed in §6 and has not been chased.
 
 ## 1. What the model computes
 
@@ -53,16 +55,26 @@ All rows: static engine, opt level 5, iters 8. Session-relative comparisons only
 | animevideov3 x4 | 1920x1080 | moderate | 52.7 | 48.7 |
 | 2x Futsuu Anime | 1920x1080 | moderate | 45.7 | 54.3 |
 | 2x Futsuu Anime | 1440x1080 | moderate | 35.1 | 53.0 |
-| 2x Futsuu Anime | 1920x1080 | full | ~42.7 (derived, see below) | ~58 |
+| 2x Futsuu Anime | 1920x1080 | full | **51.37 (measured, same session as the app runs below)** | 48.3 |
+| 2x Futsuu Anime | 1920x1080 | full, while an NVENC 2160p encode runs alongside | 55.99 | 44.3 |
 | same, built from ONNX instead of torch-tensorrt | 1920x1080 | none | 50.3 | 49.4 |
 
 - **Build flags alone are 1.79x** (94.3 -> 52.7) on identical weights. This is why "the model has
   no headroom" was the wrong prior: tactics and L2 tiling were leaving 44% on the table.
 - **`tiling=full` vs `moderate` (2x model, 1920x1080):** the A/B is end-to-end on 502 gated anime
-  frames - 11.01 s -> 10.595 s, i.e. **3.8% of wall clock**. Per *processed* frame the model
-  share is 45.7 x 0.273 = 12.5 ms of a 21.1 ms frame, so if the delta is entirely model-side it
-  is **~6.6% of the model (45.7 -> ~42.7 ms)**. Both numbers are stated because the A/B mixes
-  bases; the per-model figure is derived, not directly measured.
+  frames - 11.01 s -> 10.595 s, i.e. **3.8% of wall clock**. That is the trustworthy number.
+  The earlier "45.7 -> ~42.7 ms, i.e. ~58 TFLOP/s" was derived from it by assuming the whole
+  delta is model-side, and a direct measurement of the `full` engine at 1920x1080 (51.37 ms,
+  see the table) does **not** support it: 51.37 ms is 48.3 TFLOP/s, and the `moderate` figure
+  of 45.7 ms came from a different session in which this machine was ~26% faster overall (the
+  same ungated anime render took 30.8 s then against 38.85 s now). So the derived 58 TFLOP/s is
+  withdrawn; what stands is the same-session ratio (3.8% of wall clock) and the same-session
+  absolute (51.4 ms, 48.3 TFLOP/s at today's clocks).
+- **NVENC alongside the engine costs 9%** of the engine (51.37 -> 55.99 ms in a controlled
+  A/B with an ffmpeg encode feeding from /dev/zero on the same card; the app measures 54.3 ms
+  per rendered frame, which is this effect plus 5.7% over the quiet standalone run). The
+  earlier "the app is 23-43% slower than isolated" was that cross-session drift, not a
+  wrapper cost.
 - The x2-vs-x4 gap is 7 ms against a 3.5% FLOP difference (~1.6 ms), i.e. **not explained**.
   Either noise (+-15% between sessions) or the x4 tail is memory-bound.
 - Run-to-run spread is +-15%; the audit runs that overlapped each other on the card spread up to
@@ -81,9 +93,10 @@ Peaks are fuzzy on a power-capped consumer part:
 | fp16 with fp16 accumulate, sustained | ~74 TF/s | borrowed estimate for this part at 165 W (not measured here) |
 | fp16 with fp16 accumulate, whitepaper boost | 88 TF/s | spec sheet, not sustainable |
 
-So, with bases stated: 54.3 (tiling moderate) / 74 = **73%**, 54.3 / 88 = 62%; and at the
-`tiling=full` default the derived ~58 TFLOP/s gives **78% / 66%**. The report previously mixed
-these two bases without saying which was which.
+So, with bases stated: 54.3 (tiling moderate, the session in which this machine was faster)
+/ 74 = **73%**, 54.3 / 88 = 62%; and at the `tiling=full` default the direct measurement of
+48.3 TFLOP/s gives **65% / 55%**. The report previously mixed these two bases without saying
+which was which, and quoted a derived 58 TFLOP/s that a direct measurement does not support.
 The earlier claim of "73-84% of achievable" **added a +14.5% halo correction that belongs to our
 * pipeline* tiling (512 -> 548 px), not to TRT's internal spatial tiling, which is unknown**. It
 is therefore not a solid number and is removed; the honest statement is "somewhere between 60%
@@ -112,18 +125,19 @@ What the numbers *do* support, and it is stronger than the cautious line this se
 end on:
 
 - The per-layer profile (§6) puts the 18 subgraphs at 2.2-3.9 ms, about **2.66 ms per body conv**
-  on average; 152.9 GFLOP / 2.66 ms = **~57 TF/s, i.e. ~78% of the borrowed 74 TF/s**, and that
-  is with profiler overhead (51.95 ms under `IProfiler` against 45.7 ms wall clock - the profiler
-  serialises, so the real figure is better).
+  on average; 152.9 GFLOP / 2.66 ms = **~57 TF/s, i.e. ~78% of the borrowed 74 TF/s**. That
+  figure was taken in the faster session (51.95 ms under `IProfiler` against 45.7 ms wall
+  clock); at today's clocks the same engine is 51.4 ms and the per-conv figure would be ~3 ms,
+  i.e. ~51 TF/s, and the profiler serialises on top of that.
 - The only standalone conv that is compute-dominated, 256->256, reaches **49 TF/s - below the
   model's 54.3**. So the model already runs faster than any of its own convolutions measured
   standalone, and the borrowed GEMM ceiling is probably the wrong reference for a conv shape with
   C=64.
 
-Honest summary: measured 54.3-58 TFLOP/s; no trustworthy conv ceiling; the model is at roughly
-78% of a *borrowed* sustained figure and above every standalone conv we could build. That is
-close enough to a floor to stop optimising here, but it is not a proof, and the difference
-matters.
+Honest summary: 48-54 TFLOP/s depending on the session's clock state (the spread is the
+machine, not the kernel); no trustworthy conv ceiling; the model is at 65-73% of a *borrowed*
+sustained figure and above every standalone conv we could build. That is close to a floor, but
+it is not a proof, and the difference matters: 25-35% of a borrowed ceiling is not "finished".
 
 ## 4. Techniques: what we ran here vs what we read
 
@@ -204,11 +218,20 @@ tried*.
 | anime, duplicate gate | **27.3%** | **47.4 fps** (10.54 s in one run, 10.60 in the A/B), median 52.6 dB / worst frame 48.1 dB vs ungated |
 | film, ungated (94 frames, 1440p -> 2880p) | 100% | 19-22 fps |
 | film, duplicate gate | 53.2% | 23.7 fps, 71 dB vs ungated |
-| tile-level reuse (anime, 512/1024 px) | 65.8% / 66.0% of tiles | **1.44x faster than ungated** (30.8 -> 21.4 s) but **slower than the frame gate** (21.4 s against 10.6). Expected work is 0.658 x 1.145 = 0.753 of full, so the win should have been there; it is eaten by a per-tile launch and by losing the cross-kernel L2 residency that makes the fused engine fast - 512 px tiles cut exactly what the engine is good at |
+| tile-level reuse, square 512 px cores (anime) | 65.8% of tiles | 1.44x faster than ungated (30.8 -> 21.4 s) but slower than the frame gate (10.6 s). The loss was **geometry**: 512 does not divide 1080, so 12 windows of 548x548 cover a frame of 1.55 Mpx = 1.74x its area |
+| tile-level reuse, cores fitted to the frame (anime, 480x540) | 65.6% of tiles | **18.14 s** ungated against 21.37 s for the 512 grid: the area model `area x (1 - reuse)` predicted 21.49 s for the 512 grid (measured 21.37, 0.6%) and 16.9 s for the fitted one (measured 18.14), so there is no per-tile launch penalty worth modelling |
+| gate **and** fitted tiles (anime) | 57.4% of tiles inside the 27% of frames the gate renders | **8.45 s** against 11.74 s for the gate alone = **1.39x**; 51.6 dB average / 47.5 dB worst frame against the ungated render (gate alone 52.7 / 48.2). The tile share falls from 65.6% to 57.4% because the frames the gate leaves are exactly the ones that changed, so the two levers compose at ~1.4x rather than multiplicatively |
 
-So the model costs 45.7 ms on the frames it sees, and the pipeline pays 45.7 x 0.273 = 12.5 ms
-per output frame on anime. Tile-level reuse was the last "do less work" candidate and it is a
-measured loss on both materials.
+So the model costs 45.7 ms on the frames it sees at 1440x1080, and the pipeline pays
+45.7 x 0.273 = 12.5 ms per output frame on anime at that size. Tile-level reuse is not a dead
+end after all: with a grid that divides the frame it stacks on the gate for 1.39x (see the
+table above). What it cannot do is replace the gate, because the reuse it finds inside a frame
+is concentrated in frames the gate already skips.
+
+Un-gated anime numbers in this table were taken in different sessions and drift: the same
+ungated full-frame configuration measured 30.8 s in one session and 38.85 s in another on the
+same machine (the desktop's own GPU clients keep the card at 17-47% "utilisation", and the
+power budget moves with them). Ratios within one session are the only safe comparison.
 
 ## 8. Reproduce
 

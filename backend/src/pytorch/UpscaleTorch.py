@@ -12,6 +12,11 @@ from time import sleep
 
 from ..utils.Util import log, CudaChecker
 from ..utils.Frame import Frame
+
+# Diagnostic: with RVE_TRT_SPLIT=1 the model stream is synced before the output Frame is
+# built, so `last_model_ms` is attributable to the engine instead of overlapping with
+# the Frame's construction. It costs that overlap, so it is never a production path.
+_SPLIT_TIMING = os.environ.get("RVE_TRT_SPLIT") == "1"
 HAS_PYTORCH_CUDA = CudaChecker().HAS_PYTORCH_CUDA
 import numpy as np
 def process_output(output, hdr_mode):
@@ -200,17 +205,30 @@ class UpscalePytorch:
                 case _:
                     modulo = 1
             if self.tile_reuse:
-                from .TiledUpscale import TiledUpscaler
+                from .TiledUpscale import TiledUpscaler, divisor_tile
+                # A square core that does not divide the frame pays for a full halo window on a
+                # clipped tail: 1920x1080 at 512 px is 12 windows of 548x548, i.e. 1.74x the
+                # frame's area for 1.0x of its pixels. Sizing the cores to divide each axis
+                # (480x540 here) makes the grid exact: 8 windows, 1.15x.
+                self.tile_h = divisor_tile(self.videoHeight, self.tilesize)
+                self.tile_w = divisor_tile(self.videoWidth, self.tilesize)
                 self.tile_upscaler = TiledUpscaler(
-                    tile_lr=self.tilesize,
+                    tile_lr=self.tile_h,
+                    tile_w=self.tile_w,
                     halo_lr=self.tile_pad,
                     threshold=self.tile_threshold,
                     max_chain=self.tile_max_chain,
                 )
-                side = self.tile_upscaler.tile
-                self.pad_w = math.ceil(side / modulo) * modulo
-                self.pad_h = self.pad_w
-                log(f"Tile reuse enabled: {self.tilesize}px LR tiles + {self.tile_pad}px halo -> engine {self.pad_w}x{self.pad_h}")
+                engine_h, engine_w = self.tile_upscaler.tile_shape
+                self.pad_w = math.ceil(engine_w / modulo) * modulo
+                self.pad_h = math.ceil(engine_h / modulo) * modulo
+                tiles = (math.ceil(self.videoHeight / self.tile_h)
+                         * math.ceil(self.videoWidth / self.tile_w))
+                log(f"Tile reuse enabled: {self.tile_w}x{self.tile_h} LR cores (WxH) + "
+                    f"{self.tile_pad}px halo -> engine {self.pad_w}x{self.pad_h} (WxH), "
+                    f"{tiles} tiles, "
+                    f"{tiles * self.pad_w * self.pad_h / (self.videoWidth * self.videoHeight):.3f}x "
+                    f"the frame's area")
             elif all(t > 0 for t in self.tile):
                 self.pad_w = (
                     math.ceil(
@@ -465,7 +483,18 @@ class UpscalePytorch:
                 output = self.upscale_model_wrapper(image_tensor)
             else:
                 output = self.renderTiledImage(image_tensor)
-            
+
+            # Split of the timed region: the engine call, the output Frame's own
+            # construction, and the handover. `last_inference_ms` measures the whole block,
+            # and the block overlaps Frame construction with the model (the ctor runs while
+            # the kernels are still going), so it is *not* the engine time - which is exactly
+            # how "the app is 23% slower than the isolated benchmark" got misread (ledger P11).
+            # RVE_TRT_SPLIT=1 forces a sync here so the parts are attributable; it costs the
+            # overlap, so it is a diagnostic, never a production path.
+            if _SPLIT_TIMING:
+                self.torchUtils.sync_stream(self.stream)
+            self.last_model_ms = (time.perf_counter() - _t_inf) * 1000.0
+            _t_frame_ctor = time.perf_counter()
             retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale, device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                              high_bitdepth=self.high_bitdepth)
             # 10-bit SDR: hand ffmpeg ready-made yuv420p10le instead of RGB
@@ -473,6 +502,7 @@ class UpscalePytorch:
             retFrame.yuv10_format = self.pipe_pixel_format
             
             retFrame.set_frame_tensor(output, sync=False)
+            self.last_frame_ms = (time.perf_counter() - _t_frame_ctor) * 1000.0
         
         self.torchUtils.sync_stream(self.stream)
         # measured after the sync: the model runs async on its stream, so a timer taken at
