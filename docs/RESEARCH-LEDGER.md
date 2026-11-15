@@ -1934,6 +1934,15 @@ registers (of 65 536) - **four blocks and 16 warps fit on both axes**, and the f
 register file. So the point is viable, and the one barrier the kernel declares is the staging that made the
 "zero smem" reading wrong in the first place.
 
+And it does not scale with the flag: `metadata.shared` is **12 288 B at `num_stages` 1, 2, 3 and 4
+alike**, with the same 128 registers and the same 8-byte spill after the cap. So Triton does not deepen the
+staging here at all - the flat timing sweep is not "the registers would not allow more", it is "the flag
+changes nothing". The cross term I wanted to test (128 registers **and** a deeper staging) therefore does
+not exist as a configuration: there is no deeper staging to combine with.
+
+Which leaves exactly one point to run: 128 registers, 12 KB of staging, four blocks, 16 warps, at the same
+total in-flight accumulator as the configuration that ships 1.97 ms today.
+
 That number is also a launcher requirement, not a detail: `cuLaunchKernel` must be given
 `sharedMemBytes = 12 288`, or the kernel reads and writes outside its staging buffer - a silent corruption
 rather than a fault, which is exactly what the bit-exact comparison is for.
