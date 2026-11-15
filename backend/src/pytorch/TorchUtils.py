@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import sys
+import threading
 from ..utils.BackendDetect import (
     BackendDetect
 )
@@ -70,6 +71,39 @@ class TorchUtils:
         self._pinned_buffer = None
         self._pinned_buffer_numel = 0
         self._pinned_buffer_dtype = None
+
+        # rotating pool(s) of pinned host buffers for the output payload, keyed by geometry
+        # (see utils.Frame.PinnedSlotPool). One pool per (slots, numel, dtype), reused for
+        # every frame of a render - the reader creates a Frame per frame, the pool must not.
+        self._pinned_pools: dict = {}
+        self._pinned_pool_lock = threading.Lock()
+
+    def pinned_slots(self, n: int, numel: int, dtype, allocator=None):
+        """The shared pool of `n` pinned host buffers of (numel, dtype).
+
+        `allocator(numel, dtype)` is injected so the pool can be exercised without torch;
+        in the app it defaults to pinned torch memory (pageable fallback when the build
+        cannot pin). See `utils.Frame.PinnedSlotPool` for the acquire/release contract.
+        """
+        key = (int(n), int(numel), str(dtype))
+        with self._pinned_pool_lock:
+            pool = self._pinned_pools.get(key)
+            if pool is None:
+                # imported here: utils.Frame imports this module lazily, so a module-level
+                # import in either direction would be a cycle
+                from ..utils.Frame import PinnedSlotPool
+
+                pool = PinnedSlotPool(n, numel, dtype, allocator=allocator)
+                self._pinned_pools[key] = pool
+        return pool
+
+    def pinned_pool_stats(self) -> str:
+        """One line per output pool: the numbers that show whether the writer bound us."""
+        with self._pinned_pool_lock:
+            pools = list(self._pinned_pools.values())
+        if not pools:
+            return "pinned pool: unused (no pooled output payloads)"
+        return " | ".join(pool.stats() for pool in pools)
 
     def __sync_all_streams_function(self):
         if self.device_type == "cuda":
@@ -237,7 +271,14 @@ class TorchUtils:
             torch.cuda.reset_max_memory_cached()
     
     @torch.inference_mode()
-    def tensor_to_frame(self, frame: torch.Tensor):
+    def tensor_to_frame(self, frame: torch.Tensor, dest: torch.Tensor | None = None):
+        """(1,3,H,W) float 0..1 -> HWC uint8/uint16, on the host.
+
+        `dest` (a 1-D host buffer of `dest.numel() == H*W*3` elements, ideally pinned) is
+        filled in place: one DMA and no host allocation, which is the whole point of the
+        pooled output payload. Without `dest` this is exactly the previous behaviour - a
+        fresh host tensor plus the numpy view of it.
+        """
         # Prepare the tensor
         tensor = (
             frame.squeeze(0)
@@ -248,8 +289,14 @@ class TorchUtils:
             .to(torch.uint16 if self.high_bitdepth else torch.uint8)
             .contiguous()
             .detach()
-            .cpu()
         )
+        if dest is not None:
+            target = dest if dest.shape == tensor.shape else dest.reshape(tensor.shape)
+            target.copy_(tensor, non_blocking=True)
+            # the writer thread reads the host buffer next, so the DMA must have landed
+            self.sync_all_streams()
+            return target
+        tensor = tensor.cpu()
         if self.use_numpy:
             # Convert to numpy array if possible
             return tensor.numpy()
@@ -258,13 +305,16 @@ class TorchUtils:
             return np.array(tensor.tolist(), dtype=np_dtype)
     
     @torch.inference_mode()
-    def tensor_to_yuv420p10(self, frame: torch.Tensor) -> bytes:
+    def tensor_to_yuv420p10(self, frame: torch.Tensor, dest: torch.Tensor | None = None):
         """(1,3,H,W) float 0..1 -> packed yuv420p10le bytes (BT.709, limited range).
 
         Doing this on the GPU keeps the pipe at 3 bytes/pixel instead of 6 (rgb48le) while
         preserving 10-bit precision: measured 26.6 ms vs 40.8 ms for the old uint8 rgb24
         path at 4320x7680, and vs ~80 ms for piping rgb48le. Validated against ffmpeg's
         own bt709 conversion (mean |d| 1.85/255, the remainder being chroma upsampling).
+
+        With `dest` the packed frame is written into that 1-D uint16 host buffer instead of
+        being `.tobytes()`-ed into a new one - same bytes, one less full-frame copy.
         """
         x = frame if frame.dtype == torch.float16 else frame.half()
         r, g, b = x[0, 0], x[0, 1], x[0, 2]
@@ -283,7 +333,13 @@ class TorchUtils:
         yq = (y.mul_(876.0).add_(64.0).round_().clamp_(64, 940)).to(torch.uint16).reshape(-1)
         uq = (cb.mul_(896.0).add_(512.0).round_().clamp_(64, 960)).to(torch.uint16).reshape(-1)
         vq = (cr.mul_(896.0).add_(512.0).round_().clamp_(64, 960)).to(torch.uint16).reshape(-1)
-        packed = torch.cat((yq, uq, vq)).cpu().numpy()
+        packed = torch.cat((yq, uq, vq))
+        if dest is not None:
+            target = dest if dest.shape == packed.shape else dest.reshape(packed.shape)
+            target.copy_(packed, non_blocking=True)
+            self.sync_all_streams()  # the writer thread reads it next
+            return target
+        packed = packed.cpu().numpy()
         return packed.tobytes()
 
     @staticmethod
