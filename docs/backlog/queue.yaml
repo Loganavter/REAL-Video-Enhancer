@@ -142,22 +142,21 @@ tasks:
     acceptance: "Engine time at three widths, same builder settings as the app (fp16, tiling full, optimization level 5), per-layer body times from trt.IProfiler, 20 iterations. Output: measured time ratio against MAC ratio for each width."
     note: "Split from the pruning item on purpose: how much TIME a width costs is measurable on a synthesized model with random weights (tactics depend on shapes, not values), so it needs no reconstruction and no decision about the picture. The picture half only becomes interesting if this half shows a win."
   - id: rve-pruning-bounds-2026-11-15
-    title: "E30b (dropped): channel cut reconstruction - the time half killed it"
+    title: "E30b: channel cut reconstruction - the picture half, never measured"
     type: code
-    status: dropped
-    owner: "@supervisor"
-    resolution: "dropped 2026-11-15 on E30a's measurement: a width cut is worth 1.23x at best, which is below the int8 ceiling (1.40x) and the fp16 headroom (1.34x), and it is the only one of the three that also costs picture quality. No reconstruction method can rescue a time win that small."
+    status: todo
+    owner: null
     priority: P2
     gpu: true
-    cost: "1-2d"
+    cost: "1d"
     tags: [pruning, channels, asvd, snows, reconstruction]
     base_branch: perf/inference
     relates_to: [docs/RESEARCH-LEDGER.md, docs/MODEL.md]
     owns_files: [scripts/prune_channels.py]
-    refutes: "Reconstruction cannot hold the bar at whatever width E30a shows to be worth the time. The calibration point is measured: a 2.1% RMS weight perturbation (int8) costs a 0.66-level mean and a 4-level peak, i.e. half the bar - so the admissible perturbation is of that order, and a 25% channel cut is not."
-    acceptance: "Worst-frame statistic (share of pixels > 8 levels, RGB) against the unpruned engine on a spread sample of at least three titles, plus engine time at the width E30a justified."
+    refutes: "Reconstruction cannot hold the bar at the width the fusion probes justify. Calibration point: a 2.1% RMS weight perturbation (int8) costs a 0.66-level mean and a 4-level peak, half the bar, so the admissible perturbation is of that order and a 25% cut is well beyond it."
+    acceptance: "Worst-frame statistic (share of pixels > 8 levels, RGB) against the unpruned engine, on a spread sample of at least three titles, at the width that survives the fusion probes. One render, not a sweep."
     owner_ruling: "2026-11-15: weights may change when the change is practically meaningless. int8 rounding is in that class and is measured (0.000% of pixels above 8 levels, peak 4, 54.1 dB); a channel cut is admissible only while it also stays inside the bar."
-    note: "Demoted from the critical path: the licence it rested on (e~0.4 multiplicative error) is refuted by our own int8 measurement - the error has a floor that is NOT proportional to the correction, because on flat patches the correction is zero by construction and any weight-space change leaves a DC shift there. What the residual measurement licenses is approximations multiplicative in the OUTPUT (truncating small corrections, tail precision), not a change of the function. Reconstruction method if it runs: ASVD/SNOWS (activation-aware, K-step layer reconstruction), not naive SVD - the old SVD test measured weight energy and answered a different question."
+    note: "Reopened: it was dropped on E30a's C=32 row, and that row is a build whose fusion broke - the convolutions moved to the indexed_wo_smem tactic family and myelin stopped taking an epilogue. With the epilogue back, C=32 is ~24.5 ms (2.31x) and even with a half-empty N tile ~30.8 ms (1.84x). Reopen is warranted by our own precedent (E19: the head at C=3 refused myelin, at C=8 accepted it, and the fix was padding the channels). Gated on the fusion probes; the picture question is what this task answers."
   - id: rve-film-gate-codec-2026-11-15
     title: "E31 (dropped): grain synthesis / motion-compensated reuse for film"
     type: research
@@ -216,6 +215,109 @@ tasks:
     refutes: "The arithmetic does not survive contact with the gate: the changed region has to be estimated, and an underestimate is visible by construction (it recomputes less than the motion implies), which is the failure mode the pixel veto exists to catch."
     acceptance: "Phase 1 only: work ratio for a changed region of radius r under {cylinder, cone} at 16 layers with halo k at layer k, for r in {5,10,20,40}, plus the per-frame launch cost of the extra regions. Phase 2 only if the ratio is above 2x at a radius the gate can actually certify."
     note: "A different axis from the frame gate: the gate drops or reuses whole frames, while this recomputes only a cone (halo k at layer k) for the region that changed. The review's numbers: radius 10 -> 2.16x less work, radius 5 -> 2.6x. It is the layer-level analogue of a KV cache, and it is the only temporal idea on the list that this engine does not already have in some form."
+  - id: rve-fusion-break-map-2026-11-15
+    title: "B1: map where myelin's epilogue fusion breaks - width sweep, tactic name, time"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P0
+    gpu: true
+    cost: "2h"
+    tags: [fusion, myelin, tactics, width]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md, backend/src/pytorch/RawTRTEngine.py]
+    owns_files: [scripts/probe_fusion_map.py]
+    refutes: "Fusion survives at exactly one width (48) and dies at every other, in which case the wall is narrow and the only remaining question is whether the tactic can be forced (B2)."
+    acceptance: "For widths 32/36/40/44/48/56: total ms, per-layer tactic name from trt.IEngineInspector, count of fused myelin layers against separate pointwise passes. One table, plus the width where the tactic family switches."
+    note: "The mechanism is a tactic choice, not a width limit: at C=64 the body runs sm75_xmma_..._nhwcrsc_nhwc_tilesize128x64x32 and fuses PReLU into the same kernel; at C=32 it runs sm80_xmma_..._indexed_wo_smem_... - the family the head and tail use - and the PReLU becomes 16 separate passes worth 23 ms. The cost model may simply be flipping because GEMM gets 4x cheaper while pointwise only gets 2x cheaper, which doubles the relative price of the boundary. C=40 with fusion alive would be K=360 -> 12 steps against 18, ~1.5x."
+  - id: rve-force-epilogue-tactic-2026-11-15
+    title: "B2: force the epilogue-capable tactic at C=32 (editable timing cache / algorithm selector)"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P0
+    gpu: true
+    cost: "2h"
+    tags: [fusion, tactics, timing-cache]
+    base_branch: perf/inference
+    relates_to: [backend/src/pytorch/RawTRTEngine.py, docs/RESEARCH-LEDGER.md]
+    owns_files: [scripts/force_tactic.py]
+    refutes: "No tactic in the epilogue-capable family can be built for C=32 - then the width genuinely needs a kernel of our own with a 32-wide N tile, and the prize moves to E27."
+    acceptance: "A C=32 plan whose body convolutions report a fused myelin tactic, with its total ms and the number of separate pointwise passes. Target: under 30.8 ms total (1.84x) as the conservative case."
+    note: "B1 names the tactic family that fuses; this tries to get it back at 32. TRT 10.12 exposes IAlgorithmSelector (deprecated in 10.8 in favour of editable ITimingCache) and ITimingCache, so exclusion is possible in principle - the open question is whether the selector can identify a tactic by family, since IAlgorithmVariant gives implementation+tactic hash rather than a kernel name."
+  - id: rve-prelu-rewrite-at-32-2026-11-15
+    title: "B3: reopen E17 at C=32 - a*x + (1-a)*ReLU(x) may fuse where PReLU does not"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P1
+    gpu: true
+    cost: "1h"
+    tags: [fusion, prelu, rewrite]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md]
+    owns_files: [scripts/probe_prelu_forms.py]
+    refutes: "The rewrite fuses no better at 32 than PReLU does. Then the boundary needs the tactic (B2) or a kernel, and E17 stays closed for this shape too."
+    acceptance: "Same width, same builder, three forms of the same activation: PReLU, a*x+(1-a)*ReLU(x), and LeakyReLU with a scalar slope as a control. Fused layer count and total ms for each."
+    note: "E17's negative result was measured at C=64, where fusion already worked - so it says nothing about C=32, where the tactic family is different. A verdict from one width does not transfer: this investigation has caught that class of error three times (build path, calibration window, statistic population)."
+  - id: rve-shot-cascade-2026-11-15
+    title: "A: route whole shots between models - use the 78-model collection instead of one model"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P1
+    gpu: true
+    cost: "1d"
+    tags: [cascade, collection, shot, routing]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md, docs/MODEL.md]
+    owns_files: [scripts/probe_shot_cascade.py]
+    refutes: "On every shot the cheap model (SPAN or another light member of the collection) exceeds the bar against the expensive one by more than 0.1% of pixels at 8 levels, or the visible texture changes at shot boundaries. Then the collection is not interchangeable and the idea dies without touching the engine."
+    acceptance: "Per shot: 2-3 frames through both models, the existing worst-frame statistic, then the whole shot on the cheap model if it passes. Report the share of shots that pass and the wall-clock saving."
+    note: "Not retraining and not replacing the owner's set - using it. The decision statistic already exists and the safe granularity is the shot, not the tile: a tile-level cascade was killed by seams, and a shot has one model throughout. Arithmetic on a tile version for scale: 1.147*(f + (1-f)*c); at f=0.3, c=0.25 that is 1.83x, and the shot version has no 1.147 tax at all."
+  - id: rve-base-grain-split-2026-11-15
+    title: "D: split the source into base + grain, upscale the base, composite the REAL grain back"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P1
+    gpu: true
+    cost: "1d"
+    tags: [grain, film, gate, metric]
+    base_branch: perf/inference
+    relates_to: [backend/src/utils/TemporalReuse.py, docs/RESEARCH-LEDGER.md]
+    owns_files: [scripts/probe_grain_split.py]
+    refutes: "The gate's floor on the base does not fall below 1.5, or the composited result differs from the current render by more than the bar for reasons the owner will not accept. Both outcomes are cheap to obtain."
+    acceptance: "On the 35 mm clip: noise floor on the decomposed base, achieved reuse and wall-clock against the current 14.95 s / 1.85x, and the picture difference of the composite against today's render."
+    note: "Stronger than E31's synthesis: the grain is not generated, it is lifted from the source and put back, so nothing about the grain is invented. The gate then certifies on the base, where the floor should drop to ~0.8, and film could move from 1.85x toward 3.5-4x - more than everything left in the engine. What changes is how grain is upscaled, which is a metric question for the owner, not an impossibility."
+  - id: rve-strip-concurrency-2026-11-15
+    title: "C: horizontal strips on separate streams - hide the boundary instead of removing it"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P2
+    gpu: true
+    cost: "1d"
+    tags: [concurrency, streams, strips, dualpipe]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md]
+    owns_files: [scripts/probe_strips.py]
+    refutes: "Two independent streams do not overlap on this GPU: the frame time does not improve past the halo tax (2 strips 1.067x, 3 strips 1.10x, 4 strips 1.133x). ncu counters would say in advance whether anything is there to hide, and they are still blocked."
+    acceptance: "Frame time and picture for 1/2/3/4 strips with halo 18, each strip on its own stream with its own context, against the single-stream build."
+    note: "The engine runs at ~53% of DRAM bandwidth and ~61% of the fp16 peak - neither saturated - which is the condition under which two streams add up. The earlier 'concurrent contexts = 0%' result was two torch.jit.load handles of one file with corrupted output (25 dB), i.e. a broken harness, not a property of the card (E13 says so). Not worth trying at C=32, where both parts already sit near the bandwidth."
+  - id: rve-ncu-access-2026-11-15
+    title: "ncu counters: one line in modprobe.d plus a reboot, still the only way to know what is physically left"
+    type: ops
+    status: todo
+    owner: "@owner"
+    priority: P1
+    gpu: true
+    cost: "1 reboot"
+    tags: [profiling, ncu, blocked]
+    base_branch: perf/inference
+    relates_to: [docs/MODEL.md]
+    owns_files: []
+    note: "RmProfilingAdminOnly=1 blocks the counters; nsys' timeline works but its archive refuses CUDA 13. Until this is unblocked, every DRAM-vs-compute claim in this ledger is a bound computed from layer tensor sizes, and lanes C and the 25-40% remainder cannot be sized."
   - id: rve-doc-literature-closures-2026-11-15
     title: "Record the literature closures so nobody re-enters them (PReLU zeros, 3x3->5x5, Strassen)"
     type: docs

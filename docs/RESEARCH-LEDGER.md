@@ -756,7 +756,12 @@ sizes (`tiling=moderate` is a shipped option): 1080x1920 -> 41.7, 540x960 -> 41.
 135x240 -> 28.1 TFLOP/s. Efficiency is flat or worse, so there is no tile size at which a different
 algorithm takes over.
 
-**What this does not establish, stated plainly: the kernel NAME.** Trying to name it failed twice -
+**What this does not establish, stated plainly: neither the kernel NAME nor that Winograd was among
+the candidates.** cuDNN's autotune picks the best of what it enumerates; a forced
+`CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD` would settle whether the algorithm exists for this shape and what
+it costs, and PyTorch exposes no algorithm selector, so that test needs the cuDNN C API. "cuDNN's best
+is slower" is a fact about selection, not about Winograd, and the two have been confused once already
+in this ledger (E14 restricted sources, it never enumerated algorithms within a source).** Trying to name it failed twice -
 `torch.profiler` returns zero CUDA events under this CUDA 13 / torch 2.9 pairing, and the nsys
 archive (2025.1.3) refuses to run against CUDA 13 (`hasn't been installed with CUDA Toolkit
 #CUDA_MAJOR#...`, its own template unexpanded). So we know that *whatever* cuDNN selects after timing
@@ -966,22 +971,34 @@ mechanism in one investigation: the fp16 build pays it unless myelin fuses, int8
 not the arithmetic and not the peak - it is the boundary between operators, and it is charged whether
 the saving comes from precision, from width, or from a different algorithm.
 
-**What that does to the plan.** A structural cut was the shortest route to 2x because it needs no
-plugin and no new precision: 1.78x of MACs at the fp16 peak, i.e. 27.3 ms. Measured, it is 1.23x, and
-it comes with a quality cost that the residual measurement does not license (the error is not
-proportional to the correction, because the correction is zero on flat patches by construction). So the
-picture half of E30 is dropped as well: 1.23x is below both the int8 ceiling (1.40x, measured) and the
-fp16 headroom (1.34x, measured), and it is the only one of the three that also risks the picture.
+**C=32 is not a ceiling of the direction, it is a broken build, and the engine inspector says why.**
+Its 16 convolutions run on `sm80_xmma_fprop_implicit_gemm_indexed_wo_smem_...` - the same family the
+head and tail convolutions use, and the one that does not take an epilogue. That is why myelin stops
+fusing: not the width, the tactic. E19 is the precedent: the head at C=3 refused myelin, the same head
+at C=8 accepted it, and the fix was to pad the head's channels rather than to abandon the idea. The
+same move is untested here.
+
+The arithmetic if the epilogue comes back at C=32: 16 convolutions at 20.09 ms, head and tail scaled
+to ~3.6, layout 0.85 - a frame near **24.5 ms, i.e. 2.31x**, and even with half of a 64-wide N tile
+empty, ~30.8 ms, i.e. 1.84x. Both ends are above every other row in the table above, which is why the
+direction is open rather than closed.
+
+The accounting, exactly (engine inspector, sum of layer times against the measured total): C=64 ->
+53.14 ms total, 52.82 attributed, 22 fused myelin layers, **zero** separate PReLU passes. C=32 ->
+45.69 total, 45.09 attributed, 16 fused convs, and 52 pointwise layers (each PReLU is split into
+several segments). The earlier "body" column mixed 22 fused layers with 16 convs and was not
+comparable between rows; the 2 ms that did not add up was the head and tail, not a mystery.
 
 Every lever measured so far therefore tops out between 1.23x and 1.40x:
 
-| lever | ceiling | status |
+| lever | number | what that number actually is |
 |---|---|---|
-| fp16, any configuration | 1.34x | measured peak, 70% achieved |
-| int8 with a fused epilogue | 1.40x | measured with a scalar activation |
-| channel cut C=48 / C=32 | 1.23x | measured, time only |
-| Winograd | none available | measured through cuDNN, E26 |
-| low-rank | 1.15x | arithmetic on the same boundary mechanism |
+| fp16, any configuration | 1.34x | a **headroom to a peak**, with no mechanism attached - and the peak is a square GEMM's, while the one compute-dominated conv measured here ran at 49 TFLOP/s |
+| int8 with a fused epilogue | 1.40x | a **measured ceiling of the wrong function**: the epilogue that made it cheap was a scalar slope, -2.02 dB |
+| channel cut C=48 | 1.23x | **measured real time of a working build** |
+| channel cut C=32 | 1.23x | the same, but **of a build whose fusion broke** - not a ceiling of the direction (see below) |
+| Winograd | not available | **not established**: cuDNN's best configuration is 20% slower than our kernel, which is a statement about selection, not about Winograd |
+| low-rank | 1.15x | arithmetic on the boundary mechanism, never built |
 
 2x is not reachable through any of these, and the reason is now consistent across four independent
 measurements: the boundary is charged per hop and the arithmetic saving does not survive it. What
