@@ -34,7 +34,7 @@ __all__ = ["Int8Body"]
 SHIFT = 20
 BLOCK_M = 64
 WARPS = 2
-QB = 1024
+QB = 256      # the conversions are register-bound: 1024 measured 2.3 ms against 1.57 at 256
 
 
 class Int8Body:
@@ -57,6 +57,8 @@ class Int8Body:
         self.feat, self.block_m, self.warps = feat, block_m, warps
         self._launches = None
         self._grids = None         # (s_act, outs)
+        # fp16 for the kernel: an fp32 slope promotes the tile and costs 3x
+        self._slope_half = self.head_prelu.weight.detach().half().contiguous()
 
     # ---- calibration: the per-channel maximum each PReLU produced on the frame it was shown
     def _measure(self, x):
@@ -113,7 +115,7 @@ class Int8Body:
         qgrid = ((n_pix + QB - 1) // QB,)
 
         with torch.no_grad():
-            head = torch.nn.functional.prelu(self.head_conv(x.clamp(0.0, 1.0)), self.head_prelu.weight)
+            head = self.head_conv(x.clamp(0.0, 1.0))      # PReLU is fused into the quantise below
             # The fused Triton conversion is CORRECT once fed a contiguous tensor (the PReLU output is
             # not, and the kernel indexes raw memory as ch * n_pix + pix - that mismatch was the 98.34%
             # of differing codes), but making it contiguous costs more than the four torch passes it
@@ -123,9 +125,11 @@ class Int8Body:
             if head.is_contiguous(memory_format=torch.channels_last):
                 # the bytes are already NHWC: read them where they are, no transpose, no copy
                 buf = torch.empty((x.shape[0], h, w, self.feat), device=x.device, dtype=torch.int8)
-                quantise_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
-                                     BLOCK=QB, C=self.feat, num_warps=4)
+                quantise_nhwc_prelu[qgrid](head, s_act.contiguous(),
+                                           self._slope_half, buf, n_pix,
+                                           BLOCK=QB, C=self.feat, num_warps=4)
             else:
+                head = torch.nn.functional.prelu(head, self.head_prelu.weight)
                 buf = (torch.round(head / s_act.view(1, -1, 1, 1)).clamp(-127, 127)
                        .to(torch.int8).permute(0, 2, 3, 1).contiguous())
             # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
