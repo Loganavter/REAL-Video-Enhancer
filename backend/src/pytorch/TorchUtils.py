@@ -219,22 +219,27 @@ class TorchUtils:
             c = (self.height // 2) * (self.width // 2)
             planes = raw.to(device=device, non_blocking=True).half()
             y = planes[:n].view(self.height, self.width)
-            u = planes[n:n + c].view(self.height // 2, self.width // 2)
-            v = planes[n + c:n + 2 * c].view(self.height // 2, self.width // 2)
+            uv = planes[n:n + 2 * c].view(2, self.height // 2, self.width // 2)
 
-            y = y.sub_(64.0).div_(876.0)
-            u = u.sub_(512.0).div_(896.0)
-            v = v.sub_(512.0).div_(896.0)
-            u = torch.nn.functional.interpolate(u[None, None], size=(self.height, self.width),
-                                                mode="bilinear", align_corners=False)[0, 0]
-            v = torch.nn.functional.interpolate(v[None, None], size=(self.height, self.width),
-                                                mode="bilinear", align_corners=False)[0, 0]
-            # BT.709
+            y.sub_(64.0).div_(876.0)
+            uv.sub_(512.0).div_(896.0)
+            # both chroma planes upsampled in one call instead of two
+            uv = torch.nn.functional.interpolate(uv[None], size=(self.height, self.width),
+                                                 mode="bilinear", align_corners=False)[0]
+            u, v = uv[0], uv[1]
+            # BT.709 with green derived from (y, u, v) directly. Computing it through r and b
+            # materialised two extra full frames; the algebra is the same:
+            #   g = y - kr*2(1-kr)/D * v - kb*2(1-kb)/D * u,  D = 1 - kr - kb
             kr, kb = 0.2126, 0.0722
-            r = y + (2.0 * (1.0 - kr)) * v
-            b = y + (2.0 * (1.0 - kb)) * u
-            g = (y - kr * r - kb * b) / (1.0 - kr - kb)
-            rgb = torch.stack((r, g, b)).clamp_(0.0, 1.0).unsqueeze(0).to(dtype=dtype)
+            d = 1.0 - kr - kb
+            rgb = torch.empty((1, 3, self.height, self.width), dtype=torch.float16, device=device)
+            torch.add(y, v, alpha=2.0 * (1.0 - kr), out=rgb[0, 0])
+            torch.add(y, u, alpha=2.0 * (1.0 - kb), out=rgb[0, 2])
+            torch.mul(v, -2.0 * kr * (1.0 - kr) / d, out=rgb[0, 1])
+            rgb[0, 1].add_(y)
+            rgb[0, 1].add_(u, alpha=-2.0 * kb * (1.0 - kb) / d)
+            rgb.clamp_(0.0, 1.0)
+            rgb = rgb.to(dtype=dtype)
             if stream is not None:
                 self.sync_stream(stream)
         return rgb
