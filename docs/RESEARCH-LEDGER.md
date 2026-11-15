@@ -233,18 +233,21 @@ only 94 frames. The 502-frame run shows it directly: 22.72 x 502 = 11.40 s of lo
    of that), and **P4'/P5' are closed too** (the writer is idle half the time), so neither is
    on this list any more.
 
-## In flight (delegated, 2026-11-15)
+## Tooling (delegated, merged 2026-11-15)
 
-Two cells, disjoint files, no GPU work in either (the card is busy with measurements here):
+Two cells, disjoint files, no GPU work in either. Both replace /tmp scripts that produced the
+numbers in this ledger and are now lost.
 
-| branch | task | files |
-|---|---|---|
-| `agent/rve-bench/work` | one reproducible benchmark harness: timing with repeat, NVENC contention A/B, clock sampling, tactic dump, TFLOP/s with its basis printed | `backend/tests/tools/bench_engine.py`, `backend/tests/test_bench_tool.py` |
-| `agent/rve-quality/work` | PSNR report for render comparisons with the pixel format stated, worst frames with indices, fail-under, frame-count mismatch as an error | `backend/tests/tools/psnr_report.py`, `backend/tests/test_psnr_report.py` |
+| tool | what it takes over |
+|---|---|
+| `backend/tests/tools/bench_engine.py` | every row of MODEL.md §2: `--engine` or `--model/--tiling/--opt-level` to build, `--repeat` so the session spread is visible, `--with-nvenc` for the contention A/B, `--sample-clocks`, `--dump-tactics`, `--json`. Each row prints its basis (measured vs derived, and where the shape came from). Verified: 51.04 and 51.25 ms/frame, 48.6 and 48.4 TFLOP/s on the 1920x1080 tiling-full engine, against 51.37 from the old script |
+| `backend/tests/tools/psnr_report.py` | every quality number in these docs: states the pixel format both inputs were converted to, refuses a frame-count mismatch, lists the worst frames with indices, `--fail-under` for a gate. Verified on the gated anime render: average 52.73 dB / worst 48.18 dB (frame 371), matching the hand-typed 52.7 / 48.2 |
 
-Both replace /tmp scripts that produced the numbers in this ledger and are now lost, so the next
-reader can re-take them. Neither touches `backend/src`, and neither is a speed task: the tile
-default question below is the supervisor's, because flipping it changes output quality.
+Two things verification of that tool changed: `identical` frames are now counted instead of
+being averaged in (a gated render re-emits them, so their per-frame PSNR is infinite and the
+naive average of the stats file is `inf`), and both aggregates are printed because they are
+different numbers - ffmpeg's `average` is the PSNR of the mean MSE (52.731) while the per-frame
+average is 52.810.
 
 ## Open questions
 
