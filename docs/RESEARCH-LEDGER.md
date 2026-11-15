@@ -215,9 +215,26 @@ only 94 frames. The 502-frame run shows it directly: 22.72 x 502 = 11.40 s of lo
 4. **C4 - the P010 divergence.** 1.54 ms/frame, and the 31 dB smells like tags, not packing.
 5. **P8 / P9 / N3 / N4** - quality-of-life and encoder-side, only if x265 or per-plane tile
    writes are kept.
-6. **P11 is closed** (engine 51.4 ms standalone against 54.3 in-app, NVENC accounting for 9%
+6. **Tile reuse as a default?** Measured: anime 1.39-1.54x, film neutral in time (+1.7%) and
+   -0.8 dB in quality. Turning it on for everyone buys the anime case and costs the film case a
+   little fidelity, so it stays a flag until the owner says otherwise or a content-adaptive
+   switch exists (enable tiles when the gate's calibration reuse share passes ~60%).
+7. **P11 is closed** (engine 51.4 ms standalone against 54.3 in-app, NVENC accounting for 9%
    of that), and **P4'/P5' are closed too** (the writer is idle half the time), so neither is
    on this list any more.
+
+## In flight (delegated, 2026-11-15)
+
+Two cells, disjoint files, no GPU work in either (the card is busy with measurements here):
+
+| branch | task | files |
+|---|---|---|
+| `agent/rve-bench/work` | one reproducible benchmark harness: timing with repeat, NVENC contention A/B, clock sampling, tactic dump, TFLOP/s with its basis printed | `backend/tests/tools/bench_engine.py`, `backend/tests/test_bench_tool.py` |
+| `agent/rve-quality/work` | PSNR report for render comparisons with the pixel format stated, worst frames with indices, fail-under, frame-count mismatch as an error | `backend/tests/tools/psnr_report.py`, `backend/tests/test_psnr_report.py` |
+
+Both replace /tmp scripts that produced the numbers in this ledger and are now lost, so the next
+reader can re-take them. Neither touches `backend/src`, and neither is a speed task: the tile
+default question below is the supervisor's, because flipping it changes output quality.
 
 ## Open questions
 
