@@ -248,7 +248,7 @@ What each knob actually costs, isolated:
 - **threshold 12 -> 4** (tiles off): 0.517% -> 0.045%, peaks 95 -> 13.
 - **chain 4 -> 1** (tiles on): 0.288% -> 0.105%, peaks 100 -> 20.
 - **tile reuse on -> off** (threshold 4, chain 4): 0.287% -> 0.045%, peaks 98 -> 13, at the price of
-  9.2 -> 11.3 s.
+  9.2 -> 11.3 s (11.7 s after the statistic change that followed).
 - **tile judge mean -> worst block**: worse, 0.288% -> 1.174%. The worst block fires on grain and
   takes neighbouring tiles out of sync frame to frame; it moved the artifact instead of removing
   it.
@@ -267,7 +267,7 @@ What each knob actually costs, isolated:
 | configuration | 502 anime frames | worst frame, RGB > 8 levels |
 |---|---|---|
 | ungated, full frame | 38.85 s | reference |
-| **default now: gate (thr 4, chain 4), no tile reuse** | **11.3 s** | **0.045%, peak 13** |
+| **default now: gate (thr 4, chain 4), no tile reuse** | **11.7 s** | **0.009%, peak 14** |
 | gate, chain 4, tile reuse | 9.2 s | 0.287%, peak 98 |
 | gate, chain 4, tile reuse, threshold 12 | 8.4 s | 0.288%, peak 100 |
 | tile judge = worst block | 8.9 s | 1.174%, peak 42 |
@@ -275,10 +275,10 @@ What each knob actually costs, isolated:
 
 `best` is the default and takes the certified depth - chain 4, once the chain budget is expressed
 on the proxy's own scale instead of the one-step bar; `fast` keeps the full chain unconditionally
-and pays the moved fist when tile reuse is also on. Tile reuse is off by default: it buys 2.1 s of 11.3 and costs six times the defect area, and
+and pays the moved fist when tile reuse is also on. Tile reuse is off by default: it buys 2.4 s of 11.7 and costs thirty times the defect area, and
 its per-tile mean cannot be made safe without giving the win back entirely (`--tile_reuse_mode auto`
 and `on` stay available for material where the owner accepts the trade). The honest headline is
-**3.4x** (38.85 -> 11.3 s); 5.06x was the tile-reuse number, i.e. the configuration that moves the
+**3.3x** (38.85 -> 11.7 s); 5.06x was the tile-reuse number, i.e. the configuration that moves the
 fist.
 
 Caveat on this whole framing: "the last 1.5x is the price of not moving objects" describes a
