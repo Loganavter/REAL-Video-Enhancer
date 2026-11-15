@@ -23,7 +23,8 @@ try:                       # round-half-to-EVEN, which is what torch.round does
 except Exception:          # pragma: no cover - older triton
     _rint = None
 
-__all__ = ["body_prologue_kernel", "quantise_nchw_to_nhwc", "dequantise_nhwc_to_nchw"]
+__all__ = ["body_prologue_kernel", "quantise_nchw_to_nhwc", "quantise_nhwc",
+           "dequantise_nhwc_to_nchw", "dequantise_nhwc"]
 
 
 @triton.jit
@@ -86,3 +87,40 @@ def dequantise_nhwc_to_nchw(q_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: 
     s = tl.load(s_ptr + ch)[None, :]
     tl.store(y_ptr + ch[:, None] * n_pix + pix[None, :], tl.trans(q * s).to(tl.float16),
              mask=mask[None, :])
+
+
+@triton.jit
+def quantise_nhwc(x_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl.constexpr):
+    """Head activation ALREADY in NHWC memory -> int8 NHWC. No copy, no transpose, no `.contiguous()`.
+
+    A PReLU output of a channels_last convolution is channels_last, and `permute(0,2,3,1)` on it is a *view* -
+    the bytes are already NHWC. The NCHW variant indexes `ch * n_pix + pix` and therefore needs a contiguous
+    tensor, which costs a full transpose of a 64-channel 1080p half tensor (89.25 ms against 72.49 ms for the
+    whole body). This one reads the same bytes the tensor already has.
+    """
+    pid = tl.program_id(0)
+    pix = pid * BLOCK + tl.arange(0, BLOCK)
+    ch = tl.arange(0, C)
+    mask = pix < n_pix
+    v = tl.load(x_ptr + pix[:, None] * C + ch[None, :], mask=mask[:, None], other=0.0)
+    s = tl.load(s_ptr + ch)[None, :]
+    q = tl.floor(v / s + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    tl.store(y_ptr + pix[:, None] * C + ch[None, :], q.to(tl.int8), mask=mask[:, None])
+
+
+@triton.jit
+def dequantise_nhwc(q_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl.constexpr):
+    """Last hop's codes -> fp16, staying in NHWC memory.
+
+    The model's weights are channels_last, so `y.permute(0,3,1,2)` is a channels_last *view* the tail
+    convolution consumes natively. Writing NCHW instead forces the same transpose the head conversion was
+    paying for.
+    """
+    pid = tl.program_id(0)
+    pix = pid * BLOCK + tl.arange(0, BLOCK)
+    ch = tl.arange(0, C)
+    mask = pix < n_pix
+    q = tl.load(q_ptr + pix[:, None] * C + ch[None, :], mask=mask[:, None], other=0).to(tl.float32)
+    s = tl.load(s_ptr + ch)[None, :]
+    tl.store(y_ptr + pix[:, None] * C + ch[None, :], (q * s).to(tl.float16), mask=mask[:, None])

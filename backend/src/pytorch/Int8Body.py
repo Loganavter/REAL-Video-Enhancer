@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import torch
 
-from .Int8Kernels import body_prologue_kernel, dequantise_nhwc_to_nchw, quantise_nchw_to_nhwc
+from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
+                          quantise_nchw_to_nhwc, quantise_nhwc)
 
 __all__ = ["Int8Body"]
 
@@ -119,8 +120,14 @@ class Int8Body:
             # replaces: 89.25 ms against 72.49 ms for this path, both certified at 0.00000%. So the
             # faster of the two correct versions is the torch one, and the measured win of the earlier
             # fusion was entirely the wrong codes, not the fusion.
-            buf = (torch.round(head / s_act.view(1, -1, 1, 1)).clamp(-127, 127)
-                   .to(torch.int8).permute(0, 2, 3, 1).contiguous())
+            if head.is_contiguous(memory_format=torch.channels_last):
+                # the bytes are already NHWC: read them where they are, no transpose, no copy
+                buf = torch.empty((x.shape[0], h, w, self.feat), device=x.device, dtype=torch.int8)
+                quantise_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
+                                     BLOCK=QB, C=self.feat, num_warps=4)
+            else:
+                buf = (torch.round(head / s_act.view(1, -1, 1, 1)).clamp(-127, 127)
+                       .to(torch.int8).permute(0, 2, 3, 1).contiguous())
             # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
             # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
             # and the same launch parameters - the aliasing was the whole difference.
@@ -131,9 +138,17 @@ class Int8Body:
                                            launch["bias"], launch["slope"], launch["os"], dst, h, w,
                                            BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps)
                 src = dst
-            last = torch.empty((x.shape[0], self.feat, h, w), device=x.device, dtype=torch.float16)
-            dequantise_nhwc_to_nchw[qgrid](src, self._launches[-1]["os"].contiguous(), last, n_pix,
-                                           BLOCK=QB, C=self.feat, num_warps=4)
+            channels_last = self.tail_conv.weight.is_contiguous(memory_format=torch.channels_last)
+            if channels_last:
+                last_nhwc = torch.empty((x.shape[0], h, w, self.feat), device=x.device,
+                                        dtype=torch.float16)
+                dequantise_nhwc[qgrid](src, self._launches[-1]["os"].contiguous(), last_nhwc, n_pix,
+                                       BLOCK=QB, C=self.feat, num_warps=4)
+                last = last_nhwc.permute(0, 3, 1, 2)      # a channels_last view, no copy
+            else:
+                last = torch.empty((x.shape[0], self.feat, h, w), device=x.device, dtype=torch.float16)
+                dequantise_nhwc_to_nchw[qgrid](src, self._launches[-1]["os"].contiguous(), last, n_pix,
+                                               BLOCK=QB, C=self.feat, num_warps=4)
             out = self.model.upsampler(self.tail_conv(last))
         return out + torch.nn.functional.interpolate(x.clamp(0.0, 1.0), scale_factor=self.scale,
                                                      mode="nearest")
