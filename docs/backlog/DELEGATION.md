@@ -1,0 +1,132 @@
+# Delegating the RVE research queue
+
+`queue.yaml` is what to do. This file is who does it and what they are allowed to
+run, because most of these tasks are blocked by two facts that a generic worker
+prompt would get wrong.
+
+## Fact 1: the GPU is one lane, and it is the supervisor's lane
+
+Every measurement in this queue goes through one physical device. The rule is
+already in the ledger's provenance section because it was broken once: **exactly
+one GPU job at a time**. A worker that runs `nvidia-smi dmon` while the
+supervisor renders does not "measure variance", it produces the drift that has
+already retracted three headlines.
+
+Mechanism: `flock -n /var/tmp/opencode/gpu.lock <command>`. A blocked job exits
+instead of queueing silently, and the failure is visible at the call site.
+
+Consequence for planning: items marked `gpu: true` are **serial**, and their
+order is a dependency chain, not a wish list. In particular E26 runs before E28:
+if Winograd is the reason TensorRT wins on conv-dominated stacks, then Welder
+(which has no Winograd) cannot win on ours, and running it first would spend a
+day to produce a number we could have predicted.
+
+## Fact 2: a clone cell cannot measure here
+
+`agent-clone.sh` copies committed state. In this repo that means no bundled
+interpreter (`../REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/...` is outside the
+jail), no `venv` (gitignored, absent), no model weights (`/tmp/opencode/models2`
+and the 78-weight collection live outside the cell). A worker that tries to
+reproduce a timing will burn its whole budget on `ModuleNotFoundError` or on a
+missing `futsuu.pth`, and its report will blame the code.
+
+So the split is fixed:
+
+| work | who | why |
+|---|---|---|
+| literature verification, budget arithmetic, ONNX inspection | research cell | CPU, read-only, no jail escape needed |
+| writing probes, plugins, tests that run on CPU or `--dry` | code cell | the code is reviewed before it touches the GPU |
+| every timing, every render, every acceptance statistic | supervisor, on the shared checkout | needs the GPU, the weights and the bundled interpreter |
+| ledger rows, queue state, merge | supervisor | one writer for one file |
+
+This inverts the usual delegation: workers prepare, the supervisor measures.
+That is the honest shape for a project whose whole difficulty is measurement
+drift.
+
+## Creating a cell for this repo
+
+```bash
+agent-clone.sh "/home/jorj/Загрузки/projects/REAL-Video-Enhancer" rve-<task-id>
+# cell:   ~/.cache/opencode/clones/rve-<task-id>/REAL-Video-Enhancer
+# branch: agent/rve-<task-id>/work
+```
+
+`agent-clone.sh` accepts a path (anything that is not one of the three aliases is
+passed through), and it writes its own pre-commit hook into the clone, so the
+branch discipline holds inside the cell. Two differences from the three managed
+repos that the prompt has to state explicitly, because nothing enforces them
+here: this repo has **no `pre-push` hook and no repo-level guard config**, so
+"never push `main`" is a prompt rule, and the supervisor checks the branch tip
+rather than trusting the hook.
+
+Delivery from a cell is always `git push origin agent/<task-id>/work` — inside a
+clone, `origin` is the local source checkout, not GitHub. The fork is the
+source checkout's `fork` remote; the supervisor moves the branch.
+
+`DONE.md` at the clone root, untracked, sections per the machine protocol, and
+`INTERFACE:` names every new symbol with its signature, because the plugin and
+the probes are the only shared seams here.
+
+## Lanes
+
+At most **three** cells at once, and never two with overlapping `owns_files`:
+
+- **lane-lit** (research, `agent-clone.sh … --research`): verify the external
+  numbers the queue cites, and answer three narrow questions: does the bundled
+  torch's cuDNN expose the Winograd algorithm constants and does
+  `cudnnGetConvolutionForwardAlgorithm_v7` return Winograd for
+  `[N,H,W,64] x [64,3,3,64]`; can TRT's plan file be inspected for kernel names
+  at all (the tactic dump we have shows `implicit_gemm`, the question is whether
+  it enumerates the alternative); does Welder build on this host at all, and
+  which of our ops (`PReLU`, `PixelShuffle`, residual add) it can express.
+  Owns `REPORT.md` only. Every claim carries a command or a `file:line`.
+- **lane-probes** (code): `scripts/probe_winograd.py` and
+  `scripts/pyramid_budget.py`. Both are written and reviewed before the
+  supervisor runs them; the probe must print the algorithm name it got, not just
+  a time, or it reproduces the mistake E26 exists to correct.
+- **lane-plugin** (code): `backend/src/pytorch/int8_plugin/` plus a CPU test of
+  shapes, serialisation and the per-channel-scale path. No GPU run.
+- **supervisor**: the GPU lane, the ledger, the queue, the merge, and the answer
+  to the owner about weights.
+
+`queue.yaml` is edited by the supervisor only, the same way `catalog.yaml` is in
+the docs repo: the board is not a place where several agents write.
+
+## Order
+
+1. **Now**, CPU only: `rve-ledger-reopen-e16` (done in this commit),
+   `rve-doc-literature-closures` (folded into it).
+2. `lane-lit` in parallel with `lane-probes` and `lane-plugin` — three disjoint
+   file sets, no GPU, so they can run together.
+3. Supervisor: **E26** (1 h), the cheapest lever and the one that decides
+   whether E28 is worth a day.
+4. If E26 is positive, E28 and E27 follow; if negative, E28 moves to "expected
+   loss" and E27 stays the next GPU item.
+5. E29 phase 1 is CPU arithmetic and can run in `lane-probes` at any time; its
+   phase 2 waits for the fused-prototype decision, i.e. weeks.
+6. E30 is blocked on the owner, and blocked means asked, not deferred.
+7. E31 phase 1 is CPU; phase 2 is a render, and it changes the metric, so it
+   needs the owner in the loop before it costs GPU time.
+
+## Acceptance, per task type
+
+- **experiment**: the number, the reference it is compared against, the
+  interleaving (3 rounds, alternating), and the count of runs. A single pair is
+  not a measurement in this repo.
+- **code**: the CPU test, plus the exact command the supervisor will run on the
+  GPU. "It should work" is not a delivery.
+- **research/decision**: every claim traceable to a command output, a `file:line`
+  or a cited paper section. The literature is evidence about the literature, not
+  about our engine; a 1.53x on a V100 against TensorRT is a reason to measure,
+  never a prediction.
+- **docs**: the ledger row states what was measured here, and marks external
+  numbers as external.
+
+## Timeboxes
+
+S 60 min, M 120 min, L per phase. Heartbeats: pre-flight read ≤15 min, first
+scoped edit ≤45 min, first push ≤60 min. At every wait slice: `agent-spin.sh`
+plus `scripts/worker_progress.sh`, act on the worse verdict. Two consecutive
+misses means kill, salvage, split. A cell that cannot run its task because it
+needs the GPU posts `blocked` with the exact command it wanted to run, and the
+supervisor runs it.

@@ -1,0 +1,138 @@
+# RVE research queue — blackboard for the perf/inference lane
+# Status: todo | in_progress | in_review | done | dropped
+#
+# Why this file exists: docs/RESEARCH-LEDGER.md records MEASUREMENTS (it is a
+# ledger, every row cites a number we produced). Intentions drift when they live
+# in prose at the bottom of it, so plans and unmeasured literature claims live
+# here instead, with the field that decides whether a task can run at all:
+#
+#   gpu: true   -> the task needs the single GPU. Exactly ONE gpu job runs at a
+#                  time (rule learned the hard way, recorded in the ledger's
+#                  provenance section); take the lock with
+#                  `flock -n /var/tmp/opencode/gpu.lock <command>`.
+#   gpu: false  -> CPU-only: literature verification, budget arithmetic, code
+#                  that is written but not executed against CUDA.
+#   gpu: partial-> writes code/tests that run on CPU; the actual timing is a
+#                  separate supervisor run.
+#
+# Delegation map, lanes and the acceptance rules: docs/backlog/DELEGATION.md
+version: "1.0"
+tasks:
+  - id: rve-ledger-reopen-e16-2026-11-15
+    title: "Ledger: E16 Winograd is the largest untested lever, not 'expected near zero'"
+    type: docs
+    status: done
+    owner: "@supervisor"
+    resolution: "commit on perf/inference (docs: research queue + reopen E16); 296 tests unchanged"
+    priority: P0
+    gpu: false
+    cost: "1h"
+    tags: [docs, winograd, ledger]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md, backend/src/pytorch/TensorRTHandler.py]
+    owns_files: [docs/RESEARCH-LEDGER.md, docs/backlog/]
+    note: "The backlog row said 'cheap, expected near zero'. The counter-precedent it rested on (cuDNN-only build 10.7% slower) measures cuDNN's DEFAULT algorithm choice, not forced Winograd, so it does not answer the question. Reclassified with the external numbers cited as external; also recorded the three closures the literature settles (PReLU has no zeros => activation sparsity inapplicable; merging adjacent 3x3 into 5x5 costs +39% MAC; Strassen dead at N=64) and the overflow arithmetic that kills the fp16-range objection."
+  - id: rve-winograd-tactics-2026-11-15
+    title: "E26: does Winograd exist and win for 64->64 3x3 at 2.07 Mpx in fp16 NHWC?"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P0
+    gpu: true
+    cost: "1h"
+    tags: [winograd, cudnn, tactics, engine]
+    base_branch: perf/inference
+    relates_to: [backend/src/pytorch/RawTRTEngine.py, backend/src/pytorch/TensorRTHandler.py, docs/MODEL.md]
+    owns_files: [scripts/probe_winograd.py]
+    refutes: "Forcing CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD (or the WINOGRAD_NONFUSED variant) on one 3x3 64->64 conv at 1920x1080 fp16 NHWC is not faster than the implicit-GEMM default, or the algorithm is unavailable for the shape (constructor returns BAD_PARAM / no tactic). Either outcome closes E16 with a measurement."
+    acceptance: "A table: {default, forced Winograd, forced implicit GEMM, fp32 NCHW control} x ms per conv, 3 interleaved rounds, plus the algorithm actually returned by cudnnGetConvolutionForwardAlgorithm_v7 for the shape. Written into the ledger as E26."
+    note: "Cheapest untested item. Literature says TensorRT beats fusion compilers on VGG-shaped stacks BECAUSE of Winograd (Welder OSDI'23 reports UNet 9.251 vs 4.429, VGG16 4.123 vs 2.584 ms, blaming its own lack of Winograd), while our tactic dump shows all 16 body convolutions on implicit_gemm. Second question, only if the first is positive: does TRT's tactic set for this shape contain any Winograd kernel at all, and did the timing cache exclude it or never see it?"
+  - id: rve-int8-prelu-plugin-2026-11-15
+    title: "E27: int8 conv + per-channel PReLU as ONE plugin (the 1.3x that E9' left on the table)"
+    type: code
+    status: todo
+    owner: null
+    priority: P1
+    gpu: partial
+    cost: "1d"
+    tags: [int8, plugin, prelu, tensorrt]
+    base_branch: perf/inference
+    relates_to: [backend/src/pytorch/RawTRTEngine.py, docs/RESEARCH-LEDGER.md]
+    owns_files: [backend/src/pytorch/int8_plugin/, backend/tests/test_int8_plugin.py]
+    refutes: "A plugin that fuses conv+per-channel PReLU in int8 does not reproduce the ~2.14 ms block that the traffic arithmetic predicts (2.93 ms fp16 measured), or the per-tensor activation scales lose more than the acceptance bar allows once the PReLU output has its own dynamic range."
+    acceptance: "Isolated block timing {fp16 fused, int8 conv + fp16 PReLU pass, int8 conv + int8 PReLU plugin} on the real shape, interleaved 3 rounds; picture checked against the ungated render with the usual statistic (share of pixels >8 levels, worst frame < 0.1%)."
+    note: "E9' closed the TRT path because the PReLU epilogue is a separate 1.8 ms pass between int8 convs. The traffic argument says the boundary is the cost, not the arithmetic: PReLU as its own pass moves 530.8 MB fp16 (floor 1.84 ms, measured 1.80) against 266 MB int8 (0.92 ms), and conv writing int8 saves 132 MB (-0.46 ms), so the block lands near 2.14 ms instead of 2.93. Sixteen blocks => ~43.7 ms against 56.28 (1.29x). The named risk is per-channel slope against per-tensor activation scales: either add per-channel output scales or measure the loss."
+  - id: rve-welder-onnx-2026-11-15
+    title: "E28: run Welder on our ONNX and compare against the TRT engine"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P1
+    gpu: true
+    cost: "1d"
+    tags: [welder, tvm, fusion, global-traffic]
+    base_branch: perf/inference
+    relates_to: [backend/src/pytorch/RawTRTEngine.py, docs/MODEL.md]
+    owns_files: [scripts/welder/]
+    refutes: "Welder cannot express our graph (PReLU, PixelShuffle tail, residual adds) or builds but is slower than the 56.28 ms engine. A loss here is a real result: it says TRT's tiling is already at the fusion ceiling for this shape."
+    acceptance: "Built and run on the same ONNX export the engine uses, same input shape, interleaved against the TRT plan, 3 rounds; ledger row either way."
+    note: "The framework matches the problem statement (minimise global traffic of the whole graph, propagate the output tile backwards, discard tiles that do not fit the memory level) and its published win is 1.4x geomean on an RTX 3090 against TensorRT across 34 cases, 2.98x on NAFNet (image restoration, low channel count - the nearest class to SRVGG). Two caveats to carry: it LOSES on conv-dominated stacks (see E26), and it is a TVM-based research artifact (~5.2k LOC) whose build on a 4060 Ti / current CUDA is unverified."
+  - id: rve-l2-pyramid-2026-11-15
+    title: "E29: L2-resident layer pyramid - is the 7.9 MB reuse buffer real, and what is the ceiling?"
+    type: research
+    status: todo
+    owner: null
+    priority: P2
+    gpu: false
+    cost: "weeks (phase 1: hours)"
+    tags: [fusion, l2, pyramid, traffic]
+    base_branch: perf/inference
+    relates_to: [docs/MODEL.md, docs/RESEARCH-LEDGER.md]
+    owns_files: [scripts/pyramid_budget.py]
+    refutes: "The buffer arithmetic does not hold at 4K (reuse buffer per layer boundary or the 16-boundary sum exceeds what stays resident), or the traffic decomposition attributes less than ~20 ms to DRAM, leaving no 1.5x ceiling."
+    acceptance: "Phase 1 is CPU arithmetic only: per-boundary buffer bytes, total, L2 residency argument, and the re-derived time decomposition (logical traffic 8.49 GB, L2 absorption ~1/3, DRAM 19.7 ms, compute floor 33.1 ms, measured 56.8 ms). Phase 2, only if phase 1 survives: a boundary search per the Welder model and one fused prototype."
+    note: "MICRO'16 (Alwani et al.) removed intermediate tensors from off-chip entirely on the first five VGG layers: 77 MB -> 3.6 MB with 362 KB on-chip, and their recompute-vs-reuse fork is our fork too (full fusion of 19 layers would cost +9.6x arithmetic by recompute, but 1.4 MB by reuse). Our version: (K-S)=2 rows x 1920 x 64 ch x 2 B = 0.49 MB per boundary, 16 boundaries = 7.9 MB, which does not fit 100 KB shared memory but does fit 32 MB L2. This is the item that would give the ledger's 'the model has that headroom; the builder cannot collect it' a number."
+  - id: rve-pruning-bounds-2026-11-15
+    title: "E30: training-free reconstruction + channel pruning - ASK THE OWNER FIRST (changes weights)"
+    type: decision
+    status: todo
+    owner: "@owner"
+    priority: P3
+    gpu: false
+    cost: "1d after the answer"
+    tags: [pruning, asvd, snows, owner-decision]
+    base_branch: perf/inference
+    relates_to: [docs/MODEL.md]
+    owns_files: []
+    refutes: "The owner's constraint is 'no weight changes', in which case this whole family is out of scope and the row is dropped, not deferred."
+    acceptance: "An explicit yes/no from the owner on whether weights may be reconstructed from calibration activations (no SGD over a dataset), recorded here before any code."
+    note: "The E-SVD test measured weight energy (77-91%) and layer output error (28.7 dB) and closed the direction. The LLM-compression literature closes exactly that gap training-free: ASVD scales weights by activation statistics before the decomposition so the OUTPUT error is what is minimised; SparseGPT prunes one-shot without retraining; SNOWS does the vision-network version (Hessian-free Newton, K-step layer reconstruction through conv+BN+ReLU+residual) with ResNet20 2:4 at 1.97x FLOPs for -0.64%. Two caveats: 2:4 needs sparse hardware and TRT already picks sparse tactics with no measured win (E7) - so the useful form is STRUCTURAL channel pruning (64->48 = 1.78x on dense kernels), not fine-grained sparsity. And 25% of channels will very likely break the 0.1%/8-level bar, which is why this is a question before it is a task."
+  - id: rve-film-gate-codec-2026-11-15
+    title: "E31: the film loss is the gate refusing (1.85x instead of 2-4x) - grain and motion-compensated reuse"
+    type: research
+    status: todo
+    owner: null
+    priority: P3
+    gpu: true
+    cost: "days"
+    tags: [gate, grain, motion-reuse, film, metric]
+    base_branch: perf/inference
+    relates_to: [backend/src/utils/TemporalReuse.py, backend/src/RenderVideo.py, docs/RESEARCH-LEDGER.md]
+    owns_files: [scripts/probe_grain.py]
+    refutes: "Synthesised grain does not restore the measured floor below 1.5 on the 35 mm clip, or the 8-level bar cannot be met by construction once grain is added back (at sigma=16 the mean |delta| is already ~18 levels), which makes this a metric question rather than an optimisation."
+    acceptance: "Phase 1 (CPU, no GPU): the arithmetic showing why the bar is unreachable on grain at the measured sigma, and what the bar would have to become. Phase 2 (GPU): one film clip through {as-is, grain removed -> gate -> grain synthesised}, with the worst-frame statistic and the time, against the current 14.95 s / 1.85x."
+    note: "Two standard techniques from video coding, applied to the SR output rather than the model: motion-compensated prediction (warp the previous HR output by estimated motion, recompute only uncovered areas - ~1-2 ms at 1080p against 45 ms of model) would let the chain stay long on moving content; film grain synthesis (AV1) removes grain before processing and synthesises it after, which is the only path to a floor below 1.5 on 35 mm. Both change what the acceptance metric sees, so the metric question is part of the task, not a footnote."
+  - id: rve-doc-literature-closures-2026-11-15
+    title: "Record the literature closures so nobody re-enters them (PReLU zeros, 3x3->5x5, Strassen)"
+    type: docs
+    status: done
+    owner: "@supervisor"
+    resolution: "folded into rve-ledger-reopen-e16-2026-11-15 (same file, same commit)"
+    priority: P1
+    gpu: false
+    cost: "20m"
+    tags: [docs, negative-results]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md]
+    owns_files: [docs/RESEARCH-LEDGER.md]
+    note: "Three whole branches of literature are closed by the shape of our network, and each closure is structural rather than measured, so it needs to be written down once: (a) PReLU produces no zeros, so activation-sparsity / dynamic-skipping work does not apply by construction; (b) collapsing two 3x3 into one 5x5 costs 25 taps against 18, i.e. +39% MAC, so linear pre-composition is counterproductive at any precision; (c) Strassen at N=64 has no recursion depth, adds intermediate sums (traffic, where we are already on the ridge) and is fp16-unstable."

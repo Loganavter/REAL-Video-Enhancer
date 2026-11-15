@@ -88,7 +88,7 @@ worst frame - rounding, not the padding. | **engine-level win measured, not ship
 | E13 | concurrent engine contexts (batch/streams) | vs-mlrt wiki: 1.65 -> 2.25x on a 2nd stream | up to 2x | no gain (4.25 -> 4.27 s) and output corrupt (25 dB) - because two `torch.jit.load` modules of one engine file are not independent contexts | **rejected as wired** (a wiring fault, not a GPU property) |
 | E14 | alternative tactics for the 16 body convs | our tactic dump: 17 of 18 convs get `sm75_` kernels on an sm89 part | unknown | **measured and closed.** With the tactic sources restricted to JIT convolutions only (no cuDNN, no cuBLAS) the winner is the *same* `sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x64x32`, at 49.97 ms against the baseline's 50.09 (0.998x). So there is no sm80/86/89 alternative being skipped for this shape at K=576 in this TRT build; the `sm75_` name is the name of the winner, not a symptom. Restricting to cuDNN alone is 10.7% **slower** (55.43 ms, stable across three rounds), so TRT's own kernels beat cuDNN here | **closed** (measured) |
 | E15 | crop the active picture area (letterbox bars) | - | up to 1.33x if 25% of the frame is black | **n/a on our material**: the film clip (1440x1080) and the anime clip (1920x1080) both have zero rows darker than 6/255, minimum row mean 59.9 and 124.8. Worth one row-histogram check per new source before rendering | open (source-dependent) |
-| E16 | Winograd F(2,3)/F(4,3) | cuDNN/CORE-TAG counter-precedent | F(2,3) cuts MACs 2.25x, inflates tensors ~4x | not measured. The ridge is **128 MAC/byte** at the borrowed 74 TF/s and 288 GB/s (257 FLOP/byte), not 42: 42 corresponds to a ~24 TF/s fp32-shader peak, so the earlier figure was off by 3x in the wrong direction. The conclusion is unchanged - Winograd inflates tensors ~4x, which drops intensity below the ridge - but it is a weaker argument than it looked, and cuDNN-only builds measuring 10.7% *slower* also weakens the counter-precedent | open (untested) |
+| E16 | Winograd F(2,3)/F(4,3) | cuDNN/CORE-TAG counter-precedent | F(2,3) cuts MACs 2.25x, inflates tensors ~4x | not measured. The ridge is **128 MAC/byte** at the borrowed 74 TF/s and 288 GB/s (257 FLOP/byte), not 42: 42 corresponds to a ~24 TF/s fp32-shader peak, so the earlier figure was off by 3x in the wrong direction. **The intensity objection was withdrawn 2026-11-15**: Winograd's transform stages are memory-bound at the shared-memory/L2 level, and that is a cache-blocking problem the literature fixes (PPoPP'20: b_k 32->64 raises intensity 8 -> 10.67 ops/byte; PKF fuses the stages by memory level), not a property of the algorithm on this GPU. The cuDNN-only build being 10.7% slower is E14's measurement of cuDNN's *default* algorithm, not of a forced Winograd kernel, so it does not close this row either. Cheapest test and the numbers behind the reclassification: §What the literature closes, and the one item it reopens | open (untested, and now the largest one) |
 | E17 | rewrite PReLU as `a*x + (1-a)*Relu(x)` | TRT supported-op patterns | maybe changes tactic eligibility | **measured, as the unlock E9' was missing - and it is not one.** The rewrite does not remove the boundary: the `a*x` term still needs the pre-ReLU frame, and the `(1-a)*Relu(x)` term gives a second full-frame pass, so it trades one 1.8 ms PReLU pass for two. What would remove the boundary is a fused int8 conv+PReLU epilogue, and this build has none for a per-channel slope (measured: the int8 conv reports `HasReLU: 0, Activation: NONE` and the PReLU appears as its own `PointWiseV2` layer). The earlier guess that it was "cheap and near zero" was right about the cost and wrong about the mechanism | **closed together with E9'** |
 
 ## Precision / colour (10-bit)
@@ -252,11 +252,23 @@ rather than on a hunch.
    the earlier "30x above the bandwidth floor" estimate implied. That estimate counted GPU-side
    bandwidth and forgot the frame has to cross PCIe first. The `gbrp` idea (planar decoder, no
    permute) is the same order and does not justify reworking the preview and cv2 consumers.
-3. **E16 Winograd.** Cheap, expected near zero, and its counter-precedent is weaker than it looked:
-   restricting the build to cuDNN alone made the engine 10.7% *slower*, so this TRT build's own
-   kernels beat cuDNN's for this shape, whatever way cuDNN wins a single-conv race elsewhere. (E17
-   used to be listed here as a micro-optimisation; it is now part of E9' above, where it turned out
-   not to unlock anything.)
+3. **E16 Winograd - reclassified 2026-11-15: the largest untested lever, not "expected near zero."**
+   The old wording rested on one measurement: restricting the build to cuDNN alone made the engine
+   10.7% *slower*. That measures **cuDNN's default algorithm choice**, not a forced Winograd kernel,
+   and cuDNN's default for this shape is its own implicit GEMM - so the measurement is silent about
+   the algorithm it was taken to rule out. The external picture points the other way: Welder
+   (OSDI'23) loses to TensorRT precisely on conv-dominated stacks (UNet 9.251 against 4.429 ms,
+   VGG16 4.123 against 2.584 ms) and its authors attribute the loss to TensorRT using Winograd while
+   Welder has none; PPoPP'20 measures cuDNN Winograd 1.54-1.59x over GEMM on a `[64,3x3,64]` layer,
+   which is our exact body shape. Our tactic dump shows all 16 body convolutions on `implicit_gemm`
+   and no Winograd, which is consistent with either "TRT has no Winograd tactic for this shape" or
+   "it has one and the search never picked it" - two different findings.
+   The cost is one hour: force `CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD` on a single 3x3 64->64 conv at
+   1920x1080 fp16 NHWC, with fp32 NCHW as a control, and print the algorithm the v7 query returns.
+   Both outcomes are informative and neither is currently known. Queue entry:
+   `docs/backlog/queue.yaml` `rve-winograd-tactics-2026-11-15`.
+   (E17 used to be listed here as a micro-optimisation; it is now part of E9' above, where it turned
+   out not to unlock anything.)
 4. **P8 / P9 / N2 / N3 / N4** - quality-of-life and encoder-side, only if x265 or per-plane tile
    writes are kept.
 
@@ -717,6 +729,62 @@ one decimal was hiding the only thing that mattered: 0.1% of 502 frames is half 
 worst-frame metric **one frame is the entire result**. Published as counts, the three settings differ
 by 11 frames and the defect is flat at 0.015-0.016% - on `box(|diff|)` the threshold really is not
 the lever, and that now shows in the counts as well as in the defect.
+
+## What the literature closes, and the one item it reopens (2026-11-15)
+
+Written down because these are structural closures - true by the shape of our network, not measured
+by us - and because the reopened item was previously dismissed on a measurement that does not answer
+the question it was cited for. Nothing in this section is our measurement; every number attributed
+to a paper is the paper's, about its own hardware. The queue that turns the open ones into
+experiments is `docs/backlog/queue.yaml`; who runs what is `docs/backlog/DELEGATION.md`.
+
+**Closed by construction, so nobody re-enters them:**
+
+- **Activation sparsity / dynamic skipping** (Deja Vu, PowerInfer and the rest of that family) assumes
+  roughly half the post-activation values are zero. Our activation is PReLU, whose output is
+  non-zero almost everywhere: there is nothing to skip. This is inapplicable rather than untested.
+- **Collapsing linear parts** (folding two adjacent 3x3 layers into one 5x5) costs 25 taps against 18,
+  i.e. **+39% MAC**, even with a fixed PReLU sign mask. Pre-composition is counterproductive at any
+  precision on a stack of 3x3s.
+- **Strassen and fast matrix multiplication**: N=64 leaves no recursion depth, the intermediate sums
+  add exactly the traffic we are already short of, and fp16 stability is unproven. Theoretically
+  attractive on large square GEMMs, dead on this shape.
+
+**The fp16-range objection to Winograd does not hold at our activations.** We measured the activation
+range at 1.0..55.2. For F(2x2,3x3) the transform matrix B^T has +-1 entries with row L1-norm 2, so the
+2-D gain is at most 4 and the worst intermediate is about **221** against an fp16 maximum of 65504.
+Even F(4x4,3x3), whose gain is roughly two orders larger, lands near 5e3. The ncnn/Vulkan overflow
+story is about half-precision paths without a wide accumulate, which is not this GPU - the report
+itself already said so.
+
+**The E16 ridge argument was half right, and the half that was wrong is the actionable one.** The
+literature agrees that Winograd's arithmetic intensity is 2.25x lower than GEMM convolution, and that
+its transform stages are memory-bound. It does not conclude "do not use Winograd": PPoPP'20 raises
+intensity by growing the cache block (b_k 32 -> 64 takes it from 8 to 10.67 ops/byte, +33%), and PKF
+(NPC'22) reports 8.22-13.69x over cuDNN by fusing the transform stages by memory level. The intensity
+drop is a shared-memory/L2 problem, which is the layer we can influence.
+
+**The pruning family exists and is training-free, which is a question before it is a task.** The SVD
+test measured weight energy and layer output error; ASVD scales weights by activation statistics so
+the decomposition minimises output error, SparseGPT prunes one-shot with layer-wise reconstruction,
+and SNOWS does the vision-network version without retraining (ResNet20 2:4 at 1.97x FLOPs, -0.64%).
+Two caveats travel with it: 2:4 needs sparse hardware and TensorRT already selects sparse tactics
+with no measured win here (E7), so the useful form is structural channel pruning on dense kernels;
+and reconstruction changes the weights, which the brief forbids. That is an owner's decision, filed
+as such rather than absorbed into a technical plan.
+
+**The film loss is not in the model.** On 35 mm the gate refuses (floor 2.27) and the render stays at
+1.85x against the 2-4x the same engine reaches on anime. Two standard techniques from video coding
+apply to the SR output rather than to the network: motion-compensated prediction (warp the previous HR
+frame, recompute only uncovered areas - about 1-2 ms at 1080p against 45 ms of model) and AV1-style
+film grain synthesis (strip grain before, synthesise after, which is the only way the floor falls
+below 1.5). Both change what the acceptance metric sees, and at sigma=16 the mean absolute deviation
+is already about 18 levels, so an 8-level bar on grain is unreachable by construction. This is a
+metric conversation with the owner, not an optimisation.
+
+Queue ids keep the reserved numbers: E26 Winograd tactics, E27 int8 PReLU plugin, E28 Welder on our
+ONNX, E29 L2-resident pyramid, E30 pruning bounds (owner decision), E31 film gate via codec-side
+techniques. They become ledger rows when they have a number.
 
 ## Open questions
 

@@ -403,6 +403,10 @@ counter is read (§6, item 2).
 What is left is byte counting: `ncu` needs `RmProfilingAdminOnly=0` (one line plus a reboot), and
 until then the DRAM split stays a bound (§6 item 2) rather than a measurement.
 
+The living list of what is left, with costs, what would refute each item and which of them need the
+GPU, is `docs/backlog/queue.yaml` (lanes and the one-GPU rule: `docs/backlog/DELEGATION.md`). That
+file is the one to edit when a direction is added; this section stays the measured summary.
+
 ## 7. The lever that works today: fewer frames
 
 | scenario | frames through the model | measured |
