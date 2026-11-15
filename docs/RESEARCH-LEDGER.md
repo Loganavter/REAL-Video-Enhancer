@@ -1148,10 +1148,38 @@ median of **0.616** across 17 layers (range 0.500-0.727, six layers below 0.6), 
 range buys a ~1.6x finer step on the average channel - real, less than the 1.85x a one-sided channel
 would give, and enough to pay for the margin rather than replacing it.
 
-Status, stated so it does not overclaim in either direction: **the share passes with a 5.3x margin and
-beats the shipped opt-in; the residual peak comes from a third source, invariant to step size, localized
-to dark flat patches.** What is unmeasured is whether that peak survives a spread sample - one held-out
-pair is one realisation, which this ledger has already been burned by twice.
+**The spread sample kills it, and it is the third time a single pair was optimistic.** Calibrated on two
+frames of one title (1 s and 5 s) and evaluated on five unseen frames including another title, margin 1.5:
+
+| held-out frame | share above 8 | peak | median |
+|---|---|---|---|
+| Chainsaw 1 s | 0.094% | 17 | 2.43 |
+| Chainsaw 3 s | 0.093% | 14 | 2.43 |
+| Chainsaw 7 s | 0.126% | 16 | 2.46 |
+| Violet 1 s | 0.078% | 17 | 2.43 |
+| Violet 5 s | **0.174%** | **35** | 2.49 |
+| Violet 8 s | **0.162%** | 20 | 2.43 |
+
+Three of six frames exceed the 0.1% share bar, and the same-pair result that motivated margin 1.5
+(0.019%) reappears nowhere. Worse, the optimum moved: on the Violet 5 s frame the margin is not monotone
+either -
+
+| margin | share | peak |
+|---|---|---|
+| 1.0 | 0.078% | 44 |
+| 1.25 | **0.063%** | 38 |
+| 1.5 | 0.174% | 35 |
+| 2.0 | 1.768% | 36 |
+
+so 1.25 is the best point on that frame, 1.5 makes the share *worse*, and the peak sits between 35 and 44
+whatever the margin is. That peak does not respond to step size at all, which is the same invariance the
+localization found - but on Violet it is 2x the bar rather than 1 level over it.
+
+Status, honestly: **the int8 picture passes on one title and fails on another, and the failure is not
+tuned away by scales.** Chainsaw reads 0.093-0.126% at peaks 14-17; Violet reads 0.078-0.174% at peaks
+17-35 depending on the frame, with no margin recovering the peak. The speed is real (1.91 ms, 79-80
+TOPS); the picture is not established on a spread sample, and per this ledger's own rule a configuration
+that looks good on one pair is not measured.
 
 What is left is calibration coverage, and the app already renders the material for it: the gate observes
 the first frames of every video unconditionally, so the int8 scales can be calibrated per video from
