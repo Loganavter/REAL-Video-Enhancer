@@ -227,11 +227,17 @@ counter is read (§6, item 2).
    |---|---|---|---|
    | int8 `CaskConvolution` (int8 in, half out) | 16 | 1.56-1.88 (152.9 GFLOP / 1.68 ms = **91 TFLOP/s**) | 26.8 |
    | `PointWiseV2` = the PReLU, a separate pass | 17 | 1.71-2.37 | 31.2 |
-   | head, tail, upsampler, Add, Clip, 21 reformats | - | - | 10.1 |
+   | **reformats** - the layers the old verdict blamed | 21 | 0.05-2.41 | **5.6** |
+   | head, tail, upsampler, Add, Clip | 6 | - | 4.9 |
+
+   A second profile of the same engine minutes later read 71.24 ms with the same shares
+   (PReLU 32.74, convs 27.77, reformats 5.59, the rest 4.87), so the ±4% between runs is the
+   machine, not the graph - and it also makes the point: the reformats are 8% of the engine, the
+   PReLU passes are 46%.
 
    In FP16 the same 16 blocks are **one fused myelin kernel each** (`__myl_CorrMulLtSele` = conv +
    mul + lt + select = conv + PReLU) at 2.93 ms, i.e. 52 TFLOP/s for the same FLOPs. Quantised,
-   the conv alone is 1.75x faster (1.68 ms) and
+   the conv alone is 1.74x faster (1.68 ms) and
    the PReLU becomes a pass of its own (1.80 ms), so the block costs 3.48 against 2.93. It is not
    fused for a measurable reason: the int8 conv reports `HasReLU: 0, Activation: NONE`, and the
    PReLU is a separate `PointWiseV2` that reads two tensors - the frame and the per-channel slope -
