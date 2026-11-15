@@ -142,21 +142,34 @@ tasks:
     acceptance: "Engine time at three widths, same builder settings as the app (fp16, tiling full, optimization level 5), per-layer body times from trt.IProfiler, 20 iterations. Output: measured time ratio against MAC ratio for each width."
     note: "Split from the pruning item on purpose: how much TIME a width costs is measurable on a synthesized model with random weights (tactics depend on shapes, not values), so it needs no reconstruction and no decision about the picture. The picture half only becomes interesting if this half shows a win."
   - id: rve-pruning-bounds-2026-11-15
-    title: "E30b: channel cut reconstruction - the picture half, never measured"
+    title: "E30b (closed): channel cut - 32 cannot represent the stack, 48 buys nothing"
     type: code
-    status: todo
-    owner: null
+    status: dropped
+    owner: "@supervisor"
+    resolution: "closed 2026-11-15 on a representational bound, not on a failed method: sequential layer-wise least squares fitted to the teacher's own pre-activations leaves 14-37% of each layer's target unexplained (37% at body.14) with 289 free parameters against 260k samples, and the output stays at 1.58% after every refit. Flat pixels read 0.060% (at the bar) while edges read 26.1%, the signed mean is 0.01 levels and an affine refit moves 1.573% -> 1.553%, so it is structure, not a DC shift. C=48 has the same picture at 1.2x of time. The split it produced is worth more than the pruning attempt: see the routing item."
     priority: P2
     gpu: true
-    cost: "1d"
-    tags: [pruning, channels, asvd, snows, reconstruction]
+    cost: "done"
+    tags: [pruning, channels, closed]
     base_branch: perf/inference
-    relates_to: [docs/RESEARCH-LEDGER.md, docs/MODEL.md]
-    owns_files: [scripts/prune_channels.py]
-    refutes: "Reconstruction cannot hold the bar at the width the fusion probes justify. Calibration point: a 2.1% RMS weight perturbation (int8) costs a 0.66-level mean and a 4-level peak, half the bar, so the admissible perturbation is of that order and a 25% cut is well beyond it."
-    acceptance: "Worst-frame statistic (share of pixels > 8 levels, RGB) against the unpruned engine, on a spread sample of at least three titles, at the width that survives the fusion probes. One render, not a sweep."
-    owner_ruling: "2026-11-15: weights may change when the change is practically meaningless. int8 rounding is in that class and is measured (0.000% of pixels above 8 levels, peak 4, 54.1 dB); a channel cut is admissible only while it also stays inside the bar."
-    note: "Reopened: it was dropped on E30a's C=32 row, and that row is a build whose fusion broke - the convolutions moved to the indexed_wo_smem tactic family and myelin stopped taking an epilogue. With the epilogue back, C=32 is ~24.5 ms (2.31x) and even with a half-empty N tile ~30.8 ms (1.84x). Reopen is warranted by our own precedent (E19: the head at C=3 refused myelin, at C=8 accepted it, and the fix was padding the channels). Gated on the fusion probes; the picture question is what this task answers."
+    relates_to: [docs/RESEARCH-LEDGER.md]
+    owns_files: []
+    note: "Kept because the numbers are the licence for the routing lane: the error is spatial and localised, which is exactly what conditional compute exploits."
+  - id: rve-spatial-routing-2026-11-15
+    title: "Routing: full engine where it matters, thin engine elsewhere - 1.6-1.95x on a computable mask"
+    type: experiment
+    status: in_progress
+    owner: "@supervisor"
+    priority: P0
+    gpu: true
+    cost: "2-3d"
+    tags: [routing, conditional, tiles, two-engines]
+    base_branch: perf/inference
+    relates_to: [backend/src/RenderVideo.py, backend/src/pytorch/TensorRTHandler.py, docs/RESEARCH-LEDGER.md]
+    owns_files: [backend/src/pytorch/RoutedUpscaler.py, backend/tests/test_routed_upscaler.py]
+    refutes: "Across the spread sample the mask area needed for a passing composite exceeds ~40%, or the tile-granularity cost eats the win (a tile containing any mask pixel runs the full engine). Either outcome is measurable before any production code."
+    acceptance: "Worst-frame statistic (share > 8 levels, RGB) against the full engine on at least three titles, the mask area distribution per title, and the wall clock of the tiled two-engine path against the single-engine render."
+    note: "Oracle composite where(mask, full, thin) measures 0.000% with a 15% mask (grad>4, dilate 2 LR px) and 0.094% with 8% (grad>8), against a bar of 0.1%. A perfect router would give 2.16x. The thin model is the C=32 build, which is fast (22.4-24.9 ms, 2.07-2.36x) and would be unusable alone - routing is what makes it admissible. The first mask attempt (dilate by the receptive radius 18) covered 76% of the frame and is the reason routing looked dead; the mask marks where the ANSWER needs the full model, not where its receptive field reaches. No retraining, no weights touched, two engines and a tile pass."
   - id: rve-film-gate-codec-2026-11-15
     title: "E31 (dropped): grain synthesis / motion-compensated reuse for film"
     type: research
