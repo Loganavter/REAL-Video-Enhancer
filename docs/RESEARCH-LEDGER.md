@@ -234,6 +234,28 @@ precision experiment or an input-path rewrite.
 4. **P8 / P9 / N2 / N3 / N4** - quality-of-life and encoder-side, only if x265 or per-plane tile
    writes are kept.
 
+## Which metric answers "is it visible" (2026-11-15)
+
+PSNR alone was the wrong instrument for a reuse decision, and the numbers show why. The same
+three pairs, compared with `libvmaf` (model v0.6.1neg, both inputs scaled to 1080p because that
+is what the model is calibrated for):
+
+| pair | PSNR avg | PSNR worst | VMAF mean | VMAF p5 | VMAF min |
+|---|---|---|---|---|---|
+| anime, gate + fitted tiles | 51.71 | 48.64 | 95.50 | 94.18 | 93.65 |
+| film, gate | 50.34 | 39.83 | 96.70 | 88.81 | 83.79 |
+| P010 after the fix vs a libx265 render | 52.01 | 50.40 | 96.24 | 95.65 | 95.63 |
+
+The film row is the lesson: its *mean* is the best of the three (96.7) while its minimum is the
+worst by 10 points, and the minimum is what a viewer sees on the frame where a reused edge landed
+in the wrong place. The pixel-level peak agrees: the worst block of that film frame is **196
+levels** off (mean 1.74), against 100 levels for the anime frame (mean 0.98).
+
+So the acceptance rule for any reuse or precision change here is a VMAF floor, not an average:
+**min >= 90 and p5 >= 92** on 1080p, with the worst frame's PNGs kept for eyeballing (the pairs for
+these rows are in `remastering/compare_frames/`). A PSNR average of 50 dB can hide a frame that
+fails both.
+
 ## Grain sweep (synthetic, 2026-11-15)
 
 The clean anime clip with `noise=alls=S:allf=t+u` layered on, then three renders per variant:
