@@ -1037,22 +1037,42 @@ error outside the mask. Measured against `full` with the acceptance rule, on a r
 | grad>2, dilate 18 (the first guess) | 75.9% | 100% | 0.000% | 1.02-1.15x |
 | grad>16, dilate 18 | 10.0% | 55.6% | 0.703% | 1.91x |
 
-Two things this settles. **The prize is real**: a perfect router would give 2.16x, because the thin
-model fails on 1.6% of pixels. **And the router does not need to be smart**: a 2-pixel dilation around
-pixels whose LR gradient exceeds 4 levels covers every error pixel on this frame, at 15% of the area.
-The first guess - dilate by the receptive radius 18 - is what made routing look dead, and it was the
-wrong instinct: the mask marks where the *answer* needs the full model, not where the full model's
-receptive field reaches.
+Two things this settles. **The pixel bound is real**: a perfect router would give 2.16x, because the
+thin model fails on 1.6% of pixels. **And the mask does not need to be smart**: a 2-pixel dilation
+around pixels whose LR gradient exceeds 4 levels covers every error pixel on this frame.
 
-Cost model behind the time column: a tile containing any mask pixel is computed by the full engine,
-the rest by the thin one, with a 1.15 halo tax on the masked part and thin at 1/2.2 of full. That is
-the implementation this implies - two engines, a tile pass, no new kernel, no retraining, no weights
-touched.
+**The cost column above is wrong, and correcting it kills the per-frame version.** The full engine has
+to compute on the *dilated* mask, not the mask: to produce a correct answer at a pixel, its input must
+cover `mask + 18`. Measured areas, with `c = 1/2.2`:
 
-What this is not yet: one frame. The error's location is content-dependent, so the mask's area has to
-be measured across the spread sample and the worst frames, and the router has to be evaluated on the
-same titles the acceptance bar uses. The peak of the composite is 5 levels, well inside the bar's
-peak guidance.
+| mask | mask | F = mask+18 | cost `c + |F|` | cost `|F| + c*|T+18|` |
+|---|---|---|---|---|
+| thr 2, r2 | 22.5% | 78.8% | 0.80x | 0.98x |
+| thr 4, r2 | 14.9% | **52.1%** | 1.02x | 1.18x |
+| thr 8, r2 | 8.3% | 33.8% | **1.26x** | 1.40x |
+| thr 8, r18 | 32.0% | 45.6% | 1.10x | 1.33x |
+
+So per-frame spatial routing is worth 1.0-1.3x, not 1.8x, and the 18-pixel receptive radius is the
+reason - the same tax that ate every other algorithmic saving in this ledger.
+
+**What survives is the temporal version.** The LR gradient mask is mostly scene contours, and contours
+are nearly static between frames: over a 1/24 s pair the mask+18 region changes by 1.2-2.3%. With its
+own halo on the changed part, the cost is `c + |delta + 18|`:
+
+| mask | F | F changes per frame | with halo | cost |
+|---|---|---|---|---|
+| thr 8, r2 | 33.8% | 1.5% | 26.1% | **1.40x** |
+| thr 2, r18 | 93.4% | 2.3% | 17.5% | **1.59x** |
+
+That is a per-frame path that keeps the edges on the full engine and pays the thin engine for
+everything else, cashing the full answer on the static region once. It is also the same class of bet as
+the existing gate - content-dependent, and a pan destroys it - so it belongs next to the gate, not
+instead of it, and it needs the gate's certification rather than its own.
+
+What is still unmeasured: the step at the mask boundary. The composite is the full answer inside the
+mask and the thin one outside, so along the contour it steps by exactly the thin model's error, up to 8
+levels - inside the bar's per-pixel rule and visible as an outline on a flat gradient. That is the kind
+of defect the bar does not see, and it has to be looked at before any of this ships.
 
 
 ## E30b closed: 32 channels cannot hold the stack's features, and that is a bound, not a method failure

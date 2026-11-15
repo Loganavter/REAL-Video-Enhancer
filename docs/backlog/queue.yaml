@@ -156,7 +156,7 @@ tasks:
     owns_files: []
     note: "Kept because the numbers are the licence for the routing lane: the error is spatial and localised, which is exactly what conditional compute exploits."
   - id: rve-spatial-routing-2026-11-15
-    title: "Routing: full engine where it matters, thin engine elsewhere - 1.6-1.95x on a computable mask"
+    title: "Routing: the pixel bound is 2.16x, the per-frame cost is 1.0-1.3x, the temporal one 1.2-1.6x"
     type: experiment
     status: in_progress
     owner: "@supervisor"
@@ -167,7 +167,7 @@ tasks:
     base_branch: perf/inference
     relates_to: [backend/src/RenderVideo.py, backend/src/pytorch/TensorRTHandler.py, docs/RESEARCH-LEDGER.md]
     owns_files: [backend/src/pytorch/RoutedUpscaler.py, backend/tests/test_routed_upscaler.py]
-    refutes: "Across the spread sample the mask area needed for a passing composite exceeds ~40%, or the tile-granularity cost eats the win (a tile containing any mask pixel runs the full engine). Either outcome is measurable before any production code."
+    refutes: "Measured 2026-11-15: the area that matters is mask+18, not the mask, and it is 34-79% of the frame. Per-frame cost is therefore 1.0-1.3x. What survives is the temporal variant (the region changes 1.2-2.3% per frame, 1.2-1.6x with its halo on the delta being recomputed), which is content-dependent and belongs beside the existing gate rather than replacing it."
     acceptance: "Worst-frame statistic (share > 8 levels, RGB) against the full engine on at least three titles, the mask area distribution per title, and the wall clock of the tiled two-engine path against the single-engine render."
     note: "Oracle composite where(mask, full, thin) measures 0.000% with a 15% mask (grad>4, dilate 2 LR px) and 0.094% with 8% (grad>8), against a bar of 0.1%. A perfect router would give 2.16x. The thin model is the C=32 build, which is fast (22.4-24.9 ms, 2.07-2.36x) and would be unusable alone - routing is what makes it admissible. The first mask attempt (dilate by the receptive radius 18) covered 76% of the frame and is the reason routing looked dead; the mask marks where the ANSWER needs the full model, not where its receptive field reaches. No retraining, no weights touched, two engines and a tile pass."
   - id: rve-film-gate-codec-2026-11-15
