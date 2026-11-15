@@ -276,20 +276,19 @@ tasks:
     acceptance: "Per shot: 2-3 frames through both models, the existing worst-frame statistic, then the whole shot on the cheap model if it passes. Report the share of shots that pass and the wall-clock saving."
     note: "Not retraining and not replacing the owner's set - using it. The decision statistic already exists and the safe granularity is the shot, not the tile: a tile-level cascade was killed by seams, and a shot has one model throughout. Arithmetic on a tile version for scale: 1.147*(f + (1-f)*c); at f=0.3, c=0.25 that is 1.83x, and the shot version has no 1.147 tax at all."
   - id: rve-base-grain-split-2026-11-15
-    title: "D: split the source into base + grain, upscale the base, composite the REAL grain back"
+    title: "D (dropped): base + grain split with the real grain composited back"
     type: experiment
-    status: todo
-    owner: null
-    priority: P1
+    status: dropped
+    owner: "@owner"
+    resolution: "dropped 2026-11-15 by the owner: grain-heavy cel material is out of scope, so the film lane is not worth a day. The stronger version of E31 (lift the real grain from the source, upscale the base, composite it back) stays recorded here rather than deleted, because it was the largest single prize on the board - film 1.85x against anime 4.3x - and the reason it is not taken is scope, not feasibility."
+    priority: P3
     gpu: true
-    cost: "1d"
-    tags: [grain, film, gate, metric]
+    cost: "0"
+    tags: [grain, film, dropped, scope]
     base_branch: perf/inference
-    relates_to: [backend/src/utils/TemporalReuse.py, docs/RESEARCH-LEDGER.md]
-    owns_files: [scripts/probe_grain_split.py]
-    refutes: "The gate's floor on the base does not fall below 1.5, or the composited result differs from the current render by more than the bar for reasons the owner will not accept. Both outcomes are cheap to obtain."
-    acceptance: "On the 35 mm clip: noise floor on the decomposed base, achieved reuse and wall-clock against the current 14.95 s / 1.85x, and the picture difference of the composite against today's render."
-    note: "Stronger than E31's synthesis: the grain is not generated, it is lifted from the source and put back, so nothing about the grain is invented. The gate then certifies on the base, where the floor should drop to ~0.8, and film could move from 1.85x toward 3.5-4x - more than everything left in the engine. What changes is how grain is upscaled, which is a metric question for the owner, not an impossibility."
+    relates_to: [docs/RESEARCH-LEDGER.md]
+    owns_files: []
+    note: "Measured context that would have mattered: on 35 mm the gate refuses because the noise floor is 2.27 against a 1.5 limit, so the render stays at 1.85x where the same engine gets 2-4x on anime. Decomposing base and grain would let the gate certify on a base whose floor is ~0.8. Not taken."
   - id: rve-strip-concurrency-2026-11-15
     title: "C: horizontal strips on separate streams - hide the boundary instead of removing it"
     type: experiment
