@@ -126,24 +126,28 @@ preset) before tuning anything else.
 Per frame at 2880x2160 output: engine ~35 ms, **D2H 3.4 ms** (an 18.7 MB RGB frame over the link
 below), colour conversion ~1.3 ms, the rest is reading/writing and the encoder.
 
-**How the engine is built matters more than what the graph looks like, and nobody had measured it.**
-One clip, one preset, one render each:
+**A single pair said the builder was worth 7.6%, and it did not survive three rounds.** One clip, one
+preset, engines cached, interleaved:
 
-| build | wall | app's `inference` | picture |
-|---|---|---|---|
-| app default (`torch_tensorrt.dynamo.compile`) | 11.92 s | 16.22 ms | - |
-| **raw `trt.Builder` from the same ONNX** | **11.01 s** | **15.04 ms** | **identical: 0.000% above 8 levels, peak 0** |
-| raw + head padding | 10.91 s | 14.96 ms | 0.012% at the worst frame |
+| round | app (`torch_tensorrt.dynamo.compile`) | raw (`trt.Builder`) |
+|---|---|---|
+| 1 | 13.00 s / 15.44 ms | 12.81 s / 16.52 ms |
+| 2 | 14.65 s / 18.27 ms | 12.95 s / 17.33 ms |
+| 3 | 14.84 s / 20.01 ms | 14.55 s / 19.97 ms |
 
-So **7.6% comes from the builder and 0.9% from the head padding on top of it** - which re-qualifies
-the padding claim this section used to make: its 5.8% was measured against a slower unpadded build
-than the raw path produces, not against what ships. The padding ships **off** (`RVE_HEAD_PAD=1`); the
-raw builder ships behind `RVE_RAW_TRT=1` because it is a change to how every engine is made - engines
-are static per resolution by default (`tensorrt_dynamic_shapes` is off), which is the shape it
-exports, the opt-in dynamic mode falls back, and any export or build failure falls back to
-torch_tensorrt after deleting the stale plan (ledger E22). What remains of the 8.11 ms: tail
+Raw wins the wall clock in all three rounds and loses the engine number in one, while **both series
+climb 13-30% across the experiment** - this host has no thermal control, and an effect smaller than the
+drift inside its own measurement is not measured. The honest status is **no established difference**,
+and the 7.6% an earlier revision of this section claimed is withdrawn. What survives is structural:
+the two builders give a **bit-identical picture** on the shipping model (0.000% of pixels above 8
+levels, peak 0), and the raw path covers 78 of 78 models in the owner's collection at the
+load/forward/ONNX-export stages. It stays behind `RVE_RAW_TRT=1` as an independent build path - engines
+are static per resolution by default (`tensorrt_dynamic_shapes` is off), which is the shape it exports;
+the opt-in dynamic mode falls back; any export or build failure falls back to torch_tensorrt after
+deleting the stale plan. The head padding on top is 0.9% at best and ships off (`RVE_HEAD_PAD=1`), with
+a probe forward that reverts any head it cannot widen safely. What remains of the 8.11 ms: tail
 convolution tactics and the upsampler plus myelin's reshape/add, **2.35 ms**, and the layout kernels
-**0.81 ms** (ledger E20-E21, E18).
+**0.81 ms** (ledger E20-E21, E18, E22).
 
 ### The link is PCIe 3.0 x8, and pinning is not the lever
 
