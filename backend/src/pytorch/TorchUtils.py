@@ -258,7 +258,7 @@ class TorchUtils:
             return np.array(tensor.tolist(), dtype=np_dtype)
     
     @torch.inference_mode()
-    def tensor_to_yuv420p10(self, frame: torch.Tensor) -> bytes:
+    def tensor_to_yuv420p10(self, frame: torch.Tensor, pixel_format: str = "yuv420p10le") -> bytes:
         """(1,3,H,W) float 0..1 -> packed yuv420p10le bytes (BT.709, limited range).
 
         Doing this on the GPU keeps the pipe at 3 bytes/pixel instead of 6 (rgb48le) while
@@ -283,7 +283,16 @@ class TorchUtils:
         yq = (y.mul_(876.0).add_(64.0).round_().clamp_(64, 940)).to(torch.uint16).reshape(-1)
         uq = (cb.mul_(896.0).add_(512.0).round_().clamp_(64, 960)).to(torch.uint16).reshape(-1)
         vq = (cr.mul_(896.0).add_(512.0).round_().clamp_(64, 960)).to(torch.uint16).reshape(-1)
-        packed = torch.cat((yq, uq, vq)).cpu().numpy()
+        if pixel_format == "p010le":
+            # P010LE: 10 bits in the MSBs of 16-bit words, chroma interleaved (U0 V0 U1 V1 ...)
+            # P010LE keeps the 10-bit sample in the MSBs of the 16-bit word (x64); with the
+            # sample in the low bits ffmpeg decodes it as garbage (measured: R=B=0).
+            # CUDA has no uint16 shift, so shift in int32 and come back
+            uv = torch.stack(((uq.to(torch.int32) << 6).to(torch.uint16),
+                              (vq.to(torch.int32) << 6).to(torch.uint16)), dim=-1).reshape(-1)
+            packed = torch.cat(((yq.to(torch.int32) << 6).to(torch.uint16), uv)).cpu().numpy()
+        else:
+            packed = torch.cat((yq, uq, vq)).cpu().numpy()
         return packed.tobytes()
 
     @staticmethod

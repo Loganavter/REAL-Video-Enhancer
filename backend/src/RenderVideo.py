@@ -149,6 +149,7 @@ class Render:
         self.trt_tiling_level = trt_tiling_level
         self.trt_timing_iters = trt_timing_iters
         self.trt_streams = trt_streams
+
         self.uncacheNextFrame = False
         self.UHD_mode = UHD_mode
         self.dynamic_scaled_optical_flow = dynamic_scaled_optical_flow
@@ -208,6 +209,15 @@ class Render:
         self.high_bitdepth = high_bitdepth
 
         video_encoder = EncoderSettings(video_encoder_preset)
+        # NVENC wants P010 and repacks planar internally (~1.5 ms/frame at 2160p), but the
+        # P010 pipe is NOT validated end to end here: the packing matches the planar decode
+        # bit-exactly in isolation, yet a full render through hevc_nvenc diverges from the
+        # planar reference (31 dB). An opt-in, not a default, until that is explained.
+        self.pipePixelFormat = (
+            "p010le"
+            if (os.environ.get("RVE_P010") and video_encoder.getPresetTag() in ("x265_nvenc", "av1_nvenc"))
+            else "yuv420p10le"
+        )
         audio_encoder = EncoderSettings(audio_encoder_preset, type="audio")
         subtitle_encoder = EncoderSettings(subtitle_encoder_preset, type="subtitle")
 
@@ -511,6 +521,7 @@ class Render:
             trt_tiling_level=self.trt_tiling_level,
             trt_timing_iters=self.trt_timing_iters,
             trt_streams=self.trt_streams,
+            pipe_pixel_format=getattr(self, "pipePixelFormat", "yuv420p10le"),
             hdr_mode=self.hdr_mode,
             high_bitdepth=getattr(self, "high_bitdepth", self.hdr_mode),
             tile_reuse=getattr(self, "tileReuse", False),

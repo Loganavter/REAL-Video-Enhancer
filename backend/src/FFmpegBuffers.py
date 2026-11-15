@@ -270,8 +270,13 @@ class FFmpegWrite(Buffer):
     def _pipe_input_pixel_format(self) -> str:
         """What the raw pipe carries from the renderer to ffmpeg."""
         if self.high_bitdepth and not self.hdr_mode:
-            # the GPU already produced packed YUV420p10 (see TorchUtils.tensor_to_yuv420p10)
-            return "yuv420p10le"
+            # the GPU already produced packed YUV420p10 (see TorchUtils.tensor_to_yuv420p10);
+            # NVENC wants P010, libx265 wants planar - chosen from the encoder preset
+            try:
+                tag = self.video_encoder.getPresetTag()
+            except Exception:
+                tag = ""
+            return "p010le" if tag in ("x265_nvenc", "av1_nvenc") else "yuv420p10le"
         return "rgb48le" if self.high_bitdepth else "rgb24"
 
     def _color_convert_args(self) -> list[str]:
