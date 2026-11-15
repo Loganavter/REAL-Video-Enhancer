@@ -1341,10 +1341,38 @@ Two consequences of that composition are unmeasured:
   | bar: int8(t-1) against fp16(t) - reuse plus engine | 0.006% | 13 | 1.88 |
   | fp16 against fp16, no int8 at all | 0.000% | 10 | 1.03 |
 
-  So the gap is real and **4x, in the safe direction**: the tuner would read 0.024% where the bar measures
-  0.006%, refuse reuse that actually passes, and pay in speed rather than in picture. Quantifying it also
-  says the composition is additive as predicted - 0.006% against 0.000% for the engine alone, i.e. the
-  reuse term adds its own small share instead of being masked.
+  So the gap is 4x on anime - and **Violet inverts the conclusion**:
+
+  | comparison (Violet, adjacent pair 5.000 / 5.042 s) | share | peak | median |
+  |---|---|---|---|
+  | bar: int8(t) against fp16(t) - engine alone | 0.028% | 37 | 1.62 |
+  | tuner: int8(t) against int8(t-1) | **0.242%** | 19 | 2.61 |
+  | bar: int8(t-1) against fp16(t) - reuse plus engine | **0.146%** | 34 | 2.24 |
+  | fp16 against fp16, no int8 | 0.009% | 14 | 1.59 |
+
+  On the heavy material the composition **crosses the bar** (0.146% against 0.1%) while the fp16 pipeline
+  reads 0.009% on the same pair. So int8 does not merely tighten the margin there - it removes reuse the
+  shipped engine is allowed: under fp16 the gate certifies the pair, under int8 both the tuner (0.242%) and
+  the bar (0.146%) refuse it. The cost is speed on exactly the material that has the least of it, and it is
+  the first place in this lane where int8 is worse than what ships on a statistic that matters.
+
+  Two mechanisms, and neither is the one I first wrote:
+  - the composition is **not** additive in proportion; two sub-threshold errors cross the threshold
+    together (anime: 0.000% + 0.000% -> 0.006%), because what sums is the error *distribution* below the
+    bar, not the sets of failing pixels. The triangle-inequality bound of 0.067% was never a bound on a
+    share, and it also mixed Violet's numbers with anime's to get there;
+  - in the body of the distribution the errors add **in quadrature** (median sqrt(1.03^2 + 1.65^2) = 1.94
+    against 1.88 measured), but the tail is not Gaussian: at sigma 2.88 a Gaussian would put 0.55% above
+    8 levels where 0.006% is measured, 90x less. Quantisation error is bounded at half a step, and a
+    bounded distribution's tail is exponentially sensitive to where its edge sits - which is why the share
+    moved 11.6x while the median moved 2.6x.
+
+  And the blind spot is the point, not the conservatism: on a **static** pair int8(t) equals int8(t-1)
+  exactly, so the tuner certifies zero while the bar measures the engine's own error. The tuner is blind to
+  the engine's error precisely on the frames it certifies. What keeps that safe is not the sign of the gap
+  but that the engine's own error sits far under the bar everywhere measured (0.000-0.005% anime, 0.028%
+  Violet). The fix is therefore a **floor**, not a comparison: certify the engine against fp16 on the
+  calibration frames and treat that as the lower bound of what the bar will see.
 
 **And architecture weighs more than the remaining accuracy.** At 1.97 ms per block, keeping the TRT head
 and tail gives 39.6 ms = 1.42x engine / 1.24x wall; doing head and tail as Triton memory-bound kernels
