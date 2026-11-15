@@ -450,7 +450,32 @@ Two side results, both useful:
   refuses depth on this material), and it is also why the sample cannot be read as a smooth
   continuous quantity.
 
-## Provenance of the rows in this file## Provenance of the rows in this file
+## Is `tiling=none` faster than what ships? No - and the probe that said so measured a different engine
+
+A three-way engine-level probe of raw-TRT plans (round-robin, 7 rounds, 2250 MHz / 161 W) put `none`
+5% ahead: **53.64** against 56.67 (`moderate`) and 56.57 (`full`). That looked like a free 5% behind a
+flag, so it was taken to the product: five rounds per level through the app, every engine cached,
+interleaved, reading the app's own reported per-frame engine time (medians of rounds 2-5; the first
+round is cold):
+
+| level | wall | app's `inference` | vs full |
+|---|---|---|---|
+| `full` (shipped) | **11.32 s** | **15.37 ms** | - |
+| `none` | 11.35 s | 15.45 ms | +0.2% / +0.5% |
+| `moderate` | 11.75 s | 16.29 ms | +3.7% / +6.0% |
+
+So the default is the best of the three, `none` is indistinguishable from it, and the flag's real
+content is "not moderate" - which reproduces the original 3.8% A/B as 3.7%. The isolated probe was
+not wrong about its own plans: the app builds through torch-tensorrt, and its `none` engine measures
+56.6 ms per rendered frame against `full`'s 56.3. **A hand-built plan is not the shipped engine**, and
+engine-level numbers from one build path do not transfer to another.
+
+Method note, because the first attempt at this was wasted: that A/B was run while the sample/clip
+renders were still going (`ab_moderate_1` at 16:27:04 and `sp_vi48` at 16:27:06), which produced 18.6
+and 23.9 s for `moderate` and a false "no difference" verdict. "One GPU job at a time" is a rule
+about *this* measurement too.
+
+## Provenance of the rows in this file
 
 Five things changed after most of these numbers were taken, and it is worth knowing which rows
 predate which change:
