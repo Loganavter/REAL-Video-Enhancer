@@ -252,6 +252,29 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**And the comparison itself fails A/A: my harness cannot reproduce the simulation it is comparing against.**
+
+| chain | vs fp16 |
+|---|---|
+| my torch chain, chain grid, int conv (variant A) | 0.4795% |
+| my torch chain, **the simulation's own hop**, fp16 grid, float conv (variant B) | 0.4865% |
+| `quantised_forward` itself | **0.0000%** |
+| `quantised_forward` with the model's weights quantised too | **0.0000%** |
+
+Variant B is built to be the simulation's hop verbatim - per-tensor input grid from `inputs[key]`, per-channel
+output grid from `outputs[key]`, PReLU, one quantisation per hop - and it still reads 0.4865% where the
+simulation reads 0.0000%. So the harness and the thing it measures differ in something not yet identified, and
+**every comparison of the pipeline against `quantised_forward` in this stage inherits that error**, including
+the 1.569% headline: it is a pipeline measured against a reference my own harness cannot reproduce.
+
+That is the pattern this file already names twice (the empty graph that reported OK, the reference that ignored
+its weight scale): an instrument that disagrees with itself by 0.48 percentage points is not a measuring stick.
+
+The next step is therefore not another hypothesis about the kernel - that is already exonerated bit-for-bit -
+but an A/A on the harness: run variant B and `quantised_forward` on the *same* activation and compare their
+per-layer outputs, layer by layer, until the first divergence names the line where my hop differs. Only after
+that is the 1.569% interpretable at all.
+
 **The separating test: the kernel and a torch chain with the same bookkeeping agree exactly.**
 
 | chain | vs fp16 |
