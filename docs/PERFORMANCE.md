@@ -59,6 +59,16 @@ preset) before tuning anything else.
 ## Where the remaining time is
 
 Per frame at 2880x2160 output: engine ~35 ms, colour pack + D2H + bytes ~10 ms, the rest is
-reading/writing and the encoder. Ideas with sources are in the session notes: in-process
-encoding from CUDA frames (PyAV 19 / PyNvVideoCodec) is the only large remaining lever
-(estimates 45 -> 20-25 ms/frame), at the cost of owning muxing and audio.
+reading/writing and the encoder.
+
+### In-process encoding: measured, not worth it in this stack
+
+- PyPI `av` 19.0.2 installs and exposes `libx265`/`hevc_nvenc`, but the wheel has **no
+  `av.CudaContext`** and `hevc_nvenc` refuses to open (`avcodec_open2` -> EINVAL) for both
+  `yuv420p10le` and `p010le`, so CUDA-frame encoding is unreachable through PyAV here.
+- Dropping the subprocess and its pipe, same codec: **+2%** on real content - libx265
+  in-process 10.35 s vs ffmpeg CLI + pipe 10.58 s for 94 frames at 2880x2160 10-bit. The pipe
+  write overlaps the encode, so it costs ~2 ms/frame, not the 3-8 ms often quoted.
+- The only true zero-copy route left is PyNvVideoCodec (P010 from a CUDA tensor), which moves
+  muxing, timestamps and audio into our code: ~18% of a 45 ms frame for days of work and
+  permanent maintenance. Not recommended.
