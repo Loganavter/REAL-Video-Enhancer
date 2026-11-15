@@ -252,6 +252,45 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**STAGE 1 PASSES ON THE ANIME POPULATION: the rounding shift was implemented wrong, and that was the 5x.**
+The "sign-aware rounding" I tested twice and rejected twice was not a rounding shift at all. Adding `-half` for
+negative products rounds **away from zero**:
+
+| prod | true | floor | round (prod + half) | what I called "sign-aware" |
+|---|---|---|---|---|
+| -436 | -3.406 | -4 | **-3** | -4 |
+| -300 | -2.344 | -3 | **-2** | -3 |
+| -200 | -1.562 | -2 | **-2** | -3 |
+| 200 | 1.562 | 1 | **2** | 2 |
+
+So the 4.990% and 2.773% readings measured a shift that was worse than flooring by construction, and the
+conclusion "the truncation is compensating something" was an artefact of my own instrument. With ONE constant for
+both signs - `((a * m) + (1 << (shift - 1))) >> shift` - the same build reads:
+
+    anime 1920x1080, pct 100, recalibration on:  >8 0.00043%  peak 10  median 1.72 levels
+    simulation, same frame:                      >8 0.00000%  peak  8  median 1.21 levels
+
+Against the gate's own anime band (0.000-0.005%): **passed**, and the peak sits at 10 against a guidance of 20.
+That is 1.569% -> 0.00043%, and 9 pixels of 2 073 600 above the 8-level bar.
+
+**The Violet half of the gate does not reproduce, and the build loses there.** The recorded band is 0.028-0.031%,
+but the simulation on a 4K Violet frame (t = 10 s, 3840x2160) reads **0.01059%**, so the band belongs to a
+different population and cannot be judged against. Comparing build to simulation on the same frame:
+
+| | share |
+|---|---|
+| build, Violet 3840x2160 | 0.07115% |
+| simulation, same frame | 0.01059% |
+| ratio | **6.72x** |
+
+which is the plan's own kill condition ("build/simulation disagree by more than 2x - stop and find out"). So
+stage 1 holds where the gate is defined and does not hold at 4K; the 4K gap is the next thing to close, not a
+rounding question.
+
+Two side results: at pct 100 the grid now uses `amax` instead of `quantile` (identical value, no sort buffer,
+which is what let the 4K frame run at all instead of OOM), and measuring the grids on the quantised model instead
+of the fp16 one moves 1080p 0.00043 -> 0.00047 and 4K 0.07115 -> 0.06436, so the grid source is not the mechanism.
+
 **Cost of the fix: none in registers, and the prologue is what costs time.** `cuobjdump -res-usage` on the
 compiled cubin with the bias in the epilogue: **REG 241, STACK 0, LOCAL 0** (against 255 before), so the bias add
 does not touch occupancy and the accumulator is still int32 - int8-MMA is intact. Timing on the full 1920x1080

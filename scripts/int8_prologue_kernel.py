@@ -19,7 +19,10 @@ def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, bias_ptr, slop
         inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
         src = (yy * W + xx)[:, None] * C + lanes[None, :]
         a = tl.load(x_ptr + src, mask=inside[:, None], other=0).to(tl.int32)
-        a = (a * m[None, :]) >> shift               # per-channel grid -> per-tensor grid, integer
+        # per-channel grid -> per-tensor grid: add half a step and let the arithmetic shift floor.
+        # ONE constant for both signs - adding -half for negatives (what this did first) rounds AWAY
+        # from zero, which is worse than flooring, not better.
+        a = ((a * m[None, :]) + (1 << (shift - 1))) >> shift
         a = tl.minimum(tl.maximum(a, -127), 127).to(tl.int8)
         b = tl.load(w_ptr + tap * C * C + lanes[:, None] * C + lanes[None, :])
         acc += tl.dot(a, b, out_dtype=tl.int32)

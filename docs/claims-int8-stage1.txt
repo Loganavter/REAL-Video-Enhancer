@@ -1,31 +1,26 @@
-# Stage 1 claims, 2026-11-16 (after the bias fix). Run: scripts/claim_check.py docs/claims-int8-stage1.txt
+# Stage 1 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage1.txt
 # Every number carries the population it was measured on.
 
-@bar bar_share 0.1  %
-@bar gate_lo   0.005 %
-@bar gate_hi   0.017 %
+@bar bar_share    0.1   %
+@bar gate_anime   0.005 %     # the plan's anime band: 0.000-0.005%
+@bar max_ratio    2.0   x     # the plan's kill rule: build/simulation agree within 2x
 
-@claim pipeline_share      0.091 %  "1920x1080, pct 99, recalibration on, same frame" measured
-@claim pipeline_share_100  0.929 %  "1920x1080, pct 100, recalibration on, same frame" measured
-@claim pipeline_norecal99  0.797 %  "1920x1080, pct 99, no recalibration, same frame" measured
-@claim pipeline_round100   4.990 %  "1920x1080, pct 100, rounding instead of flooring shift" measured
-@claim simulation_share    0.000 %  "1920x1080, same frame, quantised_forward" measured
-@claim chain_512_share     0.000 %  "512x512, kernel chain fed the simulation's grids" measured
-@claim fp16_block_ms       2.93  ms "1920x1080 fp16 fused block" measured
-@claim int8_block_ms       1.97  ms "1920x1080 int8 BM256 255 regs" measured
-@claim block_speedup       1.487 x  "derived: fp16 block / int8 block" derived
-@derived block_speedup "2.93 / 1.97 = 1.487, same shape, same frame"
+@claim pipeline_share      0.00043 %  "anime 1920x1080, pct 100, recalibration on, true rounding shift" measured
+@claim simulation_share    0.00000 %  "anime 1920x1080, same frame, quantised_forward" measured
+@claim pipeline_peak      10        levels "anime 1920x1080, same run" measured
+@claim pipeline_median     1.72     levels "anime 1920x1080, same run" measured
 
-@claim saturation_layer1  18.52 %  "layer 1, recalibrated chain, values at the clamp" measured
-@claim saturation_sim      0.00 %  "layer 1, simulation, same frame" measured
-@claim bias_mean_body      2.11 %  "mean |bias| over the 18 body convs, as a share of the activation scale" measured
+@claim pipeline_violet_4k  0.07115 %  "Violet 3840x2160, pct 100, frame at t=10s" measured
+@claim sim_violet_4k       0.01059 %  "Violet 3840x2160, same frame, quantised_forward" measured
+@claim ratio_violet_4k     6.72    x  "derived: pipeline_violet_4k / sim_violet_4k, same frame" derived
+@derived ratio_violet_4k "0.07115 / 0.01059 = 6.72, same frame, same settings"
 
-# The bar: the pipeline must sit under the share it will be judged by. This now PASSES (0.091 < 0.1).
+@claim bias_mean_body      2.11 %   "mean |bias| over the 18 body convs, against activations of ~0.5" measured
+@claim kernel_regs        241   regs "ptxas on the cubin with the bias in the epilogue" measured
+
+# The anime gate: the build must land inside the simulation's band. PASSES.
+@below pipeline_share gate_anime
 @below pipeline_share bar_share
 
-# The gate: reproduce the simulation's number. Still FAILS - that failure is the stage-1 result.
-@below pipeline_share gate_hi
-
-# A/A: at 512x512 the chain reproduces the simulation exactly. Two claims, one population.
-@claim chain_matches_sim_512 0.000 % "512x512, kernel chain vs quantised_forward, same grids" measured
-@same chain_matches_sim_512 chain_512_share
+# The 4K comparison: the build must agree with the simulation within 2x. FAILS at 6.72x.
+@below ratio_violet_4k max_ratio
