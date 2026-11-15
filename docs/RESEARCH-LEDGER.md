@@ -1337,6 +1337,24 @@ and tail gives 39.6 ms = 1.42x engine / 1.24x wall; doing head and tail as Trito
 (145 MB and 195 MB of traffic, floors 0.50 and 0.68 ms against the current 3.90 and 3.35) gives 33.2 ms =
 1.69x / 1.36x. That 0.12x of wall is larger than everything left in the accuracy lane.
 
+**The spread, on the final configuration, inverts the margin recommendation and beats the shipped
+default on anime.** Per-channel weights, symmetric activations, calibrated per title:
+
+| frame | margin 1.0 | margin 1.25 |
+|---|---|---|
+| Chainsaw 3 s | **0.000% / peak 10** | 0.005% / 13 |
+| Chainsaw 7 s | **0.005% / 13** | 0.018% / 16 |
+| Violet 5 s | **0.029% / 35** | 0.058% / 37 |
+
+Margin 1.0 dominates on both titles - better share *and* lower peak - so the headroom was never needed
+once the head's input is pinned to its domain bound. And on anime, the material every shipped number was
+measured on, int8 reads **0.000-0.005% with peaks 10-13 against the gate-only default's 0.009% and peak
+14**: better on both statistics, not merely inside the bar.
+
+Violet remains the heavy case at 0.029% / peak 35, and it is the material whose gate-only defect is
+already 0.096% against anime's 0.009%. So the honest summary of the picture is a range, not a number:
+0.000-0.029% of pixels and peaks 10-35 depending on the title, against bars of 0.1% and ~20.
+
 Finally, there is no tradable point: inside the bar *and* faster than fp16 there is exactly one
 configuration - per-channel weights, symmetric activations, 1.97 ms, 0.058%, peak 37. Everything that
 lowers the peak is slower than the fp16 engine it replaces. So the decision is binary, and the peak is a
