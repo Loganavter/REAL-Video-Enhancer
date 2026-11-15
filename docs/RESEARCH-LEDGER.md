@@ -73,7 +73,7 @@ or run the same pixels in a cheaper numeric format.
 | E10 | hand-written conv kernel / plugin | CORE-TAG/rtx50-realesrgan-video | - | 39.8 TFLOP/s vs the engine's 186.7 on a 5090. Counter-precedent: for a 3x3 conv cuDNN chose Winograd at 74 ms where TRT's best tactic was 156 ms, so TRT's tactic set is not the set of all algorithms | **untested** (was "rejected": the source is one attempt on another card, and it does not measure this GPU) |
 | E11 | L2 persistence window | blog measurement (H100/3090) | 1.02-1.20x | nothing to pin: 1.2 MB of weights. The old justification ("265 MB activation stream") predates the myelin fusion finding - the engine is 25 top-level layers, not 18 separate kernels with a full round trip each - so how much traffic actually remains is unknown; the verdict rests on the weights being 1.2 MB against **32 MB** of L2 (AD106; 24 MB is the 4060 without Ti), not on the traffic count | **rejected** (justification corrected) |
 | E12 | per-layer precision constraints (force fp16 accumulate) | TRT docs | unknown | closed by measurement, not by an API limit: the DETAILED tactic dump shows all 16 body convs already running `f16f16_f16f16` (fp16 accumulation, NHWC). There is no fp32-accumulate share to convert | **closed (already in effect)** |
-| E19 | make the one unfused PReLU fold into the convolution before it | `nsys` per-kernel trace + the engine's subgraph metadata | 2.40 ms (4.2% of the frame) | **located, and the first fix hypothesis is measured and refuted.** The engine fuses 16 of its 17 PReLUs into the body GEMMs (`__myl_CorrMulLtSele`, body.2..body.32) and leaves exactly one separate (`__myl_MulLtSele_myl3_2`), which the metadata attributes to **body.1/PRelu** - directly behind the head convolution. Hypothesis was "the head got `indexed_wo_smem` instead of an xmma with an epilogue, so force another tactic"; **measured false**: rebuilding the same ONNX at `tiling_optimization_level` none, moderate and full gives the same 16 fusion layers and the same single separate kernel every time (moderate even changes the layer mix to 29 with 3 correlations and still leaves it). So the fusion is not a tiling accident. The head is a **3-channel** convolution (RGB in) while the fused pattern is what the 64->64 body convs get - a different GEMM class, K=27 against K=576. The next test is graph surgery, not tactics, and **it is one operation with E18, not two items**: pad the input and the head's weights to **8 channels** (fp16 dense tensor cores want C % 8 == 0; 4 would leave it unaligned and probably reproduce the same unfused path) with zeros, so the head becomes a class the epilogue supports. Order matters more than the padding: padding on the host adds 20.7 MB to the H2D (+3.5 ms at 6 GB/s - a regression), padding on the GPU before the layout kernel grows E18's 0.61 ms to ~1.6 and eats 40% of the prize, while **padding inside the colour kernel straight into NHWC-8** removes E18 (-0.81), folds the PReLU (-2.40), and costs the head +0.07 (narrower input) and +0.25 (3 K-steps instead of 1) - net **about -2.9 ms, 5.1%**. Arithmetic of the head itself: 2.40 - 1.45 = **0.95 ms** if the head doubled, not 1.35 as an earlier revision of this row said. The prize is real: the PReLU pass moves 530.8 MB, whose floor is 1.84 ms, against 2.40 measured = 1.30x | 
+| E19 | make the one unfused PReLU fold into the convolution before it | `nsys` per-kernel trace + the engine's subgraph metadata | 2.40 ms (4.2% of the frame) | **located, and the first fix hypothesis is measured and refuted.** The engine fuses 16 of its 17 PReLUs into the body GEMMs (`__myl_CorrMulLtSele`, body.2..body.32) and leaves exactly one separate (`__myl_MulLtSele_myl3_2`), which the metadata attributes to **body.1/PRelu** - directly behind the head convolution. Hypothesis was "the head got `indexed_wo_smem` instead of an xmma with an epilogue, so force another tactic"; **measured false**: rebuilding the same ONNX at `tiling_optimization_level` none, moderate and full gives the same 16 fusion layers and the same single separate kernel every time (moderate even changes the layer mix to 29 with 3 correlations and still leaves it). So the fusion is not a tiling accident. The head is a **3-channel** convolution (RGB in) while the fused pattern is what the 64->64 body convs get - a different GEMM class, K=27 against K=576. The next test is graph surgery, not tactics, and **it is one operation with E18, not two items**: pad the input and the head's weights to **8 channels** (fp16 dense tensor cores want C % 8 == 0; 4 would leave it unaligned and probably reproduce the same unfused path) with zeros, so the head becomes a class the epilogue supports - **+0.48% of the model's FLOPs** (the head is 7.17 GFLOP, 0.29% of the model, and 8/3 of it is +11.9 GFLOP). Order matters more than the padding: padding on the host adds 20.7 MB to the H2D (+3.5 ms at 6 GB/s - a regression), padding on the GPU before the layout kernel grows E18's 0.61 ms to ~1.6 and eats 40% of the prize, while **padding inside the colour kernel straight into NHWC-8** removes E18 (-0.81), folds the PReLU (-2.40), and costs the head +0.07 (narrower input) and +0.25 (3 K-steps instead of 1) - net **about -2.9 ms, 5.1%**. Arithmetic of the head itself: 2.40 - 1.45 = **0.95 ms** if the head doubled, not 1.35 as an earlier revision of this row said. The prize is real: the PReLU pass moves 530.8 MB, whose floor is 1.84 ms, against 2.40 measured = 1.30x | 
 | E20 | head and tail convolution tactics | `nsys` | ~1.31 ms | both run `indexed_wo_smem` at 1.45 and 1.92 ms against a traffic floor of about 2.06 - the gap is 1.31 ms across the two, and it is the same tactic question as E19 | open |
 | E21 | express the nearest upsampler as a shuffle instead of a gather | `nsys`: `ResizeNearest2D` 0.37 + `__myl_TranReshMoveAdd` 1.06 | ~1.04 ms | 1.43 ms against a ~0.39 floor. Nearest upsample is a pure gather, and `Reshape (1,C,H,1,W,1) -> Expand (...,2,...,2) -> Reshape (1,C,2H,2W)` is the same function in shuffle form, which TRT's shuffle fusion folds into the consumer's indexing - the 0.37 ms kernel then disappears without a new kernel. That is separate from the DepthToSpace idea, which is about PixelShuffle and not about the residual path | open |
 | E18 | NHWC input/output for the engine (removes the layout kernels) - **and see E19: this and the head padding are one operation** | nsys per-kernel trace of the fp16 plan | ~1.5% (0.81 ms/frame) | measured cost, not yet removed: `cuInt8::nchwTonchw<__half, float, 4>` 0.61 ms and `CUTENSOR permutationKernelPLC3` 0.20 ms run once per frame, and no layer in `IProfiler` owns them. It is the only clean ~1.5% left in the engine | open (small, well-defined) |
@@ -407,33 +407,50 @@ What this settled:
   comfort margin was the **retired statistic's** scale: the same family of clean 1080p anime
   measures **0.77** under `box(|diff|)`, i.e. just below Chainsaw Man's 0.95, not an outlier.
 
-## Is the calibration window the fix for the sample bias? No (measured)
+## The sample bar cannot be calibrated yet (measured, and one earlier claim withdrawn)
 
-The acceptance-certified tuner reads 0.02% on its 16 calibration frames and the clip measures 0.096%
-(Violet Evergarden) - a factor of ~5 - so the obvious fix is a longer window. Measured, same clip,
-same preset, with the tuner's HR history resetting at scene cuts:
+The acceptance-certified tuner reads its calibration sample lower than the clip, so the obvious fix
+was a longer window or a tighter sample bar. Both were tried, and neither is established:
 
-| calibration frames | decision | reuse | time | defect on the clip |
-|---|---|---|---|---|
-| 16 | chain 2 | 142/219 | 6.76 s | 0.096% (inside the bar, 4% of margin) |
-| 48 | **chain 3** | 158/219 | 6.55 s | **0.121%** (past the bar) |
+| material | calibration window | tuner's worst share on the sample | decision | reuse | clip, worst frame |
+|---|---|---|---|---|---|
+| Chainsaw Man ep01 | 16 | 0.00 / 0.00 | chain 2 | 146/220 | **0.005%** |
+| Violet Evergarden ep01 | 16 | 0.01 / 0.02 | chain 2 | 142/219 | **0.096%** |
+| anime clip | 16 | 0.00 / 0.00 | chain 4 | 362/498 | **0.017%** |
+| Cowboy Bebop ep01 | 16 | - (floor refuses) | refused | 0 | **0.000%** |
+| Violet Evergarden ep01 | 48 | 1.95 / 99.69 | chain 1 | 117/219 | **0.097%** |
 
-So a longer window makes the *verdict* worse rather than more accurate: more frames mean more
-reachable reuses, the tuner certifies a deeper chain, and the clip then exceeds the number the
-sample promised. The window is not the lever; the sample number needs a margin (a ~0.05% sample bar
-would keep this clip inside), and that calibration is the open item. The 16-frame default stays.
+Three things this table says, and one it cannot:
 
-Two side results from the same pair of runs, both useful:
+- **The sample reads 5x low where it is non-zero at all.** Violet is the only material with a
+  non-zero sample (0.02% against 0.096%), and the other three read 0.00 on 16 frames while their
+  clips measure 0.005-0.017%. So the factor is ~5 on one title and undefined on the rest - **not a
+  calibration, one point**.
+- **The bar cannot be set from passing cases.** A 0.05% sample bar would leave Violet exactly where
+  it is (0.02 < 0.05) and change nothing for any measured configuration. To calibrate it, a
+  *failing* configuration measured on the fixed code is needed, with its sample number.
+- **The 48-frame window is not a fix, and the claim that it made things worse is withdrawn.** The
+  chain 3 / 0.121% result that suggested "longer window certifies deeper and fails the bar" was
+  measured while the tuner's HR history spanned scene cuts (the bug below); with that fixed the same
+  window reads chain 1 at 0.097%, i.e. *more* conservative, not less. Its sample numbers are still
+  contaminated at depth >= 2 (99.69% of pixels differ, which is a cut, not a reuse), so the 48-frame
+  row cannot calibrate anything either. (Its wall time is not quoted: that run collided with another
+  GPU job and measured 16.1 s against 6.8 s for the same decision class.)
+- **The 16-frame window reproduces** across runs (chainsaw 146/220 0.005% and violet 142/219 0.096%
+  on every repetition), which is why it stays the default.
 
-- chain 1 on this clip measures **0.097%** against chain 2's 0.096% at 9.56 against 6.90 s - the
-  cheap depth is not buying picture here either, which is the same conclusion the anime clip
-  reached with tiles off (0.016% against 0.017%).
-- the 48-frame run initially read `d2 worst share 99.69%`, which is a bug I introduced: the app
-  reset the tuner's block-mean history at a scene cut but not the HR-frame history added in the same
-  round, so the acceptance statistic compared across a cut. Fixed; the 16-frame run reproduces
-  exactly afterwards, and the fix is what makes the 48-frame row above meaningful.
+Two side results, both useful:
 
-## Provenance of the rows in this file
+- chain 1 on Violet measures **0.097%** against chain 2's 0.096% (9.56 against 6.90 s): the cheap
+  depth is not buying picture on this clip either, the same conclusion the anime clip reached with
+  tiles off (0.016% against 0.017%).
+- the depth-2 sample numbers of 99.69% are the honest limit of the acceptance statistic on a moving
+  shot: per-pixel differences above 8 levels stay huge under a pan even when the block-mean
+  statistic says the frame barely moved. That is the statistic doing its job (it is why the tuner
+  refuses depth on this material), and it is also why the sample cannot be read as a smooth
+  continuous quantity.
+
+## Provenance of the rows in this file## Provenance of the rows in this file
 
 Five things changed after most of these numbers were taken, and it is worth knowing which rows
 predate which change:
