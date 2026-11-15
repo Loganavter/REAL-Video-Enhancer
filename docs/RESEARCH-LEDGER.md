@@ -1096,6 +1096,31 @@ cover `mask + 18`. Measured areas, with `c = 1/2.2`:
 So per-frame spatial routing is worth 1.0-1.3x, not 1.8x, and the 18-pixel receptive radius is the
 reason - the same tax that ate every other algorithmic saving in this ledger.
 
+**And the gated statistic, measured properly, is 1.31x of wall clock at its best.** The first attempt at
+it used `max|pixel difference|` as a stand-in for the gate and declared 97.7% of the clip rendered where
+the real gate renders 33.6%; the gate pools luma into 32x32 blocks at 1080p and thresholds the max over
+blocks. Reimplemented that way it renders 73 of 219 frames (33.3%, against the app's 146/220 reused),
+which is the check that matters, and then the 2x2 grid separates the two mask parameters:
+
+| mask | F | change on rendered frames | cost (engine) | wall |
+|---|---|---|---|---|
+| thr 2, r2 | 78.8% | 46.7% | 1.09x | 1.05x |
+| thr 2, r18 | 93.4% | 18.5% | 1.56x | 1.30x |
+| thr 8, r2 | 33.8% | 25.4% | 1.41x | 1.23x |
+| **thr 8, r18** | 45.6% | **18.0%** | **1.58x** | **1.31x** |
+
+The surprise is that the *larger* mask is the stabler one: a thin mask thresholded on gradient magnitude
+flickers pixel by pixel at the threshold, so its frames differ by 25%; a mask dilated to 18 becomes a
+smooth blob that moves as a whole, and the recomputed area falls to 18%. The composite quality is
+unchanged by that choice - thr 8, r18 covers 97.1% of the thin model's error pixels and measures 0.046%
+against the bar.
+
+So the lane's real numbers are **1.58x of engine time and 1.31x of wall clock**, against a ceiling of
+2.2x engine (thin pass alone) and 1.53x wall, and against 1.40x engine / 1.23x wall for int8's measured
+ceiling. Routing is therefore *not* worse than int8 on the measured ceiling - it is marginally better -
+and the argument for int8 is not the size of the prize: it is that int8 does not depend on the content,
+does not touch the picture (0.000% against 0.071%) and needs no masks, no cone and no seam treatment.
+
 **What survives is the temporal version.** The LR gradient mask is mostly scene contours, and contours
 are nearly static between frames: over a 1/24 s pair the mask+18 region changes by 1.2-2.3%. With its
 own halo on the changed part, the cost is `c + |delta + 18|`:

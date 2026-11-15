@@ -38,7 +38,8 @@ def frames(clip, w, h, limit):
         buf = proc.stdout.read(size)
         if len(buf) < size:
             break
-        yield torch.frombuffer(bytearray(buf), dtype=torch.uint8).reshape(1, 1, h, w).float()
+        # 2 Mpx with a 37x37 max-pool per stage is minutes on CPU and milliseconds on the card
+        yield torch.frombuffer(bytearray(buf), dtype=torch.uint8).reshape(1, 1, h, w).float().cuda()
         n += 1
         if limit and n >= limit:
             break
