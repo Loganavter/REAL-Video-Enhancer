@@ -118,7 +118,9 @@ def main() -> int:
     for i in range(len(layers)):
         key = f"body.{2 * (i + 1) + 1}"
         lo_c, hi_c = outputs[key]
-        outs.append(float(torch.maximum(hi_c.abs(), lo_c.abs()).max()) / 127.0)
+        # per CHANNEL, not per tensor: the PReLU slopes span -1.39..1.70, so the post-PReLU range differs
+        # by factors across channels and a single scalar grid throws bits away on the narrow ones
+        outs.append((torch.maximum(hi_c.abs(), lo_c.abs()).float() / 127.0).clamp_min(1e-8))
 
     def run_pipeline():
         """Per-channel activation grids throughout, with each layer's input scale folded into its weights.
@@ -132,18 +134,18 @@ def main() -> int:
             w_eff = w_full * s_in.view(1, -1, 1, 1)                  # absorb this layer's input grid
             w_q, w_scale = quantise_weights(w_eff)
             tap_w = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
-            ovec = torch.full_like(w_scale, float(s_out)).contiguous()
+            ovec = s_out.contiguous()
             out = torch.empty_like(buf)
             grid = (triton.cdiv(args.height * args.width, BLOCK_M),)
             body_kernel[grid](buf, tap_w, w_scale.contiguous(), slope, ovec, out, args.height, args.width,
                               BLOCK_M=BLOCK_M, C=64, num_warps=2)
-            buf, s_in = out, torch.full_like(s_in, float(s_out))
-        return buf, float(s_out)
+            buf, s_in = out, s_out
+        return buf, s_out
 
     out_q, s_last = run_pipeline()
 
     with torch.no_grad():
-        last = out_q.permute(0, 3, 1, 2).float() * s_last
+        last = out_q.permute(0, 3, 1, 2).float() * s_last.view(1, -1, 1, 1)
         up = model.upsampler(tail_conv(last.half()))
         got = (up.float() + torch.nn.functional.interpolate(x, scale_factor=scale_up, mode="nearest").float())
 

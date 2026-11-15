@@ -141,6 +141,28 @@ activations drift away from it and clip.
 Three things are now excluded by measurement: the kernel's dot orientation (exact against `_int_mm`), the
 scale granularity (3.680 against 3.589), and the kernel's maths against the simulation (0.0002).
 
+**And the comparison the plan asked for says the simulation is not a reachable target.** On the same 512x512
+frame the chained simulation reads **0.000% / peak 4 / median 0.65**, which is essentially exact, while the
+pipeline reads 1.693-3.589%. The reason is structural, not a bug:
+
+- the simulation quantises the **input of each conv per-tensor** on a *float* tensor that already carries the
+  previous layer's **per-channel** grid. That transition is free in float and is what makes it accurate;
+- a real int8 chain must pick one grid per hop. Per-channel output grids (1.693% with the scale folded into
+  the weights at alpha = 1) keep the ranges but wreck the weight conditioning - `w * s_in[cin]` spans 30x
+  across input channels and is then quantised per output channel, which is exactly the trade the correlation
+  measurement (+0.45) predicted;
+- per-tensor output grids chain cheaply but read 3.589%;
+- the third option, an explicit requant between grids, costs 266 MB per hop (0.92 ms x 16 = 14.7 ms), which
+  erases the 1.53x the block wins.
+
+So stage 1's gate as written - "reproduce the simulation's numbers" - cannot be met by any chainable int8
+body: the simulation's 0.000% is bought with a free float requant that the hardware does not have. The gate
+has to be restated against what a chain can do, and 1.693% is what it does.
+
+That is the honest state, and it is a finding about the lane rather than a step towards its completion: the
+16-block int8 body, as measured, does not hold the 0.1% bar when chained, and the simulation that said it
+would was measuring a different pipeline.
+
 **Second pass, still failing, and the layout is the suspect.** Per-layer isolation on 256x256 says every
 layer is wrong on its own (ratio 0.12-3.7 against the fp16 activation, relative error 1.1-4.3), so it is not
 the chaining. The kernel was verified bit-exact in stage 0 only on **synthetic** weights already in the
