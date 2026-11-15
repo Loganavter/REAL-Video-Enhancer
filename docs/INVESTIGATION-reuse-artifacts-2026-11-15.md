@@ -93,9 +93,13 @@ filter the same titles certify **chain 2** and measure **0.005%** and **0.096%**
 *immediate predecessor* and picked a threshold from a 2-level budget. The gate, however, serves a
 frame from a reference up to `max_chain` frames old. On static anime the two agree; on moving
 content the four-step error is an order of magnitude larger (anime: one-step 1.65 levels, four-step
-9.26). It now records one delta per chain depth and certifies the depth itself, with the same
-strict budget at every depth, and a candidate that certifies nothing falls back to "do not reuse"
-in the quality-first preset.
+9.26). Three things were wrong at once and all three are fixed: it now records one value per chain
+depth; it scores **only depths the gate can reach** (serving a `k`-frame-old reference requires the
+frames in between to have been reused - that one cost 1.5x until it was fixed); and it certifies on
+**the acceptance statistic itself** (share of pixels above 8 levels in RGB, worst frame) rather than
+on the block-mean proxy, so "the depth it can prove" is the same measurement the pictures are judged
+by. A candidate that certifies nothing still falls back to "do not reuse" in the quality-first
+preset.
 
 **Whole-frame metrics cannot see this defect.** The same pairs, PSNR and VMAF:
 

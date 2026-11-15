@@ -373,9 +373,16 @@ counter is read (§6, item 2).
    investigation, not as a recommendation. The verdict is therefore "the quantised block boundary costs more than int8
    saves on this architecture", not "no int8 kernel exists".
 
-What is left is item (2) alone: `nsys` tensor-active-% and DRAM bytes with clocks pinned would turn
-§3 from inference into measurement. Until then, "per-frame is at its floor" remains a statement
-about *what we tried*.
+6. **The non-GEMM 14% of the frame is now mapped and quantified.** `nsys` puts 8.11 ms of the 56.8 ms
+   outside the 16 body GEMMs, and four of the five pieces have a measured size and a named fix:
+   the one unfused PReLU (E19, 2.40 ms - it sits behind the *head* convolution, and three builds at
+   different tiling levels leave it there, so the fix is graph surgery on the head's 3-channel
+   shape, not a tactic), head and tail tactics (E20, 1.31 ms), `ResizeNearest2D` + the myelin
+   reshape/add (E21, 1.04 ms), and the layout kernels (E18, 0.81 ms). Together **5.56 ms = 9.8% of
+   the frame**, which is now the largest quantified per-frame headroom in this report.
+
+What is left is byte counting: `ncu` needs `RmProfilingAdminOnly=0` (one line plus a reboot), and
+until then the DRAM split stays a bound (§6 item 2) rather than a measurement.
 
 ## 7. The lever that works today: fewer frames
 

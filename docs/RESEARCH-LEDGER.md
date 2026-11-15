@@ -35,8 +35,11 @@ something the numbers say. What the numbers say is narrower, and still useful:
 
 - the model runs faster than any of its own convolutions measured standalone, and the only
   compute-dominated standalone conv (256->256, 49 TF/s) is *slower* than the whole network;
-- six kernel-level ideas were measured as dead ends or closed by measurement (below: E5, E9',
-  E12, E13, E14, E17), two are open (E16 Winograd, E18 layout kernels);
+- seven kernel-level ideas are closed by measurement (below: E5, E9', E12, E13, E14, E17, and E19's
+  tiling hypothesis), five are open and all five are quantified: E16 Winograd, E18 layout kernels
+  (0.81 ms), E19 the head convolution's 3-channel shape (2.40 ms), E20 head/tail tactics (1.31 ms),
+  E21 upsampler/reshape fusion (1.04 ms) - the last four are 5.56 ms, 9.8% of the frame, and E10
+  (hand-written kernels) is untested;
 - every per-layer time is spread evenly (1.3-3.1 ms over 18 conv subgraphs, top layer 3.15 ms), so
   no single layer is the lever - and `nsys` has since confirmed the shape: 25 launches, 48.7 of
   56.8 ms in the 16 body GEMMs, 8.1 ms in everything else, no launch gap.
@@ -432,8 +435,8 @@ Two side results from the same pair of runs, both useful:
 
 ## Provenance of the rows in this file
 
-Three defects were fixed after most of these numbers were taken, and it is worth knowing which rows
-predate which fix:
+Five things changed after most of these numbers were taken, and it is worth knowing which rows
+predate which change:
 
 - **the `mean_abs` statistic** - every row below is post-change unless it says `|box - box|`;
 - **the noise-floor limit (2.0 -> 1.5)** - rows measured at 2.0 say so (the grain-4 row above does);
@@ -444,7 +447,11 @@ predate which fix:
   because those clips either certify the same depth or refuse;
 - the dead scene-cut guard (it had not run since the statistic changed) did **not** alter any reuse
   decision either - a cut frame misses the threshold by 255 levels regardless - but it fed the tuner
-  a history spanning the cut, which is part of what the reachability fix addresses.
+  a history spanning the cut, which is part of what the reachability fix addresses;
+- **the acceptance certification** (2026-11-15, last) changed which instrument decides. Rows measured
+  before it were certified on the block-mean proxy; on the three Blu-rays both instruments agreed
+  (same chain, same counts), so those rows are comparable, and the shipping numbers quoted above are
+  from the acceptance-certified run.
 
 ## Grain sweep, re-measured on the statistic that ships (2026-11-15)
 

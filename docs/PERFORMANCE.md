@@ -28,23 +28,28 @@ which frames were sampled, not which configuration ran). (Earlier
 revisions put "62% frame reuse -> 3.84 s" here; 3.84 s is the 94-frame 2160p clip at 8-bit output
 from the depth comparison in the investigation, not the 502-frame run.)
 
-### The tuner's budget and the acceptance bar are different instruments
+### One instrument decides, the other is a log line
 
-Two numbers sit next to each other in this file and are not comparable, which has caused at least
-one wrong "the preset is refusing although the frame is fine" conclusion:
+Two measurements exist side by side in this file, and until recently the tuner decided on the one the
+pictures are *not* judged by:
 
-- the **tuner** decides on a block-mean proxy at the output scale - p90 of the HR delta, 2 levels
-  at depth 1 and 12 at depth >= 2 - because that is what it can measure without touching the
-  reference;
-- **acceptance** is a per-pixel count, 0.1% of pixels more than 8 levels off in any channel on the
-  worst frame.
+- the **acceptance statistic** - the share of pixels more than 8 levels off in any RGB channel, on
+  the worst frame of the sample, bar **0.1%**. This is now what the tuner certifies against, computed
+  on the same calibration frames by the app;
+- the **block-mean proxy** - p90 of the HR delta, 2 levels at depth 1 and 12 at depth >= 2. It is
+  still measured and printed (`d1 p90 0.3 (limit 2)`), and it still decides when a caller supplies
+  no acceptance data (the unit tests do), but the app no longer lets it overrule the picture.
 
-The mapping between them was measured on the anime clip: at depth 4 the proxy reads **9.3** while
-the same reuses realise **0.00%** of pixels above 8 levels and a worst 64 px block of 2.0 levels.
-So the chain budget of 12 is a motion measure, not a loosened error budget, and the depth-1 budget
-of 2 is the strict one. A run where the tuner refuses while the pixel metric would have passed is
-therefore not a wiring fault - it is the stricter instrument winning - and the converse (pixel
-metric fails while the tuner certified) is what the noise-floor limit above exists to prevent.
+Why that mattered: the mapping between the two was only ever measured in one point - at depth 4 the
+proxy reads **9.3** while the same reuses realise **0.00%** of pixels above 8 levels and a worst
+64 px block of 2.0 levels - and a single point cannot certify a rule. Every false "price of quality"
+in the ledger came from that gap: the statistic's order of operations, a one-step budget applied to a
+four-step chain, and depths the gate could not reach.
+
+The residue is not zero, and it is stated rather than hidden: the calibration sample reads lower than
+the clip (Violet: 0.02% against 0.096%), a longer window makes the verdict *worse* rather than
+better, and a sample bar with a margin (~0.05%) is the open calibration question. The noise-floor
+limit above remains the cheap pre-filter that stops hopeless material before any of this runs.
 
 The one time this *was* a fault is worth naming, because it is the reason the budget is 2 and not 1:
 at a 1-level budget `best` disabled the gate even on clean anime (18.1 s against 7.65 s, the gate
