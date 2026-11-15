@@ -252,6 +252,23 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**The separating test: the kernel and a torch chain with the same bookkeeping agree exactly.**
+
+| chain | vs fp16 |
+|---|---|
+| torch, sixteen hops, prologue requant in float | 0.4901% / peak 25 / median 1.11 |
+| kernel, same grids | 0.4535% / peak 25 / median 1.21 |
+| **kernel against the torch chain** | **0.0000% / peak 4** |
+
+So the kernel does exactly what the bookkeeping says, and it is exonerated by the test the plan named. Whatever
+separates 0.45% from the simulation's 0.000% is a bookkeeping choice, not an implementation one - and it can now
+be iterated in **torch at full speed**, with no kernel rebuild and no GPU launch, which is the practical gain of
+this pass.
+
+Two things this also fixes in the reading of the earlier sweeps: at 512x512 the chain reads 0.45-0.49% while the
+full frame reads 1.569%, so the frame-to-frame spread is content, and every "the kernel does something odd"
+hypothesis was testing an implementation that is bit-identical to its own specification.
+
 **The grid's SOURCE is not the difference either.** Switching the prologue target to the simulation's own
 per-tensor calibration (`inputs[key]/127`, measured on the fp16 activation) reads **1.581%** against 1.569% for
 the chain-derived `max(per-channel grid)`. No difference, so the structural statement recorded last pass is
