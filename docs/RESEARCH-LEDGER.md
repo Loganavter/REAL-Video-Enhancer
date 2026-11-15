@@ -499,6 +499,23 @@ That is the gate for any future "make it the default": the export prerequisite h
 architectures, and the structures that break are caught by a 32x32 probe forward rather than by a
 render.
 
+The raw path itself was then checked for **correctness** on the two architectures that build at
+256x256 - a compact SRVGG and an RRDB - by comparing the plan's output against eager torch:
+**0.000% of pixels above 8 levels, peak 2**, on both. So the path computes the same function, not just
+the same shapes.
+
+The third representative, DAT (`4xLSDIRDAT`), cannot even run in fp16 through this codebase -
+`RuntimeError: expected scalar type Float but found Half` in its attention - which is why the app has a
+precision fallback and is not a property of the raw path. The fourth, SPAN, was not reached because
+the probe stopped at DAT. Both are stated rather than glossed: "two of the four representatives" is
+what was checked.
+
+A note on that probe's timing column, because it is easy to misread: it compared the plan against
+**eager torch**, not against torch_tensorrt, so its ratios (2.92 against 4.41 ms for the compact,
+14.51 against 71.90 for the RRDB) say the plan is much faster than eager inference and nothing about
+the two builders. The builder comparison is the interleaved one above, and it established no
+difference.
+
 ## Is `tiling=none` faster than what ships? No - and the probe that said so measured a different engine
 
 A three-way engine-level probe of raw-TRT plans (round-robin, 7 rounds, 2250 MHz / 161 W) put `none`
