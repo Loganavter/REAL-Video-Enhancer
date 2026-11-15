@@ -90,6 +90,31 @@ All rows: static engine, opt level 5, iters 8. Session-relative comparisons only
 `full` figure"; that derivation assumed the whole 45.7 -> 42.7 ms step was the model, and direct
 measurement does not support it - see the withdrawn-derivation note below.)
 
+### The card is at its power cap, and that is most of the answer
+
+An isolated engine loop (490 runs in 28.1 s = 57.37 ms/frame, no host pipeline, no encoder) sampled
+once a second with `nvidia-smi`:
+
+| what | measured | note |
+|---|---|---|
+| SM utilisation | **100%** in all 23 samples | not a stall, not idle lanes |
+| memory-controller utilisation | 85% (max 88) | busy, not saturated |
+| SM clock | **2130 MHz** (max 2295) | 7% below the part's maximum |
+| memory clock | 8751 MHz | at its rating |
+| power draw | **162 W** (max 163) | against the card's **165 W** cap |
+| temperature | 60 C | not thermal |
+
+The engine saturates the SMs, keeps the memory system 85% busy, and does both at **162 of 165 W**
+with the SM clock held below maximum. So the binding constraint is the power budget, not a kernel -
+which is consistent with everything in §4 and §6: no kernel-level lever moved the number, and the
+only two things that did were fewer DRAM round trips (`tiling=full`) and fewer frames (the gate).
+It is also why the int8 ceiling below is the only place in this report where a 1.5x exists: halving
+the FLOPs is the only lever that does not fight the cap.
+
+What the sampling does **not** give is the DRAM-byte and tensor-active-% split - that is what `nsys`
+would add. The 85% memory-controller figure says the memory system is working hard; it does not say
+how much of the 57 ms is spent waiting on it.
+
 Peaks are fuzzy on a power-capped consumer part:
 
 | base | value | how obtained |
@@ -248,7 +273,25 @@ counter is read (§6, item 2).
    per-channel coefficient of variation above 1. That is the whole gap. Quantising the conv output as
    well, so the PReLU reads int8: **78.36 ms**, with 36 reformat layers instead of 21 and 16 `DQout`
    passes at 1.64 ms - charging the boundary per hop makes it worse, not better. So the precision
-   path is closed as a TRT configuration. The verdict is therefore "the quantised block boundary costs more than int8
+   path is closed as a TRT configuration.
+
+   **How big the prize would be if the PReLU were fusion-friendly**, same graph, same calibration,
+   only `PRelu` replaced by a scalar `LeakyRelu` (alpha = that node's mean slope):
+
+   | build | ms/frame | vs fp16 | reformat layers | PReLU passes | picture against fp16 |
+   |---|---|---|---|---|---|
+   | fp16 (fused conv+PReLU) | 56.28 | 1.00x | 2 | - | reference |
+   | int8, per-channel PReLU (the real function) | 71.37 | 0.79x | 21 | 17 | **0.000%** above 8, peak 4, 54.05 dB |
+   | int8, scalar LeakyRelu (the form TRT fuses) | **40.24** | **1.40x** | 4 | 1 | **99.323%** above 8, peak 255, **-2.02 dB** |
+
+   So the ceiling is real - 40 ms instead of 56, because the tensor chain stays int8 end to end and
+   the PReLU stops being a pass - and the only form that reaches it is **not this function**: a
+   scalar slope destroys the picture (99.3% of pixels, negative PSNR). The model's per-channel
+   slopes span -1.39..1.70, so there is no scalar stand-in. That leaves exactly one route to the
+   1.4x: a plugin that implements an int8 convolution with a per-channel PReLU epilogue - i.e. its
+   own int8 GEMM, against a counter-precedent (a hand-written conv kernel once measured 39.8
+   TFLOP/s where the engine holds 91 on this shape). Recorded as the honest boundary of this
+   investigation, not as a recommendation. The verdict is therefore "the quantised block boundary costs more than int8
    saves on this architecture", not "no int8 kernel exists".
 
 What is left is item (2) alone: `nsys` tensor-active-% and DRAM bytes with clocks pinned would turn

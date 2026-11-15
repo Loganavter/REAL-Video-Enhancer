@@ -310,10 +310,45 @@ configuration:
 - The table's absolute column is **tiles on**. Shipped is tiles off, where chain 4 measures
   **0.009%** of pixels above 8 on the worst of 19 sampled frames - so what the table isolates is
   the depth's *contribution inside the tile path*, not its price on its own.
-- **There is no clean "chain 1, tiles off" measurement**, so the depth's price cannot be quoted
-  independently of the tile path. What exists: chain 1 with tiles on, 11.5 s at 0.105%; chain 4
-  with tiles on, 9.2 s at 0.287%; chain 4 with tiles off (shipped), 11.7 s at 0.009%. The
-  11.7-vs-10.0 pair that used to be here mixed a tiles-off number with a tiles-on-and-dilated one.
+- **The clean measurement exists now, and it changes the reading.** Chain 1 with tiles off, same
+  clip: **212/498 reused (42.6%), 17.9 s, 0.016% of pixels above 8 (peak 15)** against the shipped
+  chain 4 at **362/498 (72.7%), 9.97-12.03 s, 0.017% (peak 17)**. So with the tile path out of the
+  way the depth costs **nothing measurable** and is worth 1.5-1.8x in time (chain 1 reuses half as
+  much, so it renders nearly twice as many frames); with tiles on the same pair measured 0.29%
+  against 0.00%. The two sources do not only mask each other - they **compound**: a four-frame-old
+  reference served into a stale tile is what moves the fist, and neither alone does. (The
+  11.7-vs-10.0 pair that used to be here mixed a tiles-off number with a tiles-on-and-dilated one.)
+
+- **On real material the depth was not free because the rule was wrong, and fixing it paid 1.5x.**
+  Forcing chain 4 by hand measured **148/220 (67.3%) in 5.82 s at 0.005% (peak 14)** on Chainsaw Man
+  - the same defect as its chain-1 run to the last digit - while Violet Evergarden measured
+  165/219 in 4.97 s at **0.124%**, past the bar. So the depth was worth about 1.7x on one title and
+  unsafe on the other, and the tuner certified chain 1 on both.
+
+  The cause was not the budget (budget 4 and chain budget 30 changed nothing) but **reachability**:
+  to serve a reference `k` frames old the gate must have reused the frames in between, and the tuner
+  scored depth-`k` deltas even when the intermediate frames would never have passed the threshold.
+  The per-frame debug shows it plainly - on Chainsaw Man, calm frames read `0.2` at depth 1 and
+  `16-35` at depths 2-4 because each sits next to a one-frame flash, and the p90 of those
+  unreachable reuses exceeded every budget. A second, older bug sat behind it: the scene-cut test
+  (`|mean - ref_mean| > 32`) lived inside an `elif` that stopped being taken when the statistic
+  became `mean_abs`, so it had not run since that change.
+
+  Both are fixed (`AutoGateTuner._decide` filters unreachable depths; the cut test moved out of the
+  branch; the gate exposes `last_scene_cut` and the app resets the tuner's HR history there). With
+  16-frame calibration frames per title, on the same clips and the same preset:
+
+  | title | before | after | defect before -> after |
+  |---|---|---|---|
+  | Chainsaw Man ep01 | chain 1, 83/220, 9.94 s | **chain 2, 146/220, 6.56 s** | 0.005% -> **0.005%** (peak 15 -> 14) |
+  | Violet Evergarden ep01 | chain 1, 107/219, 8.58 s | **chain 2, 142/219, 6.92 s** | 0.097% -> **0.096%** |
+  | Cowboy Bebop ep01 | refused | refused | 0% both |
+
+  So 1.5x on the first title and 1.24x on the second, with the defect unchanged (Violet's is a
+  hair lower). The tuner stops at chain 2 because deeper depths run out of *reachable samples* in a
+  16-frame window, and that turns out not to matter much: forcing chain 4 by hand buys only 6.56 ->
+  5.82 s on Chainsaw and makes Violet worse (0.124%). Chain 2 is the sweet spot it now finds by
+  itself.
 
 Acceptance for this family of defects is therefore local and absolute, not a mean: **under 0.1%
 of pixels more than 8 levels off in any channel, on the worst frame of a spread sample, with a
@@ -331,8 +366,8 @@ The acceptance rule and the presets were derived from two clips. Three actual BD
 
 | title | noise floor | decision, reuse as a count | time | RGB > 8 levels, worst of 15 frames |
 |---|---|---|---|---|
-| Chainsaw Man ep01 (digital, added grain) | 0.95 | thr 4.0, chain 1 - **83/220** (37.7%) | 9.94 s against 13.50 s (**1.36x**) | **0.005%** (peak 15) |
-| Violet Evergarden ep01 (clean digital) | 1.32 | thr 4.0, chain 1 - **107/219** (48.9%) | 8.58 s against 13.31 s (**1.55x**) | **0.097%** (peak 20) - 3% of margin |
+| Chainsaw Man ep01 (digital, added grain) | 0.95 | thr 4.0, chain 2 - **146/220** (66.4%) | 6.56 s against 13.50 s (**2.06x**) | **0.005%** (peak 14) |
+| Violet Evergarden ep01 (clean digital) | 1.32 | thr 4.0, chain 2 - **142/219** (64.8%) | 6.92 s against 13.31 s (**1.92x**) | **0.096%** (peak 18) - 4% of margin |
 | Cowboy Bebop ep01 (35 mm TV, deinterlaced) | 2.27 | **refused** - 0/240 | 14.79 s against 14.93 s, **byte-identical 240/240** | 0.000% now; **0.470%** at threshold 4 and **0.469%** at 2 when it was still allowed |
 | clean anime clip + synthetic grain 4 (sweep below) | 1.84 | **refused** at the 1.5 limit - 0/498 | 31.61 s against 31.11 s, **byte-identical 498/498** | 0.000% now; **0.105%** when it was still allowed |
 

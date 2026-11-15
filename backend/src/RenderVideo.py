@@ -536,6 +536,15 @@ class Render:
         history = getattr(self, "_hr_history", None)
         if history is None:
             history = self._hr_history = []
+        # The gate drops its reference at a scene cut, so a frame in the next shot is never served
+        # from the previous one. The tuner's history has to reset at the same frames, or its
+        # "two frames back" delta measures reusing across the cut - a configuration the gate does
+        # not have. Measured on Chainsaw Man ep01: with the history spanning cuts, calm frames read
+        # 0.2 at depth 1 and 16-35 at depths 2-4, so the chain was pinned to 1 on every title whose
+        # first 16 frames contain a cut, and forcing chain 4 by hand measured 0.005% (the same as
+        # chain 1) at 1.7x. With the reset, the depths describe what the chain can actually do.
+        if getattr(self.temporalReuse, "last_scene_cut", False):
+            history.clear()
         depth = int(getattr(self.temporalReuse, "max_chain", 0) or 0)
         if history:
             # one delta per chain depth, so the tuner can certify "two frames deep" when

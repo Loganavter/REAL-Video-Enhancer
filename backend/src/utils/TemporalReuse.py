@@ -273,6 +273,12 @@ class ReferenceFrameGate:
         self.statistic = statistic
         self._ref_luma = None           # its full-res luma (needed by mean_abs and by the veto)
         self._chain = 0                 # consecutive frames served from the reference
+        # Whether the frame just observed dropped the reference as a scene cut. The gate resets
+        # its own history there, and the auto tuner has to reset its HR history at the same
+        # frames: otherwise its "two frames back" delta compares across the cut, which is
+        # something the gate never does. Measured on Chainsaw Man: calm frames read 0.2 at depth
+        # 1 and 16-35 at depths 2-4 for exactly that reason, and the chain was pinned to 1.
+        self.last_scene_cut = False
         self.processed = 0
         self.reused = 0
         self.scene_cuts = 0
@@ -396,8 +402,12 @@ class ReferenceFrameGate:
                 self.last_delta = delta
             else:                       # resolution change: history is meaningless
                 scene_cut = True
-            if abs(mean - self._ref_mean) > self.scene_threshold:
-                scene_cut = True
+        # A global brightness jump is a cut even when the block delta is small (a cut between two
+        # dim scenes). This used to live inside the `elif` above, i.e. it only ran when the caller
+        # supplied no decision grid - which stopped being true when the statistic became
+        # `mean_abs`, so since then it has never executed.
+        if self._ref is not None and abs(mean - self._ref_mean) > self.scene_threshold:
+            scene_cut = True
         reuse = bool(decide_reference(delta, self._chain, self.threshold, self.max_chain,
                                       scene_cut))
         if reuse and self.pixel_veto is not None and luma is not None:
@@ -407,12 +417,14 @@ class ReferenceFrameGate:
                 if worst_pixel > self.pixel_veto:
                     reuse = False
                     self.vetoes += 1
+        self.last_scene_cut = bool(scene_cut)
         if reuse:
             self._chain += 1
             self.reused += 1
         else:
             if scene_cut:
                 self.scene_cuts += 1
+            self.last_scene_cut = bool(scene_cut)
             self._ref = blocks
             self._ref_mean = mean
             self._ref_luma = luma if (self.pixel_veto is not None
@@ -590,18 +602,42 @@ class AutoGateTuner:
         # "1 frame deep" on moving content where "4" was assumed.
         deepest = max((len(deltas) for _, deltas in self._pairs), default=0)
         certified: list[tuple[int, float, float]] = []      # (depth, threshold, p90)
+        self._certified: list[tuple[int, float, float]] = certified
+        # The best p90 each depth can reach over the whole candidate range, certified or not: the
+        # rejected depths are the ones that decide the chain, so they need to be in the log too.
+        self._depth_p90: list[tuple[int, float, float]] = []
         for depth in range(1, deepest + 1):
             limit = self.budget if depth == 1 else self.chain_budget
             best_cand = None
             best_p90 = None
+            floor_p90 = None
             for cand in self.candidates:
-                errs = sorted(deltas[depth - 1] for lr, deltas in self._pairs
-                              if lr <= cand and len(deltas) >= depth)
+                errs = []
+                for index, (lr, deltas) in enumerate(self._pairs):
+                    if lr > cand or len(deltas) < depth:
+                        continue
+                    # Reachability: the reference is only `depth` frames old if the frames between
+                    # it and this one were reused too, so a frame whose predecessor failed the
+                    # threshold never costs a depth-2 reuse. Measured on Chainsaw Man ep01: calm
+                    # frames read deltas of 0.2 at depth 1 and 16-35 at depths 2-4 because they
+                    # sit next to a one-frame flash - a configuration the gate cannot build - and
+                    # the p90 of those unreachable reuses pinned the chain to 1 on every title with
+                    # that structure, while forcing chain 4 measured 0.005% at 1.7x.
+                    if any(self._pairs[j][0] > cand
+                           for j in range(max(0, index - depth + 1), index)):
+                        continue
+                    errs.append(deltas[depth - 1])
+                errs.sort()
                 if len(errs) < max(2, len(self._pairs) // 4):
                     continue
                 p90 = errs[min(len(errs) - 1, int(0.90 * (len(errs) - 1)))]
+                # The loosest candidate that still qualifies gives the smallest p90 at this depth:
+                # that is the number worth logging, whether or not it fits the limit.
+                floor_p90 = p90
                 if p90 <= limit:
                     best_cand, best_p90 = cand, p90
+            if floor_p90 is not None:
+                self._depth_p90.append((depth, floor_p90, limit))
             if best_cand is not None:
                 certified.append((depth, best_cand, best_p90 or 0.0))
 
@@ -671,7 +707,10 @@ class AutoGateTuner:
                     f"(noise floor {self._noise_floor():.2f}), so reuse is OFF - "
                     f"{len(self._pairs)} calibration frames")
         reuse = 100.0 * sum(1 for lr, _ in self._pairs if lr <= self.chosen) / len(self._pairs)
+        depths = ", ".join(f"d{depth} p90 {p90:.1f} (limit {limit:.0f})"
+                           for depth, p90, limit in self._depth_p90)
         return (f"auto gate: threshold {self.chosen:.1f}/255, chain "
                 f"{self.chosen_chain or '?'}, veto {self.veto}, "
                 f"noise floor {self._noise_floor():.2f}, would reuse {reuse:.0f}% of the "
-                f"{len(self._pairs)} calibration frames")
+                f"{len(self._pairs)} calibration frames"
+                + (f"; certified {depths}" if depths else ""))

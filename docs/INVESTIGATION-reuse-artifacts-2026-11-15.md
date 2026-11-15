@@ -70,6 +70,23 @@ to `max_chain` frames old, and four frames is long enough for a fist to move. Th
 half the answer - the tile path has its own staleness and, as the next section shows, the two mask
 each other.
 
+A later measurement settles what "half" means, and is worth reading before the next section: with
+tiles **off**, chain 4 and chain 1 measure the **same** defect on the same clip - 0.017% against
+0.016% of pixels above 8 (362/498 reuses at 9.97-12.03 s against 212/498 at 17.9 s). So the depth is
+free in picture on its own, and worth 1.5-1.8x in time; it costs picture only where the tile path is
+also serving stale content (0.287% against 0.009% for tiles on/off at chain 4). The two sources
+**compound** rather than merely masking each other, and the honest form of the original finding is:
+*chain depth amplified the tile artifact four-fold, and on its own did not move the fist at all.*
+
+That measurement also exposed a defect in the rule that chose the depth. The tuner scored a
+depth-`k` reuse for every frame, including frames whose intermediate neighbours would never have
+passed the threshold - a configuration the gate cannot build, because serving a `k`-frame-old
+reference requires the frames in between to have been reused too. On Chainsaw Man ep01 that made
+calm frames read 0.2 levels at depth 1 and 16-35 at depths 2-4 (each sits next to a one-frame
+flash), and the chain was pinned to 1 on every title with that structure. With the reachability
+filter the same titles certify **chain 2** and measure **0.005%** and **0.096%** at 6.56 s and
+6.92 s - i.e. 2.06x and 1.92x over ungated instead of 1.36x and 1.55x, at an unchanged defect.
+
 ## The two measurement mistakes underneath it
 
 **The tuner scored the wrong quantity.** `AutoGateTuner` measured the upscaled frame against its

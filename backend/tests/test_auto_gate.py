@@ -213,3 +213,36 @@ def test_a_clean_source_is_not_refused_by_the_floor():
     _feed(t, [(0.2 + 0.01 * i, 0.4) for i in range(10)])
     assert t.ready
     assert t.chosen is not None
+
+
+def test_a_depth_is_only_scored_where_the_gate_could_actually_reach_it():
+    """A one-frame flash must not be scored as a depth-2 reuse - the gate cannot build one.
+
+    To serve a reference two frames old the gate has to have reused the frame in between, so a
+    frame whose predecessor failed the threshold never costs a depth-2 error. Measured on Chainsaw
+    Man ep01 before this rule existed: calm frames read 0.2 at depth 1 and 16-35 at depths 2-4
+    because each sat next to a flash, the p90 of those unreachable reuses exceeded every chain
+    budget up to 30 levels, and the chain was pinned to 1 on every title with that structure - while
+    forcing chain 4 by hand measured the same defect as chain 1 (0.005%) at 1.7x the speed.
+    """
+    t = AutoGateTuner(seed=5.0, min_pairs=6, budget=2.0, chain_budget=1.0)
+    _feed(t, [
+        (0.5, (0.2,)),                    # calm
+        (0.6, (0.2, 0.3)),                # calm after calm: depth 2 reachable, small
+        (30.0, (30.0, 30.1)),             # flash
+        (0.5, (0.2, 30.3)),               # calm after flash: depth 2 is NOT reachable
+        (0.6, (0.2, 0.3)),                # calm after calm: reachable again
+        (0.5, (0.2, 0.3)),
+        (0.6, (0.2, 0.3)),
+        (0.5, (0.2, 0.3)),
+    ])
+    assert t.ready
+    assert t.chosen_chain == 2, "the 30.3 pair is unreachable and must not veto depth 2"
+
+    # and the rule must not simply ignore depth-2 errors: a genuinely stale frame still vetoes
+    stale = AutoGateTuner(seed=5.0, min_pairs=6, budget=2.0, chain_budget=1.0)
+    _feed(stale, [(0.5, (0.2, 0.2)), (0.6, (0.2, 9.0)), (0.5, (0.2, 9.0)),
+                  (0.6, (0.2, 9.0)), (0.5, (0.2, 9.0)), (0.6, (0.2, 9.0)),
+                  (0.5, (0.2, 9.0)), (0.6, (0.2, 9.0))])
+    assert stale.ready
+    assert stale.chosen_chain == 1
