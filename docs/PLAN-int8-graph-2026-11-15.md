@@ -252,6 +252,26 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**And the saturation counter explains why recalibration could not help: clipping is a fixed point.**
+
+| layer | saturated after recalibration |
+|---|---|
+| 1 | **18.52%** |
+| 2 | 8.34% |
+| 3 | 9.62% |
+| 8 | 0.13% |
+
+The grid for a layer is set from that layer's **measured** maximum - but once the output clips, the measured
+maximum *is* the clamp (`127 x s_out`), so the grid stops growing and the clipping reproduces itself exactly.
+Self-calibration is therefore a fixed point that a clipped chain can never leave, which is why the drift
+converged (10.24 -> 4.72 -> 2.59%) while the share did not move: it converged *to the clipped solution*.
+
+The fix is to measure the distribution **before** the clamp. Two ways, both cheap: run the collect pass with
+the quantisation replaced by an identity (float conv in torch for that pass, ~16 convs of fp16 - what the
+simulation already does), or have the kernel write a per-channel running maximum of the pre-clamp value to a
+side buffer during the collect pass. The first is a two-line change to the collect path; the second needs one
+extra atomic per block.
+
 Which means the bar's 1.57% is carried by a minority of pixels that the grid cannot fix: if twelve percent of a
 layer's values sit at the clamp, the grid widening should have removed them, and the median says it did; what
 survives is something else. The next measurement is the same saturation counter after recalibration - if it is
