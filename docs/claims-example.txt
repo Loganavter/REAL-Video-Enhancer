@@ -1,0 +1,36 @@
+# Claims from this investigation, including three that were published and later withdrawn.
+# Run: scripts/claim_check.py docs/claims-example.txt
+
+@claim reuse_chainsaw        66.4   %     "Chainsaw, gate on, per-title counts"
+@claim breakeven_rendered    47.8   %     "Chainsaw, break-even RENDERED share"
+@claim margin_chainsaw       18.6   pp    "Chainsaw, margin"
+
+# 1. The published margin subtracted a rendered-column threshold from a reuse percentage.
+@ratio margin_chainsaw reuse_chainsaw 1.0 "Chainsaw, gate on, per-title counts"
+
+@claim tops_bm128_capped     67.6   TOPS  "1080x1080, int8 BM128 128 regs"
+@claim tops_bm256            77.6   TOPS  "1920x1080, int8 BM256 255 regs"
+
+# 2. A ratio between two different frames is not a ratio.
+@ratio tops_bm256 tops_bm128_capped 1.148 "1920x1080, int8 BM256 255 regs"
+
+@claim tiles_share           0.071  %     "anime, tile path, worst frame"
+@claim routing_margin        14.13  pp    "Chainsaw, reuse points"
+
+# 3. A share in percent cannot be compared with a margin in points.
+@ratio tiles_share routing_margin 0.005
+
+@claim gate_share            0.005  %     "Chainsaw, gate only"
+@claim engine_share          0.006  %     "Chainsaw, int8 engine only"
+@claim composition_share     0.017  %     "Chainsaw, gate + int8"
+
+# 4. Two sub-threshold errors do not partition the composition - the sum is a null hypothesis.
+@sum 0.011% @of gate_share + engine_share
+
+@claim pipeline_share         1.870  %     "512x512 crop, int8 chain, pipeline"
+@claim simulation_share       0.000  %     "512x512 crop, int8 chain, simulation"
+@claim acceptance_bar         0.1    %     "the project's bar, worst frame RGB"
+
+# 5. The stage-1 gate: the pipeline must sit under the bar it will be judged by.
+@below pipeline_share 0.1
+@below simulation_share 0.1

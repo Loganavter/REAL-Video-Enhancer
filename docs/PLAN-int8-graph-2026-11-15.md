@@ -368,6 +368,28 @@ top of an unvalidated launcher means six suspects when the comparison fails inst
 All five are caught by the bit-exact comparison; checking the PTX and the code before running is cheaper than
 debugging the difference afterwards.
 
+## Before a number enters the ledger: `scripts/claim_check.py`
+
+Nine conclusions in this investigation were wrong the same way - a number computed on one population, scale
+or column and applied to another. That class is mechanical, so it is now checked mechanically. Claims go into
+a plain text table next to the measurement:
+
+    @claim  name  value  unit  "population"
+    @ratio  numerator  denominator  claimed  ["population"]
+    @below  name  limit          # the value must sit under its bar
+    @sum    X%  @of  a + b       # shares that must add up
+
+The checker fails on: arithmetic that does not reproduce, unit families that differ (share vs delta, TOPS vs
+TFLOP/s), a ratio whose two operands were measured on different populations, a ratio whose declared population
+is neither operand's, and a value that sits above its own bar. Exit code 1, so it can gate an edit.
+
+Its first run on real claims from this session caught seven issues, including the published Chainsaw margin
+(an 18.6 pp claim that is 0.280 of the reuse percentage it was derived from, in a different unit family) and
+the cross-frame TOPS comparison (67.6 at 1080x1080 against 77.6 at 1920x1080). The fixture is
+`docs/claims-example.txt`; it fails on purpose and is the self-test.
+
+Rule: a measurement is not a result until its claims file passes.
+
 ## Machine notes (tools, paths, rules)
 
 - **One GPU job at a time**: wrap every run in `flock -n /var/tmp/opencode/gpu.lock`.
