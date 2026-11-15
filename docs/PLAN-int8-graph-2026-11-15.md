@@ -941,6 +941,32 @@ probe, because only the app has the encoder alongside.
 
 ## Stage 3 - the graph (half a day)
 
+**State (2026-11-16): the stopwatch says 1.00x, so the graph is not a lever for this body - and the harness does
+not yet reproduce eager, which is recorded rather than papered over.** `scripts/int8_graph.py` warms five launches
+(the first enqueue does lazy initialisation), captures the 16 hops plus the fused dequantise, replays, and then
+times. At 1920x1080:
+
+| | ms |
+|---|---|
+| eager | 47.16 |
+| graph replay | 47.47 |
+| ratio | **0.994x** |
+
+Sixteen launches take 16 x 2.771 = 44.3 ms of GPU work, so the launch overhead being removed is at most ~3 ms and
+the graph removes none of it in practice - the body is **compute-bound, not launch-bound**. The plan's stage-3
+premise (that launch overhead is what a graph buys) does not hold at this size.
+
+The bit-exactness check **fails and is not yet explained**: replay is deterministic (replay-to-replay max diff 0)
+but differs from eager by up to 127 codes on 56.4 M of 132.7 M elements, and the fault is at the first hop, so it is
+a bind or argument issue rather than nondeterminism. Two candidate causes are named and neither is tested: Triton's
+launcher using the default stream during capture (which would execute rather than record), or a temporary created
+inside the capture taking its storage with it. This must be resolved before any graph number is entered in the
+ledger - but it cannot change the 0.994x, which is measured with 16 real kernels executing either way.
+
+One trap was found and fixed in the harness itself, and it is the same trap the gate script had: the ping-pong
+writes over its own input, so a second run starts from the first run's last hop. The graph harness now keeps an
+immutable source buffer. The first comparison read 35 M differing codes purely because of it.
+
 The empty graph is already found. One silent trap of the same class remains.
 
 **Scale binding: pointer or value?**
