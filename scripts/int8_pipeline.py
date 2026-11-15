@@ -77,6 +77,8 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--iters", type=int, default=0)
+    ap.add_argument("--pct", type=float, default=99.9,
+                    help="percentile for the grids; 100 means the maximum")
     args = ap.parse_args()
 
     raw = np.fromfile(args.frame, dtype=np.uint8)
@@ -105,9 +107,23 @@ def main() -> int:
 
     # activations live on a PER-TENSOR grid so that scale * weight-scale folds into one per-channel
     # vector; a per-channel activation grid cannot be folded and would break the chain
+    # grids from a percentile rather than the maximum: max|activation| over 2 Mpx is a tail event, and
+    # the resulting step is what made the full frame fail while a 256x256 crop passed
+    qq = {}
+    hooks = []
+    for name, mod in model.named_modules():
+        if isinstance(mod, torch.nn.PReLU):
+            hooks.append(mod.register_forward_hook(
+                lambda _m, _i, out, k=name: qq.__setitem__(
+                    k, out.detach().float().abs().flatten(2)[:, :, ::16].quantile(args.pct / 100.0, dim=2).cuda().flatten())))
+    with torch.no_grad():
+        model(x)
+    for h in hooks:
+        h.remove()
+
+    # each layer's output grid: per-tensor, from the simulation's calibration of the PReLU output
     # per-channel activation grid: the whole point of the fold below
-    s_act_vec = (torch.maximum(act.amax(dim=(0, 2, 3)), -act.amin(dim=(0, 2, 3))).float()
-                 / 127.0).clamp_min(1e-8)
+    s_act_vec = (qq["body.1"] / 127.0).clamp_min(1e-8)
     cur = torch.round(act / s_act_vec.view(1, -1, 1, 1)).clamp(-127, 127).to(torch.int8)
     cur = cur.permute(0, 2, 3, 1).contiguous()
 
@@ -115,7 +131,6 @@ def main() -> int:
     layers = [(conv.weight.detach().float(), prelu.weight.detach().float())
               for conv, prelu in zip(inner, prelus[1:])]
 
-    # each layer's output grid: per-tensor, from the simulation's calibration of the PReLU output
     outs = []
     for i in range(len(layers)):
         key = f"body.{2 * (i + 1) + 1}"
