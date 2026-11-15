@@ -460,8 +460,17 @@ class AutoGateTuner:
     def __init__(self, budget: float = 2.0, min_pairs: int = 16, seed: float = 5.0,
                  candidates=(2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0),
                  clamp=(2.0, 12.0), noise_floor_quiet: float = 0.35,
-                 fallback: str = "strictest"):
+                 fallback: str = "strictest", chain_budget: float = 10.0,
+                 chain_policy: str = "certified"):
         self.budget = float(budget)
+        self.chain_budget = float(chain_budget)
+        # "certified": the chain may only be as deep as the measurement proves safe.
+        # "max": always use the full chain (the speed-first preset). Measured on the anime clip,
+        # the difference is 0.39% of pixels above 4 levels at depth 1 against 1.13% with peaks
+        # of 100 levels at depth 4, for 11.5 s against 7.65 s.
+        if chain_policy not in ("certified", "max"):
+            raise ValueError(f"chain_policy must be 'certified' or 'max', got {chain_policy!r}")
+        self.chain_policy = chain_policy
         self.min_pairs = int(min_pairs)
         # the value the pipeline was configured with: kept when no candidate qualifies, which
         # happens on an unrepresentative opening (a busy first scene measured a "noise floor"
@@ -527,6 +536,11 @@ class AutoGateTuner:
         deepest = max((len(deltas) for _, deltas in self._pairs), default=0)
         certified: list[tuple[int, float, float]] = []      # (depth, threshold, p90)
         for depth in range(1, deepest + 1):
+            # one bar for every depth: a frame four references stale moves a fist on screen
+            # even when the whole-frame metrics call it transparent (VMAF 93.65 at 48.6 dB),
+            # so "how stale is safe" cannot be answered with a looser number than "is reuse
+            # safe at all"
+            limit = self.budget
             best_cand = None
             best_p90 = None
             for cand in self.candidates:
@@ -535,7 +549,7 @@ class AutoGateTuner:
                 if len(errs) < max(2, len(self._pairs) // 4):
                     continue
                 p90 = errs[min(len(errs) - 1, int(0.90 * (len(errs) - 1)))]
-                if p90 <= self.budget:
+                if p90 <= limit:
                     best_cand, best_p90 = cand, p90
             if best_cand is not None:
                 certified.append((depth, best_cand, best_p90 or 0.0))
@@ -552,6 +566,10 @@ class AutoGateTuner:
         if certified:
             # Longest usable chain, then the widest threshold certified for it.
             depth, cand, _ = max(certified, key=lambda row: (row[0], row[1]))
+            if self.chain_policy == "max":
+                # speed-first: keep the threshold that depth 1 certified, but let the gate walk
+                # the whole chain. The content is the owner's call, the numbers are in the docs.
+                depth = deepest
             lo, hi = self.clamp
             self.chosen = max(lo, min(hi, cand))
             self.chosen_chain = depth
@@ -571,6 +589,8 @@ class AutoGateTuner:
                 self.chosen = None
                 self.veto = None
                 return
+            # nothing certified at any depth, so reuse only in place (depth 1)
+            self.chosen_chain = 1
             best = self.candidates[0]
         lo, hi = self.clamp
         self.chosen = max(lo, min(hi, best))
