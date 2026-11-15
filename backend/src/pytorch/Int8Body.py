@@ -27,7 +27,7 @@ from __future__ import annotations
 import torch
 
 from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
-                          quantise_nchw_to_nhwc, quantise_nhwc)
+                          quantise_nchw_to_nhwc, quantise_nhwc, quantise_nhwc_prelu)
 
 __all__ = ["Int8Body"]
 
