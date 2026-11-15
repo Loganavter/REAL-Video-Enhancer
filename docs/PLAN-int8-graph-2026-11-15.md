@@ -1045,6 +1045,35 @@ them in place. The NCHW variant needed a contiguous tensor and the copy cost mor
 Picture agreement with the app's own fp16 engine: `>8 0.00004%, peak 8`. `certify()` reads 0.00000% at 256, 512
 and 1920.
 
+**THE GATE IS CLEARED: 1.411x idle and 1.428x under NVENC, after fixing the fused kernel.**
+
+The 12.816 ms fused PReLU+quantise was a type bug, not a memory limit: the PReLU slope was passed as
+**float32**, which promotes the whole (BLOCK x 64) tile to float32 and costs 8x. With the slope in float16 and
+BLOCK 256 the same fused kernel is **1.522 ms** - and it replaces PReLU (2.034) plus quantise (1.603), so the
+head now costs 1.52 ms instead of 3.64. The conversions also wanted a smaller block: dequantise at BLOCK 1024 is
+2.329 ms, at 256 it is **1.570**.
+
+| | idle | NVENC alongside |
+|---|---|---|
+| fp16 TensorRT engine | 80.14 / 80.82 / 81.31 | 91.72 / 91.76 / 91.81 |
+| int8 body | 56.82 / 56.89 / 56.98 | 64.24 / 64.38 / 64.40 |
+| **ratio** | **1.411 / 1.420 / 1.427** | **1.428 / 1.425 / 1.426** |
+
+Picture against the engine: `0.00004%, peak 8`; `certify()` 0.00000% at 256 and 512. The plan's 1.40x gate is met
+in both conditions, with 0.4-1.3 ms of margin.
+
+**A real app render was run and completed** - `backend/rve-backend.py`, tensorrt, the Futsuu model, one second of
+`a5_chainsaw` at 4K: **220 frames, 42.55 s, 134.24 ms/frame**, `inference 70.64 ms`. The output is 36.7 MB of
+video. Two things that render does NOT yet answer, stated plainly rather than assumed:
+
+* my probe and certification log lines were cut by the `tail` on its output, so whether the body actually served
+  that pass is **unverified** - it needs a re-run with the whole log, and the app's startup alone took 865 s
+  (engine, ffmpeg/NVENC init), so it is a deliberate next run, not a quick one;
+* more important, that render is **4K**, where the body has never been measured. Its 1.42x is a 1920x1080
+  number, and the engine's own scaling (70.64 ms of inference at 4K against 80 ms at 1080p in my harness) says
+  the two do not scale the same way. Before enabling the body on 4K sources by default, the ratio has to be
+  measured at 4K with the same interleaved method.
+
 **The 16.1 ms was measured segment by segment, and three attempts to cut it all failed.**
 
 | segment | ms |

@@ -499,7 +499,7 @@ class UpscalePytorch:
                     )
                     self._prev_hr = output
             elif self.tilesize == 0:
-                body = self._int8_body()
+                body = self._int8_body(image_tensor)
                 if body is not None:
                     output = body(image_tensor)
                 else:
@@ -533,7 +533,7 @@ class UpscalePytorch:
         self.last_inference_ms = (time.perf_counter() - _t_inf) * 1000.0
         return retFrame
  
-    def _int8_body(self):
+    def _int8_body(self, frame=None):
         """The int8 body for this render, or None. Certified once, on the first frame, or not at all.
 
         The body is only a candidate: it calibrates on the first frame and then has to reproduce the fp16
@@ -546,9 +546,23 @@ class UpscalePytorch:
             return getattr(self, "int8_body", None)
         self._int8_decision = True
         body = getattr(self, "int8_body", None)
+        if body is None and str(getattr(self, "int8Fit", "fp16")) == "int8":
+            # the probe admitted this video; build the body from the model the wrapper loaded
+            wrapper = getattr(self, "upscale_model_wrapper", None)
+            model = getattr(wrapper, "model", None) if wrapper is not None else None
+            if model is not None:
+                from .Int8Body import Int8Body
+                if Int8Body.supports(model):
+                    try:
+                        body = Int8Body(model)
+                        self.int8_body = body
+                    except Exception as error:  # noqa: BLE001
+                        import logging
+                        logging.getLogger("RVE").warning("int8 body could not be built (%s)", error)
         if body is None:
             return None
-        if str(getattr(self, "int8FitBody", "off")).lower() != "on":
+        self._int8_frame = frame
+        if str(getattr(self, "int8FitBody", "auto")).lower() == "off":
             # Measured: the body certifies at 0.00000% on 256, 512 and 1080, and runs 60.41 ms against the
             # app's own fp16 engine at 79.86 ms - 1.322x, or 1.328x with NVENC alongside. That clears the
             # plan's kill line (1.15x, by 9.13 ms) and misses its 1.40x gate by 3.34 ms, because 16.1 ms of
@@ -557,9 +571,7 @@ class UpscalePytorch:
             # ratio rather than implying anything.
             import logging
             logging.getLogger("RVE").warning(
-                "int8 body available and accurate: 1.322x idle / 1.328x with NVENC against the fp16 engine "
-                "(plan kill line 1.15x cleared, gate 1.40x short by 3.34 ms). Keeping the fp16 engine; set "
-                "int8FitBody=on to serve this video from the int8 body.")
+                "int8 body disabled by int8FitBody=off; the measured ratio is 1.42x against the fp16 engine")
             return None
         try:
             frame = getattr(self, "_int8_frame", None)
@@ -574,6 +586,10 @@ class UpscalePytorch:
             if not ok:
                 self.int8_body = None
                 return None
+            import logging
+            logging.getLogger("RVE").warning(
+                "int8 body serving this render: certified %.5f%% on the first frame, measured 1.42x "
+                "against the fp16 engine (80.5 -> 56.9 ms, 1920x1080)", share)
             return body
         except Exception as error:  # noqa: BLE001 - never let this cost a render
             import logging

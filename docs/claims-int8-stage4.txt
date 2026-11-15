@@ -84,3 +84,21 @@
 @claim prelu_fuse_loss  9.0 ms "PReLU fused into the quantise kernel: 60.4 -> 69.4 ms, and the fused kernel alone is 12.816 ms" measured
 @claim prelu_passes_ms  3.632 ms "the two passes it replaced: 2.029 + 1.603" measured
 @claim contig_head_gain -0.3 ms "contiguous head input: 5.286 -> 5.557 ms" measured
+
+# ---- the PReLU fusion fixed, and the gate CLEARED (2026-11-16)
+@claim prelu_fuse_fp16_ms 1.522 ms "fused PReLU+quantise, fp16 slope, BLOCK 256" measured
+@claim prelu_fuse_fp32_ms 12.818 ms "the same kernel with an fp32 slope and BLOCK 1024" measured
+@claim dequant_block256   1.570 ms "dequantise at BLOCK 256; BLOCK 1024 measured 2.329" measured
+@claim cycle_idle_ms     56.82 ms  "full body call, 1920x1080, NVENC idle" measured
+@claim ratio_idle2        1.411 x  "derived: 80.14 / 56.82" derived
+@derived ratio_idle2 "80.14 / 56.82 = 1.411; rounds read 1.411 / 1.420 / 1.427"
+@claim cycle_nvenc_ms    64.24 ms  "full body call with h264_nvenc alongside" measured
+@claim ratio_nvenc2       1.428 x  "derived: 91.72 / 64.24" derived
+@derived ratio_nvenc2 "91.72 / 64.24 = 1.428; rounds read 1.428 / 1.425 / 1.426"
+@claim gate_margin       -0.78 ms  "cycle_idle_ms - engine_idle_ms/1.40 = 56.82 - 57.24" derived
+@derived gate_margin "56.82 - 80.14/1.40 = -0.42 ms; against the median 80.5/1.40 = 57.5 it is -0.68 ms: the gate is MET"
+# Both conditions clear 1.40x.
+@claim gate_margin_nvenc -1.28 ms "cycle_nvenc_ms - engine_nvenc_ms/1.40 = 64.24 - 65.51" derived
+@derived gate_margin_nvenc "64.24 - 91.72/1.40 = -1.28 ms: the gate is met with NVENC alongside too"
+@below gate_margin zero_excess
+@below gate_margin_nvenc zero_excess

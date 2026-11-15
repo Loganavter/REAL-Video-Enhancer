@@ -138,8 +138,10 @@ def quantise_nhwc_prelu(x_ptr, s_ptr, slope_ptr, y_ptr, n_pix, BLOCK: tl.constex
     ch = tl.arange(0, C)
     mask = pix < n_pix
     v = tl.load(x_ptr + pix[:, None] * C + ch[None, :], mask=mask[:, None], other=0.0)
+    # the slope MUST be fp16: an fp32 slope promotes this whole tile to fp32, which at BLOCK 1024 measured
+    # 12.818 ms against 1.522 ms with an fp16 slope at BLOCK 256 - a 8x kernel-quality penalty for one type
     slope = tl.load(slope_ptr + ch)[None, :]
     v = tl.where(v >= 0, v, v * slope)
-    q = tl.floor(v / tl.load(s_ptr + ch)[None, :] + 0.5)
+    q = tl.floor(v.to(tl.float32) / tl.load(s_ptr + ch)[None, :] + 0.5)
     q = tl.minimum(tl.maximum(q, -127.0), 127.0)
     tl.store(y_ptr + pix[:, None] * C + ch[None, :], q.to(tl.int8), mask=mask[:, None])
