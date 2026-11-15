@@ -96,6 +96,26 @@ anything else.
 Per the stage gate this stops the work here: build/simulation disagree far beyond 2x, so the cause is found
 first, not optimised around.
 
+**Second pass, still failing, and the layout is the suspect.** Per-layer isolation on 256x256 says every
+layer is wrong on its own (ratio 0.12-3.7 against the fp16 activation, relative error 1.1-4.3), so it is not
+the chaining. The kernel was verified bit-exact in stage 0 only on **synthetic** weights already in the
+kernel's `[tap, cin, cout]` layout, so stage 0 never exercised the real conversion, and five attempts at that
+conversion have now disagreed with the reference:
+
+| conversion | vs shift reference on real weights |
+|---|---|
+| `permute(2,3,0,1)` | 254 on 88.8% |
+| `permute(2,3,1,0)` | 203-207 on 87-90% |
+| explicit `stack([w_q[:,:,i,j]])` (`[tap, cout, cin]`) | 254 on 90.5% |
+| the same with `.t()` (`[tap, cin, cout]`) | 207 on 87.1% |
+
+Both sides were agreeing with each other and disagreeing with the truth at different points, which is the
+signature of hand-built layout code rather than a numerical issue. The next diagnostic is not another
+permutation: build the kernel's operand **from the same tensor the reference uses** (`wtap[tap].contiguous()`
+passed to both) and compare against `_int_mm` on that same pair - if they differ, the kernel's dot orientation
+is not `a @ b` with `b[cin, cout]` and the PTX tells you which operand it transposes; if they agree, the shift
+reference is the broken side and the pipeline's conversion is fine.
+
 ## Stage 2 - the first real numbers (half a day)
 
 `16 * 1.97 + 6.2 = 37.7 ms` stops being a projection here.
