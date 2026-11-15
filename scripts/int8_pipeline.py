@@ -23,9 +23,11 @@ import triton.language as tl
 
 sys.path.insert(0, "/home/jorj/Загрузки/projects/REAL-Video-Enhancer/scripts")
 from cut_channels_naive import load, statistic  # noqa: E402
+from int8_prologue_kernel import body_prologue_kernel  # noqa: E402
 from int8_accuracy_sim import calibrate  # noqa: E402
 
 BLOCK_M = 128
+SHIFT = 12
 MODEL = "/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth"
 
 
@@ -131,14 +133,18 @@ def main() -> int:
         """
         buf, s_in = cur.clone(), s_act_vec
         for (w_full, slope), s_out in zip(layers, outs):
-            w_eff = w_full * s_in.view(1, -1, 1, 1)                  # absorb this layer's input grid
-            w_q, w_scale = quantise_weights(w_eff)
+            # prologue requant: the buffer is int8 on a per-channel grid, the dot wants one per-tensor
+            # grid, so the ratio goes in as an integer multiplier and the accumulator stays int32
+            s_t = float(s_in.max())
+            m_int = torch.round(s_in / s_t * (1 << SHIFT)).to(torch.int32).contiguous()
+            w_q, w_scale = quantise_weights(w_full)
             tap_w = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
+            vec = (w_scale * s_t).contiguous()
             ovec = s_out.contiguous()
             out = torch.empty_like(buf)
             grid = (triton.cdiv(args.height * args.width, BLOCK_M),)
-            body_kernel[grid](buf, tap_w, w_scale.contiguous(), slope, ovec, out, args.height, args.width,
-                              BLOCK_M=BLOCK_M, C=64, num_warps=2)
+            body_prologue_kernel[grid](buf, tap_w, m_int, SHIFT, vec, slope, ovec, out,
+                                       args.height, args.width, BLOCK_M=BLOCK_M, C=64, num_warps=4)
             buf, s_in = out, s_out
         return buf, s_out
 

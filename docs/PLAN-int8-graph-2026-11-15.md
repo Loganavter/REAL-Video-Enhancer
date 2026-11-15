@@ -181,6 +181,24 @@ The plan's earlier claim that "no chainable int8 body can meet the gate" was wro
 reason this file keeps recording: it compared the pipeline against the simulation without isolating which of
 the two variables differed. The gate stands.
 
+**Built, and it does not close the gap.** `scripts/int8_prologue_kernel.py` requants per-channel ->
+per-tensor on load with an integer multiplier and shift, leaving the accumulator int32:
+
+    ptxas: Used 176 registers, 0 bytes spill, smem 12288    <- no hot spill, so the variant is viable
+    pipeline on the same frame: >8 1.870%  peak 34  median 2.47
+
+Against the simulation's 0.000% that is still 100x, so the prologue requant - correct as it is - is not the
+missing piece either. The discriminators are now exhausted one by one: dot orientation (exact), scale
+granularity (3.680 vs 3.589), kernel maths against the simulation (0.0002), the fold (2.765 vs 2.038), the
+input grid with a float intermediate (0.000 vs 2.038), and now the same input grid with an integer prologue
+(1.870).
+
+Which means the difference is not in any single mechanism the last six tests varied, and the next step is
+the one the plan named two passes ago and that keeps getting deferred: a **per-layer comparison of the
+pipeline's chain against the simulation's chain**, layer by layer, on the same frame and in the same units.
+Six hypotheses have been tested against fp16 in isolation and five of them died; comparing the two chains to
+each other is the only test that cannot be satisfied by a coincidence of the final number.
+
 Next: build the kernel with the prologue requant - integer requant `(q * M[c] + R[c]) >> S[c]` on load, one
 int32 temporary per element, no fp32 expansion - and check `ptxas -v` first: the kernel already sits at 255
 registers, so a hot spill would kill the variant in a minute, exactly as the 168-register cap did.
