@@ -38,10 +38,31 @@ def _writer(pipe: str = "p010le", high_bitdepth: bool = True, space: str = "bt70
     writer.color_primaries = None
     writer.color_transfer = None
     writer.video_encoder = _Encoder("x265_nvenc" if pipe == "p010le" else "hevc_nvenc")
+    writer.pipe_input_pixel_format = pipe
     # `__del__` closes this log; the shim never opened one
     import io
     writer.ffmpeg_log = io.StringIO()
     return writer
+
+
+@pytest.mark.parametrize("pipe", ["yuv420p10le", "p010le"])
+def test_the_command_format_is_the_one_that_was_packed(pipe):
+    """The `-pix_fmt` on the pipe must be the packer's format, never the encoder's preference.
+
+    Deriving it from the encoder tag meant planar samples were labelled P010 for every
+    10-bit source rendered with NVENC: 12.68 dB against the reference, and nothing to see in
+    the log because both are 16-bit words at 3 bytes/pixel.
+    """
+    writer = _writer(pipe=pipe)
+    writer.pipe_input_pixel_format = pipe
+    writer.video_encoder = _Encoder("x265_nvenc")     # the encoder that "wants" P010
+    assert writer._pipe_input_pixel_format() == pipe
+
+
+def test_a_pack_without_a_declared_format_falls_back_to_planar():
+    writer = _writer(pipe="yuv420p10le")
+    writer.pipe_input_pixel_format = None
+    assert writer._pipe_input_pixel_format() == "yuv420p10le"
 
 
 @pytest.mark.parametrize("pipe", ["yuv420p10le", "p010le"])
@@ -66,16 +87,18 @@ def test_an_rgb_pipe_does_get_the_matrix_conversion():
     assert any("out_color_matrix=bt709" in argument for argument in args)
 
 
-def test_the_pipe_format_follows_the_encoder_and_the_depth():
+def test_the_pipe_format_follows_the_packed_format_and_the_depth():
     assert _writer(pipe="p010le")._pipe_input_pixel_format() == "p010le"
     assert _writer(pipe="yuv420p10le")._pipe_input_pixel_format() == "yuv420p10le"
+    # an 8-bit source ignores the 10-bit declaration entirely
+    assert _writer(pipe="yuv420p10le", high_bitdepth=False)._pipe_input_pixel_format() == "rgb24"
 
 
 @pytest.mark.parametrize("requested,high_bitdepth,interpolating,expected", [
-    (None, True, False, "yuv420p10le"),    # a 10-bit source keeps its depth by default
-    (None, False, False, "yuv420p"),       # an 8-bit source stays 8-bit
-    (None, True, True, "yuv420p"),         # the interpolator works in 8 bits
-    ("yuv420p", True, False, "yuv420p"),   # an explicit request always wins
+    (None, True, False, "yuv420p"),          # 10 bits at the encoder costs ~2x the NVENC time
+    (None, False, False, "yuv420p"),
+    ("yuv420p10le", True, False, "yuv420p10le"),   # opt-in, and worth ~6 dB
+    ("yuv420p", True, False, "yuv420p"),     # an explicit request always wins
     ("yuv444p10le", False, False, "yuv444p10le"),
 ])
 def test_output_depth_resolution(requested, high_bitdepth, interpolating, expected):

@@ -509,11 +509,25 @@ class Render:
         luma = tensor[:, :, ::2, ::2].mean(dim=1, keepdim=True).float()
         k = max(1, block // 16)
         grid = F.avg_pool2d(F.avg_pool2d(luma, 8), k, ceil_mode=True) * 255.0
-        prev = self._hr_grid_prev
-        if prev is not None and tuple(prev.shape) == tuple(grid.shape):
-            hr_delta = float((grid - prev).abs().max().item())
-            lr_delta = float(getattr(self.temporalReuse, "last_delta", 0.0) or 0.0)
-            self.autoTuner.add(lr_delta, hr_delta)
+        # The tuner has to score a candidate the way the gate will actually use it: a frame
+        # may be served from a reference up to `max_chain` frames old, and that is where the
+        # visible error comes from. Measured on the film clip at threshold 5.0 with chain 4,
+        # the worst frames were 34.7 dB while a single-step model predicted "p90 error under
+        # 2 levels". So keep the recent grids and take the worst delta over every chain depth
+        # the gate can reach.
+        history = getattr(self, "_hr_history", None)
+        if history is None:
+            history = self._hr_history = []
+        depth = int(getattr(self.temporalReuse, "max_chain", 0) or 0)
+        if history:
+            from .utils.TemporalReuse import worst_chain_delta
+            hr_delta = worst_chain_delta(grid, history, max(depth, 1))
+            if hr_delta != float("inf"):
+                lr_delta = float(getattr(self.temporalReuse, "last_delta", 0.0) or 0.0)
+                self.autoTuner.add(lr_delta, hr_delta)
+        history.append(grid)
+        if len(history) > max(1, depth):
+            del history[:-max(1, depth)]
         self._hr_grid_prev = grid
         if self.autoTuner.ready:
             self.temporalReuse.threshold = self.autoTuner.chosen
