@@ -252,6 +252,27 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**Discriminated: the prologue is numerically right, and the 1.8x was my measurement.** Layer 1 fed the
+identical quantised buffer, with the output grid set 20x too large so nothing clips:
+
+    s_in[:3] = 0.01219, 0.03368, 0.01622     s_t = 0.04930     median s_in/s_t = 0.250
+    m_int[:3] = 259200, 716276, 345055       (SHIFT is 20 in this build)
+    |kernel| 1.8240   |reference| 1.9074   ratio 0.956
+
+So the prologue's algebra - rescale the buffer from its per-channel grid to `s_t`, then dequantise with
+`w_scale * s_t` - reproduces the reference to **4.4%**, not with a 1.8x gain. The 1.809 figure came from my
+magnitude print, which compared the chain's dequantised output against the fp16 activation *on the full frame*
+whereas the earlier per-layer test had compared against the simulation's activation; two different denominators,
+one claim. That is the same class of error the claims file exists for and it was committed without one.
+
+The 4.4% deficit is the floor shift: `(q*m) >> SHIFT` truncates toward -inf, and 3 of 4 channels have
+`s_in/s_t` near 0.25, so the multiplier is ~0.25 x 2^20 and the truncation is systematic. A rounding shift is
+the next one-line test.
+
+What this does *not* explain is the pipeline's 1.569%: with the prologue correct, the chain's remaining error is
+in how the grids are chosen per hop (`outs` from fp16 calibration, then from the chain's own clipped maxima) -
+the fixed point already recorded - or in the head/tail, which have not been compared in the same harness.
+
 **The gain is present at the first layer, so it is a scale factor and not accumulation.**
 
 | layer | 1 | 2 | 3 | 4 | 8 | 16 |
