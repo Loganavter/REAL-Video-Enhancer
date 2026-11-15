@@ -355,7 +355,9 @@ statistic.
   (1088 values, -1.39..1.70) does not fit an int8 epilogue; in fp16 the conv and its PReLU are one
   myelin kernel. Quantising the conv output as well so the PReLU reads int8 gives 78.36 ms - the
   boundary is charged per hop. Closed as a TRT configuration; only a fused int8 conv+PReLU plugin
-  would reopen it. The accuracy figure for that second build is not quoted anywhere: the extra
+  would reopen it, and the ceiling that would justify one is measured: with the PReLU replaced by a
+  scalar `LeakyRelu` (the only form TRT fuses) the engine runs 40.24 ms against 56.28 - 1.40x - but
+  that form is not this function (99.323% of pixels above 8 levels, -2.02 dB). The accuracy figure for that second build is not quoted anywhere: the extra
   output scales were mis-calibrated there and its output contained NaN, and the *timing* argument
   does not depend on them (scales are constants).
 - ~~The input conversion costs 2.80 ms/frame against a ~0.1 ms bandwidth floor~~ **measured, and the
