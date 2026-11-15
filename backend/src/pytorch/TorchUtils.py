@@ -201,7 +201,8 @@ class TorchUtils:
             b = y + (2.0 * (1.0 - kb)) * u
             g = (y - kr * r - kb * b) / (1.0 - kr - kb)
             rgb = torch.stack((r, g, b)).clamp_(0.0, 1.0).unsqueeze(0).to(dtype=dtype)
-            self.sync_stream(stream)
+            if stream is not None:
+                self.sync_stream(stream)
         return rgb
 
     @torch.inference_mode()

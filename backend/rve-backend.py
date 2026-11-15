@@ -175,6 +175,7 @@ class HandleApplication:
             dynamic_scaled_optical_flow=self.args.dynamic_scaled_optical_flow,
             ensemble=self.args.ensemble,
             output_to_mpv=self.args.output_to_mpv,
+            tile_reuse=not self.args.no_tile_reuse,
             temporal_reuse=not self.args.no_temporal_reuse,
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
@@ -421,6 +422,13 @@ class HandleApplication:
         parser.add_argument(
             "--UHD_mode",
             help="Lowers the resoltion flow is calculated at, speeding up model and saving vram. Helpful for higher resultions.",
+            action="store_true",
+            default=False,
+        )
+        parser.add_argument(
+            "--no_tile_reuse",
+            help="Disable tile-level reuse (recompute only the LR tiles that changed). On by "
+                 "default; it needs the model to be fully convolutional and builds a tile engine.",
             action="store_true",
             default=False,
         )

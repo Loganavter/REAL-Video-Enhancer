@@ -105,6 +105,7 @@ class Render:
         dynamic_scaled_optical_flow: bool = False,
         ensemble: bool = False,
         output_to_mpv: bool = False,
+        tile_reuse: bool = True,
         temporal_reuse: bool = True,
         temporal_reuse_threshold: float = 0.35,
         temporal_reuse_max_chain: int = 2,
@@ -113,6 +114,11 @@ class Render:
         self.backend = backend
         self.upscaleModel = upscaleModel
         self.interpolateModel = interpolateModel
+        # decided here, before setupUpscale() builds the engine (tile reuse changes its shape)
+        self.tileReuse = bool(
+            tile_reuse and self.upscaleModel and not self.interpolateModel
+            and self.backend in ("pytorch", "tensorrt")
+        )
         self.tilesize = tile_size
         self.device = device
         self.precision = precision
@@ -321,7 +327,7 @@ class Render:
         
 
         self.temporalReuse = None
-        if temporal_reuse and self.upscaleModel and not self.interpolateModel and self.backend in ("pytorch", "tensorrt"):
+        if temporal_reuse and not self.tileReuse and self.upscaleModel and not self.interpolateModel and self.backend in ("pytorch", "tensorrt"):
             from .utils.TemporalReuse import TemporalReuse
             self.temporalReuse = TemporalReuse(
                 threshold=temporal_reuse_threshold,
@@ -458,6 +464,11 @@ class Render:
                 sleep(1)
         if self.temporalReuse is not None:
             log(self.temporalReuse.stats())
+        if self.upscaleModel and getattr(self, "tileReuse", False):
+            up = getattr(self, "upscaleOption", None)
+            tu = getattr(up, "tile_upscaler", None)
+            if tu is not None:
+                log(tu.stats())
         self.writeBuffer.writeQueue.put(None)
         """
         tracer.stop()
@@ -480,6 +491,7 @@ class Render:
             trt_optimization_level=self.trt_optimization_level,
             hdr_mode=self.hdr_mode,
             high_bitdepth=getattr(self, "high_bitdepth", self.hdr_mode),
+            tile_reuse=getattr(self, "tileReuse", False),
             trt_static_shape= not self.trt_dynamic_shapes,
         )
     

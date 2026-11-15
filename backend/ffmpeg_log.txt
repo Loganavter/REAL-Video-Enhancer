@@ -1,7 +1,7 @@
 x265 [info]: HEVC encoder version 3.6+116-f6735953
-x265 [info]: build info [Linux][GCC 14.2.0][64 bit] 10bit
+x265 [info]: build info [Linux][GCC 14.2.0][64 bit] 8bit+10bit+12bit
 x265 [info]: using cpu capabilities: MMX2 SSE2Fast LZCNT SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
-x265 [info]: Main 10 profile, Level-5 (Main tier)
+x265 [info]: Main profile, Level-5 (Main tier)
 x265 [info]: Thread pool created using 12 threads
 x265 [info]: Slices                              : 1
 x265 [info]: frame threads / pool features       : 3 / wpp(34 rows)
@@ -16,9 +16,9 @@ x265 [info]: AQ: mode / str / qg-size / cu-tree  : 2 / 1.0 / 32 / 1
 x265 [info]: Rate Control / qCompress            : CRF-18.0 / 0.60
 x265 [info]: tools: rd=3 psy-rd=2.00 early-skip rskip mode=1 signhide tmvp
 x265 [info]: tools: b-intra strong-intra-smoothing lslices=8 deblock sao
-x265 [info]: frame I:      1, Avg QP:17.08  kb/s: 34618.12
-x265 [info]: frame P:     28, Avg QP:17.97  kb/s: 20497.11
-x265 [info]: frame B:     65, Avg QP:23.03  kb/s: 3835.81 
-x265 [info]: Weighted P-Frames: Y:28.6% UV:7.1%
+x265 [info]: frame I:      1, Avg QP:17.34  kb/s: 37759.74
+x265 [info]: frame P:     28, Avg QP:18.56  kb/s: 21888.82
+x265 [info]: frame B:     65, Avg QP:22.36  kb/s: 4906.29 
+x265 [info]: Weighted P-Frames: Y:10.7% UV:7.1%
 
-encoded 94 frames in 17.60s (5.34 fps), 9126.22 kb/s, Avg QP:21.46
+encoded 94 frames in 11.47s (8.19 fps), 10314.42 kb/s, Avg QP:21.17
