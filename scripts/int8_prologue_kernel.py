@@ -36,3 +36,21 @@ def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, bias_ptr, slop
     q = tl.minimum(tl.maximum(q, -127.0), 127.0)
     tl.store(y_ptr + rows[:, None] * C + lanes[None, :], q.to(tl.int8))
 
+
+
+@triton.jit
+def quantise_nchw_to_nhwc(x_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl.constexpr):
+    """Head activation (NCHW float) -> int8 on the per-channel grid, written NHWC, in ONE pass.
+
+    The torch version round/clamp/cast then permute+contiguous, which is four passes over a 64-channel
+    1080p buffer and measured 10.0 ms - 17% of the whole int8 cycle.
+    """
+    pid = tl.program_id(0)
+    pix = pid * BLOCK + tl.arange(0, BLOCK)
+    ch = tl.arange(0, C)
+    mask = pix < n_pix
+    v = tl.load(x_ptr + ch[:, None] * n_pix + pix[None, :], mask=mask[None, :], other=0.0)
+    s = tl.load(s_ptr + ch)[:, None]
+    q = tl.floor(v / s + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    tl.store(y_ptr + pix[:, None] * C + ch[None, :], tl.trans(q).to(tl.int8), mask=mask[:, None])

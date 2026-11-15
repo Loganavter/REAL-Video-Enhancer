@@ -824,8 +824,41 @@ reference is the broken side and the pipeline's conversion is fine.
 
 `16 * 1.97 + 6.2 = 37.7 ms` stops being a projection here.
 
-**State (2026-11-16): the segments exist and the boundaries are 3x their budget; the app baseline is not measured
-yet, and that is deliberate.** `scripts/int8_timing.py` builds every launch argument before the clock, then measures
+**State (2026-11-16, second measurement): the gate is taken and it FAILS by 2.00 ms.**
+
+`scripts/int8_app_gate.py` loads the **cached fp16 TensorRT engine the app itself loads**
+(`torch.jit.load` on `2x-Futsuu-Anime(1).pth_fp16_..._1920x1080.engine`), keeps both cached in one process,
+encodes h264 with NVENC concurrently through a real ffmpeg loop, runs three interleaved rounds with the order
+alternating, and logs clocks before and after each condition:
+
+| condition | fp16 engine | int8 cycle | ratio |
+|---|---|---|---|
+| NVENC idle | 80.43 ms | 59.45 ms | **1.353x** |
+| NVENC alongside | 91.92 ms | 67.23 ms | **1.367x** |
+
+Gate 1.40x: **failed, short by 2.00 ms idle / 1.57 ms under NVENC** (`docs/claims-int8-stage2.txt` encodes that as
+the shortfall, which must be <= 0). Kill 1.15x: not triggered. The engine is a valid baseline - it agrees with the
+torch fp16 model to `>8 0.00000%` on the same input - and the int8 cycle reproduces the engine's picture to
+`>8 0.00004%, peak 8`.
+
+NVENC costs the engine 14.3% and the int8 cycle 13.1%, so the Triton body is **not** more encoder-sensitive than
+the engine - the worry in condition 3 does not materialise.
+
+**Instrument finding worth more than the number:** the first run of this gate read a perfectly plausible 59.72 ms
+for a cycle that produced a 73.4% wrong picture. `s_act` had been left in float16, so the requant multiplier
+`s_in/s_t * 2^SHIFT` overflowed half (max 65504) to inf and cast to `INT32_MAX`, and every hop became garbage -
+with unchanged timing. Only the image check caught it. This is the sharpest instance so far of the rule that a
+speed number without a picture number does not survive, and the reason the gate script now prints
+`engine vs torch`, `int8 vs torch` and `int8 vs engine` before it starts the clock.
+
+**Where the 2 ms is.** Fusing the quantise pass into a single Triton kernel (NCHW float in, NHWC int8 out) bought
+0.49 ms - 59.54 -> 59.05. The rest sits in the body block and the dequantise: 2.88 ms per launch against the 1.97
+recorded for the bare block is 14.6 ms of headroom on 16 launches. Decomposing the cycle against the fixed fp16
+head and tail (5.5 + 14.9 ms, which both sides pay) puts the **body-only ratio at about 1.54x** - so the body
+already clears the gate and the fp16 boundary work is what dilutes it. That is stage 6's sentence, now measured
+rather than suspected.
+
+**State (2026-11-16, first measurement): the segments exist and the boundaries are 3x their budget.** `scripts/int8_timing.py` builds every launch argument before the clock, then measures
 six segments plus the fp16 baseline in the same process, in three interleaved rounds, with clocks in the log
 (`2805 MHz / 8751 MHz / 49 C / 65.89 W` before, `2775 / 8751 / 57 / 143.05 W` after). Medians at 1920x1080:
 
