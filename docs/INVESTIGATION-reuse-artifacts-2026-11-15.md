@@ -146,17 +146,58 @@ refuses tiles past a noise floor of ~0.45.
    when nothing certifies.
 6. **A pipe format must be declared by the packer, never inferred from the encoder.**
 
+## The two staleness sources mask each other
+
+The chain-depth conclusion above is only half the answer, and the way it was reached hid the
+other half. Reuse has two independent staleness sources: the frame gate (a whole frame served
+from a reference up to `max_chain` frames old) and the tile path (single tiles served from the
+same kind of reference, judged by their own mean). Measured in the metric that matches a viewer -
+share of pixels more than 8 levels off in any RGB channel, worst of 19 sampled frames:
+
+| configuration | median | worst frame | peak | time |
+|---|---|---|---|---|
+| tile reuse off, gate threshold 4, chain 4 | 0.001% | **0.045%** (f480) | **13** | 11.3 s |
+| tile reuse off, gate threshold 12, chain 4 | 0.001% | 0.517% (f370) | 95 | 10.9 s |
+| tile reuse on, gate chain 1 | 0.002% | 0.105% (f390) | 20 | 11.5 s |
+| tile reuse on, gate chain 4, threshold 4 | 0.025% | 0.287% (f383) | 98 | 9.2 s |
+| tile reuse on, gate chain 4, threshold 12 | 0.024% | 0.288% (f383) | 100 | 8.4 s |
+| tile judge = worst block, threshold 2 | 0.024% | 1.174% (f360) | 42 | 8.9 s |
+
+Read down the columns and the trap is visible: **with tile reuse on, the gate's own threshold
+makes no difference at all** (0.288% against 0.287%), because the tile artifact is an order of
+magnitude larger and masks it. Turn tile reuse off and the same gate threshold becomes a tenfold
+difference (0.517% against 0.045%). A quarter of a day went into "the threshold does not matter"
+and "chain depth is the cause" conclusions that were both artefacts of measuring two sources at
+once.
+
+What each knob actually costs, isolated:
+
+- **threshold 12 -> 4** (tiles off): 0.517% -> 0.045%, peaks 95 -> 13.
+- **chain 4 -> 1** (tiles on): 0.288% -> 0.105%, peaks 100 -> 20.
+- **tile reuse on -> off** (threshold 4, chain 4): 0.287% -> 0.045%, peaks 98 -> 13, at the price of
+  9.2 -> 11.3 s.
+- **tile judge mean -> worst block**: worse, 0.288% -> 1.174%. The worst block fires on grain and
+  takes neighbouring tiles out of sync frame to frame; it moved the artifact instead of removing
+  it.
+- **tile threshold 0.35 -> 0.10**: reuse collapses from 57.7% to 3.0% and the render becomes
+  *slower* than not using the tile path at all (13.3 s against 11.4 s), so the tile statistic
+  cannot be tightened into safety - it either pays for itself with the artifact or pays nothing.
+
 ## Result
 
-| configuration | 502 anime frames | worst-frame error |
+| configuration | 502 anime frames | worst frame, RGB > 8 levels |
 |---|---|---|
 | ungated, full frame | 38.85 s | reference |
-| gate, chain 4, fitted tiles | 7.68 s | 0.29% > 8 levels, peaks of 100 |
-| gate, chain 1, fitted tiles (`best`) | 11.52 s | nothing above 8 levels, peak 12 |
-| film, gate chain 4 | 4.33 s against 4.66 s ungated | 2.35% > 8 levels |
+| **default now: gate (thr 4, chain 4), no tile reuse** | **11.3 s** | **0.045%, peak 13** |
+| gate, chain 4, tile reuse | 9.2 s | 0.287%, peak 98 |
+| gate, chain 4, tile reuse, threshold 12 | 8.4 s | 0.288%, peak 100 |
+| tile judge = worst block | 8.9 s | 1.174%, peak 42 |
+| film, any of the above | 4.3-4.6 s against 4.66 s ungated | the gate refuses at `best`; tile reuse off |
 
 `best` is the default and takes the certified depth; `fast` keeps the full chain and pays the moved
-fist. The honest headline with the certified chain is **3.4x** (38.85 -> 11.52 s), not 5x: 5.06x is
+fist. Tile reuse is off by default: it buys 2.1 s of 11.3 and costs six times the defect area, and
+its per-tile mean cannot be made safe without giving the win back entirely (`--tile_reuse_mode auto`
+and `on` stay available for material where the owner accepts the trade). The honest headline with the certified chain is **3.4x** (38.85 -> 11.52 s), not 5x: 5.06x is
 the chain-4 number, i.e. the configuration that moves the fist.
 
 Caveat on this whole framing: "the last 1.5x is the price of not moving objects" describes a

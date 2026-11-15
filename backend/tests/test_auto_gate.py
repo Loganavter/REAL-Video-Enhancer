@@ -126,13 +126,24 @@ def test_chain_depth_is_certified_separately_from_the_threshold():
     so the useful answer is "reuse, but never from a reference more than N frames old",
     not "throw the gate away" and not "reuse four frames deep and live with it".
     """
-    t = AutoGateTuner(min_pairs=6, budget=2.0)
+    t = AutoGateTuner(min_pairs=6, budget=2.0, chain_budget=12.0)
     for index in range(6):
-        # depth 1 calm, depth 2 calm, depth 3 and 4 drift past the budget
-        t.add(1.0, (1.5, 1.8, 6.0, 9.3))
+        # depth 1 and 2 calm, depth 3 and 4 drift past even the chain budget
+        t.add(1.0, (1.5, 1.8, 16.0, 20.0))
     assert t.ready
     assert t.chosen_chain == 2
     assert t.chosen == max(t.candidates)
+
+
+def test_the_clamp_still_bounds_the_choice():
+    """The clamp is a bound, not a fix: thresholds 12 and 4 measured the same on the clip
+    (0.288% against 0.287% of pixels above 8 levels), so it is here to keep the number inside a
+    physically meaningful range, and the test only pins that it does."""
+    t = AutoGateTuner(min_pairs=4, budget=50.0, clamp=(2.0, 4.0))
+    for _ in range(4):
+        t.add(1.0, 0.5)
+    assert t.ready
+    assert t.chosen == 4.0
 
 
 def test_a_scalar_delta_is_treated_as_depth_one():
@@ -145,8 +156,8 @@ def test_a_scalar_delta_is_treated_as_depth_one():
 
 
 def test_no_depth_certifies_means_no_reuse_under_best():
-    t = AutoGateTuner(min_pairs=4, budget=2.0, fallback="off")
+    t = AutoGateTuner(min_pairs=4, budget=2.0, chain_budget=12.0, fallback="off")
     for _ in range(4):
-        t.add(1.0, (9.0, 9.0, 9.0, 9.0))
+        t.add(1.0, (20.0, 20.0, 20.0, 20.0))     # over the budget at every depth
     assert t.ready
     assert t.chosen is None

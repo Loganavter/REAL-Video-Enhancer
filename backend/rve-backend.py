@@ -467,11 +467,14 @@ class HandleApplication:
         )
         parser.add_argument(
             "--tile_reuse_mode",
-            help="auto (default): decode a few frames at a few positions, replay the gate's "
-                 "and the tile path's own statistics, and enable tiles only when the halo tax "
-                 "is smaller than the tiles saved. on: always. off: never.",
+            help="off (default): tile-level reuse costs 0.29%% of pixels above 8 levels (RGB, "
+                 "worst frame, peaks of 100) for 2.3 s per 21 s of anime, and its per-tile mean "
+                 "cannot be tightened without losing the whole benefit (3%% of tiles at "
+                 "threshold 0.10, slower than no tiles at all). auto: decode a few frames and "
+                 "enable it only where the predicted cost beats the halo tax - fast, not safe. "
+                 "on: always.",
             choices=("auto", "on", "off"),
-            default="auto",
+            default="off",
         )
         parser.add_argument(
             "--tile_reuse_size",
@@ -482,7 +485,8 @@ class HandleApplication:
         )
         parser.add_argument(
             "--tile_reuse_threshold",
-            help="Worst-tile low-passed luma delta (0-255) under which a tile is reused. Default 0.35.",
+            help="Worst-tile low-passed luma delta (0-255) under which a tile is reused. "
+                 "Default 0.35, the mean over the tile's blocks.",
             default=0.35,
             type=float,
         )

@@ -220,6 +220,10 @@ class UpscalePytorch:
                     halo_lr=self.tile_pad,
                     threshold=self.tile_threshold,
                     max_chain=self.tile_max_chain,
+                    # RVE_TILE_STAT=max judges a tile by its worst block instead of its mean:
+                    # a mean lets a moving object inside one tile average itself away, which is
+                    # the same blindness the frame gate had (measured: peaks of 98 levels).
+                    tile_stat=os.environ.get("RVE_TILE_STAT", "mean"),
                 )
                 engine_h, engine_w = self.tile_upscaler.tile_shape
                 self.pad_w = math.ceil(engine_w / modulo) * modulo

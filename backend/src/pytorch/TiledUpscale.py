@@ -456,11 +456,11 @@ class TiledUpscaler:
         for core in cores:
             by0, by1, bx0, bx1 = block_bounds(core, self.downscale, blocks_h, blocks_w)
             window = delta[..., by0:by1, bx0:bx1]
-            # The per-tile statistic must be the MEAN of the low-passed deltas, not the max:
-            # a 512px tile holds 64x64 8px blocks, so a max trips on a single dithered block
-            # and the gate would never fire (measured: 9/9 tiles "changed" on every frame of
-            # a moving film). The measured predictor is mean-based: LR mean 0.25-0.35 ->
-            # HR mean 0.77 / max 0.95 levels, i.e. sub-1-level, invisible error.
+            # MEAN of the low-passed deltas, not the max: a moving object inside a tile does
+            # average itself away, and switching to the worst block was measured to make the
+            # whole clip worse rather than better - 1.174% of pixels above 8 levels (RGB) on the
+            # worst frame against 0.29% for the mean, because the worst block fires on grain and
+            # flips neighbouring tiles out of sync frame to frame.
             per_tile.append(window.mean() if self.tile_stat == "mean" else window.amax())
         # one host sync for the whole frame instead of one per tile
         return [float(v) for v in torch.stack(per_tile).tolist()]
