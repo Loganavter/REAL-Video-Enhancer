@@ -32,8 +32,8 @@ from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc
 __all__ = ["Int8Body"]
 
 SHIFT = 20
-BLOCK_M = 64
-WARPS = 2
+BLOCK_M = 128   # the rolled loop prefers a wider block: 2.198 ms against 2.919 at BM 64
+WARPS = 4
 QB = 256      # the conversions are register-bound: 1024 measured 2.3 ms against 1.57 at 256
 
 

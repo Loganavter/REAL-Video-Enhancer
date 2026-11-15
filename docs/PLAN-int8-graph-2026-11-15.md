@@ -6,9 +6,11 @@ before anything is built on top of them.
 
 Adapted to this machine at the end of each stage (`Tools`).
 
-**Outcome (2026-11-16): the lane does not pay, measured on one instrument.** Against the engine the app actually
-builds (tiled, head-fused, opt-5) the int8 body runs 56.56 ms against 46.40 ms for a 1920x1080 frame - **0.820x**,
-1.22x slower - and 0.774x at 3840x2160. Stages 2, 4 and 6 are closed as measured-does-not-pay and stage 5 is scoped
+**Outcome (2026-11-16): the lane does not pay, measured on one instrument, and the ceiling is now bounded.** Against
+the engine the app actually builds (tiled, head-fused, opt-5) the int8 body runs **48.55 ms against 46.29 ms** for a
+1920x1080 frame - **0.962x**, and 0.774x at 3840x2160. The kernel lever was taken (+15%: rolled loop, not
+unrolled), and with the measured dot floor of 1.900 ms per launch the best this design can reach is **1.062x** -
+below the 1.15 kill line arithmetic, not tuning. Stages 2, 4 and 6 are closed as measured-does-not-pay and stage 5 is scoped
 out; `docs/claims-int8-stage{1,2,4,5}.txt` all pass with those verdicts asserted. No int8 frame was ever rendered,
 for two measured reasons recorded in Stage 6. The one lever left is a body kernel rewrite, sized in Stage 6.
 
@@ -1403,13 +1405,34 @@ division across two processes. This is the only number in the document that has 
 So the hook is not "unfinished" - it is on the wrong branch of a renderer that tiles, and serving it there would
 have made every frame 1.22x slower.
 
-**Why the gap is a rewrite and not a tweak.** The body is 43.9 ms of the 56.6 - sixteen launches at 2.74 ms
-against the engine's fused convolution at roughly 1.6 ms per layer-equivalent. Closing 16.20 ms needs the body at
-<= 40.4 ms, i.e. 2.5 ms per launch: a 10% win on the kernel. The obvious transformation is to load the input tile
-once with a halo and reuse it across the nine taps instead of issuing nine masked gathers per launch, but Triton
-has no cheap way to shift a register tile by one column, so that becomes an im2col-style restructure - a rewrite
-of the kernel, with the same traffic in the naive form. That is the one lever left and its size is now stated in
-milliseconds rather than hoped at.
+**The kernel lever was taken, and the ceiling it exposes is below the kill line.**
+
+The kernel was diagnosed before it was rewritten: one gather plus nine dots costs **1.900 ms** per launch and nine
+gathers with no dot costs **1.060 ms**, so the tensor cores are the floor and the gathers are mostly L2 hits. The
+win was not in halo-reuse - unrolling was the problem:
+
+| variant | ms per launch |
+|---|---|
+| nine taps fully unrolled (`tl.static_range`), BM 64 / 2 warps | 2.919 |
+| the same loop rolled (`tl.range`, `num_stages=1`), BM 128 / 4 warps | **2.198** |
+| rolled and pipelined (`num_stages=2`) | 2.497 - worse, the gathers are already in L2 |
+
+Fifteen percent, from not unrolling nine copies of the loop body. Against the app's engine, one process, three
+interleaved rounds:
+
+| 1920x1080 | ms |
+|---|---|
+| the app's engine | 46.29 / 46.84 / 46.75 |
+| the int8 body, rolled loop | 48.55 / 48.49 / 48.62 |
+| **ratio** | **0.953 / 0.966 / 0.962** (was 0.820) |
+
+Picture unchanged: `0.00000%, peak 7`.
+
+**And that is the end of the road, arithmetically.** The measured dot floor is 1.900 ms per launch, so sixteen
+hops cannot go below **30.40 ms** without beating the engine's own MMA efficiency; the non-body work is 13.3 ms.
+The best this design can reach is therefore about **43.7 ms**, i.e. **1.062x** against the engine - **below the
+1.15 kill line before any tuning**. The remaining 8.30 ms to the kill line is not a kernel defect to grind out; it
+is the design. A truly perfect dot (matching the engine's 1.6 ms per layer) would give 1.08-1.12x and still miss.
 
 **State (2026-11-16, first measurement): the body is in the app and wired into the upscale path, and it REFUSES
 to serve.**

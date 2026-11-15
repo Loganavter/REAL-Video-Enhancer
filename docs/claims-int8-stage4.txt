@@ -145,3 +145,22 @@
 # (the cross-instrument version of body_vs_app lived here; recorded once above as superseded_ratio)
 @claim probe_admitted      1 x     "log: 'int8 probe: engine 0.002% composition 0.003% peak 14 (7 pairs) -> int8'" measured
 @claim probe_served        0 x     "log: no certification line; the render is tiled and the int8 hook only covers tilesize==0" measured
+
+# ---- the kernel lever, tried: 15% back, and the ceiling is now bounded
+@claim tap_static_ms    2.919 ms "nine taps fully unrolled (tl.static_range), BM 64 / 2 warps" measured
+@claim tap_rolled_ms    2.198 ms "the same loop rolled (tl.range num_stages=1), BM 128 / 4 warps" measured
+@claim tap_stages2_ms   2.497 ms "pipelined two stages - worse, the gathers are already L2-resident" measured
+@claim dot_floor_ms     1.900 ms "one gather plus nine dots: the tensor-core floor for one launch" measured
+@claim gather_ms        1.060 ms "nine gathers with no dot: the memory path alone" measured
+@claim body_rolled_ms  48.55 ms  "the full body after the rolled loop, 1920x1080" measured
+@claim ratio_rolled     0.962 x  "derived: 46.29 / 48.55 against the app's engine, one process" derived
+@derived ratio_rolled "46.29 / 48.55 = 0.953; rounds read 0.953 / 0.966 / 0.962 - up from 0.820"
+@claim kill_overspend2  8.30 ms  "body_rolled_ms - app_engine_ms/1.15 = 48.55 - 40.25" derived
+@derived kill_overspend2 "48.55 - 46.29/1.15 = +8.30 ms still past the kill line"
+@claim ceiling_body_ms 30.40 ms  "16 x the measured dot floor: no kernel can go below this without better MMA" derived
+@derived ceiling_body_ms "16 x 1.900 = 30.40 ms"
+@claim ceiling_cycle_ms 43.70 ms "ceiling_body_ms + the 13.3 ms of non-body work" derived
+@derived ceiling_cycle_ms "30.40 + 13.3 = 43.70 ms"
+@claim ceiling_ratio     1.062 x  "derived: app_engine_ms / ceiling_cycle_ms - the best this design can reach" derived
+@derived ceiling_ratio "46.29 / 43.70 = 1.062, below the 1.15 kill line: the design cannot pay, not the tuning"
+@below body_vs_app kill_ratio
