@@ -23,8 +23,8 @@ from int8_accuracy_sim import calibrate, quantised_forward  # noqa: E402
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("calib")
     ap.add_argument("test")
+    ap.add_argument("--calib", nargs="+", default=None)
     ap.add_argument("width", type=int)
     ap.add_argument("height", type=int)
     ap.add_argument("--model", default="/tmp/opencode/models2/futsuu.pth")
@@ -42,11 +42,12 @@ def main() -> int:
 
     model, _, _ = load(args.model)
     model = model.eval().cuda().half()
-    a, b = frame(args.calib), frame(args.test)
+    calib_paths = args.calib or [args.test]
+    b = frame(args.test)
     with torch.no_grad():
         ref = model(b).float()
 
-    inputs, outputs, _ = calibrate(model, [a])
+    inputs, outputs, _ = calibrate(model, [frame(p) for p in calib_paths])
     # the head conv's input is the image, clamped to [0,1] by the model itself: its range is a domain
     # constant and calibrating it on one frame made a dark frame clip a fifth of a different title
     inputs["body.0"] = 1.0
