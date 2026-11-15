@@ -1214,6 +1214,32 @@ the error is spread over all channels and the remaining levers are the ones that
 asymmetric scales (~0.7 of a bit, measured) and the fp16 boundary on the early layers (untested, and the
 tail experiment showed the last layers are not where it enters).
 
+**Three cheap checks localize the peak, and the null test moved the blame.**
+
+| test | share | peak | median |
+|---|---|---|---|
+| own-calibration clip rate at margin 1.25 | **0.00% on every layer** | - | - |
+| fp32 reference against the fp16 one, whole frame | 0.000% | **0** | 0.00 |
+| weights quantised, activations NOT (all 16 boundaries fp16) | 0.005% | **28** | 0.75 |
+| weights and activations quantised, margin 1.25 | 0.058% | 37 | 1.93 |
+
+So: clipping is **excluded** in-domain (zero on every layer), and the reference is **excluded** - the fp32
+and fp16 models agree to the level (max 0 over the whole frame), so the 37 is not the measuring stick.
+What is left is the quantisation, and the null test splits it: **weight quantisation alone accounts for 28
+of the 37 levels**; adding activation quantisation takes it to 37 and the median from 0.75 to 1.93.
+
+That reframes the next lever. The weights already carry per-output-channel scales, so the untried axis is
+the **input** channel dimension - per-input-channel scaling folded into the following weights, which is
+exactly SmoothQuant's migration. The conditioning ratio being flat said "no bad channels to target", not
+"nothing to migrate": the migration acts on the input axis, where no scaling exists at all today.
+Asymmetric activation scales then act on the remaining 9 levels and on the median.
+
+A note for whoever repeats this: `margin` multiplies the calibration maxima, which **coarsens** the grid -
+it buys clipping headroom and pays in rounding. There is no "identity quantisation" direction in that
+knob, so the null test has to be run by disabling quantisation (`--fp16-tail 16`), not by a large margin
+(a 1000x margin overflows fp16 in the requant divide and returns NaN, which is how the first attempt
+failed).
+
 Status, honestly: **with per-video calibration and margin 1.25 the int8 picture passes the statistic the
 project actually applies** - 0.058% against 0.1%, and better than the shipped opt-in's 0.071% - while
 reading peak 37 against that option's 23. Two frames of one title are still a narrow calibration set;
