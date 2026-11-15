@@ -217,11 +217,25 @@ derives both from the activation's own range, the simulation takes `inputs[key]`
 `outputs[key]` (per-channel) from a calibration pass on fp16 activations. Sixteen hops of a slightly different
 grid is enough to turn 4.6% into 26%.
 
-The next test is therefore not another kernel variant but a **grid alignment**: rebuild the pipeline's chain
-using exactly the simulation's grids - `s_t = inputs[key]/127` for the prologue target and
-`s_out = outputs[key]` for the write - and see whether layer 1's 4.6% collapses. If it does, the pipeline was
-correct all along and only disagreed about which numbers to quantise to; if it does not, the difference is in
-the double quantisation itself, which is a design constraint rather than a bug.
+**The grids were already aligned, and the ratio is misleading.** Rebuilding with the simulation's own
+`s_t = max|input|/127` changes not a digit - 0.0462, 0.0939, 0.1110 reproduce exactly - because the pipeline's
+`max(per-channel grid)` is that same global maximum. So the two chains quantise to identical grids and still
+differ by 4.6% at the first hop.
+
+The reason the ratio looks alarming is the denominator: the layer's activation has `|sim| mean 0.64` while its
+quantisation step is `max/127`, and on this crop the step is comparable to the mean. A relative error against
+a tensor whose mean is one step wide is dominated by rounding, not by a mechanism - which is consistent with
+the *final image* being nearly exact in the simulation while the intermediate ratio reads 4.6%.
+
+So the layer-wise ratio is the wrong instrument here, and the honest conclusion is the one the final comparison
+already gave: pipeline 1.870% against simulation 0.000% on the same frame, both chains quantising to the same
+grids, the kernel exact on identical input. Something in the handoff still differs and the layer-level ratio
+cannot localise it because its denominator is the noise floor.
+
+What can localise it: compare the two chains' **final images** pixel-wise and look at where the pipeline's
+error concentrates - if it is a thin set of pixels (as the 21-level localisation was for the single-block
+case), it is a boundary or a clamp; if it is everywhere, it is a grid. That is a diagnostic with a
+discriminating read, unlike the intermediate ratio.
 
 Steps 2-6 remain blocked on this gate.
 
