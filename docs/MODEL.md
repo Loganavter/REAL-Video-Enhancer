@@ -202,13 +202,22 @@ counter is read (§6, item 2).
    (§3): the tactic search hit OOM and each standalone engine pays border reformats. It would
    need re-running with a constrained workspace and, ideally, NHWC input/output so the comparison
    is not dominated by layout conversion.
-4. **Alternative tactics for the 16 body convs**: editable timing cache, check whether an
-   sm80/86/89 variant exists for this shape, how it timings, and A/B it - the `sm75_` lead.
-5. **Explicit Q/DQ int8 in NHWC** if the format (rather than the implementation) is to be closed.
+4. ~~Alternative tactics for the 16 body convs~~ **done, and the lead is closed**: four builds of
+   the same ONNX (baseline, 8 GB explicit workspace, cuDNN-only, JIT-only) with three interleaved
+   timing rounds each. A workspace changes the tactic mix (one tail conv moves from sm80 to sm75)
+   and buys 0.5%, i.e. noise; a JIT-only source set picks the *same* `sm75_` tactic, so there is no
+   sm80/86/89 variant being skipped for this shape at K=576; cuDNN-only is 10.7% *slower*. The name
+   `sm75_` is the name of the winner, not a symptom.
+5. ~~Explicit Q/DQ int8~~ **done**: calibrated on our own frames it is essentially lossless
+   (0.000% of pixels above 8 levels against the FP16 engine, peak 4 levels) and **slower** -
+   68.11 ms against 55.54 - because TRT picks an **NCHW** int8 kernel
+   (`sm80_xmma_..._i8f16_i8i32_f32_nchw_vect_c`) where the FP16 path is NHWC, and the 60 reformat
+   layers that needs cost more than int8 saves. The verdict is "no NHWC int8 kernel for this
+   shape", not "int8 does not work".
 
-Each of these is hours, not days. Item (2) is the one that would turn §3 from inference into
-measurement; until it is done, "per-frame is at its floor" remains a statement about *what we
-tried*.
+What is left is item (2) alone: `nsys` tensor-active-% and DRAM bytes with clocks pinned would turn
+§3 from inference into measurement. Until then, "per-frame is at its floor" remains a statement
+about *what we tried*.
 
 ## 7. The lever that works today: fewer frames
 
@@ -216,7 +225,7 @@ tried*.
 |---|---|---|
 | anime, ungated (502 frames, 1080p -> 2160p) | 100% | 16.3 fps |
 | anime, duplicate gate | 29.1% | 51.71 dB average / 48.64 dB worst frame against the ungated render, 70.9% reuse |
-| anime, gate only (default) | 29.1% of frames | **11.3 s against 38.85 s ungated (3.4x)**, 0.045% of pixels above 8 levels (RGB) on the worst of 19 sampled frames, peak 13 |
+| anime, gate only (default) | 29.1% of frames | **11.7 s against 38.85 s ungated (3.3x)**, 0.009% of pixels above 8 levels (RGB) on the worst of 19 sampled frames, peak 14 |
 | anime, gate + tile reuse | 57.7% of tiles | 9.2 s, but **0.287%** above 8 levels and peaks of 98: the tile path has its own staleness, so it is off by default (see the investigation linked below) |
 | film, ungated (94 frames, 1440p -> 2880p) | 100% | 4.66 s |
 | film, duplicate gate | 81.9% | 4.33 s (1.08x), 50.34 dB average / 39.83 dB worst frame against ungated. The 71 dB this row used to claim came from comparing two renders that were both corrupted by the pipe-format bug in ledger C4 |

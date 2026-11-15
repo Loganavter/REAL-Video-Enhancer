@@ -143,9 +143,10 @@ refuses tiles past a noise floor of ~0.45.
      was 4x worse on frame 360.
 
    The bar is one number: **under 0.1% of pixels above 8 levels (RGB) on the worst of a spread
-   sample**. Measured against it: 0.045% for the shipping configuration, 0.045% for no reuse at all,
-   0.287% for the rejected tile configuration, 1.174% for the worst-block tile judge. A peak under
-   20 levels accompanies a pass. VMAF (min >= 90) is reported as a second opinion and is explicitly
+   sample**. Measured against it: **0.009%** for the shipping configuration, 0.287% for the rejected
+   tile configuration, 1.174% for the worst-block tile judge. A peak under 20 levels accompanies a
+   pass. (The 0.045% quoted in earlier revisions of this file was the same configuration before the
+   statistic changed from `|box - box|` to `box(|diff|)`; see the section below.) VMAF (min >= 90) is reported as a second opinion and is explicitly
    **not** sufficient - the rejected configuration scores min 93.65.
 2. **One GPU job at a time** means no other render or benchmark; `nvidia-smi` utilisation is not a
    usable idle check on this host (17-47% with nothing of ours running).
@@ -213,7 +214,7 @@ three times wider: the old one falls off a cliff between 4 and 8, the new one is
 That margin is what the tuner actually needs - the failure this investigation started with was a
 threshold that had drifted to 12.
 
-Whole-clip effect, 19 sampled frames, RGB, chip clip: worst frame goes from **0.045% / peak 13** to
+Whole-clip effect, 19 sampled frames, RGB, anime clip: worst frame goes from **0.045% / peak 13** to
 **0.009% / peak 14**, at 11.7 s against 11.3 s (3.7% slower for a 5x smaller defect area). The
 scene-cut logic still runs on the level grid, which is why `observe()` now takes the decision grid
 separately: the error field is already relative to the reference and must not be differenced twice.
@@ -228,7 +229,7 @@ share of pixels more than 8 levels off in any RGB channel, worst of 19 sampled f
 
 | configuration | median | worst frame | peak | time |
 |---|---|---|---|---|
-| tile reuse off, gate threshold 4, chain 4 | 0.001% | **0.045%** (f480) | **13** | 11.3 s |
+| tile reuse off, gate threshold 4, chain 4 (before the box|diff| change) | 0.001% | **0.045%** (f480) | **13** | 11.3 s |
 | tile reuse off, gate threshold 12, chain 4 | 0.001% | 0.517% (f370) | 95 | 10.9 s |
 | tile reuse on, gate chain 1 | 0.002% | 0.105% (f390) | 20 | 11.5 s |
 | tile reuse on, gate chain 4, threshold 4 | 0.025% | 0.287% (f383) | 98 | 9.2 s |
