@@ -79,8 +79,8 @@ def main() -> int:
     ap.add_argument("--iters", type=int, default=0)
     ap.add_argument("--sat", action="store_true", help="per-layer saturation share")
     ap.add_argument("--margin", type=float, default=1.0, help="safety factor on every grid")
-    ap.add_argument("--no-recal", dest="recal", action="store_false",
-                    help="grids from the fp16 calibration only (no chain self-calibration)")
+    ap.add_argument("--recal", action="store_true",
+                    help="the chain self-calibration; OFF by default because it is worse on both populations")
     ap.add_argument("--sim-grids", action="store_true",
                     help="prologue target from the simulation's per-tensor calibration")
     ap.add_argument("--pct", type=float, default=99.9,
@@ -122,7 +122,8 @@ def main() -> int:
             hooks.append(mod.register_forward_hook(
                 lambda _m, _i, out, k=name: qq.__setitem__(
                     k, (out.detach().float().abs().flatten(2).amax(dim=2) if args.pct >= 100
-                        else out.detach().float().abs().flatten(2).quantile(args.pct / 100.0, dim=2)
+                        else out.detach().float().abs().flatten(2)[:, :, ::8].quantile(
+                            args.pct / 100.0, dim=2)
                         ).cuda().flatten())))
     with torch.no_grad():
         model(x)
@@ -146,7 +147,7 @@ def main() -> int:
         lo_c, hi_c = outputs[key]
         # per CHANNEL, not per tensor: the PReLU slopes span -1.39..1.70, so the post-PReLU range differs
         # by factors across channels and a single scalar grid throws bits away on the narrow ones
-        outs.append((torch.maximum(hi_c.abs(), lo_c.abs()).float() / 127.0).clamp_min(1e-8))
+        outs.append((torch.maximum(hi_c.abs(), lo_c.abs()).float() / 127.0).clamp_min(1e-8) * args.margin)
 
     def run_pipeline(outs_used=None, collect=False, sat=False):
         """Per-channel activation grids throughout, with each layer's input scale folded into its weights.

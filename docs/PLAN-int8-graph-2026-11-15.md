@@ -252,6 +252,39 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**The per-hop instrument is rebuilt and it agrees with its own end-to-end result; and what it exposed first is a
+unit error in my own reading.** The new instrument marches both chains in lockstep, keeps the chain state as int8
+codes plus a grid (so a 4K frame fits), and processes the frame in row strips with a one-row halo - exact for each
+strip's interior because a hop is a 3x3 conv. Validated at 1080p, where the answer is known: build vs fp16
+0.00000%, simulation vs fp16 0.00000%, build vs simulation 0.00001%.
+
+What it settled: **body levels are not image levels.** The body's mean absolute activation is 0.0032 while the
+image's is 0.0904, and a deliberately injected 40-level body perturbation lands as 17.8 image levels. So the
+"22 levels at hop 1" I reported two passes ago was a unit error - a large number in a small unit - not damage.
+Any future per-hop number in this document must be quoted in propagated image levels or it is meaningless.
+
+**And the 4K defect is the chain self-calibration itself.** Removing it - the grids come from the calibration on
+the fp16 activations, exactly as the simulation does - improves both populations:
+
+| | with self-calibration | without |
+|---|---|---|
+| anime 1080p | 0.00043% | **0.00000%** (peak 7, median 1.08; the simulation is 0.00000%, peak 8, median 1.21) |
+| Violet 4K | 0.07115% | **0.03075%** (peak 17, median 1.39) |
+
+So the build is now **bit-exact with the simulation on the anime gate** and 6.72x -> **2.90x** on 4K Violet. That
+reverses the pct-99 reading from two passes ago, which had kept the self-calibration in: that comparison ran with
+the broken rounding shift, so it was measuring the wrong thing - the same confound, one level up.
+
+Three more candidates were closed at 4K: percentiles are worse, not better (99.9 -> 0.102%, 99.5 -> 0.447%,
+99 -> 0.767%, against 0.03075% for the true maximum, which is also what the simulation uses); snapping the head's
+input to the simulation's 127-level grid is worse (0.03379%); and the prologue's channel collapse does not happen
+where it would matter - 0 of 1024 channel-slots are below the 1/254 threshold at 4K, and 8 of 1024 are at 1080p,
+where the build is exact.
+
+**Open: 2.90x against the plan's 2x rule.** The absolute gap is 418 pixels of 8 310 400 (0.03075% vs 0.01059%),
+both inside the anime gate band and both 3x under the bar, so the rule is being violated by a small number - but
+it is violated, and the next pass starts from the 4K frame with the instrument that now agrees with itself.
+
 **STAGE 1 PASSES ON THE ANIME POPULATION: the rounding shift was implemented wrong, and that was the 5x.**
 The "sign-aware rounding" I tested twice and rejected twice was not a rounding shift at all. Adding `-half` for
 negative products rounds **away from zero**:
