@@ -1940,8 +1940,42 @@ staging here at all - the flat timing sweep is not "the registers would not allo
 changes nothing". The cross term I wanted to test (128 registers **and** a deeper staging) therefore does
 not exist as a configuration: there is no deeper staging to combine with.
 
-Which leaves exactly one point to run: 128 registers, 12 KB of staging, four blocks, 16 warps, at the same
-total in-flight accumulator as the configuration that ships 1.97 ms today.
+Which leaves exactly one point to run - but it is not "the same ILP with more warps", because the register
+cut comes out of the operand budget, not the accumulator:
+
+| config | registers | accumulator per thread | left for operands and addresses |
+|---|---|---|---|
+| BM 256, 255 regs | 255 | 128 | 127 |
+| BM 128, 128 regs | 128 | 64 | **64** |
+
+And 64 is barely enough, which is why the cap spills 8 bytes at all. So the experiment asks whether warp
+switching replaces per-thread load hoisting - a real question, not a free lunch.
+
+Three distinguishable predictions, each against its own base:
+
+| model | prediction | base |
+|---|---|---|
+| total in-flight accumulator binds | **1.97 ms** | parity with today's best |
+| warps hide latency | **2.355 x 12/16 = 1.766 ms** | 10% better than today's best |
+| load hoisting beats warps | **> 2.355 ms** | worse than the same shape at 138 registers |
+
+The second base has to be 2.355 - the same BM/BN/warps at 138 registers and three blocks - because
+comparing only against 1.97 mixes a tile-shape change with a register-budget change.
+
+**And the ceiling at this budget is 1.33x of wall, not 1.48x.** Saturating the pipeline from the 2.355 base
+would need 2.355 x 12/1.363 = 20.7 warps, and four blocks of four warps gives 16; five blocks would need
+102 registers or fewer (38 left for everything but the 64-value accumulator) and six would need 85. So 16
+warps is the practical maximum at BN=64, and the "warps hide latency" model gives 1.766 ms = 34.46 ms per
+frame = 1.633x engine = **1.334x of wall**, i.e. **+5% over today's 1.271x**. 1.48x is a boundary, not an
+expectation.
+
+A fourth silent contract for the launcher, and the only one whose stale value is still a valid number:
+BM 128 doubles the **grid** to 16 200 blocks while leaving the block size at 128. A launcher that keeps
+8 100 computes half a frame - no fault, just half an image.
+
+Given that the prize is 0 to +5% of wall, the launcher is worth building as the **delivery path for the whole
+int8 lane** (sixteen Triton kernels under a CUDA graph between two small engines, no plugin and no QDP),
+with the register experiment as a by-product, rather than as its own project.
 
 That number is also a launcher requirement, not a detail: `cuLaunchKernel` must be given
 `sharedMemBytes = 12 288`, or the kernel reads and writes outside its staging buffer - a silent corruption
