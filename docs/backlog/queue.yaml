@@ -125,22 +125,37 @@ tasks:
     refutes: "The buffer arithmetic does not hold at 4K (reuse buffer per layer boundary or the 16-boundary sum exceeds what stays resident), or the traffic decomposition attributes less than ~20 ms to DRAM, leaving no 1.5x ceiling."
     acceptance: "Phase 1 is CPU arithmetic only: per-boundary buffer bytes, total, L2 residency argument, and the re-derived time decomposition (logical traffic 8.49 GB, L2 absorption ~1/3, DRAM 19.7 ms, compute floor 33.1 ms, measured 56.8 ms). Phase 2, only if phase 1 survives: a boundary search per the Welder model and one fused prototype."
     note: "MICRO'16 (Alwani et al.) removed intermediate tensors from off-chip entirely on the first five VGG layers: 77 MB -> 3.6 MB with 362 KB on-chip, and their recompute-vs-reuse fork is our fork too (full fusion of 19 layers would cost +9.6x arithmetic by recompute, but 1.4 MB by reuse). Our version: (K-S)=2 rows x 1920 x 64 ch x 2 B = 0.49 MB per boundary, 16 boundaries = 7.9 MB, which does not fit 100 KB shared memory but does fit 32 MB L2. This is the item that would give the ledger's 'the model has that headroom; the builder cannot collect it' a number."
+  - id: rve-channel-width-time-2026-11-15
+    title: "E30a: time of the body at C=64/48/32 - no picture question, no owner"
+    type: experiment
+    status: in_progress
+    owner: "@supervisor"
+    priority: P0
+    gpu: true
+    cost: "30m"
+    tags: [channels, time, tactics, tile-alignment]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md, backend/src/pytorch/RawTRTEngine.py]
+    owns_files: [scripts/probe_channel_width.py]
+    refutes: "The measured ratio does not follow the MAC ratio. E19 already showed FLOPs are not time on this engine (C=3 -> 8 raised FLOPs 0.48% and moved time 3.36 ms), and the shipped tactic is tilesize128x64x32, so C=48 fills 75% of an N tile of 64 and K=432 is 14 steps of 32 against 18: the expectation is nearer 1.29x than 1.78x. If 48 measures at 1.29x, the plan's 2.06x frame estimate becomes ~1.5x."
+    acceptance: "Engine time at three widths, same builder settings as the app (fp16, tiling full, optimization level 5), per-layer body times from trt.IProfiler, 20 iterations. Output: measured time ratio against MAC ratio for each width."
+    note: "Split from the pruning item on purpose: how much TIME a width costs is measurable on a synthesized model with random weights (tactics depend on shapes, not values), so it needs no reconstruction and no decision about the picture. The picture half only becomes interesting if this half shows a win."
   - id: rve-pruning-bounds-2026-11-15
-    title: "E30: channel cut 64->48 at fp16 - the only route to 2x that needs no new kernel"
+    title: "E30b: channel cut reconstruction - the picture half, gated on E30a"
     type: code
     status: todo
     owner: null
-    priority: P1
+    priority: P2
     gpu: true
     cost: "1-2d"
     tags: [pruning, channels, asvd, snows, reconstruction]
     base_branch: perf/inference
     relates_to: [docs/RESEARCH-LEDGER.md, docs/MODEL.md]
     owns_files: [scripts/prune_channels.py]
-    refutes: "A reconstructed 64->48 cut puts more than 0.1% of pixels above 8 levels on the worst frame of a spread sample. That is the whole test, and the correction measurement says the picture has room (median correction 0.9 levels, 98.4% of pixels under the bar)."
-    acceptance: "Worst-frame statistic (share of pixels > 8 levels, RGB) against the unpruned engine on the spread sample, plus engine time. Admissible if the share stays under 0.1% and the frame drops toward 27 ms."
-    owner_ruling: "2026-11-15: weights may change when the change is practically meaningless. int8 rounding is in that class and is measured (0.000% of pixels above 8 levels, peak 4, 54.1 dB); a channel cut is admissible only while it also stays inside the bar, which is now a measurement rather than a judgement."
-    note: "The arithmetic: 2*9*48*48 against 2*9*64*64 is 1.78x fewer MACs, so at the measured fp16-accumulate peak (71.6 TFLOP/s) the body is 19.2 ms and the frame 27.3 ms = 2.06x - on dense kernels, no plugin, no int8 boundary. The licence comes from the correction measurement: 0.1% of pixels sit above 19.4 levels of correction, so an approximation wrong by 40% of the correction still keeps the worst pixel at the bar. The old SVD test (weight energy 77-91%, 28.7 dB layer output) answered a different question; what to do instead is reconstruction on calibration activations (ASVD scales weights by activation statistics so the OUTPUT error is minimised; SNOWS does the vision version with a K-step layer reconstruction through conv+BN+ReLU+residual). 2:4 sparsity is explicitly out: TRT picks sparse tactics with no measured win (E7) - structural channels keep dense kernels."
+    refutes: "Reconstruction cannot hold the bar at whatever width E30a shows to be worth the time. The calibration point is measured: a 2.1% RMS weight perturbation (int8) costs a 0.66-level mean and a 4-level peak, i.e. half the bar - so the admissible perturbation is of that order, and a 25% channel cut is not."
+    acceptance: "Worst-frame statistic (share of pixels > 8 levels, RGB) against the unpruned engine on a spread sample of at least three titles, plus engine time at the width E30a justified."
+    owner_ruling: "2026-11-15: weights may change when the change is practically meaningless. int8 rounding is in that class and is measured (0.000% of pixels above 8 levels, peak 4, 54.1 dB); a channel cut is admissible only while it also stays inside the bar."
+    note: "Demoted from the critical path: the licence it rested on (e~0.4 multiplicative error) is refuted by our own int8 measurement - the error has a floor that is NOT proportional to the correction, because on flat patches the correction is zero by construction and any weight-space change leaves a DC shift there. What the residual measurement licenses is approximations multiplicative in the OUTPUT (truncating small corrections, tail precision), not a change of the function. Reconstruction method if it runs: ASVD/SNOWS (activation-aware, K-step layer reconstruction), not naive SVD - the old SVD test measured weight energy and answered a different question."
   - id: rve-film-gate-codec-2026-11-15
     title: "E31 (dropped): grain synthesis / motion-compensated reuse for film"
     type: research

@@ -70,7 +70,7 @@ or run the same pixels in a cheaper numeric format.
 | E7 | 2:4 structured sparsity | TRT docs; NVIDIA engineer on GitHub | 2x theoretical | needs pruned weights; TRT picks sparse tactics for 22/53 layers; up to 5% slower in fp16 | **rejected** |
 | E8 | FP8 on consumer Ada | TRT issue #4081; OwLite report | 1.4-1.8x | no gain vs FP16 on 4090/4060 Ti; L40S gets 1.7-1.9x. Consumer parts are firmware-capped | **rejected** |
 | E9 | INT8 PTQ, implicit with fp16 fallback | mmdeploy's ESRGAN benchmark | 2x ceiling | **slower**: 73.2 and 94.3 ms against 48-51 (the two runs overlapped on the card, so the magnitude is indicative) | **rejected as implemented** - this configuration is a reformat-heavy graph. Explicit Q/DQ NHWC per-channel is E9' |
-| E9' | INT8 with explicit Q/DQ, per-channel weights, calibrated on real frames | TRT PTQ docs | 2x of the arithmetic | **measured: accurate, slower, and the mechanism is the boundary, not the kernel.** Calibrated per-tensor activation scales from 8 real frames, per-channel int8 weights, 16 body convs quantised, head and tail in FP16: **0.000% of pixels above 8 levels against the FP16 engine, peak 4, PSNR 54.1 dB** - the format is essentially lossless here. Time **68.11 ms against 55.54 (0.82x)**. Per-layer (`trt.IProfiler`): the 16 int8 convs are `sm80_xmma_..._interleaved_i8f16_i8i32_f32_nchw_vect_c_...` - the **interleaved NC/32HWC32 tensor-core layout, not plain NCHW** - at 1.56-1.88 ms each, i.e. 152.9 GFLOP / 1.68 ms = **91 TFLOP/s against 52 TFLOP/s for the fused fp16 block**; the PReLU runs as **17 separate `PointWiseV2` passes** of 1.71-2.37 ms (31.2 ms, 46% of the engine) because a per-channel slope (1088 values, -1.39..1.70, per-channel Cv > 1) does not fit an int8 epilogue. In fp16 those 16 blocks are one fused myelin kernel each (`__myl_CorrMulLtSele`, 2.93 ms). The engine holds **21 reformat layers of 78**, worth **5.6 ms in total** (8% of the engine) against **32.7 ms for the 17 PReLU passes** (46%) - the "60 reformats" in earlier revisions was 78 minus 18 convs. Second build, quantising the conv output too so the PReLU reads int8: **78.36 ms**, 36 reformats, 16 `DQout` passes at 1.64 ms - the boundary pass is charged per hop, so adding a hop makes it worse | **rejected as quantised** (measured, with the mechanism): the per-channel PReLU forces one int8->fp16->int8 hop per conv, and each hop costs about what int8 saves on the conv. Precision path closed, pending a plugin that fuses conv+PReLU in int8 |
+| E9' | INT8 with explicit Q/DQ, per-channel weights, calibrated on real frames | TRT PTQ docs | 2x of the arithmetic | **measured: accurate, slower, and the mechanism is the boundary, not the kernel.** Calibrated per-tensor activation scales from 8 real frames, per-channel int8 weights, 16 body convs quantised, head and tail in FP16: **0.000% of pixels above 8 levels against the FP16 engine, peak 4, PSNR 54.1 dB** - the format is essentially lossless here. Time **68.11 ms against 55.54 (0.82x)**. Per-layer (`trt.IProfiler`): the 16 int8 convs are `sm80_xmma_..._interleaved_i8f16_i8i32_f32_nchw_vect_c_...` - the **interleaved NC/32HWC32 tensor-core layout, not plain NCHW** - at 1.56-1.88 ms each, i.e. 152.9 GFLOP / 1.68 ms = **91 TOPS against 52 TFLOP/s for the fused fp16 block**; the PReLU runs as **17 separate `PointWiseV2` passes** of 1.71-2.37 ms (31.2 ms, 46% of the engine) because a per-channel slope (1088 values, -1.39..1.70, per-channel Cv > 1) does not fit an int8 epilogue. In fp16 those 16 blocks are one fused myelin kernel each (`__myl_CorrMulLtSele`, 2.93 ms). The engine holds **21 reformat layers of 78**, worth **5.6 ms in total** (8% of the engine) against **32.7 ms for the 17 PReLU passes** (46%) - the "60 reformats" in earlier revisions was 78 minus 18 convs. Second build, quantising the conv output too so the PReLU reads int8: **78.36 ms**, 36 reformats, 16 `DQout` passes at 1.64 ms - the boundary pass is charged per hop, so adding a hop makes it worse | **rejected as quantised** (measured, with the mechanism): the per-channel PReLU forces one int8->fp16->int8 hop per conv, and each hop costs about what int8 saves on the conv. Precision path closed, pending a plugin that fuses conv+PReLU in int8 |
 | E10 | hand-written conv kernel / plugin | CORE-TAG/rtx50-realesrgan-video | - | 39.8 TFLOP/s vs the engine's 186.7 on a 5090. Counter-precedent: for a 3x3 conv cuDNN chose Winograd at 74 ms where TRT's best tactic was 156 ms, so TRT's tactic set is not the set of all algorithms | **untested** (was "rejected": the source is one attempt on another card, and it does not measure this GPU) |
 | E11 | L2 persistence window | blog measurement (H100/3090) | 1.02-1.20x | nothing to pin: 1.2 MB of weights. The old justification ("265 MB activation stream") predates the myelin fusion finding - the engine is 25 top-level layers, not 18 separate kernels with a full round trip each - so how much traffic actually remains is unknown; the verdict rests on the weights being 1.2 MB against **32 MB** of L2 (AD106; 24 MB is the 4060 without Ti), not on the traffic count | **rejected** (justification corrected) |
 | E12 | per-layer precision constraints (force fp16 accumulate) | TRT docs | unknown | closed by measurement, not by an API limit: the DETAILED tactic dump shows all 16 body convs already running `f16f16_f16f16` (fp16 accumulation, NHWC). There is no fp32-accumulate share to convert | **closed (already in effect)** |
@@ -234,7 +234,7 @@ rather than on a hunch.
 
 1. ~~E9' - explicit Q/DQ INT8~~ **measured, and it is not 2x away: it is one epilogue away.** The
    format is essentially lossless (0.000% of pixels above 8 levels, peak 4, 54.1 dB), the int8 conv
-   is fast (91 TFLOP/s against 52 for the fused fp16 block), and the build is still slower - 68.11
+   is fast (91 TOPS against 52 for the fused fp16 block), and the build is still slower - 68.11
    against 55.54 ms - because the per-channel PReLU cannot be fused into the int8 epilogue and
    becomes a 1.8 ms pass between two int8 convs. Quantising the conv output as well (so the PReLU
    reads int8) makes it worse, not better: 78.36 ms with 36 reformats and 16 `DQout` passes. The
@@ -795,7 +795,7 @@ even with a plugin that fuses conv and PReLU perfectly, the remaining distance t
 1.4x that has to come from somewhere else.
 
 **That somewhere is GEMM efficiency at int8, not another algorithm.** The 16 body convolutions are
-2.45 TFLOP of work; at the 91 TFLOP/s the int8 conv actually reports that is 26.9 ms, and the measured
+2.45 TFLOP of work; at the 91 TOPS the int8 conv actually reports that is 26.9 ms, and the measured
 block is 1.95 ms including its epilogue, i.e. **31.2 ms for the body alone**. The int8 tensor-core
 peak on this part is around 148 TFLOP/s if the borrowed 74 TFLOP/s fp16 figure is right, so the body
 runs at ~55-60% of it. Fusion does not raise that: fusing layers reduces DRAM round trips, and the
@@ -854,7 +854,7 @@ and it makes fp16 arithmetic final: the body is 2.446 TFLOP, so even at a perfec
 without leaving fp16.
 
 **int8 has a real 147 TOPS, so 2x is arithmetically reachable - at a price.** The body is 2.446 TFLOP,
-i.e. 16.6 ms at peak and 26.9 ms at the 91 TOPS our int8 convolution actually reports (62% of peak).
+i.e. 16.6 ms at peak and 26.9 ms at the 91 TOPS our int8 convolution actually reports (62% of the K-major peak).
 Adding the 8.1 ms of non-GEMM work:
 
 | body efficiency | body | + non-GEMM | frame | against 56.28 |
@@ -898,26 +898,44 @@ Measured on a real frame (Chainsaw Man, 1920x1080, x2 model `futsuu`, fp16 engin
 So for 88.7% of pixels the network adds less than two levels on top of a pixel repeat, and for 98.4%
 it adds less than the acceptance bar itself.
 
-**What this licenses, and it is the first thing in this investigation that widens the admissible set
-rather than narrowing it.** Any approximation whose error is a fraction `e` of the correction puts a
-pixel over the 8-level bar only where `|correction| > 8/e`. The bar allows 0.1% of pixels, and 0.1% of
-pixels sit above 19.4 levels, so `8/e = 19.4` gives **e ~ 0.4**: an approximation that is wrong by 40%
-*of the correction* still keeps the worst pixel of the frame at the bar. First-order, and it holds only
-where the error is proportional to the correction rather than a constant floor, but the order is the
-point.
+**The licence this looks like it grants, and why the first reading of it was wrong.** The obvious
+model is `error = e * |correction|`: a pixel crosses the 8-level bar only where `|correction| > 8/e`,
+0.1% of pixels sit above 19.4 levels, so `e ~ 0.4`. That model is **refuted by our own int8
+measurement**, and the refutation is measurable in one minute:
 
-**What it costs: the 2x question is now an arithmetic question with a named route.** A structural
-channel cut from 64 to 48 removes 44% of the body's MACs (2*9*48*48 against 2*9*64*64), i.e. 1.78x.
-At the measured fp16-accumulate peak that is a body of 19.2 ms, and with the 8.1 ms of non-GEMM work
-the frame is **27.3 ms = 2.06x** - on dense kernels, no plugin, no int8 boundary, no graph surgery.
-The licence above is what makes it admissible: the error this introduces is a fraction of a correction
-that is itself 0.9 levels at the median.
+- the int8 engine's per-channel weight quantisation perturbs the weights by **2.0-2.3% RMS** per body
+  layer (measured on this checkpoint, 16 values between 0.014 and 0.023);
+- the model then predicts a peak error of `0.021 * 44.5 = 0.93` levels and a mean of `0.021 * 1.4 =
+  0.03`;
+- the int8 picture actually measured **peak 4 levels, mean 0.66, PSNR 54.1 dB**. The mean is off by
+  **20x**.
 
-That inverts the plan's ordering. The int8 plugin was the critical path because int8 was the only way
-to raise the rate; a channel cut raises the *work*, not the rate, and the correction measurement says
-the picture can pay for it. What is unmeasured is how much error a 25% cut actually makes on the
-final frame - the old SVD test answered a different question (weight energy, 28.7 dB layer output)
-and answered it badly.
+So the error has a component that is not proportional to the correction, and it dominates. The
+mechanism is structural: on a flat input patch the network computes `g(c) ~ c`, i.e. the correction is
+**zero by construction** - and that is 88.7% of the frame. Any change in the weight space moves `g` to
+`g'` and leaves a DC shift there, exactly where the proportional model predicts no error at all. That
+is what a tint or banding on a background is made of.
+
+What survives is narrower and still useful: the residual measurement licenses approximations that are
+**multiplicative in the output** - truncating the correction where it is small, dropping the tail's
+precision, quantising the correction in flat regions. It does not license changing the function, and
+therefore it does not license a structural cut of the body. Two further reasons the 0.4 was never a
+working point even inside its own model: `8/e = 19.4` puts the decision exactly **on** the bar with no
+margin, on a single frame, with a known ~5x spread between frames (f383 vs f360 on the reuse
+artefact), and with channel-max against luma differing 8x (0.29% against 0.036%).
+
+**What the int8 falsification does give: a calibration point.** A 2.1% perturbation of the weights
+costs a 0.66-level mean and a 4-level peak, i.e. half the bar. Whatever the admissible perturbation
+is, it is of that order, not forty times larger.
+
+**And the MAC arithmetic for a channel cut was wrong twice over.** E19 already refuted FLOP
+proportionality on this engine: widening the head from C=3 to C=8 raised FLOPs by 0.48% and moved
+time by 3.36 ms, because the kernel class changed. For C=48 the arithmetic is worse than
+proportionality suggests: the shipped tactic is `tilesize128x64x32`, so an N tile of 64 is 75% filled
+by 48 channels and K = 432 is 14 steps of 32 against 18. The expectation is nearer **1.29x than
+1.78x**, and C=32 is the width that fills both 64 and 32 exactly (MAC x0.25, K = 288 = 9 steps). All
+of it is a time question, and it is measurable without asking anyone about the picture - which is what
+`scripts/probe_channel_width.py` does.
 
 ## What the literature closes, and the one item it reopens (2026-11-15)
 
