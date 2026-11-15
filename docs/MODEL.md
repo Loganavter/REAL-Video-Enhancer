@@ -7,8 +7,13 @@ Rig: RTX 4060 Ti 16 GB (AD106, 34 SM, 165 W cap), Ryzen 5 5600, TensorRT 10.12.0
 torch 2.9.0+cu130. Unless stated: fp16 engines, static shape, `optimization_level=5`,
 `num_avg_timing_iters=8`, `tiling_optimization_level=full` (the new default).
 
-**Conclusion up front**: no kernel-level technique we could run locally beat a well-built
-engine, and the two model-side wins of this round are `tiling=full` (3.8% end-to-end) and a **graph**
+**Conclusion up front**: against the original 2.4.2 the pipeline is **4.3x** on animation and
+**1.85x** on 35 mm film, and the engine-side part of that - optimization profile, tiling, the pipe
+fixes - is **1.6-1.9x on every frame of every clip**. That comparison also shows a systematic
+-0.5/255 luma offset against the original which PERFORMANCE.md records as an open candidate
+regression, so "faster" is not the same as "identical". No kernel-level technique we could run
+locally beat a well-built engine, and the two model-side wins of this round are `tiling=full` (3.8%
+end-to-end) and a **graph**
 change - padding the head convolution to 8 input channels, worth **5.8% on a raw TRT build** because
 it is the one convolution whose 3-channel shape kept it out of the myelin pattern compiler - which
 this app's build path turns into a **71% regression**, so it is measured, documented and switched
