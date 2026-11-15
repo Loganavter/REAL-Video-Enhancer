@@ -16,9 +16,9 @@ x265 [info]: AQ: mode / str / qg-size / cu-tree  : 2 / 1.0 / 32 / 1
 x265 [info]: Rate Control / qCompress            : CRF-18.0 / 0.60
 x265 [info]: tools: rd=3 psy-rd=2.00 early-skip rskip mode=1 signhide tmvp
 x265 [info]: tools: b-intra strong-intra-smoothing lslices=8 deblock sao
-x265 [info]: frame I:      1, Avg QP:17.34  kb/s: 37759.74
-x265 [info]: frame P:     28, Avg QP:18.56  kb/s: 21888.82
-x265 [info]: frame B:     65, Avg QP:22.36  kb/s: 4906.29 
-x265 [info]: Weighted P-Frames: Y:10.7% UV:7.1%
+x265 [info]: frame I:      1, Avg QP:17.81  kb/s: 36699.04
+x265 [info]: frame P:     29, Avg QP:18.64  kb/s: 21071.36
+x265 [info]: frame B:     64, Avg QP:22.32  kb/s: 5035.75 
+x265 [info]: Weighted P-Frames: Y:10.3% UV:6.9%
 
-encoded 94 frames in 11.47s (8.19 fps), 10314.42 kb/s, Avg QP:21.17
+encoded 94 frames in 12.56s (7.48 fps), 10319.75 kb/s, Avg QP:21.14

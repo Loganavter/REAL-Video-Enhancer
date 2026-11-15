@@ -176,6 +176,8 @@ class HandleApplication:
             ensemble=self.args.ensemble,
             output_to_mpv=self.args.output_to_mpv,
             tile_reuse=not self.args.no_tile_reuse,
+            tile_reuse_size=self.args.tile_reuse_size,
+            tile_reuse_threshold=self.args.tile_reuse_threshold,
             temporal_reuse=not self.args.no_temporal_reuse,
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
@@ -431,6 +433,19 @@ class HandleApplication:
                  "default; it needs the model to be fully convolutional and builds a tile engine.",
             action="store_true",
             default=False,
+        )
+        parser.add_argument(
+            "--tile_reuse_size",
+            help="LR tile size for tile-level reuse (default 512). Larger tiles pay less halo "
+                 "overhead but qualify less often.",
+            default=512,
+            type=int,
+        )
+        parser.add_argument(
+            "--tile_reuse_threshold",
+            help="Worst-tile low-passed luma delta (0-255) under which a tile is reused. Default 0.35.",
+            default=0.35,
+            type=float,
         )
         parser.add_argument(
             "--no_temporal_reuse",

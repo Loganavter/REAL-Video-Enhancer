@@ -106,6 +106,8 @@ class Render:
         ensemble: bool = False,
         output_to_mpv: bool = False,
         tile_reuse: bool = True,
+        tile_reuse_size: int = 512,
+        tile_reuse_threshold: float = 0.35,
         temporal_reuse: bool = True,
         temporal_reuse_threshold: float = 0.35,
         temporal_reuse_max_chain: int = 2,
@@ -115,6 +117,8 @@ class Render:
         self.upscaleModel = upscaleModel
         self.interpolateModel = interpolateModel
         # decided here, before setupUpscale() builds the engine (tile reuse changes its shape)
+        self.tileReuseSize = tile_reuse_size
+        self.tileReuseThreshold = tile_reuse_threshold
         self.tileReuse = bool(
             tile_reuse and self.upscaleModel and not self.interpolateModel
             and self.backend in ("pytorch", "tensorrt")
@@ -492,6 +496,8 @@ class Render:
             hdr_mode=self.hdr_mode,
             high_bitdepth=getattr(self, "high_bitdepth", self.hdr_mode),
             tile_reuse=getattr(self, "tileReuse", False),
+            tile_lr=getattr(self, "tileReuseSize", 512),
+            tile_threshold=getattr(self, "tileReuseThreshold", 0.35),
             trt_static_shape= not self.trt_dynamic_shapes,
         )
     
