@@ -47,8 +47,11 @@ def read_pairs(clip, count, w, h, step=0.0417):
     size = w * h * 3
     for i in range(count):
         t = duration * (i + 0.5) / count
+        # scale to the requested size: the clips here are 3840x2160, and without this the reader takes the
+        # first w*h*3 bytes of a 4K frame and reinterprets them as 1080p - a mangled picture that read
+        # 4.1% engine error where the same clip measured 0.0086% when decoded properly
         argv = [FF, "-hide_banner", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", clip,
-                "-frames:v", "3", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+                "-frames:v", "3", "-vf", f"scale={w}:{h}", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
         raw = subprocess.run(argv, capture_output=True).stdout
         if len(raw) < 2 * size:
             continue

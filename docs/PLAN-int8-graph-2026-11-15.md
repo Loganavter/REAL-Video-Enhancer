@@ -1025,6 +1025,34 @@ verified), then the stopwatch.
 
 ## Stage 4 - calibration and the probe in the render path (one day)
 
+**State (2026-11-16): the probe runs, it discriminates, and it had been reading mangled frames.**
+
+`scripts/probe_int8_fit.py` assumes 1920x1080 input, but these clips are **3840x2160**: it took the first
+`w*h*3` bytes of a 4K frame and reinterpreted them as 1080p. That is not a short frame, it is a scrambled one, and
+it read **4.0-4.2% engine error on every title** - 500x the same clip's real number. First run of the fixed reader
+on one frame of `a5_chainsaw`: simulation **0.00858%**, build **0.00616%**. One missing `-vf scale=W:H` would have
+returned P(pass) = 0 and killed the lane.
+
+With the reader fixed, the probe separates the two statistics the plan says must be separated:
+
+| title | engine (int8(t) vs fp16(t)) | composition (int8(t-1) vs fp16(t)) | verdict |
+|---|---|---|---|
+| a5_chainsaw | 0.009% | 0.010% | int8 |
+| adv_chainsaw | 0.010% | 0.022% | int8 |
+| c10_p010 | 0.010% | 0.011% | int8 |
+| a5_violet | 0.057% | **0.170%** | fp16 fallback |
+| adv_violet | 0.058% | **0.165%** | fp16 fallback |
+
+**P(pass) = 3 of 5 readable titles = 0.6**, against a kill threshold of 0.3 - the lane survives, and it survives
+as an opt-in, which is what the plan's kill rule describes.
+
+The Violet pair is the useful part: both pass on the engine's own defect (0.057%, 0.058%) and fail on composition
+(0.170%, 0.165%). Certifying on the engine's own error would have shipped them. That is the plan's warning
+measured on real titles rather than argued.
+
+Five `bebop*` titles produced no output from the probe (decoder refused them); they are **not** in the denominator
+above, and that is a hole in the sample rather than a pass.
+
 **Scales:** the head's input is the domain constant [0, 1] and needs no calibration. The rest come from
 spread frames plus deliberately bright ones (p99.9 LR luma), ~1 s of forwards, reusing the frames the probe
 already decodes.

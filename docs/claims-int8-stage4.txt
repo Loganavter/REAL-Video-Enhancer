@@ -1,0 +1,29 @@
+# Stage 4 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage4.txt
+# The probe reads adjacent pairs from a clip, calibrates on a disjoint half, and reports two statistics
+# separately because they answer different questions.
+
+@bar bar_share 0.1 %      # the acceptance bar: share of pixels whose worst channel is >8 levels off
+@bar kill_prob 0.3   x    # P(pass) below this and int8 becomes a narrow opt-in
+
+@claim chainsaw_engine      0.009 %  "a5_chainsaw, 1920x1080, 7 gated pairs, int8(t) vs fp16(t)" measured
+@claim chainsaw_composition 0.010 %  "a5_chainsaw, int8(t-1) vs fp16(t): what the bar actually sees" measured
+@claim adv_chainsaw_comp    0.022 %  "adv_chainsaw, same population" measured
+@claim c10_comp             0.011 %  "c10_p010, same population" measured
+@claim violet_engine        0.057 %  "a5_violet, int8(t) vs fp16(t) - UNDER the bar" measured
+@claim violet_comp          0.170 %  "a5_violet, int8(t-1) vs fp16(t) - OVER the bar" measured
+@claim adv_violet_engine    0.058 %  "adv_violet, same population" measured
+@claim adv_violet_comp      0.165 %  "adv_violet, composition" measured
+@claim pass_rate            0.6   x  "derived: 3 of 5 readable titles pass on composition" derived
+@derived pass_rate "a5_chainsaw, adv_chainsaw and c10_p010 pass; a5_violet and adv_violet fall back = 0.6"
+
+# The engine's own defect is not the criterion: a5_violet passes it and fails composition.
+# The three passing titles must sit under the bar.
+@below chainsaw_composition bar_share
+@below adv_chainsaw_comp bar_share
+@below c10_comp bar_share
+# The two Violet titles do NOT sit under it, and that is the stage's finding, not a broken claim:
+#   a5_violet     engine 0.057 (pass)  composition 0.170 (fail) -> fp16 fallback
+#   adv_violet    engine 0.058 (pass)  composition 0.165 (fail) -> fp16 fallback
+# So the engine's own defect is not the criterion; composition is, exactly as the plan warned.
+# P(pass) = 0.6 is ABOVE the 0.3 kill threshold, so the lane survives; there is no 'above'
+# directive, so this is recorded rather than asserted.
