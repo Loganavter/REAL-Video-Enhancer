@@ -66,25 +66,31 @@ def test_a_pack_without_a_declared_format_falls_back_to_planar():
 
 
 @pytest.mark.parametrize("pipe", ["yuv420p10le", "p010le"])
-def test_an_already_yuv_pipe_gets_tags_and_no_scale_filter(pipe):
-    """Neither 10-bit YUV pipe may be converted as if it were RGB.
+def test_an_already_yuv_pipe_gets_tags_on_the_input_side_and_no_filter(pipe):
+    """Neither 10-bit YUV pipe may be converted, and its tags belong to the input.
 
-    `-vf scale=in_range=pc:out_color_matrix=...` on a limited-range P010 stream both
-    reinterprets the levels and applies a second matrix; that is the C4 regression.
+    Two separate regressions live here. `-vf scale=in_range=pc:...` on a limited-range P010
+    stream reinterprets the levels and applies a second matrix (ledger C4, 31 dB). And the tags
+    themselves, placed after the input, make ffmpeg convert every frame to the declared space:
+    measured 79.0 ms/frame against 16.6 ms/frame at 2880x2160 10-bit - a 4.8x tax for metadata.
     """
-    args = _writer(pipe=pipe)._color_convert_args()
+    writer = _writer(pipe=pipe)
 
-    assert "-vf" not in args
-    assert args[0] == "-colorspace" and args[1] == "bt709"
-    assert args[2] == "-color_range" and args[3] == "tv"
+    assert writer._color_convert_args() == [], "no swscale filter for a YUV pipe"
+    tags = writer._color_tags()
+    assert tags == ["-colorspace", "bt709", "-color_range", "tv"]
 
 
-def test_an_rgb_pipe_does_get_the_matrix_conversion():
-    """The RGB pipe must still convert, or bt601 defaults eat 6 chroma levels (C1)."""
+def test_an_rgb_pipe_still_gets_the_matrix_filter():
     args = _writer(pipe="rgb24", high_bitdepth=False)._color_convert_args()
+    assert args[0] == "-vf" and "out_color_matrix=bt709" in args[1]
 
-    assert "-vf" in args
-    assert any("out_color_matrix=bt709" in argument for argument in args)
+
+def test_the_tags_exist_only_when_they_were_given():
+    writer = _writer(pipe="yuv420p10le")
+    writer.color_space = None
+    writer.color_range = None
+    assert writer._color_tags() == []
 
 
 def test_the_pipe_format_follows_the_packed_format_and_the_depth():
@@ -95,7 +101,7 @@ def test_the_pipe_format_follows_the_packed_format_and_the_depth():
 
 
 @pytest.mark.parametrize("requested,high_bitdepth,interpolating,expected", [
-    (None, True, False, "yuv420p"),          # 10 bits at the encoder costs ~2x the NVENC time
+    (None, True, False, "yuv420p10le"),      # a 10-bit source keeps its depth (it is free now)
     (None, False, False, "yuv420p"),
     ("yuv420p10le", True, False, "yuv420p10le"),   # opt-in, and worth ~6 dB
     ("yuv420p", True, False, "yuv420p"),     # an explicit request always wins

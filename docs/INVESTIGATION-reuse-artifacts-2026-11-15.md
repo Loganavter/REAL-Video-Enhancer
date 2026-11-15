@@ -156,6 +156,41 @@ refuses tiles past a noise floor of ~0.45.
    when nothing certifies.
 6. **A pipe format must be declared by the packer, never inferred from the encoder.**
 
+## Colour tags on the wrong side cost 62 ms/frame and five levels of chroma
+
+Found while checking why a 10-bit render looked twice as slow as an 8-bit one of the same clip.
+Bisecting the exact command the app logs, at 2880x2160 10-bit:
+
+| command variant | ms/frame |
+|---|---|
+| input section + encoder | 16.6 |
+| + second input, `-map`, audio/subtitle copy | 15.0 |
+| + `-colorspace bt709 -color_range tv` on the **output** | **79.0** |
+| the same tags on the **input** | **16.6** |
+| no tags at all | 15.3 |
+
+`-colorspace` after the input tells ffmpeg the *output* must be that space, so it inserts a
+swscale matrix conversion on every frame. Before the input it describes the raw pipe and no
+conversion happens. The container tags are identical either way (`color_range=tv`,
+`color_space=bt709`), so this was 62 ms/frame - 4.8x the encoder's own cost - paid for a metadata
+declaration.
+
+And it was not only time: mean chroma against the source, 10-bit scale (0..1023), first 20 frames:
+
+| stream | U | V |
+|---|---|---|
+| source | 468.96 | 565.72 |
+| tags on input (now) | **468.88** | **565.51** |
+| tags on output (before) | 474.22 | 563.61 |
+
+The old path was converting already-bt709 samples as if they were bt601, which moved U by 5.3
+levels. So every 10-bit render on the NVENC path had a chroma shift, and the two renders differ by
+38 dB between themselves - a difference one would otherwise be tempted to attribute to the model.
+
+Consequence for the defaults: 10 bits at the encoder is free now (4.67 s against 4.64 s on the
+film clip), so a 10-bit source keeps its depth unless asked otherwise, and the "10-bit is opt-in
+for speed" row in PERFORMANCE.md is withdrawn.
+
 ## The two staleness sources mask each other
 
 The chain-depth conclusion above is only half the answer, and the way it was reached hid the

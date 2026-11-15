@@ -177,18 +177,17 @@ def resolve_output_pixel_format(requested: str | None, high_bitdepth: bool,
                                 interpolating: bool = False) -> str:
     """Output pixel format when the caller did not choose one.
 
-    Stays 8-bit on purpose. Keeping 10 bits through the encoder is worth about 6 dB against
-    the 8-bit output on a 10-bit source (52.01 against 46.11 dB against the same reference),
-    but on this machine it costs the NVENC encoder roughly twice the wall clock: the same
-    94-frame 2160p render takes 3.84 s at 8-bit and 8.01 s at 10-bit, because at a fixed CQ
-    the 10-bit stream is both larger and slower to encode. Speed is the priority here, so
-    10 bits at the encoder is an explicit `--video_pixel_format yuv420p10le`, not a default.
+    A 10-bit source keeps its depth. That used to be a speed trade ("10-bit costs 2x NVENC"),
+    and it was not: the encoder costs 1.47x (9.4 against 6.4 ms/frame at 2160p), and the 2x
+    was swscale, inserted because the colour tags were declared on the *output* side - see
+    `FFmpegWrite._color_tags`. With the tags on the input side the same 94-frame 2160p render
+    takes 4.67 s at 10-bit against 4.64 s at 8-bit, so the ~6 dB are free.
     An explicit request always wins, and interpolated frames keep 8-bit because the
     interpolator works in 8 bits.
     """
     if requested:
         return requested
-    return "yuv420p"
+    return "yuv420p10le" if (high_bitdepth and not interpolating) else "yuv420p"
 
 
 class FFmpegWrite(Buffer):
@@ -307,39 +306,51 @@ class FFmpegWrite(Buffer):
             return self.pipe_input_pixel_format or "yuv420p10le"
         return "rgb48le" if self.high_bitdepth else "rgb24"
 
+    def _color_tags(self) -> list[str]:
+        """The colour description of the raw pipe, for the INPUT side of ffmpeg.
+
+        These are input options, not output options, and that is not cosmetic: `-colorspace`
+        placed after the input tells ffmpeg the *output* must be that space, so it inserts a
+        swscale matrix conversion of every frame - measured 79.0 ms/frame against 16.6 ms/frame
+        for the same stream at 2880x2160 10-bit (a 4.8x tax for a metadata declaration, and the
+        real explanation of what looked like "10-bit output costs 2x NVENC": NVENC itself is
+        9.4 against 6.4 ms/frame). On the input side the same tags produce the same container
+        tags and no conversion at all.
+        """
+        if self.hdr_mode:
+            return []
+        args: list[str] = []
+        if self.color_space:
+            args += ["-colorspace", self.color_space]
+        if self.color_range:
+            args += ["-color_range", self.color_range]
+        if self.color_primaries:
+            args += ["-color_primaries", self.color_primaries]
+        if self.color_transfer:
+            args += ["-color_trc", self.color_transfer]
+        return args
+
     def _color_convert_args(self) -> list[str]:
         """RGB pipe -> YUV with an explicit matrix.
 
         When ffmpeg converts RGB rawvideo to YUV it picks its own default matrix (bt601),
         which shifts chroma on a bt709/bt2020 source - measured |dU| ~6.6 levels on a
         bt709 clip. Passing the source's own matrix/range removes that shift entirely.
+
+        Only the RGB pipe needs a filter here; a YUV pipe is described by `_color_tags()` on the
+        input side and must not be touched again. P010 used to fall through to this branch and got
+        `scale=in_range=pc:...`: a full-range reinterpretation of a limited-range stream, which is
+        what cost that pipe 31 dB against the planar reference (ledger C4).
         """
         if self.hdr_mode or self.custom_encoder is not None:
             return []
         if self._pipe_input_pixel_format() in ("yuv420p10le", "p010le"):
-            # already YUV in the source's own matrix/range - only the tags are needed.
-            # P010 was missing from this branch, so it fell through to the RGB path and got
-            # `scale=in_range=pc:out_color_matrix=...`: a full-range reinterpretation of a
-            # limited-range P010 stream plus a second matrix conversion. That is what cost the
-            # P010 pipe 31 dB against the planar reference (ledger C4).
-            args = ["-colorspace", self.color_space or "bt709", "-color_range", self.color_range or "tv"]
-            if self.color_primaries:
-                args += ["-color_primaries", self.color_primaries]
-            if self.color_transfer:
-                args += ["-color_trc", self.color_transfer]
-            return args
+            return []
         cs = self.color_space or "bt709"
         rng = self.color_range or "tv"
-        args = [
-            "-vf", f"scale=in_range=pc:out_color_matrix={cs}:out_range={rng}",
-            "-colorspace", cs,
-            "-color_range", rng,
-        ]
-        if self.color_primaries:
-            args += ["-color_primaries", self.color_primaries]
-        if self.color_transfer:
-            args += ["-color_trc", self.color_transfer]
+        args = ["-vf", f"scale=in_range=pc:out_color_matrix={cs}:out_range={rng}"]
         return args
+
 
     def command(self):
         if self.mpv_output:
@@ -353,6 +364,7 @@ class FFmpegWrite(Buffer):
                 "rawvideo",
                 "-pix_fmt",
                 self._pipe_input_pixel_format(),
+                *self._color_tags(),
                 "-vcodec",
                 "rawvideo",
                 "-s",
@@ -417,6 +429,7 @@ class FFmpegWrite(Buffer):
                 "rawvideo",
                 "-pix_fmt",
                 self._pipe_input_pixel_format(),
+                *self._color_tags(),
                 "-vcodec",
                 "rawvideo",
                 "-s",
@@ -550,6 +563,7 @@ class FFmpegWrite(Buffer):
                 f"{self.width * self.upscaleTimes}x{self.upscaleTimes * self.height}",
                 "-pix_fmt",
                 self._pipe_input_pixel_format(),
+                *self._color_tags(),
                 "-r",
                 str(self.outputFPS),
                 "-i",
