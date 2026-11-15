@@ -824,6 +824,39 @@ reference is the broken side and the pipeline's conversion is fine.
 
 `16 * 1.97 + 6.2 = 37.7 ms` stops being a projection here.
 
+**State (2026-11-16): the segments exist and the boundaries are 3x their budget; the app baseline is not measured
+yet, and that is deliberate.** `scripts/int8_timing.py` builds every launch argument before the clock, then measures
+six segments plus the fp16 baseline in the same process, in three interleaved rounds, with clocks in the log
+(`2805 MHz / 8751 MHz / 49 C / 65.89 W` before, `2775 / 8751 / 57 / 143.05 W` after). Medians at 1920x1080:
+
+| segment | ms |
+|---|---|
+| head (fp16 conv0 + PReLU) | 5.507 |
+| quantise | **10.041** |
+| 16 int8 launches | **46.007** (2.88 per launch) |
+| dequantise | 6.807 |
+| tail (fp16 conv34 + upsampler + residual) | 14.867 |
+| full int8 cycle | 60.197 |
+
+The plan budgeted 6.2 ms for **all** boundaries; quantise + dequantise alone are **16.8 ms**, i.e. 28% of the
+60.2 ms cycle, and they are two element-wise passes over a 64-channel 1080p buffer that this build does in torch
+(float round-and-clamp). That is precisely the trap the plan's condition 2 names - boundaries measured inside the
+pipeline rather than as standalone kernels - only in the other direction: they are more expensive than projected,
+not less. Head and tail are unchanged fp16 work and not on the critical path of this stage.
+
+**The baseline is torch fp16, not the app's engine, so the ratio below is NOT the stage-2 gate number.** Measured
+in the same session against torch fp16 convolution (cudnn benchmark on, fixed shapes):
+
+| baseline | body | full cycle |
+|---|---|---|
+| fp16 NCHW | 192.176 ms | 199.184 ms |
+| fp16 NHWC (channels_last, the layout the app's engines use) | 126.891 ms | 132.188 ms |
+
+so the body is **2.758x** and the cycle **2.203x** faster in int8 - but the plan's gate is `engine >= 1.4x` against
+the **fp16 TensorRT engine**, and torch fp16 conv is not that engine: 126.9 ms for 16 convs is 2.7x the 46.9 ms
+that the recorded 2.93 ms-per-block implies, so a torch baseline overstates the ratio. The gate number has to come
+from the app, where the fp16 engine and NVENC both exist, and it has not been taken.
+
 **Measure separately, inside the built pipeline:** head engine, quantize, 16 launches, dequantize, tail
 engine, full cycle.
 
