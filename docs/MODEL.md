@@ -8,7 +8,10 @@ torch 2.9.0+cu130. Unless stated: fp16 engines, static shape, `optimization_leve
 `num_avg_timing_iters=8`, `tiling_optimization_level=full` (the new default).
 
 **Conclusion up front**: no kernel-level technique we could run locally beat a well-built
-engine, and the one model-side win of this round is `tiling=full` (3.8% end-to-end). We do
+engine, and the two model-side wins of this round are `tiling=full` (3.8% end-to-end) and a **graph**
+change - padding the head convolution to 8 input channels, which is worth **5.8%** of the model
+because it is the one convolution whose 3-channel shape kept it out of the myelin pattern compiler
+(§4). We do
 **not** have a trustworthy ceiling for this shape, so the size of the remaining gap is unknown:
 the model is at 58-73% of a *borrowed* sustained figure, which is not the same as "finished".
 The pipeline-side win of the round is bigger than any model work: the frame gate alone is
@@ -193,6 +196,7 @@ it is not a proof, and the difference matters: 25-35% of a borrowed ceiling is n
 | parallel engine contexts | **yes** | 0%, and our wiring produced corrupt output | the corruption was an implementation fault (two `torch.jit.load` modules are not independent contexts), not a GPU property |
 | duplicate-frame gate (pipeline level) | **yes** | **70.9% of anime frames** / 18.1% of the film clip skipped; anime 16.3 -> 29.1% of frames rendered; 52.7 dB average vs ungated | see §7. The 46.8% / 72.7% pair this row used to quote came from two renders that were both corrupted by the pipe-format bug in ledger C4, and the film clip now trips the noise-floor guard rather than reusing |
 | INT8, implicit + fp16 fallback, entropy calibration on 8 real frames | **yes** | **slower**: 73.2 and 94.3 ms against 48-51; the two runs also overlapped on the card (29% spread), so treat the magnitude as indicative | this is the implicit-with-fallback configuration, i.e. a reformat-heavy graph. Explicit Q/DQ, fully-int8 NHWC, per-channel: **not tried**. The "2x for int8 on a 4090" note in issue #4081 does not transfer to C=64 implicit |
+| pad the head convolution to 8 input channels, so myelin fuses it with its PReLU | **yes** | **57.51 -> 54.15 ms (-5.8%)**, interleaved A/B, 7 rounds; picture 0.000% of pixels above 8 levels, peak under 0.5 level, 78.69 dB; the pad folds away and the graph input stays 3-channel, so nothing outside the engine changes | the head is the only 3-channel convolution in the model, and at C=3 it does not enter myelin at all - at C=8 the whole head block becomes one `__myl_CorrMulLtSele` (ledger E19) |
 | accumulator precision | **yes (closed)** | all 16 body convs run `f16f16_f16f16` = fp16 accumulator, per DETAILED tactic dump | no fp32-accumulate share exists to convert |
 | hand-written conv kernels | **no** | - | one public attempt was 4.7x slower than TRT, but there is a **counter-precedent**: for a 3x3 conv cuDNN chose Winograd at 74 ms while TRT's best tactic was 156 ms, i.e. TRT's tactic set is not the set of all algorithms. Recorded as untested, not as "slower" |
 | 2:4 structured sparsity | **no** | - | needs retrained sparse weights; NVIDIA reports small gains under 256 channels |
@@ -374,7 +378,11 @@ counter is read (§6, item 2).
    investigation, not as a recommendation. The verdict is therefore "the quantised block boundary costs more than int8
    saves on this architecture", not "no int8 kernel exists".
 
-6. **The non-GEMM 14% of the frame is now mapped and quantified.** `nsys` puts 8.11 ms of the 56.8 ms
+6. ~~The non-GEMM 14% of the frame~~ **the largest piece of it is closed**: padding the head
+   convolution to 8 input channels moved it into myelin and removed the separate PReLU pass, worth
+   **5.8% of the model** with an unchanged picture (§4, ledger E19). What remains of the 8.11 ms is
+   E20's tail tactics and E21's upsample/reshape; the head half of E20 went with the fusion.
+7. **The non-GEMM 14% of the frame was mapped and quantified.** `nsys` puts 8.11 ms of the 56.8 ms
    outside the 16 body GEMMs, and four of the five pieces have a measured size and a named fix:
    the one unfused PReLU (E19, 2.40 ms - it sits behind the *head* convolution, and three builds at
    different tiling levels leave it there, so the fix is graph surgery on the head's 3-channel
