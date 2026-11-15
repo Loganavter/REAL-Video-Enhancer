@@ -68,7 +68,7 @@ remaining ways to make the model cheaper are to *do less work per frame*:
 | T2 | exact-duplicate (bit-identical) gating | video2x issue #270 discussion | large | 0% bit-identical frames on encoded video | **rejected** |
 | T3 | reuse vs the **last kept** frame, 32 px block means, threshold 5.0, chain 4 | TAS `dedup/dedup.py` + `PARAMETERS.MD` (sens 35 / 7) | 20-40% frames | **46.8%** reused, 3.97 s vs 4.92 s, 71.1 dB vs ungated | **adopted** |
 | T4 | full-res per-pixel veto at 40 levels | TAS `PixelDiffGuard` | rescues mouth flaps | on grainy film a single pixel exceeds it: 43 vetoes, reuse 1.1%, render 5.08 s | opt-in (`--temporal_reuse_pixel_veto 40` for anime) |
-| T5 | tile-level reuse with halo | TAS/waifu2x tiling; our halo measurement (radius 18 LR px) | 2-4x on static content | 27.7% of tiles reused but slower: halo window +15% area; at 1024 px tiles 30.3% and 12.92 s | opt-in (`--tile_reuse`) |
+| T5 | tile-level reuse with halo | TAS/waifu2x tiling; our halo measurement (radius 18 LR px) | 2-4x on static content | **rejected after measuring anime too**: film 27.7%/30.3% of tiles reused and slower (6.57/12.92 s vs 4.27); anime 65.8%/66.0% of tiles reused and *still* slower (21.37/26.14 s vs 10.58 s). The tile path costs 42.5 ms/frame at 100% of frames - no better than the 45.7 ms full-frame model call - so even combining it with the frame gate (0.27 x 21.37 = 5.8 s vs 6.3 s of model work) buys nothing | opt-in, not recommended |
 | T6 | blend or discard the tile overlap | vs-mlrt discards, chaiNNer blends sinusoidally | - | we crop (discard), which is exact thanks to the halo | **adopted** |
 | T7 | per-slot HR memo: copies of one held frame share one upscale | TAS `pipeline/executor.py` | - | our gate already skips the whole model for a duplicate | equivalent |
 
@@ -115,6 +115,9 @@ largest block is the encoder again - `RVE_NVENC_PRESET=p1` measured 3.82 s vs 4.
 
 ## Backlog, ranked by expected gain on our pipeline
 
+0. **The "do less work" direction is now exhausted too**: frame-level reuse is adopted (46.8%
+   film, 72.7% anime), tile-level reuse is measured slower on both materials, and the per-frame
+   path is at its measured floor (fp16 accumulator already in use, INT8 slower, L2 knob harmful).
 1. **Nothing large is left in the model.** 53 TFLOP/s of 88 peak; every kernel-level idea is
    a measured dead end. Further speed must come from doing less work (T3/T5) or from the
    encoder side.
