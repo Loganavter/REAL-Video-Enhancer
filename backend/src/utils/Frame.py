@@ -10,7 +10,7 @@ _pytorch_stream = None
 _torch_utils = None
 _torch = None
 
-def _init_pytorch(device, gpu_id, dtype, width, height, hdr_mode):
+def _init_pytorch(device, gpu_id, dtype, width, height, hdr_mode, high_bitdepth=None):
     global _pytorch_device, _pytorch_dtype, _torch_utils, _torch, _pytorch_stream
     if _torch_utils is None:
         import torch
@@ -21,7 +21,8 @@ def _init_pytorch(device, gpu_id, dtype, width, height, hdr_mode):
             height=height, 
             device_type=device, 
             hdr_mode=hdr_mode, 
-            gpu_id=gpu_id
+            gpu_id=gpu_id,
+            high_bitdepth=high_bitdepth,
             )
         _pytorch_stream = _torch_utils.init_stream(gpu_id=gpu_id)
         _pytorch_device = _torch_utils.handle_device(device, gpu_id)
@@ -30,13 +31,18 @@ def _init_pytorch(device, gpu_id, dtype, width, height, hdr_mode):
 
 
 class Frame:
-    def __init__(self, backend: str, width: int, height: int, device, gpu_id, hdr_mode, dtype):
+    def __init__(self, backend: str, width: int, height: int, device, gpu_id, hdr_mode, dtype,
+                 high_bitdepth: bool | None = None):
         self.backend = backend
         self.width = width
         self.height = height
         self.gpu_id = gpu_id
         self.device = device
         self.hdr_mode = hdr_mode
+        # 16-bit DATA path (10-bit sources) vs HDR COLOUR tagging - see FFmpegBuffers
+        self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
+        # set by the upscaler: emit yuv420p10le instead of RGB bytes (10-bit SDR path)
+        self.yuv10_output = False
         self.dtype = dtype
         
         self.tensor_conversions = 0
@@ -45,7 +51,7 @@ class Frame:
         self._bytes: Optional[bytes] = None
         
         if backend in ("pytorch", "tensorrt"):
-            _init_pytorch(device, gpu_id, dtype, width, height, hdr_mode)
+            _init_pytorch(device, gpu_id, dtype, width, height, hdr_mode, self.high_bitdepth)
 
     def _invalidate_cache(self, keep: str):
         """Clear cached representations except the one being set."""
@@ -108,7 +114,11 @@ class Frame:
     def get_frame_bytes(self, clear_cache: bool = False) -> bytes:
         if self._bytes is None:
             if self._tensor is not None:
-                self._bytes = _torch_utils.tensor_to_frame(self._tensor)
+                if getattr(self, "yuv10_output", False):
+                    # 10-bit SDR: pack YUV420p10 on the GPU so the pipe stays 3 bytes/px
+                    self._bytes = _torch_utils.tensor_to_yuv420p10(self._tensor)
+                else:
+                    self._bytes = _torch_utils.tensor_to_frame(self._tensor)
             elif self._np is not None:
                 self._bytes = self._np_to_bytes(self._np)
 
@@ -137,7 +147,7 @@ class Frame:
         # Assuming raw RGB/BGR bytes
         channels = 3
         
-        return np.frombuffer(data, dtype=np.uint8 if not self.hdr_mode else np.uint16).reshape(
+        return np.frombuffer(data, dtype=np.uint8 if not self.high_bitdepth else np.uint16).reshape(
             self.height, self.width, int(channels)
         )
 
@@ -169,7 +179,7 @@ class Frame:
         Get the frame as a numpy array in SDR format (H, W, C) with dtype uint8.
         """
         np_frame = self.get_frame_np()
-        if self.hdr_mode:
+        if self.high_bitdepth:
             # Convert from HDR (uint16) to SDR (uint8)
             np_frame = (np.clip(np_frame.astype(np.float32) / 65535.0, 0, 1) * 255).astype(np.uint8)
         return np_frame
@@ -184,6 +194,7 @@ class Frame:
             gpu_id=self.gpu_id,
             hdr_mode=self.hdr_mode,
             dtype=self.dtype,
+            high_bitdepth=self.high_bitdepth,
         )
         if self._tensor is not None:
             new_frame.set_frame_tensor(self._tensor.clone())
@@ -191,6 +202,7 @@ class Frame:
             new_frame.set_frame_np(self._np.copy())
         if self._bytes is not None:
             new_frame.set_frame_bytes(self._bytes)
+        new_frame.yuv10_output = self.yuv10_output
         return new_frame
     
     def get_dummy_frame(self) -> "Frame":
@@ -202,4 +214,5 @@ class Frame:
             gpu_id=self.gpu_id,
             hdr_mode=self.hdr_mode,
             dtype=self.dtype,
+            high_bitdepth=self.high_bitdepth,
         )

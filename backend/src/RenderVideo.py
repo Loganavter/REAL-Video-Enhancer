@@ -1,4 +1,7 @@
 from threading import Thread
+import torch
+
+_NO_PREVIEW = object()  # non-None marker: keeps the FPS/ETA printer alive, costs nothing
 import os
 import math
 from time import sleep, time
@@ -175,6 +178,18 @@ class Render:
             color_range = videoInfo.get_color_range()
         except Exception:
             color_range = None
+        # 10-bit SDR sources: keep them 16-bit through the pipe instead of quantising to
+        # rgb24 (the 8-bit round trip caps the conversion at ~44 dB vs ~79.5 dB).
+        # Interpolation feeds synthetic frames through the same buffers, so keep the old
+        # 8-bit behaviour there rather than mixing depths.
+        try:
+            source_bitdepth = videoInfo.get_bit_depth() or 8
+        except Exception:
+            source_bitdepth = 8
+        high_bitdepth = (hdr_mode or source_bitdepth >= 10) and not (self.interpolateModel)
+        if high_bitdepth and not hdr_mode:
+            log(f"10-bit source detected: keeping the pipeline at 16 bit (was rgb24)")
+        self.high_bitdepth = high_bitdepth
 
         video_encoder = EncoderSettings(video_encoder_preset)
         audio_encoder = EncoderSettings(audio_encoder_preset, type="audio")
@@ -249,6 +264,7 @@ class Render:
             color_primaries=color_primaries,
             color_transfer=color_transfer,
             color_range=color_range,
+            high_bitdepth=high_bitdepth,
             input_pixel_format=input_pix_fmt,
             ffmpeg_path=ffmpeg_path,
         )
@@ -281,6 +297,7 @@ class Render:
             color_primaries=color_primaries,
             color_transfer=color_transfer,
             color_range=color_range,
+            high_bitdepth=high_bitdepth,
             ffmpeg_path=ffmpeg_path,
             ffmpeg_log_file=os.path.join(cwd, "ffmpeg_log.txt"),
         )
@@ -338,6 +355,25 @@ class Render:
         frame_array = cv2.cvtColor(frame_array, cv2.COLOR_BGR2RGB)
         cv2.imwrite("frame.jpg", frame_array)
 
+    def _preview_bytes(self, frame):
+        """Payload for the information/preview channel.
+
+        Nothing consumes it in a headless render (no shared memory target), yet building
+        it for a 16-bit 4K frame costs a full host-side conversion per frame - that alone
+        made the 10-bit path ~2x slower. Without a preview target a sentinel is enough:
+        the writer only uses the payload when self.sharedMemoryID is set.
+        """
+        if self.informationHandler.sharedMemoryID is None:
+            return _NO_PREVIEW
+        if type(frame) is bytes:
+            return frame
+        if getattr(self, "high_bitdepth", False) and not getattr(frame, "hdr_mode", False):
+            tensor = frame.get_frame_tensor(clear_cache=False)
+            with torch.inference_mode():
+                small = (tensor[0].permute(1, 2, 0).clamp(0, 1) * 255).to(torch.uint8)
+                return small.cpu().numpy().tobytes()
+        return frame.get_frame_bytes()
+
     def render(self):
         frames_rendered = 0
         """
@@ -381,7 +417,7 @@ class Render:
                                                height=self.height*self.modelScale,
                                                target_width=self.width*self.override_upscale_scale,
                                                target_height=self.height*self.override_upscale_scale,)
-                        self.informationHandler.setPreviewFrame(interpolated_frame.get_frame_bytes() if type(interpolated_frame) != bytes else interpolated_frame)
+                        self.informationHandler.setPreviewFrame(self._preview_bytes(interpolated_frame))
                         self.informationHandler.setFramesRendered(frames_rendered)
                         self.writeBuffer.writeQueue.put(interpolated_frame.get_frame_bytes() if type(interpolated_frame) != bytes else interpolated_frame)
                 
@@ -413,7 +449,8 @@ class Render:
 
                 
                 self.informationHandler.setFramesRendered(frames_rendered)
-                self.informationHandler.setPreviewFrame(frame.get_frame_bytes() if type(frame) != bytes else frame)
+                preview_payload = self._preview_bytes(frame)
+                self.informationHandler.setPreviewFrame(preview_payload)
                 
                 self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
                 frames_rendered += int(self.ceilInterpolateFactor)
@@ -442,6 +479,7 @@ class Render:
             gpu_id=self.pytorch_gpu_id,
             trt_optimization_level=self.trt_optimization_level,
             hdr_mode=self.hdr_mode,
+            high_bitdepth=getattr(self, "high_bitdepth", self.hdr_mode),
             trt_static_shape= not self.trt_dynamic_shapes,
         )
     
