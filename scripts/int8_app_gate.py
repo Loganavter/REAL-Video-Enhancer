@@ -154,13 +154,18 @@ def main() -> int:
               f"{int((cur.to(torch.int16) - ref_cur.to(torch.int16)).abs().max())}")
         ping = torch.empty_like(cur)
 
+    scratch = torch.empty_like(cur)
+
     def int8_cycle():
+        # cycle the destination between the two scratch buffers only - a plain swap would write into
+        # `cur` on the second hop and destroy the input, so every call after the first would start from
+        # the previous call's last hop (timing unaffected, picture silently wrong)
         src, dst = cur, ping
         for L in launches:
             body_prologue_kernel[grid](src, L["w"], L["m"], SHIFT, L["vec"], L["bias"], L["slope"],
                                        L["os"], dst, args.height, args.width,
                                        BLOCK_M=args.bm, C=64, num_warps=args.warps)
-            src, dst = dst, src
+            src, dst = dst, (scratch if dst is ping else ping)
         last = torch.empty((1, 64, args.height, args.width), device="cuda", dtype=torch.float16)
         dequantise_nhwc_to_nchw[qgrid](src, outs[-1].contiguous(), last, args.height * args.width,
                                        BLOCK=QB, C=64, num_warps=4)

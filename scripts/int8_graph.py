@@ -52,7 +52,9 @@ def main() -> int:
     ap.add_argument("--frame", default="/var/tmp/opencode/frame.raw")
     args = ap.parse_args()
 
-    raw = np.fromfile(args.frame, dtype=np.uint8).reshape(args.height, args.width, 3)
+    _full = np.fromfile(args.frame, dtype=np.uint8)
+    _h, _w = _full.size // (3 * args.width), args.width
+    raw = _full.reshape(_h, _w, 3)[:args.height, :args.width]
     x = torch.from_numpy(raw.astype(np.float32) / 255.0).permute(2, 0, 1)[None].cuda().half()
     model, _, _ = load(f"{BUNDLE}/custom_models/2x-Futsuu-Anime(1).pth")
     model = model.eval().cuda().half()
@@ -101,12 +103,15 @@ def main() -> int:
     qgrid = (triton.cdiv(args.height * args.width, QB),)
 
     def run_body(params):
+        # the destination must cycle between buf_a and buf_b ONLY: a plain swap would hand `inp` back as
+        # the destination on the second hop and destroy the source, so every run after the first started
+        # from a previous run's output and a captured graph re-read that garbage as its input.
         src, dst = inp, buf_a
         for L in params:
             body_prologue_kernel[grid](src, L["w"], L["m"], SHIFT, L["vec"], L["bias"], L["slope"],
                                        L["os"], dst, args.height, args.width,
                                        BLOCK_M=BM, C=64, num_warps=WARPS)
-            src, dst = dst, src
+            src, dst = dst, (buf_b if dst is buf_a else buf_a)
         dequantise_nhwc_to_nchw[qgrid](src, params[-1]["os"].contiguous(), last,
                                        args.height * args.width, BLOCK=QB, C=64, num_warps=4)
         return src

@@ -941,8 +941,43 @@ probe, because only the app has the encoder alongside.
 
 ## Stage 3 - the graph (half a day)
 
-**State (2026-11-16): the stopwatch says 1.00x, so the graph is not a lever for this body - and the harness does
-not yet reproduce eager, which is recorded rather than papered over.** `scripts/int8_graph.py` warms five launches
+**State (2026-11-16, closed): the graph is BIT-EXACT, binds by POINTER, and buys nothing - stage 3 is not a lever.**
+
+The bit-exactness failure was mine, and it was the same two-buffer bug the gate harness had. The ping-pong
+`src, dst = dst, src` hands `inp` back as the *destination* on the second hop, so hop 2 writes over the source and
+every run after the first starts from a previous run's output; a captured graph then re-reads that garbage as its
+input. A destination cycle between the two scratch buffers - never back to the source - fixes it:
+
+    graph vs eager, codes:  max diff 0, differing 0 of 132 710 400
+    graph replay:           bit-exact on the whole body, dequantise included
+
+With a correct harness the plan's second question answers itself:
+
+    capture with calibration A; overwrite m/vec/os buffers on device with B; replay
+    graph vs eager-on-B: max diff 0        graph vs eager-on-A: max diff 145
+    verdict: POINTERS - one capture serves any calibration
+
+So the scales are bound by address, not by value: a per-video calibration does **not** need a re-capture, and the
+`set_tensor_address` concern carries over to the TRT segments only as a buffer-rotation question.
+
+And the stopwatch still says no:
+
+| | ms |
+|---|---|
+| eager | 47.25 |
+| graph replay | 47.35 |
+| ratio | **0.998x** |
+
+Sixteen launches of 2.771 ms are 44.3 ms of GPU work; there is at most ~3 ms of launch overhead to remove and the
+graph removes none of it. **Stage 3 closes as "the graph is not a lever at 1920x1080"** - it is correct, it is
+capturable, and it is worth nothing here. It may still earn its keep in the app's render path, where the per-frame
+Python around these launches is not hidden under 44 ms of GPU work, and that belongs to stage 4.
+
+The single-hop isolation that found the bug is worth keeping as a habit: a one-hop capture on an explicit side
+stream compared against eager was bit-exact while the sixteen-hop version was not, which located the fault in the
+orchestration rather than in the capture mechanism.
+
+**State (2026-11-16, first graph measurement): the stopwatch says 1.00x, so the graph is not a lever for this body.** `scripts/int8_graph.py` warms five launches
 (the first enqueue does lazy initialisation), captures the 16 hops plus the fused dequantise, replays, and then
 times. At 1920x1080:
 
