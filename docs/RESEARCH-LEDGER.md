@@ -1264,6 +1264,22 @@ same calibration, margin 1.25, symmetric activations:
 | per output channel (what TensorRT can do) | 0.058% | 37 | 1.93 |
 | **per (output channel, tap)** | **0.021%** | **32** | 1.99 |
 
+**The best combination is per-tap WITHOUT the asymmetric grid and without a margin.** Violet 5 s, two
+Violet frames for calibration:
+
+| configuration | share above 8 | peak | median |
+|---|---|---|---|
+| per-channel, symmetric, margin 1.25 | 0.058% | 37 | 1.93 |
+| per-tap, symmetric, margin 1.0 | **0.008%** | 33 | 1.62 |
+| per-tap, asymmetric, margin 1.0 | 0.019% | 37 | 1.99 |
+| per-tap, asymmetric, margin 1.25 | 0.049% | 33 | 2.46 |
+| per-tap, asymmetric, margin 1.5 | 0.246% | **28** | 2.99 |
+
+So the margin and the asymmetric grid both cost share for peak, and neither gets the peak below 28; the
+headroom is not needed once the weights are per-tap. At 0.008% the share is 12x inside the bar and 9x
+better than the tile path's 0.071%, with the median at 1.62 levels - and the peak sits at 33 whatever is
+done to it.
+
 2.8x better on the share, five levels off the peak, and the median flat - so the gain is not a
 redistribution between the two statistics, it is a genuine reduction. This is exact rather than
 approximate in our own kernel: dequantise inside the tap loop, accumulate each tap in int32 over 64
