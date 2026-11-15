@@ -105,7 +105,9 @@ class Render:
         dynamic_scaled_optical_flow: bool = False,
         ensemble: bool = False,
         output_to_mpv: bool = False,
-        tile_reuse: bool = True,
+        trt_timing_iters: int = 8,
+        trt_tiling_level: str = "moderate",
+        tile_reuse: bool = False,
         tile_reuse_size: int = 512,
         tile_reuse_threshold: float = 0.35,
         temporal_reuse: bool = True,
@@ -143,6 +145,8 @@ class Render:
         self.sceneDetectSensitivty = sceneDetectSensitivity
         self.sharedMemoryID = sharedMemoryID
         self.trt_optimization_level = trt_optimization_level
+        self.trt_tiling_level = trt_tiling_level
+        self.trt_timing_iters = trt_timing_iters
         self.uncacheNextFrame = False
         self.UHD_mode = UHD_mode
         self.dynamic_scaled_optical_flow = dynamic_scaled_optical_flow
@@ -493,6 +497,8 @@ class Render:
             tilesize=self.tilesize,
             gpu_id=self.pytorch_gpu_id,
             trt_optimization_level=self.trt_optimization_level,
+            trt_tiling_level=self.trt_tiling_level,
+            trt_timing_iters=self.trt_timing_iters,
             hdr_mode=self.hdr_mode,
             high_bitdepth=getattr(self, "high_bitdepth", self.hdr_mode),
             tile_reuse=getattr(self, "tileReuse", False),
