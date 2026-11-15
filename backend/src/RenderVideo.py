@@ -535,11 +535,11 @@ class Render:
                 log(f"  {result.reason}")
             verdict = "int8" if result.use_int8 else "fp16"
             if verdict == "int8":
-                # say both things: the probe's answer, and the fact that the render still runs the fp16
-                # engine because the Triton body is not wired into the upscale path yet. A log that only
-                # said "int8" would be a promise the render does not keep.
-                log("int8 body: the probe admits this video, but the int8 body is not wired into the "
-                    "render path yet - the fp16 engine runs this pass")
+                # The probe's answer is not the render's: the body is wired but only into the whole-frame
+                # path, while the app renders tiled. And measured against the TILED engine the app actually
+                # builds, the body loses - 56.8 ms against 35.85 ms. Say the measured reason, not a promise.
+                log("int8 body: the probe admits this video; the body only serves the whole-frame path and "
+                    "loses to the app's tiled engine anyway (56.8 vs 35.85 ms at 1080p) - fp16 engine runs")
             return verdict
         except Exception as error:  # a probe failure must never cost the render
             log(f"int8 probe failed ({error}); staying on the fp16 engine")

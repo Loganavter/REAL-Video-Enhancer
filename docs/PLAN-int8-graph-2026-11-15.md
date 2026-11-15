@@ -1023,7 +1023,46 @@ verified), then the stopwatch.
 
 **Tools:** `/var/tmp/opencode/graph_bitexact.py` is the harness; `launch_cubin.py` has the launcher.
 
-## Lane disposition (2026-11-16, final)
+## Lane disposition (2026-11-16, corrected by the app's own log)
+
+**The app does not build the engine the gate was measured against. Against the engine it does build, the body
+loses at both resolutions - the lane does not pay, and that is now measured rather than assumed.**
+
+A 1920x1080 render was run with the complete log (the 4K one OOM'd the probe before it could decide). Two things
+the log settles:
+
+* **the probe works at 1080p**: `int8 probe: engine 0.002% composition 0.003% peak 14 (7 pairs, bar 0.1%) -> int8`.
+  The 4K failure was memory, not judgement;
+* **the app renders TILED and builds its own engine**: `..._opt-5_tiling-full_headpad5_1920x1080.engine`, with the
+  head convolution fused to 8 padded channels - and that engine runs a 1080p frame in **35.85 ms** (`inference
+  35.85, frame total 45.36`, 24 frames). My 1.411x/1.428x was measured against the **monolithic** engine in my
+  harness, which takes **80 ms**. The app's tiled engine is **2.2x faster than the baseline I compared against**.
+
+So the honest ratio, at the resolution where the body was supposed to win:
+
+| 1920x1080 | time |
+|---|---|
+| the app's tiled fp16 engine (its own profile) | **35.85 ms** |
+| the int8 body (my harness, same shape) | **56.82 ms** |
+| **ratio** | **0.631x** - the body is 1.6x slower |
+
+And the body never served that render for a second, independent reason: `_int8_body` is only consulted on the
+whole-frame path (`tilesize == 0`), while the app renders tiled. The log shows no certification line - the probe
+admitted the video and the tiled path never asked.
+
+**Conclusion, and it reprices the whole lane:** every number from stage 2 onwards (1.489x, 1.505x, 1.422x, and the
+"gate cleared" 1.411x/1.428x) was measured against a monolithic TensorRT engine that the app does not use. Against
+the engine it does use - tiled, head-fused, opt-5 - the int8 body is **0.63x at 1080p and 0.77x at 4K**. The plan's
+kill line (<=1.15x: "the lane does not pay for integration") is triggered, and not narrowly.
+
+What that means for the remaining stages: the graph (stage 3, 0.998x) cannot help a body that is behind on
+compute; the head/tail work (stage 6) tops out because the app's engine already fuses the head; and calibration
+(stage 4) is correct but cannot close a 1.6x compute gap. The lane is closed on measurement, and the one thing
+that could reopen it is a faster body kernel - not more boundaries, not a graph, not a probe.
+
+## Lane disposition (2026-11-16, superseded)
+
+**Measured verdict (against the monolithic engine): the int8 body is accurate and pays 1.32x.**
 
 **Measured verdict: the int8 body is accurate and pays 1.32x, which clears the plan's kill line (1.15x) and
 misses its gate (1.40x) by 3.34 ms. Stages 4, 5 and 6 close on that number.**

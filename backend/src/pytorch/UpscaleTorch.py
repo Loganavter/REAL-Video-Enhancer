@@ -579,7 +579,9 @@ class UpscalePytorch:
                     return None
         except Exception:  # noqa: BLE001 - a shape check must never cost a render
             pass
-        if str(getattr(self, "int8FitBody", "auto")).lower() == "off":
+        import os
+        _mode = str(getattr(self, "int8FitBody", None) or os.environ.get("RVE_INT8_BODY", "auto")).lower()
+        if _mode == "off":
             # Measured: the body certifies at 0.00000% on 256, 512 and 1080, and runs 60.41 ms against the
             # app's own fp16 engine at 79.86 ms - 1.322x, or 1.328x with NVENC alongside. That clears the
             # plan's kill line (1.15x, by 9.13 ms) and misses its 1.40x gate by 3.34 ms, because 16.1 ms of
