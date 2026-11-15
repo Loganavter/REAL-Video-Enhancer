@@ -207,69 +207,57 @@ only 94 frames. The 502-frame run shows it directly: 22.72 x 502 = 11.40 s of lo
 
 ## Backlog, ranked by expected gain on our pipeline
 
-0. **T5' is measured, not a plan any more**: on anime the fitted grid plus the gate is 1.39x
-   (median) to 1.54x (best pair) over the gate alone, and on the moving film clip it is
-   **neutral in time and -0.8 dB in quality** (4.14 s against 4.07 s, tile reuse 9.5%, 68.46 dB
-   average against 69.29, worst frame identical at 65.2-65.3). So it stays opt-in: it pays on
-   content the gate already likes, and on film it is a small quality loss for nothing. A
-   content-adaptive default (enable tiles once the gate's own reuse share passes ~60% during
-   calibration) is the way to get it without asking the user, and it is unbuilt.
-1. **The input conversion - 2.80 ms/frame** of the gated anime path, paid once per frame by
+Nothing in the model or the gate is a measured loss any more; what is left is either a
+precision experiment or an input-path rewrite.
+
+1. **E9' - explicit Q/DQ INT8.** The only remaining precision row with 2x in its arithmetic and
+   no local measurement. Needs a Q/DQ ONNX (per-channel weights, per-tensor activations), a TRT
+   INT8 build, and an accuracy budget on real frames. Half a day, and the accuracy risk is the
+   whole question - the implicit-with-fallback attempt was *slower*, but that configuration is a
+   reformat-heavy graph, not a test of the format.
+2. **The input conversion - 2.80 ms/frame** of the gated anime path, paid once per frame by
    whichever stage reads the frame first. The gate's own arithmetic is 0.80 ms, so the lever is
-   the input pipe, not the gate. Where it goes, per `TorchUtils`: one H2D of the packed frame
-   (6.2 MB at 1080p 8-bit, 12.4 MB at 10-bit) followed by roughly fifteen elementwise kernels
-   that each materialise a full-resolution intermediate (`sub_`/`div_`, two bilinear chroma
-   upsamples, `r`, `b`, `g` computed through `r` and `b`, a three-channel `stack`, `clamp_`,
-   the dtype cast, and in the 8-bit path a `reshape -> permute -> contiguous` layout copy).
-   The bandwidth floor for that traffic is ~0.1 ms, so it is launch- and materialisation-bound
-   by roughly 30x. Two candidates, in order of payoff: give ffmpeg's decoder `gbrp` so the
-   planar frame arrives in the layout the tensor wants (kills the permute copy, 8-bit path
-   only, and the preview/cv2 consumers would need the interleaved view), and rewrite the 10-bit
-   conversion to write into one preallocated 3-channel buffer with `g` computed directly from
-   `y,u,v` instead of through `r` and `b`. Neither is measured yet.
-2. **E14 / E5' - the `sm75_` tactics.** Same experiment answers both: a quiet rebuild with an
-   explicit workspace, then diff the tactic dump and A/B the alternatives through an editable
-   timing cache. This is the only remaining kernel-level lead.
-3. **E9' - explicit Q/DQ INT8.** The only remaining precision row with 2x in its arithmetic.
-   Needs a calibration set and a real accuracy check; expect a non-trivial quality budget.
-4. **C4 - the P010 divergence.** 1.54 ms/frame, and the 31 dB smells like tags, not packing.
-5. **P8 / P9 / N3 / N4** - quality-of-life and encoder-side, only if x265 or per-plane tile
+   the input pipe. Where it goes, per `TorchUtils`: one H2D of the packed frame (6.2 MB at 1080p
+   8-bit, 12.4 MB at 10-bit) followed by roughly fifteen elementwise kernels that each
+   materialise a full-resolution intermediate (`sub_`/`div_`, two bilinear chroma upsamples,
+   `r`, `b`, `g` computed through `r` and `b`, a three-channel `stack`, `clamp_`, the dtype cast,
+   and in the 8-bit path a `reshape -> permute -> contiguous` layout copy). The bandwidth floor
+   for that traffic is ~0.1 ms, so it is launch- and materialisation-bound by roughly 30x. Two
+   candidates: give ffmpeg's decoder `gbrp` so the planar frame arrives in the layout the tensor
+   wants (kills the permute copy, 8-bit path only; the preview and cv2 consumers would need the
+   interleaved view), and rewrite the 10-bit conversion to write into one preallocated
+   3-channel buffer with `g` computed directly from `y,u,v`. Neither is measured.
+3. **E16 Winograd / E17 PReLU rewrite.** Both cheap, both expected near zero. E16's
+   counter-precedent is now weaker: restricting the build to cuDNN alone made the engine 10.7%
+   *slower*, so this TRT build's own kernels beat cuDNN's for this shape, whatever way cuDNN
+   wins a single-conv race elsewhere.
+4. **P8 / P9 / N2 / N3 / N4** - quality-of-life and encoder-side, only if x265 or per-plane tile
    writes are kept.
-6. **Tile reuse as a default?** Measured: anime 1.39-1.54x, film neutral in time (+1.7%) and
-   -0.8 dB in quality. Turning it on for everyone buys the anime case and costs the film case a
-   little fidelity, so it stays a flag until the owner says otherwise or a content-adaptive
-   switch exists (enable tiles when the gate's calibration reuse share passes ~60%).
-7. **P11 is closed** (engine 51.4 ms standalone against 54.3 in-app, NVENC accounting for 9%
-   of that), and **P4'/P5' are closed too** (the writer is idle half the time), so neither is
-   on this list any more.
-
-## Tooling (delegated, merged 2026-11-15)
-
-Two cells, disjoint files, no GPU work in either. Both replace /tmp scripts that produced the
-numbers in this ledger and are now lost.
-
-| tool | what it takes over |
-|---|---|
-| `backend/tests/tools/bench_engine.py` | every row of MODEL.md §2: `--engine` or `--model/--tiling/--opt-level` to build, `--repeat` so the session spread is visible, `--with-nvenc` for the contention A/B, `--sample-clocks`, `--dump-tactics`, `--json`. Each row prints its basis (measured vs derived, and where the shape came from). Verified: 51.04 and 51.25 ms/frame, 48.6 and 48.4 TFLOP/s on the 1920x1080 tiling-full engine, against 51.37 from the old script |
-| `backend/tests/tools/psnr_report.py` | every quality number in these docs: states the pixel format both inputs were converted to, refuses a frame-count mismatch, lists the worst frames with indices, `--fail-under` for a gate. Verified on the gated anime render: average 52.73 dB / worst 48.18 dB (frame 371), matching the hand-typed 52.7 / 48.2 |
-
-Two things verification of that tool changed: `identical` frames are now counted instead of
-being averaged in (a gated render re-emits them, so their per-frame PSNR is infinite and the
-naive average of the stats file is `inf`), and both aggregates are printed because they are
-different numbers - ffmpeg's `average` is the PSNR of the mean MSE (52.731) while the per-frame
-average is 52.810.
 
 ## Open questions
 
-- Why does the P010 pipe diverge end to end (31 dB) while the packing is bit-exact against the
-  planar decode? Leading hypothesis now: the colour matrix/range never reaches the encoder,
-  the same failure that cost C3 5 dB (check the `-colorspace/-color_primaries/-color_trc/
-  -color_range` tags and the meaningless `-hwaccel cuda` on the raw input).
-- Why did the pooled payload corrupt frames (12.6 dB) with `writeQueue.maxsize=25` and 4 slots?
-  The writer instrumentation shows the queue never fills (max depth 4 of 25), so "a whole pool
-  behind" cannot be the mechanism; a slot released before its last byte was copied is.
-- Is the app's per-frame model time really higher than the isolated benchmark (P11)? Answered:
-  no, or almost. The engine measures 51.37 ms standalone and 54.3 ms in-app at the same shape,
-  and an NVENC encode running alongside costs 9% in a controlled A/B (51.37 -> 55.99). The
-  earlier 23-43% "gap" was a cross-session comparison against a figure from a session in which
-  this machine was 26% faster.
+- **Is the film gate worth its quality cost?** Measured: 18.1% reuse, 4.33 s against 4.66 s
+  ungated (1.08x), average 50.34 dB and **worst frame 39.83 dB**. That worst frame is not
+  transparent. The automation now picks the strictest threshold on this clip, so this is the best
+  the mechanism does here, not a tuning miss. The owner has to say whether 7% is worth a frame
+  at 40 dB, or whether film should run ungated.
+- **Does the tile probe generalise?** It reads 16 frames at 4 positions. On our two clips it
+  classified both correctly after the margin rule, but the prediction is off in both directions
+  (anime 33% predicted against 58% achieved, film 15% against 9.5%) and the sample is two titles.
+  Three more anime clips with different grain would settle whether "cost must clear 1/area_tax"
+  is the right bar or luck.
+- **The GUI still passes its own `--video_pixel_format` default**, so the 10-bit output fix
+  reaches the CLI only. The GUI path keeps quantising 10-bit sources at the encoder.
+- **The pooled payload corruption is explained but unverified.** The writer instrumentation
+  shows the queue never fills (depth 4 of 25), so the mechanism must be a slot released before
+  its last byte was copied. The feature is off; re-verifying it would buy 0.79 ms/frame.
+- **Does the chain-aware tuner over-tighten?** It now picks 2.0 on anime as well as on film,
+  which cost 2.6% of reuse (73.5% -> 70.9%) for no measurable quality change there. Harmless in
+  this measurement, unverified on other content.
+- ~~Why does the P010 pipe diverge (31 dB)?~~ Answered: two faults, see C4. The packing was never
+  the problem; the command declared a format the packer did not produce, and P010 additionally
+  fell through to the RGB branch.
+- ~~Is the app's per-frame model time really higher than the isolated benchmark?~~ Answered: no,
+  or almost. 51.37 ms standalone against 54.3 in-app at the same shape, with an NVENC encode
+  alongside costing 9% in a controlled A/B (51.37 -> 55.99). The earlier 23-43% "gap" was a
+  cross-session comparison against a session in which this machine was 26% faster.
