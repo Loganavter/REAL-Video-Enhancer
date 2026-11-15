@@ -1813,6 +1813,26 @@ outside. Whatever restores the epilogue at C=32 has to beat those kernels while 
 that fuses, which is exactly what `scripts/force_tactic.py` scans by forcing one tactic index at a time
 and reading the resulting layer names.
 
+## The int8 fit probe (2026-11-15)
+
+`scripts/probe_int8_fit.py` answers the only product question left: does int8 fit *this* video? It takes N
+adjacent pairs spread over the clip, calibrates on a disjoint half, applies the gate's own statistic so
+only pairs it would actually reuse enter the composition, and returns one verdict.
+
+| clip | gated pairs | engine | composition | verdict |
+|---|---|---|---|---|
+| Chainsaw | 4 of 6 | 0.006% / 14 | **0.017% / 18** | **int8** |
+| Violet | 5 of 6 | 0.031% / 20 | **0.258% / 26** | **fp16 fallback** |
+
+Three bugs it had to lose before it could answer, all of the class this ledger keeps recording: it paired
+frames spread over the clip instead of adjacent ones (measuring scene changes, an "80% error"), then it
+compared every pair rather than the pairs the gate would reuse (0.45% and 7.5%, peaks 178 and 187 - a cut
+is not a reuse), and its gate statistic was computed in 0..1 instead of levels, which passed every pair
+trivially. Each of the three looked like a result.
+
+Cost: ~1.5 s of forwards per video, against 0.7 s for the existing tile probe. At 1.42x of engine time the
+win saves 0.19*T, so the probe pays for itself when the render is longer than ~4.2 s.
+
 ## What the literature closes, and the one item it reopens (2026-11-15)
 
 Written down because these are structural closures - true by the shape of our network, not measured
