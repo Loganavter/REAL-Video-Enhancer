@@ -948,11 +948,20 @@ Same architecture, same builder settings as the app (fp16, `tiling=full`, optimi
 synthesized weights (tactics depend on shapes, not values), 1920x1080, per-layer times from
 `trt.IProfiler`.
 
-| width | total | body | fusion | MAC ratio | **time ratio** |
+| width | builds | fusion | MAC ratio | **time, same harness** | **ratio** |
 |---|---|---|---|---|---|
-| C=64 | 56.68 ms | 55.83 ms (22 myelin layers) | conv+PReLU fused throughout | 1.00x | 1.00x |
-| C=48 | 46.02 ms | 45.26 ms (22 fused) | preserved | 1.77x | **1.23x** |
-| C=32 | 46.10 ms | 20.09 ms (16 fused convs) | **PReLU breaks out**, 16 passes of 1.4-1.5 ms | 3.94x | **1.23x** |
+| C=64 | 52.99, 51.38 | 16 fused, 0 separate PReLU (1.03x spread) | 1.00x | 51.4-53.0 ms | 1.00x |
+| C=48 | 44.26, 41.84 | 16 fused, 0 (1.06x) | 1.77x | 41.8-44.3 ms | **1.16-1.27x** |
+| C=40 | 48.54, 48.48 | 16 fused, 0 (1.00x) | 2.56x | 48.5 ms | **1.06-1.09x** |
+| C=32 | 24.88, 24.06, 22.41 | 16 fused, 0 (1.11x) | 3.94x | 22.4-24.9 ms | **2.07-2.36x** |
+
+**The curve is not monotonic, and that is the finding.** C=48 is faster than C=64 by 1.2x, C=40 is
+*slower* than C=48 by 16% despite removing another 17% of the MACs, and C=32 is 1.9x faster than C=40.
+Widths do not buy time proportionally; they buy a different kernel class, and only 32 lands on one that
+fuses and also fits the tiling. The earlier readings for 48 and 32 in this table (46.02 and 46.10 ms
+with the PReLU split out) were one build each of a choice that mostly does fuse - so the "fusion break"
+row is retired, and the honest statement is that a build can land in either family, while the fused one
+reproduces 3/3 for C=32 in this run.
 
 Two results, and the second one is the interesting one.
 
