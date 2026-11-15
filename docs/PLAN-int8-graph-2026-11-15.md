@@ -252,6 +252,38 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**The tail is exact, and a grid margin makes things worse.** Two results that close the remaining suspects.
+
+**Tail: exonerated.** The simulation's own body output pushed through the pipeline's tail code (the same three
+lines the pipeline uses) reproduces the simulation's final image **bit-exactly**:
+
+    captured body output (1, 64, 512, 512) fp16
+    pipeline tail vs simulation, same body output: >8 0.0000%  peak 0  median 0.006 levels
+
+So PixelShuffle, the residual, and the dequantisation of the last grid are all correct. The 1.569% is entirely
+inside the sixteen-hop body chain.
+
+**Margin: refuted in the pipeline too** (it was already refuted in the simulation):
+
+| grid margin | share |
+|---|---|
+| 1.0 | **1.569%** |
+| 1.5 | 2.476% |
+| 2.0 | 2.905% |
+| 3.0 | 3.121% |
+
+Coarsening the grids costs more than the clipping it removes, exactly as the simulation's margin sweep said.
+And with the tail clean and every knob refuted, the remaining difference is a single structural one: the
+pipeline's hop quantises **twice** per layer - int8 on the per-channel grid, then the prologue requant to a
+per-tensor grid - while the simulation's hop also quantises twice but between different grids: its input grid
+is a per-tensor maximum measured on the **fp16** activation, the pipeline's is `max(per-channel grid)` of the
+**chain's** output. Those two agree at the first layer and diverge after it, and no amount of margin,
+percentile or collection strategy changes that because they all move the grid, not its source.
+
+That is where stage 1 stops: the mechanism is narrow enough to state in one sentence - the hop's input grid is
+derived from the chain rather than measured on the material the bar judges - and it has not been tested,
+because every test of it so far changed the grid's *value* instead of its *source*.
+
 **The rounding shift was tried and is worse: 2.773% against 1.569%.** Sign-aware rounding in the prologue
 (`(q*m + sign*2^(SHIFT-1)) >> SHIFT`) raises the share to 2.773% and the median to 2.96 levels, so the floor
 truncation was not the defect - it was partially cancelling something else in the chain, and removing it

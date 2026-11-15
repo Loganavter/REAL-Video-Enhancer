@@ -78,6 +78,7 @@ def main() -> int:
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--iters", type=int, default=0)
     ap.add_argument("--sat", action="store_true", help="per-layer saturation share")
+    ap.add_argument("--margin", type=float, default=1.0, help="safety factor on every grid")
     ap.add_argument("--pct", type=float, default=99.9,
                     help="percentile for the grids; 100 means the maximum")
     args = ap.parse_args()
@@ -166,17 +167,33 @@ def main() -> int:
                 print(f"    layer {idx:2d}: saturated "
                       f"{float((out.abs() >= 127).float().mean()) * 100:5.2f}%", flush=True)
             if collect:
+                key = f"body.{2 * (idx) + 1}"
+                chain_mag = float((out.permute(0, 3, 1, 2).float() * s_out.view(1, -1, 1, 1)).abs().mean())
+                ref_mag = fp16_mag.get(key, float('nan'))
+                print(f"    layer {idx:2d}: |chain| {chain_mag:7.3f}  |fp16| {ref_mag:7.3f}  "
+                      f"ratio {chain_mag / ref_mag:7.3f}", flush=True)
                 # the chain's OWN per-channel maximum, which is what the next grid has to cover
                 measured.append((out.permute(0, 3, 1, 2).float() * s_out.view(1, -1, 1, 1))
                                 .amax(dim=(0, 2, 3)).abs())
             buf, s_in = out, s_out
         return (buf, s_out, measured) if collect else (buf, s_out)
 
+    fp16_mag = {}
+    hh = []
+    for name, mod in model.named_modules():
+        if isinstance(mod, torch.nn.PReLU):
+            hh.append(mod.register_forward_hook(
+                lambda _m, _i, out, k=name: fp16_mag.__setitem__(k, float(out.float().abs().mean()))))
+    with torch.no_grad():
+        model(x)
+    for h in hh:
+        h.remove()
+
     # iterate: grids from the fp16 calibration first, then from the chain's own maxima, until the
     # per-layer maximum stops moving (an fp16 grid is fitted to a distribution the chain never sees)
     _, _, measured = run_pipeline(collect=True)
     for step in range(3):
-        outs = [(m.float() / 127.0).clamp_min(1e-8) for m in measured]
+        outs = [(m.float() / 127.0).clamp_min(1e-8) * args.margin for m in measured]
         _, _, new_measured = run_pipeline(outs_used=outs, collect=True)
         drift = max(float((a - b).abs().max() / b.abs().max().clamp_min(1e-9))
                     for a, b in zip(new_measured, measured))
