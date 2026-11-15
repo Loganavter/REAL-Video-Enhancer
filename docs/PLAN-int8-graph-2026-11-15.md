@@ -252,6 +252,26 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**The rounding shift was tried and is worse: 2.773% against 1.569%.** Sign-aware rounding in the prologue
+(`(q*m + sign*2^(SHIFT-1)) >> SHIFT`) raises the share to 2.773% and the median to 2.96 levels, so the floor
+truncation was not the defect - it was partially cancelling something else in the chain, and removing it
+exposed more. Reverted to the truncating version, which stays the best measured: 1.569%.
+
+So both named suspects from the last pass are now resolved against:
+
+| candidate | test | result |
+|---|---|---|
+| prologue arithmetic (double counting) | layer 1 against the shift reference, no clipping | **0.956** - correct |
+| floor-shift bias | sign-aware rounding shift | **2.773%** - worse, reverted |
+| per-hop grid choice | three collection strategies | all worse or equal (1.569 / 74 / 96) |
+| head + tail | not yet compared in one harness | **open** |
+
+That leaves the head and the tail as the only untested part of the pipeline. The next measurement puts the
+**simulation's own body output** through the pipeline's head and tail code and compares it against the
+simulation's final image: if they differ, the tail (PixelShuffle, residual, the dequantisation of the last
+grid) is the remaining 1.569%; if they agree, the body chain is still wrong despite the layer-1 agreement, and
+the difference is between "one layer right" and "sixteen hops right".
+
 **Discriminated: the prologue is numerically right, and the 1.8x was my measurement.** Layer 1 fed the
 identical quantised buffer, with the output grid set 20x too large so nothing clips:
 
