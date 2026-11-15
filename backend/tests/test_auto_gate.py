@@ -27,7 +27,7 @@ def test_busy_content_falls_back_to_the_strictest_candidate():
     ungated render (measured on the film clip, chain 4).
     """
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0)
-    _feed(t, [(60.0 + i, 200.0) for i in range(10)])
+    _feed(t, [(1.0, 200.0) for _ in range(10)])       # calm frames, absurd HR error
     assert t.ready
     assert t.chosen == min(t.candidates)
 
@@ -111,7 +111,7 @@ def test_best_preset_refuses_to_reuse_when_nothing_is_certified():
 
 def test_fast_preset_still_reuses_the_strictest_threshold():
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0, fallback="strictest")
-    _feed(t, [(60.0 + i, 200.0) for i in range(10)])
+    _feed(t, [(1.0, 200.0) for _ in range(10)])
     assert t.ready
     assert t.chosen == min(t.candidates)
 
@@ -163,3 +163,25 @@ def test_no_depth_certifies_means_no_reuse_under_best():
         t.add(1.0, (20.0, 20.0, 20.0, 20.0))     # over the budget at every depth
     assert t.ready
     assert t.chosen is None
+
+
+def test_a_grainy_source_refuses_at_any_threshold():
+    """Above the measured noise floor, reuse is refused rather than tuned.
+
+    Three real Blu-rays measured at the current settings: noise floor 0.95 -> 0.005% of pixels
+    above 8 levels, 1.32 -> 0.097%, 2.27 -> 0.470% (i.e. five times the acceptance bar, and the
+    same at threshold 4 and at threshold 2). So the floor is the signal, not the threshold.
+    """
+    t = AutoGateTuner(seed=5.0, min_pairs=8, budget=2.0, fallback="off",
+                      noise_floor_refuse=2.0)
+    _feed(t, [(3.0 + 0.1 * i, 0.5) for i in range(10)])   # calm frames sit above the floor
+    assert t.ready
+    assert t.chosen is None
+    assert "above the" in t.stats()
+
+
+def test_a_clean_source_is_not_refused_by_the_floor():
+    t = AutoGateTuner(seed=5.0, min_pairs=8, budget=2.0, noise_floor_refuse=2.0)
+    _feed(t, [(0.2 + 0.01 * i, 0.4) for i in range(10)])
+    assert t.ready
+    assert t.chosen is not None
