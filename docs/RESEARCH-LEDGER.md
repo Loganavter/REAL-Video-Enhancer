@@ -1016,6 +1016,45 @@ ceiling is the int8 rate, 147 TOPS, i.e. 16.6 ms of body plus non-GEMM = 24.7 ms
 1.97x at 120 TOPS, 1.84x at 109. That is E27 extended into a real kernel project (CUTLASS or
 hand-written), weeks of work, with 2x at the very top of its range.
 
+## Spatial routing survives the oracle: 1.6-1.95x on a mask a router can actually compute
+
+The pruning post-mortem ended on a split worth more than the pruning attempt: at C=32 the error sits on
+edges (26.1% of edge pixels above 8 levels) and flat regions are at the bar (0.060%). That is a licence
+for conditional compute rather than for a global cut, and it is testable on outputs that already exist:
+
+    out = where(mask, full, thin)
+
+Inside the mask the composite *is* the full model, so the only error it can show is the thin model's
+error outside the mask. Measured against `full` with the acceptance rule, on a real frame:
+
+| mask | area | covers error pixels | >8 levels | time |
+|---|---|---|---|---|
+| oracle (where thin is actually wrong) | 1.6% | 100% | 0.000% | 2.16x |
+| grad>4, dilate 2 LR px | 14.9% | 100% | **0.000%** | **1.79x** |
+| grad>4, dilate 4 | 21.4% | 100% | 0.000% | 1.66x |
+| grad>8, dilate 2 | 8.3% | 94.1% | 0.094% | 1.95x |
+| grad>8, dilate 4 | 12.6% | 95.2% | 0.077% | 1.84x |
+| grad>2, dilate 18 (the first guess) | 75.9% | 100% | 0.000% | 1.02-1.15x |
+| grad>16, dilate 18 | 10.0% | 55.6% | 0.703% | 1.91x |
+
+Two things this settles. **The prize is real**: a perfect router would give 2.16x, because the thin
+model fails on 1.6% of pixels. **And the router does not need to be smart**: a 2-pixel dilation around
+pixels whose LR gradient exceeds 4 levels covers every error pixel on this frame, at 15% of the area.
+The first guess - dilate by the receptive radius 18 - is what made routing look dead, and it was the
+wrong instinct: the mask marks where the *answer* needs the full model, not where the full model's
+receptive field reaches.
+
+Cost model behind the time column: a tile containing any mask pixel is computed by the full engine,
+the rest by the thin one, with a 1.15 halo tax on the masked part and thin at 1/2.2 of full. That is
+the implementation this implies - two engines, a tile pass, no new kernel, no retraining, no weights
+touched.
+
+What this is not yet: one frame. The error's location is content-dependent, so the mask's area has to
+be measured across the spread sample and the worst frames, and the router has to be evaluated on the
+same titles the acceptance bar uses. The peak of the composite is 5 levels, well inside the bar's
+peak guidance.
+
+
 ## E30b closed: 32 channels cannot hold the stack's features, and that is a bound, not a method failure
 
 Three diagnostics and then the refit that settles it.
