@@ -200,6 +200,7 @@ class FFmpegWrite(Buffer):
         mpv_output: bool,
         merge_subtitles: bool,
         high_bitdepth: bool | None = None,
+        pipe_input_pixel_format: str | None = None,
         color_space: str = None,
         color_primaries: str = None,
         color_transfer: str = None,
@@ -234,6 +235,7 @@ class FFmpegWrite(Buffer):
         self.mpv_output = mpv_output
         self.hdr_mode = hdr_mode
         self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
+        self.pipe_input_pixel_format = pipe_input_pixel_format
         self.merge_subtitles = merge_subtitles
         self.writeQueue = queue.Queue(maxsize=25)
         self.previewFrame = None
@@ -539,7 +541,13 @@ class FFmpegWrite(Buffer):
                 if frame is None:
                     break
                 
-                self.writeProcess.stdin.buffer.write(frame)
+                # A pooled-output item is the Frame itself (its payload is a live view on a
+                # pinned host slot); plain bytes still go through unchanged.
+                payload = frame.get_frame_bytes() if hasattr(frame, "get_frame_bytes") else frame
+                self.writeProcess.stdin.buffer.write(payload)
+                if hasattr(frame, "release_payload"):
+                    # the bytes are in the pipe's own buffer now: the slot may be rewritten
+                    frame.release_payload()
 
             self.writeProcess.stdin.close()
             self.writeProcess.wait()

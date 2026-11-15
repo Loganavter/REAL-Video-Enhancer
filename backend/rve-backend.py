@@ -184,6 +184,7 @@ class HandleApplication:
             temporal_reuse=not self.args.no_temporal_reuse,
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
+            temporal_reuse_pixel_veto=self.args.temporal_reuse_pixel_veto,
         )
         
 
@@ -480,16 +481,24 @@ class HandleApplication:
         )
         parser.add_argument(
             "--temporal_reuse_threshold",
-            help="Worst-tile low-passed luma delta (0-255) under which a frame counts as "
-                 "unchanged. Default 0.35; raise it for more speed, lower it for safety.",
-            default=0.35,
+            help="Max 32px-block mean |delta| (0-255) under which a frame counts as a duplicate "
+                 "of the last KEPT frame. Default 5.0 (TheAnimeScripter: sens 35 / 7).",
+            default=5.0,
             type=float,
         )
         parser.add_argument(
             "--temporal_reuse_max_chain",
-            help="Maximum number of consecutive frames taken from the cache. Default 2.",
-            default=2,
+            help="Maximum number of consecutive frames taken from the cache. Default 4.",
+            default=4,
             type=int,
+        )
+        parser.add_argument(
+            "--temporal_reuse_pixel_veto",
+            help="Full-res max |delta| (0-255) above which a would-be duplicate is kept anyway. "
+                 "0 = off (default). Use 40 for clean anime (catches mouth flaps/blinks); on "
+                 "grainy film it rejects nearly every duplicate (measured 1.1% reuse vs 46.8%).",
+            default=0.0,
+            type=float,
         )
         parser.add_argument(
             "--slomo_mode",
