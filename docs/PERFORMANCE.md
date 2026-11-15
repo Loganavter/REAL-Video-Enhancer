@@ -98,6 +98,13 @@ preset) before tuning anything else.
 Per frame at 2880x2160 output: engine ~35 ms, **D2H 3.4 ms** (an 18.7 MB RGB frame over the link
 below), colour conversion ~1.3 ms, the rest is reading/writing and the encoder.
 
+Inside the engine, 8.11 ms of 56.8 ms is not the 16 body GEMMs, and four of those five pieces now
+have a measured size and a named fix: the one unfused PReLU **2.40 ms** (it sits behind the *head*
+convolution; three builds at different tiling levels leave it there, so the fix is graph surgery on
+the head's 3-channel shape), head and tail convolution tactics **1.31 ms**, the upsampler plus
+myelin's reshape/add **1.04 ms**, and the layout kernels **0.81 ms** - **5.56 ms, 9.8% of the
+frame**, which is the largest quantified per-frame headroom left (ledger E18-E21).
+
 ### The link is PCIe 3.0 x8, and pinning is not the lever
 
 `nvidia-smi` reports `pcie.link.gen.current = 3`, `width = 8` - that is both the current and the
