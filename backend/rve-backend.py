@@ -341,8 +341,11 @@ class HandleApplication:
         )
         parser.add_argument(
             "--video_pixel_format",
-            help="pixel format for output video. (Overwritten by custom encoder)",
-            default="yuv420p",
+            help="pixel format for output video. Default: the source's own depth - "
+                 "yuv420p10le for a 10-bit source, yuv420p otherwise, which is what keeps the "
+                 "10-bit pipe from being quantised away at the encoder. "
+                 "(Overwritten by custom encoder)",
+            default=None,
             choices=[
                 "yuv420p",
                 "yuv422p",

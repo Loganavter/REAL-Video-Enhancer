@@ -317,6 +317,9 @@ class Render:
             ffmpeg_path=ffmpeg_path,
         )
 
+        from .FFmpegBuffers import resolve_output_pixel_format
+        pixelFormat = resolve_output_pixel_format(
+            pixelFormat, self.high_bitdepth, bool(self.interpolateModel))
         self.writeBuffer = FFmpegWrite(
             inputFile=inputFile,
             outputFile=outputFile,
