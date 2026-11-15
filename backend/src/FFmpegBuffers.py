@@ -438,6 +438,16 @@ class FFmpegWrite(Buffer):
                         self.audio_bitrate,
                     ]
                 command += self.video_encoder.getPostInputSettings().split()
+                # NVENC defaults to p4; p1 is ~36% faster at a slightly worse quality/bit
+                # (measured 3.46x -> 4.71x realtime at 2880x2160 10-bit). The encoder is on the
+                # critical path again once the model and the gate are in place, so this is
+                # worth ~8% of the frame. Override with RVE_NVENC_PRESET=p4/p7.
+                try:
+                    _tag = self.video_encoder.getPresetTag()
+                except Exception:
+                    _tag = ""
+                if _tag in ("x265_nvenc", "x264_nvenc", "av1_nvenc"):
+                    command += ["-preset", os.environ.get("RVE_NVENC_PRESET", "p1")]
                 command += [self.video_encoder.getQualityControlMode(), str(self.crf)]
                 command += self.audio_encoder.getPostInputSettings().split()
                 command += self.subtitle_encoder.getPostInputSettings().split()

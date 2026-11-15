@@ -466,7 +466,6 @@ class UpscalePytorch:
             else:
                 output = self.renderTiledImage(image_tensor)
             
-            self.last_inference_ms = (time.perf_counter() - _t_inf) * 1000.0
             retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale, device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                              high_bitdepth=self.high_bitdepth)
             # 10-bit SDR: hand ffmpeg ready-made yuv420p10le instead of RGB
@@ -476,6 +475,9 @@ class UpscalePytorch:
             retFrame.set_frame_tensor(output, sync=False)
         
         self.torchUtils.sync_stream(self.stream)
+        # measured after the sync: the model runs async on its stream, so a timer taken at
+        # enqueue time only measures the launch (~1.8 ms, not the 35 ms of work)
+        self.last_inference_ms = (time.perf_counter() - _t_inf) * 1000.0
         return retFrame
  
     def getScale(self):
