@@ -36,7 +36,21 @@ broken once itself. Until it agrees with a third implementation, any mismatch re
 | 5 | stream | read **inside** `with torch.cuda.graph(g)` | empty graph that reports OK |
 | 6 | context | `cuCtxGetCurrent`, never a second one | hard failure (400) |
 
-**Gate:** three implementations, max abs diff 0. If not, fix the reference, not the kernel.
+**Gate (refined by the first run):** the two integer implementations must agree **exactly**; the float
+reference must agree to within **1 level on unsaturated pixels** and may diverge where the output clamps.
+
+First run: kernel against shift+`_int_mm` = **0 exactly**; kernel against fp32 `conv2d` on dequantised weights
+= **max 8 on 2.2% of pixels**, and the two references differ from each other by the same 8, so that gap is
+between the references and not attributable to the kernel. It is expected in kind - the integer path sums 576
+terms exactly and scales once, while the float path scales the weights first and accumulates in float32 - but
+"expected in kind" is not a measurement, so the gate above replaces the absolute zero the plan started with.
+The next check is the same comparison restricted to pixels that do not saturate; if it is <= 1 there, the
+float reference is usable as a sanity check and not as a bit-exact standard.
+
+A third permutation bug was caught getting this far: `w.permute(2, 1, 0)` is [cout, cin, tap] and reshapes
+into a valid conv2d weight, while `permute(2, 0, 1)` gives [cout, tap, cin] and reshapes silently into a
+*wrong* weight of the same element count. Three permutation mistakes in one investigation (twice in a
+reference, once in a probe), all of them producing plausible numbers rather than errors.
 
 **Tools:** `scripts/int8_block_probe.py` (`reference()`, `--check-size`), `scripts/launch_cubin.py`.
 
