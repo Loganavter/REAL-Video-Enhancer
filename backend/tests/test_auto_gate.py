@@ -56,7 +56,9 @@ def test_clean_content_takes_the_widest_threshold_that_fits():
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0)
     _feed(t, [(0.2 + 0.01 * i, 0.3) for i in range(10)])
     assert t.ready
-    assert t.chosen == max(t.candidates)
+    # the widest candidate the clamp allows: 12 and 4 measured the same only while the tile
+    # artifact dominated; with the tile path off it is 0.517% against 0.045%
+    assert t.chosen == t.clamp[1] == 4.0
 
 
 def test_threshold_grows_with_grain():
@@ -132,7 +134,7 @@ def test_chain_depth_is_certified_separately_from_the_threshold():
         t.add(1.0, (1.5, 1.8, 16.0, 20.0))
     assert t.ready
     assert t.chosen_chain == 2
-    assert t.chosen == max(t.candidates)
+    assert t.chosen == t.clamp[1]
 
 
 def test_the_clamp_still_bounds_the_choice():
