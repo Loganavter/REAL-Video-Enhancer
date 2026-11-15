@@ -131,9 +131,12 @@ refuses tiles past a noise floor of ~0.45.
 
 ## Rules adopted
 
-1. **Acceptance for any reuse or precision change is local**: no pixel above 8 levels, under 0.5%
-   above 4, on the worst frame, plus a VMAF floor (min >= 90) as a second opinion. Averages are
-   reported but never decide.
+1. **Acceptance for any reuse or precision change is local**, and stated as a percentile rather
+   than as "no pixel at all", because the reference configuration itself does not pass that: the
+   tile path alone differs from a full-frame render by up to **9 levels** on a peak (fp16 tail
+   accumulation), and the certified chain-1 render peaks at 12. So the rule is: **99.99% of pixels
+   within 8 levels, under 0.5% above 4**, a VMAF floor of 90 as a second opinion, and the worst
+   block reported with its coordinates. Averages are reported but never decide.
 2. **One GPU job at a time** means no other render or benchmark; `nvidia-smi` utilisation is not a
    usable idle check on this host (17-47% with nothing of ours running).
 3. **Ratios only within a session.** The same ungated configuration measured 30.8 s and 38.85 s on
@@ -153,8 +156,16 @@ refuses tiles past a noise floor of ~0.45.
 | film, gate chain 4 | 4.33 s against 4.66 s ungated | 2.35% > 8 levels |
 
 `best` is the default and takes the certified depth; `fast` keeps the full chain and pays the moved
-fist. The speed story survives, but the honest version of it is "5x with a chain of one frame",
-not "5x", and the last 1.5x is the price of not moving objects.
+fist. The honest headline with the certified chain is **3.4x** (38.85 -> 11.52 s), not 5x: 5.06x is
+the chain-4 number, i.e. the configuration that moves the fist.
+
+Caveat on this whole framing: "the last 1.5x is the price of not moving objects" describes a
+*decision rule*, not a property of the problem. The gate reduces its per-pixel difference into a
+32 px block mean, which is exactly the reduction that also averages grain away - a fist of ~50 px
+survives a block mean almost intact, so the statistic cannot see what it is being asked to police,
+and the remedy (a shorter chain) is applied to the whole frame although the defect is one tile. A
+box-filtered intermediate statistic is being measured precisely to see whether that 1.5x can come
+back without the artifact; the rules below are therefore provisional.
 
 ## Still open
 
@@ -165,6 +176,9 @@ not "5x", and the last 1.5x is the price of not moving objects.
   fifteen kernels that each materialise a full-resolution intermediate, against a ~0.1 ms
   bandwidth floor. Two candidates are recorded (planar `gbrp` from the decoder, and one
   preallocated buffer for the 10-bit conversion); neither is measured.
+- **Film does not justify the gate as it stands.** 1.08x (4.33 against 4.66 s) for 2.35% of pixels
+  above 8 levels is a bad trade, and `best` refuses it automatically; `fast` still offers it. Either
+  the local-statistic work above makes film cheap too, or film simply runs ungated.
 - **The tile probe reads 16 frames** and mispredicts in both directions (anime 33% predicted
   against 58% achieved, film 15% against 9.5%), held together by a margin rule. Needs two or three
   more titles with different grain.
