@@ -30,6 +30,7 @@ def main() -> int:
     ap.add_argument("--model", default="/tmp/opencode/models2/futsuu.pth")
     ap.add_argument("--margin", type=float, default=1.0)
     ap.add_argument("--margin-all", type=float, default=1.0)
+    ap.add_argument("--localize", action="store_true")
     ap.add_argument("--fp16-tail", type=int, default=0,
                     help="leave the last N body pairs on the fp16 boundary")
     args = ap.parse_args()
@@ -81,6 +82,22 @@ def main() -> int:
     with torch.no_grad():
         got = quantised_forward(model, b, inputs, outputs, {}, fp16_tail=args.fp16_tail).float()
     share, peak, median = statistic(ref, got)
+
+    if args.localize:
+        err = (ref - got).abs() * 255.0          # levels, the statistic's own unit
+        per_px = err.amax(dim=1)[0]
+        flat = int(per_px.argmax())
+        y, x = divmod(flat, per_px.shape[1])
+        ch = int(err[0, :, y, x].argmax())
+        patch = per_px[max(0, y - 2):y + 3, max(0, x - 2):x + 3]
+        over = (per_px > 20).float().sum()
+        over8 = (per_px > 8).float().sum()
+        print(f"peak {float(per_px.max()):.0f} at (y={y}, x={x}) channel {ch}; "
+              f"ref {float(ref[0, ch, y, x]):.4f} got {float(got[0, ch, y, x]):.4f}")
+        print(f"3x3 error patch max {float(patch.max()):.0f}, pixels >20: {int(over)}, >8: {int(over8)}")
+        print(f"neighbourhood: ref range {float(ref[0, :, max(0,y-1):y+2, max(0,x-1):x+2].min()):.3f}"
+              f"..{float(ref[0, :, max(0,y-1):y+2, max(0,x-1):x+2].max()):.3f}, "
+              f"saturated refs (0 or 1): {int(((ref < 0.002) | (ref > 0.998)).float().sum())} of {ref.numel()}")
 
     worst = sorted(clipped.items(), key=lambda kv: -kv[1])[:5]
     print(f"held-out: >8 {share:.3f}% (bar 0.1)  peak {peak:.0f}  median {median:.2f} levels")

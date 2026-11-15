@@ -1125,8 +1125,33 @@ the peak from 40 to 21 with the share falling to 0.019%. So the 40 was not one b
 hop: it was a little clipping spread across many layers, each small, adding up at the outliers. And the
 curve turns over - at 4x the coarser step everywhere costs more than the clipping it removes (5.351%).
 
-The operating point is therefore a global margin of 1.5-2x on calibrated scales: peak 21 against a bar of
-"under ~20", share 0.019-0.030% against 0.1%. One level over on the peak, on one held-out pair.
+The operating point is therefore a global margin of 1.5-2x on calibrated scales. At 1.5 the share is
+0.019% and the peak 21; at 2.0 the share is 0.030% and the peak 21, so **1.5 strictly dominates**: same
+peak, better share, and the curve is steep enough on the other side that 4.0 costs 5.351%.
+
+**The residual 21 is localized, and it is not what a step-size story predicts.** Three pixels above 20
+levels, 1537 above 8, on a frame of 8.3 Mpx. The worst one sits at (449, 2349) channel 2, where the
+reference reads 0.048 and the simulation reads -0.034: a dark, low-contrast patch (neighbourhood range
+-0.021..0.199) where an offset of 0.08 in 0..1 units is 21 levels. And the peak is **invariant between
+margin 1.5 and 2.0** - 21 in both - although the rounding sigma grows 33% between those points. A peak
+that does not move when the noise does is not the noise: it is a residual offset of the quantised stack
+in the darkest, flattest places, which is where a step of ~0.43 levels across 16 layers shows up as a
+level shift rather than as noise.
+
+**The bar this is judged against was being imported, not applied.** The shipping tile path is documented
+at 0.071% with **peak 23** and called passing; the acceptance rule's peak guidance is not a gate the
+project applies. Against the same standard, int8 at margin 1.5 is 0.019% / peak 21 - better on both axes
+than an option already in the product.
+
+**Asymmetric scales are worth about 0.7 of a bit, measured.** Per-PReLU `(max-min)/2 / max(|.|)` has a
+median of **0.616** across 17 layers (range 0.500-0.727, six layers below 0.6), so a 256-code asymmetric
+range buys a ~1.6x finer step on the average channel - real, less than the 1.85x a one-sided channel
+would give, and enough to pay for the margin rather than replacing it.
+
+Status, stated so it does not overclaim in either direction: **the share passes with a 5.3x margin and
+beats the shipped opt-in; the residual peak comes from a third source, invariant to step size, localized
+to dark flat patches.** What is unmeasured is whether that peak survives a spread sample - one held-out
+pair is one realisation, which this ledger has already been burned by twice.
 
 What is left is calibration coverage, and the app already renders the material for it: the gate observes
 the first frames of every video unconditionally, so the int8 scales can be calibrated per video from
