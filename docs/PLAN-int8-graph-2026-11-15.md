@@ -1045,6 +1045,36 @@ them in place. The NCHW variant needed a contiguous tensor and the copy cost mor
 Picture agreement with the app's own fp16 engine: `>8 0.00004%, peak 8`. `certify()` reads 0.00000% at 256, 512
 and 1920.
 
+**The 16.1 ms was measured segment by segment, and three attempts to cut it all failed.**
+
+| segment | ms |
+|---|---|
+| head: clamp + conv 3->64 + PReLU | 5.272 (conv alone 3.238, PReLU 2.029, clamp 0.015) |
+| quantise (NHWC, no copy) | 1.603 |
+| **16 int8 hops** | **43.851** (2.74 per launch) |
+| dequantise | 2.320 |
+| tail conv 64->12 | 2.258 |
+| upsampler (pixel shuffle) | 0.742 |
+| residual add | 1.708 |
+| sum of segments | 57.754 |
+| **full body call** | **60.115** - the 2.4 ms gap is launch and allocation |
+
+Attempts, all measured, all negative:
+
+* **tail dequantise staying NHWC** (so the tail conv reads a channels_last view instead of a transposed
+  tensor): 60.2 -> 60.4 ms, inside the noise. The transpose was already free.
+* **PReLU fused into the quantise kernel** (one pass over the pre-PReLU activation instead of PReLU's 530 MB
+  read-write plus the quantise): 60.4 -> **69.4 ms**, i.e. 9 ms *worse*. Measured on its own the fused kernel
+  is **12.816 ms** against 2.029 + 1.603 for the two passes it replaces - a single extra vector load and a
+  `tl.where` cost 9 ms, which is a kernel-quality problem, not a memory one.
+* **making the head input contiguous**: 5.286 -> 5.557 ms, and channels_last 5.272. The conv is cuDNN's and
+  does not care.
+
+So the floor is structural: 43.9 ms of int8 body that no boundary work can touch, 5.3 ms of cuDNN head, and
+~11 ms of conversions and tail that three separate attacks failed to reduce. Reaching the 1.40x gate from here
+means either a faster body kernel or replacing the head/tail convolutions with int8 kernels too - both are
+kernel work of the same size as everything built so far, not tuning.
+
 **Where the missing 3.34 ms is, in the plan's own words:** "below 1.3x the boundaries or NVENC ate the prize" -
 and they did, at 1.32x. The body alone is 44.3 ms (2.77 ms x 16), which against the engine's 79.86 ms would be
 **1.80x**; the 16.1 ms of non-body work - head conv 5.5, quantise ~2, dequantise and tail ~8.4 - is what dilutes

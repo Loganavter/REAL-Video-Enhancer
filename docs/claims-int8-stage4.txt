@@ -70,3 +70,17 @@
 @below kill_excess zero_excess
 # The gate is NOT asserted: the measured shortfall is recorded above, because a claim file that fails
 # on a number it has already measured cannot also state the verdict.
+
+# ---- the 16.1 ms of non-body work, measured and attacked three times
+@claim seg_head_ms      5.272 ms "clamp + conv 3->64 + PReLU, 1920x1080" measured
+@claim seg_quant_ms     1.603 ms "quantise NHWC, no copy" measured
+@claim seg_body_ms     43.851 ms "16 int8 hops, 2.74 per launch" measured
+@claim seg_dequant_ms   2.320 ms "dequantise" measured
+@claim seg_tailconv_ms  2.258 ms "tail conv 64->12" measured
+@claim seg_upsampler_ms 0.742 ms "pixel shuffle" measured
+@claim seg_residual_ms  1.708 ms "nearest upsample + add" measured
+@claim seg_sum_ms      57.754 ms "sum of the segments; the full call is 60.115, so 2.4 ms is launch and allocation" measured
+@claim tail_nhwc_gain  -0.2 ms "tail dequantise staying NHWC: 60.2 -> 60.4 ms, inside the noise" measured
+@claim prelu_fuse_loss  9.0 ms "PReLU fused into the quantise kernel: 60.4 -> 69.4 ms, and the fused kernel alone is 12.816 ms" measured
+@claim prelu_passes_ms  3.632 ms "the two passes it replaced: 2.029 + 1.603" measured
+@claim contig_head_gain -0.3 ms "contiguous head input: 5.286 -> 5.557 ms" measured
