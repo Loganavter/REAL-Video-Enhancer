@@ -1025,19 +1025,28 @@ verified), then the stopwatch.
 
 ## Lane disposition (2026-11-16, final - stages 2, 4 and 6 closed as measured, does not pay)
 
-**The gate, restated against the engine the app actually builds.**
+**The gate, measured in ONE process against the engine the app actually builds.**
 
-| 1920x1080 | time |
+The first version of this number was a cross-instrument division: the app's profile log said 35.85 ms and my
+harness body said 56.82 ms, and I divided them. Two processes, two paths (tiled vs whole-frame) - a ratio nobody
+had measured, and it overstated the loss by 30%. Both sides were then loaded into a single process on one frame:
+
+| 1920x1080, one process, three interleaved rounds | ms |
 |---|---|
-| the app's own engine: tiled, head-fused, opt-5 (its log, `inference 35.85 ms`, 24 frames) | **35.85 ms** |
-| the int8 body, same shape | **56.82 ms** |
-| ratio | **0.631x** |
+| the app's own engine (`..._opt-5_tiling-full_headpad5_1920x1080`) | **46.40 / 46.81 / 46.79** |
+| the int8 body | 56.56 / 56.73 / 56.84 |
+| **ratio** | **0.820 / 0.825 / 0.823** |
 
-3623 words of measurement in this document were aimed at a baseline the app never builds. Everything from stage 2
-onwards - 1.489x, 1.505x, 1.422x, and the "gate cleared" 1.411x/1.428x - is a ratio against the **monolithic**
-TensorRT engine in my harness (80 ms). The app builds `..._opt-5_tiling-full_headpad5_1920x1080` and runs the same
-frame in 35.85 ms, because it tiles and because it fuses the head convolution (3 -> 8 padded channels) into the
-graph. Against that engine the body is **1.58x slower**, 25.65 ms past the plan's own kill line of 1.15x.
+Picture between the two on the same frame: `>8 0.00000%, peak 7` - the body and the app's engine agree exactly,
+which also retires the 0.11579% measured at 4K against a different engine.
+
+So the body is **1.22x slower**, 16.20 ms past the plan's kill line of 1.15x, not 1.58x and 25.65 ms. The verdict
+does not change - the lane still does not pay - but the size of the loss was wrong by a third, and it was wrong
+because a ratio was assembled from two instruments instead of measured on one.
+
+Everything from stage 2 onwards - 1.489x, 1.505x, 1.422x, and the "gate cleared" 1.411x/1.428x - remains a ratio
+against the **monolithic** engine in my harness (80 ms), which the app never builds: it builds the tiled,
+head-fused, opt-5 engine that takes 46.4 ms in the same process.
 
 **Closed on that number:**
 
