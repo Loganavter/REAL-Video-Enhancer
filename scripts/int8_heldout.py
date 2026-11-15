@@ -28,6 +28,10 @@ def main() -> int:
     ap.add_argument("width", type=int)
     ap.add_argument("height", type=int)
     ap.add_argument("--model", default="/tmp/opencode/models2/futsuu.pth")
+    ap.add_argument("--margin", type=float, default=1.0)
+    ap.add_argument("--margin-all", type=float, default=1.0)
+    ap.add_argument("--fp16-tail", type=int, default=0,
+                    help="leave the last N body pairs on the fp16 boundary")
     args = ap.parse_args()
 
     def frame(path):
@@ -45,6 +49,15 @@ def main() -> int:
     # the head conv's input is the image, clamped to [0,1] by the model itself: its range is a domain
     # constant and calibrating it on one frame made a dark frame clip a fifth of a different title
     inputs["body.0"] = 1.0
+    # margin on the layer whose output still clips: the decisive knob between "calibration bug" and
+    # "the int8 hop itself". 1.0 = the calibrated maximum, 2.0 = twice it.
+    if args.margin != 1.0:
+        outputs["body.1"] = outputs["body.1"] * args.margin
+    if args.margin_all != 1.0:
+        # every scale, both sides: if the peak falls now, distributed clipping was the cause; if it
+        # stays, the int8 grid itself is
+        inputs = {k: v * args.margin_all for k, v in inputs.items()}
+        outputs = {k: v * args.margin_all for k, v in outputs.items()}
 
     # per-layer clip rate on the held-out frame
     clipped = {}
@@ -66,7 +79,7 @@ def main() -> int:
         h.remove()
 
     with torch.no_grad():
-        got = quantised_forward(model, b, inputs, outputs, {}).float()
+        got = quantised_forward(model, b, inputs, outputs, {}, fp16_tail=args.fp16_tail).float()
     share, peak, median = statistic(ref, got)
 
     worst = sorted(clipped.items(), key=lambda kv: -kv[1])[:5]

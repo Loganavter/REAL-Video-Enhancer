@@ -1106,6 +1106,28 @@ it assumes all 27 taps are simultaneously extreme. Against the empirical per-cha
 remove 2.87% of clipping. It is fine for the head's INPUT (that bound is the data's own [0,1]) and
 useless one layer later, which is exactly the distinction to carry forward.
 
+**The peak is distributed clipping, not the format, and one number proves it.** Same-title held-out
+pair, head pinned to its domain bound, everything else as calibrated:
+
+| knob | share above 8 | peak | median |
+|---|---|---|---|
+| calibrated maxima (margin 1.0) | 0.066% | **40** | 1.25 |
+| margin 1.5 on **body.1 only** | 0.071% | 42 | 1.23 |
+| margin 2.0 on body.1 only | 0.073% | 43 | 1.25 |
+| fp16 boundary on the last 2 layers | 0.062% | 36 | 1.00 |
+| fp16 boundary on the last 8 layers | 0.047% | 35 | 0.81 |
+| **margin 1.5 on every layer** | **0.019%** | **21** | 1.74 |
+| **margin 2.0 on every layer** | 0.030% | **21** | 1.99 |
+| margin 4.0 on every layer | 5.351% | 27 | 3.77 |
+
+A per-layer margin does nothing, the tail's precision buys 5 levels, and a margin on *everything* takes
+the peak from 40 to 21 with the share falling to 0.019%. So the 40 was not one bad layer and not the int8
+hop: it was a little clipping spread across many layers, each small, adding up at the outliers. And the
+curve turns over - at 4x the coarser step everywhere costs more than the clipping it removes (5.351%).
+
+The operating point is therefore a global margin of 1.5-2x on calibrated scales: peak 21 against a bar of
+"under ~20", share 0.019-0.030% against 0.1%. One level over on the peak, on one held-out pair.
+
 What is left is calibration coverage, and the app already renders the material for it: the gate observes
 the first frames of every video unconditionally, so the int8 scales can be calibrated per video from
 frames the pipeline is already producing. That is the honest form of "the scales must cover the material"
