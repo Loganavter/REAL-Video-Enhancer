@@ -283,7 +283,7 @@ different pose than in the ungated one. Five measurements, in the order that nar
    with no seams, and the halo is not the limit.
 5. **Chain depth**, same frame 383, share of pixels by error magnitude:
 
-| threshold | chain 4 (what shipped) | chain 1 (what the tuner now certifies) |
+| threshold | chain 4 (shipped) | chain 1 (what an over-tightened budget certifies) |
 |---|---|---|
 | > 2 levels | 10.87% | 8.91% |
 | > 4 | 1.13% | 0.39% |
@@ -295,7 +295,7 @@ So the artifact is the **chain depth**: a reference four frames old moves a fist
 the tile path were both innocent, which is why "lower the threshold" and "raise the halo" were
 dead ends. `best` now certifies the depth itself (chain 4 once the chain budget is expressed on the
 proxy's own scale, chain 1 when it is held to the one-step bar) and `fast` keeps the full chain;
-the price is 11.3 s against 9.2 s on 502 anime frames (tile reuse off), and that is what the moved
+the price is 11.7 s against 10.0 s on 502 anime frames (tile reuse off), and that is what the moved
 fist costs.
 
 Acceptance for this family of defects is therefore local and absolute, not a mean: **nothing above
@@ -353,7 +353,7 @@ used to choose a default.
   its last byte was copied. The feature is off; re-verifying it would buy 0.79 ms/frame.
 - **Does the chain-aware tuner over-tighten?** With the one-step budget applied at every depth it
   certified only chain 1 on anime (11.5 s); with the chain budget on the proxy's own scale it
-  certifies chain 4 (11.3 s). The gap between those two budgets is what "over-tighten" means here,
+  certifies chain 4 (11.7 s at the current statistic). The gap between those two budgets is what "over-tighten" means here,
   and it is a calibration question rather than a correctness one.
 - ~~Why does the P010 pipe diverge (31 dB)?~~ Answered: two faults, see C4. The packing was never
   the problem; the command declared a format the packer did not produce, and P010 additionally
