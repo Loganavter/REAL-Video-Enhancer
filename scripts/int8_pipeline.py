@@ -79,6 +79,8 @@ def main() -> int:
     ap.add_argument("--iters", type=int, default=0)
     ap.add_argument("--sat", action="store_true", help="per-layer saturation share")
     ap.add_argument("--margin", type=float, default=1.0, help="safety factor on every grid")
+    ap.add_argument("--sim-grids", action="store_true",
+                    help="prologue target from the simulation's per-tensor calibration")
     ap.add_argument("--pct", type=float, default=99.9,
                     help="percentile for the grids; 100 means the maximum")
     args = ap.parse_args()
@@ -153,7 +155,9 @@ def main() -> int:
         for idx, ((w_full, slope), s_out) in enumerate(zip(layers, outs_used or outs), 1):
             # prologue requant: the buffer is int8 on a per-channel grid, the dot wants one per-tensor
             # grid, so the ratio goes in as an integer multiplier and the accumulator stays int32
-            s_t = float(s_in.max())
+            # the simulation's own per-tensor input grid (calibrated on the fp16 activation) instead of
+            # max(per-channel grid) taken from the chain - the one structural difference left untested
+            s_t = sim_t[idx - 1] if args.sim_grids else float(s_in.max())
             m_int = torch.round(s_in / s_t * (1 << SHIFT)).to(torch.int32).contiguous()
             w_q, w_scale = quantise_weights(w_full)
             tap_w = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
@@ -188,6 +192,11 @@ def main() -> int:
         model(x)
     for h in hh:
         h.remove()
+
+    sim_t = []
+    for k in range(1, 17):
+        lo_i, hi_i = inputs[f"body.{2 * k}"]
+        sim_t.append(max(abs(lo_i), abs(hi_i)) / 127.0)
 
     # iterate: grids from the fp16 calibration first, then from the chain's own maxima, until the
     # per-layer maximum stops moving (an fp16 grid is fitted to a distribution the chain never sees)
