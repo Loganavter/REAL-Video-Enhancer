@@ -411,6 +411,7 @@ class Render:
                     seed=float(temporal_reuse_threshold),
                     budget=2.0,
                     fallback="off" if best else "strictest",
+                    chain_policy="certified" if best else "max",
                 )
                 log("auto gate tuning: the threshold will be chosen from the first rendered "
                     "frames (LR delta vs the real HR delta they cause)")

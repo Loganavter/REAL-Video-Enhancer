@@ -256,6 +256,43 @@ So the acceptance rule for any reuse or precision change here is a VMAF floor, n
 these rows are in `remastering/compare_frames/`). A PSNR average of 50 dB can hide a frame that
 fails both.
 
+## What the reuse artifact actually is (2026-11-15)
+
+Chased from a viewer's report: on the worst frame of the gated anime render a fist sits in a
+different pose than in the ungated one. Five measurements, in the order that narrowed it:
+
+1. **A/A control.** Two runs, same input, same flags: **502 of 502 frames byte identical**. The
+   pipeline is deterministic, so every difference between configurations is real.
+2. **Global alignment.** Frame i against frames i-2..i+2 of the other render: the peak is at
+   offset 0 in both clips (anime 55.2 dB at 0 against 52.5 at -1). The pair is not time-shifted.
+3. **Patch-level probe** at the reported region: nearly identical PSNR at every offset from -5 to
+   +5, i.e. the content matches no neighbouring reference frame - so it is not "the frame is one
+   late" either.
+4. **Tiles against full frame**, same short clip, halo 18 / 24 / 32: 51.34 / 51.36 / 51.36 dB,
+   worst frame 49.84 / 49.94 / 49.94, a 2D shift search peaking at (0,0) with 49.53 dB, and the
+   error at tile boundaries (0.496 levels) indistinguishable from inside the tiles (0.477). So the
+   tile path is geometrically exact; its difference from the full-frame render is fp16-level noise
+   with no seams, and the halo is not the limit.
+5. **Chain depth**, same frame 383, share of pixels by error magnitude:
+
+| threshold | chain 4 (what shipped) | chain 1 (what the tuner now certifies) |
+|---|---|---|
+| > 2 levels | 10.87% | 8.91% |
+| > 4 | 1.13% | 0.39% |
+| > 8 | 0.29% | **0.00%** |
+| > 16 | 0.12% | **0.00%** |
+| peak in the worst block | 100 levels | **12 levels** |
+
+So the artifact is the **chain depth**: a reference four frames old moves a fist. The threshold and
+the tile path were both innocent, which is why "lower the threshold" and "raise the halo" were
+dead ends. `best` now certifies the depth itself (chain 1 here) and `fast` keeps the full chain;
+the price is 11.52 s against 7.68 s on 502 anime frames, and that is exactly what the moved fist
+costs.
+
+Acceptance for this family of defects is therefore local and absolute, not a mean: **nothing above
+8 levels, and under 0.5% of pixels above 4**. Whole-frame PSNR and VMAF both pass a frame that
+fails this, because a fist is a fraction of a percent of the frame.
+
 ## Grain sweep (synthetic, 2026-11-15)
 
 The clean anime clip with `noise=alls=S:allf=t+u` layered on, then three renders per variant:

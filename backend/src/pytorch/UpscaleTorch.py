@@ -110,7 +110,9 @@ class UpscalePytorch:
                                      high_bitdepth=high_bitdepth)  
         device = self.torchUtils.handle_device(device, gpu_id=gpu_id)
         self.dtype = self.torchUtils.handle_precision(precision)
-        self.tile_pad = tile_pad
+        # the tile path's halo; the experiment that decides whether 18 is enough needs to vary
+        # it without a rebuild flag, so an env override is honoured (RVE_TILE_HALO)
+        self.tile_pad = int(os.environ.get("RVE_TILE_HALO", tile_pad) or tile_pad)
         self.device = device
         self.videoWidth = width
         self.videoHeight = height
@@ -151,7 +153,7 @@ class UpscalePytorch:
             # the model is fully convolutional: run it on tile windows instead of whole frames
             self.tilesize = tile_lr
             self.tile = [tile_lr, tile_lr]
-            self.tile_pad = tile_halo
+            self.tile_pad = int(os.environ.get("RVE_TILE_HALO", tile_halo) or tile_halo)
         self.trt_aux_streams = trt_max_aux_streams
         self.trt_debug = trt_debug
         
