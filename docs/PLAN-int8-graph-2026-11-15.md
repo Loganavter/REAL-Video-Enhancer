@@ -199,6 +199,27 @@ pipeline's chain against the simulation's chain**, layer by layer, on the same f
 Six hypotheses have been tested against fp16 in isolation and five of them died; comparing the two chains to
 each other is the only test that cannot be satisfied by a coincidence of the final number.
 
+**The size sweep was read wrong, and the requant precision is refuted too.**
+
+| crop | share |
+|---|---|
+| 256x256 (top-left) | **0.000%** |
+| 512x512 | 0.452% |
+| 1024x1024 | **2.276%** |
+| 1920x1080 (full) | 1.783% |
+
+1024x1024 reads *worse* than the full 1920x1080, so this is not monotone in size and therefore not a size
+effect at all: the 256x256 crop is a smooth patch and the 1024x1024 crop reaches the busy part of the frame.
+The variable is **content**, and my reading of the crop as "the pipeline is correct where it was measured" was
+wrong for the same reason the whole stage has been circling: the crop was not a sample of the frame, it was a
+different picture.
+
+And the integer requant precision does not matter either: `SHIFT` 12 / 16 / 20 gives 1.910 / 1.926 / 1.935%.
+
+So on hard content the pipeline sits at ~1.8-2.3% while the simulation reads 0.000% on the same frame. That is
+the defect, it is content-dependent rather than size-dependent, and every mechanical knob tried so far - grid
+granularity, grid source, requant precision - leaves it where it was.
+
 **Percentile grids: refuted.** `--pct` sets every grid from a percentile instead of the maximum, and the
 full frame barely moves:
 
