@@ -241,6 +241,23 @@ Which makes sense of the whole stage: every grid is a maximum taken on the **fp1
 Those two distributions agree at the head and part company immediately after, because the chain re-quantises
 and the fp16 activations never see that. A grid fitted to the wrong distribution clips by construction.
 
+**Built and measured: chain recalibration converges and barely moves the share.**
+
+    calibration pass 1: max grid drift 10.24%
+    calibration pass 2:                 4.72%
+    calibration pass 3:                 2.59%
+    pipeline: >8 1.569%  peak 34  median 1.77    (was 1.910% / median 2.54)
+
+So the grids are now fitted to the chain's own maxima, the iteration converges at 2.6% per pass, the **median
+falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
+the *typical* error and almost none of the *tail* the bar measures.
+
+Which means the bar's 1.57% is carried by a minority of pixels that the grid cannot fix: if twelve percent of a
+layer's values sit at the clamp, the grid widening should have removed them, and the median says it did; what
+survives is something else. The next measurement is the same saturation counter after recalibration - if it is
+still 1-12%, the clamps are being hit for a different reason (a grid that is correct on average but too small
+per channel); if it is near zero, the tail has another source and the saturation story closes.
+
 The fix is therefore not another knob but a different calibration: fit the grids to the **chain's** activations,
 not the fp16 model's - i.e. run the fp16 pass to seed a first set of grids, then recalibrate from the
 quantised chain's own outputs (one extra pass per frame), or simply widen each grid by the ratio the chain

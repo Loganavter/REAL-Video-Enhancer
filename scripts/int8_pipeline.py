@@ -27,7 +27,7 @@ from int8_prologue_kernel import body_prologue_kernel  # noqa: E402
 from int8_accuracy_sim import calibrate  # noqa: E402
 
 BLOCK_M = 128
-SHIFT = 12
+SHIFT = 20
 MODEL = "/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth"
 
 
@@ -139,7 +139,7 @@ def main() -> int:
         # by factors across channels and a single scalar grid throws bits away on the narrow ones
         outs.append((torch.maximum(hi_c.abs(), lo_c.abs()).float() / 127.0).clamp_min(1e-8))
 
-    def run_pipeline():
+    def run_pipeline(outs_used=None, collect=False):
         """Per-channel activation grids throughout, with each layer's input scale folded into its weights.
 
         The dot is integer, so a per-input-channel activation scale cannot be applied inside it without
@@ -147,7 +147,8 @@ def main() -> int:
         grid per-channel: acc * s_w[cout] = sum_cin x_q[cin] * (w*s_in)[cin,cout], which is the real value.
         """
         buf, s_in = cur.clone(), s_act_vec
-        for (w_full, slope), s_out in zip(layers, outs):
+        measured = []
+        for (w_full, slope), s_out in zip(layers, outs_used or outs):
             # prologue requant: the buffer is int8 on a per-channel grid, the dot wants one per-tensor
             # grid, so the ratio goes in as an integer multiplier and the accumulator stays int32
             s_t = float(s_in.max())
@@ -160,10 +161,27 @@ def main() -> int:
             grid = (triton.cdiv(args.height * args.width, BLOCK_M),)
             body_prologue_kernel[grid](buf, tap_w, m_int, SHIFT, vec, slope, ovec, out,
                                        args.height, args.width, BLOCK_M=BLOCK_M, C=64, num_warps=4)
+            if collect:
+                # the chain's OWN per-channel maximum, which is what the next grid has to cover
+                measured.append((out.permute(0, 3, 1, 2).float() * s_out.view(1, -1, 1, 1))
+                                .amax(dim=(0, 2, 3)).abs())
             buf, s_in = out, s_out
-        return buf, s_out
+        return (buf, s_out, measured) if collect else (buf, s_out)
 
-    out_q, s_last = run_pipeline()
+    # iterate: grids from the fp16 calibration first, then from the chain's own maxima, until the
+    # per-layer maximum stops moving (an fp16 grid is fitted to a distribution the chain never sees)
+    _, _, measured = run_pipeline(collect=True)
+    for step in range(3):
+        outs = [(m.float() / 127.0).clamp_min(1e-8) for m in measured]
+        _, _, new_measured = run_pipeline(outs_used=outs, collect=True)
+        drift = max(float((a - b).abs().max() / b.abs().max().clamp_min(1e-9))
+                    for a, b in zip(new_measured, measured))
+        print(f"  calibration pass {step + 1}: max grid drift {drift * 100:.2f}%")
+        measured = new_measured
+        if drift < 0.01:
+            break
+    outs = [(m.float() / 127.0).clamp_min(1e-8) for m in measured]
+    out_q, s_last = run_pipeline(outs_used=outs)
 
     with torch.no_grad():
         last = out_q.permute(0, 3, 1, 2).float() * s_last.view(1, -1, 1, 1)
