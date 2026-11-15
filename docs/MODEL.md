@@ -253,11 +253,35 @@ counter is read (§6, item 2).
      memory-bound" has no single answer here: 65% of DRAM, a full SM pipe and an exhausted power
      budget at the same time.
 
-   `ncu`/`nsys` would confirm the byte count and give tensor-pipe activity directly. Both are
-   **installable without root** - the CUDA redist ships them as plain archives
-   (`nsight_compute-linux-x86_64-...-archive.tar.xz`, `nsight_systems-...`) - but this host's driver
-   is loaded with **`RmProfilingAdminOnly: 1`** (`/proc/driver/nvidia/params`), so hardware counters
-   are refused to a non-root user. Unlocking it is one line in `/etc/modprobe.d/` -
+   **`nsys` runs here and confirms the shape of that time** (its timeline needs no counters).
+   25 frames, 24 kernel launches per frame, 56.8 ms of kernel time against a 57.4 ms loop - i.e. the
+   GPU is busy for the whole frame and there is no launch gap to reclaim (which is also why CUDA
+   graphs measured ~0.3%):
+
+   | ms/frame | launches | kernel |
+   |---|---|---|
+   | **48.72** | 16 | `sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_nhwckrsc_nhwc_tilesize128x64x32_stage1` |
+   | 2.40 | 1 | `__myl_MulLtSele` (the one PReLU not fused into a GEMM) |
+   | 1.92 | 1 | `sm80_xmma_..._indexed_wo_smem_...` (tail conv) |
+   | 1.45 | 1 | `sm75_xmma_..._indexed_wo_smem_...` (head conv) |
+   | 1.06 | 1 | `__myl_TranReshMoveAdd` (residual + reshape) |
+   | **0.61** | 1 | `cuInt8::nchwTonchw<__half, float, 4>` - a layout conversion |
+   | 0.37 | 1 | `ResizeNearest2DKernel` |
+   | **0.20** | 1 | `CUTENSOR permutationKernelPLC3` - another permute |
+   | 0.10 | 2 | `__myl_Move`, `__myl_MaxMin` |
+
+   Two things this adds to the `IProfiler` view. First, the fp16 path already **fuses 16 of its 17
+   PReLUs into the convolution kernel** (the myelin subgraph named `CorrMulLtSele` compiles to one
+   xmma GEMM per block, and only the last PReLU arrives as a separate `MulLtSele` pass at 2.40 ms) -
+   that is precisely what the int8 build cannot do, so its 31.2 ms of PReLU passes is the whole
+   difference. Second, **0.81 ms/frame of pure layout conversion** (`nchwTonchw` + the cuTENSOR
+   permute) that no layer in the profile owns; an NHWC input/output would remove it, and it is the
+   only clean ~1.5% left in the engine.
+
+   `ncu` would still add the byte count and tensor-pipe activity. It also **installs without root**,
+   and it runs - but this host's driver is loaded with **`RmProfilingAdminOnly: 1`**
+   (`/proc/driver/nvidia/params`), so counter collection is refused:
+   `ERR_NVGPUCTRPERM`. Unlocking it is one line in `/etc/modprobe.d/` -
    `options nvidia NVreg_RestrictProfilingToAdminUsers=0` - plus a reboot, because the module cannot
    be unloaded under a running desktop. Nothing else is missing.
 3. ~~A conv ceiling instead of a GEMM ceiling~~ **done, but the result is unusable for 64->64**
