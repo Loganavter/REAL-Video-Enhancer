@@ -256,10 +256,16 @@ worst by 10 points, and the minimum is what a viewer sees on the frame where a r
 in the wrong place. The pixel-level peak agrees: the worst block of that film frame is **196
 levels** off (mean 1.74), against 100 levels for the anime frame (mean 0.98).
 
-So the acceptance rule for any reuse or precision change here is a VMAF floor, not an average:
-**min >= 90 and p5 >= 92** on 1080p, with the worst frame's PNGs kept for eyeballing (the pairs for
-these rows are in `remastering/compare_frames/`). A PSNR average of 50 dB can hide a frame that
-fails both.
+VMAF is **necessary but not sufficient**, and this is measured, not assumed: the anime
+configuration a viewer rejected (a moved fist, chain 4 with tile reuse) scores **min 93.65 / p5
+94.18**, i.e. it passes a `min >= 90` floor. Whole-frame metrics are blind here because the defect
+is a fraction of a percent of a 4K frame, and VMAF at 1080p downscale makes it smaller still.
+
+The deciding number is local and in RGB: **share of pixels more than 8 levels off in any channel, on
+the worst frame of a spread sample, must stay under 0.1%**. Measured: 0.045% for the shipping
+configuration, 0.287% for the rejected one, 0.045% for no reuse at all. VMAF min/p5 and PSNR are
+reported next to it as second opinions, and the worst frame's PNGs are kept for eyeballing
+(`remastering/compare_frames/`).
 
 ## What the reuse artifact actually is (2026-11-15)
 
@@ -290,7 +296,8 @@ different pose than in the ungated one. Five measurements, in the order that nar
 
 So the artifact is the **chain depth**: a reference four frames old moves a fist. The threshold and
 the tile path were both innocent, which is why "lower the threshold" and "raise the halo" were
-dead ends. `best` now certifies the depth itself (chain 1 here) and `fast` keeps the full chain;
+dead ends. `best` now certifies the depth itself (chain 4 once the chain budget is expressed on the
+proxy's own scale, chain 1 when it is held to the one-step bar) and `fast` keeps the full chain;
 the price is 11.3 s against 9.2 s on 502 anime frames (tile reuse off), and that is what the moved
 fist costs.
 
@@ -343,9 +350,10 @@ used to choose a default.
 - **The pooled payload corruption is explained but unverified.** The writer instrumentation
   shows the queue never fills (depth 4 of 25), so the mechanism must be a slot released before
   its last byte was copied. The feature is off; re-verifying it would buy 0.79 ms/frame.
-- **Does the chain-aware tuner over-tighten?** It now picks 2.0 on anime as well as on film,
-  which cost 2.6% of reuse (73.5% -> 70.9%) for no measurable quality change there. Harmless in
-  this measurement, unverified on other content.
+- **Does the chain-aware tuner over-tighten?** With the one-step budget applied at every depth it
+  certified only chain 1 on anime (11.5 s); with the chain budget on the proxy's own scale it
+  certifies chain 4 (11.3 s). The gap between those two budgets is what "over-tighten" means here,
+  and it is a calibration question rather than a correctness one.
 - ~~Why does the P010 pipe diverge (31 dB)?~~ Answered: two faults, see C4. The packing was never
   the problem; the command declared a format the packer did not produce, and P010 additionally
   fell through to the RGB branch.

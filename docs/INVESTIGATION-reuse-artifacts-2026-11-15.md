@@ -142,9 +142,11 @@ refuses tiles past a noise floor of ~0.45.
    - **worst frame of the clip, not one frame**: a configuration that looked 30x better on frame 383
      was 4x worse on frame 360.
 
-   The bar is: **under 0.1% of pixels above 8 levels (RGB) on the worst of a spread sample**, with
-   99.99% within 8 and the worst block reported; a peak under 20 levels is what the current default
-   achieves (13). Averages are reported and never decide.
+   The bar is one number: **under 0.1% of pixels above 8 levels (RGB) on the worst of a spread
+   sample**. Measured against it: 0.045% for the shipping configuration, 0.045% for no reuse at all,
+   0.287% for the rejected tile configuration, 1.174% for the worst-block tile judge. A peak under
+   20 levels accompanies a pass. VMAF (min >= 90) is reported as a second opinion and is explicitly
+   **not** sufficient - the rejected configuration scores min 93.65.
 2. **One GPU job at a time** means no other render or benchmark; `nvidia-smi` utilisation is not a
    usable idle check on this host (17-47% with nothing of ours running).
 3. **Ratios only within a session.** The same ungated configuration measured 30.8 s and 38.85 s on
@@ -202,8 +204,9 @@ What each knob actually costs, isolated:
 | tile judge = worst block | 8.9 s | 1.174%, peak 42 |
 | film, any of the above | 4.3-4.6 s against 4.66 s ungated | the gate refuses at `best`; tile reuse off |
 
-`best` is the default and takes the certified depth; `fast` keeps the full chain and pays the moved
-fist. Tile reuse is off by default: it buys 2.1 s of 11.3 and costs six times the defect area, and
+`best` is the default and takes the certified depth - chain 4, once the chain budget is expressed
+on the proxy's own scale instead of the one-step bar; `fast` keeps the full chain unconditionally
+and pays the moved fist when tile reuse is also on. Tile reuse is off by default: it buys 2.1 s of 11.3 and costs six times the defect area, and
 its per-tile mean cannot be made safe without giving the win back entirely (`--tile_reuse_mode auto`
 and `on` stay available for material where the owner accepts the trade). The honest headline is
 **3.4x** (38.85 -> 11.3 s); 5.06x was the tile-reuse number, i.e. the configuration that moves the
