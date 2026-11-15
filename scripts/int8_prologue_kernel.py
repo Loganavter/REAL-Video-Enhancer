@@ -2,7 +2,7 @@ import sys, torch, triton
 import triton.language as tl
 
 @triton.jit
-def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, slope_ptr, out_scale_ptr, y_ptr, H, W,
+def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, bias_ptr, slope_ptr, out_scale_ptr, y_ptr, H, W,
                          BLOCK_M: tl.constexpr, C: tl.constexpr):
     pid = tl.program_id(0)
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -23,7 +23,9 @@ def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, slope_ptr, out
         a = tl.minimum(tl.maximum(a, -127), 127).to(tl.int8)
         b = tl.load(w_ptr + tap * C * C + lanes[:, None] * C + lanes[None, :])
         acc += tl.dot(a, b, out_dtype=tl.int32)
-    v = acc.to(tl.float32) * tl.load(w_scale_ptr + lanes)[None, :]
+    # the conv's BIAS belongs here, after dequantisation and before PReLU: its mean is 2-4 against an
+    # activation of ~0.5, so dropping it is not a rounding choice - it is a different network
+    v = acc.to(tl.float32) * tl.load(w_scale_ptr + lanes)[None, :] + tl.load(bias_ptr + lanes)[None, :]
     slope = tl.load(slope_ptr + lanes)[None, :]
     v = tl.where(v >= 0, v, v * slope)
     out_scale = tl.load(out_scale_ptr + lanes)[None, :]
