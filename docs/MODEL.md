@@ -86,7 +86,30 @@ The earlier claim of "73-84% of achievable" **added a +14.5% halo correction tha
 is therefore not a solid number and is removed; the honest statement is "somewhere between 60%
 and 73% of a ceiling that is itself borrowed or unmeasured".
 
-A per-layer time breakdown would replace all of this with measurement - see §6.
+### A conv-shaped ceiling, measured here
+
+Single 3x3 convolutions at 1080p, built through the same stack (tiling full, opt 5, fp16):
+
+| conv | ms | TFLOP/s |
+|---|---|---|
+| 64 -> 64 (the shape of the body) | 7.90 | 19.4 |
+| 64 -> 256 | 22.75 | 26.9 |
+| 256 -> 256 | 49.89 | 49.0 |
+
+The model runs the whole 18-conv stack at 54 TFLOP/s, i.e. **faster than any of its own layers
+measured standalone**. Eighteen unpacked 64->64 convs would cost 18 x 7.9 = 142 ms against the
+45.7 ms the fused engine needs, so cross-kernel fusion is worth more than 3x here - which is
+also the explanation for why per-layer reasoning kept misleading us.
+
+Caveat: the standalone builds logged "CUDA error 2 allocating 4246732800-byte buffer" during
+autotuning, so the best tactics were skipped for some of them. These are **lower bounds**, not a
+ceiling; a fair conv ceiling needs a quieter tactic search (smaller workspace, editable timing
+cache).
+
+So the honest summary of §3 is: we measure 54 TFLOP/s, we do not have a trustworthy ceiling for
+this shape, and the two numbers we used to compare (42.1 GEMM with fp32 accumulate, 74 borrowed
+sustained fp16-acc) bracket it loosely. A per-layer time breakdown would replace all of this -
+see §6.
 
 ## 4. Techniques: what we ran here vs what we read
 
