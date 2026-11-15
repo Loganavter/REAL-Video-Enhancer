@@ -175,9 +175,10 @@ end on:
   standalone, and the borrowed GEMM ceiling is probably the wrong reference for a conv shape with
   C=64.
 
-Honest summary: 48-54 TFLOP/s depending on the session's clock state (the spread is the
-machine, not the kernel); no trustworthy conv ceiling; the model is at 58-73% of a *borrowed*
-sustained figure and above every standalone conv we could build. That is close to a floor, but
+Honest summary: **43-54 TFLOP/s** depending on the session's clock state - three same-configuration
+absolutes have been measured (45.7, 51.37 and 57.37 ms per frame, i.e. 54.3, 48.3 and 43.2 TF/s) and
+the spread is the machine, not the kernel. That is **58-73%** of a *borrowed* sustained figure and
+above every standalone conv we could build. That is close to a floor, but
 it is not a proof, and the difference matters: 25-35% of a borrowed ceiling is not "finished".
 
 ## 4. Techniques: what we ran here vs what we read

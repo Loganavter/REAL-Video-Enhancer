@@ -332,7 +332,9 @@ What each knob actually costs, isolated:
 
 `best` is the default and takes the certified depth - chain 4, once the chain budget is expressed
 on the proxy's own scale instead of the one-step bar; `fast` keeps the full chain unconditionally
-and pays the moved fist when tile reuse is also on. Tile reuse is off by default: it buys 2.4 s of 11.7 and costs thirty times the defect area, and
+and pays the moved fist when tile reuse is also on. Tile reuse is off by default: **dilated** - which is what `--tile_reuse_mode auto` actually runs -
+it buys 1.7 s of 11.7 (10.0 against 11.7 s) and costs **eight times** the defect area (0.071% against
+0.009%); the undilated 9.2 s / 0.287% pair is the upper bound of the same trade. And
 its per-tile mean cannot be made safe without giving the win back entirely (`--tile_reuse_mode auto`
 and `on` stay available for material where the owner accepts the trade). The honest headline is
 **3.3x** (38.85 -> 11.7 s); 5.06x was the tile-reuse number, i.e. the configuration that moves the
