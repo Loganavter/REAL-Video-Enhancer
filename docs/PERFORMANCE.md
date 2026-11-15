@@ -98,18 +98,24 @@ preset) before tuning anything else.
 Per frame at 2880x2160 output: engine ~35 ms, **D2H 3.4 ms** (an 18.7 MB RGB frame over the link
 below), colour conversion ~1.3 ms, the rest is reading/writing and the encoder.
 
-Inside the engine, 8.11 ms of 56.8 ms is not the body GEMMs. The largest single piece - the one
-unfused PReLU, 2.40 ms - **is fixable at the engine level and is not fixable through this app's build
-path**, which is worth stating as one sentence rather than two numbers apart. Padding the head
-convolution to 8 input channels (fp16 tensor cores want C % 8) puts it into myelin, removes the
-separate PReLU pass and measures **57.51 -> 54.15 ms (-5.8%)** on a raw TRT build with the picture
-unchanged (0.000% of pixels above 8 levels, 78.69 dB). The same graph compiled the way this app
-compiles - `torch.export` + `torch_tensorrt.dynamo.compile` - measures **15.42 -> 26.40 ms of engine
-time (+71%)** and **11.40 -> 16.75 s** of wall clock, three runs each, interleaved. So the win
-belongs to the builder: it ships **off** (`RVE_HEAD_PAD=1` enables it), and the way to it is to build
-this graph with the raw TRT builder or fix the partitioning, not a flag. What remains of the 8.11 ms:
-tail convolution tactics and the upsampler plus myelin's reshape/add, **2.35 ms**, and the layout
-kernels **0.81 ms** (ledger E20-E21, E18).
+**How the engine is built matters more than what the graph looks like, and nobody had measured it.**
+One clip, one preset, one render each:
+
+| build | wall | app's `inference` | picture |
+|---|---|---|---|
+| app default (`torch_tensorrt.dynamo.compile`) | 11.92 s | 16.22 ms | - |
+| **raw `trt.Builder` from the same ONNX** | **11.01 s** | **15.04 ms** | **identical: 0.000% above 8 levels, peak 0** |
+| raw + head padding | 10.91 s | 14.96 ms | 0.012% at the worst frame |
+
+So **7.6% comes from the builder and 0.9% from the head padding on top of it** - which re-qualifies
+the padding claim this section used to make: its 5.8% was measured against a slower unpadded build
+than the raw path produces, not against what ships. The padding ships **off** (`RVE_HEAD_PAD=1`); the
+raw builder ships behind `RVE_RAW_TRT=1` because it is a change to how every engine is made - engines
+are static per resolution by default (`tensorrt_dynamic_shapes` is off), which is the shape it
+exports, the opt-in dynamic mode falls back, and any export or build failure falls back to
+torch_tensorrt after deleting the stale plan (ledger E22). What remains of the 8.11 ms: tail
+convolution tactics and the upsampler plus myelin's reshape/add, **2.35 ms**, and the layout kernels
+**0.81 ms** (ledger E20-E21, E18).
 
 ### The link is PCIe 3.0 x8, and pinning is not the lever
 
