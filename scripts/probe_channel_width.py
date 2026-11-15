@@ -71,8 +71,18 @@ def profile(plan, h, w, iters=20, warm=5):
     torch.cuda.synchronize()
     total = s.elapsed_time(e) / iters
     per = {k: v / iters for k, v in prof.per.items()}
-    body = [v for k, v in per.items() if "conv" in k.lower() or "Conv" in k]
-    return total, sum(body), sorted(per.items(), key=lambda kv: -kv[1])[:4]
+    # the fused block is named __myl_CorrMulLtSele_* (conv+PReLU in one kernel); when fusion breaks
+    # the same work shows up as /body.N/Conv plus a separate PWN(/body.N/PRelu), which is the
+    # difference worth reporting - name-based grouping has to know both spellings or it reports
+    # "body 3.95 ms" for a 48 ms body
+    import re
+    fused = [v for k, v in per.items() if "myl" in k.lower()]
+    split_conv = [v for k, v in per.items() if re.search(r"/body\.\d+/Conv", k)]
+    split_act = [v for k, v in per.items() if "PRelu" in k or "PWN(" in k]
+    body = fused + split_conv
+    shape = (f"{len(fused)} fused" if fused else
+             f"{len(split_conv)} conv + {len(split_act)} separate PReLU")
+    return total, sum(body), shape, sorted(per.items(), key=lambda kv: -kv[1])[:4]
 
 
 def main() -> int:
@@ -98,10 +108,10 @@ def main() -> int:
             export_onnx(model, (dummy,), onnx_path)
         if not os.path.exists(plan_path):
             build_plan(onnx_path, plan_path, fp16=True, tiling="full")
-        total, body, top = profile(plan_path, args.height, args.width, iters=args.iters)
+        total, body, shape, top = profile(plan_path, args.height, args.width, iters=args.iters)
         macs = (2 * 9 * 3 * feat + 16 * 2 * 9 * feat * feat + 2 * 9 * feat * 3 * 4) * args.height * args.width
         results[feat] = (total, body, macs, top)
-        print(f"feat={feat:>3} total {total:6.2f} ms | body {body:6.2f} ms | "
+        print(f"feat={feat:>3} total {total:6.2f} ms | body {body:6.2f} ms ({shape}) | "
               f"{macs / total / 1e9:5.1f} TFLOP/s | top: {[(n[:38], round(t, 2)) for n, t in top]}")
 
     if 64 in results:
