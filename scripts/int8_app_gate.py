@@ -26,7 +26,8 @@ sys.path.insert(0, "scripts")
 from cut_channels_naive import load  # noqa: E402
 from int8_accuracy_sim import calibrate  # noqa: E402
 from int8_pipeline import BLOCK_M, SHIFT, quantise_weights  # noqa: E402
-from int8_prologue_kernel import body_prologue_kernel, quantise_nchw_to_nhwc  # noqa: E402
+from int8_prologue_kernel import (body_prologue_kernel, dequantise_nhwc_to_nchw,  # noqa: E402
+                                  quantise_nchw_to_nhwc)
 
 BUNDLE = "/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2"
 
@@ -82,6 +83,8 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--frame", default="/var/tmp/opencode/frame.raw")
+    ap.add_argument("--bm", type=int, default=64, help="BLOCK_M; 64x2 warps measured best at 1920x1080")
+    ap.add_argument("--warps", type=int, default=2)
     ap.add_argument("--engine", default=None)
     ap.add_argument("--model", default=f"{BUNDLE}/custom_models/2x-Futsuu-Anime(1).pth")
     args = ap.parse_args()
@@ -131,7 +134,7 @@ def main() -> int:
                              bias=inner[idx - 1].bias.detach().float().contiguous(),
                              slope=prels[idx].weight.detach().float().contiguous(), os=s_out.contiguous()))
         s_in = s_out
-    grid = (triton.cdiv(args.height * args.width, BLOCK_M),)
+    grid = (triton.cdiv(args.height * args.width, args.bm),)
 
     QB = 1024
     qgrid = (triton.cdiv(args.height * args.width, QB),)
@@ -156,11 +159,13 @@ def main() -> int:
         for L in launches:
             body_prologue_kernel[grid](src, L["w"], L["m"], SHIFT, L["vec"], L["bias"], L["slope"],
                                        L["os"], dst, args.height, args.width,
-                                       BLOCK_M=BLOCK_M, C=64, num_warps=4)
+                                       BLOCK_M=args.bm, C=64, num_warps=args.warps)
             src, dst = dst, src
+        last = torch.empty((1, 64, args.height, args.width), device="cuda", dtype=torch.float16)
+        dequantise_nhwc_to_nchw[qgrid](src, outs[-1].contiguous(), last, args.height * args.width,
+                                       BLOCK=QB, C=64, num_warps=4)
         with torch.no_grad():
-            last = src.permute(0, 3, 1, 2).float() * outs[-1].view(1, -1, 1, 1)
-            up = model.upsampler(tail_conv(last.half()))
+            up = model.upsampler(tail_conv(last))
             return up.float() + torch.nn.functional.interpolate(x, scale_factor=scale_up, mode="nearest")
 
     def fp16_engine():
@@ -172,7 +177,7 @@ def main() -> int:
         L = launches[0]
         body_prologue_kernel[grid](src, L["w"], L["m"], SHIFT, L["vec"], L["bias"], L["slope"],
                                    L["os"], dst, args.height, args.width,
-                                   BLOCK_M=BLOCK_M, C=64, num_warps=4)
+                                   BLOCK_M=args.bm, C=64, num_warps=args.warps)
         mine = dst.permute(0, 3, 1, 2).float() * L["os"].view(1, -1, 1, 1)
         fp = torch.nn.functional.prelu(inner[0](torch.nn.functional.prelu(head_conv(x), prels[0].weight)),
                                        prels[1].weight)

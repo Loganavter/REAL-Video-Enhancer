@@ -54,3 +54,20 @@ def quantise_nchw_to_nhwc(x_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl
     q = tl.floor(v / s + 0.5)
     q = tl.minimum(tl.maximum(q, -127.0), 127.0)
     tl.store(y_ptr + pix[:, None] * C + ch[None, :], tl.trans(q).to(tl.int8), mask=mask[:, None])
+
+
+@triton.jit
+def dequantise_nhwc_to_nchw(q_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl.constexpr):
+    """Last hop's int8 codes (NHWC) -> fp16 NCHW in ONE pass, for the fp16 tail.
+
+    The torch version dequantises into a 530 MB float32 tensor, then permutes and casts it to half for the
+    tail conv - three passes and two extra buffers over a 64-channel 1080p activation.
+    """
+    pid = tl.program_id(0)
+    pix = pid * BLOCK + tl.arange(0, BLOCK)
+    ch = tl.arange(0, C)
+    mask = pix < n_pix
+    q = tl.load(q_ptr + pix[:, None] * C + ch[None, :], mask=mask[:, None], other=0).to(tl.float32)
+    s = tl.load(s_ptr + ch)[None, :]
+    tl.store(y_ptr + ch[:, None] * n_pix + pix[None, :], tl.trans(q * s).to(tl.float16),
+             mask=mask[None, :])
