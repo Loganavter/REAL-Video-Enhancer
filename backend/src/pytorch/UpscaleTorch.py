@@ -84,7 +84,8 @@ class UpscalePytorch:
         override_upscale_scale: int | None = None,
         # trt options
         trt_workspace_size: int = 0,
-        trt_optimization_level: int = 3,
+        trt_optimization_level: int = 5,
+        trt_tiling_level: str = "moderate",
         trt_max_aux_streams: int | None = None,
         trt_debug: bool = False,
         trt_static_shape: bool = False,
@@ -104,6 +105,7 @@ class UpscalePytorch:
       
         self.trt_workspace_size = trt_workspace_size
         self.trt_optimization_level = trt_optimization_level
+        self.trt_tiling_level = trt_tiling_level
         self.trt_aux_streams = trt_max_aux_streams
         self.trt_debug = trt_debug
         
@@ -197,6 +199,9 @@ class UpscalePytorch:
                         + f"_trt-{trtHandler.tensorrt_version}"
                         + f"_torch_tensorrt-{trtHandler.torch_tensorrt_version}"
                         + f"_opt-{self.trt_optimization_level}"
+                        # tiling is not part of the plan's own metadata, so it has to be
+                        # in the file name or a stale non-tiled engine would be reused
+                        + (f"_tiling-{self.trt_tiling_level}" if self.trt_tiling_level != "none" else "")
                         + (
                             f"_workspace-{self.trt_workspace_size}"
                             if self.trt_workspace_size > 0

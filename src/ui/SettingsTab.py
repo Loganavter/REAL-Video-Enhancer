@@ -387,7 +387,7 @@ class Settings:
         output_folder_default = FileHandler.getDefaultOutputFolder()
         self.defaultSettings = {
             "precision": "auto",
-            "tensorrt_optimization_level": "3",
+            "tensorrt_optimization_level": "5",
             "dynamic_tensorrt_engine": "False",
             "encoder": "libx264",
             "video_encoder_speed": "medium",
