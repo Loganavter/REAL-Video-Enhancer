@@ -39,6 +39,7 @@ class FFmpegRead(Buffer):
             color_space=None, 
             color_primaries=None, 
             color_transfer=None, 
+            color_range=None,
             input_pixel_format: str | None = None,
             ffmpeg_path: str = "./bin/ffmpeg",
         ):
@@ -58,6 +59,7 @@ class FFmpegRead(Buffer):
         self.color_space = color_space
         self.color_primaries = color_primaries
         self.color_transfer = color_transfer
+        self.color_range = color_range
         self.input_pixel_format = input_pixel_format
         self.yuv420pMOD = self.input_pixel_format == "yuv420p" and not self.hdr_mode
         self.ffmpeg_path = ffmpeg_path
@@ -86,7 +88,17 @@ class FFmpegRead(Buffer):
             f"{self.inputFile}",
         ]
 
-        filter_string = f"crop={self.width}:{self.height}:{self.borderX}:{self.borderY},scale=w=iw*sar:h=ih" #+ ":in_range=limited:out_range=full,format=yuv420p" if self.yuv420pMOD == "yuv420p" else "" # fix dar != sar
+        filter_string = f"crop={self.width}:{self.height}:{self.borderX}:{self.borderY},scale=w=iw*sar:h=ih"
+        if not self.hdr_mode:
+            # swscale defaults to bt601 when nothing says otherwise, which shifts chroma on
+            # a bt709 source (measured |dU| ~6.6 levels without these two options).
+            if self.color_space and not self.yuv420pMOD:
+                filter_string += f":in_color_matrix={self.color_space}"
+            # RGB output is full range; a YUV stream must stay in its own range.
+            filter_string += (
+                f":in_range={self.color_range or 'tv'}"
+                f":out_range={'tv' if self.yuv420pMOD else 'pc'}"
+            ) #+ ":in_range=limited:out_range=full,format=yuv420p" if self.yuv420pMOD == "yuv420p" else "" # fix dar != sar
         #if not self.hdr_mode:
         #    if self.input_pixel_format == "yuv420p":
         #        filter_string += ":in_range=tv:out_range=pc" # color shifts a smidgen but helps with artifacts when converting yuv to raw
@@ -175,6 +187,7 @@ class FFmpegWrite(Buffer):
         color_space: str = None,
         color_primaries: str = None,
         color_transfer: str = None,
+        color_range: str = None,
         ffmpeg_path: str = "./bin/ffmpeg",
         ffmpeg_log_file: str = "ffmpeg_log.txt",
     ):
@@ -212,6 +225,7 @@ class FFmpegWrite(Buffer):
         self.color_space = color_space
         self.color_primaries = color_primaries
         self.color_transfer = color_transfer
+        self.color_range = color_range
         self.ffmpeg_path = ffmpeg_path
         self.ffmpeg_log_file = ffmpeg_log_file
         self.outputFPS = (
@@ -234,6 +248,29 @@ class FFmpegWrite(Buffer):
         except Exception as e:
             self.onErroredExit()
 
+
+
+    def _color_convert_args(self) -> list[str]:
+        """RGB pipe -> YUV with an explicit matrix.
+
+        When ffmpeg converts RGB rawvideo to YUV it picks its own default matrix (bt601),
+        which shifts chroma on a bt709/bt2020 source - measured |dU| ~6.6 levels on a
+        bt709 clip. Passing the source's own matrix/range removes that shift entirely.
+        """
+        if self.hdr_mode or self.custom_encoder is not None:
+            return []
+        cs = self.color_space or "bt709"
+        rng = self.color_range or "tv"
+        args = [
+            "-vf", f"scale=in_range=pc:out_color_matrix={cs}:out_range={rng}",
+            "-colorspace", cs,
+            "-color_range", rng,
+        ]
+        if self.color_primaries:
+            args += ["-color_primaries", self.color_primaries]
+        if self.color_transfer:
+            args += ["-color_trc", self.color_transfer]
+        return args
 
     def command(self):
         if self.mpv_output:
@@ -261,6 +298,7 @@ class FFmpegWrite(Buffer):
                 "15000k",
                 "-crf",
                 "0",
+                *self._color_convert_args(),
                 "-af",
                 f"atrim=start={self.start_time},asetpts=PTS-STARTPTS",
 
@@ -394,6 +432,7 @@ class FFmpegWrite(Buffer):
                             "full",
                         ]
 
+                command += self._color_convert_args()
                 command += [
                     "-pix_fmt",
                     self.pixelFormat,
