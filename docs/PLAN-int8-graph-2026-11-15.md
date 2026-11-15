@@ -252,6 +252,18 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**Pre-clamp collection: tried, and it made things worse (74.451%).** Replacing the collect pass with a float
+walk that records each layer's pre-clamp maximum read `>8 74.451% peak 90` against 1.569% for the clipped
+self-calibration, and saturation rose to 23% by layer 3. The float walk quantises with a per-channel grid
+derived from its own current activation while the kernel chain uses the previous layer's grid, so the two
+chains diverge and the grids are fitted to the wrong one - the same class of error as the fp16 calibration,
+one level down. Reverted to the committed 1.569% version.
+
+So the fixed point stands and the honest reading is that stage 1 has no verified fix: the clipped
+self-calibration converges to a clipped solution (1.569%), and the unclipped walk diverges (74%). What has not
+been tried is the third measurement route - a pre-clamp running maximum written to a side buffer by the kernel
+itself, which would see the chain's own distribution without any second walk.
+
 **And the saturation counter explains why recalibration could not help: clipping is a fixed point.**
 
 | layer | saturated after recalibration |
