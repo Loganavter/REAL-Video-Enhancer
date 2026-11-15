@@ -812,6 +812,17 @@ per layer (36 reformats, 16 `DQout` passes at 1.64 ms each). The PReLU pass is a
 traffic floor: 530.8 MB at 288 GB/s is 1.84 ms against 1.71-2.37 measured. There is nothing to win
 there - the pass has to disappear into the convolution, which is the plugin.
 
+**Low-rank is the same mechanism as int8 and we have already measured its answer.** A 64 -> r -> 64
+factorisation of one body layer at r=32 is 640r MAC/px against 36864, i.e. 1.8x fewer, and then the
+intermediate r=32 tensor costs a write and a read of 133 MB each, 0.92 ms at 288 GB/s, against a layer
+that costs 2.94 ms. So the layer goes 2.94 -> 1.63 + 0.92 = 2.55 ms, **1.15x, not 1.8x** - and that is
+the int8 story retold, because int8's 1.74x conv gain was also eaten by a per-hop boundary. The
+transferable lesson from the LLM literature is not the factorisation but the reason it works there:
+decoding is weight-bandwidth-bound (weights 1.2 MB here, activations 265 MB, so the regime is the
+opposite) and architectures such as MLA are learned, not applied afterwards. What survives is the
+activation-aware reconstruction, which is E30's method, and it survives because it changes the
+*model*, not because it removes a boundary.
+
 What is genuinely blocked, and for how long: an in-kernel epilogue needs an int8 GEMM we control.
 The TRT python wheel ships no `NvInfer.h`, so a C++ plugin cannot be compiled here without fetching
 TensorRT's headers, and cuDNN cannot fuse a per-channel PReLU into its int8 convolution (its fused
