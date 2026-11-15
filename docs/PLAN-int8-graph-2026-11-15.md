@@ -252,6 +252,53 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**Cost of the fix: none in registers, and the prologue is what costs time.** `cuobjdump -res-usage` on the
+compiled cubin with the bias in the epilogue: **REG 241, STACK 0, LOCAL 0** (against 255 before), so the bias add
+does not touch occupancy and the accumulator is still int32 - int8-MMA is intact. Timing on the full 1920x1080
+frame with the prologue requant in the kernel:
+
+| block | ms per layer |
+|---|---|
+| BM 128, 4 warps | **3.09** (49.39 ms for 16 hops) |
+| BM 256, 8 warps | 3.60 |
+| BM 128, 8 warps | 4.34 |
+
+So the 1.97 ms in the earlier record belongs to the bare int8 block without the prologue; the requant version
+costs ~3.1 ms per layer, and the prologue - nine masked gathers, an integer multiply and a clamp per element -
+is where the difference goes. That is a real number for stage 2 rather than an assumption.
+
+**After the bias fix: the chain reproduces the simulation exactly, and the remainder is frame-size dependent.**
+
+With the bias carried, the same harness at 256x256 and 512x512 reproduces the simulation **bit-exactly**
+(0.0000%, peak 7) whichever grid source is used, and the script agrees at 512x512 (0.000%). So the kernel chain
+*is* the simulation's chain. At full frame it is not:
+
+| size | pipeline vs fp16 |
+|---|---|
+| 640x640 | 0.001% |
+| 768x768 | 0.747% |
+| 1024x1024 | 1.194% |
+| 1920x1080 | 1.045% |
+
+Smooth growth, mean error 1.6-2.1 levels per tile-row uniformly across the frame against the simulation's 1.26-1.33,
+no saturation anywhere (0.00% at every hop, ranges matching to three decimals at hop 1: 50.629 both). So it is a
+small per-hop deficit that accumulates with the activation dynamic range, not a boundary or block artefact.
+
+Two arithmetic findings, both measured at full frame:
+
+| configuration | share |
+|---|---|
+| flooring shift, no recalibration, pct 100 | 1.045% |
+| **rounding shift, same settings** | **4.990%** |
+| recalibration on, pct 100 | 0.929% |
+| **recalibration on, pct 99** | **0.091%** |
+| recalibration off, pct 99 | 0.797% |
+
+The rounding shift is worse by 5x in every configuration tested, so the truncation is *compensating* a systematic
+positive bias of about half a code per element per hop somewhere else in the hop - which is now a specific,
+testable statement rather than a mystery. And the chain self-calibration I tried to remove as a fixed point is
+worth 0.7 percentage points at pct 99, so it stays (opt-out via `--no-recal`).
+
 **THE DEFECT: the pipeline dropped the conv bias.** The A/A said my hop returned 3.3x the simulation's
 magnitude at layer 1 with the same input and the same weights. Instrumenting the module itself:
 

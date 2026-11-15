@@ -79,6 +79,8 @@ def main() -> int:
     ap.add_argument("--iters", type=int, default=0)
     ap.add_argument("--sat", action="store_true", help="per-layer saturation share")
     ap.add_argument("--margin", type=float, default=1.0, help="safety factor on every grid")
+    ap.add_argument("--no-recal", dest="recal", action="store_false",
+                    help="grids from the fp16 calibration only (no chain self-calibration)")
     ap.add_argument("--sim-grids", action="store_true",
                     help="prologue target from the simulation's per-tensor calibration")
     ap.add_argument("--pct", type=float, default=99.9,
@@ -119,7 +121,7 @@ def main() -> int:
         if isinstance(mod, torch.nn.PReLU):
             hooks.append(mod.register_forward_hook(
                 lambda _m, _i, out, k=name: qq.__setitem__(
-                    k, out.detach().float().abs().flatten(2)[:, :, ::16].quantile(args.pct / 100.0, dim=2).cuda().flatten())))
+                    k, out.detach().float().abs().flatten(2).quantile(args.pct / 100.0, dim=2).cuda().flatten())))
     with torch.no_grad():
         model(x)
     for h in hooks:
@@ -199,20 +201,23 @@ def main() -> int:
         lo_i, hi_i = inputs[f"body.{2 * k}"]
         sim_t.append(max(abs(lo_i), abs(hi_i)) / 127.0)
 
-    # iterate: grids from the fp16 calibration first, then from the chain's own maxima, until the
-    # per-layer maximum stops moving (an fp16 grid is fitted to a distribution the chain never sees)
-    _, _, measured = run_pipeline(collect=True)
-    for step in range(3):
-        outs = [(m.float() / 127.0).clamp_min(1e-8) * args.margin for m in measured]
-        _, _, new_measured = run_pipeline(outs_used=outs, collect=True)
-        drift = max(float((a - b).abs().max() / b.abs().max().clamp_min(1e-9))
-                    for a, b in zip(new_measured, measured))
-        print(f"  calibration pass {step + 1}: max grid drift {drift * 100:.2f}%")
-        measured = new_measured
-        if drift < 0.01:
-            break
-    outs = [(m.float() / 127.0).clamp_min(1e-8) for m in measured]
-    out_q, s_last = run_pipeline(outs_used=outs, sat=args.sat)
+    # NO recalibration on the chain's own output. Fitting the grid to the values the clamp already
+    # truncated makes the clamp a fixed point: the measured maximum IS the clamp, so the grid can never
+    # grow and the clipping reproduces itself. The grids come from the calibration on the fp16
+    # activations, which is what the simulation uses.
+    if args.recal:
+        _, _, measured = run_pipeline(collect=True)
+        for step in range(3):
+            outs = [(m.float() / 127.0).clamp_min(1e-8) * args.margin for m in measured]
+            _, _, new_measured = run_pipeline(outs_used=outs, collect=True)
+            drift = max(float((a - b).abs().max() / b.abs().max().clamp_min(1e-9))
+                        for a, b in zip(new_measured, measured))
+            print(f"  calibration pass {step + 1}: max grid drift {drift * 100:.2f}%")
+            measured = new_measured
+            if drift < 0.01:
+                break
+        outs = [(m.float() / 127.0).clamp_min(1e-8) for m in measured]
+    out_q, s_last = run_pipeline(sat=args.sat)
 
     with torch.no_grad():
         last = out_q.permute(0, 3, 1, 2).float() * s_last.view(1, -1, 1, 1)

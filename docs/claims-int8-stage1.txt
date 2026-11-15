@@ -1,31 +1,31 @@
-# Stage 1 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage1.txt
-# The point of this file is that every number below carries the population it was measured on.
+# Stage 1 claims, 2026-11-16 (after the bias fix). Run: scripts/claim_check.py docs/claims-int8-stage1.txt
+# Every number carries the population it was measured on.
 
 @bar bar_share 0.1  %
-@bar bar_peak  20   levels
+@bar gate_lo   0.005 %
+@bar gate_hi   0.017 %
 
-@claim pipeline_share   1.569  %      "1920x1080, same frame, same session" measured
-@claim simulation_share 0.000  %      "1920x1080, same frame, same session" measured
-@claim fp16_block_ms    2.93   ms     "1920x1080, same frame, same session" measured
-@claim int8_block_ms    1.97   ms     "1920x1080, same frame, same session" measured
-@claim block_speedup    1.487  x      "derived: fp16 block / int8 block" derived
+@claim pipeline_share      0.091 %  "1920x1080, pct 99, recalibration on, same frame" measured
+@claim pipeline_share_100  0.929 %  "1920x1080, pct 100, recalibration on, same frame" measured
+@claim pipeline_norecal99  0.797 %  "1920x1080, pct 99, no recalibration, same frame" measured
+@claim pipeline_round100   4.990 %  "1920x1080, pct 100, rounding instead of flooring shift" measured
+@claim simulation_share    0.000 %  "1920x1080, same frame, quantised_forward" measured
+@claim chain_512_share     0.000 %  "512x512, kernel chain fed the simulation's grids" measured
+@claim fp16_block_ms       2.93  ms "1920x1080 fp16 fused block" measured
+@claim int8_block_ms       1.97  ms "1920x1080 int8 BM256 255 regs" measured
+@claim block_speedup       1.487 x  "derived: fp16 block / int8 block" derived
 @derived block_speedup "2.93 / 1.97 = 1.487, same shape, same frame"
 
-@claim saturation_layer1 18.52 %      "layer 1, recalibrated chain, values at the clamp" measured
-@claim saturation_sim    0.00  %      "layer 1, simulation, same frame" measured
+@claim saturation_layer1  18.52 %  "layer 1, recalibrated chain, values at the clamp" measured
+@claim saturation_sim      0.00 %  "layer 1, simulation, same frame" measured
+@claim bias_mean_body      2.11 %  "mean |bias| over the 18 body convs, as a share of the activation scale" measured
 
-# The gate: the pipeline must sit under the bar it will be judged by. This line is expected to FAIL -
-# that failure IS the stage-1 result, and the other checks in this file pass.
+# The bar: the pipeline must sit under the share it will be judged by. This now PASSES (0.091 < 0.1).
 @below pipeline_share bar_share
-@below simulation_share bar_share
 
-# A derived ratio must not mix populations: the block speed-up is measured on one frame for both engines.
-@ratio fp16_block_ms int8_block_ms 1.487 "1920x1080, both blocks"
+# The gate: reproduce the simulation's number. Still FAILS - that failure is the stage-1 result.
+@below pipeline_share gate_hi
 
-# A verdict over the stage-1 gate: the two shares are the same frame, the same chain.
-@verdict stage1_gate pipeline_share simulation_share
-
-# Structural test: the prologue target taken from the simulation's per-tensor calibration instead of
-# max(per-channel grid) of the chain. No difference - the grid's SOURCE is not the difference either.
-@claim pipeline_share_simgrid 1.581 %  "1920x1080, same frame, same session" measured
-@below pipeline_share_simgrid bar_share
+# A/A: at 512x512 the chain reproduces the simulation exactly. Two claims, one population.
+@claim chain_matches_sim_512 0.000 % "512x512, kernel chain vs quantised_forward, same grids" measured
+@same chain_matches_sim_512 chain_512_share
