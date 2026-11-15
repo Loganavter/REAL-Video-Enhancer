@@ -1,21 +1,21 @@
 # Model report: Real-ESRGAN compact on this machine
 
-Scope: how fast the network itself runs, what is actually measured versus read from elsewhere,
-and what remains unverified. Pipeline stages (colour packing, encoder) appear only where they
-explain a number.
+Scope: how fast the network itself runs, what was measured here versus read elsewhere, and what
+is still open. Pipeline stages appear only where they explain a number.
 
 Rig: RTX 4060 Ti 16 GB (AD106, 34 SM, 165 W cap), Ryzen 5 5600, TensorRT 10.12.0.36,
-torch 2.9.0+cu130. Engines: fp16, static shape per resolution, `optimization_level=5`,
-`num_avg_timing_iters=8`, `tiling_optimization_level=moderate` unless stated.
+torch 2.9.0+cu130. Unless stated: fp16 engines, static shape, `optimization_level=5`,
+`num_avg_timing_iters=8`, `tiling_optimization_level=full` (the new default).
 
-> Status of the conclusion in this file: **the per-frame cost is not proven to be at a floor.**
-> What is proven is narrower - none of the techniques *we ran locally* helped, and several
-> widely-cited techniques were never reproduced here. Section 5 lists the measurements that
-> would settle it; Section 6 lists what is read-not-measured.
+**Conclusion up front**: the per-frame path has no large wins left that we could measure, and
+the one real win of this round is `tiling=full` (~6.6% on the model, 3.8% end-to-end). The
+remaining gap to a theoretical ceiling is small and **not localised**; one concrete lead from
+the tactic dump (Turing-generation kernels selected on an Ada part) is listed in §6 and has not
+been chased.
 
 ## 1. What the model computes
 
-`SRVGGNetCompact` ("Real-ESRGAN anime video v3" and friends): a plain VGG-style stack, every
+`SRVGGNetCompact` ("Real-ESRGAN anime video v3" and friends): a plain VGG stack, every
 convolution at the LOW-resolution size, upsampling only in the tail.
 
 ```
@@ -25,7 +25,7 @@ x -> clamp(0,1) -> conv3x3(3 -> 64) -> PReLU
   -> + nearest_upsample(x, scale)
 ```
 
-Cost per frame (2.07 Mpx, i.e. 1920x1080):
+Per frame at 1920x1080 (2.07 Mpx):
 
 | part | GFLOP | share |
 |---|---|---|
@@ -34,88 +34,82 @@ Cost per frame (2.07 Mpx, i.e. 1920x1080):
 | tail 64 -> 3*scale^2 (12 for x2, 48 for x4) | 28.7 / 114.7 | 1.2% / 4.5% |
 | **total** | **~2.48 TFLOP (x2), ~2.57 (x4)** | |
 
-Consequences worth knowing before optimising anything:
+- **Scale is cheap in arithmetic, not necessarily in bandwidth.** x2 and x4 are 3.5% apart in
+  FLOPs (all work is at input resolution) but the x4 tail writes a 199 MB fp16 tensor against
+  49.8 MB. This difference has **not** been separated from the measured 7 ms gap - see §2.
+- **The body is 98% of the arithmetic.** A per-frame optimisation has to attack 16 identical
+  `64 -> 64, 3x3` convolutions.
+- Receptive radius is 1 + 16 + 1 = 18 LR pixels (why tile reuse needs an 18 px halo).
 
-- **Scale is cheap in arithmetic, not necessarily in bandwidth.** The x2 and x4 variants cost
-  the same in FLOPs (3.5% apart) because all the work happens at the input resolution; but the
-  x4 tail writes a 199 MB fp16 output against 49.8 MB for x2, so a tail that is cheap on paper
-  can still be memory-bound in practice.
-- **The body is 98% of the arithmetic**, so a per-frame optimisation has to attack 16
-  identical `64 -> 64, 3x3` convolutions.
-- Receptive radius is 1 + 16 + 1 = 18 LR pixels; that is why tile reuse needs an 18 px halo and
-  why a 512 px tile really runs on 548 px of work.
+## 2. Measured speed
 
-## 2. Measured speed (this machine)
+All rows: static engine, opt level 5, iters 8. Session-relative comparisons only.
 
-| model | input | engine | ms/frame | fps |
+| model | input | tiling | ms/frame | TFLOP/s |
 |---|---|---|---|---|
-| animevideov3 x4 | 1920x1080 | opt3, iters4, no tiling (old defaults) | **94.3** | 10.6 |
-| animevideov3 x4 | 1920x1080 | opt5, iters8, no tiling | 57.5 | 17.4 |
-| animevideov3 x4 | 1920x1080 | opt5, iters8, tiling moderate | **52.7** | 19.0 |
-| 2x Futsuu Anime | 1920x1080 | opt5, iters8, tiling moderate | **45.7** | 21.9 |
-| 2x Futsuu Anime | 1440x1080 | same | **35.1** | 28.5 |
+| animevideov3 x4 | 1920x1080 | none (opt3/iters4 - the old app default) | 94.3 | 27.2 |
+| animevideov3 x4 | 1920x1080 | none (opt5/iters8) | 57.5 | 44.6 |
+| animevideov3 x4 | 1920x1080 | moderate | 52.7 | 48.7 |
+| 2x Futsuu Anime | 1920x1080 | moderate | 45.7 | 54.3 |
+| 2x Futsuu Anime | 1440x1080 | moderate | 35.1 | 53.7 |
+| 2x Futsuu Anime | 1920x1080 | full | ~42.7 (derived, see below) | ~58 |
+| same, built from ONNX instead of torch-tensorrt | 1920x1080 | none | 50.3 | 49.4 |
 
-- Build flags alone give **1.79x** on identical weights (94.3 -> 52.7). This is the single
-  strongest evidence that "the model has no headroom" is the wrong prior: the same model had
-  44% more headroom until TRT was told to search tactics harder and keep tiles in L2.
-- Run-to-run spread is roughly +-15% (clocks, 165 W cap). Compare ratios from the same session,
-  not absolute milliseconds across sessions.
-- The x2-vs-x4 difference is **7 ms while the FLOP difference is only 3.5% (~1.6 ms)**. That is
-  either inside the noise band or the x4 tail is memory-bound (199 MB vs 49.8 MB of output).
-  It has not been separated, so "only the 16 convs matter" is an assumption, not a result.
+- **Build flags alone are 1.79x** (94.3 -> 52.7) on identical weights. This is why "the model has
+  no headroom" was the wrong prior: tactics and L2 tiling were leaving 44% on the table.
+- **`tiling=full` vs `moderate` (2x model, 1920x1080):** the A/B is end-to-end on 502 gated anime
+  frames - 11.01 s -> 10.595 s, i.e. **3.8% of wall clock**. Per *processed* frame the model
+  share is 45.7 x 0.273 = 12.5 ms of a 21.1 ms frame, so if the delta is entirely model-side it
+  is **~6.6% of the model (45.7 -> ~42.7 ms)**. Both numbers are stated because the A/B mixes
+  bases; the per-model figure is derived, not directly measured.
+- The x2-vs-x4 gap is 7 ms against a 3.5% FLOP difference (~1.6 ms), i.e. **not explained**.
+  Either noise (+-15% between sessions) or the x4 tail is memory-bound.
+- Run-to-run spread is +-15%; the audit runs that overlapped each other on the card spread up to
+  50%, so the protocol in RESEARCH-LEDGER.md applies: one GPU job at a time.
 
-## 3. What the milliseconds correspond to
+## 3. What the achieved rate means
 
-2.48 TFLOP in 45.7 ms = **54 TFLOP/s**.
+2.48 TFLOP in 45.7 ms = 54.3 TFLOP/s (tiling moderate), or ~58 TFLOP/s at the derived `full`
+figure.
 
-Peaks on this card are ~44 TFLOPS for fp16 with fp32 accumulation and ~88 TFLOPS with fp16
-accumulation, but those are boost-clock whitepaper numbers. Two corrections matter:
+Peaks are fuzzy on a power-capped consumer part:
 
-1. **Sustained, power-limited**: at the 165 W cap an independent measurement of this card gives
-   ~46.9 TF/s for fp16->fp32 accumulate and ~93.8 TF/s for reduced precision; a realistic
-   sustained fp16-acc figure is ~74 TF/s.
-2. **The tiling engine does more work than the frame**: a 512 px tile runs on 548 px (+14.5%),
-   so the effective rate is higher than the nominal one.
+| base | value | how obtained |
+|---|---|---|
+| fp16 with fp32 accumulate, our own GEMM (8192^2, torch matmul) | **42.1 TF/s** | measured here. `allow_fp16_reduced_precision_reduction` does not change it (42.5) - that flag controls split-k reduction, not the accumulator |
+| fp16 with fp16 accumulate, sustained | ~74 TF/s | borrowed estimate for this part at 165 W (not measured here) |
+| fp16 with fp16 accumulate, whitepaper boost | 88 TF/s | spec sheet, not sustainable |
 
-With both corrections the model sits at roughly **73-84% of what is achievable**, i.e. the
-remaining per-frame headroom is about **1.2-1.35x**, not the 1.6x a whitepaper ratio suggests.
+So: 54.3 / 74 = **73%** of the borrowed sustained fp16-acc figure, or 54.3 / 88 = 62% of boost.
+The earlier claim of "73-84% of achievable" **added a +14.5% halo correction that belongs to our
+* pipeline* tiling (512 -> 548 px), not to TRT's internal spatial tiling, which is unknown**. It
+is therefore not a solid number and is removed; the honest statement is "somewhere between 60%
+and 73% of a ceiling that is itself borrowed or unmeasured".
 
-## 4. Techniques: measured here vs read elsewhere
+A per-layer time breakdown would replace all of this with measurement - see §6.
 
-The distinction matters. Rows marked *read* are other people's benchmarks on other hardware and
-other shapes; they are hypotheses about our case, not results.
+## 4. Techniques: what we ran here vs what we read
 
-| technique | we ran it here? | result | source / caveat |
+| technique | ran here? | result on this machine | elsewhere / caveat |
 |---|---|---|---|
-| builder opt level 5 + timing iters 8 | **yes** | 94.3 -> 57.5 ms (1.64x) | our run |
-| L2 tiling (`moderate`) | **yes** | 57.5 -> 52.7 ms (1.09x) | our run; this is cross-kernel fusion and it works, contrary to an earlier claim in this file |
-| CUDA graphs | **yes** | ~0.3% | our run |
-| batching / parallel engine contexts | **yes** | 0%, and our two-context wiring produced corrupt output | our run; the corruption was an implementation fault (two `torch.jit.load` modules are not independent contexts), not a GPU property |
-| INT8 PTQ on this model at 1080p | **no** | unknown | the commonly cited 12.42 vs 12.45 ms is ESRGAN/RRDB at **32x32 on a T4 with TRT 7.2** - launch-overhead bound and a different architecture, not transferable |
-| FP8 conv | **no** | unknown for us | NVIDIA issue #4081 reports ~1.0x for a ConvNet on a 4090, but the same thread reports **2x for int8 on the 4090** and 2x for both on L40S; GeForce parts are capped in firmware |
-| 2:4 structured sparsity | **no** | needs retrained sparse weights | TRT docs; NVIDIA engineers report small gains for conv nets under 256 channels |
-| Winograd | **no** | expected loss here | F(2,3) cuts MACs 2.25x but inflates tensors ~4x, dropping arithmetic intensity below the ridge; the fp16-overflow argument is from ncnn's Vulkan backend, not from this GPU |
-| hand-written kernels | **no** | slower in the one public attempt | CORE-TAG: 39.8 TFLOP/s plugin vs 186.7 engine on a 5090 |
-| accumulator precision (fp32acc vs fp16acc share) | **no** | unknown - the most likely remaining lever | kernel names expose it (`...fp16mul_fp32acc` vs `...fp16mul_fp16acc`); never inspected here |
-| `tiling=full` + `l2_limit_for_tiling` sweep | **no** | unknown | `moderate` already gave 9%, and the L2 of this part is 32 MB |
-| distillation / channel pruning (16 -> 8 convs, 64 -> 48) | **no** | 1.5-2x in the literature | this is retraining and was declared out of scope by the owner, which is a scope decision, not a hardware limit |
+| builder opt level 5 + iters 8 | **yes** | 94.3 -> 57.5 ms (1.64x) | - |
+| L2 tiling `moderate` | **yes** | 57.5 -> 52.7 ms (1.09x) | this IS cross-kernel fusion; the earlier claim in this file that "fusing across layers is impossible because of PReLU" was wrong (PReLU is fused into the conv epilogue) |
+| L2 tiling `full` | **yes** | 11.01 -> 10.60 s end-to-end on 502 anime frames; ~6.6% of the model (derived) | adopted as default |
+| `l2_limit_for_tiling = 24 MiB` | **yes** | 67.4 and 103.2 ms against 48.6 (two overlapping runs) - harmful | leave the knob alone |
+| CUDA graphs | **yes** | ~0.3% | - |
+| parallel engine contexts | **yes** | 0%, and our wiring produced corrupt output | the corruption was an implementation fault (two `torch.jit.load` modules are not independent contexts), not a GPU property |
+| duplicate-frame gate (pipeline level) | **yes** | 46.8% of film frames / **72.7% of anime frames** skipped; anime 16.3 -> 47.4 fps; 52.6 dB vs ungated | see §7 |
+| INT8, implicit + fp16 fallback, entropy calibration on 8 real frames | **yes** | **slower**: 73.2 and 94.3 ms against 48-51; the two runs also overlapped on the card (29% spread), so treat the magnitude as indicative | this is the implicit-with-fallback configuration, i.e. a reformat-heavy graph. Explicit Q/DQ, fully-int8 NHWC, per-channel: **not tried**. The "2x for int8 on a 4090" note in issue #4081 does not transfer to C=64 implicit |
+| accumulator precision | **yes (closed)** | all 16 body convs run `f16f16_f16f16` = fp16 accumulator, per DETAILED tactic dump | no fp32-accumulate share exists to convert |
+| hand-written conv kernels | **no** | - | one public attempt was 4.7x slower than TRT, but there is a **counter-precedent**: for a 3x3 conv cuDNN chose Winograd at 74 ms while TRT's best tactic was 156 ms, i.e. TRT's tactic set is not the set of all algorithms. Recorded as untested, not as "slower" |
+| 2:4 structured sparsity | **no** | - | needs retrained sparse weights; NVIDIA reports small gains under 256 channels |
+| Winograd | **no** | - | F(2,3) cuts MACs 2.25x but inflates tensors ~4x, dropping intensity below the ridge; the fp16-overflow argument comes from ncnn's Vulkan backend, not this GPU |
+| FP8 | **no** | - | issue #4081 reports ~1.0x for a ConvNet on a 4090 and 2x on L40S; GeForce parts are firmware-capped. Not tested here |
+| distillation / pruning (16 -> 8 convs, 64 -> 48) | **no** | - | 1.5-2x in the literature; **out of scope by the owner's decision**, not by hardware |
 
-## 5. Audit log (what has been measured so far)
+## 5. What the tactic dump actually showed
 
-| item | result |
-|---|---|
-| our own GEMM peak, fp16 with fp32 accumulate | **42.1 TF/s** (torch matmul, 8192^2); the `allow_fp16_reduced_precision_reduction` flag does not change it (42.5), because it controls split-k reduction, not the accumulator |
-| model rate | **49.4 TF/s** with tiling off, i.e. **above** the fp32-accumulate GEMM peak - so fp16-accumulate kernels are already in use for part of the network |
-| engine built straight from ONNX (no torch-tensorrt), tiling off | 50.27 ms |
-| layer structure with tiling on | only 25 top-level layers, all `__myl_*`: TRT fuses the network into myelin subgraphs, i.e. cross-kernel fusion is happening (this is the mechanism that gave 57.5 -> 52.7 ms) |
-| per-layer tactic names | read with `profiling_verbosity=DETAILED` at build time (see below) |
-| `tiling=full` vs `moderate`, same build path | **full is faster**, 3.8% in the app (two runs each: 11.01 vs 10.60/10.59 s on 502 anime frames) and 2-6% in the ONNX audit path |
-| INT8 PTQ (entropy calibration on 8 real frames, INT8+FP16 fallback) | **slower than fp16 in every run**: 73.2 and 94.3 ms against 48-51 ms. Dequant/reformat at C=64 costs more than int8 saves - the "2x for int8 on a 4090" note from issue #4081 does not transfer to this shape |
-| `l2_limit_for_tiling = 24 MiB` | **harmful**: 67.4 and 103.2 ms against 48.6. TRT's own default budget is better; leave the knob alone |
-
-### The accumulator question is settled
-
-A DETAILED build (tiling full, fp16) reports the tactic for every convolution:
+DETAILED profiling verbosity at build time, tiling full, fp16:
 
 ```
 16x  sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x64x32
@@ -123,54 +117,61 @@ A DETAILED build (tiling full, fp16) reports the tactic for every convolution:
  1x  sm80_xmma_fprop_implicit_gemm_indexed_wo_smem_f16f16_f16f16_f16
 ```
 
-`f16f16_f16f16_f16` = fp16 inputs, **fp16 accumulator**. So all 16 body convolutions already run
-with fp16 accumulation: there is no fp32-accumulate share to convert, and the "switch the
-accumulator for ~1.4x" hypothesis is closed. What remains is efficiency against a sustained
-~74 TF/s (we are at ~51-54), and the only measured lever in that space is `tiling=full`
-(+3.8%), not precision.
+Three things, in order of importance:
 
-Also visible: the body uses `tilesize256x64x32`, i.e. a K tile of 32 for C=64 - two K steps per
-convolution, which is where the C=64 penalty shows up numerically.
+1. **`f16f16_f16f16_f16`** = fp16 inputs with fp16 accumulation, NHWC. There is no fp32-acc share
+   to convert; the accumulator hypothesis is closed.
+2. **`sm75_` kernels on an sm89 part.** 16 of 18 convolutions get Turing-generation kernels; the
+   names carry no `stage*` / `warpsize*` / `tensor16x8x16` suffixes typical of Ampere+ xmma.
+   This is not proof of a loss, but it is the one concrete lead in the dump and it is testable
+   with an editable timing cache (§6, item 4).
+3. **GEMM geometry, not a C=64 penalty.** The body runs `tilesize256x64x32`, so for fprop
+   implicit GEMM K = C*R*S = 576 and a K-tile of 32 means **18 mainloop steps** - a normal
+   length, not a defect. The task is M = 2,073,600, N = 64, K = 576: with a 256x64 tile that is
+   ~8100 blocks and ~238 waves over 34 SMs, i.e. plenty of parallelism. (An earlier revision
+   claimed "two K steps" and a "short tile grid"; both were wrong.)
 
-Caveat on the audit's absolute milliseconds: those engine builds overlapped each other on the
-card (see the measurement protocol in RESEARCH-LEDGER.md), so only the *ratios* and the
-direction of each effect are trustworthy; the app A/B above was measured on a quiet GPU.
+Also: the tiled engine has **25 top-level layers, all `__myl_*`** - TRT fuses the network into
+myelin subgraphs. So the old picture "18 separate kernels, each with a full 530 MB round trip"
+is wrong. How much DRAM traffic actually remains after fusion is **unknown**; the
+arithmetic-intensity/ridge argument therefore stays a hypothesis, not a result, until the
+counter is read (§6, item 2).
 
-Consequence for the accumulator hypothesis: switching "everything" to fp16 accumulation is
-already partly done, so the realistic gap is from ~49 TF/s to a sustained ~74 TF/s, i.e.
-**~1.3-1.5x**, and it can only be claimed or refuted by a DETAILED dump plus an INT8 A/B.
+## 6. What is left to measure (short list)
 
-## 6. Measurements that would settle it (hours, not weeks)
+1. **Per-layer time**, not just names: `trtexec --loadEngine=... --dumpProfile
+   --separateProfileRun --useCudaGraph --noDataTransfers` on a quiet GPU, or `nsys` on the
+   in-process engine.
+2. **nsys** tensor-active % and DRAM bytes with clocks pinned (`nvidia-smi -lgc`): that is the
+   actual localisation of the gap; everything in §3 is inference.
+3. **A conv ceiling instead of a GEMM ceiling**: time one 3x3 conv at the same area
+   (64->64 and 64->256 at 2.07 Mpx) through the same stack, so 51-54 TF/s is compared against a
+   conv-shaped achievable number rather than matmul.
+4. **Alternative tactics for the 16 body convs**: editable timing cache, check whether an
+   sm80/86/89 variant exists for this shape, how it timings, and A/B it - the `sm75_` lead.
+5. **Explicit Q/DQ int8 in NHWC** if the format (rather than the implementation) is to be closed.
 
-1. **Per-layer tactic dump** (`trtexec --loadEngine --dumpProfile --dumpLayerInfo`, or
-   `IEngineInspector` from Python). Look for three things: `fp32acc` in kernel names (a 50/50
-   mix would explain the observed 54 TFLOP/s exactly), `Reformat` layers, and whether PReLU is
-   fused into the convolution epilogue.
-2. **Our own GEMM peaks** for fp16->fp32 and fp16->fp16 accumulate, so "% of peak" is measured
-   rather than quoted.
-3. **INT8 Q/DQ engine on this model at 1080p**, with PSNR against fp16 on ~20 real frames.
-4. **`tiling=full` and an `l2_limit_for_tiling` sweep.**
-5. `nsys` tensor-active % and DRAM throughput with clocks pinned (`nvidia-smi -lgc`).
+Each of these is hours, not days. Until at least (1) and (2) are done, "per-frame is at its
+floor" is a statement about *what we tried*, not about the hardware.
 
-If none of those yields more than 5%, the floor is proven rather than assumed.
-
-## 7. The lever that does work today: fewer frames
-
-Independent of the above, the largest measured win is not calling the model:
+## 7. The lever that works today: fewer frames
 
 | scenario | frames through the model | measured |
 |---|---|---|
-| ungated, 1080p -> 2160p, anime (502 frames) | 100% | 16.3 fps |
-| duplicate gate | **27.3%** | **43.7 fps** (1.79x), median 53 dB / worst frame 48.1 dB vs ungated |
-| ungated, film (94 frames) | 100% | 19-22 fps |
-| duplicate gate, film | 53.2% | 23.7 fps, 71 dB vs ungated |
+| anime, ungated (502 frames, 1080p -> 2160p) | 100% | 16.3 fps |
+| anime, duplicate gate | **27.3%** | **47.4 fps** (10.54 s), median 53 dB / worst frame 48.1 dB vs ungated |
+| film, ungated (94 frames, 1440p -> 2880p) | 100% | 19-22 fps |
+| film, duplicate gate | 53.2% | 23.7 fps, 71 dB vs ungated |
+| tile-level reuse (anime, 512/1024 px) | 65.8% / 66.0% of tiles | **slower**: 21.4 / 26.1 s against 10.6 - the tile path costs ~42.5 ms/frame at 100% of frames, no better than the 45.7 ms full-frame call |
 
-So the model does 45.7 ms on the frames it sees, but the pipeline pays 45.7 x 0.273 =
-**12.5 ms per output frame** on anime. The remaining 27% of frames is where the next
-"do less work" win lives (tile-level reuse), not in the 16 convolutions.
+So the model costs 45.7 ms on the frames it sees, and the pipeline pays 45.7 x 0.273 = 12.5 ms
+per output frame on anime. Tile-level reuse was the last "do less work" candidate and it is a
+measured loss on both materials.
 
 ## 8. Reproduce
 
-See `docs/PERFORMANCE.md` for the pipeline-level commands. Isolated model timing: build the
-engine through `UpscalePytorch` with `trt_static_shape=True` and time
-`upscale_model_wrapper(x)` over 25 iterations after 6 warmup calls.
+Isolated model timing: build the engine through `UpscalePytorch` with `trt_static_shape=True`,
+then time `upscale_model_wrapper(x)` over 25 iterations after 6 warmup calls. Tactic dump:
+rebuild with `cfg.profiling_verbosity = trt.ProfilingVerbosity.DETAILED` and read
+`IEngineInspector().get_engine_information(LayerInformationFormat.JSON)` (this TRT build's
+ONELINE format lists layer names only).
