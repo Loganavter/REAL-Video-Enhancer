@@ -62,7 +62,39 @@ tasks:
     owns_files: [backend/src/pytorch/int8_plugin/, backend/tests/test_int8_plugin.py]
     refutes: "A plugin that fuses conv+per-channel PReLU in int8 does not reproduce the ~2.14 ms block that the traffic arithmetic predicts (2.93 ms fp16 measured), or the per-tensor activation scales lose more than the acceptance bar allows once the PReLU output has its own dynamic range."
     acceptance: "Isolated block timing {fp16 fused, int8 conv + fp16 PReLU pass, int8 conv + int8 PReLU plugin} on the real shape, interleaved 3 rounds; picture checked against the ungated render with the usual statistic (share of pixels >8 levels, worst frame < 0.1%)."
+    measured: "The ceiling is measured, not estimated: with a scalar activation fused (so the epilogue is free) the engine builds at 40.24 ms, 1.40x. The block is 1.95 ms including its epilogue, i.e. 31.2 ms for the body alone, against a 26.9 ms compute floor at the 91 TFLOP/s the int8 conv reports. So a perfect plugin lands at 1.40x and the rest of the distance to 28.1 ms is GEMM efficiency, not epilogue."
+    blocked_on: "an int8 GEMM we control: the TRT python wheel ships no NvInfer.h, and cuDNN's fused activation takes a scalar slope, which the measured slopes (-1.39..1.70) rule out. Hand-written/CUTLASS conv = E10's cost class."
     note: "E9' closed the TRT path because the PReLU epilogue is a separate 1.8 ms pass between int8 convs. The traffic argument says the boundary is the cost, not the arithmetic: PReLU as its own pass moves 530.8 MB fp16 (floor 1.84 ms, measured 1.80) against 266 MB int8 (0.92 ms), and conv writing int8 saves 132 MB (-0.46 ms), so the block lands near 2.14 ms instead of 2.93. Sixteen blocks => ~43.7 ms against 56.28 (1.29x). The named risk is per-channel slope against per-tensor activation scales: either add per-channel output scales or measure the loss."
+  - id: rve-int8-reformats-2026-11-15
+    title: "E32: remove the 21 reformats - the difference between 42 ms and 68 ms, no kernel needed"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P0
+    gpu: true
+    cost: "1h"
+    tags: [int8, reformats, graph]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md, backend/src/pytorch/RawTRTEngine.py]
+    owns_files: [scripts/probe_int8_graph.py]
+    refutes: "The reformats survive a per-channel dequant on the conv output plus a slope constant in the engine's own layout, i.e. their cause is not the slope's layout but the graph's node placement. Then the int8 route needs the plugin to be worth anything."
+    acceptance: "Layer histogram (count of Reformat / PointWiseV2 / CaskConvolution) and ms/frame for three graphs: E9's as built, per-channel output DQ, per-channel DQ + slope pre-transposed to the engine layout. The target is the two-pass arithmetic, ~42.7 ms."
+    note: "E9' already tried quantising the conv output, got 78.36 ms, and attributed it to '36 reformats and 16 DQout passes'. The int8 conv itself is fine (91 TFLOP/s), so the loss is graph shape. One hour of node placement before any kernel work: if the reformats are only the per-channel slope arriving in the wrong layout, the two-pass build reaches ~1.32x with no new code."
+  - id: rve-int8-gemm-efficiency-2026-11-15
+    title: "E33: int8 body GEMM efficiency - the 1.4x to 2x gap lives here"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P1
+    gpu: true
+    cost: "1-2d"
+    tags: [int8, tactics, tiling, gemm]
+    base_branch: perf/inference
+    relates_to: [docs/RESEARCH-LEDGER.md]
+    owns_files: [scripts/probe_int8_tactics.py]
+    refutes: "No tiling or tactic choice raises the int8 body above ~110 TFLOP/s (its measured 91 now), in which case 2x is unreachable without a hand-written kernel and the honest ceiling is 1.4x-1.5x."
+    acceptance: "Per-conv TFLOP/s for the int8 plan across tiling levels and tactic sources, interleaved 3 rounds, plus the tactic names chosen. Any configuration that beats the shipped 91 TFLOP/s by more than drift is a candidate."
+    note: "New item, from the ceiling arithmetic: the body at int8 is 31.2 ms measured against a 26.9 ms floor at 91 TFLOP/s, and the int8 peak is roughly 148 if the borrowed 74 TFLOP/s fp16 figure holds. Closing that 55-60% -> 75% gap is the only path from 40 ms to 28 ms; fusion does not help because this GEMM is compute-bound (int8 is 1.7x the fp16 conv while moving the same bytes)."
   - id: rve-welder-onnx-2026-11-15
     title: "E28: run Welder on our ONNX and compare against the TRT engine"
     type: experiment

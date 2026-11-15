@@ -773,6 +773,49 @@ On an Ada part running TRT with an sm89 tensor-core GEMM, the convolution is alr
 74 TFLOP/s peak the ledger borrows, and a 2.25x MAC reduction does not survive the transform traffic
 at that efficiency.
 
+## The distance to 2x, in measured numbers (2026-11-15)
+
+The target for this round is 2x against the current engine without skipping frames, so 56.28 -> 28.1 ms
+of engine time. This is where each measured lever sits against that, and it is worth writing down now
+because two of the plan's items cannot reach it and one intermediate number is easy to misread.
+
+| configuration | ms/frame | against 56.28 | what it is |
+|---|---|---|---|
+| fused fp16 (ships) | 56.28 | 1.00x | 16 myelin conv+PReLU blocks at 2.93 ms |
+| int8 with a scalar activation fused (E9' ceiling test) | **40.24** | **1.40x** | the epilogue is free, the picture is meaningless (a scalar slope is not the model) |
+| int8 two-pass, as built (E9') | 68.11 | 0.83x | conv writes half, PReLU is its own pass, 21 reformats |
+| target | 28.1 | 2.00x | 16 blocks at ~1.25 ms plus the 8.1 ms of non-GEMM |
+
+Three consequences.
+
+**The int8 ceiling is 1.40x, not 2x, and that number is a measurement** - not the plug-in estimate.
+The arithmetic in the review put the two-pass block at 2.14 ms and the fused one lower; the engine
+actually builds at 1.95 ms per block with the epilogue fused, which leaves 40.24 ms for the frame. So
+even with a plugin that fuses conv and PReLU perfectly, the remaining distance to 28.1 ms is another
+1.4x that has to come from somewhere else.
+
+**That somewhere is GEMM efficiency at int8, not another algorithm.** The 16 body convolutions are
+2.45 TFLOP of work; at the 91 TFLOP/s the int8 conv actually reports that is 26.9 ms, and the measured
+block is 1.95 ms including its epilogue, i.e. **31.2 ms for the body alone**. The int8 tensor-core
+peak on this part is around 148 TFLOP/s if the borrowed 74 TFLOP/s fp16 figure is right, so the body
+runs at ~55-60% of it. Fusion does not raise that: fusing layers reduces DRAM round trips, and the
+body at int8 is compute-bound (that is why int8 conv is 1.7x faster than the fp16 one while moving
+the same tensors). So the honest ordering is: make int8 available at 1.4x, then chase GEMM efficiency
+on the int8 build, where the headroom to 28 ms lives.
+
+**The 21 reformats are the difference between 42 ms and 68 ms**, and that is a graph-compilation
+artefact worth an hour before any kernel work. E9' measured them as the per-channel slope of the
+PReLU forcing layout conversions; if a per-channel dequant on the conv output plus a slope constant
+in the engine's own layout removes them, the two-pass build lands near its arithmetic (~42.7 ms,
+1.32x) without writing a single kernel.
+
+What is genuinely blocked, and for how long: an in-kernel epilogue needs an int8 GEMM we control.
+The TRT python wheel ships no `NvInfer.h`, so a C++ plugin cannot be compiled here without fetching
+TensorRT's headers, and cuDNN cannot fuse a per-channel PReLU into its int8 convolution (its fused
+activation takes a scalar slope, which the measured slopes -1.39..1.70 rule out). That leaves a
+hand-written or CUTLASS-generated int8 conv with a per-channel epilogue: E10's cost class, weeks, and
+the item that actually stands between 1.4x and 2x.
+
 ## What the literature closes, and the one item it reopens (2026-11-15)
 
 Written down because these are structural closures - true by the shape of our network, not measured
