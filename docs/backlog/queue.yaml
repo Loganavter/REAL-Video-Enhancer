@@ -65,21 +65,21 @@ tasks:
     measured: "The ceiling is measured, not estimated: with a scalar activation fused (so the epilogue is free) the engine builds at 40.24 ms, 1.40x. The block is 1.95 ms including its epilogue, i.e. 31.2 ms for the body alone, against a 26.9 ms compute floor at the 91 TFLOP/s the int8 conv reports. So a perfect plugin lands at 1.40x and the rest of the distance to 28.1 ms is GEMM efficiency, not epilogue."
     blocked_on: "an int8 GEMM we control: the TRT python wheel ships no NvInfer.h, and cuDNN's fused activation takes a scalar slope, which the measured slopes (-1.39..1.70) rule out. Hand-written/CUTLASS conv = E10's cost class."
     note: "E9' closed the TRT path because the PReLU epilogue is a separate 1.8 ms pass between int8 convs. The traffic argument says the boundary is the cost, not the arithmetic: PReLU as its own pass moves 530.8 MB fp16 (floor 1.84 ms, measured 1.80) against 266 MB int8 (0.92 ms), and conv writing int8 saves 132 MB (-0.46 ms), so the block lands near 2.14 ms instead of 2.93. Sixteen blocks => ~43.7 ms against 56.28 (1.29x). The named risk is per-channel slope against per-tensor activation scales: either add per-channel output scales or measure the loss."
-  - id: rve-int8-reformats-2026-11-15
-    title: "E32: remove the 21 reformats - the difference between 42 ms and 68 ms, no kernel needed"
+  - id: rve-int8-prelu-pass-2026-11-15
+    title: "E32: the PReLU pass is at its traffic floor - is there anything above it but the plugin?"
     type: experiment
     status: todo
     owner: null
-    priority: P0
+    priority: P2
     gpu: true
     cost: "1h"
-    tags: [int8, reformats, graph]
+    tags: [int8, prelu, traffic, graph]
     base_branch: perf/inference
     relates_to: [docs/RESEARCH-LEDGER.md, backend/src/pytorch/RawTRTEngine.py]
     owns_files: [scripts/probe_int8_graph.py]
-    refutes: "The reformats survive a per-channel dequant on the conv output plus a slope constant in the engine's own layout, i.e. their cause is not the slope's layout but the graph's node placement. Then the int8 route needs the plugin to be worth anything."
-    acceptance: "Layer histogram (count of Reformat / PointWiseV2 / CaskConvolution) and ms/frame for three graphs: E9's as built, per-channel output DQ, per-channel DQ + slope pre-transposed to the engine layout. The target is the two-pass arithmetic, ~42.7 ms."
-    note: "E9' already tried quantising the conv output, got 78.36 ms, and attributed it to '36 reformats and 16 DQout passes'. The int8 conv itself is fine (91 TFLOP/s), so the loss is graph shape. One hour of node placement before any kernel work: if the reformats are only the per-channel slope arriving in the wrong layout, the two-pass build reaches ~1.32x with no new code."
+    refutes: "It did, when the item was written as 'remove the reformats and land at 42 ms'. E9' splits the overhead precisely: 21 reformats are 5.6 ms (8%) and 17 PReLU passes are 32.7 ms (46%), so removing every reformat lands at 62.5 ms - still behind the 56.28 that ships. The 42.7 ms arithmetic assumed an int8 PReLU pass at 0.92 ms, and the build that tried it measured 78.36 ms because TRT charges the hop per layer."
+    acceptance: "Only if a cheaper variant exists at all: layer histogram and ms/frame for a build where the PReLU pass reads and writes int8 with per-channel scales, without the extra DQout hop. Target < 2.0 ms per block, i.e. under 40 ms total. If it cannot beat the floor, the row closes and E27 is the only route."
+    note: "Kept as a row rather than deleted so the arithmetic is not re-derived: the pass moves 530.8 MB and its floor at 288 GB/s is 1.84 ms against 1.71-2.37 measured, i.e. it is already doing what the memory system allows. Disappearing into the convolution is the plugin, not a graph fix."
   - id: rve-int8-gemm-efficiency-2026-11-15
     title: "E33: int8 body GEMM efficiency - the 1.4x to 2x gap lives here"
     type: experiment

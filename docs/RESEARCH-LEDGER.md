@@ -786,7 +786,7 @@ because two of the plan's items cannot reach it and one intermediate number is e
 | int8 two-pass, as built (E9') | 68.11 | 0.83x | conv writes half, PReLU is its own pass, 21 reformats |
 | target | 28.1 | 2.00x | 16 blocks at ~1.25 ms plus the 8.1 ms of non-GEMM |
 
-Three consequences.
+Three consequences, and one correction to an earlier reading of the same numbers.
 
 **The int8 ceiling is 1.40x, not 2x, and that number is a measurement** - not the plug-in estimate.
 The arithmetic in the review put the two-pass block at 2.14 ms and the fused one lower; the engine
@@ -803,11 +803,14 @@ body at int8 is compute-bound (that is why int8 conv is 1.7x faster than the fp1
 the same tensors). So the honest ordering is: make int8 available at 1.4x, then chase GEMM efficiency
 on the int8 build, where the headroom to 28 ms lives.
 
-**The 21 reformats are the difference between 42 ms and 68 ms**, and that is a graph-compilation
-artefact worth an hour before any kernel work. E9' measured them as the per-channel slope of the
-PReLU forcing layout conversions; if a per-channel dequant on the conv output plus a slope constant
-in the engine's own layout removes them, the two-pass build lands near its arithmetic (~42.7 ms,
-1.32x) without writing a single kernel.
+**The reformats are not the difference, and an earlier revision of this section said they were.**
+E9' splits the two-pass engine's overhead precisely: **21 reformats worth 5.6 ms (8% of the engine)**
+and **17 PReLU passes worth 32.7 ms (46%)**. So removing every reformat lands at 62.5 ms, still behind
+the 56.28 ms that ships; the 42.7 ms figure was arithmetic that assumed the PReLU pass could run in
+int8 at 0.92 ms, and the build that tried it measured **78.36 ms** because TensorRT charges the hop
+per layer (36 reformats, 16 `DQout` passes at 1.64 ms each). The PReLU pass is already at its own
+traffic floor: 530.8 MB at 288 GB/s is 1.84 ms against 1.71-2.37 measured. There is nothing to win
+there - the pass has to disappear into the convolution, which is the plugin.
 
 What is genuinely blocked, and for how long: an in-kernel epilogue needs an int8 GEMM we control.
 The TRT python wheel ships no `NvInfer.h`, so a C++ plugin cannot be compiled here without fetching
