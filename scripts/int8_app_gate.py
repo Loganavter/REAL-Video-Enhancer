@@ -92,7 +92,9 @@ def main() -> int:
     engine_path = args.engine
     if engine_path is None:
         import glob
-        hits = glob.glob(f"{BUNDLE}/custom_models/2x-Futsuu-Anime(1).pth_fp16_*"
+        import os
+        stem = os.path.basename(args.model)
+        hits = glob.glob(f"{BUNDLE}/custom_models/{stem}_fp16_*"
                          f"{args.width}x{args.height}*.engine")
         if not hits:
             print(f"no cached fp16 engine for {args.width}x{args.height}", file=sys.stderr)
