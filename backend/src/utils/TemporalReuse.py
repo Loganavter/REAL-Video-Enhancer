@@ -502,7 +502,9 @@ class AutoGateTuner:
                  fallback: str = "strictest", chain_budget: float = 12.0,
                  noise_floor_refuse: float = 1.5,
                  chain_policy: str = "certified",
-                 accept_bar: float = 0.1):
+                 accept_bar: float = 0.1,
+                 calibration_window: int = 0,
+                 certify_on: str = "proxy"):
         self.budget = float(budget)
         # The clamp is load-bearing *once the tile path is out of the way*: with tile reuse
         # enabled, thresholds 12 and 4 measured the same (0.288% against 0.287% of pixels above
@@ -559,6 +561,27 @@ class AutoGateTuner:
         # proxy - the proxy's 2-level budget and this bar were two different instruments, and every
         # false "price of quality" in the ledger came from certifying one and measuring the other.
         self.accept_bar = float(accept_bar)
+        # How many rendered frames to observe before choosing, and how many of them to keep. Keeping
+        # the first 16 in arrival order made the acceptance statistic read 0.00 on three of four
+        # titles - the worst frame of a clip is not in the first sixteen - which left the depth
+        # certified by the reachability filter and the window size rather than by the picture. Keeping
+        # the `min_pairs` frames with the LARGEST LR delta instead is the adversarial choice: those are
+        # the marginal reuses, which is what a worst-frame rule is about. The window is the price: the
+        # first 64 frames render unconditionally (~3 s at 4K once per video).
+        # 0 means "the same frames the proxy always used": the window experiment is recorded in the
+        # ledger (E25) and did not survive its own verification.
+        self.calibration_window = max(int(calibration_window) or int(min_pairs), int(min_pairs))
+        # Which instrument certifies the DEPTH. "proxy" is the block-mean p90; "acceptance" is the
+        # worst per-pixel share. Measured on Violet Evergarden: the acceptance path refused chain 2
+        # because one simulated depth-2 reuse read 99.69% of pixels, while the actual chain-2 render
+        # differs from ungated by 0.011% on its worst frame in the same window - the simulation
+        # over-predicts reuses the gate never makes, and the chain-1 configuration it picked instead
+        # has a 0.129% frame, i.e. one over the bar. The proxy decided chain 2 on the same clip, and
+        # that configuration measures 0.011%. So the statistic is a guard, not yet a certifier.
+        if certify_on not in ("proxy", "acceptance"):
+            raise ValueError(f"certify_on must be 'proxy' or 'acceptance', got {certify_on!r}")
+        self.certify_on = certify_on
+        self._window: list[tuple[float, tuple[float, ...], tuple[float, ...]]] = []
         self._pairs: list[tuple[float, tuple[float, ...]]] = []
         if fallback not in ("strictest", "off"):
             raise ValueError(f"fallback must be 'strictest' or 'off', got {fallback!r}")
@@ -599,9 +622,32 @@ class AutoGateTuner:
         else:
             accept = []
         if clean:
-            self._pairs.append((float(lr_delta), tuple(clean), tuple(accept)))
-        if len(self._pairs) >= self.min_pairs:
-            self._decide()
+            self._window.append((float(lr_delta), tuple(clean), tuple(accept)))
+        if len(self._window) < self.calibration_window:
+            return
+        self.settle()
+
+    def settle(self) -> None:
+        """Decide on the frames seen so far.
+
+        Needed for two callers: a clip shorter than the calibration window (which would otherwise
+        never calibrate), and tests that feed a fixed number of frames. Keeps the same adversarial
+        subset - the `min_pairs` frames with the largest LR delta.
+        """
+        if self.settled or not self._window:
+            return
+        # The whole observed window decides, not a subset of it. Selecting the top-k by LR delta -
+        # the obvious "adversarial" move - starves the narrow candidates: the 16 most marginal frames
+        # all sit near the widest threshold, so a candidate of 2 has almost no samples left and the
+        # tuner refuses material it has been reusing safely for weeks (measured on Chainsaw Man: every
+        # depth read a worst share of 0.35% and reuse went off, against 0.005% on the clip).
+        #
+        # The adversarial part is already inside `_decide`: for each candidate it scores only the
+        # frames that candidate would actually reuse (`lr <= cand`) and takes the WORST of them. A
+        # population that matches the decision is the whole point - a top-k of the marginal frames
+        # measures the thresholds we never use.
+        self._pairs = list(self._window)
+        self._decide()
 
     @property
     def ready(self) -> bool:
@@ -609,9 +655,15 @@ class AutoGateTuner:
         return self.settled
 
     def _noise_floor(self) -> float:
-        # median of the calmest third: robust to a couple of wild frames at the start, while a
-        # mean over a fifth was effectively "the two calmest frames" and jumped to 62.9
-        ordered = sorted(p[0] for p in self._pairs)
+        # median of the calmest third of the OBSERVED frames: robust to a couple of wild frames at
+        # the start, while a mean over a fifth was effectively "the two calmest frames" and jumped
+        # to 62.9. It has to come from the whole window, not from `_pairs`: `_pairs` holds the frames
+        # with the LARGEST deltas (the adversarial subset a worst-frame rule needs), and their
+        # calmest third is not calm at all - measured on Chainsaw Man the same clip read a floor of
+        # 0.95 with arrival-order frames and 9.38 with the adversarial subset, which refused reuse on
+        # material that had been reusing safely at 0.005%.
+        source = self._window or self._pairs
+        ordered = sorted(p[0] for p in source)
         k = max(1, len(ordered) // 3)
         return ordered[k // 2]
 
@@ -626,13 +678,13 @@ class AutoGateTuner:
         # When the caller feeds the second one - the app does, from the same forced-render
         # calibration frames - it decides, and the proxy is logged only. Every false "price of
         # quality" in the ledger came from certifying one instrument and measuring the other.
-        has_accept = self._uses_acceptance()
+        has_accept = self._uses_acceptance() and self.certify_on == "acceptance"
         certified: list[tuple[int, float, float]] = []      # (depth, threshold, worst)
         self._certified: list[tuple[int, float, float]] = certified
+        self._depth_p90: list[tuple[int, float, float, float | None]] = []
         # The best value each depth can reach over the candidate range, certified or not: the
         # rejected depths decide the chain, so they belong in the log too. The third element is
         # the limit that applied, so the line reads "d2 worst share 0.20 (limit 0.1)".
-        self._depth_p90: list[tuple[int, float, float]] = []
         for depth in range(1, deepest + 1):
             limit = self.accept_bar if has_accept else (
                 self.budget if depth == 1 else self.chain_budget)
@@ -669,7 +721,11 @@ class AutoGateTuner:
                 if value <= limit:
                     best_cand, best_value = cand, value
             if floor_value is not None:
-                self._depth_p90.append((depth, floor_value, limit))
+                # record the value at the candidate that was actually certified, and name it: printing
+                # the widest candidate's value under the word "certified" read as "0.35 (limit 0.1)"
+                # while the certified threshold was 4.0, i.e. a line that contradicted itself.
+                self._depth_p90.append((depth, best_value if best_value is not None else floor_value,
+                                        limit, best_cand))
             if best_cand is not None:
                 certified.append((depth, best_cand, best_value or 0.0))
 
@@ -727,26 +783,41 @@ class AutoGateTuner:
         self.settled = True
 
     def _uses_acceptance(self) -> bool:
-        return any(accept for _, _, accept in self._pairs)
+        # length, not truthiness: a measured zero is the common answer on clean material (0.00% of
+        # pixels above 8 levels) and `any((0.0,))` is False, so a truthiness test silently threw away
+        # every measured sample and fell back to the block-mean proxy.
+        return any(len(accept) > 0 for _, _, accept in self._pairs)
 
     def stats(self) -> str:
         if not self.settled:
-            return f"auto gate: calibrating ({len(self._pairs)}/{self.min_pairs} frames)"
+            return (f"auto gate: calibrating ({len(self._window)}/{self.calibration_window} frames "
+                    f"observed, keeping the {self.min_pairs} most marginal)")
         if self.chosen is None:
             if self._noise_floor() > self.noise_floor_refuse:
                 return (f"auto gate: noise floor {self._noise_floor():.2f} is above the "
                         f"{self.noise_floor_refuse:.1f} limit for this material, so reuse is OFF "
                         f"- at this noise the measured worst frame is 0.105-0.470% of pixels "
                         f"above 8 levels, past the 0.1% acceptance bar")
-            return (f"auto gate: no candidate kept the p90 error inside {self.budget} levels "
-                    f"(noise floor {self._noise_floor():.2f}), so reuse is OFF - "
-                    f"{len(self._pairs)} calibration frames")
+            instrument = ("the worst acceptance share inside %.2f%%" % self.accept_bar
+                          if self._uses_acceptance()
+                          else "the p90 error inside %.1f levels" % self.budget)
+            best = ", ".join(f"d{depth} {value:.2f}" for depth, value, _, _ in self._depth_p90)
+            return (f"auto gate: no candidate kept {instrument} on "
+                    f"{len(self._pairs)} calibration frames (noise floor "
+                    f"{self._noise_floor():.2f}); per depth: {best or 'no reachable samples'}, "
+                    f"so reuse is OFF")
         reuse = 100.0 * sum(1 for pair in self._pairs if pair[0] <= self.chosen) / len(self._pairs)
         chosen_value = next((v for depth, cand, v in self._certified
                              if depth == self.chosen_chain and cand == self.chosen), None)
-        label = "worst share" if self._uses_acceptance() else "p90"
-        depths = ", ".join(f"d{depth} {label} {value:.2f} (limit {limit:g})"
-                           for depth, value, limit in self._depth_p90)
+        # the label must follow the instrument that DECIDED, not the one that merely has data: with
+        # certify_on="proxy" the acceptance shares are still measured and printed, and calling the
+        # p90 numbers "worst share" reads as if the picture had certified them.
+        label = ("worst share" if (self._uses_acceptance() and self.certify_on == "acceptance")
+                 else "p90")
+        depths = ", ".join(
+            f"d{depth} {label} {value:.2f} at {cand:g} (limit {limit:g})" if cand is not None
+            else f"d{depth} none ({value:.2f} at the widest, limit {limit:g})"
+            for depth, value, limit, cand in self._depth_p90)
         return (f"auto gate: threshold {self.chosen:.1f}/255, chain "
                 f"{self.chosen_chain or '?'}, veto {self.veto}, "
                 f"noise floor {self._noise_floor():.2f}, would reuse {reuse:.0f}% of the "

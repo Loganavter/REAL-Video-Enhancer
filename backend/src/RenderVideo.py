@@ -567,6 +567,9 @@ class Render:
                       for past in reversed(history[-max(depth, 1):])]
             lr_delta = float(getattr(self.temporalReuse, "last_delta", 0.0) or 0.0)
             self.autoTuner.add(lr_delta, deltas, accept)
+        if os.environ.get("RVE_CALIB_DEBUG") == "1":
+            log(f"calib: depth {depth}, hr frames {len(frames)}, accept {len(accept)}, "
+                f"lr {float(getattr(self.temporalReuse, 'last_delta', 0.0) or 0.0):.2f}")
         frames.append(rgb8)
         if len(frames) > max(1, depth):
             del frames[:-max(1, depth)]

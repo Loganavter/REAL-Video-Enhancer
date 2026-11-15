@@ -539,6 +539,51 @@ was holding the flag off - a single pair, below this ledger's own noise threshol
 Picture on the same clip: `cat` against unpadded **0.003% median, 0.012% worst, peak 15** - the fp16
 rounding of summing eight terms instead of three, inside the 0.1% bar.
 
+## E25: certifying the depth on the acceptance statistic fails its own verification
+
+The review's argument was that the tuner certifies a block-mean proxy while the pictures are judged by
+"share of pixels above 8 levels on the worst frame", and that the calibration sample should therefore
+be adversarial - the 16 frames with the largest LR delta rather than the first 16 that happen to
+arrive. Implemented, with a 64-frame observation window, and then measured. It is a **negative result,
+and an instructive one**:
+
+| what | tuner's worst acceptance share | actual render, frames 1-64 |
+|---|---|---|
+| Violet, certifying on acceptance | depth 2 reuse read **99.69%** of pixels | **0.011%** worst frame, none above 0.1% |
+| Violet, chain 1 - the configuration it chose instead | - | **0.129%** worst frame, one above 0.1% |
+
+So the acceptance path refused chain 2 because of a reuse that **never happens**, and what it picked
+instead is worse than the bar. The proxy had chosen chain 2 all along, and that configuration measures
+0.011%.
+
+The mechanism is the depth model, not the statistic: `accept[k]` compares a frame against the k-th
+previous *rendered* frame, while the gate serves the last *kept* frame no older than `max_chain`, and
+whether a k-deep reference exists depends on the chain state and the pixel veto, not only on whether
+the intermediate frames passed the LR test. The reachability filter added in E19 checks the LR test
+only, so the simulation over-predicts reuses the gate never makes. On a pan, a frame two back can
+differ by 99% of its pixels while its block mean barely moves - which is exactly the blindness this
+statistic was introduced to catch, turned against the depth decision.
+
+Three defects were fixed on the way, and they outlived the experiment:
+
+- the **noise floor** was being computed over the adversarial subset, whose calmest third is not calm:
+  Chainsaw Man read 0.95 -> 9.38 and refused material that reuses at 0.005%;
+- the selection by LR delta picked **cut-adjacent frames first**, where the HR history had just been
+  cleared, so every kept frame had an empty acceptance array and the tuner silently fell back to the
+  proxy;
+- `any(accept)` tests **truthiness, not presence**, and a measured 0.0 is the common answer on clean
+  material - so every measured sample was discarded. This one had been live since the statistic was
+  introduced.
+
+What ships: `certify_on="proxy"` (the depth is certified on the block-mean p90 as before),
+`calibration_window` back to the frame count it always used, and the acceptance statistic kept as a
+**guard and a log line** with its per-depth values. The `acceptance` mode exists, is tested, and is the
+thing to revisit once the depth simulation matches the gate - that is the open item, and it is a
+modelling problem rather than a statistics one.
+
+Both titles are back to their previous decisions with the same reuse counts and defects (Chainsaw
+146/220 at 0.004%, Violet 142/219 at 0.097%).
+
 ## The head padding across the whole collection (78 models, 2026-11-15)
 
 Load -> pad -> forward -> ONNX export, CPU, no engine builds (a build is minutes per model and tactic

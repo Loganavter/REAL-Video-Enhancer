@@ -13,9 +13,13 @@ from src.utils import TemporalReuse
 from src.utils.TemporalReuse import AutoGateTuner  # noqa: E402
 
 
-def _feed(tuner, pairs):
+def _feed(tuner, pairs, settle=True):
     for pair in pairs:
         tuner.add(*pair)
+    if settle:
+        # these fixtures feed fewer frames than the calibration window (the tuner observes 64 and
+        # keeps the 16 most marginal); settle() is what a clip shorter than the window does
+        tuner.settle()
 
 
 def test_busy_content_falls_back_to_the_strictest_candidate():
@@ -28,6 +32,7 @@ def test_busy_content_falls_back_to_the_strictest_candidate():
     """
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0)
     _feed(t, [(1.0, 200.0) for _ in range(10)])       # calm frames, absurd HR error
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen == min(t.candidates)
 
@@ -55,6 +60,7 @@ def test_clean_content_takes_the_widest_threshold_that_fits():
     possible: the threshold is a cap on error, not a fixed quality setting."""
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0)
     _feed(t, [(0.2 + 0.01 * i, 0.3) for i in range(10)])
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     # the widest candidate the clamp allows: 12 and 4 measured the same only while the tile
     # artifact dominated; with the tile path off it is 0.517% against 0.045%
@@ -74,6 +80,7 @@ def test_below_the_floor_limit_grain_costs_chain_depth_not_the_threshold():
     # floor ~0.9 (calmest third is under the 1.5 limit), and four frames of motion sit between
     # a reference and its reuse, so only depth 1 stays inside the chain budget
     _feed(t, [(0.9, (0.4, 0.8, 9.0, 12.0)) for _ in range(10)])
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen == t.clamp[1] == 4.0
     # depth 2 (0.8) is inside the 2.0 chain budget, depth 3 (9.0) is not - so chain 2, not 4
@@ -84,15 +91,17 @@ def test_no_auto_veto():
     """The full-res veto is never enabled automatically (it kills grainy film)."""
     t = AutoGateTuner(seed=5.0, min_pairs=4)
     _feed(t, [(0.1, 0.2)] * 6)
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.veto is None
 
 
 def test_waits_for_enough_pairs():
     t = AutoGateTuner(seed=5.0, min_pairs=8)
-    _feed(t, [(1.0, 0.5)] * 7)
+    _feed(t, [(1.0, 0.5)] * 7, settle=False)
     assert not t.ready
     _feed(t, [(1.0, 0.5)])
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
 
 
@@ -104,8 +113,11 @@ def test_stats_are_readable():
 
 
 def test_clamped_to_the_configured_range():
-    t = AutoGateTuner(seed=5.0, min_pairs=4, budget=100.0, clamp=(2.0, 6.0))
-    _feed(t, [(float(v), 0.0) for v in range(1, 20)])
+    # the adversarial selection keeps the largest LR deltas, whose median trips the noise floor;
+    # this test is about the clamp, so the floor guard is out of the way
+    t = AutoGateTuner(seed=5.0, min_pairs=4, budget=100.0, clamp=(2.0, 6.0), noise_floor_refuse=1e9)   # a huge limit disables the guard; 0.0 would refuse everything
+    _feed(t, [(float(v), 0.0) for v in range(1, 9)])
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen <= 6.0
 
@@ -114,6 +126,7 @@ def test_best_preset_refuses_to_reuse_when_nothing_is_certified():
     """`fallback="off"` is the quality-first answer: no reuse beats the least-bad reuse."""
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0, fallback="off")
     _feed(t, [(60.0 + i, 200.0) for i in range(10)])
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready                 # calibration is over
     assert t.chosen is None        # ...and the verdict is "do not reuse"
     assert "reuse is OFF" in t.stats()
@@ -122,6 +135,7 @@ def test_best_preset_refuses_to_reuse_when_nothing_is_certified():
 def test_fast_preset_still_reuses_the_strictest_threshold():
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0, fallback="strictest")
     _feed(t, [(1.0, 200.0) for _ in range(10)])
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen == min(t.candidates)
 
@@ -142,6 +156,7 @@ def test_chain_depth_is_certified_separately_from_the_threshold():
     for index in range(6):
         # depth 1 and 2 calm, depth 3 and 4 drift past even the chain budget
         t.add(1.0, (1.5, 1.8, 16.0, 20.0))
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen_chain == 2
     assert t.chosen == t.clamp[1]
@@ -154,6 +169,7 @@ def test_the_clamp_still_bounds_the_choice():
     t = AutoGateTuner(min_pairs=4, budget=50.0, clamp=(2.0, 4.0))
     for _ in range(4):
         t.add(1.0, 0.5)
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen == 4.0
 
@@ -162,6 +178,7 @@ def test_a_scalar_delta_is_treated_as_depth_one():
     t = AutoGateTuner(min_pairs=4, budget=2.0)
     for _ in range(4):
         t.add(1.0, 1.2)
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen_chain == 1
     assert t.chosen is not None
@@ -171,6 +188,7 @@ def test_no_depth_certifies_means_no_reuse_under_best():
     t = AutoGateTuner(min_pairs=4, budget=2.0, chain_budget=12.0, fallback="off")
     for _ in range(4):
         t.add(1.0, (20.0, 20.0, 20.0, 20.0))     # over the budget at every depth
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen is None
 
@@ -185,6 +203,7 @@ def test_a_grainy_source_refuses_at_any_threshold():
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=2.0, fallback="off",
                       noise_floor_refuse=2.0)
     _feed(t, [(3.0 + 0.1 * i, 0.5) for i in range(10)])   # calm frames sit above the floor
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen is None
     assert "above the" in t.stats()
@@ -211,6 +230,7 @@ def test_the_floor_limit_sits_where_the_bar_is_crossed():
 def test_a_clean_source_is_not_refused_by_the_floor():
     t = AutoGateTuner(seed=5.0, min_pairs=8, budget=2.0, noise_floor_refuse=2.0)
     _feed(t, [(0.2 + 0.01 * i, 0.4) for i in range(10)])
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen is not None
 
@@ -236,6 +256,7 @@ def test_a_depth_is_only_scored_where_the_gate_could_actually_reach_it():
         (0.6, (0.2, 0.3)),
         (0.5, (0.2, 0.3)),
     ])
+    t.settle()          # idempotent; the window is not filled by these fixtures
     assert t.ready
     assert t.chosen_chain == 2, "the 30.3 pair is unreachable and must not veto depth 2"
 
@@ -261,7 +282,7 @@ def test_the_tuner_certifies_on_the_acceptance_statistic_when_it_has_one():
     # proxy says depth 2 is hopeless (30 levels against a 1.0 chain budget); the picture says 0.02%
     # against a 0.1% bar. The picture wins.
     picture_fine = AutoGateTuner(seed=5.0, min_pairs=6, budget=2.0, chain_budget=1.0,
-                                 accept_bar=0.1)
+                                 accept_bar=0.1, certify_on="acceptance")
     _feed(picture_fine, [(0.5, (0.2, 30.0), (0.004, 0.02)),
                          (0.6, (0.2, 30.0), (0.004, 0.02)),
                          (0.5, (0.2, 30.0), (0.004, 0.02)),
@@ -273,7 +294,7 @@ def test_the_tuner_certifies_on_the_acceptance_statistic_when_it_has_one():
 
     # and the converse: a calm proxy with 0.5% of pixels over the bar must not certify depth 2
     picture_bad = AutoGateTuner(seed=5.0, min_pairs=6, budget=2.0, chain_budget=12.0,
-                                accept_bar=0.1)
+                                accept_bar=0.1, certify_on="acceptance")
     _feed(picture_bad, [(0.5, (0.2, 0.3), (0.004, 0.5)),
                         (0.6, (0.2, 0.3), (0.004, 0.5)),
                         (0.5, (0.2, 0.3), (0.004, 0.5)),
