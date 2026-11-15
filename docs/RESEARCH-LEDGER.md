@@ -351,7 +351,9 @@ configuration:
   | Cowboy Bebop ep01 | refused | refused | 0% both |
 
   So 1.5x on the first title and 1.24x on the second, with the defect unchanged (Violet's is a
-  hair lower). The tuner stops at chain 2 because deeper depths run out of *reachable samples* in a
+  hair lower). Those two rows are the **acceptance-certified** run (the shipping rule); the
+  proxy-certified run of the same code read 6.56 s and 6.92 s with identical counts, i.e. the two
+  instruments agreed here. The tuner stops at chain 2 because deeper depths run out of *reachable samples* in a
   16-frame window, and that turns out not to matter much: forcing chain 4 by hand buys only 6.56 ->
   5.82 s on Chainsaw and makes Violet worse (0.124%). Chain 2 is the sweet spot it now finds by
   itself.
@@ -372,8 +374,8 @@ The acceptance rule and the presets were derived from two clips. Three actual BD
 
 | title | noise floor | decision, reuse as a count | time | RGB > 8 levels, worst of 15 frames |
 |---|---|---|---|---|
-| Chainsaw Man ep01 (digital, added grain) | 0.95 | thr 4.0, chain 2 - **146/220** (66.4%) | 6.56 s against 13.50 s (**2.06x**) | **0.005%** (peak 14) |
-| Violet Evergarden ep01 (clean digital) | 1.32 | thr 4.0, chain 2 - **142/219** (64.8%) | 6.92 s against 13.31 s (**1.92x**) | **0.096%** (peak 18) - 4% of margin |
+| Chainsaw Man ep01 (digital, added grain) | 0.95 | thr 4.0, chain 2 - **146/220** (66.4%) | 6.61 s against 13.50 s (**2.04x**) | **0.005%** (peak 14) |
+| Violet Evergarden ep01 (clean digital) | 1.32 | thr 4.0, chain 2 - **142/219** (64.8%) | 6.90 s against 13.31 s (**1.93x**) | **0.096%** (peak 18) - 4% of margin |
 | Cowboy Bebop ep01 (35 mm TV, deinterlaced) | 2.27 | **refused** - 0/240 | 14.79 s against 14.93 s, **byte-identical 240/240** | 0.000% now; **0.470%** at threshold 4 and **0.469%** at 2 when it was still allowed |
 | clean anime clip + synthetic grain 4 (sweep below) | 1.84 | **refused** at the 1.5 limit - 0/498 | 31.61 s against 31.11 s, **byte-identical 498/498** | 0.000% now; **0.105%** when it was still allowed |
 
