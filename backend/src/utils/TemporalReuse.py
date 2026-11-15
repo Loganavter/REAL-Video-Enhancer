@@ -16,6 +16,8 @@ torch; only :meth:`ReferenceFrameGate.blocks` needs tensors.
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import Dict, Optional, Sequence, Tuple
 
 try:  # keep the decision helpers importable where torch is not installed
@@ -457,7 +459,8 @@ class AutoGateTuner:
 
     def __init__(self, budget: float = 2.0, min_pairs: int = 16, seed: float = 5.0,
                  candidates=(2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0),
-                 clamp=(2.0, 12.0), noise_floor_quiet: float = 0.35):
+                 clamp=(2.0, 12.0), noise_floor_quiet: float = 0.35,
+                 fallback: str = "strictest"):
         self.budget = float(budget)
         self.min_pairs = int(min_pairs)
         # the value the pipeline was configured with: kept when no candidate qualifies, which
@@ -468,11 +471,21 @@ class AutoGateTuner:
         self.clamp = (float(clamp[0]), float(clamp[1]))
         self.noise_floor_quiet = float(noise_floor_quiet)
         self._pairs: list[tuple[float, float]] = []
+        if fallback not in ("strictest", "off"):
+            raise ValueError(f"fallback must be 'strictest' or 'off', got {fallback!r}")
+        # what to do when no candidate keeps the error inside the budget:
+        #   "strictest" - reuse as little as the range allows (speed-first)
+        #   "off"       - do not reuse at all (quality-first; the tuner just established that
+        #                 nothing in its range is safe on this content)
+        self.fallback = fallback
         self.chosen: float | None = None
         self.veto: float | None = None
+        # calibration is finished even when the verdict is "do not reuse", so this cannot
+        # double as `chosen is not None`
+        self.settled = False
 
     def add(self, lr_delta: float, hr_delta: float) -> None:
-        if self.chosen is not None or lr_delta <= 0:
+        if self.settled or lr_delta <= 0:
             return
         if hr_delta == hr_delta and hr_delta >= 0:  # not NaN
             self._pairs.append((float(lr_delta), float(hr_delta)))
@@ -481,7 +494,8 @@ class AutoGateTuner:
 
     @property
     def ready(self) -> bool:
-        return self.chosen is not None
+        """Calibration is over. ``chosen is None`` with ``ready`` means "do not reuse"."""
+        return self.settled
 
     def _noise_floor(self) -> float:
         # median of the calmest third: robust to a couple of wild frames at the start, while a
@@ -491,6 +505,18 @@ class AutoGateTuner:
         return ordered[k // 2]
 
     def _decide(self) -> None:
+        if os.environ.get("RVE_TUNER_DEBUG"):
+            print(f"[tuner] budget {self.budget} fallback {self.fallback}", file=sys.stderr)
+            print("[tuner] pairs: " + ", ".join(f"({lr:.2f},{hr:.2f})"
+                                                for lr, hr in self._pairs), file=sys.stderr)
+            for cand in self.candidates:
+                errs = sorted(hr for lr, hr in self._pairs if lr <= cand)
+                if not errs:
+                    print(f"[tuner] {cand}: no frames", file=sys.stderr)
+                    continue
+                p90 = errs[min(len(errs) - 1, int(0.90 * (len(errs) - 1)))]
+                print(f"[tuner] {cand}: {len(errs)} frames p90 {p90:.2f} "
+                      f"{'ok' if p90 <= self.budget else 'OVER'}", file=sys.stderr)
         best = None
         for cand in self.candidates:
             errs = [hr for lr, hr in self._pairs if lr <= cand]
@@ -502,11 +528,16 @@ class AutoGateTuner:
             if p90 <= self.budget:
                 best = cand
         if best is None:
-            # Nothing qualified: the strictest candidate is the honest fallback, because the
-            # tuner just established that *no* threshold keeps the error inside the budget.
-            # Keeping the configured seed instead (the old behaviour) meant a grainy clip ran
+            # Nothing qualified, i.e. no threshold in the range keeps the error inside the
+            # budget. "strictest" reuses as little as the range allows; "off" refuses to reuse
+            # at all. Keeping the configured seed (the old behaviour) meant a grainy clip ran
             # at whatever number happened to be set, and on the film clip that produced frames
             # at 34.7 dB against the ungated render.
+            self.settled = True
+            if self.fallback == "off":
+                self.chosen = None
+                self.veto = None
+                return
             best = self.candidates[0]
         lo, hi = self.clamp
         self.chosen = max(lo, min(hi, best))
@@ -515,10 +546,15 @@ class AutoGateTuner:
         # measured as invisible (52.6 dB median, 48.1 dB worst frame without it). The noise floor
         # is still computed because it is the useful diagnostic when someone does want it.
         self.veto = None
+        self.settled = True
 
     def stats(self) -> str:
-        if self.chosen is None:
+        if not self.settled:
             return f"auto gate: calibrating ({len(self._pairs)}/{self.min_pairs} frames)"
+        if self.chosen is None:
+            return (f"auto gate: no candidate kept the p90 error inside {self.budget} levels "
+                    f"(noise floor {self._noise_floor():.2f}), so reuse is OFF - "
+                    f"{len(self._pairs)} calibration frames")
         reuse = 100.0 * sum(1 for lr, _ in self._pairs if lr <= self.chosen) / len(self._pairs)
         return (f"auto gate: threshold {self.chosen:.1f}/255, veto {self.veto}, "
                 f"noise floor {self._noise_floor():.2f}, would reuse {reuse:.0f}% of the "

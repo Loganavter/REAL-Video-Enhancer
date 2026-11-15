@@ -234,6 +234,34 @@ precision experiment or an input-path rewrite.
 4. **P8 / P9 / N2 / N3 / N4** - quality-of-life and encoder-side, only if x265 or per-plane tile
    writes are kept.
 
+## Grain sweep (synthetic, 2026-11-15)
+
+The clean anime clip with `noise=alls=S:allf=t+u` layered on, then three renders per variant:
+ungated, `--quality_preset fast`, `--quality_preset best`. One GPU job at a time, same session.
+
+| variant | noise floor | fast | reuse | avg dB vs ungated |
+|---|---|---|---|---|
+| clean | 0.18 | 8.30 s | 70.9% | 52.14 |
+| grain 4 | 0.40 | 8.96 s | 70.9% | 50.21 |
+| grain 8 | 0.51 | 13.99 s | 70.9% | 47.60 |
+| grain 12 | 0.67 | 12.54 s | 70.9% | 44.75 |
+| grain 16 | 0.96 | 13.47 s | 70.9% | 42.10 |
+
+Two results worth keeping:
+
+- **Grain does not stop frame reuse.** The share stays at 70.9% from clean to grain 16, because
+  the statistic is a 32 px block mean and grain averages out inside a block. What degrades is the
+  *quality* of the reuse: 52.1 -> 42.1 dB, because a reused frame suppresses the grain's own
+  frame-to-frame variation.
+- **Grain stops tile reuse.** The ungated render jumps from 17.6 s at grain 4 to 36.6 s at grain 8
+  and stays there: the tile probe refuses tiles on grainier material, so the render falls back to
+  the full-frame model. The boundary sits between noise floor 0.40 and 0.51 on this scale.
+
+`best` refused to reuse on every variant including the clean one, which cannot be right when
+`fast` certifies 81% of the same calibration frames at the same budget - that is a bug in the
+preset wiring, not a verdict about grain, and it is being chased before any of these rows are
+used to choose a default.
+
 ## Open questions
 
 - **Is the film gate worth its quality cost?** Measured: 18.1% reuse, 4.33 s against 4.66 s

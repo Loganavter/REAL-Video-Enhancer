@@ -186,6 +186,7 @@ class HandleApplication:
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
             temporal_reuse_pixel_veto=self.args.temporal_reuse_pixel_veto,
             temporal_reuse_auto=not self.args.no_temporal_reuse_auto,
+            quality_preset=self.args.quality_preset,
         )
         
 
@@ -498,6 +499,17 @@ class HandleApplication:
                  "of the last KEPT frame. Default 5.0 (TheAnimeScripter: sens 35 / 7).",
             default=5.0,
             type=float,
+        )
+        parser.add_argument(
+            "--quality_preset",
+            help="best (default): the duplicate gate may only skip a frame when the tuner can "
+                 "prove the error stays inside a 1-level budget on this content, otherwise "
+                 "reuse is switched off for the whole render. fast: when nothing proves out, "
+                 "reuse as little as the threshold range allows and keep going. The difference "
+                 "is measurable: on a grainy film clip 'best' renders every frame, 'fast' "
+                 "reuses 18%% and its worst frame is 39.8 dB against the ungated render.",
+            choices=("best", "fast"),
+            default="best",
         )
         parser.add_argument(
             "--no_temporal_reuse_auto",

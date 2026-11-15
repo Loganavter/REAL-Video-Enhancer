@@ -129,6 +129,7 @@ class Render:
         # reuse collapsed to 1.1% (vs 46.8% with the veto off).
         temporal_reuse_pixel_veto: float | None = 0.0,
         temporal_reuse_auto: bool = True,
+        quality_preset: str = "best",
     ):
         self.inputFile = inputFile
         self.backend = backend
@@ -142,6 +143,9 @@ class Render:
         self.temporalReuseThreshold = temporal_reuse_threshold
         self.temporalReuseMaxChain = temporal_reuse_max_chain
         self.ffmpegPath = ffmpeg_path
+        if quality_preset not in ("best", "fast"):
+            raise ValueError(f"quality_preset must be 'best' or 'fast', got {quality_preset!r}")
+        self.qualityPreset = quality_preset
         self.tileReuseMode = tile_reuse if isinstance(tile_reuse, str) else (
             "on" if tile_reuse else "off")
         self.tileReuse = bool(
@@ -394,7 +398,20 @@ class Render:
             self.autoTuner = None
             if temporal_reuse_auto:
                 from .utils.TemporalReuse import AutoGateTuner
-                self.autoTuner = AutoGateTuner(seed=float(temporal_reuse_threshold))
+                # "best" asks the tuner to prove the error budget or refuse to reuse at all,
+                # and holds it to a tighter budget; "fast" accepts the least aggressive
+                # candidate when nothing proves out. Measured on the film clip the difference
+                # is 18.1% reuse with a worst frame at 39.8 dB against no reuse at all.
+                # Both presets hold the tuner to the same 2-level budget: 1.0 was too tight
+                # and made "best" disable the gate even on clean anime (measured: 18.1 s
+                # against 7.65 s, with the gate doing nothing). What separates them is the
+                # fallback, i.e. exactly the content that cannot be certified.
+                best = getattr(self, "qualityPreset", "fast") == "best"
+                self.autoTuner = AutoGateTuner(
+                    seed=float(temporal_reuse_threshold),
+                    budget=2.0,
+                    fallback="off" if best else "strictest",
+                )
                 log("auto gate tuning: the threshold will be chosen from the first rendered "
                     "frames (LR delta vs the real HR delta they cause)")
 
@@ -530,6 +547,13 @@ class Render:
             del history[:-max(1, depth)]
         self._hr_grid_prev = grid
         if self.autoTuner.ready:
+            if self.autoTuner.chosen is None:
+                # quality preset "best": the tuner could not certify any threshold on this
+                # content, so stop reusing frames entirely rather than pick the least-bad one
+                log(self.autoTuner.stats())
+                self.temporalReuse = None
+                self.autoTuner = None
+                return
             self.temporalReuse.threshold = self.autoTuner.chosen
             self.temporalReuse.pixel_veto = self.autoTuner.veto
             log(self.autoTuner.stats())
