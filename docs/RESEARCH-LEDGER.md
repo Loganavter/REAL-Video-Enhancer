@@ -1390,6 +1390,21 @@ is representative of the title, the gate refuses and int8 is 1.57x *slower* than
 that is already the slowest (1.93x against anime's 3.3x). The first place in this lane where int8 loses on
 the metric that matters is therefore time, not the share.
 
+**But Violet is not uniformly over the bar, which turns the verdict from title-level into per-video.** A
+second adjacent pair per title, each with in-domain calibration:
+
+| pair | engine | composition | fp16 only |
+|---|---|---|---|
+| Chainsaw 3.000 s | 0.000% / 10 | **0.006% / 13** | 0.000% / 10 |
+| Chainsaw 1.000 s | 0.001% / 12 | **0.006% / 13** | 0.000% / 11 |
+| Violet 1.000 s | 0.001% / 12 | **0.062% / 16** | 0.006% / 13 |
+| Violet 5.000 s | 0.028% / 37 | **0.146% / 34** | 0.009% / 14 |
+
+So one pair in four crosses the bar, and it is the one whose own frame is the engine's worst (0.028% and
+peak 37 in isolation). The other three pass with 1.6-17x margin. That is a probe's job description rather
+than a verdict on a title: the decision is per video (or per shot), the instrument is 16 frames on both
+engines at the start, and the fallback is the fp16 engine that already works.
+
 **A floor is not sufficient, and Violet is the proof.** The engine's own error there is 0.028% while the
 composition is 0.146% - 5.2x - so certifying the engine against fp16 would have approved a depth that
 fails the bar. The correction is that the composition does not decompose: certify
