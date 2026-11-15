@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import shlex
 import shutil
@@ -83,6 +84,8 @@ class Summary:
     median: float
     worst: float
     worst_frames: tuple[FrameStats, ...]
+    identical: int = 0            # frames byte identical to the reference (per-frame dB inf)
+    mean_over_mse: float = float("nan")  # PSNR of the mean MSE: ffmpeg's own "average" line
 
 
 @dataclass(frozen=True)
@@ -160,21 +163,68 @@ def parse_stats_file(text: str) -> list[FrameStats]:
     return frames
 
 
+def _peak_squared(records: Sequence[FrameStats]) -> float | None:
+    """Reconstruct the code value range from any usable frame: peak^2 = mse * 10^(psnr/10).
+
+    Needed because the report has no business assuming 8 or 10 bits: `psnr_avg` carries the
+    format's peak already, so a finite frame gives it back exactly.
+    """
+    for record in records:
+        if record.mse_avg and record.mse_avg > 0 and math.isfinite(record.psnr_avg):
+            return record.mse_avg * 10.0 ** (record.psnr_avg / 10.0)
+    return None
+
+
 def summarize(frames: Iterable[FrameStats], worst_n: int = DEFAULT_WORST) -> Summary:
-    """Mean, median, worst and the ``worst_n`` worst frames (ties: lowest index first)."""
+    """Mean, median, worst and the ``worst_n`` worst frames (ties: lowest index first).
+
+    Two aggregates, because they answer different questions and one of them is the number in
+    ``docs/``:
+
+    * ``mean`` averages the per-frame dB over the *finite* ones, so one bad frame moves it.
+      A frame byte identical to the reference scores ``inf``: it is counted in ``identical``
+      instead of being averaged in, which is why the naive average of a gated render reads
+      ``inf`` (measured: 502 frames, 73% reused, 18 of them identical).
+    * ``mean_over_mse`` is the PSNR of the mean MSE. That is what ffmpeg's own ``average:``
+      line reports and the figure quoted in ``docs/MODEL.md``; on the same pair it read
+      52.731 against 52.810 for the per-frame average, so they are close but not the same.
+    """
     records = list(frames)
     if not records:
         raise PsnrError("no per-frame statistics: ffmpeg compared nothing")
-    values = [record.psnr_avg for record in records]
-    # Sorting by (value, index) makes the tie-break deterministic instead of depending on
-    # the order ffmpeg happened to write equal values in.
-    ordered = sorted(records, key=lambda record: (record.psnr_avg, record.index))
+    finite = [record for record in records if math.isfinite(record.psnr_avg)]
+    identical = len(records) - len(finite)
+    values = [record.psnr_avg for record in finite]
+    if not values:
+        mean = median = worst = float("inf")
+        ordered: list[FrameStats] = []
+        mean_over_mse = float("inf")
+    else:
+        # Sorting by (value, index) makes the tie-break deterministic instead of depending on
+        # the order ffmpeg happened to write equal values in.
+        ordered = sorted(finite, key=lambda record: (record.psnr_avg, record.index))
+        mean = statistics.fmean(values)
+        median = statistics.median(values)
+        worst = min(values)
+        peak_squared = _peak_squared(records)
+        # Over ALL frames, identical ones included: their mse is 0 and it belongs in the mean,
+        # which is exactly how ffmpeg computes its "average" line. Averaging only the finite
+        # frames would quietly inflate the number the docs quote.
+        mses = [record.mse_avg for record in records]
+        if peak_squared is not None and all(mse is not None for mse in mses):
+            mean_mse = statistics.fmean(float(mse) for mse in mses)
+            mean_over_mse = (10.0 * math.log10(peak_squared / mean_mse)
+                             if mean_mse > 0 else float("inf"))
+        else:
+            mean_over_mse = mean
     return Summary(
         frames=len(records),
-        mean=statistics.fmean(values),
-        median=statistics.median(values),
-        worst=min(values),
+        mean=mean,
+        median=median,
+        worst=worst,
         worst_frames=tuple(ordered[:max(0, worst_n)]),
+        identical=identical,
+        mean_over_mse=mean_over_mse,
     )
 
 
@@ -325,9 +375,15 @@ def format_report(report: Report, fail_under: float | None = None) -> str:
         f"candidate : {report.candidate}",
         f"format    : {report.pixel_format} (both inputs converted before comparison)",
         f"frames    : {summary.frames} (both inputs)",
-        f"mean      : {summary.mean:.2f} dB",
+        f"mean      : {summary.mean:.2f} dB (per-frame, over "
+        f"{summary.frames - summary.identical} finite frames)",
+        f"average   : {summary.mean_over_mse:.2f} dB (PSNR of the mean MSE = ffmpeg's own "
+        f"\"average\", the figure docs/ quotes)",
         f"median    : {summary.median:.2f} dB",
     ]
+    if summary.identical:
+        lines.append(f"identical : {summary.identical} frame(s) byte identical to the "
+                     f"reference (per-frame dB infinite, counted here, not averaged)")
     if summary.worst_frames:
         # The worst frame is the first entry of the sorted list by construction; read the
         # index off it rather than searching the values again (ties pick the lowest index).
@@ -358,7 +414,9 @@ def build_payload(report: Report, fail_under: float | None = None) -> dict:
         "candidate": report.candidate,
         "format": report.pixel_format,
         "frames": summary.frames,
+        "identical": summary.identical,
         "mean": summary.mean,
+        "mean_over_mse": summary.mean_over_mse,
         "median": summary.median,
         "worst": summary.worst,
         "worst_frames": [{"index": frame.index, "psnr_avg": frame.psnr_avg}
