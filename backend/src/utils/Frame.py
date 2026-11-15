@@ -66,12 +66,15 @@ class Frame:
         self._bytes = frame
         return self
     
-    def set_frame_tensor(self, frame: Any) -> "Frame":
+    def set_frame_tensor(self, frame: Any, copy: bool = False) -> "Frame":
         # might need to sync streams here
         if _torch is not None and not isinstance(frame, _torch.Tensor):
             raise TypeError(f"Expected torch.Tensor, got {type(frame).__name__}")
         self._invalidate_cache("tensor")
-        self._tensor = frame.clone()
+        # No copy by default: callers hand over a freshly allocated tensor (model output)
+        # and a full-HR copy costs ~4.6 ms/frame at 4x. Pass copy=True if the caller may
+        # keep writing into the same buffer (e.g. preallocated/cudagraph outputs).
+        self._tensor = frame.clone() if copy else frame
         _torch_utils.sync_all_streams()
         return self
 

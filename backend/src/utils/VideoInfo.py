@@ -87,6 +87,8 @@ class VideoInfo(ABC):
     @abstractmethod
     def get_color_primaries(self) -> str: ...
     @abstractmethod
+    def get_color_range(self) -> str: ...
+    @abstractmethod
     def get_bitrate(self) -> int: ...
     @abstractmethod
     def get_codec(self) -> str: ...
@@ -202,6 +204,23 @@ class FFMpegInfoWrapper(VideoInfo):
     def get_color_primaries(self) -> str:
         return self.check_color_opt("Primaries")
 
+    def get_color_range(self) -> str | None:
+        """ffmpeg prints e.g. 'yuv420p10le(tv, bt709, progressive)'; the first field is
+        the range. Without it swscale falls back to its own defaults and the RGB<->YUV
+        round trip shifts colours (measured: |dU| ~6.6 levels on a bt709 source)."""
+        if not getattr(self, "stream_line", None):
+            return None
+        try:
+            inside = self.stream_line.split("(")[1].split(")")[0]
+            first = inside.split(",")[0].strip().lower()
+        except Exception:
+            return None
+        if first in ("tv", "limited"):
+            return "tv"
+        if first in ("pc", "full", "jpeg"):
+            return "pc"
+        return None
+
     def get_color_transfer(self) -> str:
         return self.check_color_opt("Transfer")
 
@@ -295,6 +314,9 @@ class OpenCVInfo(VideoInfo):
 
     def get_color_primaries(self) -> str:
         return self.ffmpeg_info.get_color_primaries()
+
+    def get_color_range(self) -> str:
+        return self.ffmpeg_info.get_color_range()
 
     def get_bitrate(self) -> int:
         return self.ffmpeg_info.get_bitrate()

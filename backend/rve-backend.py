@@ -175,6 +175,9 @@ class HandleApplication:
             dynamic_scaled_optical_flow=self.args.dynamic_scaled_optical_flow,
             ensemble=self.args.ensemble,
             output_to_mpv=self.args.output_to_mpv,
+            temporal_reuse=not self.args.no_temporal_reuse,
+            temporal_reuse_threshold=self.args.temporal_reuse_threshold,
+            temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
         )
         
 
@@ -265,9 +268,9 @@ class HandleApplication:
         )
         parser.add_argument(
             "--tensorrt_opt_profile",
-            help="sets tensorrt optimization profile for model, (1/2/3/4/5, default=3)",
+            help="sets tensorrt optimization profile for model, (1/2/3/4/5, default=5)",
             type=int,
-            default=3,
+            default=5,
         )
         parser.add_argument(
             "--tensorrt_dynamic_shapes",
@@ -420,6 +423,26 @@ class HandleApplication:
             help="Lowers the resoltion flow is calculated at, speeding up model and saving vram. Helpful for higher resultions.",
             action="store_true",
             default=False,
+        )
+        parser.add_argument(
+            "--no_temporal_reuse",
+            help="Disable reusing the previous upscaled frame when the current frame is "
+                 "structurally unchanged (on by default; skip only, never invents pixels).",
+            action="store_true",
+            default=False,
+        )
+        parser.add_argument(
+            "--temporal_reuse_threshold",
+            help="Worst-tile low-passed luma delta (0-255) under which a frame counts as "
+                 "unchanged. Default 0.35; raise it for more speed, lower it for safety.",
+            default=0.35,
+            type=float,
+        )
+        parser.add_argument(
+            "--temporal_reuse_max_chain",
+            help="Maximum number of consecutive frames taken from the cache. Default 2.",
+            default=2,
+            type=int,
         )
         parser.add_argument(
             "--slomo_mode",

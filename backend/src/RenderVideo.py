@@ -102,6 +102,9 @@ class Render:
         dynamic_scaled_optical_flow: bool = False,
         ensemble: bool = False,
         output_to_mpv: bool = False,
+        temporal_reuse: bool = True,
+        temporal_reuse_threshold: float = 0.35,
+        temporal_reuse_max_chain: int = 2,
     ):
         self.inputFile = inputFile
         self.backend = backend
@@ -168,6 +171,10 @@ class Render:
         color_space = videoInfo.get_color_space()
         color_primaries = videoInfo.get_color_primaries()
         color_transfer = videoInfo.get_color_transfer()
+        try:
+            color_range = videoInfo.get_color_range()
+        except Exception:
+            color_range = None
 
         video_encoder = EncoderSettings(video_encoder_preset)
         audio_encoder = EncoderSettings(audio_encoder_preset, type="audio")
@@ -241,6 +248,7 @@ class Render:
             color_space=color_space,
             color_primaries=color_primaries,
             color_transfer=color_transfer,
+            color_range=color_range,
             input_pixel_format=input_pix_fmt,
             ffmpeg_path=ffmpeg_path,
         )
@@ -272,6 +280,7 @@ class Render:
             color_space=color_space,
             color_primaries=color_primaries,
             color_transfer=color_transfer,
+            color_range=color_range,
             ffmpeg_path=ffmpeg_path,
             ffmpeg_log_file=os.path.join(cwd, "ffmpeg_log.txt"),
         )
@@ -293,6 +302,15 @@ class Render:
             
         )
         
+
+        self.temporalReuse = None
+        if temporal_reuse and self.upscaleModel and not self.interpolateModel and self.backend in ("pytorch", "tensorrt"):
+            from .utils.TemporalReuse import TemporalReuse
+            self.temporalReuse = TemporalReuse(
+                threshold=temporal_reuse_threshold,
+                max_chain=temporal_reuse_max_chain,
+            )
+            log(f"Temporal reuse enabled (threshold {temporal_reuse_threshold}/255, max chain {temporal_reuse_max_chain})")
 
         self.renderThread = Thread(target=self.render)
         self.ffmpegReadThread = Thread(target=self.readBuffer.read_frames_into_queue)
@@ -370,9 +388,19 @@ class Render:
                 
 
                 if self.upscaleModel:
-                    frame = self.upscaleOption(
-                        frame
+                    reuse = (
+                        self.temporalReuse is not None
+                        and self.temporalReuse.can_reuse()
+                        and self.temporalReuse.should_reuse(frame)
                     )
+                    if reuse:
+                        frame = self.temporalReuse.last_frame()
+                    else:
+                        frame = self.upscaleOption(
+                            frame
+                        )
+                        if self.temporalReuse is not None:
+                            self.temporalReuse.remember(frame)
                 
                 
                 
@@ -391,6 +419,8 @@ class Render:
                 frames_rendered += int(self.ceilInterpolateFactor)
             else:
                 sleep(1)
+        if self.temporalReuse is not None:
+            log(self.temporalReuse.stats())
         self.writeBuffer.writeQueue.put(None)
         """
         tracer.stop()
