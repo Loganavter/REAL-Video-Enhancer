@@ -252,6 +252,25 @@ So the grids are now fitted to the chain's own maxima, the iteration converges a
 falls from 2.54 to 1.77 levels** - and the share stays at 1.57%. The saturation hypothesis explains the bulk of
 the *typical* error and almost none of the *tail* the bar measures.
 
+**A/A run: the two hops diverge at the FIRST layer, by 3.3x in magnitude.**
+
+| layer | mean abs, my hop | mean abs, simulation | relative |
+|---|---|---|---|
+| 1 | **1.754** | **0.526** | 3.65 |
+| 2 | 0.894 | 0.711 | 1.53 |
+| 3 | 0.984 | 0.825 | 1.48 |
+| 6 | 1.062 | 0.850 | 1.48 |
+
+The first layer is fed the *same* activation, the *same* grid and weights that differ only by int8 rounding, and
+my hop returns 3.3x the magnitude. So my hand-built hop is not the simulation's hop - and since the kernel was
+shown bit-identical to my hop (0.0000%), the disagreement is between **the harness and the simulation**, not
+between the kernel and anything.
+
+That is the end of what this stage can conclude without fixing the harness: the pipeline's 1.569%, the 0.45-0.49%
+at 512x512, and every "the chain is wrong" statement in this file are measured against a reference my own code
+cannot reproduce, so they are not results. The 3.3x factor at layer 1 is the thing to chase, and it is a
+harness bug - one layer, one set of inputs, printable - not a property of the pipeline.
+
 **And the comparison itself fails A/A: my harness cannot reproduce the simulation it is comparing against.**
 
 | chain | vs fp16 |
