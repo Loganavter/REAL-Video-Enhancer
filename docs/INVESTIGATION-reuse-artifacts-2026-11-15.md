@@ -65,9 +65,10 @@ Same frame 383, share of pixels by error magnitude, 8-bit levels:
 The film clip's worst frame, same measurement at chain 4: > 2 levels on 20.31% of pixels, > 4 on
 5.88%, > 8 on 2.35%, > 32 on 0.40%.
 
-The artifact is the chain: the gate may serve a frame from a reference up to `max_chain` frames
-old, and four frames is long enough for a fist to move. The threshold and the tile path were both
-innocent.
+At this point the artifact looked like the chain: the gate may serve a frame from a reference up
+to `max_chain` frames old, and four frames is long enough for a fist to move. That turned out to be
+half the answer - the tile path has its own staleness and, as the next section shows, the two mask
+each other.
 
 ## The two measurement mistakes underneath it
 
@@ -131,12 +132,19 @@ refuses tiles past a noise floor of ~0.45.
 
 ## Rules adopted
 
-1. **Acceptance for any reuse or precision change is local**, and stated as a percentile rather
-   than as "no pixel at all", because the reference configuration itself does not pass that: the
-   tile path alone differs from a full-frame render by up to **9 levels** on a peak (fp16 tail
-   accumulation), and the certified chain-1 render peaks at 12. So the rule is: **99.99% of pixels
-   within 8 levels, under 0.5% above 4**, a VMAF floor of 90 as a second opinion, and the worst
-   block reported with its coordinates. Averages are reported but never decide.
+1. **Acceptance is local, in RGB, and on the worst frame of the clip** - three qualifiers that each
+   cost a wrong conclusion to learn:
+   - **local**: a fist is a fraction of a percent of a 4K frame, so PSNR (mean or worst) and VMAF at
+     1080p pass a frame a viewer rejects. The number is the share of pixels more than 8 levels off.
+   - **in RGB, not luma**: the moved fist measures 0.29% by channel maximum and 0.036% in luma,
+     because the error lands in chroma; a luma-only rule passes exactly the frame this whole
+     investigation exists for.
+   - **worst frame of the clip, not one frame**: a configuration that looked 30x better on frame 383
+     was 4x worse on frame 360.
+
+   The bar is: **under 0.1% of pixels above 8 levels (RGB) on the worst of a spread sample**, with
+   99.99% within 8 and the worst block reported; a peak under 20 levels is what the current default
+   achieves (13). Averages are reported and never decide.
 2. **One GPU job at a time** means no other render or benchmark; `nvidia-smi` utilisation is not a
    usable idle check on this host (17-47% with nothing of ours running).
 3. **Ratios only within a session.** The same ungated configuration measured 30.8 s and 38.85 s on
@@ -197,8 +205,9 @@ What each knob actually costs, isolated:
 `best` is the default and takes the certified depth; `fast` keeps the full chain and pays the moved
 fist. Tile reuse is off by default: it buys 2.1 s of 11.3 and costs six times the defect area, and
 its per-tile mean cannot be made safe without giving the win back entirely (`--tile_reuse_mode auto`
-and `on` stay available for material where the owner accepts the trade). The honest headline with the certified chain is **3.4x** (38.85 -> 11.52 s), not 5x: 5.06x is
-the chain-4 number, i.e. the configuration that moves the fist.
+and `on` stay available for material where the owner accepts the trade). The honest headline is
+**3.4x** (38.85 -> 11.3 s); 5.06x was the tile-reuse number, i.e. the configuration that moves the
+fist.
 
 Caveat on this whole framing: "the last 1.5x is the price of not moving objects" describes a
 *decision rule*, not a property of the problem. The gate reduces its per-pixel difference into a

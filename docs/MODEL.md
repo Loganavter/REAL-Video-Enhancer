@@ -216,7 +216,8 @@ tried*.
 |---|---|---|
 | anime, ungated (502 frames, 1080p -> 2160p) | 100% | 16.3 fps |
 | anime, duplicate gate | 29.1% | 51.71 dB average / 48.64 dB worst frame against the ungated render, 70.9% reuse |
-| anime, gate + fitted tiles | 29.1% of frames, 57.5% of their tiles | **7.65 s against 38.85 s ungated** (5.1x) |
+| anime, gate only (default) | 29.1% of frames | **11.3 s against 38.85 s ungated (3.4x)**, 0.045% of pixels above 8 levels (RGB) on the worst of 19 sampled frames, peak 13 |
+| anime, gate + tile reuse | 57.7% of tiles | 9.2 s, but **0.287%** above 8 levels and peaks of 98: the tile path has its own staleness, so it is off by default (see the investigation linked below) |
 | film, ungated (94 frames, 1440p -> 2880p) | 100% | 4.66 s |
 | film, duplicate gate | 81.9% | 4.33 s (1.08x), 50.34 dB average / 39.83 dB worst frame against ungated. The 71 dB this row used to claim came from comparing two renders that were both corrupted by the pipe-format bug in ledger C4 |
 | tile-level reuse, square 512 px cores (anime) | 65.8% of tiles | 1.44x faster than ungated (30.8 -> 21.4 s) but slower than the frame gate (10.6 s). The loss was **geometry**: 512 does not divide 1080, so 12 windows of 548x548 cover a frame of 1.55 Mpx = 1.74x its area |
