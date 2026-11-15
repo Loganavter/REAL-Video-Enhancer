@@ -1115,11 +1115,29 @@ smooth blob that moves as a whole, and the recomputed area falls to 18%. The com
 unchanged by that choice - thr 8, r18 covers 97.1% of the thin model's error pixels and measures 0.046%
 against the bar.
 
-So the lane's real numbers are **1.58x of engine time and 1.31x of wall clock**, against a ceiling of
-2.2x engine (thin pass alone) and 1.53x wall, and against 1.40x engine / 1.23x wall for int8's measured
-ceiling. Routing is therefore *not* worse than int8 on the measured ceiling - it is marginally better -
-and the argument for int8 is not the size of the prize: it is that int8 does not depend on the content,
-does not touch the picture (0.000% against 0.071%) and needs no masks, no cone and no seam treatment.
+**And that 1.58x describes a cached region the composite cannot afford.** The 0.046% was measured on a
+*fresh* composite - the full answer recomputed for that frame - while `c + delta` assumes 82% of F comes
+from a cache. Those are different configurations, and the ranking flips between them:
+
+| configuration | quality (worst frame) | engine | wall |
+|---|---|---|---|
+| fresh, thr 8 r18 | 0.026-0.034% | 1.10x | 1.06x |
+| fresh, thr 8 r2 | 0.026-0.034% | 1.26x | 1.15x |
+| **cached, thr 8 r18** | **0.423-0.648%** | *1.58x* | *1.31x* |
+| **cached, thr 8 r18, stride 3** (gate spacing) | **0.485-0.648%** | *1.58x* | *1.31x* |
+
+Simulated offline over 20 frames, cache updated only where `delta` covers, truth is the full render of
+the same frame. The cached composite is **4-6x over the bar**, and it is over by the same class of
+mechanism that made the tile path measure 0.287% before dilation: parts of the reused region have
+different ages. Dilation fixes the mask's spatial coherence and says nothing about the cache's age.
+
+So the lane closes numerically, not by prior: **the only passing configuration is the fresh one, and at
+1.15x of wall clock it is a little slower than the tile path already shipping at 1.17x** (with a better
+defect, 0.03% against 0.071%). Paying 1.15x for a defect improvement that a 1.17x path already delivers
+differently is not a lane worth a two-engine architecture.
+
+For reference, int8's measured ceiling is 1.40x engine / 1.23x wall, content-independent, 0.000% of
+pixels, no masks, no cache, no seam.
 
 **What survives is the temporal version.** The LR gradient mask is mostly scene contours, and contours
 are nearly static between frames: over a 1/24 s pair the mask+18 region changes by 1.2-2.3%. With its

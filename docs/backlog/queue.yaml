@@ -156,24 +156,19 @@ tasks:
     owns_files: []
     note: "Kept because the numbers are the licence for the routing lane: the error is spatial and localised, which is exactly what conditional compute exploits."
   - id: rve-spatial-routing-2026-11-15
-    title: "Routing: the pixel bound is 2.16x, the per-frame cost is 1.0-1.3x, the temporal one 1.2-1.6x"
+    title: "Routing (closed): the passing configuration is 1.15x wall, the fast one is 4-6x over the bar"
     type: experiment
-    status: in_progress
+    status: dropped
     owner: "@supervisor"
-    priority: P0
+    resolution: "closed 2026-11-15 by measurement. Fresh composite passes (0.026-0.034% of pixels above 8 levels, worst frame, 20 frames) but costs 1.10-1.26x of engine time, i.e. 1.06-1.15x of wall. The cached composite that the 1.58x cost model describes measures 0.42-0.65% - 4-6x over the bar - because 82% of the grown mask is stale by up to several frames, the same mechanism that made tile reuse measure 0.287% before dilation. So the only admissible configuration is slower than the tile path already shipping at 1.17x wall (0.071% defect)."
+    priority: P2
     gpu: true
-    cost: "2-3d"
-    tags: [routing, conditional, tiles, two-engines]
+    cost: "done"
+    tags: [routing, closed, cache]
     base_branch: perf/inference
-    relates_to: [backend/src/RenderVideo.py, backend/src/pytorch/TensorRTHandler.py, docs/RESEARCH-LEDGER.md]
-    owns_files: [backend/src/pytorch/RoutedUpscaler.py, backend/tests/test_routed_upscaler.py]
-    refutes: "Measured 2026-11-15: the area that matters is mask+18, not the mask, and it is 34-79% of the frame. Per-frame cost is therefore 1.0-1.3x. What survives is the temporal variant (the region changes 1.2-2.3% per frame, 1.2-1.6x with its halo on the delta being recomputed), which is content-dependent and belongs beside the existing gate rather than replacing it."
-    acceptance: "Worst-frame statistic (share > 8 levels, RGB) against the full engine on at least three titles; the CONDITIONAL change rate - delta of F on the frames the gate actually renders, not the average over all pairs; the mask area per title; and the wall clock, which is engine time multiplied by 0.646 (the engine's share of the render cycle). Break-even is delta ~3-4%: below it the lane lives, above it the recomputed region approaches the whole frame."
-    ceiling: "2.2x of engine time, because the thin pass itself is 72% of the cost at the 1.59x row; the wall figure is 1.23x (at 1.40x engine) to 1.32x (at 1.59x). The existing tile path already measures 1.17x wall at 0.071%, so this lane is an improvement on a marginal path at best."
-    artefact: "The seam creeps: the boundary of F moves with the change mask, so the composite's step travels across the frame - a moving contour on a flat gradient reads worse than a static one. Fix is free (feather across the halo, where the error stays under the bar), but it must be looked at rather than assumed."
-    delta_rule: "delta must be measured on CONTENT, not on the mask: pixels under a stable mask can drift (grain, slow brightness, dithering) while the cached full answer ages. Same defect that moved the gate from |box-box| to box(|diff|). Grain therefore has to be part of the measurement."
-
-    note: "Oracle composite where(mask, full, thin) measures 0.000% with a 15% mask (grad>4, dilate 2 LR px) and 0.094% with 8% (grad>8), against a bar of 0.1%. A perfect router would give 2.16x. The thin model is the C=32 build, which is fast (22.4-24.9 ms, 2.07-2.36x) and would be unusable alone - routing is what makes it admissible. The first mask attempt (dilate by the receptive radius 18) covered 76% of the frame and is the reason routing looked dead; the mask marks where the ANSWER needs the full model, not where its receptive field reaches. No retraining, no weights touched, two engines and a tile pass."
+    relates_to: [docs/RESEARCH-LEDGER.md, backend/src/RenderVideo.py]
+    owns_files: []
+    note: "Kept for the numbers the closure produced: the pixel bound is 2.16x (thin fails on 1.6% of pixels), the gated delta is 18% at thr 8 r18 (and 25% at r2, because a thin gradient mask flickers at its own threshold while a dilated one moves as a blob), and the fresh/cached split is the reason the 1.58x was not real. The gate simulation reproduces the app (73/219 = 33.3% rendered against 146/220 reused)."
   - id: rve-film-gate-codec-2026-11-15
     title: "E31 (dropped): grain synthesis / motion-compensated reuse for film"
     type: research
