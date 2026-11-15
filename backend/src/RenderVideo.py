@@ -94,7 +94,7 @@ class Render:
         sceneDetectMethod: str = "pyscenedetect",
         sceneDetectSensitivity: float = 3.0,
         sharedMemoryID: Optional[str] = None,
-        trt_optimization_level: int = 3,
+        trt_optimization_level: int = 5,
         trt_dynamic_shapes: bool = False,
         override_upscale_scale: int | None = None,
         UHD_mode: bool = False,
