@@ -2124,6 +2124,39 @@ What is established: the register-capped cubin loads and runs, and the four cont
 is the lucky half; the scratch and the border are the quiet half, and the comparison caught them on the
 first try, which is why it exists.
 
+## Film is the better target, and its accuracy question is one number (2026-11-15)
+
+Every composition measurement so far was taken on material the gate reuses, which is the hard case: the
+engine's error and a stale reference add, and the amplification is 1.55-2.03x over the sum of the parts. On
+material where the gate **refuses** there is no reuse, so there is no composition - the defect is the
+engine's own, measured directly.
+
+And the gate refuses on exactly the material whose engine share is largest:
+
+| material | gate | engine share of the frame | wall gain at 1.49x engine |
+|---|---|---|---|
+| anime 1080p | reuse 72.7% | 0.646 | 1.27x |
+| film 1440x1080 | **refuses** (noise floor) | 0.866 | **1.40x** |
+| Bebop 1080p | **refuses** | 0.904 | **1.42x** |
+
+**Measured on Bebop, five scattered frames, int8 against fp16, no gate filter: worst share 0.016%, worst
+peak 16** (0.007% and 0.012% on the individual frames - 0.007, 0.016, and one below). Against a bar of 0.1%
+that is a 6x margin, and peak 16 sits under the "~20" guidance.
+
+So the film path asks one question and answers it: no reuse, no staleness, no break-even in points of reuse.
+The prize there is 1.40-1.42x of wall against 1.27x on anime, and in absolute terms a two-hour film goes
+2.99 h -> 2.10 h.
+
+What remains for film is delivery, and none of it needs new knowledge: sixteen launches under a CUDA graph
+on torch's stream (the launcher is bit-exact and knows its four contracts), the head and tail either left on
+TRT (non-GEMM 6.2 ms, 1.49x engine) or written as their own memory-bound kernels (non-GEMM ~1.7 ms, 1.69x
+engine), scales calibrated per video from frames the probe already runs, and the probe in the render path
+where it degenerates to "own defect against fp16 on N frames".
+
+2x on film would need 104 TOPS after the head and tail become ours (71% of the peak), against 77.6 measured
+and a codegen that cannot give more at this register allocation - so 2x stays a hand-written-kernel project,
+not the next step.
+
 ## The int8 fit probe (2026-11-15)
 
 `scripts/probe_int8_fit.py` answers the only product question left: does int8 fit *this* video? It takes N
