@@ -96,3 +96,24 @@ def test_clamped_to_the_configured_range():
     _feed(t, [(float(v), 0.0) for v in range(1, 20)])
     assert t.ready
     assert t.chosen <= 6.0
+
+
+def test_best_preset_refuses_to_reuse_when_nothing_is_certified():
+    """`fallback="off"` is the quality-first answer: no reuse beats the least-bad reuse."""
+    t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0, fallback="off")
+    _feed(t, [(60.0 + i, 200.0) for i in range(10)])
+    assert t.ready                 # calibration is over
+    assert t.chosen is None        # ...and the verdict is "do not reuse"
+    assert "reuse is OFF" in t.stats()
+
+
+def test_fast_preset_still_reuses_the_strictest_threshold():
+    t = AutoGateTuner(seed=5.0, min_pairs=8, budget=1.0, fallback="strictest")
+    _feed(t, [(60.0 + i, 200.0) for i in range(10)])
+    assert t.ready
+    assert t.chosen == min(t.candidates)
+
+
+def test_an_unknown_fallback_is_refused():
+    with pytest.raises(ValueError):
+        AutoGateTuner(fallback="maybe")
