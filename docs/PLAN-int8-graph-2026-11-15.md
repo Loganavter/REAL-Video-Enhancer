@@ -199,6 +199,32 @@ pipeline's chain against the simulation's chain**, layer by layer, on the same f
 Six hypotheses have been tested against fp16 in isolation and five of them died; comparing the two chains to
 each other is the only test that cannot be satisfied by a coincidence of the final number.
 
+**Layer-by-layer, the chains part at the FIRST hop and drift.** Relative error of the pipeline's chain
+against the simulation's, per layer, same 256x256 crop:
+
+| layer | 1 | 4 | 8 | 12 | 16 |
+|---|---|---|---|---|---|
+| rel error | **0.046** | 0.111 | 0.176 | 0.167 | 0.258 |
+
+Since the kernel matches the simulation to 0.0002 when handed *identical* input, layer 1's 4.6% is entirely
+in the handoff, not in the arithmetic. The difference is visible in the two recipes:
+
+    simulation:  fp16 activation -> one quantisation onto a PER-TENSOR grid from calibration -> dot
+    pipeline:    fp16 activation -> quantisation onto a PER-CHANNEL grid -> prologue requant to per-tensor
+
+The pipeline quantises twice and the simulation once, and the grids come from different places: the pipeline
+derives both from the activation's own range, the simulation takes `inputs[key]` (per-tensor) and
+`outputs[key]` (per-channel) from a calibration pass on fp16 activations. Sixteen hops of a slightly different
+grid is enough to turn 4.6% into 26%.
+
+The next test is therefore not another kernel variant but a **grid alignment**: rebuild the pipeline's chain
+using exactly the simulation's grids - `s_t = inputs[key]/127` for the prologue target and
+`s_out = outputs[key]` for the write - and see whether layer 1's 4.6% collapses. If it does, the pipeline was
+correct all along and only disagreed about which numbers to quantise to; if it does not, the difference is in
+the double quantisation itself, which is a design constraint rather than a bug.
+
+Steps 2-6 remain blocked on this gate.
+
 Next: build the kernel with the prologue requant - integer requant `(q * M[c] + R[c]) >> S[c]` on load, one
 int32 temporary per element, no fp32 expansion - and check `ptxas -v` first: the kernel already sits at 255
 registers, so a hot spill would kill the variant in a minute, exactly as the 168-register cap did.
