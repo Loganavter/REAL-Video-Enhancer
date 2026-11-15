@@ -142,7 +142,6 @@
 @claim app_engine_tiled    1 x     "log: 'tiling-full_headpad5_1920x1080', opt-5, head fused 3->8 channels" measured
 @claim app_inference_1080 35.85 ms "the app's own profile over 24 frames, 1920x1080 -> 3840x2160" measured
 @claim app_frame_ms       45.36 ms "the same profile, frame total" measured
-@claim body_vs_app        0.631 x  "derived: 35.85 / 56.82 - the body against the engine the app BUILDS" derived
-@derived body_vs_app "35.85 / 56.82 = 0.631: against the tiled engine the app actually uses, the body is slower"
+# (the cross-instrument version of body_vs_app lived here; recorded once above as superseded_ratio)
 @claim probe_admitted      1 x     "log: 'int8 probe: engine 0.002% composition 0.003% peak 14 (7 pairs) -> int8'" measured
 @claim probe_served        0 x     "log: no certification line; the render is tiled and the int8 hook only covers tilesize==0" measured
