@@ -7,6 +7,27 @@ from .QTcustom import RegularQTPopup
 from ..GenerateFFMpegCommand import FFMpegCommand
 from ..VideoInfo import VideoLoader
 
+# the combo box shows user words, the backend wants flag values.
+# this is the single place where the two are mapped.
+QUALITY_PRESET_LABELS = {
+    "Best quality": "best",
+    "Fast": "fast",
+}
+
+
+def qualityPresetLabelToValue(label: str) -> str:
+    """Maps a combo box label to the value the backend's --quality_preset expects."""
+    return QUALITY_PRESET_LABELS.get(label, "best")
+
+
+def qualityPresetValueToLabel(value: str) -> str:
+    """Maps a saved --quality_preset value back to its combo box label."""
+    for label, mappedValue in QUALITY_PRESET_LABELS.items():
+        if mappedValue == value:
+            return label
+    return "Best quality"
+
+
 class SettingsTab:
     def __init__(
         self,
@@ -232,6 +253,14 @@ class SettingsTab:
                 "video_encoder_speed", self.parent.video_encoder_speed.currentText()
             )
         )
+        self.parent.qualityPresetComboBox.currentIndexChanged.connect(
+            lambda: self.settings.writeSetting(
+                "quality_preset",
+                qualityPresetLabelToValue(
+                    self.parent.qualityPresetComboBox.currentText()
+                ),
+            )
+        )
         self.parent.inputFileText.textChanged.connect(
             self.updateFFMpegCommand
         )
@@ -357,6 +386,9 @@ class SettingsTab:
         self.parent.subtitle_encoder.setCurrentText(
             self.settings.settings["subtitle_encoder"]
         )
+        self.parent.qualityPresetComboBox.setCurrentText(
+            qualityPresetValueToLabel(self.settings.settings["quality_preset"])
+        )
 
     def selectOutputFolder(self):
         outputFile = QFileDialog.getExistingDirectory(
@@ -411,6 +443,7 @@ class Settings:
             "pytorch_version": "2.9.0",
             "pytorch_backend": "CUDA",
             "auto_hdr_mode": "True",
+            "quality_preset": "best",
         }
         self.allowedSettings = {
             "precision": ("auto", "float32", "float16"),
@@ -456,6 +489,7 @@ class Settings:
             "pytorch_version": ("2.9.0", "2.8.0", "2.6.0"),
             "pytorch_backend": "ANY",
             "auto_hdr_mode": ("True", "False"),
+            "quality_preset": ("best", "fast"),
         }
         self.settings = self.defaultSettings.copy()
         if not os.path.isfile(self.settingsFile):
