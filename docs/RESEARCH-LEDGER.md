@@ -1256,6 +1256,20 @@ Two levers are now measured rather than argued:
   Correlated means shrinking the activation range inflates the weights, so alpha sets how much peak is
   paid for share.
 
+**Per-tap weight scales are the first lever that improves both metrics at once.** Same held-out frame,
+same calibration, margin 1.25, symmetric activations:
+
+| weight scales | share above 8 | peak | median |
+|---|---|---|---|
+| per output channel (what TensorRT can do) | 0.058% | 37 | 1.93 |
+| **per (output channel, tap)** | **0.021%** | **32** | 1.99 |
+
+2.8x better on the share, five levels off the peak, and the median flat - so the gain is not a
+redistribution between the two statistics, it is a genuine reduction. This is exact rather than
+approximate in our own kernel: dequantise inside the tap loop, accumulate each tap in int32 over 64
+channels (64*127*127 ~ 1.03M, no overflow), sum the taps in fp32. Cost measured separately at ~0.1 ms on a
+1.91 ms block, and TensorRT cannot express it because its dequant must follow the whole accumulation.
+
 **Asymmetric activation scales were expected to take 91% of the binding metric and instead trade one
 against the other.** Same held-out frame, same calibration (two Violet frames), margin 1.25:
 
