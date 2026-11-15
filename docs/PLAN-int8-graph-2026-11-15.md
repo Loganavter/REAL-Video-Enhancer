@@ -824,6 +824,38 @@ reference is the broken side and the pipeline's conversion is fine.
 
 `16 * 1.97 + 6.2 = 37.7 ms` stops being a projection here.
 
+**State (2026-11-16, third measurement): THE GATE PASSES, 1.492x idle and 1.504x under NVENC.**
+
+The 2.00 ms came back from two places, and the smaller one was the block sweep:
+
+| BLOCK_M | warps | ms per launch |
+|---|---|---|
+| **64** | **2** | **2.771** |
+| 64 | 4 | 4.004 |
+| 128 | 4 | 2.876 |
+| 256 | 8 | 3.337 |
+| 512 | 16 | 3.427 |
+
+The recorded 1.97 ms for "BM 256 / 8 warps" does **not** reproduce with the prologue inside the kernel - that
+number belongs to the bare int8 block without the requant, and at 1080p the prologue's best configuration is
+BM 64 / 2 warps, not the one in the record. The sweep is worth doing rather than inheriting.
+
+The larger part came from fusing the dequantise into the tail: one Triton kernel reads the last hop's int8 codes
+NHWC and writes fp16 NCHW directly, instead of dequantising into a 530 MB float32 tensor, permuting it and casting
+it to half. That is **4.00 ms** (57.92 -> 53.92), eight times the 0.49 ms the quantise fusion bought - the
+asymmetry is the tell: the expensive side was the buffer round-trip, not the arithmetic.
+
+Final gate, three interleaved rounds each, clocks logged:
+
+| condition | fp16 engine | int8 cycle | ratio | margin under the gate |
+|---|---|---|---|---|
+| NVENC idle | 80.47 ms | 53.92 ms | **1.492x** | 3.56 ms |
+| NVENC alongside | 91.73 ms | 60.98 ms | **1.504x** | 4.54 ms |
+
+Accuracy unchanged by any of it: int8 vs the engine picture `>8 0.00004%, peak 8`, int8 vs the torch fp16 model
+`>8 0.00001%`. `docs/claims-int8-stage2.txt` reads **PASS**. NVENC costs the engine 13.99% and the int8 cycle
+13.09% - still no extra encoder sensitivity in the Triton body.
+
 **State (2026-11-16, second measurement): the gate is taken and it FAILS by 2.00 ms.**
 
 `scripts/int8_app_gate.py` loads the **cached fp16 TensorRT engine the app itself loads**

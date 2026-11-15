@@ -3,35 +3,38 @@
 
 @bar gate_ratio 1.40 x      # engine >= 1.4x
 @bar kill_ratio 1.15 x      # <= 1.15x and the lane does not pay
+@bar zero_excess 0.0 ms
 
-@claim engine_idle_ms   80.43 ms  "fp16 TensorRT engine forward, 1920x1080 to 2x, NVENC idle, 3 rounds" measured
-@claim int8_idle_ms     59.45 ms  "int8 full cycle, same session, NVENC idle, 3 rounds" measured
-@claim ratio_idle        1.353 x  "derived: engine_idle_ms / int8_idle_ms" derived
-@derived ratio_idle "80.43 / 59.45 = 1.353, interleaved rounds, clocks 2760->2670 MHz"
-@claim engine_nvenc_ms  91.92 ms  "fp16 engine forward, h264_nvenc encoding concurrently" measured
-@claim int8_nvenc_ms    67.23 ms  "int8 full cycle, h264_nvenc encoding concurrently" measured
-@claim ratio_nvenc       1.367 x  "derived: engine_nvenc_ms / int8_nvenc_ms" derived
-@derived ratio_nvenc "91.92 / 67.23 = 1.367, interleaved rounds"
+@claim engine_idle_ms   80.47 ms  "fp16 TensorRT engine forward, 1920x1080 to 2x, NVENC idle, 3 rounds" measured
+@claim int8_idle_ms     53.92 ms  "int8 full cycle, same session, NVENC idle, 3 rounds" measured
+@claim ratio_idle        1.492 x  "derived: engine_idle_ms / int8_idle_ms" derived
+@derived ratio_idle "80.47 / 53.92 = 1.492, interleaved rounds, clocks 2760->2655 MHz"
+@claim engine_nvenc_ms  91.73 ms  "fp16 engine forward, h264_nvenc encoding concurrently" measured
+@claim int8_nvenc_ms    60.98 ms  "int8 full cycle, h264_nvenc encoding concurrently" measured
+@claim ratio_nvenc       1.504 x  "derived: engine_nvenc_ms / int8_nvenc_ms" derived
+@derived ratio_nvenc "91.73 / 60.98 = 1.504, interleaved rounds, clocks 2805->2655 MHz"
 
-@claim nvenc_cost_engine 14.3 %   "engine 80.43 -> 91.92 ms with NVENC alongside" measured
-@claim nvenc_cost_int8   13.1 %   "int8 cycle 59.45 -> 67.23 ms with NVENC alongside" measured
+@claim nvenc_cost_engine 13.99 %  "engine 80.47 -> 91.73 ms with NVENC alongside" derived
+@derived nvenc_cost_engine "91.73 / 80.47 - 1 = 13.99%"
+@claim nvenc_cost_int8   13.09 %  "int8 cycle 53.92 -> 60.98 ms with NVENC alongside" derived
+@derived nvenc_cost_int8 "60.98 / 53.92 - 1 = 13.09%"
 
-@claim int8_vs_engine   0.00004 % "int8 cycle vs the fp16 engine image, same input, 1920x1080 to 2x" measured
+@claim int8_vs_engine   0.00004 % "int8 cycle vs the fp16 engine picture, same input, 1920x1080 to 2x" measured
 @claim int8_vs_torch    0.00001 % "int8 cycle vs the torch fp16 model, same input" measured
 @claim engine_vs_torch  0.00000 % "the engine and the torch model agree exactly on the same input" measured
 
-@claim body_per_launch  2.88 ms   "16 int8 launches over 46.0 ms at 1920x1080, BM 128 / 4 warps" measured
-@claim body_optimum     1.97 ms   "the recorded bare int8 block, BM 256 / 8 warps" measured
+@claim body_per_launch  2.771 ms  "16 int8 launches over 44.33 ms at 1920x1080, BM 64 / 2 warps" measured
+@claim body_before      2.876 ms  "the same at BM 128 / 4 warps" measured
 @claim quantise_fused   0.49 ms   "cycle 59.54 -> 59.05 ms when the quantise pass was fused into one kernel" measured
+@claim dequant_fused    4.00 ms   "cycle 57.92 -> 53.92 ms when the dequantise pass was fused into the tail" measured
 
-# The stage gate is "engine >= 1.4x", so what must hold is that the int8 cycle is short enough. Encoded as
-# the shortfall against that bar, which must be <= 0 - and it is not.
-@bar zero_excess 0.0 ms
-@claim shortfall_idle  2.00 ms  "int8_idle_ms - engine_idle_ms/1.40 = 59.45 - 57.45" derived
-@derived shortfall_idle "59.45 - 80.43/1.40 = 2.00 ms still to cut for the gate"
-@claim shortfall_nvenc 1.57 ms  "int8_nvenc_ms - engine_nvenc_ms/1.40 = 67.23 - 65.66" derived
-@derived shortfall_nvenc "67.23 - 91.92/1.40 = 1.57 ms still to cut for the gate"
+# The shortfall against the gate must be <= 0, and now it is.
+@claim shortfall_idle  -3.56 ms  "int8_idle_ms - engine_idle_ms/1.40 = 53.92 - 57.48" derived
+@derived shortfall_idle "53.92 - 80.47/1.40 = -3.56 ms: 3.56 ms of margin under the gate"
+@claim shortfall_nvenc -4.54 ms  "int8_nvenc_ms - engine_nvenc_ms/1.40 = 60.98 - 65.52" derived
+@derived shortfall_nvenc "60.98 - 91.73/1.40 = -4.54 ms: 4.54 ms of margin under the gate"
 @below shortfall_idle zero_excess
 @below shortfall_nvenc zero_excess
-# The kill condition (<=1.15x) is NOT triggered: 1.353 and 1.367 are both above it, and there is no
+
+# The kill condition (<=1.15x) is not triggered: 1.492 and 1.504 are both above it, and there is no
 # "above" directive - so it is recorded here rather than asserted.
