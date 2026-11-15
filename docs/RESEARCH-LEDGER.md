@@ -1016,6 +1016,35 @@ ceiling is the int8 rate, 147 TOPS, i.e. 16.6 ms of body plus non-GEMM = 24.7 ms
 1.97x at 120 TOPS, 1.84x at 109. That is E27 extended into a real kernel project (CUTLASS or
 hand-written), weeks of work, with 2x at the very top of its range.
 
+## E30b first look: a naive channel cut is 16x over the bar, and the error does not shrink with width
+
+Real frame, real x2 model, worst-channel reduction (the acceptance rule), reference is the uncut model:
+
+| keep | share above 8 levels (bar 0.1) | peak | median |
+|---|---|---|---|
+| 64 (control) | **0.000%** | 0 | 0.00 |
+| 56 | 1.573% | 59 | 0.90 |
+| 48 | 1.607% | 59 | 0.98 |
+| 40 | 1.580% | 59 | 0.93 |
+| 32 | 1.585% | 59 | 0.93 |
+
+The identity control at 64 reading exactly zero is what makes the rest readable: the slicing, the
+selection propagation through the stack and the statistic are correct, so this is the model's answer,
+not the instrument's.
+
+**The error does not scale with the cut.** Removing 8 of 64 channels costs the same as removing 32, and
+the peak is 59 levels in all four cases. That is the flat-region mechanism again, and it means the
+naive cut destroys a *different* thing than it appears to: not gradually more detail, but a DC-type
+shift that saturates as soon as the stack's balance is broken. It also explains why 48 - the cheap width
+that costs only 1.2x of time - is no better than 32 on the picture: on this metric they are the same
+cut.
+
+So the picture half stands at **16x over the bar before any reconstruction**, at every width worth
+considering. ASVD/SNOWS reconstruction is designed to minimise the output error rather than the weight
+error, and the next rung is the cheap version of exactly that: a per-layer least-squares refit on
+calibration activations, which is half an hour and tells whether the gap is closable before a day is
+spent on the full method.
+
 ## C=32 fuses and runs at 22.4-24.9 ms: the "fusion break" was the builder (2026-11-15)
 
 The same synthesized C=32 model that measured 45.69 ms with the PReLU split out rebuilt three times
