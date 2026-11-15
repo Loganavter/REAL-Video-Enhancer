@@ -1923,6 +1923,21 @@ accumulator comes back to 16 x 64 = 1024, i.e. the same as the current best conf
 prediction for this point is **parity, not a win** - it buys warp-level latency hiding at constant ILP,
 which is exactly the unnamed 6.24 cycles.
 
+And the third check needed correcting before it could be read. **`ptxas -v` reports static shared memory;
+Triton uses dynamic**, declared as `.extern .shared .b8 global_smem[]` and sized at launch - so the zero in
+that line was expected and proved nothing. The number that matters is `metadata.shared`:
+
+    metadata.shared = 12288 B  (12 KB per block)
+
+With 128 registers and 128 threads: four blocks need 49 152 B of smem (of 102 400) and exactly 65 536
+registers (of 65 536) - **four blocks and 16 warps fit on both axes**, and the fifth would exceed the
+register file. So the point is viable, and the one barrier the kernel declares is the staging that made the
+"zero smem" reading wrong in the first place.
+
+That number is also a launcher requirement, not a detail: `cuLaunchKernel` must be given
+`sharedMemBytes = 12 288`, or the kernel reads and writes outside its staging buffer - a silent corruption
+rather than a fault, which is exactly what the bit-exact comparison is for.
+
 Three checks on data already collected, and all three favour the point:
 
 | check | result | consequence |
