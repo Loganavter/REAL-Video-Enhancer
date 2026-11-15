@@ -220,18 +220,15 @@ precision experiment or an input-path rewrite.
    INT8 build, and an accuracy budget on real frames. Half a day, and the accuracy risk is the
    whole question - the implicit-with-fallback attempt was *slower*, but that configuration is a
    reformat-heavy graph, not a test of the format.
-2. **The input conversion - 2.80 ms/frame** of the gated anime path, paid once per frame by
-   whichever stage reads the frame first. The gate's own arithmetic is 0.80 ms, so the lever is
-   the input pipe. Where it goes, per `TorchUtils`: one H2D of the packed frame (6.2 MB at 1080p
-   8-bit, 12.4 MB at 10-bit) followed by roughly fifteen elementwise kernels that each
-   materialise a full-resolution intermediate (`sub_`/`div_`, two bilinear chroma upsamples,
-   `r`, `b`, `g` computed through `r` and `b`, a three-channel `stack`, `clamp_`, the dtype cast,
-   and in the 8-bit path a `reshape -> permute -> contiguous` layout copy). The bandwidth floor
-   for that traffic is ~0.1 ms, so it is launch- and materialisation-bound by roughly 30x. Two
-   candidates: give ffmpeg's decoder `gbrp` so the planar frame arrives in the layout the tensor
-   wants (kills the permute copy, 8-bit path only; the preview and cv2 consumers would need the
-   interleaved view), and rewrite the 10-bit conversion to write into one preallocated
-   3-channel buffer with `g` computed directly from `y,u,v`. Neither is measured.
+2. ~~The input conversion~~ **measured: it is PCIe-bound, not kernel-bound.** The 10-bit
+   conversion is 1.42 ms standalone at 1080p for 6.2 MB of packed planes, and the H2D of those
+   planes at ~6 GB/s is about 1 ms of that. Rewriting it to one preallocated buffer with `g`
+   computed from `y,u,v` (instead of through `r` and `b`, which materialised two extra full
+   frames), both chroma planes upsampled in one call and no `stack`, is correct to 0.02 levels
+   mean (max 0.37, fp16 rounding) and takes **1.26 ms against 1.42 ms** - 11%, not the 10x that
+   the earlier "30x above the bandwidth floor" estimate implied. That estimate counted GPU-side
+   bandwidth and forgot the frame has to cross PCIe first. The `gbrp` idea (planar decoder, no
+   permute) is the same order and does not justify reworking the preview and cv2 consumers.
 3. **E16 Winograd / E17 PReLU rewrite.** Both cheap, both expected near zero. E16's
    counter-precedent is now weaker: restricting the build to cuDNN alone made the engine 10.7%
    *slower*, so this TRT build's own kernels beat cuDNN's for this shape, whatever way cuDNN
