@@ -819,6 +819,51 @@ activation takes a scalar slope, which the measured slopes -1.39..1.70 rule out)
 hand-written or CUTLASS-generated int8 conv with a per-channel epilogue: E10's cost class, weeks, and
 the item that actually stands between 1.4x and 2x.
 
+## What the card can actually do, measured (2026-11-15)
+
+Three dense GEMMs, because the 2x question turned out to be a peak question and the peak in this
+ledger has been a borrowed number until now: `torch._int_mm` and `torch.matmul` on 8192^3, warm, 20
+iterations.
+
+| operation | TFLOP/s or TOPS |
+|---|---|
+| fp16 GEMM, fp32 accumulate (cuBLAS) | 42.1 |
+| int8 GEMM, B in the K-major layout | **147.4** |
+| int8 GEMM, B in the transposed layout | 39.3 |
+
+Two things follow, and the second one is the useful one.
+
+**Our body convolution is faster than cuBLAS fp16 because it accumulates in fp16.** The myelin kernel
+is named `f16f16_f16f16` - no fp32 accumulator - and reports 50.2 TFLOP/s, above the 42.1 that cuBLAS
+reaches with an fp32 accumulator. So the "74 TFLOP/s borrowed peak" was optimistic by roughly 1.7x for
+this class of kernel; the fp16 ceiling for what we run is nearer 88 TFLOP/s (fp16 accumulate), and 50.2
+is 57% of it.
+
+**int8 has a real 147 TOPS, so 2x is arithmetically reachable - at a price.** The body is 2.446 TFLOP,
+i.e. 16.6 ms at peak and 26.9 ms at the 91 TOPS our int8 convolution actually reports (62% of peak).
+Adding the 8.1 ms of non-GEMM work:
+
+| body efficiency | body | + non-GEMM | frame | against 56.28 |
+|---|---|---|---|---|
+| 147 TOPS (peak, unreachable in practice) | 16.6 | 8.1 | 24.7 | 2.28x |
+| 120 TOPS | 20.4 | 8.1 | 28.5 | 1.97x |
+| 109 TOPS | 22.4 | 8.1 | 30.5 | 1.84x |
+| 91 TOPS (measured today) | 26.9 | 8.1 | 35.0 | 1.61x |
+
+So 2x is not blocked by arithmetic, it is blocked by the epilogue that costs 32.7 ms, and behind that
+by GEMM efficiency: no configuration is 2x below 82% of the int8 peak. An in-kernel epilogue gets us
+to the 1.61x row (35 ms, and the measured ceiling test says 40.24 ms - the difference between 35 and 40
+is the epilogue's own write traffic and the non-GEMM part being larger than 8.1 in that build). The
+1.61x row is what a plugin buys; the rows above it need the GEMM itself to improve.
+
+**Scope change: grain-heavy cel samples are out of the acceptance sample set** (owner, 2026-11-15).
+Nobody upscales celluloid animation with its grain preserved, so the 35 mm TV clip is no longer a
+quality target and the question "what should the bar mean on grain" is withdrawn as posed: at sigma=16
+two independent grain fields differ by more than 8 levels on 72.4% of pixels, which made the bar
+unreachable by construction rather than by a defect. The measured numbers on that clip stay in this
+ledger as history (the gate's floor of 2.27, the refusal, the 1.85x), and the 2-4x headline for anime
+material is unaffected.
+
 ## What the literature closes, and the one item it reopens (2026-11-15)
 
 Written down because these are structural closures - true by the shape of our network, not measured
