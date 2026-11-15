@@ -2228,6 +2228,79 @@ background-color:#343b47
                                    </widget>
                                   </item>
                                   <item>
+                                   <widget class="QWidget" name="qualityPresetContainer" native="true">
+                                    <layout class="QHBoxLayout" name="horizontalLayout_qualityPreset">
+                                     <item>
+                                      <widget class="QLabel" name="qualityPresetLabel">
+                                       <property name="font">
+                                        <font>
+                                         <pointsize>12</pointsize>
+                                        </font>
+                                       </property>
+                                       <property name="text">
+                                        <string>Quality Preset</string>
+                                       </property>
+                                      </widget>
+                                     </item>
+                                     <item>
+                                      <spacer name="horizontalSpacer_qualityPreset">
+                                       <property name="orientation">
+                                        <enum>Qt::Orientation::Horizontal</enum>
+                                       </property>
+                                       <property name="sizeHint" stdset="0">
+                                        <size>
+                                         <width>237</width>
+                                         <height>20</height>
+                                        </size>
+                                       </property>
+                                      </spacer>
+                                     </item>
+                                     <item>
+                                      <widget class="QLabel" name="qualityPresetInfoLabel">
+                                       <property name="maximumSize">
+                                        <size>
+                                         <width>25</width>
+                                         <height>25</height>
+                                        </size>
+                                       </property>
+                                       <property name="toolTip">
+                                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:700;&quot;&gt;Quality Preset:&lt;/span&gt;&lt;/p&gt;&lt;p&gt; - How much of the previous frame and neighbouring tile results may be reused. &lt;span style=&quot; font-weight:700;&quot;&gt;Best quality&lt;/span&gt; re-checks every reuse before accepting it, &lt;span style=&quot; font-weight:700;&quot;&gt;Fast&lt;/span&gt; accepts more reuse and renders quicker.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                                       </property>
+                                       <property name="text">
+                                        <string/>
+                                       </property>
+                                       <property name="pixmap">
+                                        <pixmap resource="resources.qrc">:/icons/icons/info.svg</pixmap>
+                                       </property>
+                                       <property name="scaledContents">
+                                        <bool>true</bool>
+                                       </property>
+                                      </widget>
+                                     </item>
+                                     <item>
+                                      <widget class="QComboBox" name="qualityPresetComboBox">
+                                       <property name="minimumSize">
+                                        <size>
+                                         <width>0</width>
+                                         <height>0</height>
+                                        </size>
+                                       </property>
+                                       <item>
+                                        <property name="text">
+                                         <string>Best quality</string>
+                                        </property>
+                                       </item>
+                                       <item>
+                                        <property name="text">
+                                         <string>Fast</string>
+                                        </property>
+                                       </item>
+                                      </widget>
+                                     </item>
+                                    </layout>
+                                   </widget>
+                                  </item>
+                                  <item>
                                    <widget class="QWidget" name="widget_25" native="true">
                                     <layout class="QHBoxLayout" name="horizontalLayout_40">
                                      <property name="spacing">
