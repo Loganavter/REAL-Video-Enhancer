@@ -1007,6 +1007,29 @@ ceiling is the int8 rate, 147 TOPS, i.e. 16.6 ms of body plus non-GEMM = 24.7 ms
 1.97x at 120 TOPS, 1.84x at 109. That is E27 extended into a real kernel project (CUTLASS or
 hand-written), weeks of work, with 2x at the very top of its range.
 
+## Winograd exists on this card and TRT selects it - at C=32, not at C=64 (2026-11-15)
+
+A single Conv(3x3)+PReLU block exported at 1920x1080 and built with the app's settings is enough to see
+which family the builder reaches for, because the engine names the tactic it chose:
+
+| width | default build | fused? | time |
+|---|---|---|---|
+| C=64 | `__myl_CorrMulLtSele_myl1_0` -> `sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_...` | **yes** | 2.67 ms |
+| C=32 | `/conv/Conv` -> `ampere_scudnn_winograd_128x128_ldg1_ldg4_relu_tile148t_nt_v1` | **no** | 3.12 ms + 2.46 ms PReLU pass |
+
+So E16's stronger claim ("Winograd is not available here") is **wrong and now retracted**: a Winograd
+kernel exists for sm89 fp16 in this TensorRT build and is chosen by the builder as soon as it wins on a
+shape. What the earlier measurement established stands and is narrower - for the 64-channel body shape,
+cuDNN's best is 3.67 ms against our kernel's 3.05, so no cuDNN-selected algorithm beats what ships
+there. Two different statements, and the ledger had them merged.
+
+The second result explains the fusion break at C=32 better than "the width is too narrow": the tactic
+family changes, and both families that win at narrow widths - `scudnn_winograd` here,
+`sm80_xmma_..._indexed_wo_smem_...` in the full model - take no epilogue, so myelin leaves the PReLU
+outside. Whatever restores the epilogue at C=32 has to beat those kernels while staying in a family
+that fuses, which is exactly what `scripts/force_tactic.py` scans by forcing one tactic index at a time
+and reading the resulting layer names.
+
 ## What the literature closes, and the one item it reopens (2026-11-15)
 
 Written down because these are structural closures - true by the shape of our network, not measured
