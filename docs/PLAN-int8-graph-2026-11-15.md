@@ -199,6 +199,32 @@ pipeline's chain against the simulation's chain**, layer by layer, on the same f
 Six hypotheses have been tested against fp16 in isolation and five of them died; comparing the two chains to
 each other is the only test that cannot be satisfied by a coincidence of the final number.
 
+**Localised on the full frame: the error follows the content, not the border.** Pipeline against simulation on
+1920x1080, 8x8 tile map of the share of pixels above 8 levels:
+
+```
+ 0.19  0.30  0.01  0.25  0.98  0.63  1.22  0.10      <- top strip: quiet
+ 0.08  0.00  0.01  0.05  0.93  1.34  1.17  0.20
+ 0.14  1.44  0.03  0.03  0.20  1.84  0.64  0.60
+ 1.56  5.70  7.99  7.34  6.26  5.11  3.19  0.81      <- the busy middle
+ 1.08  4.60  6.96  5.27  5.18  4.13  2.11  1.47
+ 2.01  2.30  4.85 10.28  5.25  4.02  2.22  0.39
+ 0.32  0.87  4.35  6.32  4.86  6.16  1.14  0.56
+ 0.05  0.26  2.38  3.98  3.64  1.36  0.00  0.00
+```
+
+Only 0.5% of the failing pixels lie in the outer 16 px band (which is 2.3% of the image), and the mean error is
+*lower* at the border (2.78) than inside (3.30). So no clamp-at-the-edge story and no padding story: the
+pipeline diverges where the picture is busy, i.e. where the activations are large.
+
+Which points at saturation: every grid is a maximum over the calibration pass, and the chained activations
+drift away from the fp16 ones those maxima were taken on. A large activation that the fp16 chain keeps inside
+the range lands outside it after sixteen hops, clips at +-127, and the error appears exactly in the busy
+tiles.
+
+The next measurement is one counter per layer on both chains - the share of quantised values at |q| == 127 -
+and the first layer where the pipeline's saturation exceeds the simulation's is the one that starts the drift.
+
 **The size sweep was read wrong, and the requant precision is refuted too.**
 
 | crop | share |
