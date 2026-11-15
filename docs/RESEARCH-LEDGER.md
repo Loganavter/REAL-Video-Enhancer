@@ -1332,6 +1332,20 @@ Two consequences of that composition are unmeasured:
   The cheap fix is to run both engines on the 16 calibration frames and certify against fp16 there (16 x
   (56 + 40) ms ~ 1.5 s per video), leaving the other frames on int8 alone.
 
+  **Measured on an adjacent pair** (Chainsaw 3.000 s and 3.042 s, calibration on two other frames):
+
+  | what is compared | share above 8 | peak | median |
+  |---|---|---|---|
+  | bar: int8(t) against fp16(t) - engine error alone | 0.000% | 10 | 1.65 |
+  | tuner: int8(t) against int8(t-1) - what it would see | **0.024%** | 17 | 2.21 |
+  | bar: int8(t-1) against fp16(t) - reuse plus engine | 0.006% | 13 | 1.88 |
+  | fp16 against fp16, no int8 at all | 0.000% | 10 | 1.03 |
+
+  So the gap is real and **4x, in the safe direction**: the tuner would read 0.024% where the bar measures
+  0.006%, refuse reuse that actually passes, and pay in speed rather than in picture. Quantifying it also
+  says the composition is additive as predicted - 0.006% against 0.000% for the engine alone, i.e. the
+  reuse term adds its own small share instead of being masked.
+
 **And architecture weighs more than the remaining accuracy.** At 1.97 ms per block, keeping the TRT head
 and tail gives 39.6 ms = 1.42x engine / 1.24x wall; doing head and tail as Triton memory-bound kernels
 (145 MB and 195 MB of traffic, floors 0.50 and 0.68 ms against the current 3.90 and 3.35) gives 33.2 ms =
