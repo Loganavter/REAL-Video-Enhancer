@@ -271,7 +271,7 @@ class TiledUpscaler:
 
     def __init__(self, tile_lr: int = 512, halo_lr: int = 18, threshold: float = 0.35,
                  max_chain: int = 2, downscale: int = 8,
-                 scene_threshold: float = 32.0) -> None:
+                 scene_threshold: float = 32.0, tile_stat: str = "mean") -> None:
         if tile_lr <= 0:
             raise ValueError(f"tile_lr must be positive, got {tile_lr}")
         if halo_lr < 0:
@@ -286,6 +286,9 @@ class TiledUpscaler:
         self.max_chain = int(max_chain)
         self.downscale = int(downscale)
         self.scene_threshold = float(scene_threshold)
+        if tile_stat not in ("mean", "max"):
+            raise ValueError(f"tile_stat must be 'mean' or 'max', got {tile_stat!r}")
+        self.tile_stat = tile_stat
 
         self._prev_blocks = None          # (1, 1, bh, bw) low-passed luma, 8-bit levels
         self._prev_shape: Optional[Tuple[int, int]] = None
@@ -388,11 +391,17 @@ class TiledUpscaler:
     @_no_grad
     def _tile_deltas(self, blocks, prev, cores: Sequence[Rect]) -> List[float]:
         delta = (blocks - prev).abs()
-        blocks_h, blocks_w = int(blocks.shape[-2]), int(blocks.shape[-1])
+        blocks_h, blocks_w = int(blocks.shape[-2]), int(delta.shape[-1])
         per_tile = []
         for core in cores:
             by0, by1, bx0, bx1 = block_bounds(core, self.downscale, blocks_h, blocks_w)
-            per_tile.append(delta[..., by0:by1, bx0:bx1].amax())
+            window = delta[..., by0:by1, bx0:bx1]
+            # The per-tile statistic must be the MEAN of the low-passed deltas, not the max:
+            # a 512px tile holds 64x64 8px blocks, so a max trips on a single dithered block
+            # and the gate would never fire (measured: 9/9 tiles "changed" on every frame of
+            # a moving film). The measured predictor is mean-based: LR mean 0.25-0.35 ->
+            # HR mean 0.77 / max 0.95 levels, i.e. sub-1-level, invisible error.
+            per_tile.append(window.mean() if self.tile_stat == "mean" else window.amax())
         # one host sync for the whole frame instead of one per tile
         return [float(v) for v in torch.stack(per_tile).tolist()]
 

@@ -87,6 +87,11 @@ class UpscalePytorch:
         trt_workspace_size: int = 0,
         trt_optimization_level: int = 5,
         trt_tiling_level: str = "moderate",
+        tile_reuse: bool = False,
+        tile_lr: int = 512,
+        tile_halo: int = 18,
+        tile_threshold: float = 0.35,
+        tile_max_chain: int = 2,
         trt_max_aux_streams: int | None = None,
         trt_debug: bool = False,
         trt_static_shape: bool = False,
@@ -108,6 +113,16 @@ class UpscalePytorch:
         self.trt_workspace_size = trt_workspace_size
         self.trt_optimization_level = trt_optimization_level
         self.trt_tiling_level = trt_tiling_level
+        self.tile_reuse = tile_reuse
+        self.tile_threshold = tile_threshold
+        self.tile_max_chain = tile_max_chain
+        self.tile_upscaler = None
+        self._prev_hr = None
+        if tile_reuse:
+            # the model is fully convolutional: run it on tile windows instead of whole frames
+            self.tilesize = tile_lr
+            self.tile = [tile_lr, tile_lr]
+            self.tile_pad = tile_halo
         self.trt_aux_streams = trt_max_aux_streams
         self.trt_debug = trt_debug
         
@@ -155,7 +170,19 @@ class UpscalePytorch:
                     modulo = 2
                 case _:
                     modulo = 1
-            if all(t > 0 for t in self.tile):
+            if self.tile_reuse:
+                from .TiledUpscale import TiledUpscaler
+                self.tile_upscaler = TiledUpscaler(
+                    tile_lr=self.tilesize,
+                    halo_lr=self.tile_pad,
+                    threshold=self.tile_threshold,
+                    max_chain=self.tile_max_chain,
+                )
+                side = self.tile_upscaler.tile
+                self.pad_w = math.ceil(side / modulo) * modulo
+                self.pad_h = self.pad_w
+                log(f"Tile reuse enabled: {self.tilesize}px LR tiles + {self.tile_pad}px halo -> engine {self.pad_w}x{self.pad_h}")
+            elif all(t > 0 for t in self.tile):
                 self.pad_w = (
                     math.ceil(
                         min(self.tile[0] + 2 * self.tile_pad, self.videoWidth) / modulo
@@ -310,7 +337,17 @@ class UpscalePytorch:
         with self.torchUtils.run_stream(self.stream):
             while self.upscale_model_wrapper is None:
                 sleep(1)
-            if self.tilesize == 0:
+            if self.tile_upscaler is not None:
+                rects = self.tile_upscaler.plan(image_tensor)
+                if rects is None and self._prev_hr is not None:
+                    # nothing changed: re-emit the previous HR frame as-is
+                    output = self._prev_hr
+                else:
+                    output = self.tile_upscaler.compose(
+                        self.scale, self.upscale_model_wrapper, self._prev_hr, image_tensor
+                    )
+                    self._prev_hr = output
+            elif self.tilesize == 0:
                 output = self.upscale_model_wrapper(image_tensor)
             else:
                 output = self.renderTiledImage(image_tensor)
