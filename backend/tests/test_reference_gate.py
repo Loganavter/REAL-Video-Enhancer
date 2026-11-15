@@ -656,3 +656,25 @@ def test_torch_1080p_cost():
           f"with pixel veto {vetoed:.3f} ms")
     assert cheap < 10.0
     assert vetoed < 10.0
+
+
+def test_a_scene_cut_is_reported_so_callers_can_reset_their_histories():
+    """The gate drops its reference at a cut; callers keeping their own history must know.
+
+    The auto tuner keeps the last `max_chain` output grids to score depth-2/3/4 reuses. Without a
+    reset at the cut it scores reusing across a shot change - something the gate never does - and
+    one busy opening is enough to pin the chain to 1 for the whole title (measured on three real
+    Blu-rays; Chainsaw Man reads 0.2 at depth 1 and 16-35 at depths 2-4 on calm frames).
+    """
+    torch = _torch()
+    gate = TR.ReferenceFrameGate(threshold=4.0, max_chain=4)
+    dark = torch.zeros(1, 3, 1080, 1920)
+    bright = torch.ones(1, 3, 1080, 1920)
+    gate.is_duplicate(dark)
+    assert gate.last_scene_cut is False           # no reference yet, nothing to cut from
+    gate.is_duplicate(dark)
+    assert gate.last_scene_cut is False
+    gate.is_duplicate(bright)                     # full-range jump: a cut
+    assert gate.last_scene_cut is True
+    gate.is_duplicate(bright)
+    assert gate.last_scene_cut is False           # the new reference is now stable
