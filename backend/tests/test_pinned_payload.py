@@ -715,8 +715,11 @@ def test_pooled_yuv420p10_payload_is_byte_identical():
     frame.yuv10_output = True
     payload = frame.get_frame_bytes()
     expected = FrameModule._torch_utils.tensor_to_yuv420p10(tensor)
-    assert len(payload) == len(expected), "3 bytes/pixel: Y + two quarter-size chroma planes"
-    assert bytes(payload) == expected
+    # the converter hands back a freshly allocated numpy array (one host copy less); compare
+    # through a common byte view so the test does not care which of the two it is
+    expected_bytes = expected.tobytes() if hasattr(expected, "tobytes") else bytes(expected)
+    assert len(bytes(payload)) == len(expected_bytes), "3 bytes/pixel: Y + chinroma planes"
+    assert bytes(payload) == expected_bytes
     frame.release_payload()
 
 
