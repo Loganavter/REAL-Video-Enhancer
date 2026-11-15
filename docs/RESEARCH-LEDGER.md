@@ -345,8 +345,12 @@ used to choose a default.
   (anime 33% predicted against 58% achieved, film 15% against 9.5%) and the sample is two titles.
   Three more anime clips with different grain would settle whether "cost must clear 1/area_tax"
   is the right bar or luck.
-- **The GUI still passes its own `--video_pixel_format` default**, so the 10-bit output fix
-  reaches the CLI only. The GUI path keeps quantising 10-bit sources at the encoder.
+- ~~The GUI never passes any reuse flag.~~ Now it passes one: `--quality_preset`, exposed as a
+  "Quality preset" combo in the render options and defaulting to `best`. The tile and threshold
+  knobs stay CLI-only on purpose - they are the ones that need measurement to use well.
+- **The GUI's output depth** comes from its own `--custom_encoder` string within
+  `GenerateFFMpegCommand`, not from `--video_pixel_format`; the backend's depth resolution is
+  bypassed there, and `auto_hdr_mode` promotes a 10-bit source on its own.
 - **The pooled payload corruption is explained but unverified.** The writer instrumentation
   shows the queue never fills (depth 4 of 25), so the mechanism must be a slot released before
   its last byte was copied. The feature is off; re-verifying it would buy 0.79 ms/frame.
