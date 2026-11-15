@@ -1055,13 +1055,42 @@ the configuration E9' could not express. Measured on a real frame against the fp
 | peak | 7 levels |
 | median | 1.15 levels |
 
-So the design is admissible on this frame, and the margin is at the peak rather than in the share: 7
-against a bar of 8, where E9's per-tensor build measured 4. **That is the opposite of what was
-predicted** - per-channel output scales were expected to beat the per-tensor peak, and the simulation
-has them 3 levels worse. Two candidate reasons, both cheap to test: my activation scales are max-based
-(saturating) rather than percentile-based, and the calibration here is two frames including the test
-frame itself, which is exactly the kind of leak this investigation keeps catching. Either way the
-conclusion for the lane is unchanged (passes, thin at the peak) and the tuning question is named.
+**But it does not survive a held-out title, and the leak was mine.** Calibrated on one frame of one
+title and evaluated on a frame of another (Violet Evergarden):
+
+| held-out | share above 8 levels | peak | median |
+|---|---|---|---|
+| same shot, 1/24 s apart | 0.000% | 7 | 1.15 |
+| **different title** | **3.573%** | **120** | 1.34 |
+
+Clip rate on the held-out title, by layer: **body.0 23.8%**, body.1 2.9%, body.3 0.46%. So the failure is
+not diffuse - it is the head conv's input, which is the image itself and whose range a single frame
+under-samples; the per-tensor scale from one title's maximum then clips a fifth of another title's
+pixels, and clipping is what produces a 120-level peak.
+
+Two corrections follow, and one of them also corrects an earlier reading:
+
+- **The peak bar is 20 levels, not 8.** The acceptance rule has two numbers - share above 8 levels under
+  0.1%, and peak under ~20 - so "peak 7 against 8" was comparing the peak against the share's threshold.
+  Against its own bar the same-frame result has 13 levels of margin, and the real defect was the sample,
+  not the margin.
+- **The head's input range is known** (0..1 after the clamp), so its scale is a domain constant and not a
+  calibration result; the layers after it need calibration over several titles, or a percentile, or the
+  asymmetric form below.
+
+**And the mechanism behind "per-channel was worse" is the format, not the granularity.** E9's boundary was
+`int8 -> half -> PReLU in fp16 -> requant`, i.e. 11 bits at the hop; the kernel's is `int32 -> PReLU ->
+int8`, i.e. 8. At an activation of 55 the fp16 step is ~0.031 and the per-channel int8 step is ~0.435, so
+fp16 is ~14x finer there and per-channel scales buy back about a bit of the three the format change
+spends. That is why a design that should have been more accurate measured worse - and it is the reason
+the next lever is the **asymmetric** boundary (scale + zero-point), where a one-sided channel such as a
+negative PReLU slope spends half its codes on values it never produces: 60/256 = 0.234 against
+55/127 = 0.433 on a [-55, +5] channel, i.e. ~0.9 of a bit, folded into the bias as `z_a * sum(w)`.
+
+Also checked before any of this could mislead a later step: the requant rounds to nearest
+(`floor(v/s + 0.5)` in both kernel and reference), so there is no coherent -0.5 LSB bias across the 16
+layers; and the model clips to [0,1] *before* the residual add, so the tail kernel reads one buffer, not
+two.
 
 What it does not settle: the seam structure when the block is inserted into the graph (target: the
 40.24 ms build's four reformats and one pointwise), and whether the 8.1 ms of non-GEMM survives the
