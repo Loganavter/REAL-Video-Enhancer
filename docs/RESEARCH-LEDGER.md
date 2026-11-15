@@ -1007,6 +1007,30 @@ ceiling is the int8 rate, 147 TOPS, i.e. 16.6 ms of body plus non-GEMM = 24.7 ms
 1.97x at 120 TOPS, 1.84x at 109. That is E27 extended into a real kernel project (CUTLASS or
 hand-written), weeks of work, with 2x at the very top of its range.
 
+## C=32 fuses and runs at 22.4-24.9 ms: the "fusion break" was the builder (2026-11-15)
+
+The same synthesized C=32 model that measured 45.69 ms with the PReLU split out rebuilt three times
+with an explicit 8 GB workspace pool: **24.88, 24.06, 22.41 ms, sixteen fused myelin layers and zero
+separate PReLU passes in all three.** The body convolutions come in at 1.17-1.42 ms each, i.e. at the
+1.3 ms bar that makes the frame 2x.
+
+Against 56.68 ms at C=64 that is **2.28-2.53x**, and the spread across three identical builds (1.11x)
+is smaller than the effect.
+
+Two candidate causes and they are not yet separated: the **workspace pool** (myelin needs scratch for
+its fused kernels; without it, the body falls back to `indexed_wo_smem` plus separate pointwise passes,
+which is exactly the 45.69 ms configuration) and the **tactic-selection instability** measured earlier
+on a single block, where two builds of one file chose `scudnn_winograd` and `sm80_xmma` in turn. Both
+produce the same symptom, and the separation matters beyond this row: `build_plan` in
+`RawTRTEngine.py` never sets a workspace limit, so if the pool is the cause, the **shipped** engine is
+also leaving tactics on the table, and that would be a speedup with no width cut and no picture risk.
+
+Honest status of the number: it is a synthesized model at C=32 with random weights, so it measures time
+and nothing else. What it establishes is that the fused build exists, reproduces, and lands where the
+plan needs it. What it does not establish is the picture at 32 channels - a half-width body is a far
+larger perturbation than the 2.1% weight noise that int8 showed to cost a 4-level peak against an
+8-level bar.
+
 ## Winograd exists on this card and TRT selects it - at C=32, not at C=64 (2026-11-15)
 
 A single Conv(3x3)+PReLU block exported at 1920x1080 and built with the app's settings is enough to see

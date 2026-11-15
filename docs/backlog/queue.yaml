@@ -243,7 +243,8 @@ tasks:
     relates_to: [backend/src/pytorch/RawTRTEngine.py, docs/RESEARCH-LEDGER.md]
     owns_files: [scripts/force_tactic.py]
     refutes: "No tactic in the epilogue-capable family can be built for C=32 - then the width genuinely needs a kernel of our own with a 32-wide N tile, and the prize moves to E27."
-    acceptance: "A C=32 plan whose body convolutions report a fused myelin tactic, with its total ms and the number of separate pointwise passes. Target: under 30.8 ms total (1.84x) as the conservative case."
+    acceptance: "A C=32 plan whose body convolutions BOTH report a fused myelin tactic AND land at or under ~1.3 ms per convolution. The second half is the whole prize: 16 x 1.3 + ~4 = 24.8 ms (2.29x), while a fused tactic at 3.0 ms gives 51.5 ms (1.10x). 'Beats winograd' is not the criterion - winograd measured 3.12 ms here, and beating it is compatible with gaining nothing. Conservative floor: 30.8 ms (1.84x) if the N tile stays half empty."
+    confound: "The single-block probe and the full model choose DIFFERENT tactics at C=32: the probe picks scudnn_winograd (3.12 + 2.46 = 5.58 ms) while the full model picks indexed_wo_smem (1.26 + 1.45 = 2.71 ms) - 2.06x apart, not drift. At C=64 they agree (2.67 against 2.93). So the probe ranks something the engine does not do; the boundary reformats on a single block are the same confound that made the 64->64 ceiling read 7.90 ms against ~3 in the engine. Fix: NHWC I/O on the probe, and re-verify the top candidates inside the full model before believing any of them. Same for the workspace: a tactic skipped for lack of a scratch buffer is absent from the sweep for the wrong reason (the documented CUDA error 2 allocating 4.2 GB during autotuning)."
     note: "B1 names the tactic family that fuses; this tries to get it back at 32. TRT 10.12 exposes IAlgorithmSelector (deprecated in 10.8 in favour of editable ITimingCache) and ITimingCache, so exclusion is possible in principle - the open question is whether the selector can identify a tactic by family, since IAlgorithmVariant gives implementation+tactic hash rather than a kernel name."
   - id: rve-prelu-rewrite-at-32-2026-11-15
     title: "B3: reopen E17 at C=32 - a*x + (1-a)*ReLU(x) may fuse where PReLU does not"
@@ -289,6 +290,21 @@ tasks:
     relates_to: [docs/RESEARCH-LEDGER.md]
     owns_files: []
     note: "Measured context that would have mattered: on 35 mm the gate refuses because the noise floor is 2.27 against a 1.5 limit, so the render stays at 1.85x where the same engine gets 2-4x on anime. Decomposing base and grain would let the gate certify on a base whose floor is ~0.8. Not taken."
+  - id: rve-hr-reference-cache-2026-11-15
+    title: "E37: keep 64 HR references and search by signature instead of a chain of one"
+    type: experiment
+    status: todo
+    owner: null
+    priority: P1
+    gpu: true
+    cost: "1-2d"
+    tags: [reuse, cache, gate, vram]
+    base_branch: perf/inference
+    relates_to: [backend/src/utils/TemporalReuse.py, backend/src/RenderVideo.py]
+    owns_files: [backend/src/utils/TemporalReuse.py, backend/tests/test_auto_gate.py]
+    refutes: "Signature search does not find a reference the chain could not: i.e. on Chainsaw Man the calm frame still matches nothing better than depth 1. Then the reachability limit was not what cost 1.5x there."
+    acceptance: "Reuse share and wall clock on Chainsaw Man and Violet against the current chain results (146/220 at 6.61 s and 142/219 at 6.90 s), the worst-frame statistic unchanged, and the tile dilation tax either kept or provably removable because all reused tiles come from one cached reference."
+    note: "The gate stores ONE reference, so the chain is a window of length one and reachability is a property of the storage, not of the reference quality - it cost 1.5x on Chainsaw Man, whose calm frame reads 0.2 at depth 1 and 16-35 at depths 2-4 because a one-frame flash sits next door. 64 references at 49.8 MB is 3.2 GB of the 16 GB the card has; the signature is 60x34 block means, so the search is ~130k comparisons and the full box(|diff|) still runs once, on the winner. Second-order effect worth more than the first: with every reused tile pulled from one cached reference, tile coherence is structural instead of bought with dilation, which currently removes 4x of the artefact at the cost of a third of the reuse."
   - id: rve-strip-concurrency-2026-11-15
     title: "C: horizontal strips on separate streams - hide the boundary instead of removing it"
     type: experiment
