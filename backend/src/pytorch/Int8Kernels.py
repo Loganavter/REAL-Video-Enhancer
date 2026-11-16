@@ -23,7 +23,8 @@ try:                       # round-half-to-EVEN, which is what torch.round does
 except Exception:          # pragma: no cover - older triton
     _rint = None
 
-__all__ = ["body_prologue_kernel", "quantise_nchw_to_nhwc", "quantise_nhwc", "quantise_nhwc_prelu",
+__all__ = ["body_prologue_kernel", "quantise_nchw_to_nhwc", "quantise_nchw_to_nhwc_prelu", "quantise_nhwc",
+           "quantise_nhwc_prelu",
            "dequantise_nhwc_to_nchw", "dequantise_nhwc"]
 
 
@@ -148,3 +149,23 @@ def quantise_nhwc_prelu(x_ptr, s_ptr, slope_ptr, y_ptr, n_pix, BLOCK: tl.constex
     q = tl.floor(v.to(tl.float32) / tl.load(s_ptr + ch)[None, :] + 0.5)
     q = tl.minimum(tl.maximum(q, -127.0), 127.0)
     tl.store(y_ptr + pix[:, None] * C + ch[None, :], q.to(tl.int8), mask=mask[:, None])
+
+
+@triton.jit
+def quantise_nchw_to_nhwc_prelu(x_ptr, s_ptr, slope_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl.constexpr):
+    """Pre-PReLU head (NCHW) -> PReLU -> int8 NHWC, one pass.
+
+    The app's head is contiguous NCHW, and `F.prelu` on it allocates a fresh 265 MB tensor every frame - which
+    measured 20.2 ms for the phase against 1.6 ms for the conversion kernel alone on the same input. Fusing the
+    PReLU removes both the allocation and the extra read-write.
+    """
+    pid = tl.program_id(0)
+    pix = pid * BLOCK + tl.arange(0, BLOCK)
+    ch = tl.arange(0, C)
+    mask = pix < n_pix
+    v = tl.load(x_ptr + ch[:, None] * n_pix + pix[None, :], mask=mask[None, :], other=0.0)
+    sl = tl.load(slope_ptr + ch)[:, None].to(tl.float16)
+    v = tl.where(v >= 0, v, v * sl)
+    q = tl.floor(v / tl.load(s_ptr + ch)[:, None].to(tl.float16) + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    tl.store(y_ptr + pix[:, None] * C + ch[None, :], tl.trans(q).to(tl.int8), mask=mask[:, None])
