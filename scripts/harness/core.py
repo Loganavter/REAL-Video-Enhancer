@@ -39,7 +39,7 @@ UNITS: dict[str, str] = {
     "min": "time",                       # minutes; the corpus also uses "min" as a statistic name
 }
 
-STATISTICS = ("single", "mean", "median", "min", "max", "worst_of", "p99", "sum")
+STATISTICS = ("single", "mean", "median", "min", "max", "worst_of", "p90", "p99", "p99.9", "sum")
 TIERS = ("measured", "derived", "assumed")
 
 
@@ -175,7 +175,8 @@ class Record:
 
     def claims_line(self) -> str:
         pop = self.population.claims_text().replace('"', "'")
-        return f'@claim {self.id} {self.value:g} {self.unit} "{pop}" {self.tier}'
+        # repr, not :g - the claims file must round-trip to the exact float it describes
+        return f'@claim {self.id} {self.value!r} {self.unit} "{pop}" {self.tier}'
 
 
 def _compare_field(name: str, a: Any, b: Any, allow: bool, why: str) -> None:
