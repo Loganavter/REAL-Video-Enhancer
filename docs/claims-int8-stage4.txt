@@ -225,3 +225,11 @@
 @below render_share_epilogue bar_share
 # The probe decides from the SIMULATION, not from these kernels, so its verdicts are unaffected by the move.
 @claim probe_independent 1 x "Int8Probe uses _quantised_forward; the requant move cannot change its verdicts" measured
+
+# ---- the FUSED head conversion adopted (PReLU + quantise in one pass)
+@claim fused_head_ms     1.71 ms "fused PReLU+quantise, 1080p, 64 channels" measured
+@claim separate_head_ms  4.01 ms "F.prelu + conversion, same shape" measured
+@claim int8_window_ms2  42.75 ms "one process, host timeline, steady state, 1920x1080" measured
+@claim body_cert_fused 0.00820 % "certification, fused head, best of the three schemes" measured
+@ratio fp16_window_ms int8_window_ms2 1.194 "one process, host timeline, steady state, 1920x1080, fused head"
+@below body_vs_app kill_ratio
