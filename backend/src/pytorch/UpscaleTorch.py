@@ -540,6 +540,10 @@ class UpscalePytorch:
         if getattr(self, "_int8_done", False):
             return getattr(self, "_int8_live", None)
         self._int8_done = True
+        import os
+        if str(os.environ.get("RVE_INT8_BODY", "auto")).lower() == "off":
+            log("int8: disabled by RVE_INT8_BODY=off - the fp16 engine runs")
+            return None
         log("int8: start (tilesize=%s, tile_upscaler=%s, int8Fit=%s)",
             getattr(self, "tilesize", "?"), getattr(self, "tile_upscaler", None) is not None,
             getattr(self, "int8Fit", "<unset>"))
