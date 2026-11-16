@@ -534,86 +534,53 @@ class UpscalePytorch:
         return retFrame
  
     def _int8_body(self, frame=None):
-        """The int8 body for this render, or None. Certified once, on the first frame, or not at all.
-
-        The body is only a candidate: it calibrates on the first frame and then has to reproduce the fp16
-        model on that same frame within the bar before it may serve a single pixel. Today it does not -
-        3.53% at 1920x1080 against a 0.1% bar - so this returns None and the fp16 engine runs, with the
-        number in the log rather than an assumption. A body that cannot pass its own bar on its own
-        calibration frame is not a faster engine, it is a wrong picture.
-        """
-        if getattr(self, "_int8_decision", False):
-            return getattr(self, "int8_body", None)
-        self._int8_decision = True
-        body = getattr(self, "int8_body", None)
-        if body is None and str(getattr(self, "int8Fit", "fp16")) == "int8":
-            # the probe admitted this video; build the body from the model the wrapper loaded
+        """The int8 body for this render, or None. Built, calibrated and certified once, then reused."""
+        import logging
+        log = logging.getLogger("RVE").warning
+        if getattr(self, "_int8_done", False):
+            return getattr(self, "_int8_live", None)
+        self._int8_done = True
+        log("int8: start (tilesize=%s, tile_upscaler=%s, int8Fit=%s)",
+            getattr(self, "tilesize", "?"), getattr(self, "tile_upscaler", None) is not None,
+            getattr(self, "int8Fit", "<unset>"))
+        body = None
+        if str(getattr(self, "int8Fit", "")) == "int8":
             wrapper = getattr(self, "upscale_model_wrapper", None)
-            model = getattr(wrapper, "model", None) if wrapper is not None else None
+            model = wrapper.get_model() if wrapper is not None and hasattr(wrapper, "get_model") else None
+            log("int8: wrapper=%s model=%s", type(wrapper).__name__ if wrapper else None,
+                type(model).__name__ if model is not None else None)
             if model is not None:
-                from .Int8Body import Int8Body
-                if Int8Body.supports(model):
-                    try:
-                        body = Int8Body(model)
-                        self.int8_body = body
-                    except Exception as error:  # noqa: BLE001
-                        import logging
-                        logging.getLogger("RVE").warning("int8 body could not be built (%s)", error)
+                try:
+                    from .Int8Body import Int8Body
+                    body = Int8Body(model)
+                    log("int8: built (supports=%s)", Int8Body.supports(model))
+                except Exception as error:  # noqa: BLE001
+                    log("int8: build failed (%s)", error)
+        else:
+            log("int8: verdict is not int8, fp16 engine runs")
         if body is None:
             return None
         self._int8_frame = frame
-        # The body wins at 1920x1080 (1.411x idle, 1.428x under NVENC) and LOSES at 3840x2160 (0.774x idle,
-        # 0.771x under NVENC, and 0.116% off the engine against a 0.1% bar). The engine scales better because
-        # it is one fused graph while this is sixteen launches plus three conversions. Until a 4K measurement
-        # says otherwise, refuse anything above 1080p-class frames - a 25% regression is worse than the fp16
-        # path it replaces, and the probe decides content, not resolution.
         try:
             if frame is not None:
                 pixels = int(frame.shape[-2]) * int(frame.shape[-1])
                 if pixels > 2_500_000:
-                    import logging
-                    logging.getLogger("RVE").warning(
-                        "int8 body refused at %dx%d: measured 0.77x against the engine at 4K (1.41x at "
-                        "1080p). Keeping the fp16 engine.", frame.shape[-1], frame.shape[-2])
-                    self.int8_body = None
+                    log("int8: refused at %dx%d (measured 0.77x at 4K against 0.96x at 1080p)",
+                        frame.shape[-1], frame.shape[-2])
                     return None
-        except Exception:  # noqa: BLE001 - a shape check must never cost a render
+        except Exception:  # noqa: BLE001
             pass
-        import os
-        _mode = str(getattr(self, "int8FitBody", None) or os.environ.get("RVE_INT8_BODY", "auto")).lower()
-        if _mode == "off":
-            # Measured: the body certifies at 0.00000% on 256, 512 and 1080, and runs 60.41 ms against the
-            # app's own fp16 engine at 79.86 ms - 1.322x, or 1.328x with NVENC alongside. That clears the
-            # plan's kill line (1.15x, by 9.13 ms) and misses its 1.40x gate by 3.34 ms, because 16.1 ms of
-            # fp16 head and tail sit on top of a 44.3 ms body. The gate is the plan's condition for treating
-            # the path as ready, so it stays behind an explicit opt-in - but the log states the measured
-            # ratio rather than implying anything.
-            import logging
-            logging.getLogger("RVE").warning(
-                "int8 body disabled by int8FitBody=off; the measured ratio is 1.42x against the fp16 engine")
-            return None
         try:
-            frame = getattr(self, "_int8_frame", None)
-            if frame is None:
-                return None
             body.calibrate(frame)
             share, ok = body.certify(frame)
-            import logging
-            logging.getLogger("RVE").warning(
-                "int8 body self-certification on the first frame: %.4f%% of pixels >8 levels (bar 0.1%%) "
-                "-> %s", share, "serving" if ok else "refusing, fp16 engine runs")
+            log("int8 body self-certification on the first frame: %.5f%% of pixels >8 levels (bar 0.1%%) -> %s",
+                share, "serving" if ok else "refusing, fp16 engine runs")
             if not ok:
-                self.int8_body = None
                 return None
-            import logging
-            logging.getLogger("RVE").warning(
-                "int8 body serving this render: certified %.5f%% on the first frame, measured 1.42x "
-                "against the fp16 engine (80.5 -> 56.9 ms, 1920x1080)", share)
+            self._int8_live = body
             return body
         except Exception as error:  # noqa: BLE001 - never let this cost a render
-            import logging
-            logging.getLogger("RVE").warning("int8 body refused to start (%s); fp16 engine runs", error)
-            self.int8_body = None
+            log("int8 body refused to start (%s); fp16 engine runs", error)
             return None
 
     def getScale(self):
