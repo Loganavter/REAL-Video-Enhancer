@@ -49,7 +49,9 @@ def main() -> int:
     ap.add_argument("--iters", type=int, default=25)
     ap.add_argument("--warm", type=int, default=6)
     ap.add_argument("--repeat", type=int, default=3)
+    ap.add_argument("--harness-note", default="one GPU job at a time", help="notes for the record's instrument field")
     ap.add_argument("--dump-layers", action="store_true")
+    ap.add_argument("--emit", default="", help="write the repeats as harness records (JSONL)")
     args = ap.parse_args()
 
     logger = trt.Logger(trt.Logger.ERROR)
@@ -70,7 +72,7 @@ def main() -> int:
         import json
         layers = json.loads(info) if isinstance(info, str) else info
         rows = layers.get("Layers", layers) if isinstance(layers, dict) else layers
-        names = [str(r.get("Name", "")) for r in rows]
+        names = [str(r.get("Name", "")) if isinstance(r, dict) else str(r) for r in rows]
         print(f"total {len(names)}, __myl_ {sum(n.startswith('__myl_') for n in names)}, "
               f"Reformat {sum('Reformat' in n for n in names)}, "
               f"PointWise {sum('PointWise' in n or n.startswith('PWN') for n in names)}, "
@@ -87,6 +89,7 @@ def main() -> int:
     def once() -> None:
         ctx.execute_async_v3(stream.cuda_stream)
 
+    results: list[float] = []
     with torch.cuda.stream(stream):
         for _ in range(args.warm):
             once()
@@ -99,8 +102,37 @@ def main() -> int:
             end.record()
             torch.cuda.synchronize()
             ms = start.elapsed_time(end) / args.iters
+            results.append(ms)
             flops = 2.0 * 64 * 64 * 9 * 16 * args.height * args.width   # 16 body convs, as MODEL.md §1
             print(f"repeat {r}: {ms:.2f} ms/frame -> {flops / ms / 1e9:.1f} TFLOP/s")
+
+    if args.emit:
+        import statistics
+        sys.path.insert(0, "scripts")
+        from harness import Population, Record, Store
+        store = Store()
+        insp = engine.create_engine_inspector()
+        import json as _json
+        layers = _json.loads(insp.get_engine_information(trt.LayerInformationFormat.JSON))
+        rows = layers.get("Layers", layers) if isinstance(layers, dict) else layers
+        names = [str(r.get("Name", "")) if isinstance(r, dict) else str(r) for r in rows]
+        graph = {"total": len(names),
+                 "fused_mylin": sum(n.startswith("__myl_") for n in names),
+                 "reformat": sum("Reformat" in n for n in names),
+                 "pointwise": sum("PointWise" in n or n.startswith("PWN") for n in names)}
+        pop = Population.of("plan repeats", [f"repeat-{i+1}" for i in range(len(results))],
+                            label=f"{args.plan}: {args.width}x{args.height}, fp16, one process, no encoder")
+        common = dict(population=pop,
+                      instrument=f"torch.cuda.Event around {args.iters} executions, {args.harness_note}",
+                      config=f"trt {trt.__version__}, {torch.cuda.get_device_name(0)}, "
+                             f"static {args.width}x{args.height}, opt level 5, iters {args.iters}",
+                      session=store.session, run=f"run-bench-{args.width}x{args.height}",
+                      extra={"of": "frame_time", "quantity": "speed", "graph": graph,
+                             "artifact_sha256": __import__("hashlib").sha256(plan).hexdigest()})
+        store.emit(Record(value=round(statistics.median(results), 2), unit="ms", statistic="median", **common))
+        store.emit(Record(value=round(max(results), 2), unit="ms", statistic="max", **common))
+        store.dump(args.emit)
+        print(f"records -> {args.emit}  (graph {graph})")
     return 0
 
 

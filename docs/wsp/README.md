@@ -61,6 +61,7 @@ They PASS `harness.cli check` with full coverage - the first non-vacuous green i
 | `model-prelu.txt` | the 1088 per-channel PReLU slopes, span and per-node Cv | matches the ledger exactly |
 | `int8-block.txt` | 1.91 ms / 80 TOPS for one 64->64 int8 block | reproduces at 1.78-1.85 ms / 83-86 TOPS |
 | `residual-scale.txt` | the correction the network adds over a nearest upsample | a DIFFERENT, named frame: 1.3-2.3x away, which is what an unnamed population costs |
+| `engine-fp16.txt` | the fp16 engine at 1920x1080, rebuilt from the ONNX path | 50.2-51.2 and 54.5-56.5 ms in four sessions; the ledger's 50.3 / 51.37 / 55.54 / 57.37 all fall inside, and the 10% jump is the host |
 
 The int8 probe emits its own records now (`scripts/int8_block_probe.py --emit`), so this is not a
 hand-copied number: the probe, the record and the claim are the same object.
