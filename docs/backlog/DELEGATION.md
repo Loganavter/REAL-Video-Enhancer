@@ -28,6 +28,13 @@ interpreter, no `venv` (gitignored, absent) and no model weights (they live
 outside the cell). **The path this section used to name —
 `../REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/...` — does not exist on this host
 (checked 2026-11-16); a worker that follows it will fail on the first command.**
+**Never calibrate a quantisation model on the CPU at frame resolution (measured 2026-11-17).**
+onnxruntime's `quantize_static` runs the model once per calibration frame on the CPU: 8 frames x
+2.5 TFLOP of 3x3 convolutions at 1920x1080 on 16 threads, plus its arena. It took the desktop down to
+the point where the window manager stuttered ("almost killed mutter") and the run had to be killed.
+The same ranges come from forward hooks in torch on the GPU in about half a second per frame - that
+is what `scripts/make_qdq.py` does, and it is also the only way to keep the one-GPU-job rule honest.
+
 **TensorRT: how it is obtained here (measured 2026-11-17, after a 6-hour hang).** The app itself
 pins the source of truth: `src/DownloadDeps.py` installs `tensorrt==10.12.0.36` with
 `tensorrt_cu12`, `tensorrt-cu12_libs` and `tensorrt_cu12_bindings`, and the metapackage's own
