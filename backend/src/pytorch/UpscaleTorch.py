@@ -502,8 +502,9 @@ class UpscalePytorch:
                 body = self._int8_body(image_tensor)
                 # GPU time of the fp16 engine, measured the same way as the body's: events, previous
                 # frame's pair read on the next, nothing synchronised inside a frame.
-                import logging as _lgf
-                _prevf = getattr(self, "_fp16_ev", None)
+                import logging as _lgf, os as _osq
+                _quietf = _osq.environ.get("RVE_INT8_NO_EVENTS") == "1"
+                _prevf = None if _quietf else getattr(self, "_fp16_ev", None)
                 if _prevf is not None:
                     self._fp16_ms = getattr(self, "_fp16_ms", []) + [_prevf[0].elapsed_time(_prevf[1])]
                     if len(self._fp16_ms) % 8 == 0:
