@@ -28,6 +28,18 @@ interpreter, no `venv` (gitignored, absent) and no model weights (they live
 outside the cell). **The path this section used to name —
 `../REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/...` — does not exist on this host
 (checked 2026-11-16); a worker that follows it will fail on the first command.**
+**TensorRT: how it is obtained here (measured 2026-11-17, after a 6-hour hang).** The app itself
+pins the source of truth: `src/DownloadDeps.py` installs `tensorrt==10.12.0.36` with
+`tensorrt_cu12`, `tensorrt-cu12_libs` and `tensorrt_cu12_bindings`, and the metapackage's own
+`pyproject.toml` names `index_url = "https://pypi.nvidia.com/"`. Consequences, all observed:
+- `pip install tensorrt` from **PyPI** resolves to a source tarball under cp313+ and hangs in
+  "Preparing metadata" (it wants the NVIDIA index for its build deps). Two attempts sat for hours.
+- The real wheels live on **pypi.nvidia.com**: `tensorrt-cu12-libs` is a `py2.py3-none-manylinux`
+  wheel (any Python), but `tensorrt-cu12-bindings` is **cp310 only** - so the interpreter has to be
+  3.10, whatever the venv for torch is.
+- No `tensorrt` package exists in the pacman repos (only `tensorrt-debug`, symbols), and no
+  `libnvinfer`/`trtexec` is installed system-wide.
+
 The interpreter to use is the repo's own `.venv` (2026-11-16: torch 2.15.0+cu132,
 triton 3.9.0, numpy; verified on the GPU - RTX 4060 Ti sm89, a Triton kernel runs).
 The system `python3` is 3.14 with **no torch**, so a cell cannot even import the model;
