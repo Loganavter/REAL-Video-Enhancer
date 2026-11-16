@@ -758,12 +758,16 @@ tasks:
     2026-11-16: the system python has no torch and the bundled-interpreter path in
     DELEGATION.md does not exist, so a probe cannot be run here at all. Converting
     a probe to emit records without running it would be an unverified edit to a measurement
-    path - worse than the print it replaces. Needs one runnable probe environment.'
+    path - worse than the print it replaces. Needs one runnable probe environment.
+    UNBLOCKED 2026-11-16: the repo now has .venv with torch 2.15.0+cu132 and triton
+    3.9.0 (GPU verified: RTX 4060 Ti sm89, a Triton add kernel runs). Pure-Triton
+    probes run today (scripts/int8_block_probe.py reproduced the int8 block); engine
+    probes still need python-tensorrt.'
 - id: rve-findings-rederivation-2026-11-16
   title: 'The existing findings are unprotected: 0 of 211 claims carry a tuple; 62
     are decision-bearing'
   type: experiment
-  status: todo
+  status: in_progress
   owner: null
   priority: P0
   gpu: partial
@@ -798,7 +802,15 @@ tasks:
     decision-bearing entries with no instrument or population, 0 fabricated values.
     Use it to size the work: the claims corpus (213 lines) is smaller than the ledger
     (1525 numbers), so re-deriving only the claims would still leave most of the ledger
-    unprotected.'
+    unprotected. PROGRESS 2026-11-16: three findings re-derived from artifacts and
+    now PASS their own gate (docs/wsp/verified/): the PReLU slope span (1088 slopes,
+    -1.388661623..1.695556045, per-node Cv 1.13/1.62/5.17 - matches the ledger exactly),
+    the residual scale on a NAMED 1440x1080 frame (1.16/4.83/14.35/44.67/109.03, 96.52%
+    under 8 - the ledger''s 0.9/2.1/10.1/19.4/44.5 was an unnamed frame, 1.3-2.3x
+    apart), and the int8 block 1.91 ms / 80 TOPS (re-run with the repo''s own Triton
+    kernel under CUDA events: 1.779-1.841 ms, 83-86 TOPS, bit-exact vs the int32 reference).
+    The engine-timing claims still need TensorRT python bindings, which are not installed
+    (only tensorrt-debug symbols).'
 - id: rve-bars-populations-2026-11-16
   title: Bars need an `of` field and populations need item sets - format work, no
     measurement
@@ -917,7 +929,7 @@ tasks:
 - id: rve-lean-statistic-spike-2026-11-16
   title: 'Lean spike: formalize the acceptance statistic, with a written kill criterion'
   type: research
-  status: todo
+  status: done
   owner: null
   priority: P3
   gpu: false
@@ -949,6 +961,18 @@ tasks:
     as a spike. TOOLCHAIN 2026-11-16: no lean/elan/lake on this host. The list of
     assumptions that a formal statement forces - the spike''s real deliverable - is
     extracted in docs/wsp/lean/Statistic.md; the three lemmas remain unproved.'
+  resolution: 'closed 2026-11-16. Lean 4.36.0 installed from the GitHub tarball (elan''s
+    host release.lean-lang.org does not resolve here). docs/wsp/lean/Statistic.lean
+    compiles with no `sorry` and proves: an empty sample passes every positive bar
+    (the min_n rule, proved rather than argued, because Nat division by zero is 0);
+    to certify a sample you must certify every frame (plus its contrapositive: one
+    failing frame fails the sample); the statistic is a function of (pixels, threshold)
+    alone; and two populations are interchangeable only when their item lists are
+    equal, with the kind part of identity. VERDICT: the kill criterion was met - ~110
+    lines, proofs in about ten minutes - and Lean quietly confirmed the prediction
+    that matters for this project: it cannot see a wrong population or a swapped instrument,
+    so it sharpened the specification and certified no measurement. Kept because that
+    statement now exists in a machine-checked form.'
 - id: rve-agent-crew-adoption-2026-11-16
   title: 'Adopt the machine''s agent crew: it already works here, three one-liners
     are missing'

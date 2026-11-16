@@ -28,8 +28,12 @@ interpreter, no `venv` (gitignored, absent) and no model weights (they live
 outside the cell). **The path this section used to name —
 `../REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/...` — does not exist on this host
 (checked 2026-11-16); a worker that follows it will fail on the first command.**
-The interpreter to use is whatever the supervisor's checkout has; the system
-`python3` is 3.14 with **no torch**, so a cell cannot even import the model. A
+The interpreter to use is the repo's own `.venv` (2026-11-16: torch 2.15.0+cu132,
+triton 3.9.0, numpy; verified on the GPU - RTX 4060 Ti sm89, a Triton kernel runs).
+The system `python3` is 3.14 with **no torch**, so a cell cannot even import the model;
+measurement probes are run by the supervisor as `.venv/bin/python scripts/...` under
+`flock -n /var/tmp/opencode/gpu.lock`. A cell still cannot: the venv is gitignored
+and absent from the clone, and TensorRT's python bindings are not installed at all. A
 worker that tries to reproduce a timing will burn its budget on
 `ModuleNotFoundError` or on a missing `futsuu.pth`, and its report will blame the
 code.

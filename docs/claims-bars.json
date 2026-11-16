@@ -67,5 +67,13 @@
     "statistic": "max",
     "min_n": 2,
     "note": "beyond +-2 the PReLU is no longer a leaky rectifier"
+  },
+  "bar_block_time": {
+    "value": 2.0,
+    "unit": "ms",
+    "of": "engine_time",
+    "statistic": "median",
+    "min_n": 2,
+    "note": "the probe's own acceptance: a 64->64 block at 2.07 Mpx including the per-channel epilogue"
   }
 }

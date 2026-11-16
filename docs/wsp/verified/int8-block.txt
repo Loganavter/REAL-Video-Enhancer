@@ -1,0 +1,15 @@
+# The int8 block, re-measured 2026-11-16 with the repo's own kernel.
+#
+# Ledger (line 1019): '1.91 ms and 80 TOPS, measured, not projected', with no instrument named
+# (the inventory flagged it as the load-bearing number of the int8 section and the weakest
+# provenance in the range). Re-run: scripts/int8_block_probe.py, three separate invocations,
+# torch.cuda.Event over 20 iterations, one GPU job at a time.
+#   runs: 1.840 / 1.779 / 1.841 ms  -> 83.1 / 86.0 / 83.0 TOPS
+#   correctness: max |diff| vs the int32 reference = 0, share of differing outputs 0.00%
+# The recorded 1.91-1.93 ms is 3-7% slower than today's session, which is the drift this machine
+# shows between sessions; the shape of the claim survives.
+
+@claim R001 1.84 ms "int8 block launch [ea432364037f4b16] n=3" measured
+@claim R002 83.1 TOPS "int8 block launch [ea432364037f4b16] n=3" measured
+
+@below R001 bar_block_time
