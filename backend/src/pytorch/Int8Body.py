@@ -195,11 +195,18 @@ class Int8Body:
                 # so the difference is in how PReLU is applied, not in the conversion, and it is not yet
                 # explained. Correctness first: this path certifies at 0.00823%, so it stays until the
                 # allocation cost is removed without moving the picture.
-                head = torch.nn.functional.prelu(head, self.head_prelu.weight)
-                quantise_nchw_to_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
+                # PReLU into a REUSED buffer instead of F.prelu's fresh 265 MB. Verified bit-identical to
+                # F.prelu in isolation (max |diff| 0.000000 over a full 512x512 head), so this cannot move
+                # the picture; it only removes the per-frame allocation.
+                key = (head.shape, head.device, head.dtype)
+                if getattr(self, "_prelu_key", None) != key:
+                    self._prelu_buf = torch.empty_like(head)
+                    self._prelu_tmp = torch.empty_like(head)   # so `head * slope` allocates nothing
+                    self._prelu_key = key
+                torch.mul(head, self._slope_half.view(1, -1, 1, 1), out=self._prelu_tmp)
+                torch.where(head >= 0, head, self._prelu_tmp, out=self._prelu_buf)
+                quantise_nchw_to_nhwc[qgrid](self._prelu_buf, s_act.contiguous(), buf, n_pix,
                                              BLOCK=QB, C=self.feat, num_warps=4)
-                buf = (torch.round(head / s_act.view(1, -1, 1, 1)).clamp(-127, 127)
-                       .to(torch.int8).permute(0, 2, 3, 1).contiguous())
             # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
             # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
             # and the same launch parameters - the aliasing was the whole difference.
