@@ -930,7 +930,7 @@ tasks:
   title: 'Adopt the machine''s agent crew: it already works here, three one-liners
     are missing'
   type: ops
-  status: todo
+  status: done
   owner: null
   priority: P1
   gpu: false
@@ -969,10 +969,17 @@ tasks:
     works manually until a timer exists. The shared GPU lock /var/tmp/opencode/gpu.lock
     already exists and DELEGATION.md cites the same path, so this project and the
     img-sli lanes serialise on one card today.'
+  resolution: 'closed 2026-11-16: agent-spin learned this repo (+SPIN_EXTRA_GITDIRS),
+    install.sh guards it (pushDefault=fork, pre-push, post-checkout - verified: main
+    DENY, agent branch ALLOW, archive DENY), board-status already took --queue, test-journal
+    recorded a run here, and a cell was provisioned and removed end to end. scripts/autopush.sh
+    + packaging/systemd ship the missing snapshot lifecycle; verified in an isolated
+    repo (dirty+untracked readable from refs/autopush, HEAD/status unchanged, clean
+    and MERGE_HEAD skipped, retention bounded).'
 - id: rve-harness-redteam-residual-2026-11-16
   title: 'Harness red team: 23 bypasses found, 12 closed here, 11 remain and are named'
   type: code
-  status: todo
+  status: done
   owner: null
   priority: P1
   gpu: false
@@ -1016,3 +1023,10 @@ tasks:
     noqa escape is wider than documented and += is invisible; F21 graph_counts accepts
     an empty dict; F22 the dataclasses are constructible by a caller, so only Store-mediated
     paths are guarded.'
+  resolution: 'closed 2026-11-16: all 23 repros now raise or report no bypass; the
+    14 attacks that can be asserted are permanent negative tests in backend/tests/test_harness_redteam.py
+    (62 tests in the pair). Fixes: provenance validated at emit and on use, artifact
+    digest required, claimable() refuses an empty parse, verdict/cause/equal validate
+    their records, refuse() re-derives the A/A, only the specific noqa marker disables
+    a check. Residual by design: F17 (nothing ties a record to the artifact it names
+    beyond the digest) stays an architectural limit of a schema-only harness.'
