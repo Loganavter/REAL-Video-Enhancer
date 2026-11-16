@@ -245,3 +245,31 @@ All 98 part1 unverified entries are of this family: their longest verbatim run i
 ledger has a median of 20 characters — 23 reach 30–39 characters (one token changed), 27
 reach 20–29, 48 stay below 20. They record what a sentence *says*, not what it says *word
 for word*, and the value on the line is right in every case.
+
+---
+
+## Arithmetic: checked, and it holds
+
+Added 2026-11-16 by the supervisor, after the inventory above.
+
+Every `a × b = c` / `a / b = c` / `a + b = c` equality written out in the ledger's prose was extracted
+and recomputed, accepting a unit conversion (×1000, ×1024, ×60) when that is what the sentence does
+(`94 × 29.7 = 2.79` is 94 frames times 29.7 ms in 2.79 s), and parsing `x`/`×`/`*`/`/` left to right so
+`2.355 × 12/16 = 1.766` is read as written.
+
+**Result: 21 equalities recognised, 21 consistent, 0 mismatches.**
+
+Two honest limits, both of which matter more than the result:
+
+- 21 of 1,525 numbers is all the corpus writes as a *closed arithmetic statement*. The other derived
+  numbers (`1.53x cheaper`, `58-73% of a borrowed peak`) are ratios of quantities that are not both
+  printed in the sentence, so no reader and no script can recompute them from the text.
+- A first version of this check reported five "mismatches". All five were the checker's own: a unit
+  conversion it did not know, and an operator precedence it assumed wrong. An arithmetic checker
+  without units and precedence is a noise generator - the same class of error as a number without its
+  tuple, applied to the checker instead of the claim.
+
+So the debt is **provenance, not mathematics**: the ledger's arithmetic is sound, and the 634
+decision-bearing entries without an instrument or a population cannot be fixed by recomputing them.
+They need the artifact they were read from, and no probe artifact is committed anywhere in the repo
+(`git ls-files` finds no JSON, CSV, log or npz).
