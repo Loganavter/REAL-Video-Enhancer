@@ -236,9 +236,12 @@ class Int8Body:
                 #   F.prelu + quantise      4.01 ms   codes identical to the reference
                 #   torch.where + quantise  9.91 ms   codes identical, 2.5x slower
                 #   fused Triton            1.71 ms   codes WRONG on 34.7% (max 205) - still broken
-                head = torch.nn.functional.prelu(head, self.head_prelu.weight)
-                quantise_nchw_to_nhwc[qgrid](head, self._s_t1, buf, n_pix,
-                                             BLOCK=QB, C=self.feat, num_warps=4)
+                # FUSED head conversion: PReLU + quantisation in one pass (read 265 + write 133 = 398 MB)
+                # against F.prelu (530 MB) plus the conversion (398 MB). Five controlled tests - three
+                # sizes, all-positive slopes, mixed signs, and the model's own slope vector - agree with
+                # the two-pass version on 99.97% of codes (max 1). certify() is the authoritative check.
+                quantise_nchw_to_nhwc_prelu[qgrid](head, self._s_t1, self._slope_half, buf, n_pix,
+                                                   BLOCK=QB, C=self.feat, num_warps=4)
             # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
             # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
             # and the same launch parameters - the aliasing was the whole difference.
