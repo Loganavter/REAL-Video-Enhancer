@@ -201,3 +201,19 @@
 # The picture passes; the speed does not. Both asserted where they are true.
 @below delivered_share bar_share
 @below delivered_ratio kill_ratio
+
+# ---- FINAL STATE, 2026-11-16, after the requant move and the PReLU A/B
+# The profile field "inference" is a mean over frames that includes per-video work (~850 ms), so it is NOT the
+# per-frame cost; the host timeline is. Both windows below are host-timeline totals from one process.
+@claim fp16_window_ms  51.06 ms "one process, host timeline, steady state, 1920x1080" measured
+@claim int8_window_ms  46.52 ms "one process, host timeline, steady state, 1920x1080" measured
+@claim quant_phase_ms   4.01 ms "head quantise phase with F.prelu + the conversion kernel" measured
+@claim quant_phase_where_ms 9.91 ms "the same phase with torch.where + torch.mul (my regression)" measured
+@claim body_cert_share  0.00832 % "certification on the first frame, epilogue scheme" measured
+@claim hop_ms           1.753 ms "one int8 hop, requant in the epilogue" measured
+@claim hop_tops         87.2 TOPS "derived from the hop time and 152.9 GFLOP" derived
+@derived hop_tops "152.9 GFLOP / 1.753 ms = 87.2 TOPS against TRT's 91 on this shape"
+
+# THE RATIO, asserted as a ratio so the arithmetic is checked rather than described
+@ratio fp16_window_ms int8_window_ms 1.098 "one process, host timeline, steady state, 1920x1080"
+@below body_vs_app kill_ratio
