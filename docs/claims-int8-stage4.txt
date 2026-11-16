@@ -257,3 +257,18 @@
 @claim comp_spread_violet 0.050 % "composition with spread frames, same title - under the 0.1 bar" measured
 @below comp_spread_frame bar_share
 @below comp_spread_violet bar_share
+
+# ---- F_total, measured: the probe dominates it, and it moves the break-even by 20x
+@claim probe_cost_s     64.6 s  "Int8Probe on a 1080p clip, 8 positions x 3 frames, end to end" measured
+@claim build_cost_s     0.85 s  "body build + calibrate + certify, frame-1 model-call" measured
+@claim F_total_s        65.4 s  "derived: probe + build" derived
+@derived F_total_s "64.6 + 0.85 = 65.45 s - the earlier 850 ms figure counted only the build"
+@claim save_per_frame_ms 8.45 ms "fp16 window 51.06 - int8 window 42.61" measured
+@claim breakeven_min_now 16.2 min "derived: F_total / save, at a 33.3% render rate and 24 fps" derived
+@derived breakeven_min_now "65500 ms / 8.45 ms = 7746 rendered = 23260 frames = 16.2 min"
+@claim breakeven_min_ht   5.6 min "the same after the head+tail fix (window 26.8)" derived
+@derived breakeven_min_ht "65500 / 24.26 = 2698 rendered = 8102 frames = 5.6 min"
+@claim net_24min_now    +31.8 s "a 24-minute episode now: saves 97.2 s, costs 65.4 s" derived
+@derived net_24min_now "11520 rendered frames x 8.45 ms = 97.2 s against F 65.4 s"
+@claim net_24min_ht    +213.7 s "the same episode after head+tail" derived
+@derived net_24min_ht "11520 x 24.26 ms = 279.2 s against 65.4 s"
