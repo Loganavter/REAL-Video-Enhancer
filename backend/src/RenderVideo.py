@@ -533,6 +533,8 @@ class Render:
             log(result.stats())
             if not result.use_int8:
                 log(f"  {result.reason}")
+            # hand the decoded calibration frames to the body: they are what makes its grids cover the video
+            self.int8Frames = getattr(result, "frames", None)
             verdict = "int8" if result.use_int8 else "fp16"
             if verdict == "int8":
                 # The probe's answer is not the render's: the body is wired but only into the whole-frame
@@ -880,6 +882,7 @@ class Render:
                 # the verdict has to reach the object that runs frames: gen_render keeps it here, the hook
                 # reads it from the upscale option, and until this line existed the body was never built.
                 self.upscaleOption.int8Fit = self.int8Fit
+                self.upscaleOption.int8Frames = getattr(self, "int8Frames", None)
             
 
         if self.backend == "ncnn":

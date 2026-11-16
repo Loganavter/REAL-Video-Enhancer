@@ -248,3 +248,12 @@
 @claim kernel_vs_sim_violet   1.69 x "derived: probe_sim_violet / probe_real_same_cal_violet" derived
 @derived kernel_vs_sim_violet "0.084 / 0.050 = 1.69x better, and both verdicts are int8"
 @claim calibration_gap      1 x     "the 0.116% and 0.377% came from single-frame calibration, not from the kernels" measured
+
+# ---- spread-frame calibration is now the production path (the probe hands over the frames it decoded)
+@claim calib_frames_prod 1 x "Int8Body calibrates on the probe's frames; certification 0.00821%, window 42.61 ms" measured
+@claim comp_single_frame 0.116 % "composition with ONE-frame calibration, a5_chainsaw" measured
+@claim comp_spread_frame 0.006 % "composition with the probe's spread frames, same title" measured
+@claim comp_single_violet 0.377 % "composition with ONE-frame calibration, a5_violet" measured
+@claim comp_spread_violet 0.050 % "composition with spread frames, same title - under the 0.1 bar" measured
+@below comp_spread_frame bar_share
+@below comp_spread_violet bar_share

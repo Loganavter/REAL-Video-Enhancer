@@ -613,7 +613,10 @@ class UpscalePytorch:
         except Exception:  # noqa: BLE001
             pass
         try:
-            body.calibrate(frame)
+            # calibrate on the probe's spread frames when they exist: single-frame grids cost 20x on
+            # composition (0.116% against 0.006% on a5_chainsaw)
+            _frames = getattr(self, "int8Frames", None) or frame
+            body.calibrate(_frames)
             share, ok = body.certify(frame)
             log("int8 body self-certification on the first frame: %.5f%% of pixels >8 levels (bar 0.1%%) -> %s",
                 share, "serving" if ok else "refusing, fp16 engine runs")
