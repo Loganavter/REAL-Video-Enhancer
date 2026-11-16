@@ -116,7 +116,20 @@ def aa_gate(store: Store, a: str, b: str, *, tol: float = 0.0,
 
 
 def refuse(store: Store, claim_id: str, base: str, aa: AA, reason: str) -> None:
-    """A refusal relative to a base. Unchecked bases produce false refusals, which are permanent."""
+    """A refusal relative to a base. Unchecked bases produce false refusals, which are permanent.
+
+    The ``AA`` dataclass is forgeable by a caller (``AA(identical=True, ...)`` with no run behind it),
+    so the gate does not trust it: the emitted A/A record must exist in the store and the pair is
+    re-derived from the record's own inputs before a refusal is written.
+    """
+    rec = store.get(aa.record.id)
+    if aa.record.id != rec.id or len(rec.inputs) != 2:
+        raise RecordError(f"refusing to record {claim_id}: the A/A it cites is not a two-input record "
+                          f"in this store")
+    fresh = aa_gate(store, rec.inputs[0], rec.inputs[1], calibration=rec.extra.get("calibration", ""))
+    if not fresh.identical:
+        raise RecordError(f"refusing to record {claim_id}: re-deriving the A/A from {rec.inputs} gives "
+                          f"{fresh.detail}, not identity")
     if not aa.identical:
         raise RecordError(f"refusing to record {claim_id}: the base {base} did not pass its own A/A "
                           f"({aa.detail}) - an A/B on a broken base rejects the correct variant")
@@ -214,7 +227,7 @@ def check_claims(store: Store, claims: Iterable[Claim], *, scope: Scope | None =
                 sc.cover("ratio")
 
             elif c.kind == "verdict":
-                recs = [store.get(r) for r in c.args]
+                recs = [store.get(r).validate() for r in c.args]
                 if len(recs) < 2:
                     raise RecordError(f"{c.id}: a verdict needs at least two records")
                 keys = {(r.instrument, r.config, r.session, r.statistic, r.unit,
@@ -231,7 +244,7 @@ def check_claims(store: Store, claims: Iterable[Claim], *, scope: Scope | None =
                 sc.cover("verdict")
 
             elif c.kind == "cause":
-                a, b = store.get(c.args[0]), store.get(c.args[1])
+                a, b = store.get(c.args[0]).validate(), store.get(c.args[1]).validate()
                 if a.tier != "measured" or b.tier != "measured":
                     raise RecordError(f"{c.id}: a cause needs two measurements")
                 diff, pop_differs = _varying(a, b)
@@ -247,7 +260,7 @@ def check_claims(store: Store, claims: Iterable[Claim], *, scope: Scope | None =
                 sc.cover("cause")
 
             elif c.kind == "equal":
-                a, b = store.get(c.args[0]), store.get(c.args[1])
+                a, b = store.get(c.args[0]).validate(), store.get(c.args[1]).validate()
                 if "assumed" in (a.tier, b.tier):
                     raise RecordError(f"{c.id}: equality of an assumed number is not evidence")
                 if a.instrument != b.instrument or a.config != b.config:

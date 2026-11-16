@@ -112,8 +112,16 @@ class _suppress:
 
 
 def claimable(r: Run) -> bool:
-    """The only evidence a claim may cite."""
-    return r.status == "ok" and r.parsed is not None
+    """The only evidence a claim may cite.
+
+    A parse that produced nothing usable is not a result: a Schema whose required fields are all
+    missing (a ptxas line with no register count, an inspector JSON with no layers) used to pass.
+    """
+    if r.status != "ok" or r.parsed is None:
+        return False
+    if isinstance(r.parsed, Schema) and r.parsed.missing:
+        return False
+    return True
 
 
 # --------------------------------------------------------------------------------------------------

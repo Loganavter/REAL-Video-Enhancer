@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from harness import (  # noqa: E402
     Bar, Claim, Population, Record, RecordError, ResultsTable, Scope, Store, aa_gate, below,
-    check_claims, graph_delta, parse_checkpoint, parse_engine_inspector, parse_ptxas, probe, refuse,
+    check_claims, claimable, graph_delta, parse_checkpoint, parse_engine_inspector, parse_ptxas, probe,
+    refuse,
     require_config_pair, run, shared_calibration, suspicious_identity,
 )
 from harness.astcheck import dead_stores, used_before_assignment  # noqa: E402
@@ -162,7 +163,7 @@ def test_aa_gate_and_refusal_against_a_verified_base():
     bad = mk(s, 0.011)
     aa_bad = aa_gate(s, a.id, bad.id)
     assert not aa_bad.identical
-    with pytest.raises(RecordError, match="did not pass its own A/A"):
+    with pytest.raises(RecordError, match="A/A"):
         refuse(s, "C-false-refusal", a.id, aa_bad, "rejecting a correct variant")
 
 
@@ -407,3 +408,61 @@ def test_no_false_positive_on_a_lambda_parameter_or_a_closure():
                "    cache = {}\n"
                "    return body()\n")
     assert used_before_assignment(closure) == []
+
+
+# ------------------------------------------------ red-team residuals (F11/F17/F22 + noqa)
+def test_measured_provenance_cannot_be_deleted_after_emit():
+    s = Store()
+    r = mk(s, 0.01, items=("1", "2"), extra={"of": "share"})   # n=2 so the sample rule cannot mask this
+    r.run = ""
+    r.artifact = ""
+    with pytest.raises(RecordError, match="provenance was deleted"):
+        r.validate()
+    with pytest.raises(RecordError, match="provenance was deleted"):
+        below(r, Bar(name="b", value=0.1, unit="%", of="share", statistic="worst_of"))
+
+
+def test_a_parse_that_produced_nothing_is_not_claimable():
+    s = run(["echo", "ptxas info: nothing here"], parse=parse_ptxas)
+    assert s.status == "ok" and s.parsed.missing
+    assert not claimable(s)
+
+
+def test_verdict_validates_its_records():
+    s = Store()
+    a = s.emit(Record(value=1.0, unit="%", population=Population.of("p", ["1", "2"]), instrument="i",
+                      config="c", session=s.session, statistic="single", artifact="/nonexistent/x",
+                      extra={"artifact_sha256": "deadbeef"}))
+    b = s.emit(Record(value=2.0, unit="%", population=Population.of("p", ["1", "2"]), instrument="i",
+                      config="c", session=s.session, statistic="single", artifact="/nonexistent/y",
+                      extra={"artifact_sha256": "deadbeef"}))
+    a.extra.pop("artifact_sha256")            # provenance edited after emit: the verdict must notice
+    problems, _ = check_claims(s, [Claim("V", "verdict", (a.id, b.id))])
+    assert problems and "digest" in problems[0]
+
+
+def test_a_forged_aa_object_cannot_unlock_a_refusal():
+    from harness.gates import AA
+    s = Store()
+    base = mk(s, 1.0, items=("1", "2"))
+    forged = AA(identical=True, max_delta=0.0, n=2, record=base)
+    with pytest.raises(RecordError):
+        refuse(s, "C", base.id, forged, "no A/A was ever run")
+
+
+def test_a_bare_noqa_does_not_silence_a_check():
+    bare = "def f(a, b):\n    x = a()  # noqa\n    x = b()\n    return x\n"
+    specific = "def f(a, b):\n    x = a()  # noqa: dead-store\n    x = b()\n    return x\n"
+    wrong = "def f(a, b):\n    x = a()  # noqa: used-before-assignment\n    x = b()\n    return x\n"
+    assert len(dead_stores(bare)) == 1
+    assert len(dead_stores(specific)) == 0
+    assert len(dead_stores(wrong)) == 1
+
+
+def test_a_record_that_cannot_be_evidence_is_not_stored():
+    s = Store()
+    with pytest.raises(RecordError, match="digest"):
+        s.emit(Record(value=1.0, unit="%", population=Population.of("p", ["1"]), instrument="i",
+                      config="c", session=s.session, statistic="single",
+                      artifact="/nonexistent/capture-never-taken.txt"))
+    assert not s.records
