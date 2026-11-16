@@ -32,6 +32,21 @@ from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc
 
 __all__ = ["Int8Body"]
 
+
+class _NoEvent:
+    """A null CUDA event: keeps one code path when instrumentation is switched off.
+
+    `elapsed_time` on the previous frame's pair is a real cost: it BLOCKS until that pair has completed,
+    which serialises the frame with the one before it. That is fine for a diagnostic and wrong for a
+    measurement of what the render costs, so RVE_INT8_NO_EVENTS=1 replaces every event with this.
+    """
+
+    def record(self):
+        pass
+
+    def elapsed_time(self, _other):
+        return 0.0
+
 SHIFT = 20
 BLOCK_M = 128   # the rolled loop prefers a wider block: 2.198 ms against 2.919 at BM 64
 WARPS = 4
@@ -147,11 +162,21 @@ class Int8Body:
         _prev = getattr(self, "_ev_pair", None)
         if _prev is not None:
             _s, _e, _n = _prev
-            self._gpu_ms = getattr(self, "_gpu_ms", []) + [_s.elapsed_time(_e)]
+            self._last_body_ms = _s.elapsed_time(_e)
+            self._gpu_ms = getattr(self, "_gpu_ms", []) + [self._last_body_ms]
             if len(self._gpu_ms) % 8 == 0:
                 _v = self._gpu_ms[-8:]
                 _lg.getLogger("RVE").warning("int8 body GPU: %.2f ms/frame (last 8), frame %d",
                                              sum(_v) / len(_v), len(self._gpu_ms))
+        import os as _os
+        _quiet = _os.environ.get("RVE_INT8_NO_EVENTS") == "1"
+        if not _quiet and not getattr(self, "_sync_dbg", False):
+            self._sync_dbg = True
+            try:
+                torch.cuda.set_sync_debug_mode("warn")   # names any implicit synchronisation by stack
+            except Exception:  # noqa: BLE001
+                pass
+        _mk = (lambda: torch.cuda.Event(True)) if not _quiet else (lambda: _NoEvent())
         _prevp = getattr(self, "_phase_ev", None)
         if _prevp is not None:
             _names = ("head", "quantise", "hops", "tail")
@@ -159,9 +184,12 @@ class Int8Body:
             self._phase_log = getattr(self, "_phase_log", 0) + 1
             if self._phase_log % 8 == 0:
                 _lg.getLogger("RVE").warning(
-                    "int8 phases: head %.1f  quantise %.1f  hops %.1f  tail %.1f ms  (total %.1f)",
-                    _vals[0], _vals[1], _vals[2], _vals[3], sum(_vals))
-        _e0, _e1, _e2, _e3, _e4 = (torch.cuda.Event(True) for _ in range(5))
+                    "int8 phases: head %.1f  quantise %.1f  hops %.1f  tail %.1f  SUM %.1f  "
+                    "BODY-TOTAL %.1f ms (gap %.1f)",
+                    _vals[0], _vals[1], _vals[2], _vals[3], sum(_vals),
+                    getattr(self, "_last_body_ms", -1.0),
+                    getattr(self, "_last_body_ms", 0.0) - sum(_vals))
+        _e0, _e1, _e2, _e3, _e4 = (_mk() for _ in range(5))
         _e0.record(); _start = _e0; _end = _e4
         with torch.no_grad():
             head = self.head_conv(x.clamp(0.0, 1.0))      # PReLU is fused into the quantise below
@@ -217,11 +245,16 @@ class Int8Body:
             _, self._scratch_a, self._scratch_b = self._int8_buffers(x, h, w)
             _e2.record()
             src, nxt = buf, self._scratch_a
+            import time as _time
+            _host_launch = 0.0
+            _host_total0 = _time.perf_counter()
             for launch in self._launches:
                 dst = nxt
+                _h0 = _time.perf_counter()
                 body_prologue_kernel[grid](src, launch["w"], launch["m"], SHIFT, launch["vec"],
                                            launch["bias"], launch["slope"], launch["os"], dst, h, w,
                                            BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps)
+                _host_launch += _time.perf_counter() - _h0
                 src = dst
                 nxt = self._scratch_b if dst is self._scratch_a else self._scratch_a
             if not getattr(self, "_probe_done", False):
@@ -242,6 +275,12 @@ class Int8Body:
                     _cs.elapsed_time(_ce) / 5.0,
                     torch.cuda.memory_allocated() / 2**20, torch.cuda.memory_reserved() / 2**20,
                     torch.cuda.max_memory_allocated() / 2**20)
+            _host_loop = (_time.perf_counter() - _host_total0) * 1000.0
+            self._host_log = getattr(self, "_host_log", 0) + 1
+            if self._host_log % 8 == 0:
+                _lg.getLogger("RVE").warning(
+                    "int8 host: 16 launches cost %.2f ms of HOST (%.3f ms each); whole hop loop %.2f ms",
+                    _host_launch * 1000.0, _host_launch * 1000.0 / 16.0, _host_loop)
             _e3.record()
             channels_last = self.tail_conv.weight.is_contiguous(memory_format=torch.channels_last)
             if channels_last:
