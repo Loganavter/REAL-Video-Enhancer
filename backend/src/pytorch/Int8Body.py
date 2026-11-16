@@ -43,14 +43,25 @@ class Int8Body:
     def __init__(self, model, feat: int = 64, block_m: int = BLOCK_M, warps: int = WARPS):
         convs = [m for m in model.body if isinstance(m, torch.nn.Conv2d)]
         prels = [m for m in model.body if isinstance(m, torch.nn.PReLU)]
-        if len(convs) < 3 or len(prels) < 2:
-            raise ValueError(f"int8 body needs a head, a tail and inner convs; got {len(convs)} convs")
-        if convs[0].out_channels != feat:
+        # THE HEAD IS NOT ALWAYS A Conv2d. The app widens body[0] to 8 input channels and wraps it in
+        # PadInputConv so the engine can fuse it with its PReLU (log: "3 -> 8, zeros, padded inside the
+        # head"), and PadInputConv is not a Conv2d - so it is absent from this list and convs[0] is the
+        # SECOND convolution. Building from convs[0] fed a 64-channel conv a 3-channel tensor and failed
+        # with 'expected input[1,3,1080,1920] to have 64 channels'.
+        head = list(model.body)[0]
+        rest = convs if isinstance(head, torch.nn.Conv2d) else convs
+        if not isinstance(head, torch.nn.Conv2d):
+            rest = convs                      # head wrapped: the list holds the 16 inner convs + the tail
+        else:
+            rest = convs[1:]                  # head is a Conv2d: drop it
+        if len(rest) != 17 or len(prels) != 17:
+            raise ValueError(f"int8 body expects 16 inner convs plus a tail (17 Conv2d, 17 PReLU); "
+                             f"this model has {len(rest)} and {len(prels)}")
+        if rest[0].out_channels != feat:
             raise ValueError(f"int8 body needs {feat} body channels; this model has "
-                             f"{convs[0].out_channels}")
+                             f"{rest[0].out_channels}")
         self.model = model
-        self.head_conv, self.tail_conv = convs[0], convs[-1]
-        self.inner = convs[1:-1]
+        self.head_conv, self.inner, self.tail_conv = head, rest[:-1], rest[-1]
         self.head_prelu = prels[0]
         self.inner_prelus = prels[1:]
         self.scale = int(getattr(model, "upscale", 2))
@@ -177,9 +188,11 @@ class Int8Body:
     # ---- a helper the render can ask for a one-line verdict, as TileProbe does
     @staticmethod
     def supports(model):
-        """The coverage boundary: 18 convs and 64 body channels, or the kernel cannot run at all."""
+        """The coverage boundary: 16 inner convs, a tail, 64 body channels - head wrapped or not."""
         try:
             convs = [m for m in model.body if isinstance(m, torch.nn.Conv2d)]
-            return len(convs) == 18 and convs[0].out_channels == 64
+            head = list(model.body)[0]
+            rest = convs[1:] if isinstance(head, torch.nn.Conv2d) else convs
+            return len(rest) == 17 and rest[0].out_channels == 64
         except Exception:  # noqa: BLE001
             return False

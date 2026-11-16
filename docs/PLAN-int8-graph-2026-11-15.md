@@ -1403,8 +1403,40 @@ picture. The fused comparison that preceded this one (1.489x, 1.505x, 1.411x, 1.
 0.631x) is retired: every one of those was a ratio against a monolithic 80 ms engine the app never builds, or a
 division across two processes. This is the only number in the document that has both sides on one instrument.
 
-**No int8 frame can be rendered by this renderer, and the final reason is structural - measured in the app's own
-run after two wiring faults were fixed.**
+**DELIVERED: the body served a real app render - and in that render it is 2.07x slower.**
+
+Building the body against the app's **transformed** module was the missing piece. The app replaces `body[0]` with a
+`PadInputConv` (3 -> 8 channels, zero-padded, so the engine can fuse the head with its PReLU), and that module is
+not a `Conv2d`, so the old code took `convs[0]` to be the head when it was really the second convolution and fed a
+64-channel conv a 3-channel tensor. With the head taken from `model.body[0]` whatever its type, and the rest
+derived from the seventeen `Conv2d` that follow:
+
+    int8: built (supports=True)
+    int8 body self-certification on the first frame: 0.00823% of pixels >8 levels (bar 0.1%) -> serving
+    BACKEND: profile over 24 frames: inference 96.88 ms (engine 32.68, frame handover 0.01), frame total 104.44 ms
+
+The same clip, the same flags, with `RVE_INT8_BODY=off`:
+
+    int8: disabled by RVE_INT8_BODY=off - the fp16 engine runs
+    BACKEND: profile over 24 frames: inference 46.92 ms, frame total 54.56 ms
+
+So the delivered render, first one in this lane, measures:
+
+| | ms of inference |
+|---|---|
+| fp16 engine | **46.92** |
+| int8 body serving | **96.88** |
+| ratio | **0.484x** - 2.07x slower |
+
+Picture: frame 10 of the two renders at 3840x2160 differs on **0.07592%** of pixels (peak 24, median 1.00) - under
+the 0.1% bar. **The accuracy side of the lane is delivered and passes; the speed side is delivered and fails**,
+by a wider margin in the app than in the harness (0.484x here against 0.962x there, because the app's inference
+window includes the transformed head and its own stream handling).
+
+That supersedes the derived ceiling as the lane's final evidence: this is not a projection, it is a render that ran,
+certified, served and was timed.
+
+**Earlier: why the body could not be built at first, and the two wiring faults behind it.**
 
 Wiring first, because both were real and both were mine: the probe's verdict lived on the render object while the
 hook read it from the upscale option (now propagated), and the model is reached through `get_model()` rather than an
