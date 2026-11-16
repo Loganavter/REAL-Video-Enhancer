@@ -229,17 +229,15 @@ class Int8Body:
                 # so the difference is in how PReLU is applied, not in the conversion, and it is not yet
                 # explained. Correctness first: this path certifies at 0.00823%, so it stays until the
                 # allocation cost is removed without moving the picture.
-                # PReLU into a REUSED buffer instead of F.prelu's fresh 265 MB. Verified bit-identical to
-                # F.prelu in isolation (max |diff| 0.000000 over a full 512x512 head), so this cannot move
-                # the picture; it only removes the per-frame allocation.
-                key = (head.shape, head.device, head.dtype)
-                if getattr(self, "_prelu_key", None) != key:
-                    self._prelu_buf = torch.empty_like(head)
-                    self._prelu_tmp = torch.empty_like(head)   # so `head * slope` allocates nothing
-                    self._prelu_key = key
-                torch.mul(head, self._slope_half.view(1, -1, 1, 1), out=self._prelu_tmp)
-                torch.where(head >= 0, head, self._prelu_tmp, out=self._prelu_buf)
-                quantise_nchw_to_nhwc[qgrid](self._prelu_buf, self._s_t1, buf, n_pix,
+                # F.prelu is ONE fused ATen kernel (read 265 + write 265 = 530 MB, 1.84 ms). The
+                # torch.where replacement I put here was three eager passes (1856 MB, ~6.4 ms) and made
+                # the phase 9.91 ms against 4.01 - it removed allocations that were already free
+                # (num_alloc_retries = 0) and paid for them with two extra sweeps. Measured A/B:
+                #   F.prelu + quantise      4.01 ms   codes identical to the reference
+                #   torch.where + quantise  9.91 ms   codes identical, 2.5x slower
+                #   fused Triton            1.71 ms   codes WRONG on 34.7% (max 205) - still broken
+                head = torch.nn.functional.prelu(head, self.head_prelu.weight)
+                quantise_nchw_to_nhwc[qgrid](head, self._s_t1, buf, n_pix,
                                              BLOCK=QB, C=self.feat, num_warps=4)
             # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
             # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
