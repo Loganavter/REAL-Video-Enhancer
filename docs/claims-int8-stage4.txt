@@ -217,3 +217,11 @@
 # THE RATIO, asserted as a ratio so the arithmetic is checked rather than described
 @ratio fp16_window_ms int8_window_ms 1.098 "one process, host timeline, steady state, 1920x1080"
 @below body_vs_app kill_ratio
+
+# ---- accuracy re-shot on the EPILOGUE scheme, in the DEFAULT configuration (gate on)
+@claim render_share_epilogue 0.07024 % "int8 render vs fp16 render, frame 10, gate ON, 3840x2160 output" measured
+@claim render_peak_epilogue  26 levels "the same frame" measured
+@claim render_share_prologue 0.07592 % "the earlier number, measured while the prologue still requanted" measured
+@below render_share_epilogue bar_share
+# The probe decides from the SIMULATION, not from these kernels, so its verdicts are unaffected by the move.
+@claim probe_independent 1 x "Int8Probe uses _quantised_forward; the requant move cannot change its verdicts" measured
