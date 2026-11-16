@@ -325,8 +325,18 @@ def test_migrate_flags_one_name_with_two_values(tmp_path):
                              '@claim ratio_idle 1.322 x "one process, 1920x1080"\n')
     found, _, _ = migrate([path])
     assert {f.status for f in found} == {"conflicted"}
-    reuse, pop, _ = conflicts(found)
+    reuse, pop, _, cross = conflicts(found)
     assert reuse and reuse[0]["name"] == "ratio_idle"
+
+
+def test_the_same_name_in_two_runs_is_not_a_contradiction(tmp_path):
+    from harness.migrate import conflicts, migrate
+    path = _claims(tmp_path, '@claim ratio_idle 1.489 x "one process"  @session=stage2\n'
+                             '@claim ratio_idle 1.322 x "one process"  @session=stage4\n')
+    found, _, _ = migrate([path])
+    assert {f.status for f in found} == {"unverifiable"}          # two runs, not two truths
+    reuse, _, _, cross = conflicts(found)
+    assert not reuse and cross and cross[0]["sessions"] == ["stage2", "stage4"]
 
 
 def test_migrate_does_not_call_three_arms_a_contradiction(tmp_path):

@@ -32,6 +32,7 @@ from .core import Population, Record, Store
 CLAIM = re.compile(r'@claim\s+(\S+)\s+([-+]?[\d.]+)\s+(\S+)\s+"([^"]*)"(?:\s+(measured|derived|assumed))?')
 DERIVED = re.compile(r'@derived\s+(\S+)\s+"([^"]*)"')
 BAR = re.compile(r'@bar\s+(\S+)\s+(-?[\d.]+)\s+(\S+)')
+SESSION = re.compile(r'@session=(\S+)')
 CITES = {
     "ratio": re.compile(r'@ratio\s+(\S+)\s+(\S+)'),
     "below": re.compile(r'@below\s+(\S+)\s+(\S+)'),
@@ -61,6 +62,7 @@ class Finding:
     n_hint: int | None = None
     stat_hint: str = ""
     clip_hint: str = ""
+    session: str = ""
     cited_by: list[str] = field(default_factory=list)
 
     def key(self) -> str:
@@ -91,6 +93,7 @@ def _parse(path: str) -> tuple[list[Finding], list[tuple[str, str, str, int, str
             f.n_hint = int(m2.group(1)) if (m2 := N_HINT.search(pop)) else None
             f.stat_hint = (m2.group(1).lower() if (m2 := STAT.search(pop)) else "")
             f.clip_hint = (m2.group(1) if (m2 := CLIP.search(pop)) else "")
+            f.session = (m2.group(1) if (m2 := SESSION.search(line)) else "")
             findings.append(f)
         elif m := BAR.match(line):
             bars.append((m.group(1), m.group(2), m.group(3), lineno, path))
@@ -142,7 +145,7 @@ def migrate(paths: list[str], store: Store | None = None) -> tuple[list[Finding]
         if pathlib.Path(f.file).name == "claims-example.txt":
             f.status = "withdrawn"
             f.missing = ["withdrawn by the source file"]
-    name_reuse, pop_conf, _ = conflicts(all_f)
+    name_reuse, pop_conf, _, cross_run = conflicts(all_f)
     # Only name reuse is a contradiction. Three values on one population LABEL (fp16 / int8 /
     # int8-fused) are three arms the label does not distinguish - counted, not failed.
     conflicted = {e["name"] for e in name_reuse}
@@ -168,7 +171,8 @@ def migrate(paths: list[str], store: Store | None = None) -> tuple[list[Finding]
             f.missing = _missing(f, False)
     return all_f, all_bars, {"cited": dict(cited), "protected": protected,
                              "name_reuse": name_reuse, "pop_conflicts": pop_conf,
-                             "legacy_audit": audit, "unparsed": unparsed}
+                             "legacy_audit": audit, "unparsed": unparsed,
+                             "cross_run": cross_run}
 
 
 def _legacy_audit(path: str) -> tuple[str, int, str]:
@@ -213,11 +217,24 @@ def conflicts(findings: list[Finding]) -> tuple[list[dict], list[dict], list[dic
     for f in findings:
         if f.status == "withdrawn":
             continue
-        by_name[f.name].append(f)
+        by_name[(f.name, f.session)].append(f)
 
-    name_reuse = [{"name": k, "values": sorted({(x.value, x.unit, x.file.split('/')[-1], x.line) for x in v})}
+    name_reuse = [{"name": k[0], "session": k[1],
+                   "values": sorted({(x.value, x.unit, x.file.split('/')[-1], x.line) for x in v})}
                   for k, v in by_name.items()
                   if len({(x.value, x.unit) for x in v}) > 1]
+    # The same name in two runs is not a contradiction - it is a re-measurement, and the corpus
+    # carried no session at all until 2026-11-16, so nothing said which one is current.
+    cross_run = []
+    byname_any: dict[str, list[Finding]] = defaultdict(list)
+    for f in findings:
+        if f.status != "withdrawn":
+            byname_any[f.name].append(f)
+    for name, group in byname_any.items():
+        sessions = {x.session for x in group if x.session}
+        if len(sessions) > 1 and len({(x.value, x.unit) for x in group}) > 1:
+            cross_run.append({"name": name, "sessions": sorted(sessions),
+                              "values": sorted({(x.value, x.unit, x.session) for x in group})})
 
     pop_stat, stat_hidden = [], []
     loose: dict[tuple, list[Finding]] = defaultdict(list)
@@ -232,7 +249,7 @@ def conflicts(findings: list[Finding]) -> tuple[list[dict], list[dict], list[dic
         entry = {"unit": key[0], "population": key[1],
                  "values": sorted({(x.value, x.name) for x in group})}
         (pop_stat if len(stats) == 1 else stat_hidden).append(entry)
-    return name_reuse, pop_stat, stat_hidden
+    return name_reuse, pop_stat, stat_hidden, cross_run
 
 
 def emit_records(findings: list[Finding], store: Store) -> Store:
@@ -271,7 +288,7 @@ def report(findings: list[Finding], bars: list[tuple], meta: dict) -> tuple[str,
              f"{len(bars)} bars, {len(meta['cited'])} names cited"]
     lines.append(f"  withdrawn by the source file: {len(withdrawn)}   (claims-example.txt)")
     lines.append(f"  protected:                    {len(protected)}")
-    lines.append(f"  CONFLICTED (two values, one name/population): {len(conflicted)}")
+    lines.append(f"  CONFLICTED (two values, one name within one run): {len(conflicted)}")
     lines.append(f"  unverifiable (no tuple):      {len(unver)}")
     lines.append(f"  decision-bearing (cited by a relation): {len(bearing)}, "
                  f"not protected: {len(bearing_bad)}")
@@ -282,6 +299,14 @@ def report(findings: list[Finding], bars: list[tuple], meta: dict) -> tuple[str,
         lines.append("One name, two values - a re-measurement or a contradiction, and nothing in the file says which:")
         for e in sorted(meta["name_reuse"], key=lambda e: e["name"]):
             vals = "; ".join(f"{v:g} {u} ({f}:{l})" for v, u, f, l in e["values"])
+            lines.append(f"  {e['name']:<28} {vals}")
+
+    if meta.get("cross_run"):
+        lines.append("")
+        lines.append("Same name in two runs - a re-measurement, not a contradiction, and nothing in the "
+                     "file says which run is current:")
+        for e in sorted(meta["cross_run"], key=lambda e: e["name"]):
+            vals = ", ".join(f"{v:g} {u} ({s})" for v, u, s in e["values"])
             lines.append(f"  {e['name']:<28} {vals}")
 
     if meta.get("pop_conflicts"):

@@ -187,6 +187,70 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
     return 1 if problems else 0
 
 
+def below_report(paths: list[str], bars_path: str, quiet: bool = False) -> int:
+    """Every `@below` assertion in the corpus, split into arithmetic and eligibility.
+
+    Arithmetic: is the value actually under the bar, same unit, same statistic? Eligibility: does the
+    claim carry enough to be judged at all (n, statistic, instrument)? The corpus has 29 of these and
+    no records behind them, so the honest output is two columns, not one verdict.
+    """
+    import glob as _glob
+    bars = _bars_from_file(bars_path)
+    rows: list[tuple[str, str, str, str]] = []
+    counts = {"under": 0, "over": 0, "literal": 0, "unknown": 0, "ineligible": 0}
+    for pat in paths:
+        for path in sorted(_glob.glob(pat)) or [pat]:
+            claims = {}
+            for line in open(path):
+                s_ = line.split(" # ")[0].strip()
+                if m := CLAIM.match(s_):
+                    claims[m.group(1)] = (float(m.group(2)), m.group(3))
+            for line in open(path):
+                s_ = line.split(" # ")[0].strip()
+                if not (m := BELOW.match(s_)):
+                    continue
+                name, bar_name = m.group(1), m.group(2)
+                if name not in claims:
+                    rows.append((name, "?", bar_name, "NO SUCH CLAIM"))
+                    counts["unknown"] += 1
+                    continue
+                value, unit = claims[name]
+                if bar_name in bars:
+                    bar = bars[bar_name]
+                else:
+                    try:
+                        bar = Bar(name=bar_name, value=float(bar_name), unit=unit, of="share",
+                                  statistic="worst_of")
+                        literal = True
+                    except ValueError:
+                        rows.append((name, f"{value:g} {unit}", bar_name, "UNKNOWN BAR"))
+                        counts["unknown"] += 1
+                        continue
+                if bar_name not in bars:
+                    rows.append((name, f"{value:g} {unit}", bar_name, "LITERAL BAR (not a record)"))
+                    counts["literal"] += 1
+                elif unit != bar.unit:
+                    rows.append((name, f"{value:g} {unit}", bar_name, f"UNIT {unit} vs bar {bar.unit}"))
+                    counts["unknown"] += 1
+                elif bar.min_n > 1:
+                    rows.append((name, f"{value:g} {unit}", bar_name,
+                                 ("under" if value < bar.value else "OVER") + " but n is not recorded"))
+                    counts["under" if value < bar.value else "over"] += 1
+                    counts["ineligible"] += 1
+                else:
+                    under = value < bar.value
+                    rows.append((name, f"{value:g} {unit}", bar_name, "under" if under else "OVER"))
+                    counts["under" if under else "over"] += 1
+    if not quiet:
+        for r in rows:
+            print(f"  {r[0]:<32} {r[1]:>12}  vs {r[2]:<12} {r[3]}")
+    print(f"\n{len(rows)} @below assertions: {counts['under']} under the bar, {counts['over']} OVER, "
+          f"{counts['literal']} against a literal, {counts['unknown']} unknown, "
+          f"{counts['ineligible']} not evaluable as a decision (no n recorded)")
+    print("bars: docs/claims-bars.json; a bar that is not a record is not a bar")
+    return 1 if (counts["over"] or counts["literal"] or counts["unknown"]) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m harness.cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -197,9 +261,16 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--bars")
     c.add_argument("--quiet", action="store_true")
 
+    b = sub.add_parser("below-report", help="evaluate every @below assertion against docs/claims-bars.json")
+    b.add_argument("paths", nargs="+")
+    b.add_argument("--bars", default="docs/claims-bars.json")
+    b.add_argument("--quiet", action="store_true")
+
     sub.add_parser("scope", help="print what this harness does and does not check")
 
     args = ap.parse_args(argv)
+    if args.cmd == "below-report":
+        return below_report(args.paths, args.bars, args.quiet)
     if args.cmd == "check":
         return check(args.claims, args.records, args.bars, args.quiet)
     print(__doc__)
