@@ -50,3 +50,22 @@ decision-bearing**.
 Whether a population *label* is true; whether the item set is the one the decision needs; whether a cost
 model is complete; whether a cited pair rules out the other mechanisms; free-text derivation arithmetic.
 The first two are the expensive ones, and they stay human judgements that the harness only makes visible.
+
+## Verified: claims that passed their own gate (2026-11-16/17)
+
+`docs/wsp/verified/` holds three findings re-derived from artifacts, each beside the records it cites.
+They PASS `harness.cli check` with full coverage - the first non-vacuous green in this project:
+
+| file | what it re-derives | verdict |
+|---|---|---|
+| `model-prelu.txt` | the 1088 per-channel PReLU slopes, span and per-node Cv | matches the ledger exactly |
+| `int8-block.txt` | 1.91 ms / 80 TOPS for one 64->64 int8 block | reproduces at 1.78-1.85 ms / 83-86 TOPS |
+| `residual-scale.txt` | the correction the network adds over a nearest upsample | a DIFFERENT, named frame: 1.3-2.3x away, which is what an unnamed population costs |
+
+The int8 probe emits its own records now (`scripts/int8_block_probe.py --emit`), so this is not a
+hand-copied number: the probe, the record and the claim are the same object.
+
+**The engine lane cannot follow.** This host has no TensorRT runtime (only `tensorrt-debug` symbols,
+no `libnvinfer`, no `trtexec`), and a PyPI wheel is 11.4 while the ledger's numbers are 10.12 - a
+different instrument by this project's own rule. The engine claims stay unprotectable until 10.12 is
+installed again; nothing in this repository can substitute for it.

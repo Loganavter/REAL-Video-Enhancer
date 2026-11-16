@@ -730,7 +730,7 @@ tasks:
   title: 'Route every probe that feeds a claim through scripts/harness: the number
     becomes a record'
   type: code
-  status: todo
+  status: in_progress
   owner: null
   priority: P0
   gpu: false
@@ -762,7 +762,11 @@ tasks:
     UNBLOCKED 2026-11-16: the repo now has .venv with torch 2.15.0+cu132 and triton
     3.9.0 (GPU verified: RTX 4060 Ti sm89, a Triton add kernel runs). Pure-Triton
     probes run today (scripts/int8_block_probe.py reproduced the int8 block); engine
-    probes still need python-tensorrt.'
+    probes still need python-tensorrt. FIRST LANE DONE 2026-11-17: scripts/int8_block_probe.py
+    takes --emit and writes harness records (population = launches, instrument = torch.cuda.Event,
+    config = device/triton/BLOCK_M); verified on the GPU at 1.848 ms / 82.8 TOPS with
+    the bit-exact row still clean. The remaining probes need the same treatment; the
+    engine ones wait on a TRT runtime.'
 - id: rve-findings-rederivation-2026-11-16
   title: 'The existing findings are unprotected: 0 of 211 claims carry a tuple; 62
     are decision-bearing'
@@ -810,7 +814,13 @@ tasks:
     apart), and the int8 block 1.91 ms / 80 TOPS (re-run with the repo''s own Triton
     kernel under CUDA events: 1.779-1.841 ms, 83-86 TOPS, bit-exact vs the int32 reference).
     The engine-timing claims still need TensorRT python bindings, which are not installed
-    (only tensorrt-debug symbols).'
+    (only tensorrt-debug symbols). ENGINE LANE 2026-11-17: the host has no TensorRT
+    runtime at all (only tensorrt-debug symbols; no libnvinfer, no trtexec), so the
+    recorded engine numbers were measured in an environment that no longer exists
+    here. A PyPI wheel installs 11.4.0.106; the ledger''s numbers come from 10.12,
+    and a different TRT version picks different tactics - by this project''s own rule
+    that is a DIFFERENT INSTRUMENT, so it cannot protect the old numbers, only produce
+    new ones. Reproducing as recorded would need 10.12 itself.'
 - id: rve-bars-populations-2026-11-16
   title: Bars need an `of` field and populations need item sets - format work, no
     measurement
