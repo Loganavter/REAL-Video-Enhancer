@@ -479,10 +479,15 @@ class UpscalePytorch:
         dtype = image.dtype
         gpu_id = image.gpu_id
         device = image.device
+        # host timeline of the whole inference window, no synchronisation of our own
+        import logging as _lgt
+        _h = {"t0": time.perf_counter()}
         with self.torchUtils.run_stream(self.f2tstream):  # type: ignore
             image_tensor = image.get_frame_tensor()
+        _h["upload"] = time.perf_counter()
         del image
         self.torchUtils.sync_stream(self.f2tstream)
+        _h["upload_sync"] = time.perf_counter()
 
         _t_inf = time.perf_counter()
         with self.torchUtils.run_stream(self.stream):
@@ -530,6 +535,7 @@ class UpscalePytorch:
             # how "the app is 23% slower than the isolated benchmark" got misread (ledger P11).
             # RVE_TRT_SPLIT=1 forces a sync here so the parts are attributable; it costs the
             # overlap, so it is a diagnostic, never a production path.
+            _h["model"] = time.perf_counter()
             if _SPLIT_TIMING:
                 self.torchUtils.sync_stream(self.stream)
             self.last_model_ms = (time.perf_counter() - _t_inf) * 1000.0
@@ -542,11 +548,27 @@ class UpscalePytorch:
             
             retFrame.set_frame_tensor(output, sync=False)
             self.last_frame_ms = (time.perf_counter() - _t_frame_ctor) * 1000.0
+            _h["frame"] = time.perf_counter()
         
         self.torchUtils.sync_stream(self.stream)
         # measured after the sync: the model runs async on its stream, so a timer taken at
         # enqueue time only measures the launch (~1.8 ms, not the 35 ms of work)
         self.last_inference_ms = (time.perf_counter() - _t_inf) * 1000.0
+        _h["end"] = time.perf_counter()
+        self._htl = getattr(self, "_htl", 0) + 1
+        if self._htl <= 3 or self._htl % 8 == 0:
+            _ms = lambda a, b: (_h[b] - _h[a]) * 1000.0
+            _lgt.getLogger("RVE").warning(
+                "host timeline: upload %.2f  upload_sync %.2f  model-call %.2f  frame-ctor %.2f  "
+                "final-sync %.2f  | total %.2f ms | last_inference_ms %.2f | out dtype %s "
+                "shape %s contig %s stride %s",
+                _ms("t0", "upload"), _ms("upload", "upload_sync"), _ms("upload_sync", "model"),
+                _ms("model", "frame"), _ms("frame", "end"), (_h["end"] - _h["t0"]) * 1000.0,
+                getattr(self, "last_inference_ms", -1.0),
+                getattr(retFrame, "_tensor", None).dtype if getattr(retFrame, "_tensor", None) is not None else None,
+                tuple(getattr(retFrame, "_tensor", None).shape) if getattr(retFrame, "_tensor", None) is not None else None,
+                getattr(retFrame, "_tensor", None).is_contiguous() if getattr(retFrame, "_tensor", None) is not None else None,
+                getattr(retFrame, "_tensor", None).stride() if getattr(retFrame, "_tensor", None) is not None else None)
         return retFrame
  
     def _int8_body(self, frame=None):
