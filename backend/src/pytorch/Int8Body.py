@@ -114,6 +114,21 @@ class Int8Body:
         self._launches = launches
         return launches
 
+    def _int8_buffers(self, x, h, w):
+        """One allocation per shape for all three int8 buffers.
+
+        Allocating the 133 MB quantise target inside the frame cost ~18 ms: a 133 MB cudaMalloc synchronises
+        the device, and the phase clock charges the wait to whichever kernel comes next. Measured 20.3 ms for
+        that phase in the app against 1.9 ms for the same kernel on the same tensor in isolation.
+        """
+        key = (x.shape[0], h, w)
+        if getattr(self, "_buf_key", None) != key:
+            self._buf = torch.empty((x.shape[0], h, w, self.feat), device=x.device, dtype=torch.int8)
+            self._scratch_a = torch.empty_like(self._buf)
+            self._scratch_b = torch.empty_like(self._buf)
+            self._buf_key = key
+        return self._buf, self._scratch_a, self._scratch_b
+
     def __call__(self, x):
         if self._grids is None:
             self.calibrate(x)
@@ -125,34 +140,76 @@ class Int8Body:
         grid = ((n_pix + self.block_m - 1) // self.block_m,)
         qgrid = ((n_pix + QB - 1) // QB,)
 
+        # GPU time of the body, measured without synchronising inside the frame: the previous pair is
+        # complete by now, so reading it costs nothing and charges no foreign work to us.
+        import logging as _lg
+        _prev = getattr(self, "_ev_pair", None)
+        if _prev is not None:
+            _s, _e, _n = _prev
+            self._gpu_ms = getattr(self, "_gpu_ms", []) + [_s.elapsed_time(_e)]
+            if len(self._gpu_ms) % 8 == 0:
+                _v = self._gpu_ms[-8:]
+                _lg.getLogger("RVE").warning("int8 body GPU: %.2f ms/frame (last 8), frame %d",
+                                             sum(_v) / len(_v), len(self._gpu_ms))
+        _prevp = getattr(self, "_phase_ev", None)
+        if _prevp is not None:
+            _names = ("head", "quantise", "hops", "tail")
+            _vals = [_a.elapsed_time(_b) for _a, _b in _prevp]
+            self._phase_log = getattr(self, "_phase_log", 0) + 1
+            if self._phase_log % 8 == 0:
+                _lg.getLogger("RVE").warning(
+                    "int8 phases: head %.1f  quantise %.1f  hops %.1f  tail %.1f ms  (total %.1f)",
+                    _vals[0], _vals[1], _vals[2], _vals[3], sum(_vals))
+        _e0, _e1, _e2, _e3, _e4 = (torch.cuda.Event(True) for _ in range(5))
+        _e0.record(); _start = _e0; _end = _e4
         with torch.no_grad():
             head = self.head_conv(x.clamp(0.0, 1.0))      # PReLU is fused into the quantise below
+            _e1.record()
             # The fused Triton conversion is CORRECT once fed a contiguous tensor (the PReLU output is
             # not, and the kernel indexes raw memory as ch * n_pix + pix - that mismatch was the 98.34%
             # of differing codes), but making it contiguous costs more than the four torch passes it
             # replaces: 89.25 ms against 72.49 ms for this path, both certified at 0.00000%. So the
             # faster of the two correct versions is the torch one, and the measured win of the earlier
             # fusion was entirely the wrong codes, not the fusion.
+            if not getattr(self, "_blog", False):
+                self._blog = True
+                _lg.getLogger("RVE").warning(
+                    "int8 quantise branch: channels_last=%s contiguous=%s strides=%s shape=%s QB=%s",
+                    head.is_contiguous(memory_format=torch.channels_last), head.is_contiguous(),
+                    head.stride(), tuple(head.shape), QB)
             if head.is_contiguous(memory_format=torch.channels_last):
                 # the bytes are already NHWC: read them where they are, no transpose, no copy
-                buf = torch.empty((x.shape[0], h, w, self.feat), device=x.device, dtype=torch.int8)
+                buf = self._int8_buffers(x, h, w)[0]
                 quantise_nhwc_prelu[qgrid](head, s_act.contiguous(),
                                            self._slope_half, buf, n_pix,
                                            BLOCK=QB, C=self.feat, num_warps=4)
             else:
+                # the head is plain contiguous NCHW here (the app's conv output), so the NCHW variant
+                # reads it where it is - the torch expression below was costing ~10 ms a frame
                 head = torch.nn.functional.prelu(head, self.head_prelu.weight)
+                buf = self._int8_buffers(x, h, w)[0]
+                quantise_nchw_to_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
+                                             BLOCK=QB, C=self.feat, num_warps=4)
                 buf = (torch.round(head / s_act.view(1, -1, 1, 1)).clamp(-127, 127)
                        .to(torch.int8).permute(0, 2, 3, 1).contiguous())
             # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
             # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
             # and the same launch parameters - the aliasing was the whole difference.
-            src = buf
+            # pre-allocated scratch: sixteen 132 MB allocations per frame measured ~22 ms of GPU time in
+            # the app (70.8 ms there against 48.6 in the harness) where the allocator had to grow against a
+            # fragmented pool. The destination cycles between two buffers and never returns to `buf`.
+            key = (x.shape[0], h, w)
+            _, self._scratch_a, self._scratch_b = self._int8_buffers(x, h, w)
+            _e2.record()
+            src, nxt = buf, self._scratch_a
             for launch in self._launches:
-                dst = torch.empty_like(buf)
+                dst = nxt
                 body_prologue_kernel[grid](src, launch["w"], launch["m"], SHIFT, launch["vec"],
                                            launch["bias"], launch["slope"], launch["os"], dst, h, w,
                                            BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps)
                 src = dst
+                nxt = self._scratch_b if dst is self._scratch_a else self._scratch_a
+            _e3.record()
             channels_last = self.tail_conv.weight.is_contiguous(memory_format=torch.channels_last)
             if channels_last:
                 last_nhwc = torch.empty((x.shape[0], h, w, self.feat), device=x.device,
@@ -165,8 +222,12 @@ class Int8Body:
                 dequantise_nhwc_to_nchw[qgrid](src, self._launches[-1]["os"].contiguous(), last, n_pix,
                                                BLOCK=QB, C=self.feat, num_warps=4)
             out = self.model.upsampler(self.tail_conv(last))
-        return out + torch.nn.functional.interpolate(x.clamp(0.0, 1.0), scale_factor=self.scale,
-                                                     mode="nearest")
+            out = out + torch.nn.functional.interpolate(x.clamp(0.0, 1.0), scale_factor=self.scale,
+                                                        mode="nearest")
+            _end.record()
+        self._ev_pair = (_start, _end, 0)
+        self._phase_ev = ((_e0, _e1), (_e1, _e2), (_e2, _e3), (_e3, _e4))
+        return out
 
     # ---- self-certification: the body has to prove itself on the frame it calibrated on
     def certify(self, x, bar: float = 0.1):
