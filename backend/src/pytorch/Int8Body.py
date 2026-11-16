@@ -112,6 +112,8 @@ class Int8Body:
         from torch.nn.functional import conv2d  # noqa: F401 - documents what the kernel replaces
 
         s_act, outs = self._grids
+        # the head now writes straight onto hop 1's per-tensor grid: the prologue no longer requants
+        self._s_t1 = s_act.max().expand_as(s_act).contiguous()
         launches, s_in = [], s_act
         for idx, conv in enumerate(self.inner, start=1):
             s_out = outs[idx - 1]
@@ -127,6 +129,11 @@ class Int8Body:
                 slope=self.inner_prelus[idx - 1].weight.detach().float().contiguous(),
                 os=s_out.contiguous()))
             s_in = s_out
+        # each hop's epilogue requants into the NEXT hop's per-tensor grid, so hop k gets hop k+1's
+        # multiplier and the last hop gets the identity (it stays on its per-channel grid, as before)
+        identity = torch.full((self.feat,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
+        for k in range(len(launches)):
+            launches[k]["mn"] = launches[k + 1]["m"] if k + 1 < len(launches) else identity
         self._launches = launches
         return launches
 
@@ -209,8 +216,7 @@ class Int8Body:
             if head.is_contiguous(memory_format=torch.channels_last):
                 # the bytes are already NHWC: read them where they are, no transpose, no copy
                 buf = self._int8_buffers(x, h, w)[0]
-                quantise_nhwc_prelu[qgrid](head, s_act.contiguous(),
-                                           self._slope_half, buf, n_pix,
+                quantise_nhwc_prelu[qgrid](head, self._s_t1, self._slope_half, buf, n_pix,
                                            BLOCK=QB, C=self.feat, num_warps=4)
             else:
                 # the head is plain contiguous NCHW here (the app's conv output). PReLU is FUSED into the
@@ -233,7 +239,7 @@ class Int8Body:
                     self._prelu_key = key
                 torch.mul(head, self._slope_half.view(1, -1, 1, 1), out=self._prelu_tmp)
                 torch.where(head >= 0, head, self._prelu_tmp, out=self._prelu_buf)
-                quantise_nchw_to_nhwc[qgrid](self._prelu_buf, s_act.contiguous(), buf, n_pix,
+                quantise_nchw_to_nhwc[qgrid](self._prelu_buf, self._s_t1, buf, n_pix,
                                              BLOCK=QB, C=self.feat, num_warps=4)
             # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
             # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
@@ -251,7 +257,7 @@ class Int8Body:
             for launch in self._launches:
                 dst = nxt
                 _h0 = _time.perf_counter()
-                body_prologue_kernel[grid](src, launch["w"], launch["m"], SHIFT, launch["vec"],
+                body_prologue_kernel[grid](src, launch["w"], launch["mn"], SHIFT, launch["vec"],
                                            launch["bias"], launch["slope"], launch["os"], dst, h, w,
                                            BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps)
                 _host_launch += _time.perf_counter() - _h0

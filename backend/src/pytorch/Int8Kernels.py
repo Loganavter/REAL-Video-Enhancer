@@ -29,14 +29,13 @@ __all__ = ["body_prologue_kernel", "quantise_nchw_to_nhwc", "quantise_nchw_to_nh
 
 
 @triton.jit
-def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, bias_ptr, slope_ptr, out_scale_ptr, y_ptr,
-                         H, W, BLOCK_M: tl.constexpr, C: tl.constexpr):
+def body_prologue_kernel(x_ptr, w_ptr, m_next_ptr, shift, w_scale_ptr, bias_ptr, slope_ptr, out_scale_ptr,
+                         y_ptr, H, W, BLOCK_M: tl.constexpr, C: tl.constexpr):
     pid = tl.program_id(0)
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
     h = rows // W
     w = rows % W
     lanes = tl.arange(0, C)
-    m = tl.load(m_ptr + lanes)                      # int32 per INPUT channel
     acc = tl.zeros((BLOCK_M, C), dtype=tl.int32)
     # tl.range with one stage, NOT static_range: unrolling all nine taps costs registers and measured
     # 2.919 ms per launch against 2.198 for the rolled loop at BM 128 / 4 warps. Pipelining it (stages 2-3)
@@ -48,9 +47,9 @@ def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, bias_ptr, slop
         xx = w + dx
         inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
         src = (yy * W + xx)[:, None] * C + lanes[None, :]
-        a = tl.load(x_ptr + src, mask=inside[:, None], other=0).to(tl.int32)
-        a = ((a * m[None, :]) + (1 << (shift - 1))) >> shift
-        a = tl.minimum(tl.maximum(a, -127), 127).to(tl.int8)
+        # the buffer ALREADY arrives on this hop's per-tensor grid: the previous hop's epilogue
+        # requanted it, once per element, instead of nine times here on every load.
+        a = tl.load(x_ptr + src, mask=inside[:, None], other=0)
         b = tl.load(w_ptr + tap * C * C + lanes[:, None] * C + lanes[None, :])
         acc += tl.dot(a, b, out_dtype=tl.int32)
     v = acc.to(tl.float32) * tl.load(w_scale_ptr + lanes)[None, :] + tl.load(bias_ptr + lanes)[None, :]
@@ -58,6 +57,10 @@ def body_prologue_kernel(x_ptr, w_ptr, m_ptr, shift, w_scale_ptr, bias_ptr, slop
     v = tl.where(v >= 0, v, v * slope)
     out_scale = tl.load(out_scale_ptr + lanes)[None, :]
     q = tl.floor(v / out_scale + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    # ...and the requant for the NEXT hop goes here, one multiply and one shift per element
+    q = q.to(tl.int32)
+    q = ((q * tl.load(m_next_ptr + lanes)[None, :]) + (1 << (shift - 1))) >> shift
     q = tl.minimum(tl.maximum(q, -127.0), 127.0)
     tl.store(y_ptr + rows[:, None] * C + lanes[None, :], q.to(tl.int8))
 
