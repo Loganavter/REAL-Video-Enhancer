@@ -84,10 +84,10 @@ def _read_pairs(clip, count, w, h):
         argv = [FF, "-hide_banner", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", clip,
                 "-frames:v", "3", "-vf", f"scale={w}:{h}", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
         raw = subprocess.run(argv, capture_output=True).stdout
-        if len(raw) < 2 * size:
+        if len(raw) < 3 * size:
             continue
         pair = []
-        for k in range(2):
+        for k in range(3):
             img = np.frombuffer(raw[k * size:(k + 1) * size], dtype=np.uint8)
             img = img.reshape(h, w, 3).astype("float32") / 255.0
             pair.append(torch.from_numpy(img).permute(2, 0, 1)[None])
@@ -204,6 +204,12 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         reused = [i for i in test_idx if gate_delta(frames_all[i][0], frames_all[i][1]) <= GATE_THRESHOLD]
         engine = [_statistic(ref[i][1], got[i][1]) for i in test_idx]
         comp = [_statistic(ref[i][1], got[i][0]) for i in reused]
+        # the same composition at the chain depth the gate serves (t-2 against t)
+        # depth 2 only over pairs the gate would reuse at BOTH steps: checking one delta and then
+        # comparing frames two apart measures motion, not quantisation (it read 10.7% on Violet).
+        reused2 = [i for i in reused if len(ref[i]) > 2
+                   and gate_delta(frames_all[i][1], frames_all[i][2]) <= GATE_THRESHOLD]
+        comp2 = [_statistic(ref[i][2], got[i][0]) for i in reused2]
         if not engine:
             return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "no test pairs", error="no test pairs")
         engine_worst = max(s for s, _ in engine)
@@ -212,9 +218,15 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                                    "no pair the gate would reuse", frames_used=len(pairs))
         comp_worst = max(s for s, _ in comp)
         peak = max(p for _, p in comp)
-        verdict = comp_worst <= bar
-        reason = (f"composition {comp_worst:.3f}% {'<=' if verdict else '>'} bar {bar}% "
-                  f"(own defect {engine_worst:.3f}%, {len(comp)} of {len(test_idx)} pairs reused)")
+        # The gate serves references up to its chain depth, so the verdict is taken at the WORST depth it may
+        # serve - certifying at depth 1 and serving at depth 2 is the blind spot this project already hit once.
+        worst_depth = comp_worst if not comp2 else max(comp_worst, c2)
+        verdict = worst_depth <= bar
+        c2 = max((s for s, _ in comp2), default=float("nan"))
+        _n2 = len(reused2)
+        reason = (f"composition d1 {comp_worst:.3f}% / d2 {c2:.3f}% -> worst {worst_depth:.3f}% "
+                  f"{'<=' if verdict else '>'} bar {bar}% (own defect {engine_worst:.3f}%, "
+                  f"{len(comp)} of {len(test_idx)} pairs at d1, {_n2} at d2)")
         return Int8ProbeResult(verdict, engine_worst, comp_worst, peak, len(comp), bar, reason,
                                frames_used=len(pairs),
                                frames=[f for i in calib_idx for f in frames_all[i]])

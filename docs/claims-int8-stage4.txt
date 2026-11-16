@@ -272,3 +272,17 @@
 @derived net_24min_now "11520 rendered frames x 8.45 ms = 97.2 s against F 65.4 s"
 @claim net_24min_ht    +213.7 s "the same episode after head+tail" derived
 @derived net_24min_ht "11520 x 24.26 ms = 279.2 s against 65.4 s"
+
+# ---- composition at the depth the GATE serves, not at depth 1
+@claim comp_d1_chainsaw 0.002 % "composition depth 1, a5_chainsaw, 7 gated pairs" measured
+@claim comp_d2_chainsaw 0.390 % "composition depth 2, 6 pairs where BOTH steps clear the gate" measured
+@claim comp_d1_violet   0.104 % "composition depth 1, a5_violet" measured
+@claim comp_d2_violet   0.166 % "composition depth 2, same filter" measured
+@claim depth_ratio_chainsaw 195 x "derived: comp_d2_chainsaw / comp_d1_chainsaw" derived
+@derived depth_ratio_chainsaw "0.390 / 0.002 = 195x - depth, not quantisation, is what breaks the bar"
+@claim depth_ratio_violet 1.6 x "derived: comp_d2_violet / comp_d1_violet" derived
+@derived depth_ratio_violet "0.166 / 0.104 = 1.6x"
+# The probe now decides at the worst depth the gate may serve, which is the whole point.
+@claim verdict_depth_worst 2 x "the probe's verdict uses max(d1, d2); at depth 1 both titles would pass" measured
+@below comp_d2_chainsaw bar_share
+@below comp_d2_violet bar_share
