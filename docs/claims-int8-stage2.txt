@@ -5,33 +5,33 @@
 @bar kill_ratio 1.15 x      # <= 1.15x and the lane does not pay
 @bar zero_excess 0.0 ms
 
-@claim engine_idle_ms   80.47 ms  "fp16 TensorRT engine forward, 1920x1080 to 2x, NVENC idle, 3 rounds" measured
-@claim int8_idle_ms     54.03 ms  "int8 full cycle, same session, NVENC idle, 3 rounds" measured
-@claim ratio_idle        1.489 x  "derived: engine_idle_ms / int8_idle_ms" derived
+@claim engine_idle_ms   80.47 ms  "fp16 TensorRT engine forward, 1920x1080 to 2x, NVENC idle, 3 rounds" measured  @session=stage2
+@claim int8_idle_ms     54.03 ms  "int8 full cycle, same session, NVENC idle, 3 rounds" measured  @session=stage2
+@claim ratio_idle        1.489 x  "derived: engine_idle_ms / int8_idle_ms" derived  @session=stage2
 @derived ratio_idle "80.47 / 54.03 = 1.489, interleaved rounds, clocks 2760->2655 MHz"
-@claim engine_nvenc_ms  91.91 ms  "fp16 engine forward, h264_nvenc encoding concurrently" measured
-@claim int8_nvenc_ms    61.06 ms  "int8 full cycle, h264_nvenc encoding concurrently" measured
-@claim ratio_nvenc       1.505 x  "derived: engine_nvenc_ms / int8_nvenc_ms" derived
+@claim engine_nvenc_ms  91.91 ms  "fp16 engine forward, h264_nvenc encoding concurrently" measured  @session=stage2
+@claim int8_nvenc_ms    61.06 ms  "int8 full cycle, h264_nvenc encoding concurrently" measured  @session=stage2
+@claim ratio_nvenc       1.505 x  "derived: engine_nvenc_ms / int8_nvenc_ms" derived  @session=stage2
 @derived ratio_nvenc "91.91 / 61.06 = 1.505, interleaved rounds, clocks 2805->2655 MHz"
 
-@claim nvenc_cost_engine 14.22 %  "engine 80.47 -> 91.91 ms with NVENC alongside" derived
+@claim nvenc_cost_engine 14.22 %  "engine 80.47 -> 91.91 ms with NVENC alongside" derived  @session=stage2
 @derived nvenc_cost_engine "91.91 / 80.47 - 1 = 14.22%"
-@claim nvenc_cost_int8   13.01 %  "int8 cycle 54.03 -> 61.06 ms with NVENC alongside" derived
+@claim nvenc_cost_int8   13.01 %  "int8 cycle 54.03 -> 61.06 ms with NVENC alongside" derived  @session=stage2
 @derived nvenc_cost_int8 "61.06 / 54.03 - 1 = 13.01%"
 
-@claim int8_vs_engine   0.00004 % "int8 cycle vs the fp16 engine picture, same input, 1920x1080 to 2x" measured
-@claim int8_vs_torch    0.00001 % "int8 cycle vs the torch fp16 model, same input" measured
-@claim engine_vs_torch  0.00000 % "the engine and the torch model agree exactly on the same input" measured
+@claim int8_vs_engine   0.00004 % "int8 cycle vs the fp16 engine picture, same input, 1920x1080 to 2x" measured  @session=stage2
+@claim int8_vs_torch    0.00001 % "int8 cycle vs the torch fp16 model, same input" measured  @session=stage2
+@claim engine_vs_torch  0.00000 % "the engine and the torch model agree exactly on the same input" measured  @session=stage2
 
-@claim body_per_launch  2.771 ms  "16 int8 launches over 44.33 ms at 1920x1080, BM 64 / 2 warps" measured
-@claim body_before      2.876 ms  "the same at BM 128 / 4 warps" measured
-@claim quantise_fused   0.49 ms   "cycle 59.54 -> 59.05 ms when the quantise pass was fused into one kernel" measured
-@claim dequant_fused    4.00 ms   "cycle 57.92 -> 53.92 ms when the dequantise pass was fused into the tail" measured
+@claim body_per_launch  2.771 ms  "16 int8 launches over 44.33 ms at 1920x1080, BM 64 / 2 warps" measured  @session=stage2
+@claim body_before      2.876 ms  "the same at BM 128 / 4 warps" measured  @session=stage2
+@claim quantise_fused   0.49 ms   "cycle 59.54 -> 59.05 ms when the quantise pass was fused into one kernel" measured  @session=stage2
+@claim dequant_fused    4.00 ms   "cycle 57.92 -> 53.92 ms when the dequantise pass was fused into the tail" measured  @session=stage2
 
 # The shortfall against the gate must be <= 0, and now it is.
-@claim shortfall_idle  -3.45 ms  "int8_idle_ms - engine_idle_ms/1.40 = 54.03 - 57.48" derived
+@claim shortfall_idle  -3.45 ms  "int8_idle_ms - engine_idle_ms/1.40 = 54.03 - 57.48" derived  @session=stage2
 @derived shortfall_idle "54.03 - 80.47/1.40 = -3.45 ms: 3.45 ms of margin under the gate"
-@claim shortfall_nvenc -4.59 ms  "int8_nvenc_ms - engine_nvenc_ms/1.40 = 61.06 - 65.65" derived
+@claim shortfall_nvenc -4.59 ms  "int8_nvenc_ms - engine_nvenc_ms/1.40 = 61.06 - 65.65" derived  @session=stage2
 @derived shortfall_nvenc "61.06 - 91.91/1.40 = -4.59 ms: 4.59 ms of margin under the gate"
 @below shortfall_idle zero_excess
 @below shortfall_nvenc zero_excess
@@ -44,10 +44,10 @@
 # frame, so the 1.489x/1.505x are ratios against the wrong baseline. Against the right one:
 # These two were first divided across instruments (35.85 ms of profile log / 56.82 ms of harness). Both sides
 # are now measured in ONE process on the same frame - see the same block in claims-int8-stage4.txt.
-@claim app_engine_ms     46.40 ms "the app's own tiled engine, 1920x1080, loaded into the measuring process" measured
-@claim body_ms           56.56 ms "the int8 cycle, same process, same frame" measured
-@claim body_vs_app        0.820 x "derived: app_engine_ms / body_ms" derived
+@claim app_engine_ms     46.40 ms "the app's own tiled engine, 1920x1080, loaded into the measuring process" measured  @session=stage2
+@claim body_ms           56.56 ms "the int8 cycle, same process, same frame" measured  @session=stage2
+@claim body_vs_app        0.820 x "derived: app_engine_ms / body_ms" derived  @session=stage2
 @derived body_vs_app "46.40 / 56.56 = 0.820 - the body is 1.22x slower than the engine the app builds"
-@claim cross_instrument_vs 0.631 x "what the cross-instrument division said, kept as a warning" measured
+@claim cross_instrument_vs 0.631 x "what the cross-instrument division said, kept as a warning" measured  @session=stage2
 # The stage-2 gate (>=1.40x) is therefore NOT met, and neither is the kill line. Asserted as the finding.
 @below body_vs_app kill_ratio

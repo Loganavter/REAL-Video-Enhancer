@@ -5,15 +5,15 @@
 @bar bar_share 0.1 %      # the acceptance bar: share of pixels whose worst channel is >8 levels off
 @bar kill_prob 0.3   x    # P(pass) below this and int8 becomes a narrow opt-in
 
-@claim chainsaw_engine      0.009 %  "a5_chainsaw, 1920x1080, 7 gated pairs, int8(t) vs fp16(t)" measured
-@claim chainsaw_composition 0.010 %  "a5_chainsaw, int8(t-1) vs fp16(t): what the bar actually sees" measured
-@claim adv_chainsaw_comp    0.022 %  "adv_chainsaw, same population" measured
-@claim c10_comp             0.011 %  "c10_p010, same population" measured
-@claim violet_engine        0.057 %  "a5_violet, int8(t) vs fp16(t) - UNDER the bar" measured
-@claim violet_comp          0.170 %  "a5_violet, int8(t-1) vs fp16(t) - OVER the bar" measured
-@claim adv_violet_engine    0.058 %  "adv_violet, same population" measured
-@claim adv_violet_comp      0.165 %  "adv_violet, composition" measured
-@claim pass_rate            0.6   x  "derived: 3 of 5 readable titles pass on composition" derived
+@claim chainsaw_engine      0.009 %  "a5_chainsaw, 1920x1080, 7 gated pairs, int8(t) vs fp16(t)" measured  @session=stage4
+@claim chainsaw_composition 0.010 %  "a5_chainsaw, int8(t-1) vs fp16(t): what the bar actually sees" measured  @session=stage4
+@claim adv_chainsaw_comp    0.022 %  "adv_chainsaw, same population" measured  @session=stage4
+@claim c10_comp             0.011 %  "c10_p010, same population" measured  @session=stage4
+@claim violet_engine        0.057 %  "a5_violet, int8(t) vs fp16(t) - UNDER the bar" measured  @session=stage4
+@claim violet_comp          0.170 %  "a5_violet, int8(t-1) vs fp16(t) - OVER the bar" measured  @session=stage4
+@claim adv_violet_engine    0.058 %  "adv_violet, same population" measured  @session=stage4
+@claim adv_violet_comp      0.165 %  "adv_violet, composition" measured  @session=stage4
+@claim pass_rate            0.6   x  "derived: 3 of 5 readable titles pass on composition" derived  @session=stage4
 @derived pass_rate "a5_chainsaw, adv_chainsaw and c10_p010 pass; a5_violet and adv_violet fall back = 0.6"
 
 # The engine's own defect is not the criterion: a5_violet passes it and fails composition.
@@ -31,15 +31,15 @@
 # ---- the body: accuracy first, then the stopwatch (2026-11-16)
 # History, kept because it is why the conversion was reverted: with the fused Triton head conversion the
 # body read 3.53381% at 1080p and 1.27525% at 512. Those codes differ from torch's on 98.34% of elements.
-@claim body_before_1080    3.53381 % "Int8Body with the fused Triton head conversion, 1920x1080" measured
-@claim body_before_512     1.27525 % "the same at 512x512" measured
-@claim head_codes_differ   98.34 %   "fused Triton head conversion vs torch, NCHW-to-NCHW, mean offset +16.92" measured
+@claim body_before_1080    3.53381 % "Int8Body with the fused Triton head conversion, 1920x1080" measured  @session=stage4
+@claim body_before_512     1.27525 % "the same at 512x512" measured  @session=stage4
+@claim head_codes_differ   98.34 %   "fused Triton head conversion vs torch, NCHW-to-NCHW, mean offset +16.92" measured  @session=stage4
 
 # With the head conversion in torch, as the validated recipe does it:
-@claim body_share_256      0.00000 % "Int8Body.certify, 256x256" measured
-@claim body_share_512      0.00000 % "Int8Body.certify, 512x512" measured
-@claim body_share_1080     0.00000 % "Int8Body.certify, 1920x1080" measured
-@claim body_vs_engine_share 0.00001 % "Int8Body vs the app's fp16 TRT engine picture, 1920x1080" measured
+@claim body_share_256      0.00000 % "Int8Body.certify, 256x256" measured  @session=stage4
+@claim body_share_512      0.00000 % "Int8Body.certify, 512x512" measured  @session=stage4
+@claim body_share_1080     0.00000 % "Int8Body.certify, 1920x1080" measured  @session=stage4
+@claim body_vs_engine_share 0.00001 % "Int8Body vs the app's fp16 TRT engine picture, 1920x1080" measured  @session=stage4
 @below body_share_1080 bar_share
 @below body_share_512 bar_share
 @below body_vs_engine_share bar_share
@@ -49,21 +49,21 @@
 @bar kill_ratio 1.15 x
 @bar zero_excess 0.0 ms
 
-@claim engine_idle_ms   79.86 ms "fp16 TensorRT engine, 1920x1080, NVENC idle" measured
-@claim body_idle_ms     60.41 ms "Int8Body with the NHWC-aware head conversion, same rounds" measured
-@claim ratio_idle        1.322 x "derived: engine_idle_ms / body_idle_ms" derived
+@claim engine_idle_ms   79.86 ms "fp16 TensorRT engine, 1920x1080, NVENC idle" measured  @session=stage4
+@claim body_idle_ms     60.41 ms "Int8Body with the NHWC-aware head conversion, same rounds" measured  @session=stage4
+@claim ratio_idle        1.322 x "derived: engine_idle_ms / body_idle_ms" derived  @session=stage4
 @derived ratio_idle "79.86 / 60.41 = 1.322; the three rounds read 1.319 / 1.322 / 1.327"
-@claim engine_nvenc_ms  91.65 ms "fp16 engine, h264_nvenc encoding concurrently" measured
-@claim body_nvenc_ms    69.03 ms "Int8Body, same condition" measured
-@claim ratio_nvenc       1.328 x "derived: engine_nvenc_ms / body_nvenc_ms" derived
+@claim engine_nvenc_ms  91.65 ms "fp16 engine, h264_nvenc encoding concurrently" measured  @session=stage4
+@claim body_nvenc_ms    69.03 ms "Int8Body, same condition" measured  @session=stage4
+@claim ratio_nvenc       1.328 x "derived: engine_nvenc_ms / body_nvenc_ms" derived  @session=stage4
 @derived ratio_nvenc "91.65 / 69.03 = 1.328; rounds read 1.328 / 1.326 / 1.328"
 
 # The verdict: the lane PAYS, and misses the 1.40 gate by a measured amount.
-@claim kill_excess   -9.13 ms "body_idle_ms - engine_idle_ms/1.15 = 60.41 - 69.45" derived
+@claim kill_excess   -9.13 ms "body_idle_ms - engine_idle_ms/1.15 = 60.41 - 69.45" derived  @session=stage4
 @derived kill_excess "60.41 - 79.86/1.15 = -9.13 ms: 9.13 ms FASTER than the kill line, so the lane pays"
-@claim gate_excess    3.34 ms "body_idle_ms - engine_idle_ms/1.40 = 60.41 - 57.04" derived
+@claim gate_excess    3.34 ms "body_idle_ms - engine_idle_ms/1.40 = 60.41 - 57.04" derived  @session=stage4
 @derived gate_excess "60.41 - 79.86/1.40 = +3.34 ms SHORT of the 1.40 gate; recorded, not asserted"
-@claim fixed_costs_ms 16.1 ms  "head 5.5 + quantise ~2 + dequantise/tail ~8.4: the non-body work the gate's own note blames" derived
+@claim fixed_costs_ms 16.1 ms  "head 5.5 + quantise ~2 + dequantise/tail ~8.4: the non-body work the gate's own note blames" derived  @session=stage4
 @derived fixed_costs_ms "60.41 - 16.1 = 44.3 ms of int8 body, which alone would be 1.80x against the engine"
 
 # The plan's kill line is the one that decides whether the lane pays at all. It passes.
@@ -72,132 +72,132 @@
 # on a number it has already measured cannot also state the verdict.
 
 # ---- the 16.1 ms of non-body work, measured and attacked three times
-@claim seg_head_ms      5.272 ms "clamp + conv 3->64 + PReLU, 1920x1080" measured
-@claim seg_quant_ms     1.603 ms "quantise NHWC, no copy" measured
-@claim seg_body_ms     43.851 ms "16 int8 hops, 2.74 per launch" measured
-@claim seg_dequant_ms   2.320 ms "dequantise" measured
-@claim seg_tailconv_ms  2.258 ms "tail conv 64->12" measured
-@claim seg_upsampler_ms 0.742 ms "pixel shuffle" measured
-@claim seg_residual_ms  1.708 ms "nearest upsample + add" measured
-@claim seg_sum_ms      57.754 ms "sum of the segments; the full call is 60.115, so 2.4 ms is launch and allocation" measured
-@claim tail_nhwc_gain  -0.2 ms "tail dequantise staying NHWC: 60.2 -> 60.4 ms, inside the noise" measured
-@claim prelu_fuse_loss  9.0 ms "PReLU fused into the quantise kernel: 60.4 -> 69.4 ms, and the fused kernel alone is 12.816 ms" measured
-@claim prelu_passes_ms  3.632 ms "the two passes it replaced: 2.029 + 1.603" measured
-@claim contig_head_gain -0.3 ms "contiguous head input: 5.286 -> 5.557 ms" measured
+@claim seg_head_ms      5.272 ms "clamp + conv 3->64 + PReLU, 1920x1080" measured  @session=stage4
+@claim seg_quant_ms     1.603 ms "quantise NHWC, no copy" measured  @session=stage4
+@claim seg_body_ms     43.851 ms "16 int8 hops, 2.74 per launch" measured  @session=stage4
+@claim seg_dequant_ms   2.320 ms "dequantise" measured  @session=stage4
+@claim seg_tailconv_ms  2.258 ms "tail conv 64->12" measured  @session=stage4
+@claim seg_upsampler_ms 0.742 ms "pixel shuffle" measured  @session=stage4
+@claim seg_residual_ms  1.708 ms "nearest upsample + add" measured  @session=stage4
+@claim seg_sum_ms      57.754 ms "sum of the segments; the full call is 60.115, so 2.4 ms is launch and allocation" measured  @session=stage4
+@claim tail_nhwc_gain  -0.2 ms "tail dequantise staying NHWC: 60.2 -> 60.4 ms, inside the noise" measured  @session=stage4
+@claim prelu_fuse_loss  9.0 ms "PReLU fused into the quantise kernel: 60.4 -> 69.4 ms, and the fused kernel alone is 12.816 ms" measured  @session=stage4
+@claim prelu_passes_ms  3.632 ms "the two passes it replaced: 2.029 + 1.603" measured  @session=stage4
+@claim contig_head_gain -0.3 ms "contiguous head input: 5.286 -> 5.557 ms" measured  @session=stage4
 
 # ---- the PReLU fusion fixed, and the gate CLEARED (2026-11-16)
-@claim prelu_fuse_fp16_ms 1.522 ms "fused PReLU+quantise, fp16 slope, BLOCK 256" measured
-@claim prelu_fuse_fp32_ms 12.818 ms "the same kernel with an fp32 slope and BLOCK 1024" measured
-@claim dequant_block256   1.570 ms "dequantise at BLOCK 256; BLOCK 1024 measured 2.329" measured
-@claim cycle_idle_ms     56.82 ms  "full body call, 1920x1080, NVENC idle" measured
-@claim ratio_idle2        1.411 x  "derived: 80.14 / 56.82" derived
+@claim prelu_fuse_fp16_ms 1.522 ms "fused PReLU+quantise, fp16 slope, BLOCK 256" measured  @session=stage4
+@claim prelu_fuse_fp32_ms 12.818 ms "the same kernel with an fp32 slope and BLOCK 1024" measured  @session=stage4
+@claim dequant_block256   1.570 ms "dequantise at BLOCK 256; BLOCK 1024 measured 2.329" measured  @session=stage4
+@claim cycle_idle_ms     56.82 ms  "full body call, 1920x1080, NVENC idle" measured  @session=stage4
+@claim ratio_idle2        1.411 x  "derived: 80.14 / 56.82" derived  @session=stage4
 @derived ratio_idle2 "80.14 / 56.82 = 1.411; rounds read 1.411 / 1.420 / 1.427"
-@claim cycle_nvenc_ms    64.24 ms  "full body call with h264_nvenc alongside" measured
-@claim ratio_nvenc2       1.428 x  "derived: 91.72 / 64.24" derived
+@claim cycle_nvenc_ms    64.24 ms  "full body call with h264_nvenc alongside" measured  @session=stage4
+@claim ratio_nvenc2       1.428 x  "derived: 91.72 / 64.24" derived  @session=stage4
 @derived ratio_nvenc2 "91.72 / 64.24 = 1.428; rounds read 1.428 / 1.425 / 1.426"
-@claim gate_margin       -0.78 ms  "cycle_idle_ms - engine_idle_ms/1.40 = 56.82 - 57.24" derived
+@claim gate_margin       -0.78 ms  "cycle_idle_ms - engine_idle_ms/1.40 = 56.82 - 57.24" derived  @session=stage4
 @derived gate_margin "56.82 - 80.14/1.40 = -0.42 ms; against the median 80.5/1.40 = 57.5 it is -0.68 ms: the gate is MET"
 # SUPERSEDED: the 1.40x comparisons above are against the MONOLITHIC engine in my harness (80 ms), and the
 # app does not build that engine. Its own log shows a tiled, head-fused, opt-5 engine at 35.85 ms. The two
 # margins are kept as history and are NOT asserted.
-@claim gate_margin_nvenc -1.28 ms "cycled_nvenc - engine_nvenc/1.40, against the monolithic engine" derived
+@claim gate_margin_nvenc -1.28 ms "cycled_nvenc - engine_nvenc/1.40, against the monolithic engine" derived  @session=stage4
 @derived gate_margin_nvenc "64.24 - 91.72/1.40 = -1.28 ms against the monolithic engine; superseded below"
 
 # ---- THE GATE, MEASURED IN ONE PROCESS AGAINST THE ENGINE THE APP ACTUALLY BUILDS
 # The first version of this block divided the app's profile-log figure (35.85 ms) by a harness figure (56.82 ms):
 # two processes and two paths (tiled vs whole-frame), i.e. a ratio nobody measured. Both sides were then loaded
 # into ONE process, on the same frame, three interleaved rounds:
-@claim app_engine_ms     46.40 ms "the app's own tiled engine (..._opt-5_tiling-full_headpad5_1920x1080), 1080p" measured
+@claim app_engine_ms     46.40 ms "the app's own tiled engine (..._opt-5_tiling-full_headpad5_1920x1080), 1080p" measured  @session=stage4
 # SUPERSEDED VALUE, kept and labelled: the body before the loop was rolled.
-@claim body_vs_app_unrolled 0.820 x "46.40 / 56.56, the kernel before tl.range: rounds 0.820 / 0.825 / 0.823" measured
+@claim body_vs_app_unrolled 0.820 x "46.40 / 56.56, the kernel before tl.range: rounds 0.820 / 0.825 / 0.823" measured  @session=stage4
 # THE DELIVERED GATE: the same one-process method, after the rolled loop (the final kernel).
-@claim body_ms_app_base  48.55 ms "Int8Body with the rolled loop, same process, same frame, same rounds" measured
-@claim body_vs_app        0.953 x "derived: app_engine_ms / body_ms_app_base - ratio of the two medians" derived
+@claim body_ms_app_base  48.55 ms "Int8Body with the rolled loop, same process, same frame, same rounds" measured  @session=stage4
+@claim body_vs_app        0.953 x "derived: app_engine_ms / body_ms_app_base - ratio of the two medians" derived  @session=stage4
 @derived body_vs_app "46.29 / 48.55 = 0.953 - ratio of medians; the median of the per-round ratios is recorded separately as body_vs_app_median_ratio = 0.962"
-@claim body_vs_app_median_ratio 0.962 x "median of the three per-round ratios 0.953 / 0.966 / 0.962" measured
-@claim app_kill_overspend 16.20 ms "body_ms - app_engine_ms/1.15 = 56.56 - 40.35" derived
+@claim body_vs_app_median_ratio 0.962 x "median of the three per-round ratios 0.953 / 0.966 / 0.962" measured  @session=stage4
+@claim app_kill_overspend 16.20 ms "body_ms - app_engine_ms/1.15 = 56.56 - 40.35" derived  @session=stage4
 @derived app_kill_overspend "56.56 - 46.40/1.15 = +16.20 ms past the kill line"
-@claim app_gate_overspend 23.42 ms "body_ms - app_engine_ms/1.40 = 56.56 - 33.14" derived
+@claim app_gate_overspend 23.42 ms "body_ms - app_engine_ms/1.40 = 56.56 - 33.14" derived  @session=stage4
 @derived app_gate_overspend "56.56 - 46.40/1.40 = +23.42 ms past the 1.40x gate"
-@claim body_app_share    0.00000 %  "Int8Body vs the app engine picture, same frames - peak 7" measured
-@claim superseded_ratio   0.631 x   "the cross-instrument ratio (35.85 / 56.82) that this block replaces" measured
+@claim body_app_share    0.00000 %  "Int8Body vs the app engine picture, same frames - peak 7" measured  @session=stage4
+@claim superseded_ratio   0.631 x   "the cross-instrument ratio (35.85 / 56.82) that this block replaces" measured  @session=stage4
 
 # The verdict, asserted as the statement that is true: against the engine the app builds, and measured on one
 # instrument, the body is BELOW the kill line - the lane does not pay.
 @below body_vs_app kill_ratio
 
 # ---- 4K: the body LOSES, and the app render never used it (verified from the full log)
-@claim engine_4k_idle    186.14 ms "fp16 TensorRT engine, 3840x2160, NVENC idle" measured
-@claim body_4k_idle      240.51 ms "Int8Body, 3840x2160, same rounds" measured
-@claim ratio_4k_idle       0.774 x  "derived: 186.14 / 240.51" derived
+@claim engine_4k_idle    186.14 ms "fp16 TensorRT engine, 3840x2160, NVENC idle" measured  @session=stage4
+@claim body_4k_idle      240.51 ms "Int8Body, 3840x2160, same rounds" measured  @session=stage4
+@claim ratio_4k_idle       0.774 x  "derived: 186.14 / 240.51" derived  @session=stage4
 @derived ratio_4k_idle "186.14 / 240.51 = 0.774; rounds read 0.774 / 0.789 / 0.785 - the body is SLOWER at 4K"
-@claim engine_4k_nvenc   198.68 ms "fp16 engine at 4K with NVENC alongside" measured
-@claim body_4k_nvenc     259.74 ms "Int8Body at 4K with NVENC" measured
-@claim ratio_4k_nvenc      0.765 x  "derived: 198.68 / 259.74" derived
+@claim engine_4k_nvenc   198.68 ms "fp16 engine at 4K with NVENC alongside" measured  @session=stage4
+@claim body_4k_nvenc     259.74 ms "Int8Body at 4K with NVENC" measured  @session=stage4
+@claim ratio_4k_nvenc      0.765 x  "derived: 198.68 / 259.74" derived  @session=stage4
 @derived ratio_4k_nvenc "198.68 / 259.74 = 0.765; rounds read 0.765 / 0.771 / 0.771"
-@claim body_4k_share     0.11579 % "Int8Body vs the engine picture at 4K - also over the 0.1% bar" measured
-@claim render_frames        220 x   "app render, 1 s of a5_chainsaw at 4K, tensorrt backend" measured
-@claim render_ms         120.18 ms  "the same render, ms per frame" measured
-@claim render_inference   70.70 ms  "inference per frame in that render (engine 0.58)" measured
-@claim probe_oom            1 x     "'int8 probe unavailable (CUDA out of memory); int8 stays off' in the render log" measured
+@claim body_4k_share     0.11579 % "Int8Body vs the engine picture at 4K - also over the 0.1% bar" measured  @session=stage4
+@claim render_frames        220 x   "app render, 1 s of a5_chainsaw at 4K, tensorrt backend" measured  @session=stage4
+@claim render_ms         120.18 ms  "the same render, ms per frame" measured  @session=stage4
+@claim render_inference   70.70 ms  "inference per frame in that render (engine 0.58)" measured  @session=stage4
+@claim probe_oom            1 x     "'int8 probe unavailable (CUDA out of memory); int8 stays off' in the render log" measured  @session=stage4
 
 # ---- the app's REAL engine, from the app's own log: tiled, opt-5, head fused, and twice as fast as the
 # ---- monolithic engine the 1.42x was measured against
-@claim app_engine_tiled    1 x     "log: 'tiling-full_headpad5_1920x1080', opt-5, head fused 3->8 channels" measured
-@claim app_inference_1080 35.85 ms "the app's own profile over 24 frames, 1920x1080 -> 3840x2160" measured
-@claim app_frame_ms       45.36 ms "the same profile, frame total" measured
+@claim app_engine_tiled    1 x     "log: 'tiling-full_headpad5_1920x1080', opt-5, head fused 3->8 channels" measured  @session=stage4
+@claim app_inference_1080 35.85 ms "the app's own profile over 24 frames, 1920x1080 -> 3840x2160" measured  @session=stage4
+@claim app_frame_ms       45.36 ms "the same profile, frame total" measured  @session=stage4
 # (the cross-instrument version of body_vs_app lived here; recorded once above as superseded_ratio)
-@claim probe_admitted      1 x     "log: 'int8 probe: engine 0.002% composition 0.003% peak 14 (7 pairs) -> int8'" measured
-@claim probe_served        0 x     "log: no certification line; the render is tiled and the int8 hook only covers tilesize==0" measured
+@claim probe_admitted      1 x     "log: 'int8 probe: engine 0.002% composition 0.003% peak 14 (7 pairs) -> int8'" measured  @session=stage4
+@claim probe_served        0 x     "log: no certification line; the render is tiled and the int8 hook only covers tilesize==0" measured  @session=stage4
 
 # ---- the kernel lever, tried: 15% back, and the ceiling is now bounded
-@claim tap_static_ms    2.919 ms "nine taps fully unrolled (tl.static_range), BM 64 / 2 warps" measured
-@claim tap_rolled_ms    2.198 ms "the same loop rolled (tl.range num_stages=1), BM 128 / 4 warps" measured
-@claim tap_stages2_ms   2.497 ms "pipelined two stages - worse, the gathers are already L2-resident" measured
-@claim dot_floor_ms     1.900 ms "one gather plus nine dots: the tensor-core floor for one launch" measured
-@claim gather_ms        1.060 ms "nine gathers with no dot: the memory path alone" measured
-@claim body_rolled_ms  48.55 ms  "the full body after the rolled loop, 1920x1080" measured
-@claim ratio_rolled     0.962 x  "derived: 46.29 / 48.55 against the app's engine, one process" derived
+@claim tap_static_ms    2.919 ms "nine taps fully unrolled (tl.static_range), BM 64 / 2 warps" measured  @session=stage4
+@claim tap_rolled_ms    2.198 ms "the same loop rolled (tl.range num_stages=1), BM 128 / 4 warps" measured  @session=stage4
+@claim tap_stages2_ms   2.497 ms "pipelined two stages - worse, the gathers are already L2-resident" measured  @session=stage4
+@claim dot_floor_ms     1.900 ms "one gather plus nine dots: the tensor-core floor for one launch" measured  @session=stage4
+@claim gather_ms        1.060 ms "nine gathers with no dot: the memory path alone" measured  @session=stage4
+@claim body_rolled_ms  48.55 ms  "the full body after the rolled loop, 1920x1080" measured  @session=stage4
+@claim ratio_rolled     0.962 x  "derived: 46.29 / 48.55 against the app's engine, one process" derived  @session=stage4
 @derived ratio_rolled "46.29 / 48.55 = 0.953; rounds read 0.953 / 0.966 / 0.962 - up from 0.820"
-@claim kill_overspend2  8.30 ms  "body_rolled_ms - app_engine_ms/1.15 = 48.55 - 40.25" derived
+@claim kill_overspend2  8.30 ms  "body_rolled_ms - app_engine_ms/1.15 = 48.55 - 40.25" derived  @session=stage4
 @derived kill_overspend2 "48.55 - 46.29/1.15 = +8.30 ms still past the kill line"
-@claim ceiling_body_ms 30.40 ms  "16 x the measured dot floor: no kernel can go below this without better MMA" derived
+@claim ceiling_body_ms 30.40 ms  "16 x the measured dot floor: no kernel can go below this without better MMA" derived  @session=stage4
 @derived ceiling_body_ms "16 x 1.900 = 30.40 ms"
-@claim ceiling_cycle_ms 43.70 ms "ceiling_body_ms + the 13.3 ms of non-body work" derived
+@claim ceiling_cycle_ms 43.70 ms "ceiling_body_ms + the 13.3 ms of non-body work" derived  @session=stage4
 @derived ceiling_cycle_ms "30.40 + 13.3 = 43.70 ms"
-@claim ceiling_ratio     1.062 x  "app_engine_ms / ceiling_cycle_ms - the limit of the CURRENT codegen (1.900 ms/hop)" derived
+@claim ceiling_ratio     1.062 x  "app_engine_ms / ceiling_cycle_ms - the limit of the CURRENT codegen (1.900 ms/hop)" derived  @session=stage4
 @derived ceiling_ratio "46.29 / 43.70 = 1.062 using the current kernel's 1.900 ms/hop as if it were a floor - it is not"
 # THE REAL BOUND, from the measured int8 peak rather than from the current kernel:
-@claim peak_tops       147.4 TOPS "measured int8 peak used for the bound" measured
-@claim hop_floor_ms    1.037 ms   "152.9 GFLOP / 147.4 TOPS per hop" derived
+@claim peak_tops       147.4 TOPS "measured int8 peak used for the bound" measured  @session=stage4
+@claim hop_floor_ms    1.037 ms   "152.9 GFLOP / 147.4 TOPS per hop" derived  @session=stage4
 @derived hop_floor_ms "2*1920*1080*64*64*9 / 147.4e12 = 1.037 ms"
-@claim design_floor_ms  29.9 ms   "16 x hop_floor_ms + 13.3 ms of non-body work" derived
+@claim design_floor_ms  29.9 ms   "16 x hop_floor_ms + 13.3 ms of non-body work" derived  @session=stage4
 @derived design_floor_ms "16.6 + 13.3 = 29.9 ms"
-@claim design_ratio     1.548 x   "derived: 46.29 / design_floor_ms - what the design could reach with peak-rate dots" derived
+@claim design_ratio     1.548 x   "derived: 46.29 / design_floor_ms - what the design could reach with peak-rate dots" derived  @session=stage4
 @derived design_ratio "46.29 / 29.9 = 1.548; with full memory/dot overlap max(1.060,1.037) it is 1.53x. ABOVE the kill line"
 # NOT asserted any more: the 1.062x figure is the current codegen's limit, and the peak-based bound is 1.53-1.55x,
 # which is ABOVE the kill line. Claiming "no tuning can reach it" was wrong, so the claim stays and the assertion goes.
 @below body_vs_app kill_ratio
 
 # ---- why the body cannot serve THIS renderer, measured in the app's own run
-@claim wrapper_model     0 x     "the render holds an SRVGGNetCompact whose body[0] weight is [64,64,3,3]" measured
-@claim app_supports      0 x     "Int8Body.supports(wrapper.get_model()) returns False" measured
-@claim build_error       1 x     "Int8Body build raises: expected input[1,3,1080,1920] to have 64 channels" measured
-@claim app_head_fused    1 x     "the app pads and fuses the head for its engine (log: 'body.0: 3 -> 8 zeros, padded inside the head')" measured
-@claim render_engine_ms 46.47 ms "the app's inference once temporal reuse is off - matches the 46.4 ms one-process engine" measured
+@claim wrapper_model     0 x     "the render holds an SRVGGNetCompact whose body[0] weight is [64,64,3,3]" measured  @session=stage4
+@claim app_supports      0 x     "Int8Body.supports(wrapper.get_model()) returns False" measured  @session=stage4
+@claim build_error       1 x     "Int8Body build raises: expected input[1,3,1080,1920] to have 64 channels" measured  @session=stage4
+@claim app_head_fused    1 x     "the app pads and fuses the head for its engine (log: 'body.0: 3 -> 8 zeros, padded inside the head')" measured  @session=stage4
+@claim render_engine_ms 46.47 ms "the app's inference once temporal reuse is off - matches the 46.4 ms one-process engine" measured  @session=stage4
 
 # ---- DELIVERED: the body served a real app render (2026-11-16)
 # After building Int8Body against the app's TRANSFORMED module (body[0] is PadInputConv, 3->8, not a Conv2d):
-@claim body_built        1 x     "app log: 'int8: built (supports=True)'" measured
-@claim certify_line      0.00823 % "app log: 'self-certification on the first frame: 0.00823% of pixels >8 levels -> serving'" measured
-@claim delivered_frames  24 x    "1920x1080 render, 1 s clip, --no_temporal_reuse (the gate is ON by default, so the body is INERT under it)" measured
-@claim delivered_int8_ms 96.88 ms "app profile with the int8 body serving: 'inference 96.88 ms'" measured
-@claim delivered_fp16_ms 46.92 ms "the same render with RVE_INT8_BODY=off: 'inference 46.92 ms'" measured
-@claim delivered_ratio    0.484 x "derived: delivered_fp16_ms / delivered_int8_ms" derived
+@claim body_built        1 x     "app log: 'int8: built (supports=True)'" measured  @session=stage4
+@claim certify_line      0.00823 % "app log: 'self-certification on the first frame: 0.00823% of pixels >8 levels -> serving'" measured  @session=stage4
+@claim delivered_frames  24 x    "1920x1080 render, 1 s clip, --no_temporal_reuse (the gate is ON by default, so the body is INERT under it)" measured  @session=stage4
+@claim delivered_int8_ms 96.88 ms "app profile with the int8 body serving: 'inference 96.88 ms'" measured  @session=stage4
+@claim delivered_fp16_ms 46.92 ms "the same render with RVE_INT8_BODY=off: 'inference 46.92 ms'" measured  @session=stage4
+@claim delivered_ratio    0.484 x "derived: delivered_fp16_ms / delivered_int8_ms" derived  @session=stage4
 @derived delivered_ratio "46.92 / 96.88 = 0.484 - in the real render the body is 2.07x SLOWER"
-@claim delivered_share   0.07592 % "frame 10 of the int8 render vs the fp16 render, 3840x2160 output" measured
-@claim delivered_peak    24 levels "the same comparison" measured
-@claim delivered_median   1.00 levels "the same comparison" measured
+@claim delivered_share   0.07592 % "frame 10 of the int8 render vs the fp16 render, 3840x2160 output" measured  @session=stage4
+@claim delivered_peak    24 levels "the same comparison" measured  @session=stage4
+@claim delivered_median   1.00 levels "the same comparison" measured  @session=stage4
 # The picture passes; the speed does not. Both asserted where they are true.
 @below delivered_share bar_share
 @below delivered_ratio kill_ratio
@@ -205,13 +205,13 @@
 # ---- FINAL STATE, 2026-11-16, after the requant move and the PReLU A/B
 # The profile field "inference" is a mean over frames that includes per-video work (~850 ms), so it is NOT the
 # per-frame cost; the host timeline is. Both windows below are host-timeline totals from one process.
-@claim fp16_window_ms  51.06 ms "one process, host timeline, steady state, 1920x1080" measured
-@claim int8_window_ms  46.52 ms "one process, host timeline, steady state, 1920x1080" measured
-@claim quant_phase_ms   4.01 ms "head quantise phase with F.prelu + the conversion kernel" measured
-@claim quant_phase_where_ms 9.91 ms "the same phase with torch.where + torch.mul (my regression)" measured
-@claim body_cert_share  0.00832 % "certification on the first frame, epilogue scheme" measured
-@claim hop_ms           1.753 ms "one int8 hop, requant in the epilogue" measured
-@claim hop_tops         87.2 TOPS "derived from the hop time and 152.9 GFLOP" derived
+@claim fp16_window_ms  51.06 ms "one process, host timeline, steady state, 1920x1080" measured  @session=stage4
+@claim int8_window_ms  46.52 ms "one process, host timeline, steady state, 1920x1080" measured  @session=stage4
+@claim quant_phase_ms   4.01 ms "head quantise phase with F.prelu + the conversion kernel" measured  @session=stage4
+@claim quant_phase_where_ms 9.91 ms "the same phase with torch.where + torch.mul (my regression)" measured  @session=stage4
+@claim body_cert_share  0.00832 % "certification on the first frame, epilogue scheme" measured  @session=stage4
+@claim hop_ms           1.753 ms "one int8 hop, requant in the epilogue" measured  @session=stage4
+@claim hop_tops         87.2 TOPS "derived from the hop time and 152.9 GFLOP" derived  @session=stage4
 @derived hop_tops "152.9 GFLOP / 1.753 ms = 87.2 TOPS against TRT's 91 on this shape"
 
 # THE RATIO, asserted as a ratio so the arithmetic is checked rather than described
@@ -219,75 +219,75 @@
 @below body_vs_app kill_ratio
 
 # ---- accuracy re-shot on the EPILOGUE scheme, in the DEFAULT configuration (gate on)
-@claim render_share_epilogue 0.07024 % "int8 render vs fp16 render, frame 10, gate ON, 3840x2160 output" measured
-@claim render_peak_epilogue  26 levels "the same frame" measured
-@claim render_share_prologue 0.07592 % "the earlier number, measured while the prologue still requanted" measured
+@claim render_share_epilogue 0.07024 % "int8 render vs fp16 render, frame 10, gate ON, 3840x2160 output" measured  @session=stage4
+@claim render_peak_epilogue  26 levels "the same frame" measured  @session=stage4
+@claim render_share_prologue 0.07592 % "the earlier number, measured while the prologue still requanted" measured  @session=stage4
 @below render_share_epilogue bar_share
 # The probe decides from the SIMULATION, not from these kernels, so its verdicts are unaffected by the move.
-@claim probe_independent 1 x "Int8Probe uses _quantised_forward; the requant move cannot change its verdicts" measured
+@claim probe_independent 1 x "Int8Probe uses _quantised_forward; the requant move cannot change its verdicts" measured  @session=stage4
 
 # ---- the FUSED head conversion adopted (PReLU + quantise in one pass)
-@claim fused_head_ms     1.71 ms "fused PReLU+quantise, 1080p, 64 channels" measured
-@claim separate_head_ms  4.01 ms "F.prelu + conversion, same shape" measured
-@claim int8_window_ms2  42.75 ms "one process, host timeline, steady state, 1920x1080" measured
-@claim body_cert_fused 0.00820 % "certification, fused head, best of the three schemes" measured
+@claim fused_head_ms     1.71 ms "fused PReLU+quantise, 1080p, 64 channels" measured  @session=stage4
+@claim separate_head_ms  4.01 ms "F.prelu + conversion, same shape" measured  @session=stage4
+@claim int8_window_ms2  42.75 ms "one process, host timeline, steady state, 1920x1080" measured  @session=stage4
+@claim body_cert_fused 0.00820 % "certification, fused head, best of the three schemes" measured  @session=stage4
 @ratio fp16_window_ms int8_window_ms2 1.194 "one process, host timeline, steady state, 1920x1080, fused head"
 @below body_vs_app kill_ratio
 
 # ---- the probe's proxy is 10x optimistic: its verdicts disagree with the serving kernels
-@claim probe_sim_chainsaw  0.010 % "probe simulation, composition, a5_chainsaw" measured
-@claim probe_real_chainsaw 0.116 % "the SAME pairs through Int8Body, composition" measured
-@claim probe_sim_violet    0.084 % "probe simulation, composition, a5_violet" measured
-@claim probe_real_violet   0.377 % "the same pairs through Int8Body" measured
+@claim probe_sim_chainsaw  0.010 % "probe simulation, composition, a5_chainsaw" measured  @session=stage4
+@claim probe_real_chainsaw 0.116 % "the SAME pairs through Int8Body, composition" measured  @session=stage4
+@claim probe_sim_violet    0.084 % "probe simulation, composition, a5_violet" measured  @session=stage4
+@claim probe_real_violet   0.377 % "the same pairs through Int8Body" measured  @session=stage4
 # SUPERSEDED: that 11.6x was not the kernels, it was the BODY calibrated on ONE frame while the simulation was
 # calibrated on sixteen. With matching calibration:
-@claim probe_real_same_cal_chainsaw 0.006 % "Int8Body calibrated on the same 16 frames as the simulation" measured
-@claim probe_real_same_cal_violet   0.050 % "the same on a5_violet" measured
-@claim kernel_vs_sim_chainsaw 1.71 x "derived: probe_sim_chainsaw / probe_real_same_cal_chainsaw" derived
+@claim probe_real_same_cal_chainsaw 0.006 % "Int8Body calibrated on the same 16 frames as the simulation" measured  @session=stage4
+@claim probe_real_same_cal_violet   0.050 % "the same on a5_violet" measured  @session=stage4
+@claim kernel_vs_sim_chainsaw 1.71 x "derived: probe_sim_chainsaw / probe_real_same_cal_chainsaw" derived  @session=stage4
 @derived kernel_vs_sim_chainsaw "0.010 / 0.006 = 1.71x BETTER than the simulation - the proxy is conservative"
-@claim kernel_vs_sim_violet   1.69 x "derived: probe_sim_violet / probe_real_same_cal_violet" derived
+@claim kernel_vs_sim_violet   1.69 x "derived: probe_sim_violet / probe_real_same_cal_violet" derived  @session=stage4
 @derived kernel_vs_sim_violet "0.084 / 0.050 = 1.69x better, and both verdicts are int8"
-@claim calibration_gap      1 x     "the 0.116% and 0.377% came from single-frame calibration, not from the kernels" measured
+@claim calibration_gap      1 x     "the 0.116% and 0.377% came from single-frame calibration, not from the kernels" measured  @session=stage4
 
 # ---- spread-frame calibration is now the production path (the probe hands over the frames it decoded)
-@claim calib_frames_prod 1 x "Int8Body calibrates on the probe's frames; certification 0.00821%, window 42.61 ms" measured
-@claim comp_single_frame 0.116 % "composition with ONE-frame calibration, a5_chainsaw" measured
-@claim comp_spread_frame 0.006 % "composition with the probe's spread frames, same title" measured
-@claim comp_single_violet 0.377 % "composition with ONE-frame calibration, a5_violet" measured
-@claim comp_spread_violet 0.050 % "composition with spread frames, same title - under the 0.1 bar" measured
+@claim calib_frames_prod 1 x "Int8Body calibrates on the probe's frames; certification 0.00821%, window 42.61 ms" measured  @session=stage4
+@claim comp_single_frame 0.116 % "composition with ONE-frame calibration, a5_chainsaw" measured  @session=stage4
+@claim comp_spread_frame 0.006 % "composition with the probe's spread frames, same title" measured  @session=stage4
+@claim comp_single_violet 0.377 % "composition with ONE-frame calibration, a5_violet" measured  @session=stage4
+@claim comp_spread_violet 0.050 % "composition with spread frames, same title - under the 0.1 bar" measured  @session=stage4
 @below comp_spread_frame bar_share
 @below comp_spread_violet bar_share
 
 # ---- F_total, measured: the probe dominates it, and it moves the break-even by 20x
-@claim probe_cost_s     64.6 s  "Int8Probe on a 1080p clip, 8 positions x 3 frames, end to end" measured
-@claim build_cost_s     0.85 s  "body build + calibrate + certify, frame-1 model-call" measured
-@claim F_total_s        65.4 s  "derived: probe + build" derived
+@claim probe_cost_s     64.6 s  "Int8Probe on a 1080p clip, 8 positions x 3 frames, end to end" measured  @session=stage4
+@claim build_cost_s     0.85 s  "body build + calibrate + certify, frame-1 model-call" measured  @session=stage4
+@claim F_total_s        65.4 s  "derived: probe + build" derived  @session=stage4
 @derived F_total_s "64.6 + 0.85 = 65.45 s - the earlier 850 ms figure counted only the build"
-@claim save_per_frame_ms 8.45 ms "fp16 window 51.06 - int8 window 42.61" measured
-@claim breakeven_min_now 16.2 min "derived: F_total / save, at a 33.3% render rate and 24 fps" derived
+@claim save_per_frame_ms 8.45 ms "fp16 window 51.06 - int8 window 42.61" measured  @session=stage4
+@claim breakeven_min_now 16.2 min "derived: F_total / save, at a 33.3% render rate and 24 fps" derived  @session=stage4
 @derived breakeven_min_now "65500 ms / 8.45 ms = 7746 rendered = 23260 frames = 16.2 min"
-@claim breakeven_min_ht   5.6 min "the same after the head+tail fix (window 26.8)" derived
+@claim breakeven_min_ht   5.6 min "the same after the head+tail fix (window 26.8)" derived  @session=stage4
 @derived breakeven_min_ht "65500 / 24.26 = 2698 rendered = 8102 frames = 5.6 min"
-@claim net_24min_now    +31.8 s "a 24-minute episode now: saves 97.2 s, costs 65.4 s" derived
+@claim net_24min_now    +31.8 s "a 24-minute episode now: saves 97.2 s, costs 65.4 s" derived  @session=stage4
 @derived net_24min_now "11520 rendered frames x 8.45 ms = 97.2 s against F 65.4 s"
-@claim net_24min_ht    +213.7 s "the same episode after head+tail" derived
+@claim net_24min_ht    +213.7 s "the same episode after head+tail" derived  @session=stage4
 @derived net_24min_ht "11520 x 24.26 ms = 279.2 s against 65.4 s"
 
 # ---- composition at the depth the GATE serves, not at depth 1
-@claim comp_d1_chainsaw 0.002 % "composition depth 1, a5_chainsaw, 7 gated pairs" measured
-@claim comp_d2_chainsaw 0.390 % "composition depth 2, 6 pairs where BOTH steps clear the gate" measured
-@claim comp_d1_violet   0.104 % "composition depth 1, a5_violet" measured
-@claim comp_d2_violet   0.166 % "composition depth 2, same filter" measured
-@claim depth_ratio_chainsaw 195 x "derived: comp_d2_chainsaw / comp_d1_chainsaw" derived
+@claim comp_d1_chainsaw 0.002 % "composition depth 1, a5_chainsaw, 7 gated pairs" measured  @session=stage4
+@claim comp_d2_chainsaw 0.390 % "composition depth 2, 6 pairs where BOTH steps clear the gate" measured  @session=stage4
+@claim comp_d1_violet   0.104 % "composition depth 1, a5_violet" measured  @session=stage4
+@claim comp_d2_violet   0.166 % "composition depth 2, same filter" measured  @session=stage4
+@claim depth_ratio_chainsaw 195 x "derived: comp_d2_chainsaw / comp_d1_chainsaw" derived  @session=stage4
 @derived depth_ratio_chainsaw "0.390 / 0.002 = 195x - depth, not quantisation, is what breaks the bar"
-@claim depth_ratio_violet 1.6 x "derived: comp_d2_violet / comp_d1_violet" derived
+@claim depth_ratio_violet 1.6 x "derived: comp_d2_violet / comp_d1_violet" derived  @session=stage4
 @derived depth_ratio_violet "0.166 / 0.104 = 1.6x"
 # The probe now decides at the worst depth the gate may serve, which is the whole point.
-@claim verdict_depth_worst 2 x "the probe's verdict uses max(d1, d2); at depth 1 both titles would pass" measured
+@claim verdict_depth_worst 2 x "the probe's verdict uses max(d1, d2); at depth 1 both titles would pass" measured  @session=stage4
 @below comp_d2_chainsaw bar_share
 @below comp_d2_violet bar_share
 
 # ---- the probe's verdicts with the depth-2 gate filter, verified on both titles
-@claim verdict_chainsaw 0 x "probe verdict on a5_chainsaw at the served depth: worst 0.390% > 0.1% -> fp16" measured
-@claim verdict_violet   0 x "probe verdict on a5_violet: worst 0.166% > 0.1% -> fp16" measured
-@claim probe_bug_c2   1 x "the first version of this change crashed with NameError on c2; both probes reported 'probe failed'" measured
+@claim verdict_chainsaw 0 x "probe verdict on a5_chainsaw at the served depth: worst 0.390% > 0.1% -> fp16" measured  @session=stage4
+@claim verdict_violet   0 x "probe verdict on a5_violet: worst 0.166% > 0.1% -> fp16" measured  @session=stage4
+@claim probe_bug_c2   1 x "the first version of this change crashed with NameError on c2; both probes reported 'probe failed'" measured  @session=stage4

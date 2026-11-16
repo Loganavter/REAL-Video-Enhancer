@@ -29,7 +29,8 @@ from .core import Population, Record, RecordError, Store, unit_family
 # --------------------------------------------------------------------------------------------------
 # bars
 # --------------------------------------------------------------------------------------------------
-OF_KINDS = ("share", "peak", "frame_time", "engine_time", "aa_delta", "pixel_defect")
+OF_KINDS = ("share", "peak", "frame_time", "engine_time", "aa_delta", "pixel_defect",
+            "speedup", "excess", "pass_rate")
 
 
 @dataclass(frozen=True)

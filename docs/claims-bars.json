@@ -1,0 +1,15 @@
+{
+  "bar_share":    {"value": 0.1,   "unit": "%",      "of": "share",     "statistic": "worst_of", "min_n": 2,
+                   "note": "the acceptance bar: share of pixels whose worst channel is >8 levels off, worst frame of a spread sample"},
+  "bar_peak":     {"value": 20,    "unit": "levels", "of": "peak",      "statistic": "max",      "min_n": 2,
+                   "note": "the peak bar; NOT the 8-level threshold that defines a bad pixel"},
+  "gate_anime":   {"value": 0.005, "unit": "%",      "of": "share",     "statistic": "worst_of", "min_n": 2},
+  "gate_ratio":   {"value": 1.40,  "unit": "x",      "of": "speedup",   "statistic": "single",   "min_n": 2,
+                   "note": "the int8 ceiling with a scalar epilogue - a speedup, so never a share"},
+  "kill_prob":    {"value": 0.3,   "unit": "x",      "of": "pass_rate", "statistic": "single",   "min_n": 1,
+                   "note": "P(pass) below this and the lane is not worth its probe"},
+  "kill_ratio":   {"value": 1.15,  "unit": "x",      "of": "speedup",   "statistic": "single",   "min_n": 2},
+  "max_ratio":    {"value": 2.0,   "unit": "x",      "of": "speedup",   "statistic": "single",   "min_n": 2},
+  "zero_excess":  {"value": 0.0,   "unit": "ms",     "of": "excess",    "statistic": "single",   "min_n": 2,
+                   "note": "a margin bar: the excess must be at or below zero"}
+}

@@ -829,7 +829,7 @@ tasks:
   title: Does a scalar-slope int8 stack refit under the bar? The 1.40x ceiling was
     measured on the wrong function
   type: experiment
-  status: todo
+  status: dropped
   owner: '@owner'
   priority: P1
   gpu: true
@@ -862,11 +862,17 @@ tasks:
     width is unchanged and the constraint is one scalar per node, and the lossless
     int8 build already spent peak 4 of the 8-level budget. The prize is the largest
     single number in the project - every other measured lever tops out at 1.23x.'
+  resolution: 'dropped 2026-11-16 by the owner: weights cannot be changed. That removes
+    the refit route to the 1.40x int8 build entirely - the only remaining path through
+    that ceiling is a plugin with its own int8 convolution (rve-int8-prelu-plugin,
+    E27), which is a different project. Recorded so nobody re-enters the refit: it
+    was the one item whose prize was larger than every measured lever, and it is now
+    closed by decision, not by measurement.'
 - id: rve-functional-headroom-map-2026-11-16
   title: 'How much of the network can move before the bar breaks: a per-tensor sensitivity
     map on CPU'
   type: experiment
-  status: todo
+  status: dropped
   owner: null
   priority: P2
   gpu: partial
@@ -893,6 +899,10 @@ tasks:
     so this is the one place the WSP ''persistent kernel'' shape is a real saving
     - screening without the GPU lock, confirmation as a single job. E30b measured
     a CUT; this measures a CENSUS at unchanged width, which is a different question.'
+  resolution: 'dropped 2026-11-16 by the owner: the map''s only consumer was an edit
+    (low-rank, routing, requant headroom), and with weights frozen it would measure
+    an expendability nobody may spend. E30b''s representational bound (14-37% per-layer
+    residual) already answers the question it was going to ask.'
 - id: rve-lean-statistic-spike-2026-11-16
   title: 'Lean spike: formalize the acceptance statistic, with a written kill criterion'
   type: research
