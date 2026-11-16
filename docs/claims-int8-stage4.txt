@@ -239,8 +239,12 @@
 @claim probe_real_chainsaw 0.116 % "the SAME pairs through Int8Body, composition" measured
 @claim probe_sim_violet    0.084 % "probe simulation, composition, a5_violet" measured
 @claim probe_real_violet   0.377 % "the same pairs through Int8Body" measured
-@claim probe_gap_chainsaw  11.6 x  "derived: probe_real_chainsaw / probe_sim_chainsaw" derived
-@derived probe_gap_chainsaw "0.116 / 0.010 = 11.6x optimistic"
-@claim probe_gap_violet     4.5 x  "derived: probe_real_violet / probe_sim_violet" derived
-@derived probe_gap_violet "0.377 / 0.084 = 4.5x optimistic"
-@claim probe_verdict_gap    2 x    "titles where the two paths disagree: both (sim says int8, kernels say fp16)" measured
+# SUPERSEDED: that 11.6x was not the kernels, it was the BODY calibrated on ONE frame while the simulation was
+# calibrated on sixteen. With matching calibration:
+@claim probe_real_same_cal_chainsaw 0.006 % "Int8Body calibrated on the same 16 frames as the simulation" measured
+@claim probe_real_same_cal_violet   0.050 % "the same on a5_violet" measured
+@claim kernel_vs_sim_chainsaw 1.71 x "derived: probe_sim_chainsaw / probe_real_same_cal_chainsaw" derived
+@derived kernel_vs_sim_chainsaw "0.010 / 0.006 = 1.71x BETTER than the simulation - the proxy is conservative"
+@claim kernel_vs_sim_violet   1.69 x "derived: probe_sim_violet / probe_real_same_cal_violet" derived
+@derived kernel_vs_sim_violet "0.084 / 0.050 = 1.69x better, and both verdicts are int8"
+@claim calibration_gap      1 x     "the 0.116% and 0.377% came from single-frame calibration, not from the kernels" measured
