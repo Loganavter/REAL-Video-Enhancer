@@ -286,3 +286,8 @@
 @claim verdict_depth_worst 2 x "the probe's verdict uses max(d1, d2); at depth 1 both titles would pass" measured
 @below comp_d2_chainsaw bar_share
 @below comp_d2_violet bar_share
+
+# ---- the probe's verdicts with the depth-2 gate filter, verified on both titles
+@claim verdict_chainsaw 0 x "probe verdict on a5_chainsaw at the served depth: worst 0.390% > 0.1% -> fp16" measured
+@claim verdict_violet   0 x "probe verdict on a5_violet: worst 0.166% > 0.1% -> fp16" measured
+@claim probe_bug_c2   1 x "the first version of this change crashed with NameError on c2; both probes reported 'probe failed'" measured
