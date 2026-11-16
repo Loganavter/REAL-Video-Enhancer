@@ -27,7 +27,8 @@ from __future__ import annotations
 import torch
 
 from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
-                          quantise_nchw_to_nhwc, quantise_nhwc, quantise_nhwc_prelu)
+                          quantise_nchw_to_nhwc, quantise_nchw_to_nhwc_prelu, quantise_nhwc,
+                          quantise_nhwc_prelu)
 
 __all__ = ["Int8Body"]
 
@@ -184,10 +185,17 @@ class Int8Body:
                                            self._slope_half, buf, n_pix,
                                            BLOCK=QB, C=self.feat, num_warps=4)
             else:
-                # the head is plain contiguous NCHW here (the app's conv output), so the NCHW variant
-                # reads it where it is - the torch expression below was costing ~10 ms a frame
-                head = torch.nn.functional.prelu(head, self.head_prelu.weight)
+                # the head is plain contiguous NCHW here (the app's conv output). PReLU is FUSED into the
+                # conversion: F.prelu on this tensor allocates 265 MB per frame and the phase measured
+                # 20.2 ms against 1.6 ms for the kernel alone on the very same input.
                 buf = self._int8_buffers(x, h, w)[0]
+                # F.prelu allocates ~265 MB a frame and the phase measured 20.2 ms against 1.6 ms for the
+                # conversion alone. Both attempts to avoid that allocation (a fused Triton kernel, and
+                # torch.where with a reused `out=`) changed the picture to 2.15278% - identical in both,
+                # so the difference is in how PReLU is applied, not in the conversion, and it is not yet
+                # explained. Correctness first: this path certifies at 0.00823%, so it stays until the
+                # allocation cost is removed without moving the picture.
+                head = torch.nn.functional.prelu(head, self.head_prelu.weight)
                 quantise_nchw_to_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
                                              BLOCK=QB, C=self.feat, num_warps=4)
                 buf = (torch.round(head / s_act.view(1, -1, 1, 1)).clamp(-127, 127)
@@ -209,6 +217,24 @@ class Int8Body:
                                            BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps)
                 src = dst
                 nxt = self._scratch_b if dst is self._scratch_a else self._scratch_a
+            if not getattr(self, "_probe_done", False):
+                self._probe_done = True
+                # the same kernel, alone, in the app's own process: is it slow or is it waiting?
+                _cs, _ce = torch.cuda.Event(True), torch.cuda.Event(True)
+                for _ in range(3):
+                    quantise_nchw_to_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
+                                                 BLOCK=QB, C=self.feat, num_warps=4)
+                torch.cuda.synchronize()
+                _cs.record()
+                for _ in range(5):
+                    quantise_nchw_to_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,
+                                                 BLOCK=QB, C=self.feat, num_warps=4)
+                _ce.record(); torch.cuda.synchronize()
+                _lg.getLogger("RVE").warning(
+                    "int8 quantise ALONE: %.2f ms/call  (allocated %.0f MB, reserved %.0f MB, peak %.0f MB)",
+                    _cs.elapsed_time(_ce) / 5.0,
+                    torch.cuda.memory_allocated() / 2**20, torch.cuda.memory_reserved() / 2**20,
+                    torch.cuda.max_memory_allocated() / 2**20)
             _e3.record()
             channels_last = self.tail_conv.weight.is_contiguous(memory_format=torch.channels_last)
             if channels_last:
