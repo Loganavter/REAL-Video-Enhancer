@@ -112,8 +112,9 @@
 @claim body_vs_app_unrolled 0.820 x "46.40 / 56.56, the kernel before tl.range: rounds 0.820 / 0.825 / 0.823" measured
 # THE DELIVERED GATE: the same one-process method, after the rolled loop (the final kernel).
 @claim body_ms_app_base  48.55 ms "Int8Body with the rolled loop, same process, same frame, same rounds" measured
-@claim body_vs_app        0.962 x "derived: app_engine_ms / body_ms_app_base - the delivered ratio" derived
-@derived body_vs_app "46.29 / 48.55 = 0.953; rounds read 0.953 / 0.966 / 0.962, median 0.962"
+@claim body_vs_app        0.953 x "derived: app_engine_ms / body_ms_app_base - ratio of the two medians" derived
+@derived body_vs_app "46.29 / 48.55 = 0.953 - ratio of medians; the median of the per-round ratios is recorded separately as body_vs_app_median_ratio = 0.962"
+@claim body_vs_app_median_ratio 0.962 x "median of the three per-round ratios 0.953 / 0.966 / 0.962" measured
 @claim app_kill_overspend 16.20 ms "body_ms - app_engine_ms/1.15 = 56.56 - 40.35" derived
 @derived app_kill_overspend "56.56 - 46.40/1.15 = +16.20 ms past the kill line"
 @claim app_gate_overspend 23.42 ms "body_ms - app_engine_ms/1.40 = 56.56 - 33.14" derived
@@ -164,11 +165,19 @@
 @derived ceiling_body_ms "16 x 1.900 = 30.40 ms"
 @claim ceiling_cycle_ms 43.70 ms "ceiling_body_ms + the 13.3 ms of non-body work" derived
 @derived ceiling_cycle_ms "30.40 + 13.3 = 43.70 ms"
-@claim ceiling_ratio     1.062 x  "derived: app_engine_ms / ceiling_cycle_ms - the best this design can reach" derived
-@derived ceiling_ratio "46.29 / 43.70 = 1.062, below the 1.15 kill line: the design cannot pay, not the tuning"
-# THE BOUND, asserted after it is defined: no tuning of this design reaches the kill line either, so the verdict
-# is arithmetic rather than provisional.
-@below ceiling_ratio kill_ratio
+@claim ceiling_ratio     1.062 x  "app_engine_ms / ceiling_cycle_ms - the limit of the CURRENT codegen (1.900 ms/hop)" derived
+@derived ceiling_ratio "46.29 / 43.70 = 1.062 using the current kernel's 1.900 ms/hop as if it were a floor - it is not"
+# THE REAL BOUND, from the measured int8 peak rather than from the current kernel:
+@claim peak_tops       147.4 TOPS "measured int8 peak used for the bound" measured
+@claim hop_floor_ms    1.037 ms   "152.9 GFLOP / 147.4 TOPS per hop" derived
+@derived hop_floor_ms "2*1920*1080*64*64*9 / 147.4e12 = 1.037 ms"
+@claim design_floor_ms  29.9 ms   "16 x hop_floor_ms + 13.3 ms of non-body work" derived
+@derived design_floor_ms "16.6 + 13.3 = 29.9 ms"
+@claim design_ratio     1.548 x   "derived: 46.29 / design_floor_ms - what the design could reach with peak-rate dots" derived
+@derived design_ratio "46.29 / 29.9 = 1.548; with full memory/dot overlap max(1.060,1.037) it is 1.53x. ABOVE the kill line"
+# NOT asserted any more: the 1.062x figure is the current codegen's limit, and the peak-based bound is 1.53-1.55x,
+# which is ABOVE the kill line. Claiming "no tuning can reach it" was wrong, so the claim stays and the assertion goes.
+@below body_vs_app kill_ratio
 
 # ---- why the body cannot serve THIS renderer, measured in the app's own run
 @claim wrapper_model     0 x     "the render holds an SRVGGNetCompact whose body[0] weight is [64,64,3,3]" measured
@@ -181,7 +190,7 @@
 # After building Int8Body against the app's TRANSFORMED module (body[0] is PadInputConv, 3->8, not a Conv2d):
 @claim body_built        1 x     "app log: 'int8: built (supports=True)'" measured
 @claim certify_line      0.00823 % "app log: 'self-certification on the first frame: 0.00823% of pixels >8 levels -> serving'" measured
-@claim delivered_frames  24 x    "1920x1080 render, 1 s clip, --no_temporal_reuse" measured
+@claim delivered_frames  24 x    "1920x1080 render, 1 s clip, --no_temporal_reuse (the gate is ON by default, so the body is INERT under it)" measured
 @claim delivered_int8_ms 96.88 ms "app profile with the int8 body serving: 'inference 96.88 ms'" measured
 @claim delivered_fp16_ms 46.92 ms "the same render with RVE_INT8_BODY=off: 'inference 46.92 ms'" measured
 @claim delivered_ratio    0.484 x "derived: delivered_fp16_ms / delivered_int8_ms" derived

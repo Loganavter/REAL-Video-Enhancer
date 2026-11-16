@@ -6,7 +6,36 @@ before anything is built on top of them.
 
 Adapted to this machine at the end of each stage (`Tools`).
 
-**Outcome (2026-11-16): the lane does not pay, measured on one instrument, and the ceiling is now bounded.** Against
+**Correction after review (2026-11-16, edition 2 of the report): the headline is a product fact, not a speed one.**
+
+**Under the shipped default the int8 body never runs.** Temporal reuse ("the gate") is ON by default, it creates
+`tile_upscaler`, and the body's branch in `_call_single` is never taken - the default render log has no
+certification line at all. The 0.484x was measured with `--no_temporal_reuse`, i.e. in a configuration the product
+does not ship, and enabling it means giving up the gate:
+
+| configuration | per frame |
+|---|---|
+| gate ON + fp16 (the default) | **45.36 ms** |
+| gate OFF + fp16 | 54.56 ms |
+| gate OFF + int8 body | **104.44 ms** |
+
+So the lane does not pay in any configuration: it loses per inference (0.484x delivered) *and* its enabling costs a
+gate worth 3.3x of wall clock. That is the first thing to say, not a footnote.
+
+**And the "1.062x ceiling" was wrong as a bound.** It used the current kernel's 1.900 ms/hop as if it were a floor.
+From the measured int8 peak the floor is 152.9 GFLOP / 147.4 TOPS = 1.037 ms/hop, so 16 hops + 13.3 ms of non-body
+work = 29.9 ms, i.e. **1.55x** against the app's engine - and with full memory/dot overlap 30.3 ms, **1.53x**. The
+current kernel runs at 47% of peak where the app's engine runs at 75% of its own: that is headroom, not a ceiling.
+The 1.062x figure survives only as "the limit of this codegen", and it is no longer asserted as a kill.
+
+**Also corrected:** the per-segment breakdown in the first edition of the report (quantise 27.4 ms, 30 ms of
+unattributed overhead) was an artefact of calling `torch.cuda.synchronize()` inside a frame while the writer and
+NVENC threads were busy. The NCHW quantise kernel costs **1.6-1.9 ms in isolation** - it is traffic (398 MB), not a
+transpose bug, and a `dtype` promotion in it is worth 17%, not 20x. The real 2x gap between the app render (96.88)
+and the harness (48.55) is therefore **unattributed**, and until it is, no plan should be built on subtracting
+milliseconds from it.
+
+**Outcome (2026-11-16, earlier edition): the lane does not pay, measured on one instrument.** Against
 the engine the app actually builds (tiled, head-fused, opt-5) the int8 body runs **48.55 ms against 46.29 ms** for a
 1920x1080 frame - **0.962x**, and 0.774x at 3840x2160. The kernel lever was taken (+15%: rolled loop, not
 unrolled), and with the measured dot floor of 1.900 ms per launch the best this design can reach is **1.062x** -
