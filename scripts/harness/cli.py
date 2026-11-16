@@ -53,7 +53,7 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
           quiet: bool = False) -> int:
     store = Store.load(records_path) if records_path else Store()
     bars = _bars_from_file(bars_path)
-    sc = Scope(expected={"claim", "ratio", "below"})
+    sc = Scope(expected=set())
     problems: list[str] = []
     textual: list[tuple[int, str, str]] = []       # (lineno, kind, raw) for the report
     structural: list[Claim] = []
@@ -66,12 +66,14 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
         n_lines += 1
 
         if m := BARLINE.match(line):
+            sc.expected.add("bar")
             name, value, unit = m.group(1), float(m.group(2)), m.group(3)
             bars.setdefault(name, Bar(name=name, value=value, unit=unit, of=""))
             sc.miss("bar", f"line {lineno}: a text @bar carries no 'of' field; bars are only "
                            f"authoritative from --bars")
 
         elif m := CLAIM.match(line):
+            sc.expected.add("claim")
             rid, value, unit, pop, tag = m.groups()
             value = float(value)
             if not records_path:
@@ -97,6 +99,7 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
             textual.append((lineno, "derived", line))
 
         elif m := RATIO.match(line):
+            sc.expected.add("ratio")
             num, den, claimed = m.groups()
             if not records_path:
                 sc.miss("ratio", f"line {lineno}: no --records")
@@ -108,6 +111,7 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
                 problems.append(f"{lineno}: {exc}")
 
         elif m := BELOW.match(line):
+            sc.expected.add("below")
             rid, bar = m.groups()
             if not records_path:
                 sc.miss("below", f"line {lineno}: no --records")
@@ -122,6 +126,7 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
                 problems.append(f"{lineno}: {exc}")
 
         elif m := SUM.match(line):
+            sc.expected.add("sum")
             total, names = float(m.group(1)), [n.strip() for n in m.group(2).split("+")]
             if not records_path:
                 sc.miss("sum", f"line {lineno}: no --records")
@@ -146,10 +151,12 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
                 problems.append(f"{lineno}: {exc}")
 
         elif m := CAUSE.match(line):
+            sc.expected.add("cause")
             cid, mech, a, b = m.groups()
             structural.append(Claim(id=cid, kind="cause", args=(a, b), mechanism=mech))
 
         elif m := VERDICT.match(line):
+            sc.expected.add("verdict")
             structural.append(Claim(id=m.group(1), kind="verdict", args=tuple(m.group(2).split())))
 
         elif line.startswith("@"):
@@ -158,7 +165,7 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
             sc.miss("prose", f"line {lineno}: not a directive: {line[:40]}")
 
     if structural:
-        probs, sc2 = check_claims(store, structural, scope=sc, expected={"cause", "verdict"})
+        probs, sc2 = check_claims(store, structural, scope=sc, expected=set())
         problems += probs
         sc = sc2
 
