@@ -24,11 +24,15 @@ day to produce a number we could have predicted.
 ## Fact 2: a clone cell cannot measure here
 
 `agent-clone.sh` copies committed state. In this repo that means no bundled
-interpreter (`../REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/...` is outside the
-jail), no `venv` (gitignored, absent), no model weights (`/tmp/opencode/models2`
-and the 78-weight collection live outside the cell). A worker that tries to
-reproduce a timing will burn its whole budget on `ModuleNotFoundError` or on a
-missing `futsuu.pth`, and its report will blame the code.
+interpreter, no `venv` (gitignored, absent) and no model weights (they live
+outside the cell). **The path this section used to name —
+`../REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/...` — does not exist on this host
+(checked 2026-11-16); a worker that follows it will fail on the first command.**
+The interpreter to use is whatever the supervisor's checkout has; the system
+`python3` is 3.14 with **no torch**, so a cell cannot even import the model. A
+worker that tries to reproduce a timing will burn its budget on
+`ModuleNotFoundError` or on a missing `futsuu.pth`, and its report will blame the
+code.
 
 So the split is fixed:
 
