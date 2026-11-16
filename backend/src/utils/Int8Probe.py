@@ -218,12 +218,12 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                                    "no pair the gate would reuse", frames_used=len(pairs))
         comp_worst = max(s for s, _ in comp)
         peak = max(p for _, p in comp)
+        c2 = max((s for s, _ in comp2), default=float("nan"))
+        _n2 = len(reused2)
         # The gate serves references up to its chain depth, so the verdict is taken at the WORST depth it may
         # serve - certifying at depth 1 and serving at depth 2 is the blind spot this project already hit once.
         worst_depth = comp_worst if not comp2 else max(comp_worst, c2)
         verdict = worst_depth <= bar
-        c2 = max((s for s, _ in comp2), default=float("nan"))
-        _n2 = len(reused2)
         reason = (f"composition d1 {comp_worst:.3f}% / d2 {c2:.3f}% -> worst {worst_depth:.3f}% "
                   f"{'<=' if verdict else '>'} bar {bar}% (own defect {engine_worst:.3f}%, "
                   f"{len(comp)} of {len(test_idx)} pairs at d1, {_n2} at d2)")
