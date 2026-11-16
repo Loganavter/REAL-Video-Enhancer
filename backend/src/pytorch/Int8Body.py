@@ -102,9 +102,25 @@ class Int8Body:
                 outs.append((act.abs().amax(dim=(0, 2, 3)).float() / 127.0).clamp_min(1e-8))
         return s_act, outs
 
-    def calibrate(self, x):
-        """Take the grids from one frame. Called once, before the first rendered frame."""
-        self._grids = self._measure(x)
+    def calibrate(self, frames):
+        """Take the grids from the SPREAD frames the probe already decoded.
+
+        One frame is not enough: measured on a5_chainsaw, single-frame grids give a COMPOSITION error of 0.116%
+        where sixteen-frame grids give 0.006% - a 20x difference, and the difference between failing and passing a
+        0.1% bar. The grids are the element-wise maximum over the frames, so a bright frame raises the ceiling
+        instead of the first frame setting it.
+        """
+        if torch.is_tensor(frames):
+            frames = [frames]
+        s_act, outs = None, None
+        for f in frames:
+            s2, o2 = self._measure(f)
+            if s_act is None:
+                s_act, outs = s2, o2
+            else:
+                s_act = torch.maximum(s_act, s2)
+                outs = [torch.maximum(a, b) for a, b in zip(outs, o2)]
+        self._grids = (s_act, outs)
         self._launches = None
         return self
 

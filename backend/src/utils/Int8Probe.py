@@ -50,6 +50,7 @@ class Int8ProbeResult:
     reason: str
     frames_used: int = 0
     error: str = ""
+    frames: object = None      # the decoded calibration frames, so the body reuses them instead of re-decoding
 
     def stats(self) -> str:
         if self.error:
@@ -215,6 +216,7 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         reason = (f"composition {comp_worst:.3f}% {'<=' if verdict else '>'} bar {bar}% "
                   f"(own defect {engine_worst:.3f}%, {len(comp)} of {len(test_idx)} pairs reused)")
         return Int8ProbeResult(verdict, engine_worst, comp_worst, peak, len(comp), bar, reason,
-                               frames_used=len(pairs))
+                               frames_used=len(pairs),
+                               frames=[f for i in calib_idx for f in frames_all[i]])
     except Exception as error:  # noqa: BLE001 - a probe failure must never cost a render
         return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "probe failed", error=str(error))
