@@ -233,3 +233,14 @@
 @claim body_cert_fused 0.00820 % "certification, fused head, best of the three schemes" measured
 @ratio fp16_window_ms int8_window_ms2 1.194 "one process, host timeline, steady state, 1920x1080, fused head"
 @below body_vs_app kill_ratio
+
+# ---- the probe's proxy is 10x optimistic: its verdicts disagree with the serving kernels
+@claim probe_sim_chainsaw  0.010 % "probe simulation, composition, a5_chainsaw" measured
+@claim probe_real_chainsaw 0.116 % "the SAME pairs through Int8Body, composition" measured
+@claim probe_sim_violet    0.084 % "probe simulation, composition, a5_violet" measured
+@claim probe_real_violet   0.377 % "the same pairs through Int8Body" measured
+@claim probe_gap_chainsaw  11.6 x  "derived: probe_real_chainsaw / probe_sim_chainsaw" derived
+@derived probe_gap_chainsaw "0.116 / 0.010 = 11.6x optimistic"
+@claim probe_gap_violet     4.5 x  "derived: probe_real_violet / probe_sim_violet" derived
+@derived probe_gap_violet "0.377 / 0.084 = 4.5x optimistic"
+@claim probe_verdict_gap    2 x    "titles where the two paths disagree: both (sim says int8, kernels say fp16)" measured
