@@ -165,6 +165,7 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--iters", type=int, default=20)
     ap.add_argument("--check-only", action="store_true")
+    ap.add_argument("--emit", default="", help="write the measurement as harness records (JSONL)")
     ap.add_argument("--check-size", type=int, default=64)
     ap.add_argument("--block", type=int, default=BLOCK_M)
     ap.add_argument("--warps", type=int, default=2)
@@ -236,8 +237,32 @@ def main() -> int:
     torch.cuda.synchronize()
     ms = start.elapsed_time(end) / args.iters
     flops = 2.0 * C * C * 9 * args.height * args.width
-    print(f"block {args.height}x{args.width}: {ms:.3f} ms -> {flops / ms / 1e9:.1f} TOPS "
+    tops = flops / ms / 1e9
+    print(f"block {args.height}x{args.width}: {ms:.3f} ms -> {tops:.1f} TOPS "
           f"(budget 1.9-2.0 ms, 76-80 TOPS)")
+
+    if args.emit:
+        # The number leaves the probe as a record, not as a line of stdout: a claim can cite R001
+        # instead of retyping 1.842, and the population/instrument/config travel with it.
+        import sys as _sys
+        _sys.path.insert(0, "scripts")
+        from harness import Population, Record, Store
+        store = Store()
+        pop = Population.of("int8 block launch", [f"iter-{i}" for i in range(1, args.iters + 1)],
+                            label=f"one 3x3 conv {C}->{C} NHWC int8 + per-channel PReLU + requant, "
+                                  f"{args.width}x{args.height}, synthetic")
+        common = dict(
+            population=pop,
+            instrument=f"torch.cuda.Event over {args.iters} iterations, one GPU job at a time",
+            config=f"{torch.cuda.get_device_name(0)} sm{''.join(map(str, torch.cuda.get_device_capability(0)))}, "
+                   f"triton {triton.__version__}, BLOCK_M={args.block}",
+            session=store.session, run=f"run-int8-block-{args.width}x{args.height}",
+            extra={"of": "engine_time", "quantity": "speed"})
+        store.emit(Record(value=round(float(ms), 3), unit="ms", statistic="median", **common))
+        store.emit(Record(value=round(float(tops), 1), unit="TOPS", statistic="median",
+                          **{**common, "extra": {"of": "rate", "quantity": "speed"}}))
+        store.dump(args.emit)
+        print(f"records -> {args.emit}")
     return 0
 
 
