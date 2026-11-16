@@ -67,6 +67,51 @@ source checkout's `fork` remote; the supervisor moves the branch.
 `INTERFACE:` names every new symbol with its signature, because the plugin and
 the probes are the only shared seams here.
 
+## Uncommitted work has a lifecycle here too
+
+In the sibling project two branch switches erased edits that existed only in a
+worktree: the branch moved, the tree did not come with it, and nothing had ever
+recorded what the tree looked like. The same hole is open here, and it is the
+shared checkout that is exposed — a cell throws its tree away by design, the
+supervisor's checkout is where hours of unmeasured work accumulate between
+commits.
+
+Two ways to close it, and they answer different questions:
+
+- **Timer, automatic**: `scripts/autopush.sh` snapshots the working tree
+  (staged + unstaged + untracked, `.gitignore`'d paths excluded) onto
+  `refs/autopush/<branch>` without touching `HEAD`, the index or the tree. It
+  skips a clean tree, a tree identical to the last snapshot, an in-progress
+  merge (`MERGE_HEAD` or unmerged paths) and a detached `HEAD`. Ref name is the
+  branch with `/` flattened to `--`, e.g.
+  `refs/autopush/agent--rve-autopush--work`. Retention is bounded by
+  `AUTOPUSH_KEEP` (default 48 snapshots, 12 h at the timer's interval): the ref
+  always carries the newest snapshot, older ones fall off the end of the chain.
+  The unit is `packaging/systemd/rve-autopush.{service,timer}`, 15 minutes,
+  **not enabled by default** — a timer writing into a repository another lane is
+  measuring in is the owner's decision, and the enable commands are in the
+  service header.
+- **Manual, before a switch**: `wip-save.sh [repo] [why]` from the machine
+  toolkit records a one-off snapshot into `refs/wip/<branch>/<stamp>` (permanent,
+  never pruned) and `git-safe-switch.sh <branch|commit>` saves before it
+  switches. Reach for these when the thing you are about to do is exactly the
+  thing that lost work last time; the timer only guarantees the last 15 minutes.
+
+Recovery is the same for both, and neither puts a commit on your branch:
+
+```bash
+git for-each-ref refs/autopush                      # what exists, and when
+git log refs/autopush/<name> --oneline -5           # snapshot timeline
+git show refs/autopush/<name>:<path>                # content of one file
+git checkout refs/autopush/<name> -- <path>         # restore one path
+```
+
+What `autopush.sh` deliberately does not do: no `git stash` (per-repository
+global state, and a timer must not take it), no `git reset --hard`, no
+`checkout`, no commit on any branch, and no push — this checkout's only remote is
+the local source repo, so a snapshot is local by design. A pre-PR squash
+therefore cannot drop it, which was the failure mode in the sibling project.
+
 ## Lanes
 
 At most **three** cells at once, and never two with overlapping `owns_files`:

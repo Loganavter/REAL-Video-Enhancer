@@ -1,0 +1,49 @@
+[Unit]
+Description=Snapshot the RVE working tree onto refs/autopush/<branch>
+# Off by default on purpose. A snapshot ref is cheap but is still a write into a
+# repository that another lane may be measuring in; which checkout gets a timer
+# is the owner's decision, not something an install step should make silently.
+# To enable it for the checkout you actually edit in:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp packaging/systemd/rve-autopush.{service,timer} ~/.config/systemd/user/
+#   # edit the two paths below if the checkout is not at %h/Загрузки/projects
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now rve-autopush.timer
+#   systemctl --user list-timers rve-autopush.timer     # confirm next elapse
+#   journalctl --user -u rve-autopush.service -n 20     # one line per run
+#
+# Disable with: systemctl --user disable --now rve-autopush.timer
+# It is a --user unit because the snapshot lives in the user's own checkout and
+# the repository is owned by that user; a system unit would need User=, a
+# working directory and permissions for no gain.
+ConditionPathIsDirectory=%h/Загрузки/projects/REAL-Video-Enhancer/.git
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Загрузки/projects/REAL-Video-Enhancer
+ExecStart=%h/Загрузки/projects/REAL-Video-Enhancer/scripts/autopush.sh --repo %h/Загрузки/projects/REAL-Video-Enhancer
+# Snapshotting must never compete with a render or a measurement for CPU or IO:
+# this box also serves as the single GPU lane, and a timer that steals IO mid-run
+# moves the number the ledger records.
+Nice=15
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+CPUQuota=50%
+# A snapshot that failed once will fail again on the same tree; a retry loop only
+# spams the journal. The next tick is the retry.
+Restart=no
+# No network, no privilege, and the tree is only read: keep the sandbox tight
+# enough that a bug in the script cannot write outside the repository.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+# ~ is readable (git reads the user config) but not writable; the only writable
+# path is .git, which is where objects, refs and the index stat-cache live. A
+# snapshot therefore cannot touch the working tree even if the script is wrong.
+ProtectHome=read-only
+ReadWritePaths=%h/Загрузки/projects/REAL-Video-Enhancer/.git
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target
