@@ -500,10 +500,25 @@ class UpscalePytorch:
                     self._prev_hr = output
             elif self.tilesize == 0:
                 body = self._int8_body(image_tensor)
+                # GPU time of the fp16 engine, measured the same way as the body's: events, previous
+                # frame's pair read on the next, nothing synchronised inside a frame.
+                import logging as _lgf
+                _prevf = getattr(self, "_fp16_ev", None)
+                if _prevf is not None:
+                    self._fp16_ms = getattr(self, "_fp16_ms", []) + [_prevf[0].elapsed_time(_prevf[1])]
+                    if len(self._fp16_ms) % 8 == 0:
+                        _v = self._fp16_ms[-8:]
+                        _lgf.getLogger("RVE").warning(
+                            "fp16 engine GPU: %.2f ms/frame (last 8); alloc_retries %d",
+                            sum(_v) / len(_v), torch.cuda.memory_stats().get("num_alloc_retries", -1))
+                _fs, _fe = torch.cuda.Event(True), torch.cuda.Event(True)
+                _fs.record()
                 if body is not None:
                     output = body(image_tensor)
                 else:
                     output = self.upscale_model_wrapper(image_tensor)
+                _fe.record()
+                self._fp16_ev = (_fs, _fe)
             else:
                 output = self.renderTiledImage(image_tensor)
 
