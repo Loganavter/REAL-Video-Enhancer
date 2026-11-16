@@ -28,6 +28,14 @@ interpreter, no `venv` (gitignored, absent) and no model weights (they live
 outside the cell). **The path this section used to name —
 `../REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/...` — does not exist on this host
 (checked 2026-11-16); a worker that follows it will fail on the first command.**
+**Asymmetric (uint8) quantisation is not available on this GPU (measured 2026-11-17).** A Q/DQ graph
+whose QuantizeLinear carries a non-zero zero-point is rejected by the ONNX parser:
+"Non-zero zero point is not supported. Please set kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA" -
+that switch is DLA-only, and this is a GeForce part. Every explicit-quantisation build on this host is
+therefore **symmetric** (zero point 0), which costs precision on the PReLU's one-sided output. Two
+consequences: a plan that prints a better picture than a symmetric PTQ can give is suspect, and the
+asymmetric recipe found in most PTQ guides cannot be followed here.
+
 **Never calibrate a quantisation model on the CPU at frame resolution (measured 2026-11-17).**
 onnxruntime's `quantize_static` runs the model once per calibration frame on the CPU: 8 frames x
 2.5 TFLOP of 3x3 convolutions at 1920x1080 on 16 threads, plus its arena. It took the desktop down to
