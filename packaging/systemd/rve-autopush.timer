@@ -1,0 +1,22 @@
+[Unit]
+Description=Run the RVE autopush snapshot every 15 minutes
+# Not enabled by default — see the header of rve-autopush.service for the exact
+# per-user enable commands and the reason the decision is the owner's.
+ConditionPathIsDirectory=%h/Загрузки/projects/REAL-Video-Enhancer/.git
+
+[Timer]
+# 15 minutes. OnCalendar rather than OnUnitActiveSec so the tick is aligned to the
+# wall clock: a snapshot at :00/:15/:30/:45 is easy to correlate with a log line
+# or a render that started at a round time.
+OnCalendar=*:0/15
+# A machine that was off across a tick takes one catch-up run at boot. That is
+# the intended behaviour: the work in the tree is the newest thing there is.
+Persistent=true
+# Spread the start over a minute so the snapshot does not land on the same
+# second as everything else the owner scheduled at :00.
+RandomizedDelaySec=60
+AccuracySec=30
+Unit=rve-autopush.service
+
+[Install]
+WantedBy=timers.target
