@@ -1403,7 +1403,32 @@ picture. The fused comparison that preceded this one (1.489x, 1.505x, 1.411x, 1.
 0.631x) is retired: every one of those was a ratio against a monolithic 80 ms engine the app never builds, or a
 division across two processes. This is the only number in the document that has both sides on one instrument.
 
-**No int8 frame was rendered by the app, and both reasons are measured:**
+**No int8 frame can be rendered by this renderer, and the final reason is structural - measured in the app's own
+run after two wiring faults were fixed.**
+
+Wiring first, because both were real and both were mine: the probe's verdict lived on the render object while the
+hook read it from the upscale option (now propagated), and the model is reached through `get_model()` rather than an
+attribute. With those fixed the app's own log shows the hook being reached with the right state -
+`int8: start (tilesize=0, tile_upscaler=False, int8Fit=int8)` - and then the wall:
+
+    int8: wrapper=UpscaleModelWrapper model=SRVGGNetCompact
+    int8: built (supports=False)
+    int8 body refused to start (Given groups=1, weight of size [64, 64, 3, 3], expected input[1, 3, 1080, 1920]
+    to have 64 channels, but got 3 channels instead); fp16 engine runs
+
+The engine log explains it: `head convolution body.0: 3 -> 8 (zeros, padded inside the head so the model's own
+residual keeps its 3 channels), so the engine can fuse it with its PReLU`. **The app transforms the model before the
+renderer ever sees it** - `body[0]` is a 64->64 convolution because the 3-channel head has been padded to 8 and
+folded into the engine. A body built from `wrapper.get_model()` therefore starts from the wrong module, and
+`Int8Body.supports()` returns False. Serving int8 here needs the body derived against the app's transformed graph,
+not against the `.pth` - a different piece of work from anything in this plan, and pointless while the body is
+0.962x with a 1.062x ceiling.
+
+That run also closes the loop on the baseline: with temporal reuse off, the app's inference is **46.47 ms**, which
+is the same 46.4 ms the one-process comparison measured for the tiled engine - so the ratio in this document is
+against the app's real engine, not a proxy.
+
+**Earlier reasons, retained because they were the first two walls:**
 
 * at 3840x2160 the probe dies before it decides - `int8 probe unavailable (CUDA out of memory ...); int8 stays
   off` - because the app already holds the 4K engine, the model and its own buffers;

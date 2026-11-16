@@ -877,6 +877,9 @@ class Render:
             # switch: an engine swapped mid-render would mix two error histories inside one gate window.
             if str(getattr(self, "int8Fit", "auto")).lower() == "auto":
                 self.int8Fit = self._probe_int8_fit()
+                # the verdict has to reach the object that runs frames: gen_render keeps it here, the hook
+                # reads it from the upscale option, and until this line existed the body was never built.
+                self.upscaleOption.int8Fit = self.int8Fit
             
 
         if self.backend == "ncnn":

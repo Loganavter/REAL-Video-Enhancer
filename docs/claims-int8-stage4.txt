@@ -169,3 +169,10 @@
 # THE BOUND, asserted after it is defined: no tuning of this design reaches the kill line either, so the verdict
 # is arithmetic rather than provisional.
 @below ceiling_ratio kill_ratio
+
+# ---- why the body cannot serve THIS renderer, measured in the app's own run
+@claim wrapper_model     0 x     "the render holds an SRVGGNetCompact whose body[0] weight is [64,64,3,3]" measured
+@claim app_supports      0 x     "Int8Body.supports(wrapper.get_model()) returns False" measured
+@claim build_error       1 x     "Int8Body build raises: expected input[1,3,1080,1920] to have 64 channels" measured
+@claim app_head_fused    1 x     "the app pads and fuses the head for its engine (log: 'body.0: 3 -> 8 zeros, padded inside the head')" measured
+@claim render_engine_ms 46.47 ms "the app's inference once temporal reuse is off - matches the 46.4 ms one-process engine" measured
