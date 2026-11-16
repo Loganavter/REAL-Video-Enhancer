@@ -49,18 +49,28 @@ class Compact(nn.Module):
         return self.upsampler(out) + F.interpolate(x, scale_factor=self.scale, mode="nearest")
 
 
-def calibrate(model: nn.Module, paths: list[str], w: int, h: int) -> list[tuple[float, float]]:
-    """Per-conv input range over the frames, on the GPU, batch of one."""
+def calibrate(model: nn.Module, paths: list[str], w: int, h: int,
+              percentile: float = 100.0, keep: int = 2_000_000) -> list[tuple[float, float]]:
+    """Per-conv input range over the frames, on the GPU, batch of one.
+
+    ``percentile=100`` is the max, which is what a naive calibration uses: the body's range reaches
+    +-193 while most values are far smaller, so the step is coarse and the picture pays for it. A
+    high percentile (99.99) clips a handful of outliers and buys several dB.
+    """
     convs = [m for m in model.modules() if isinstance(m, nn.Conv2d)]
     ranges = [[float("inf"), float("-inf")] for _ in convs]
+    samples = [[] for _ in convs]
     hooks = []
 
     def make_hook(idx: int):
         def hook(_mod, inp, _out):
-            x = inp[0]
-            lo, hi = float(x.min()), float(x.max())
-            ranges[idx][0] = min(ranges[idx][0], lo)
-            ranges[idx][1] = max(ranges[idx][1], hi)
+            x = inp[0].detach().float().abs().flatten()
+            if percentile < 100.0:
+                step = max(1, x.numel() // max(1, keep // len(paths)))
+                samples[idx].append(x[::step][: max(1, keep // len(paths))].cpu())
+            else:
+                ranges[idx][0] = min(ranges[idx][0], -float(x.max()))
+                ranges[idx][1] = max(ranges[idx][1], float(x.max()))
         return hook
 
     for i, c in enumerate(convs):
@@ -75,11 +85,19 @@ def calibrate(model: nn.Module, paths: list[str], w: int, h: int) -> list[tuple[
             torch.cuda.empty_cache()
     for hk in hooks:
         hk.remove()
+    if percentile < 100.0:
+        import numpy as _np
+        for i, parts in enumerate(samples):
+            if not parts:
+                continue
+            v = torch.cat(parts)
+            a = float(_np.percentile(v.numpy(), percentile))
+            ranges[i] = (-a, a)
     return [(lo, hi) for lo, hi in ranges]
 
 
 def qdq_graph(onnx_in: str, onnx_out: str, ranges: list[tuple[float, float]],
-              keep_fp16_head_tail: bool = True) -> dict:
+              keep_fp16_head_tail: bool = True, activation_uint8: bool = True) -> dict:
     m = onnx.load(onnx_in)
     inits = {i.name: i for i in m.graph.initializer}
     conv_idx = 0
@@ -116,14 +134,35 @@ def qdq_graph(onnx_in: str, onnx_out: str, ranges: list[tuple[float, float]],
 
         lo, hi = ranges[conv_idx] if conv_idx < len(ranges) else (0.0, 1.0)
         if not (keep_fp16_head_tail and (first or last)):
-            s = max(abs(lo), abs(hi)) / 127.0
-            s = s if s > 0 else 1e-8
-            s_name = uniq("as")
-            q_name, dq_name = uniq("aq"), uniq("ad")
-            new_nodes.append(helper.make_node("QuantizeLinear", [node.input[0], s_name], [q_name]))
-            new_nodes.append(helper.make_node("DequantizeLinear", [q_name, s_name], [dq_name]))
-            pending = qdq_graph._pending
-            pending.append(numpy_helper.from_array(np.array(s, dtype=np.float32), s_name))
+            if activation_uint8:
+                # asymmetric uint8: lo..hi maps to 0..255, zero-point keeps 0.0 exact. The PReLU's
+                # negative branch is scaled (~0.2x) so the distribution is one-sided and symmetric
+                # int8 spends half its codes on a range that does not occur.
+                lo = min(lo, 0.0)
+                hi = max(hi, 0.0)
+                span = (hi - lo) or 1e-8
+                s = span / 255.0
+                zp = int(round(-lo / s))
+                zp = max(0, min(255, zp))
+                s_name = uniq("as")
+                zp_name = uniq("az")
+                q_name, dq_name = uniq("aq"), uniq("ad")
+                new_nodes.append(helper.make_node("QuantizeLinear", [node.input[0], s_name, zp_name],
+                                                  [q_name]))
+                new_nodes.append(helper.make_node("DequantizeLinear", [q_name, s_name, zp_name],
+                                                  [dq_name]))
+                pending = qdq_graph._pending
+                pending.append(numpy_helper.from_array(np.array(s, dtype=np.float32), s_name))
+                pending.append(numpy_helper.from_array(np.array(zp, dtype=np.uint8), zp_name))
+            else:
+                s = max(abs(lo), abs(hi)) / 127.0
+                s = s if s > 0 else 1e-8
+                s_name = uniq("as")
+                q_name, dq_name = uniq("aq"), uniq("ad")
+                new_nodes.append(helper.make_node("QuantizeLinear", [node.input[0], s_name], [q_name]))
+                new_nodes.append(helper.make_node("DequantizeLinear", [q_name, s_name], [dq_name]))
+                pending = qdq_graph._pending
+                pending.append(numpy_helper.from_array(np.array(s, dtype=np.float32), s_name))
             node.input[0] = dq_name
             added["q"] += 1
             added["dq"] += 1
@@ -147,6 +186,10 @@ def main() -> int:
     ap.add_argument("--frames", required=True)
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
+    ap.add_argument("--activation", choices=("qint8", "quint8"), default="quint8",
+                    help="uint8 (asymmetric) is the PTQ default for activations; int8 wastes half the range")
+    ap.add_argument("--percentile", type=float, default=100.0,
+                    help="100 = min/max calibration; 99.99 clips outliers and buys precision")
     args = ap.parse_args()
 
     paths = sorted(glob.glob(os.path.join(args.frames, "*.raw")))
@@ -154,14 +197,15 @@ def main() -> int:
     state = state.get("params", state)
     model = Compact(state)
     model.load_state_dict(state, strict=True)
-    ranges = calibrate(model, paths, args.width, args.height)
+    ranges = calibrate(model, paths, args.width, args.height, args.percentile)
     print("calibrated on", len(paths), "frames:", [(round(a, 3), round(b, 3)) for a, b in ranges])
 
-    stats = qdq_graph(args.onnx_in, args.onnx_out, ranges)
+    stats = qdq_graph(args.onnx_in, args.onnx_out, ranges, activation_uint8=args.activation == "quint8")
     manifest = {"source": args.onnx_in, "qdq": args.onnx_out,
                 "frames": [{"file": os.path.basename(p),
                             "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()} for p in paths],
-                "calibration": "torch forward hooks on the GPU, per-tensor min/max, batch 1",
+                "calibration": f"torch forward hooks on the GPU, per-tensor, percentile "
+                               f"{args.percentile}, batch 1, activations {args.activation}",
                 **stats}
     with open(args.onnx_out + ".manifest.json", "w") as fh:
         json.dump(manifest, fh, indent=1)
