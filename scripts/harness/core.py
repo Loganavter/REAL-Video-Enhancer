@@ -150,6 +150,9 @@ class Record:
             raise RecordError(f"{self.id or 'record'}: unknown tier {self.tier!r}")
         if self.tier == "derived" and not (self.formula and self.inputs):
             raise RecordError(f"{self.id or 'record'}: derived without formula+inputs")
+        if self.tier == "measured" and not (self.run or self.artifact):
+            raise RecordError(f"{self.id or 'record'}: measured with no run and no artifact - provenance "
+                              f"was deleted after emit")
         if self.artifact and not self.extra.get("artifact_sha256"):
             raise RecordError(f"{self.id or 'record'} cites artifact {self.artifact!r} with no digest - "
                               f"a record that names a file it never read is the class-5 error")
@@ -196,6 +199,7 @@ class Store:
             rec = replace(rec, id=f"R{self.seq:03d}")
         if rec.id in self.records:
             raise RecordError(f"duplicate record id {rec.id}")
+        rec.validate()                      # a record that cannot be evidence is not stored at all
         self.records[rec.id] = rec
         return rec
 

@@ -27,7 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-NOQA = re_noqa = ("# noqa: dead-store", "# noqa: used-before-assignment", "# noqa")
+MARKERS = {"dead store": "# noqa: dead-store",
+           "used before assignment": "# noqa: used-before-assignment"}
 
 
 @dataclass(frozen=True)
@@ -88,12 +89,15 @@ class _NestedScope(ast.NodeVisitor):
                 self.bound.add(a.id)
 
 
-def _noqa_lines(src: str) -> set[int]:
-    """Only real COMMENT tokens count: the marker inside a docstring must not whitelist a line."""
+def _noqa_lines(src: str, kind: str) -> set[int]:
+    """Only a real COMMENT token counts, and only the marker for THIS check: a bare ``# noqa``
+    used to disable every check on the line, including the dead-store one that caught the original
+    false refusal."""
     out: set[int] = set()
+    marker = MARKERS.get(kind, "")
     try:
         for tok in tokenize.generate_tokens(io.StringIO(src).readline):
-            if tok.type == tokenize.COMMENT and any(m in tok.string for m in NOQA):
+            if tok.type == tokenize.COMMENT and marker and marker in tok.string:
                 out.add(tok.start[0])
     except (tokenize.TokenError, IndentationError):
         return {i for i, line in enumerate(src.splitlines(), 1) if any(tok in line for tok in NOQA)}
@@ -109,7 +113,7 @@ def _blocks(tree: ast.AST):
 
 def dead_stores(source: str, filename: str = "") -> list[Finding]:
     tree = ast.parse(source)
-    skip = _noqa_lines(source)
+    skip = _noqa_lines(source, "dead store")
     findings: list[Finding] = []
     for body in _blocks(tree):
         pending: dict[str, int] = {}
@@ -119,7 +123,9 @@ def dead_stores(source: str, filename: str = "") -> list[Finding]:
                 if name in loads:                 # the previous value was used: not a dead store
                     pending.pop(name)
             for name in _simple_stores(stmt):
-                if name in pending and stmt.lineno not in skip:
+                # the marker may sit on either line of the pair: the assignment whose value dies,
+                # or the one that overwrites it
+                if name in pending and stmt.lineno not in skip and pending[name] not in skip:
                     findings.append(Finding("dead store", name, pending[name], stmt.lineno, filename))
                 pending[name] = stmt.lineno
     return sorted(findings, key=lambda f: f.second_line)
@@ -127,7 +133,7 @@ def dead_stores(source: str, filename: str = "") -> list[Finding]:
 
 def used_before_assignment(source: str, filename: str = "") -> list[Finding]:
     tree = ast.parse(source)
-    skip = _noqa_lines(source)
+    skip = _noqa_lines(source, "used before assignment")
     findings: list[Finding] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
