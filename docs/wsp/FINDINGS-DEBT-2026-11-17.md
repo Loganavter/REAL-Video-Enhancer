@@ -80,3 +80,37 @@ No claim is marked withdrawn wholesale. The item's own refutes clause allowed th
 the better resolution: *re-measure what the decision actually needs*. Three items were re-measured
 today, and the two live lanes (E33, B2) are re-measurements of exactly the claims a decision would
 cite.
+
+## Appendix: the 26 decision-bearing claims, named
+
+Generated from `harness.migrate` itself (not typed by hand). "n=?" is the record's own complaint: the
+number was never attached to a sample size, which is why it cannot be a verdict's evidence.
+
+| name | value | n | source |
+|---|---|---|---|
+| `body_vs_app` | 0.82 x | ? | claims-int8-stage2.txt:49 |
+| `body_vs_app` | 0.953 x | ? | claims-int8-stage4.txt:115 |
+| `pipeline_share` | 0 % | ? | claims-int8-stage1.txt:9 |
+| `ratio_violet_4k` | 0.552 x | ? | claims-int8-stage1.txt:18 |
+| `shortfall_idle` | -3.45 ms | ? | claims-int8-stage2.txt:32 |
+| `shortfall_nvenc` | -4.59 ms | ? | claims-int8-stage2.txt:34 |
+| `kill_excess` | -9.13 ms | ? | claims-int8-stage4.txt:62 |
+| `delivered_ratio` | 0.484 x | ? | claims-int8-stage4.txt:196 |
+| `fp16_window_ms` | 51.06 ms | ? | claims-int8-stage4.txt:208 |
+| `futsuu_short` | -3.45 ms | ? | claims-int8-stage5.txt:28 |
+| `simulation_share` | 0 % | ? | claims-int8-stage1.txt:10 |
+| `chainsaw_composition` | 0.01 % | ? | claims-int8-stage4.txt:9 |
+| `adv_chainsaw_comp` | 0.022 % | ? | claims-int8-stage4.txt:10 |
+| `c10_comp` | 0.011 % | ? | claims-int8-stage4.txt:11 |
+| `body_share_512` | 0 % | ? | claims-int8-stage4.txt:40 |
+| `body_share_1080` | 0 % | ? | claims-int8-stage4.txt:41 |
+| `body_vs_engine_share` | 1e-05 % | ? | claims-int8-stage4.txt:42 |
+| `delivered_share` | 0.07592 % | ? | claims-int8-stage4.txt:198 |
+| `int8_window_ms` | 46.52 ms | ? | claims-int8-stage4.txt:209 |
+| `render_share_epilogue` | 0.07024 % | ? | claims-int8-stage4.txt:222 |
+| `int8_window_ms2` | 42.75 ms | ? | claims-int8-stage4.txt:232 |
+| `comp_spread_frame` | 0.006 % | ? | claims-int8-stage4.txt:255 |
+| `comp_spread_violet` | 0.05 % | ? | claims-int8-stage4.txt:257 |
+| `comp_d2_chainsaw` | 0.39 % | 6 | claims-int8-stage4.txt:278 |
+| `comp_d2_violet` | 0.166 % | ? | claims-int8-stage4.txt:280 |
+| `realesr_share` | 0.00058 % | ? | claims-int8-stage5.txt:18 |

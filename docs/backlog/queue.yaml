@@ -953,7 +953,7 @@ tasks:
   title: 'The existing findings are unprotected: 0 of 211 claims carry a tuple; 62
     are decision-bearing'
   type: experiment
-  status: in_progress
+  status: done
   owner: null
   priority: P0
   gpu: partial
@@ -973,6 +973,16 @@ tasks:
     live only in the claims file, and no probe output is committed (git ls-files finds
     none). Then the honest resolution is to mark them withdrawn and re-measure what
     the decision actually needs, not to keep citing them.'
+  resolution: 'closed 2026-11-17 on the acceptance''s second branch, which its own refutes clause
+    allowed: the gate still FAILS (213 claim lines, 0 protected, 194 without a tuple, 26
+    decision-bearing unprotected), and every one of those 26 is now named with its value, its n and its
+    source line in docs/wsp/FINDINGS-DEBT-2026-11-17.md, grouped into four reason classes (artifact
+    destroyed with the instrument still available; recipe under-specified at the int8 lane; session
+    drift on five re-measured names; sixteen legacy bars that do not say what they are bars of). What
+    was re-measured rather than documented on 2026-11-17: E29, E36, B3, E33''s rate and C''s stream
+    test, each with records under docs/wsp/verified/. The thirteen verified files all pass their own
+    documented command - and three of them did not before today: int8-block had no run line at all,
+    model-prelu and residual-scale pointed --records at /tmp, i.e. at tmpfs.'
   acceptance: '`python -m harness.migrate "docs/claims-*.txt" --records <records.jsonl>`
     reaches GATE: PASS, or every remaining unverifiable claim is listed as accepted
     debt with the reason. The 11 two-valued names are resolved to one current value
