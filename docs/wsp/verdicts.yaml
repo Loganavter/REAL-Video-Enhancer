@@ -183,7 +183,8 @@
 
 - id: int8-composition-d2
   lane: int8
-  status: current
+  status: superseded
+  superseded_by: int8-d2-owner-split
   scope: composition at the depth the gate serves, two titles, 6 pairs each
   date: 2026-11-17
   statement: >-
@@ -191,10 +192,33 @@
     bar, so both titles refuse. At depth 1 the same filter reads 0.002% and 0.104%.
   evidence: docs/claims-int8-stage4.txt
   open_question: >-
-    Chainsaw is 195x its own depth-1 and 78x the fp16 gate's 0.005% at the same depth, while Violet is
-    1.6x / 1.73x - inside the measured range. One of the two numbers is probably not the population it
-    is labelled with. The discriminating control needs no int8: fp16(t-2) against fp16(t) on the same
-    pairs, at the gate's depth.
+    Answered, and the answer split the verdict: the control named here was run on 2026-11-17
+    (fp16(t-2) against fp16(t) on the same pairs). Both numbers are the population they are labelled
+    with; what differs between the titles is the reference term's share - 88% on Chainsaw, 63% on
+    Violet - and on Chainsaw that share alone fails the bar. See int8-d2-owner-split.
+
+- id: int8-d2-owner-split
+  lane: int8
+  status: current
+  scope: the app's own int8 fit probe, Chainsaw Man 20 s and Violet Evergarden 20 s at 1920x1080, three
+    sample sizes (8 / 12 / 16 test pairs)
+  date: 2026-11-17
+  statement: >-
+    The depth-2 refusal has two different owners, and the control that separated them needed no int8:
+    on the same pairs and the same separation, fp16(t) against fp16(t-2) reads 0.191% / 0.139% / 0.158%
+    on Chainsaw against the 0.1% bar, so the gate refuses material that a renderer with no quantisation
+    error also fails, and int8 adds only 0.017-0.027 pp there. On Violet the same control reads 0.077%
+    on the product's 8-pair sample (where int8 reads 0.122% and refuses) and 0.013% / 0.0045% at 12 and
+    16 pairs (where int8 reads 0.0248% / 0.0265% and passes) - so that refusal belongs to the sample,
+    not to the material.
+  evidence: docs/wsp/verified/int8-d2-control.txt
+  open_question: >-
+    The depth-2 statistic rests on the intersection of the test pairs with the pairs the gate would
+    reuse: 2 pairs on Chainsaw at the sample the product uses, against 8 for the engine statistic and
+    the 13-19 the protocol asks. A verdict that moves between 0.0265% and 0.1219% across samples on a
+    0.1% bar is not yet a measurement of the material. Separately, the gate's certification statistic
+    (block-mean <= 5) admits pairs whose acceptance share is 1.4-1.9x the bar; whether the threshold or
+    the statistic is wrong is not decided.
 
 - id: b3-prelu-forms
   lane: engine
@@ -314,7 +338,8 @@
   open_question: >-
     The blocker to fix is the depth-2 composition (0.122% / 0.218% against 0.1%), i.e. the gap between
     a frame and a reference two steps back, not the peak: bar_int8_peak (20) is also unreachable
-    (29-55 across twelve configurations) but the product does not refuse on it.
+    (29-55 across twelve configurations) but the product does not refuse on it. The depth-2 refusal is
+    sample-dependent and its owner differs by title - see int8-d2-owner-split, measured 2026-11-17.
 
 - id: e37-reachability
   lane: reuse

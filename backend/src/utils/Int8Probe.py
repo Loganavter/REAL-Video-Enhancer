@@ -51,6 +51,13 @@ class Int8ProbeResult:
     frames_used: int = 0
     error: str = ""
     frames: object = None      # the decoded calibration frames, so the body reuses them instead of re-decoding
+    # the depth-2 pair of numbers and the control that owns them. `composition_d2` is what the verdict is
+    # actually taken on when the gate serves depth 2; `stale_d1`/`stale_d2` are the same statistic with
+    # fp16 on both sides, i.e. the gate's own reference without the quantiser. Kept as fields, not only in
+    # the reason string: a number that exists only in prose cannot be recorded.
+    composition_d2: float = float("nan")
+    stale_d1: float = float("nan")
+    stale_d2: float = float("nan")
 
     def stats(self) -> str:
         if self.error:
@@ -185,16 +192,12 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         calib_idx = [i for i in range(len(pairs)) if i % 2 == 0]
         test_idx = [i for i in range(len(pairs)) if i % 2 == 1]
         frames_all = [[f.cuda().half() for f in pair] for pair in pairs]
-        inputs, outputs = _calibrate(model, [f for i in calib_idx for f in frames_all[i]])
-        inputs["body.0"] = (0.0, 1.0)      # the head's input range is the clamp's own, not a measurement
-        with torch.no_grad():
-            ref = [[model(f).float() for f in pair] for pair in frames_all]
-            got = [[_quantised_forward(model, f, inputs, outputs).float() for f in pair]
-                   for pair in frames_all]
 
         # a pair only reaches the composition if the GATE would reuse it: its own block-mean statistic
         # has to clear the threshold. Without this filter the probe measures scene cuts, where nothing is
         # reused - it read 99.7% composition (peak 255) on a clip whose real composition is 0.02%.
+        # Taken BEFORE calibration: it reads the frames, not the weights, and the fp16 control below
+        # needs the pair sets to compute its own statistic one pair at a time.
         def gate_delta(fa, fb):
             def blocks(f):
                 import torch.nn.functional as F
@@ -202,14 +205,50 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
             return float((blocks(fb) - blocks(fa)).abs().max())
 
         reused = [i for i in test_idx if gate_delta(frames_all[i][0], frames_all[i][1]) <= GATE_THRESHOLD]
-        engine = [_statistic(ref[i][1], got[i][1]) for i in test_idx]
-        comp = [_statistic(ref[i][1], got[i][0]) for i in reused]
-        # the same composition at the chain depth the gate serves (t-2 against t)
         # depth 2 only over pairs the gate would reuse at BOTH steps: checking one delta and then
         # comparing frames two apart measures motion, not quantisation (it read 10.7% on Violet).
-        reused2 = [i for i in reused if len(ref[i]) > 2
+        reused2 = [i for i in reused if len(frames_all[i]) > 2
                    and gate_delta(frames_all[i][1], frames_all[i][2]) <= GATE_THRESHOLD]
-        comp2 = [_statistic(ref[i][2], got[i][0]) for i in reused2]
+
+        # The discriminating control for the depth-2 blocker needs no int8: on the SAME pairs, at the
+        # SAME separation, compare fp16 against fp16. The render is index 0 and the references are 1 and
+        # 2, exactly as in `comp` and `comp2`, so only the renderer changes. If the gate's own reference
+        # already reads ~0.2% two steps out, the blocker is the gate's certification (E25's depth model),
+        # not the quantisation - and no int8 work moves it.
+        # It is also the population the gate stores: fp16 arithmetic on the ORIGINAL weights. `_calibrate`
+        # loads int8-rounded weights into `model`, so `ref` below is fp16 on quantised weights.
+        # One pair at a time: a full copy of every output is ~200 MB per 4K triple, and holding it for
+        # the whole sample is what made the spread sample unreachable (see the note on the loop below).
+        stale1, stale2 = [], []
+        with torch.no_grad():
+            for i in sorted(set(reused) | set(reused2)):
+                outs = [model(f).float() for f in frames_all[i]]
+                if i in reused:
+                    stale1.append(_statistic(outs[1], outs[0])[0])
+                if i in reused2:
+                    stale2.append(_statistic(outs[2], outs[0])[0])
+                del outs
+        stale1_worst = max(stale1, default=float("nan"))
+        stale2_worst = max(stale2, default=float("nan"))
+
+        inputs, outputs = _calibrate(model, [f for i in calib_idx for f in frames_all[i]])
+        inputs["body.0"] = (0.0, 1.0)      # the head's input range is the clamp's own, not a measurement
+        # One pair at a time, and the three statistics are taken inside the loop: holding `ref` and `got`
+        # for every pair cost ~200 MB per decoded triple at 4K, so a 16-triple sample already sat at
+        # 11.2 GiB and a 32-triple one OOMed. The protocol's spread sample (13-19) was unreachable for
+        # that reason alone, not for want of a GPU.
+        engine, comp, comp2 = [], [], []
+        with torch.no_grad():
+            for i, pair in enumerate(frames_all):
+                outs_ref = [model(f).float() for f in pair]
+                outs_got = [_quantised_forward(model, f, inputs, outputs).float() for f in pair]
+                if i in test_idx:
+                    engine.append(_statistic(outs_ref[1], outs_got[1]))
+                if i in reused:
+                    comp.append(_statistic(outs_ref[1], outs_got[0]))
+                if i in reused2:
+                    comp2.append(_statistic(outs_ref[2], outs_got[0]))
+                del outs_ref, outs_got
         if not engine:
             return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "no test pairs", error="no test pairs")
         engine_worst = max(s for s, _ in engine)
@@ -226,9 +265,11 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         verdict = worst_depth <= bar
         reason = (f"composition d1 {comp_worst:.3f}% / d2 {c2:.3f}% -> worst {worst_depth:.3f}% "
                   f"{'<=' if verdict else '>'} bar {bar}% (own defect {engine_worst:.3f}%, "
-                  f"{len(comp)} of {len(test_idx)} pairs at d1, {_n2} at d2)")
+                  f"{len(comp)} of {len(test_idx)} pairs at d1, {_n2} at d2); "
+                  f"fp16 reference on the same pairs: d1 {stale1_worst:.3f}% / d2 {stale2_worst:.3f}%")
         return Int8ProbeResult(verdict, engine_worst, comp_worst, peak, len(comp), bar, reason,
                                frames_used=len(pairs),
-                               frames=[f for i in calib_idx for f in frames_all[i]])
+                               frames=[f for i in calib_idx for f in frames_all[i]],
+                               composition_d2=c2, stale_d1=stale1_worst, stale_d2=stale2_worst)
     except Exception as error:  # noqa: BLE001 - a probe failure must never cost a render
         return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "probe failed", error=str(error))

@@ -1,0 +1,10 @@
+# probe_int8_app.py --frames 24 /tmp/opencode/csm20s.mkv /tmp/opencode/violet20s.mkv
+# under flock -n /var/tmp/opencode/gpu.lock, bundled interpreter torch 2.9.0+cu130, 2026-11-17
+/tmp/opencode/csm20s.mkv (frames=24)
+  composition d1 0.160% / d2 0.160% -> worst 0.160% > bar 0.1% (own defect 0.000%, 7 of 12 pairs at d1, 4 at d2); fp16 reference on the same pairs: d1 0.142% / d2 0.139%
+  verdict int8=False error=
+  RAW engine=0.0001687885742285289 d1=0.15990306856110692 d2=0.16028886893764138 stale_d1=0.1424213871359825 stale_d2=0.13888889225199819 peak=75.1116943359375 pairs=7
+/tmp/opencode/violet20s.mkv (frames=24)
+  composition d1 0.027% / d2 0.025% -> worst 0.027% <= bar 0.1% (own defect 0.003%, 9 of 12 pairs at d1, 7 at d2); fp16 reference on the same pairs: d1 0.011% / d2 0.013%
+  verdict int8=True error=
+  RAW engine=0.0034119406336685643 d1=0.02739197516348213 d2=0.024799865786917508 stale_d1=0.011284722131676972 stale_d2=0.013069059059489518 peak=33.6181640625 pairs=9
