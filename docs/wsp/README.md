@@ -62,6 +62,8 @@ They PASS `harness.cli check` with full coverage - the first non-vacuous green i
 | `int8-block.txt` | 1.91 ms / 80 TOPS for one 64->64 int8 block | reproduces at 1.78-1.85 ms / 83-86 TOPS |
 | `residual-scale.txt` | the correction the network adds over a nearest upsample | a DIFFERENT, named frame: 1.3-2.3x away, which is what an unnamed population costs |
 | `engine-fp16.txt` | the fp16 engine at 1920x1080, rebuilt from the ONNX path | 50.2-51.2 and 54.5-56.5 ms in four sessions; the ledger's 50.3 / 51.37 / 55.54 / 57.37 all fall inside, and the 10% jump is the host |
+| `residual-scale-ve.txt` | the correction on a real project frame (VE ep01) | 0.56 / 1.88 / 4.35 / 8.25 / 33.39 levels, 99.89% under 8 - smaller than the ledger's unnamed frame and 2-4x smaller than a non-project upscaled frame on every percentile |
+| `int8-body-ve.txt` | the Triton int8 chain against fp16 on the same real frame | 0.006% above 8, peak 11.95, **PSNR 53.15 dB** - within a level of the ledger's TRT claim (peak 4, 54.1 dB) and 6-10 dB better than this session's TRT Q/DQ rebuilds |
 | `engine-int8.txt` | the int8 Q/DQ build (E9'): graph shape, time, and the picture | mechanism and time reproduce (19-22 reformats, 84 layers, 64-70 ms against the recorded 68.11); the PICTURE does not - 0.010% / 0.291% / 4.389% above 8 levels and 38-48 dB against a recorded 0.000% / peak 4 / 54.1 dB, with three orders of magnitude between configurations of the same recipe |
 
 The int8 probe emits its own records now (`scripts/int8_block_probe.py --emit`), so this is not a
