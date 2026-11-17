@@ -89,12 +89,12 @@ def main() -> int:
                                   f"{args.ref.split('/')[-1]}, {args.width}x{args.height}")
         common = dict(population=pop, instrument="TRT execution of both plans, worst channel in levels",
                       config=f"trt {trt.__version__}, {torch.cuda.get_device_name(0)}",
-                      session=store.session, run="run-compare-plans",
+                      session=store.session, run=f"run-compare-{args.cand.split('/')[-1][:-5]}",
                       extra={"artifact_sha256": sha, "of": "share", "quantity": "accuracy"})
         store.emit(Record(value=round(share, 4), unit="%", statistic="single", **common))
         store.emit(Record(value=round(peak, 2), unit="levels", statistic="max",
                           **{**common, "extra": {**common["extra"], "of": "peak"}}))
-        store.emit(Record(value=round(psnr, 2), unit="x", statistic="single",
+        store.emit(Record(value=round(psnr, 2), unit="dB", statistic="single",
                           **{**common, "extra": {**common["extra"], "of": "quality"}}))
         store.dump(args.emit)
         print(f"records -> {args.emit}")

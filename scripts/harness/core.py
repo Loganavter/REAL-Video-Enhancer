@@ -33,7 +33,7 @@ UNITS: dict[str, str] = {
     "TOPS": "rate", "TFLOP/s": "rate", "GFLOP/s": "rate", "GB/s": "rate",
     "GFLOP": "work", "TFLOP": "work", "MAC": "work",
     "%": "share", "pp": "delta",
-    "levels": "levels", "x": "factor",
+    "levels": "levels", "x": "factor", "dB": "quality",
     "MiB": "bytes", "GiB": "bytes", "B": "bytes", "MB": "bytes", "GB": "bytes", "KB": "bytes",
     "count": "count", "frames": "count", "ch": "count", "regs": "count",
     "min": "time",                       # minutes; the corpus also uses "min" as a statistic name
