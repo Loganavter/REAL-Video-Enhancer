@@ -126,15 +126,17 @@
 
 - id: int8-window
   lane: int8
-  status: current
+  status: superseded
   scope: model window (engine, no encoder), one process, 1920x1080, session stage4
   date: 2026-11-17
   statement: >-
     int8 window 42.75 ms against fp16 51.06 ms in the same session: 1.194x faster, not 0.82x slower.
   evidence: docs/claims-int8-stage4.txt
+  superseded_by: int8-window-measured
   note: >-
-    The 0.82x belongs to trt-int8-two-pass (a different configuration). Quoting the two together is
-    the population error this file exists to prevent.
+    The 0.82x belongs to trt-int8-two-pass (a different configuration). This entry was the 42.75 ms of
+    a claims line with no tuple (n=?), one of three values on one label; it is replaced by a measurement
+    of the chain in the tree.
 
 - id: int8-asymmetric
   lane: int8
@@ -247,3 +249,34 @@
     Phase 2 needs a region-level certificate, which does not exist: the gate's veto is frame-level, and
     the seams between a recomputed cone and a reused neighbourhood are the artifact class that made
     tile reuse read 0.287%.
+
+- id: int8-window-measured
+  lane: int8
+  status: current
+  scope: our Triton int8 chain (epilogue kernel, BM 256, channels_last head/tail), 1920x1080, gate off, no encoder, calibration on 3 frames
+  date: 2026-11-17
+  statement: >-
+    The window is 37.46-37.73 ms = 26.50-26.70 fps, against a same-process fp16 TensorRT plan at
+    53.25-53.56 ms = 18.7 fps: 1.41-1.42x, which clears the accepted bar_int8_window of 1.4x. The
+    16-hop chain is 29.4-29.6 ms (1.84 ms/hop, 84 TOPS); head+quantise 1.6-2.6 ms; tail 7.9-8.5 ms.
+  evidence: docs/wsp/verified/int8-window.txt
+  open_question: >-
+    The picture does not hold: worst of 4 frames is 0.728% against the 0.1% bar (peak 87-144), with the
+    held-out frame at 0.728% and calibration over 3 frames; the prologue form reads 0.741% on the same
+    frames, so the fast kernel is quality-neutral and the failure is the grids/calibration recipe, the
+    same class as the recorded depth-2 composition failure.
+
+- id: int8-body-hop
+  lane: int8
+  status: current
+  scope: body_kernel (our Triton int8 conv + per-channel PReLU + per-channel requant), 1920x1080, swept BLOCK_M and warps
+  date: 2026-11-17
+  statement: >-
+    One hop is 1.82 ms at BLOCK_M 256 with 4 warps (84 TOPS), 2.38 ms at 128/4 and 4.06 at 64/4;
+    BLOCK_M 512 with 4 warps collapses to 79 ms/hop (register pressure). The 16-hop chain with the
+    per-layer tensors precomputed is 29.07-29.64 ms.
+  evidence: docs/wsp/verified/int8-window.txt
+  note: >-
+    84 TOPS is above the 79.2 TOPS the TRT int8 plan reaches (trt-int8-rate-79), so the arithmetic is not
+    what is short: the chain is at 57% of the card's 147.4 TOPS, and the remaining 43% is the memory
+    floor of a 132 MB read and 132 MB write per hop.

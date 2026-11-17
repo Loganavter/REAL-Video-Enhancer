@@ -1,0 +1,65 @@
+# The int8 window at 1920x1080, ungated: 37.5 ms = 26.6 fps, and the picture that does not hold
+
+Measured 2026-11-17 with `scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
+instrument `bench_plan.py` uses), 8 executions per configuration, one process.
+
+## The number the objective asked for
+
+| configuration | window | fps |
+|---|---|---|
+| fp16 TensorRT plan, same process, same events | **53.25 ms** | 18.78 |
+| int8 chain, epilogue kernel, BM 256, channels_last head/tail | **37.46-37.73 ms** | **26.50-26.70** |
+
+**1.41-1.42x** the same-session fp16 window, against the project's accepted bar `bar_int8_window` of
+1.4x. The user-facing target (>=23 fps ungated at 1920x1080) is met with ~15% of margin.
+
+Where the 37.5 ms goes (stages measured on the same run):
+
+| stage | ms | what it is |
+|---|---|---|
+| head + quantise | 1.6-2.6 | head conv runs channels_last, so the quantise is a coalesced copy |
+| 16 body hops | 29.4-29.6 | **1.84 ms/hop, 84 TOPS** |
+| tail: dequant + conv + pixelshuffle + residual | 7.9-8.5 | dequant 2.1, tail conv + shuffle 3.6, the rest is the 4K residual |
+
+Two measurements changed this from 55 to 37.5 ms, and both were layout, not arithmetic:
+
+- **head-quantise 16.19 ms -> 1.96 ms.** The NCHW->NHWC version gathered 64 channels that sit 2 M
+  elements apart; running the head convolution in `channels_last` makes the same 400 MB pass a copy.
+- **tail 11.4 ms -> 7.9 ms.** The same transpose on the way out, fixed the same way (`dequant` to NHWC,
+  the tail convolution reads channels_last).
+
+and one swept parameter: `body_kernel` at BLOCK_M 256 / 4 warps is **1.82 ms/hop**, against 2.38 at 128
+and 4.06 at 64. BLOCK_M 512 with 4 warps is pathological (79 ms/hop) - register pressure, not a slow
+kernel - which is worth knowing before anyone "tunes" this again.
+
+## The picture does not hold, and the speed is not the reason
+
+Calibration on three frames, evaluated on four (one of them held out); worst-of, the statistic the bar
+is written on:
+
+| frame | epilogue | prologue |
+|---|---|---|
+| v120 | 0.01461% | 0.01419% |
+| v400 | 0.02933% | 0.01400% |
+| v800 | 0.15161% | 0.08007% |
+| **v1200 (held out)** | **0.72849%** | **0.74114%** |
+| worst | **0.728%** (bar 0.1%) | **0.741%** |
+
+So the fast kernel costs nothing in quality - the two forms are 2% apart on the worst frame, while the
+epilogue is 1.7x faster per hop. The failure is the **recipe**: with calibration on a single frame the
+worst frame reads 2.015% and the held-out one can reach 0.73% even after the grids are merged over
+three frames; peaks of 87-144 levels say the error is a few clipped pixels, not a drift.
+
+That is the same class of finding the lane already recorded for composition at depth 2 (0.390% /
+0.166% against an fp16 gate at 0.005%), and it is the reason this file does not claim a passing
+picture. What the speed result licenses is narrower and still useful: the chain is fast enough that the
+remaining question is grids and calibration, not arithmetic.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-window.txt \
+       --records docs/wsp/verified/records/int8-window.jsonl --bars docs/claims-bars.json
+
+@claim R001 57.48 ms "frames [72217853e9867e3f] n=8" measured
+@claim R002 37.73 ms "frames [72217853e9867e3f] n=8" measured
+@claim R003 53.25 ms "frames [72217853e9867e3f] n=8" measured
+@claim R004 0.72849 % "frames [bf76f141c714826b] n=4" measured
+@claim R005 86.5 levels "frames [bf76f141c714826b] n=4" measured

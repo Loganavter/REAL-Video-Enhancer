@@ -71,7 +71,7 @@ tasks:
   title: 'E27: int8 conv + per-channel PReLU as ONE plugin (the 1.3x that E9'' left
     on the table)'
   type: code
-  status: todo
+  status: done
   owner: null
   priority: P1
   gpu: partial
@@ -88,6 +88,17 @@ tasks:
   owns_files:
   - backend/src/pytorch/int8_plugin/
   - backend/tests/test_int8_plugin.py
+  resolution: 'closed 2026-11-17: the plugin exists and is measured IN the chain. `body_kernel` in
+    scripts/int8_pipeline.py is the fused int8 conv + per-channel PReLU + per-channel requant, and with
+    its per-layer tensors hoisted out of the frame loop it runs at 1.82 ms/hop (84 TOPS) at BLOCK_M 256
+    - against 3.14 ms/hop for the two-pass prologue form on the same frames. End to end the window is
+    37.46-37.73 ms = 26.5-26.7 fps against a same-process fp16 TRT plan at 53.25-53.56 ms = 18.7 fps,
+    i.e. 1.41-1.42x (bar_int8_window is 1.4x). Two layout fixes were worth more than the plugin itself:
+    the head quantise as a coalesced channels_last copy (16.19 -> 1.96 ms) and the tail dequant the
+    same way (11.4 -> 7.9 ms). The picture is NOT certified: worst of 4 frames 0.728% against 0.1%
+    (held out), and the prologue form reads 0.741% on the same frames, so the fast kernel is
+    quality-neutral - the grids/calibration recipe is what fails. Records:
+    docs/wsp/verified/int8-window.txt; verdicts int8-window-measured, int8-body-hop.'
   refutes: A plugin that fuses conv+per-channel PReLU in int8 does not reproduce the
     ~2.14 ms block that the traffic arithmetic predicts (2.93 ms fp16 measured), or
     the per-tensor activation scales lose more than the acceptance bar allows once
@@ -197,7 +208,11 @@ tasks:
     median 79.2 TOPS (min 76.2, max 119.7 over 18 conv layers), NOT the 91 this item and E27 assume. At
     79 the 16-conv floor is 30.9 ms, so the gap to close is a 1.5x on the GEMM. COST REVISED: each
     configuration now needs >=3 builds to be comparable (the C=32 build is bimodal, ledger B3), so the
-    sweep is more than the 1-2 d this row estimated.'
+    sweep is more than the 1-2 d this row estimated. OUR KERNEL 2026-11-17: the chain''s hop is
+    1.82 ms = 84 TOPS at BLOCK_M 256/warps 4 (2.38 at 128/4, 4.06 at 64/4, and 79 ms/hop at 512/4 -
+    register pressure), i.e. ABOVE the TRT plan''s 79.2. So the remaining question is not "can the GEMM
+    go faster than TRT" but "how much of the 147.4 TOPS peak is reachable at all": the chain sits at
+    57%, and the next 43% is the memory floor of 132 MB read + 132 MB write per hop.'
 - id: rve-welder-onnx-2026-11-15
   title: 'E28: run Welder on our ONNX and compare against the TRT engine'
   type: experiment
@@ -1320,6 +1335,13 @@ tasks:
     `_probe_int8_fit` (verdict taken once, before the first frame) and passes `int8Fit`/`int8Frames`
     to the upscaler, so this lane is runnable here in principle. It still needs a live render (the
     app, a 502-frame clip, NVENC) which is the supervisor''s live lane; the engine-side halves that do
-    not need the app are B2/E33 and they moved on 2026-11-17. The brief''s ''~1.75x wall ceiling'' is
+    not need the app are B2/E33 and they moved on 2026-11-17. PROGRESS 2026-11-17 on the six-point
+    report: (2) the model window against fp16 IS measured, same process, same events - 37.46-37.73 ms
+    (26.5-26.7 fps) against 53.25-53.56 ms (18.7 fps) = 1.41-1.42x; (3) the int8<->fp16 boundaries are
+    measured inside the built pipeline as stages: head-quantise 1.6-2.6 ms, tail dequant 2.1 ms, tail
+    conv+pixelshuffle 3.6 ms; (4) FAILS - worst of 4 frames 0.728% against the 0.1% bar, peak 87, with
+    calibration merged over 3 frames and one frame held out, and the prologue form reads 0.741% on the
+    same frames, so the kernel is not the cause; (1), (5) and (6) need the app under the gate. Records:
+    docs/wsp/verified/int8-window.txt. The brief''s ''~1.75x wall ceiling'' is
     withdrawn: at a 64.6% engine share it
     would need ~3x on the engine.'

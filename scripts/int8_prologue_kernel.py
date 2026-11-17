@@ -57,6 +57,43 @@ def quantise_nchw_to_nhwc(x_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl
 
 
 @triton.jit
+def quantise_nhwc_fp16_to_int8(x_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl.constexpr):
+    """fp16 NHWC -> int8 on the per-channel grid, in the SAME layout: no transpose, so it is a copy.
+
+    The NCHW->NHWC version has to gather 64 channels that sit 2 M elements apart, and it measured 16.19
+    ms for a 400 MB pass - 11x the memory floor. Running the head convolution in channels_last makes the
+    same work a coalesced read and write.
+    """
+    pid = tl.program_id(0)
+    pix = pid * BLOCK + tl.arange(0, BLOCK)
+    ch = tl.arange(0, C)
+    mask = pix < n_pix
+    off = pix[:, None] * C + ch[None, :]
+    v = tl.load(x_ptr + off, mask=mask[:, None], other=0.0)
+    s = tl.load(s_ptr + ch)[None, :]
+    q = tl.floor(v / s + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    tl.store(y_ptr + off, q.to(tl.int8), mask=mask[:, None])
+
+
+@triton.jit
+def dequantise_nhwc_to_nhwc(q_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl.constexpr):
+    """int8 NHWC -> fp16 NHWC: the last hop feeds a channels_last tail, so no transpose is needed.
+
+    The NCHW version transposes on the way out; that is a strided write over 2 M pixels and it is the
+    mirror image of the head-quantise cost that was 16.19 ms before the layout was fixed.
+    """
+    pid = tl.program_id(0)
+    pix = pid * BLOCK + tl.arange(0, BLOCK)
+    ch = tl.arange(0, C)
+    mask = pix < n_pix
+    off = pix[:, None] * C + ch[None, :]
+    q = tl.load(q_ptr + off, mask=mask[:, None], other=0).to(tl.float32)
+    s = tl.load(s_ptr + ch)[None, :]
+    tl.store(y_ptr + off, (q * s).to(tl.float16), mask=mask[:, None])
+
+
+@triton.jit
 def dequantise_nhwc_to_nchw(q_ptr, s_ptr, y_ptr, n_pix, BLOCK: tl.constexpr, C: tl.constexpr):
     """Last hop's int8 codes (NHWC) -> fp16 NCHW in ONE pass, for the fp16 tail.
 
