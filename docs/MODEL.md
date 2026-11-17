@@ -130,7 +130,7 @@ proves it is not the DRAM figure: the int8 build's logical traffic is 1.545x the
 its measured time is only 1.226x, i.e. the model over-predicts the slowdown by 26%, and the slope
 between the two builds (2.46 ms/GiB) is two thirds of the 3.73 ms/GiB that pure DRAM would require.
 About a third of the logical traffic never reaches DRAM - which is L2 doing its job. Real DRAM bytes
-need `ncu`, and `ncu` is blocked on this host (`ERR_NVGPUCTRPERM`, §6 item 2).
+need `ncu`; the counters ARE readable on this host since 2026-11-15 (the ledger's "counters are unblocked" section), so the byte count is a measurement rather than the bound §6 item 2 describes.
 
 So: no kernel-level lever in §4/§6 moved the number, and the two things that did were fewer DRAM
 round trips (`tiling=full`, 3.8%) and fewer frames (the gate, 3.3x). The int8 ceiling is still the
@@ -317,7 +317,10 @@ counter is read (§6, item 2).
    only clean ~1.5% left in the engine.
 
    `ncu` would still add the byte count and tensor-pipe activity. It also **installs without root**,
-   and it runs - but this host's driver is loaded with **`RmProfilingAdminOnly: 1`**
+   and it runs; **this passage used to say the counters were refused** - that was true before 2026-11-15.
+   The driver now reads `RmProfilingAdminOnly: 0` (rule in `/etc/modprobe.d/nvidia-profiling.conf`), the
+   ledger's "counters are unblocked" section prints the first counter table, and the historical text
+   follows for the record: the driver was loaded with **`RmProfilingAdminOnly: 1`**
    (`/proc/driver/nvidia/params`), so counter collection is refused:
    `ERR_NVGPUCTRPERM`. Unlocking it is one line in `/etc/modprobe.d/` -
    `options nvidia NVreg_RestrictProfilingToAdminUsers=0` - plus a reboot, because the module cannot
@@ -400,8 +403,8 @@ counter is read (§6, item 2).
    3-channel shape rather than a tactic. What that leaves is **2.68 ms, 4.7% of the frame** (item 6):
    layout kernels 0.81, the tail's 0.83 gap, the upsampler/reshape 1.04.
 
-What is left is byte counting: `ncu` needs `RmProfilingAdminOnly=0` (one line plus a reboot), and
-until then the DRAM split stays a bound (§6 item 2) rather than a measurement.
+What is left is byte counting on the *shipping* plan: `ncu` runs here (counters unblocked 2026-11-15),
+so the DRAM split can be measured; the bound in §6 item 2 is what the record has until that run.
 
 The living list of what is left, with costs, what would refute each item and which of them need the
 GPU, is `docs/backlog/queue.yaml` (lanes and the one-GPU rule: `docs/backlog/DELEGATION.md`). That

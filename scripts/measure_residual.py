@@ -40,6 +40,10 @@ class Compact(nn.Module):
         tail = state[f"body.{i - 1}.weight"]
         self.scale = int(round((tail.shape[0] / 3) ** 0.5))
         self.upsampler = nn.PixelShuffle(self.scale)
+        # Load here, not in the caller. A Compact built and not loaded is a RANDOM network: on
+        # 2026-11-17 exactly that produced a 43% "difference" between two references that should have
+        # been identical. A class that silently yields a random model is a trap.
+        self.load_state_dict(state, strict=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = x.clamp(0.0, 1.0)

@@ -67,7 +67,8 @@ They PASS `harness.cli check` with full coverage - the first non-vacuous green i
 The int8 probe emits its own records now (`scripts/int8_block_probe.py --emit`), so this is not a
 hand-copied number: the probe, the record and the claim are the same object.
 
-**The engine lane cannot follow.** This host has no TensorRT runtime (only `tensorrt-debug` symbols,
-no `libnvinfer`, no `trtexec`), and a PyPI wheel is 11.4 while the ledger's numbers are 10.12 - a
-different instrument by this project's own rule. The engine claims stay unprotectable until 10.12 is
-installed again; nothing in this repository can substitute for it.
+**The engine lane follows now (2026-11-17).** TensorRT **10.12.0.36** - the ledger's own version - is
+installed in `~/.cache/opencode/venvs/trt310` (python 3.10 bindings, libs from the NVIDIA index; the
+recipe is in `DELEGATION.md`), and both engines were rebuilt with it: `engine-fp16.txt` and
+`engine-int8.txt` above. What is NOT reproducible is the accuracy half of the int8 claim, and the
+reason is in `engine-int8.txt`.

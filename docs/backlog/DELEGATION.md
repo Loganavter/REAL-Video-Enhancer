@@ -36,6 +36,21 @@ therefore **symmetric** (zero point 0), which costs precision on the PReLU's one
 consequences: a plan that prints a better picture than a symmetric PTQ can give is suspect, and the
 asymmetric recipe found in most PTQ guides cannot be followed here.
 
+**Samples live in `remastering`, and measurements must use them (learned 2026-11-17).**
+`~/Загрузки/projects/remastering` -> `/home/jorj/2Tb/remastering` (33 GB) holds the material every
+acceptance number in this project was taken on:
+
+| path | what it is |
+|---|---|
+| `Violet Evergarden/[anti-raws]Violet Evergarden ep.01[BDRemux].mkv` | 1920x1080, the "anime" sample |
+| `Chainsaw Man/01. Dog & Chainsaw.mkv` | 1920x1080, the second anime title |
+| `film` excerpt + 35 mm captures | the film samples |
+| `compare_frames/` | the worst-frame PNG pairs kept for eyeballing - **crops, not populations**: never compute an acceptance statistic from them |
+
+A frame for calibration or for an accuracy comparison comes from here. Extracting a casual clip from
+`~/Загрузки` and upscaling it to the target grid (done on 2026-11-17 with a 1440x1080 WEB-DL) produces a
+population the project never decided on, and the number then belongs to nothing.
+
 **Never calibrate a quantisation model on the CPU at frame resolution (measured 2026-11-17).**
 onnxruntime's `quantize_static` runs the model once per calibration frame on the CPU: 8 frames x
 2.5 TFLOP of 3x3 convolutions at 1920x1080 on 16 threads, plus its arena. It took the desktop down to
