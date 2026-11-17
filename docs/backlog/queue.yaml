@@ -118,7 +118,7 @@ tasks:
   title: 'E32: the PReLU pass is at its traffic floor - is there anything above it
     but the plugin?'
   type: experiment
-  status: todo
+  status: done
   owner: null
   priority: P2
   gpu: true
@@ -151,6 +151,13 @@ tasks:
     10.12.0.36 and torch are installed and the harness can time and profile a plan
     end to end (scripts/build_plan.py, scripts/bench_plan.py, scripts/make_width_probe.py).
     No environment blocker.'
+  resolution: 'answered 2026-11-17: the PReLU pass is at its traffic floor (530.8
+    MB at 288 GB/s = 1.84 ms against 1.71-2.37 measured), and the later lane removed
+    it by moving the requant from the prologue to the epilogue: 2.518 -> 1.753 ms/hop,
+    40.3 -> 28.0 ms for 16 hops (REPORT-int8-lane-2026-11-16.md 4c6). CAVEAT, measured
+    here: that epilogue variant is NOT in this branch - int8_pipeline.py still runs
+    the prologue form at 3.42 ms/hop (54.75 ms), so the answer exists but the improvement
+    is not in the tree.'
 - id: rve-int8-gemm-efficiency-2026-11-15
   title: 'E33: int8 body GEMM efficiency - the 1.4x to 2x gap lives here'
   type: experiment
@@ -187,7 +194,7 @@ tasks:
 - id: rve-welder-onnx-2026-11-15
   title: 'E28: run Welder on our ONNX and compare against the TRT engine'
   type: experiment
-  status: todo
+  status: dropped
   owner: null
   priority: P1
   gpu: true
@@ -219,6 +226,12 @@ tasks:
     but of a day''s work, and E26 already measured cuDNN''s default algorithm choice
     as 20% slower - the answer to ''does a fusion compiler win here'' may arrive without
     it.'
+  resolution: 'dropped 2026-11-17 on the record, following the engine audit (docs/wsp/AUDIT-engine-2026-11-17.md,
+    verdict d): at fp16 the whole board is 1.34x measured from the peak; Welder''s
+    own paper reports losing on conv-dominated stacks; and the axis it optimises -
+    whole-graph traffic - is not the measured binding constraint here (registers/occupancy
+    at int8, and a per-hop boundary the compiler cannot see). A day spent building
+    a TVM-era artifact cannot change that.'
 - id: rve-l2-pyramid-2026-11-15
   title: 'E29: L2-resident layer pyramid - is the 7.9 MB reuse buffer real, and what
     is the ceiling?'

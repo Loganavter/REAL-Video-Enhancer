@@ -53,7 +53,13 @@ def main() -> int:
     ap.add_argument("--workspace-gib", type=int, default=8)
     ap.add_argument("--onnx", default="")
     ap.add_argument("--dynamic", action="store_true", help="export with dynamic H/W (no fusion-friendly static shape)")
+    ap.add_argument("--parse", default="", help="skip the export and parse this ONNX instead (e.g. a QDQ model)")
+    ap.add_argument("--detailed", action="store_true", help="build with DETAILED profiling verbosity (tactic names)")
     args = ap.parse_args()
+
+    if args.parse:
+        return build_from_onnx(args.parse, args.plan, args.width, args.height, args.fp16,
+                               args.workspace_gib, args.dynamic, args.detailed)
 
     state = torch.load(args.model, map_location="cpu", weights_only=True)
     state = state.get("params", state)
@@ -69,6 +75,12 @@ def main() -> int:
                           input_names=["input"], output_names=["output"], dynamic_axes=dyn)
     print(f"onnx -> {onnx_path} (input 1x3x{args.height}x{args.width})")
 
+    return build_from_onnx(onnx_path, args.plan, args.width, args.height, args.fp16,
+                           args.workspace_gib, args.dynamic, args.detailed)
+
+
+def build_from_onnx(onnx_path: str, plan_path: str, width: int, height: int, fp16: bool,
+                    workspace_gib: int, dynamic: bool, detailed: bool = False) -> int:
     import onnx
     import tensorrt as trt
     m = onnx.load(onnx_path)
@@ -82,19 +94,20 @@ def main() -> int:
         return 1
 
     cfg = builder.create_builder_config()
-    cfg.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, args.workspace_gib << 30)
-    if args.fp16 and builder.platform_has_fast_fp16:
+    cfg.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_gib << 30)
+    if fp16 and builder.platform_has_fast_fp16:
         cfg.set_flag(trt.BuilderFlag.FP16)
     # the app and the ledger's builds run at optimization level 5 with 8 timing iterations; a build
     # without them picks worse tactics and looks 2x slower than the recorded engine
+    if detailed:
+        cfg.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
     cfg.builder_optimization_level = 5
     cfg.avg_timing_iterations = 8
     # pin the shape: the ONNX is dynamic so one plan serves any frame, but the ledger's numbers are
     # at a fixed 1920x1080 and an unconstrained profile lets the builder choose bad tactics
-    if args.dynamic:
+    if dynamic:
         prof = builder.create_optimization_profile()
-        prof.set_shape("input", (1, 3, args.height, args.width),
-                       (1, 3, args.height, args.width), (1, 3, args.height, args.width))
+        prof.set_shape("input", (1, 3, height, width), (1, 3, height, width), (1, 3, height, width))
         cfg.add_optimization_profile(prof)
 
     t0 = __import__("time").time()
@@ -103,10 +116,10 @@ def main() -> int:
         print("build failed")
         return 1
     data = bytes(plan)
-    with open(args.plan, "wb") as fh:
+    with open(plan_path, "wb") as fh:
         fh.write(data)
-    print(f"plan -> {args.plan}  {len(data)} bytes  {__import__('time').time() - t0:.1f}s  "
-          f"fp16={args.fp16 and builder.platform_has_fast_fp16}  trt {trt.__version__}")
+    print(f"plan -> {plan_path}  {len(data)} bytes  {__import__('time').time() - t0:.1f}s  "
+          f"fp16={fp16 and builder.platform_has_fast_fp16}  trt {trt.__version__}")
     return 0
 
 
