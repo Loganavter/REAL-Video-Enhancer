@@ -25,3 +25,10 @@ gate threshold sweep on the probe (depth-2 composition, csm20s):
 colour paths: the app converts YUV->RGB with cv2.cvtColor(..., COLOR_YUV2RGB_I420) (BT.601, full
 range), this simulator decodes with ffmpeg (BT.709, tv range). Same luma taps in both (1,2,1)/4,
 different RGB - so the absolute deltas are not the same variable.
+
+# Headroom and portability, same 100 frames:
+#   max HR share among the 82 survivors 0.0755%  (the LR good-max was 0.0651% - different domain)
+#   HR/LR ratio: median 2.04, p90 9.50, max 35.4  -> the mapping is not a constant
+#   threshold 0.07% = 1451 LR px: bad-min 1696, good-max 1349 -> blocks all 18, loses none
+#   threshold 0.08% = 1658 LR px: 37 px of margin to the first missed defect
+# cv2 vs ffmpeg on the same frame: mean |delta| 0.93, max 3 levels (bt709 and bt601 identical here)

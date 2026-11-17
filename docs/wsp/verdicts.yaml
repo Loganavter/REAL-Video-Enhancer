@@ -251,8 +251,12 @@
     and 2.0 - the whole tuner clamp - because the damaged pair is under the tightest setting the tuner
     can pick (probe-threshold-invariance). The fix is the projection, not the threshold: recomputing
     the same statistic in channel-max instead of luma separates all 18 bad frames from all 82 good ones
-    (AUC 1.000 at 6 and 8 levels), puts frame 164 at rank 1 of 100 instead of 27, and a 0.08% threshold
-    blocks exactly the 18 for 4.0% of the wall with no good frame lost (gate-channel-max).
+    (AUC 1.000 at 6 and 8 levels), puts frame 164 at rank 1 of 100 instead of 27, and a 0.07% LR
+    threshold blocks exactly the 18 for 4.0% of the wall with no good frame lost (gate-channel-max).
+    That fix alone does not unblock int8: the surviving population's worst HR share is 0.0755%, 0.0245
+    pp under the bar, against a measured int8 increment of 0.0267 pp. And the threshold is a fit to this
+    clip - the LR-to-HR ratio has a median of 2.04 and a p90 of 9.50, so a constant LR threshold does
+    not transfer and the tuner's own calibration frames are the right place to measure it.
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge
