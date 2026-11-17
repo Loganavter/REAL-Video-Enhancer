@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import re
 import json
 import os
 import re
@@ -259,7 +260,11 @@ def splice(path: str, block: str) -> bool:
     return False
 
 
-def export_markdown(con) -> str:
+def _anchor(path: str) -> str:
+    return "evidence-" + re.sub(r"[^a-z0-9]+", "-", path.lower()).strip("-")
+
+
+def export_markdown(con, embed_evidence: bool = True, embed_logs: bool = False) -> str:
     """The whole index as one markdown document, for sending to someone.
 
     Not a replacement for the registry: it is a snapshot with no query behind it, generated so a reader
@@ -285,7 +290,11 @@ def export_markdown(con) -> str:
             out.append(f"> {r['statement']}")
             if r["evidence"]:
                 out.append("")
-                out.append(f"Evidence: `{r['evidence']}`")
+                if embed_evidence and os.path.exists(r["evidence"]):
+                    out.append(f"Evidence: [`{r['evidence']}`](#{_anchor(r['evidence'])}) "
+                               f"- full text below")
+                else:
+                    out.append(f"Evidence: `{r['evidence']}`")
             if r["open_question"]:
                 out.append("")
                 out.append(f"**OPEN:** {r['open_question']}")
@@ -326,6 +335,48 @@ def export_markdown(con) -> str:
     for r in con.execute("SELECT * FROM claim ORDER BY name, session"):
         out.append(f"| `{r['name']}` | {r['value']:g} | {r['unit']} | {r['session']} | "
                    f"`{r['source']}:{r['line']}` |")
+    cited: list[str] = []
+    if embed_evidence or embed_logs:
+        for r in con.execute("SELECT DISTINCT evidence FROM verdict WHERE evidence != ''"):
+            cited.append(r["evidence"])
+        for r in con.execute("SELECT DISTINCT artifact FROM record WHERE artifact != ''"):
+            cited.append(r["artifact"])
+        seen, ordered = set(), []
+        for path in cited:
+            if path in seen:
+                continue
+            seen.add(path)
+            is_log = path.endswith(".log")
+            if is_log and not embed_logs:
+                continue
+            if not is_log and not embed_evidence:
+                continue
+            ordered.append(path)
+        out += ["## Evidence, in full", "",
+                "Every file the verdicts and records rest on, embedded so this document stands alone. "
+                "The claims lines (`@claim ...`) at the end of each one are the machine-checkable form; "
+                "the prose above them is what the checks cannot verify.", ""]
+        missing = []
+        for path in ordered:
+            if not os.path.exists(path):
+                missing.append(path)
+                continue
+            with open(path, errors="replace") as fh:
+                body = fh.read().rstrip()
+            # demote the embedded file's own headings by one level, so only this document's sections
+            # appear at `##` in a reader's outline
+            def _demote(ln: str) -> str:
+                m = re.match(r"^(#{1,6}) ", ln)
+                if not m:
+                    return ln
+                return "#" * min(6, len(m.group(1)) + 3) + ln[len(m.group(1)):]
+            body = "\n".join(_demote(ln) for ln in body.splitlines())
+            out += [f'<a id="{_anchor(path)}"></a>', "", f"### `{path}`", "", body, ""]
+        if missing:
+            out += ["### Cited but missing on disk", ""]
+            out += [f"- `{m}`" for m in missing]
+            out.append("")
+
     out += ["", "## What this document does not tell you", "",
             "- whether a population label is true (the item-set hash is checked, the human label is not)",
             "- whether the item set is the one the decision needs",
@@ -341,6 +392,10 @@ def main(argv: list[str] | None = None) -> int:
                                       "summary", "current-block", "write-block", "export-md"))
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--db", default="docs/wsp/ledger.db")
+    ap.add_argument("--no-evidence", action="store_true",
+                    help="export-md: keep evidence as paths instead of embedding the files")
+    ap.add_argument("--with-logs", action="store_true",
+                    help="export-md: also embed the raw .log artifacts (bigger, noisier)")
     args = ap.parse_args(argv)
 
     if args.query == "build":
@@ -356,7 +411,8 @@ def main(argv: list[str] | None = None) -> int:
         print(render_current_state(con))
     elif args.query == "export-md":
         target = args.arg or "docs/wsp/ledger-export.md"
-        text = export_markdown(con)
+        text = export_markdown(con, embed_evidence=not args.no_evidence,
+                               embed_logs=args.with_logs)
         with open(target, "w") as fh:
             fh.write(text)
         print(f"{target}: {len(text.splitlines())} lines, {os.path.getsize(target)} bytes")
