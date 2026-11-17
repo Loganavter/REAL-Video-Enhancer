@@ -290,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
 
     d = sub.add_parser("db", help="query the evidence index (records, claims, verdicts)")
     d.add_argument("query", choices=("build", "current", "lane", "lineage", "orphans", "stale",
-                                     "summary", "current-block", "write-block"))
+                                     "summary", "current-block", "write-block", "export-md"))
     d.add_argument("arg", nargs="?")
     d.add_argument("--db", default="docs/wsp/ledger.db")
 

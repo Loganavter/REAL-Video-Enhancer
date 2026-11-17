@@ -259,10 +259,86 @@ def splice(path: str, block: str) -> bool:
     return False
 
 
+def export_markdown(con) -> str:
+    """The whole index as one markdown document, for sending to someone.
+
+    Not a replacement for the registry: it is a snapshot with no query behind it, generated so a reader
+    who has neither the repo nor the harness can still see what is current, what replaced what, and
+    which record each number came from.
+    """
+    s = summary(con)
+    out = ["# RVE evidence index - export", "",
+           f"Generated from `docs/wsp/ledger.db` ({s['records']} records, {s['claims']} claims, "
+           f"{s['verdicts']} verdicts: {s['current']} current, {s['superseded']} superseded, "
+           f"{s['refuted']} refuted).",
+           "",
+           "This is a snapshot. The source of truth is the files - `docs/wsp/verdicts.yaml`, "
+           "`docs/wsp/verified/records/*.jsonl`, `docs/claims-*.txt` - and the index is rebuilt from "
+           "them with `python -m harness.cli db build`. A verdict marked *superseded* is kept only so "
+           "that the replacement can be followed; do not cite one.", ""]
+    out += ["## Current state, by lane", ""]
+    for lane, rows in sorted(lanes(con).items()):
+        out += [f"### {lane}", ""]
+        for r in rows:
+            out.append(f"**{r['vid']}** ({r['date']}) - *{r['scope']}*")
+            out.append("")
+            out.append(f"> {r['statement']}")
+            if r["evidence"]:
+                out.append("")
+                out.append(f"Evidence: `{r['evidence']}`")
+            if r["open_question"]:
+                out.append("")
+                out.append(f"**OPEN:** {r['open_question']}")
+            out.append("")
+    sup = con.execute("SELECT vid, superseded_by, scope, statement, date FROM verdict "
+                      "WHERE status != 'current' ORDER BY vid").fetchall()
+    if sup:
+        out += ["## Superseded and refuted - do not cite", "",
+                "| verdict | status | replaced by | scope |", "|---|---|---|---|"]
+        for r in sup:
+            st = con.execute("SELECT status FROM verdict WHERE vid=?", (r["vid"],)).fetchone()
+            out.append(f"| `{r['vid']}` | {st['status']} | `{r['superseded_by']}` | {r['scope']} |")
+        out.append("")
+    out += ["## Records", "",
+            "Each row is a measurement tuple: value, unit, statistic, and the population it was taken "
+            "on. `of` is what the number is *of*, which is the field the old prose was missing.", ""]
+    rows = con.execute("SELECT * FROM record ORDER BY source, rid").fetchall()
+    by_source: dict[str, list] = {}
+    for r in rows:
+        by_source.setdefault(r["source"], []).append(r)
+    for source, recs in sorted(by_source.items()):
+        out += [f"### `{source}`", "",
+                "| id | value | unit | statistic | of | tier | population |", "|---|---|---|---|---|---|---|"]
+        for r in recs:
+            try:
+                extra = json.loads(r["extra"] or "{}")
+            except json.JSONDecodeError:
+                extra = {}
+            of = extra.get("of", "")
+            pop = (r["pop_label"] or r["pop_kind"] or "")[:70]
+            out.append(f"| {r['rid']} | {r['value']:g} | {r['unit']} | {r['statistic']} | {of} | "
+                       f"{r['tier']} | {pop} |")
+        out.append("")
+    out += ["## Claims", "",
+            "The legacy corpus (`docs/claims-*.txt`): names, values and the session that measured "
+            "them. These are the lines the migrate gate reports on, not record-backed claims.", "",
+            "| name | value | unit | session | source:line |", "|---|---|---|---|---|"]
+    for r in con.execute("SELECT * FROM claim ORDER BY name, session"):
+        out.append(f"| `{r['name']}` | {r['value']:g} | {r['unit']} | {r['session']} | "
+                   f"`{r['source']}:{r['line']}` |")
+    out += ["", "## What this document does not tell you", "",
+            "- whether a population label is true (the item-set hash is checked, the human label is not)",
+            "- whether the item set is the one the decision needs",
+            "- whether a cost model is complete",
+            "- free-text arithmetic in the legacy claims files",
+            "", "A green check is a floor, not a ceiling."]
+    return "\n".join(out) + "\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m harness.cli db")
     ap.add_argument("query", choices=("build", "current", "lane", "lineage", "orphans", "stale",
-                                      "summary", "current-block", "write-block"))
+                                      "summary", "current-block", "write-block", "export-md"))
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--db", default="docs/wsp/ledger.db")
     args = ap.parse_args(argv)
@@ -278,6 +354,12 @@ def main(argv: list[str] | None = None) -> int:
         print(render_current_state(con))
     elif args.query == "current-block":
         print(render_current_state(con))
+    elif args.query == "export-md":
+        target = args.arg or "docs/wsp/ledger-export.md"
+        text = export_markdown(con)
+        with open(target, "w") as fh:
+            fh.write(text)
+        print(f"{target}: {len(text.splitlines())} lines, {os.path.getsize(target)} bytes")
     elif args.query == "write-block":
         target = args.arg or "docs/RESEARCH-LEDGER.md"
         changed = splice(target, render_current_state(con))
