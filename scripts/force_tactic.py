@@ -1,179 +1,276 @@
-"""B2: is there ANY tactic for Conv(32->32, 3x3) + PReLU that myelin will fuse?
+"""B2: is there ANY tactic for Conv(C->C, 3x3) + PReLU that myelin will fuse at C=32?
 
-The selector cannot filter by kernel name - IAlgorithmVariant gives `implementation` (an int) and a
-64-bit tactic hash - but it can restrict the build to ONE choice index at a time, and the resulting
-engine names its layers (`__myl_CorrMulLtSele_*` when the PReLU went into the same kernel, a bare
-`Conv` plus a `PWN(.../PRelu)` when it did not). So the fused variant is found by scanning indices and
-reading the names, not by guessing names.
+The selector cannot filter by kernel name - IAlgorithmVariant exposes `implementation` (an int) and a
+64-bit tactic hash, no name - but it can restrict the build to ONE choice index at a time, and the
+built engine names its layers: `__myl_*` / `CorrMulLtSele` when the PReLU went into the same kernel,
+a bare `Conv` plus a `PWN(...PRelu)` when it did not. So the fused variant is found by scanning
+indices and reading the names, not by guessing.
 
-Single-layer graph on purpose: 293 choices per layer on the full model means a full rebuild per index,
-while a one-conv graph builds in seconds. Shapes are what tactics depend on, so a 1080p one-conv graph
-makes the same decision the body layer makes.
+Two graph sizes, on purpose:
+  --graph block  one Conv+PReLU at 1920x1080. Cheap, but a single block chooses a DIFFERENT tactic
+                 family than the engine does at C=32 (winograd vs indexed_wo_smem, 2.06x apart),
+                 so a verdict from it alone does not transfer - see the confound note in queue.yaml.
+  --graph body   N body blocks of the same shape. Detects fusion per layer; 4 blocks build ~4x
+                 faster than 16, and every body block has the same shape, so the scan is run at 4
+                 and the winner confirmed at 16.
 
-Usage: force_tactic.py [--channels 32] [--limit 40] [--index N]
-  no --index: scan the fastest `--limit` choices and stop at the first fused one
-  --index N : build with only choice N and report what came out
+Usage (one GPU job at a time):
+  F=~/.cache/opencode/venvs/trt310/bin/python
+  flock -n /var/tmp/opencode/gpu.lock $F scripts/force_tactic.py --channels 32 --graph block --scan
+  flock -n /var/tmp/opencode/gpu.lock $F scripts/force_tactic.py --channels 32 --graph body --body 4 --scan
+  flock -n /var/tmp/opencode/gpu.lock $F scripts/force_tactic.py --channels 32 --graph body --body 16 --index 7
 """
+from __future__ import annotations
+
 import argparse
+import hashlib
 import json
 import os
+import statistics
 import sys
+import time
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-sys.path.insert(0, "/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/backend/src/pytorch")
-
-import tensorrt as trt  # noqa: E402
-
-OUT = "/tmp/opencode/force"
-LOG = trt.Logger(trt.Logger.ERROR)
+OUT = "/tmp/opencode/b2"
 
 
-def make_onnx(channels, h, w):
-    import torch.nn as nn
-    path = f"{OUT}/block_c{channels}_{h}x{w}.onnx"
+def make_onnx(kind: str, channels: int, body: int, h: int, w: int) -> str:
+    os.makedirs(OUT, exist_ok=True)
+    path = f"{OUT}/{kind}_c{channels}_b{body}_{h}x{w}.onnx"
+    if os.path.exists(path):
+        return path
 
     class Block(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv = nn.Conv2d(channels, channels, 3, padding=1)
             self.act = nn.PReLU(channels)
 
-        def forward(self, x):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.act(self.conv(x))
 
-    if not os.path.exists(path):
-        m = Block().eval()
-        torch.onnx.export(m, (torch.rand(1, channels, h, w),), path, opset_version=17,
-                          input_names=["input"], output_names=["output"],
+    class Body(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.head = nn.Conv2d(3, channels, 3, padding=1)
+            self.blocks = nn.ModuleList([Block() for _ in range(body)])
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            out = self.head(x)
+            for b in self.blocks:
+                out = b(out)
+            return out
+
+    torch.manual_seed(0)
+    m = (Block() if kind == "block" else Body()).eval()
+    with torch.no_grad():
+        torch.onnx.export(m, (torch.rand(1, 3 if kind == "body" else channels, h, w),), path,
+                          opset_version=17, input_names=["input"], output_names=["output"],
                           do_constant_folding=True, dynamo=False)
     return path
 
 
-class Pick(trt.IAlgorithmSelector):
-    """Allow every choice except on the target layer, where only `index` is allowed."""
+class Pick:
+    """Allow every choice except on the target layer, where only `index` is allowed.
 
-    def __init__(self, index):
-        super().__init__()
+    Built as a plain object then registered, because trt.IAlgorithmSelector is an abstract base
+    whose SWIG trampoline is picky about attribute names in older bindings.
+    """
+
+    def __init__(self, index: int | None) -> None:
         self.index = index
-        self.seen = None
 
-    def select_algorithms(self, context, choices):
-        names = [c.algorithm_variant.tactic for c in choices]
-        if self.seen is None:
-            self.seen = names
+    def select_algorithms(self, context, choices):          # noqa: N802 - TRT API
         if self.index is None or self.index >= len(choices):
             return list(range(len(choices)))
         return [self.index]
 
-    def report_algorithms(self, context, choices):
+    def report_algorithms(self, context, choices):          # noqa: N802 - TRT API
         pass
 
 
-def build(onnx_path, index=None):
-    builder = trt.Builder(LOG)
+def build(onnx_path: str, index: int | None, workspace_gib: int = 8, fp16: bool = True):
+    import tensorrt as trt
+    logger = trt.Logger(trt.Logger.ERROR)
+    builder = trt.Builder(logger)
     net = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
-    parser = trt.OnnxParser(net, LOG)
+    parser = trt.OnnxParser(net, logger)
     with open(onnx_path, "rb") as fh:
         if not parser.parse(fh.read()):
             return None, [f"parse: {parser.get_error(i)}" for i in range(parser.num_errors)]
     cfg = builder.create_builder_config()
-    cfg.set_flag(trt.BuilderFlag.FP16)
+    cfg.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_gib << 30)
+    if fp16:
+        cfg.set_flag(trt.BuilderFlag.FP16)
     cfg.builder_optimization_level = 5
+    cfg.avg_timing_iterations = 8
     cfg.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
-    cfg.algorithm_selector = Pick(index)
-    blob = builder.build_serialized_network(net, cfg)
-    return (bytes(blob) if blob else None), []
+    if index is not None:
+        sel = Pick(index)
+        # trt.IAlgorithmSelector cannot be instantiated directly; wrap via the trampoline
+        cfg.algorithm_selector = _Selector(sel)
+    try:
+        blob = builder.build_serialized_network(net, cfg)
+    except Exception as exc:                                # noqa: BLE001 - a tactic that cannot
+        return None, [f"build raised: {exc}"]               # run is a legitimate answer
+    if blob is None:
+        return None, ["build returned None"]
+    return bytes(blob), []
 
 
-def describe(engine_bytes, h, w, iters=15):
-    engine = trt.Runtime(LOG).deserialize_cuda_engine(engine_bytes)
+def _Selector(pick: Pick):
+    import tensorrt as trt
+
+    class Selector(trt.IAlgorithmSelector):
+        def select_algorithms(self, context, choices):       # noqa: N802
+            return pick.select_algorithms(context, choices)
+
+        def report_algorithms(self, context, choices):       # noqa: N802
+            pass
+
+    return Selector()
+
+
+def describe(blob: bytes, h: int, w: int, iters: int = 15) -> dict:
+    import tensorrt as trt
+    logger = trt.Logger(trt.Logger.ERROR)
+    engine = trt.Runtime(logger).deserialize_cuda_engine(blob)
+    if engine is None:
+        raise RuntimeError("runtime refused a plan the builder produced")
     insp = engine.create_engine_inspector()
     ctx = engine.create_execution_context()
     names = [engine.get_tensor_name(i) for i in range(engine.num_io_tensors)]
     i_name = next(n for n in names if engine.get_tensor_mode(n) == trt.TensorIOMode.INPUT)
     o_name = next(n for n in names if engine.get_tensor_mode(n) == trt.TensorIOMode.OUTPUT)
-    x = torch.rand(1, engine.get_tensor_shape(i_name)[1], h, w, device="cuda")
-    y = torch.empty(tuple(engine.get_tensor_shape(o_name)), device="cuda")
+    dtype = torch.float16 if engine.get_tensor_dtype(i_name) == trt.DataType.HALF else torch.float32
+    x = torch.zeros(tuple(engine.get_tensor_shape(i_name)), dtype=dtype, device="cuda")
+    oshape = tuple(engine.get_tensor_shape(o_name))
+    y = torch.zeros(oshape, dtype=dtype, device="cuda")
     ctx.set_tensor_address(i_name, x.data_ptr())
     ctx.set_tensor_address(o_name, y.data_ptr())
-    stream = torch.cuda.current_stream().cuda_stream
-    for _ in range(5):
-        ctx.execute_async_v3(stream)
-    torch.cuda.synchronize()
+    stream = torch.cuda.Stream()
+    with torch.cuda.stream(stream):
+        for _ in range(5):
+            ctx.execute_async_v3(stream.cuda_stream)
+        torch.cuda.synchronize()
+        s, e = torch.cuda.Event(True), torch.cuda.Event(True)
+        s.record()
+        for _ in range(iters):
+            ctx.execute_async_v3(stream.cuda_stream)
+        e.record()
+        torch.cuda.synchronize()
+    ms = s.elapsed_time(e) / iters
 
-    class P(trt.IProfiler):
-        def __init__(self):
-            super().__init__()
-            self.per = {}
-
-        def report_layer_time(self, name, ms):
-            if ms > 0:
-                self.per[name] = self.per.get(name, 0.0) + ms
-
-    prof = P()
-    ctx.profiler = prof
-    s, e = torch.cuda.Event(True), torch.cuda.Event(True)
-    s.record()
-    for _ in range(iters):
-        ctx.execute_async_v3(stream)
-    e.record()
-    torch.cuda.synchronize()
-    total = s.elapsed_time(e) / iters
-
+    info = insp.get_engine_information(trt.LayerInformationFormat.JSON)
+    parsed = json.loads(info) if isinstance(info, str) else info
+    rows = parsed.get("Layers", parsed) if isinstance(parsed, dict) else parsed
     layers = []
-    for i in range(engine.num_layers):
-        info = json.loads(insp.get_layer_information(i, trt.LayerInformationFormat.JSON))
-        layers.append((info.get("Name", f"l{i}"), info.get("TacticName") or "", prof.per.get(info.get("Name"), 0.0)))
-    layers = [(n, t, ms / iters) for n, t, ms in layers]   # the profiler accumulates across iterations
-    fused = any("CorrMulLtSele" in n or "CorrMulLtSele" in t for n, t, _ in layers)
-    return total, layers, fused
+    for r in rows:
+        if isinstance(r, dict):
+            layers.append((str(r.get("Name", "")), str(r.get("TacticName", ""))))
+        else:
+            layers.append((str(r), ""))
+    fused = sum(n.startswith("__myl_") or "CorrMulLtSele" in n or "CorrMulLtSele" in t
+                for n, t in layers)
+    pw = sum("PointWise" in n or n.startswith("PWN") or "PRelu" in n or "PRelu" in t
+             for n, t in layers)
+    conv_t = sorted({t for n, t in layers if t and ("xmma" in t or "scudnn" in t or "myl" in t)})
+    return {"ms": round(ms, 3), "layers": len(layers), "fused": fused, "pointwise": pw,
+            "conv_tactics": conv_t}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--channels", type=int, default=32)
+    ap.add_argument("--graph", choices=("block", "body"), default="block")
+    ap.add_argument("--body", type=int, default=4)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--width", type=int, default=1920)
-    ap.add_argument("--limit", type=int, default=40)
+    ap.add_argument("--limit", type=int, default=40, help="scan indices 0..limit-1")
     ap.add_argument("--index", type=int, default=None)
+    ap.add_argument("--emit", default="")
     args = ap.parse_args()
-    os.makedirs(OUT, exist_ok=True)
-    onnx_path = make_onnx(args.channels, args.height, args.width)
+
+    onnx_path = make_onnx(args.graph, args.channels, args.body, args.height, args.width)
+    print(f"graph: {onnx_path}")
 
     if args.index is not None:
         blob, errs = build(onnx_path, args.index)
         if blob is None:
-            print(f"index {args.index}: build failed {errs[:1]}")
+            print(f"index {args.index}: build failed: {errs[:1]}")
             return 1
-        total, layers, fused = describe(blob, args.height, args.width)
-        print(f"index {args.index}: {total:.3f} ms fused={fused} layers={[(n[:30], t[:40]) for n, t, _ in layers]}")
+        d = describe(blob, args.height, args.width)
+        print(f"index {args.index}: {d['ms']:.3f} ms  fused={d['fused']} pw={d['pointwise']} "
+              f"layers={d['layers']}  {d['conv_tactics'][:2]}")
         return 0
 
-    # default: what does TRT choose, and is it fused?
     blob, errs = build(onnx_path, None)
-    total, layers, fused = describe(blob, args.height, args.width)
-    print(f"default: {total:.3f} ms fused={fused}")
-    for n, t, ms in layers:
-        print(f"   {ms:6.3f}  {n[:36]:<36} {t[:60]}")
+    if blob is None:
+        print(f"default build failed: {errs[:1]}")
+        return 1
+    d = describe(blob, args.height, args.width)
+    print(f"default: {d['ms']:.3f} ms  fused={d['fused']} pw={d['pointwise']} layers={d['layers']}")
+    for t in d["conv_tactics"]:
+        print(f"   tactic {t}")
 
-    seen_fused = set()
+    rows = []
     for index in range(args.limit):
         blob, errs = build(onnx_path, index)
         if blob is None:
+            rows.append({"index": index, "error": errs[0][:120]})
+            print(f"index {index:3d}: build failed ({errs[0][:60]})")
             continue
         try:
-            total, layers, fused = describe(blob, args.height, args.width, iters=10)
-        except Exception as exc:  # a tactic that cannot run is a legitimate answer
-            print(f"index {index}: ran but failed: {exc}")
+            d = describe(blob, args.height, args.width, iters=10)
+        except Exception as exc:                            # noqa: BLE001
+            rows.append({"index": index, "error": f"ran but failed: {exc}"})
+            print(f"index {index:3d}: ran but failed ({exc})")
             continue
-        tag = "FUSED" if fused else "split"
-        names = {t[:46] for _, t, _ in layers if t}
-        if fused and index not in seen_fused:
-            print(f"index {index}: {total:6.3f} ms {tag}  {sorted(names)}")
-            seen_fused.add(index)
-            break
-        print(f"index {index}: {total:6.3f} ms {tag}  {sorted(names)}")
+        rows.append({"index": index, **d,
+                     "sha256": hashlib.sha256(blob).hexdigest()})
+        tag = "FUSED" if d["fused"] else "split"
+        print(f"index {index:3d}: {d['ms']:7.3f} ms {tag:5s} pw={d['pointwise']} "
+              f"{(d['conv_tactics'][0] if d['conv_tactics'] else '')[:70]}")
+
+    fused_rows = [r for r in rows if r.get("fused")]
+    print(f"\nscan: {len(rows)} indices, {len(fused_rows)} fused, "
+          f"{sum(1 for r in rows if 'error' in r)} failed")
+    if fused_rows:
+        best = min(fused_rows, key=lambda r: r["ms"])
+        print(f"best fused: index {best['index']} {best['ms']:.3f} ms "
+              f"{best['conv_tactics'][:2]}")
+    print(f"\nNOT checked: whether a forced tactic survives the app's own build path; "
+          f"per-conv time split on the body graph (profiler is off in this scan)")
+
+    if args.emit:
+        sys.path.insert(0, "scripts")
+        from harness import Population, Record, Store
+        import tensorrt as trt
+        store = Store()
+        pop = Population.of("forced tactic builds",
+                            [f"index-{r['index']}" for r in rows if "ms" in r],
+                            label=f"C={args.channels} {args.graph} b{args.body}, one tactic index "
+                                  f"forced per build, {args.width}x{args.height}, fp16")
+        for r in rows:
+            if "ms" not in r:
+                continue
+            store.emit(Record(value=float(r["ms"]), unit="ms", statistic="single",
+                              population=pop,
+                              instrument="torch.cuda.Event around 10 executions after 5 warmups, "
+                                         "one GPU job at a time",
+                              config=f"trt {trt.__version__}, {torch.cuda.get_device_name(0)}, "
+                                     f"forced choice index {r['index']}, opt 5, workspace 8 GiB",
+                              session=store.session, run=f"B2-C{args.channels}-{args.graph}",
+                              artifact=r.get("sha256", ""),
+                              extra={"of": "frame_time", "quantity": "speed",
+                                     "graph": {"total": r["layers"], "fused_mylin": r["fused"],
+                                               "pointwise": r["pointwise"]},
+                                     "conv_tactics": r["conv_tactics"]}))
+        store.dump(args.emit)
+        print(f"records -> {args.emit}")
     return 0
 
 
