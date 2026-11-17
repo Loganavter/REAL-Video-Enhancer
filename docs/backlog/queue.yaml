@@ -293,7 +293,16 @@ tasks:
   note: 'Split from the pruning item on purpose: how much TIME a width costs is measurable
     on a synthesized model with random weights (tactics depend on shapes, not values),
     so it needs no reconstruction and no decision about the picture. The picture half
-    only becomes interesting if this half shows a win.'
+    only becomes interesting if this half shows a win. THREE-WAY CONFLICT 2026-11-17
+    (the audit called this note stale; it is not that simple): (1) this resolution
+    says C=32 gives 1.23x; (2) the ledger''s later section ''C=32 fuses and runs at
+    22.4-24.9 ms'' says 2.07-2.36x with an 8 GiB workspace pool; (3) an independent
+    rebuild on 2026-11-17 (make_width_probe -> build_plan, same pool, TRT 10.12) gets
+    0 myelin, 50 reformat, 18 pointwise and 40.60-41.37 ms = 1.23x - i.e. it reproduces
+    THIS note, not the ledger''s later row. Three positions, two of them measured,
+    and the record does not carry the graph that fused at C=32. Until someone rebuilds
+    that exact graph, quote the ceiling as 1.23x for a default build and 2.07-2.36x
+    only for the fused one, and say which.'
 - id: rve-pruning-bounds-2026-11-15
   title: 'E30b (closed): channel cut - 32 cannot represent the stack, 48 buys nothing'
   type: code
