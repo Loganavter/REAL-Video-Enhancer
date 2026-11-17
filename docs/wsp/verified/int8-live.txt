@@ -1,0 +1,77 @@
+# The live lane: the app runs the int8 body where it accepts it, and refuses it elsewhere
+
+Measured 2026-11-17 by running this checkout's own backend (`backend/rve-backend.py`) with the
+`REAL-2.4.2` bundled interpreter (torch 2.9.0+cu130, TensorRT 10.12.0.36 - the app's instrument), a
+leased GPU slot, and clips cut from the remastering library at 1920x1080 -> 2160p. The raw logs are
+committed next to this file under `logs/`, and every record cites one.
+
+| clip | int8 probe: share / peak | verdict | gate | reuse | render loop |
+|---|---|---|---|---|---|
+| smoke, 1 s (24 frames) | 0.003% / 13 | **int8** | chain 2 | 16/24 = 66.7% | 37.50 ms/frame |
+| Violet Evergarden 20 s | 0.058% / 37 | fp16 | chain 4 | 335/480 = 69.8% | 35.12 ms/frame |
+| Chainsaw Man 20 s | 0.000% / 11 | fp16 | chain 3 | 100/481 = 20.8% | 47.58 ms/frame |
+
+## The chain in the product and the chain in the probe are the same chain
+
+On the smoke clip the body runs and the app's own phase split reads
+
+```
+int8 phases: head 4.5  quantise 1.5  hops 24.3  tail 7.6  SUM 37.9  BODY-TOTAL 37.9 ms
+int8 host: 16 launches cost 0.30 ms of HOST (0.019 ms each); whole hop loop 0.31 ms
+```
+
+37.9 ms against the offline chain's 36.19 ms - 5% apart, with the hop loop at 1.52 ms/hop. That closes
+the "does the built chain reproduce" question: it does, in the product, under the gate.
+
+## Why the app refuses int8 on both longer clips: the DEPTH-2 composition, not the peak
+
+`Int8Probe.py:227` takes the verdict at the **worst depth the gate may serve**
+(`worst_depth = max(comp_d1, comp_d2) <= bar`), and the log line prints depth 1 only. Asking the probe
+directly for its `reason` (the same clip, the same model, the bundled interpreter) resolves it:
+
+```
+violet20s.mkv:  reason: composition d1 0.058% / d2 0.122% -> worst 0.122% > bar 0.1%
+                        (own defect 0.006%, 7 of 8 pairs at d1, 6 at d2)
+csm20s.mkv:     reason: composition d1 0.000% / d2 0.218% -> worst 0.218% > bar 0.1%
+                        (own defect 0.000%, 4 of 8 pairs at d1, 2 at d2)
+```
+
+So **both titles are refused on the depth-2 composition**, at 0.122% and 0.218% against the 0.1% bar,
+while the peak (37 and 11) is reported but is not the deciding number. This is the lane's recorded
+blocker (0.390% / 0.166% at depth 2) reproduced on two other clips by the product's own instrument -
+and it is the number my offline 4-frame sample cannot see, because that sample is depth 0.
+
+The correction matters: the first version of this file said Violet was refused on the peak bar, from the
+log line alone. It was not - the log prints `composition` at depth 1 and the verdict is taken at
+`max(d1, d2)`.
+
+## What the gate does on these clips (for E37)
+
+- Violet: **chain 4** certified, p90 1.85 / 4.66 / 6.98 / 9.61 against a limit of 12 - monotonically
+  worse with depth, i.e. the latest reference is the best one nearly everywhere.
+- Chainsaw: **chain 3** certified, p90 0.73 / 0.69 / 0.66 - deeper is *better* here, by 0.07 units out
+  of a 12-unit budget (0.6%).
+
+The item `rve-hr-reference-cache` is written around "the gate stores ONE reference". It does not: the
+code keeps a chain and certifies depth 3-4 on these clips. And where deeper is better the gain is
+0.6% of the budget, while where the gain could matter (Chainsaw) the reuse is limited by the threshold
+(20.8%), not by reachability.
+
+Not measured: the wall with int8 under the gate on a real title (both titles decline it), and the 13-19
+frame accuracy sample.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-live.txt \
+       --records docs/wsp/verified/records/int8-live.jsonl --bars docs/claims-bars.json
+
+@claim R001 0.003 % "frames [d85c9dd235341520] n=24" measured
+@claim R002 13.0 levels "frames [d85c9dd235341520] n=24" measured
+@claim R003 37.9 ms "frames [d85c9dd235341520] n=24" measured
+@claim R004 37.5 ms "frames [d85c9dd235341520] n=24" measured
+@claim R005 0.058 % "frames [947a1391acebd169] n=480" measured
+@claim R006 37.0 levels "frames [947a1391acebd169] n=480" measured
+@claim R007 69.8 % "frames [947a1391acebd169] n=480" measured
+@claim R008 35.12 ms "frames [947a1391acebd169] n=480" measured
+@claim R009 9.61 levels "frames [947a1391acebd169] n=480" measured
+@claim R010 20.8 % "frames [7219ce9813d28df0] n=481" measured
+@claim R011 47.58 ms "frames [7219ce9813d28df0] n=481" measured
+@claim R012 0.66 levels "frames [7219ce9813d28df0] n=481" measured

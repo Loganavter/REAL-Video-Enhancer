@@ -794,7 +794,7 @@ tasks:
   title: 'E37: keep 64 HR references and search by signature instead of a chain of
     one'
   type: experiment
-  status: todo
+  status: dropped
   owner: null
   priority: P1
   gpu: true
@@ -811,6 +811,15 @@ tasks:
   owns_files:
   - backend/src/utils/TemporalReuse.py
   - backend/tests/test_auto_gate.py
+  resolution: 'closed 2026-11-17 on two live renders (this checkout''s backend, REAL-2.4.2
+    interpreter, 20 s clips at 1920x1080): (a) the premise is stale - the gate does not store one
+    reference, it keeps a chain and certified depth 4 on Violet (p90 1.85/4.66/6.98/9.61 against a limit
+    of 12) and depth 3 on Chainsaw (0.73/0.69/0.66); (b) where deeper is BETTER (Chainsaw) the gain is
+    0.07 p90 units out of a 12-unit budget, 0.6%, and the reuse there (100/481 = 20.8%) is limited by
+    the threshold, not by reachability; (c) where the chain goes deep (Violet, 69.8% reuse) deeper
+    references are monotonically WORSE. A 64-reference signature store would therefore have to beat a
+    chain that already reaches the depths that help, for a 0.6% budget gain. Not worth building.
+    Records: docs/wsp/verified/int8-live.txt, verdict e37-reachability.'
   refutes: 'Signature search does not find a reference the chain could not: i.e. on
     Chainsaw Man the calm frame still matches nothing better than depth 1. Then the
     reachability limit was not what cost 1.5x there.'
@@ -1313,7 +1322,7 @@ tasks:
   title: 'The int8 body path lane: thresholds are bars, acceptance is the six-point
     report'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P0
   gpu: true
@@ -1330,6 +1339,19 @@ tasks:
   - docs/wsp/verified/engine-int8.txt
   owns_files:
   - docs/PLAN-int8-body-2026-11-17.md
+  resolution: 'closed 2026-11-17 with five of the six points measured and the sixth blocked by a
+    product decision. (1) the built chain reproduces: the app''s own phase split reads 37.9 ms against
+    the offline 36.19 ms, 1.52 ms/hop; (2) window against fp16 in one process: 36.19 ms = 27.63 fps
+    against 48.94 ms = 20.43 fps, 1.35-1.41x; (3) boundaries measured inside the pipeline: head 1.60,
+    tail 5.78; (4) accuracy 0.09169% worst of four held-out frames against the 0.1% bar, peak 55 against
+    the owner-pending 20 - and the APP''s own probe independently reads 0.058%/peak 37 on Violet and
+    refuses; (5) the wall under the gate with int8 is NOT measurable because the product declines int8
+    on both real titles, and the probe''s own reason lines say why: Violet d1 0.058% / d2 0.122%,
+    Chainsaw d1 0.000% / d2 0.218%, both over the 0.1% bar at depth 2 - which is the finding rather
+    than a gap, and it is the recorded composition blocker reproduced by the product itself; (6) mechanisms per hypothesis: the phase split, the saturation census (<=0.002%) and the
+    per-tensor-vs-per-channel comparison. What remains is the owner''s peak-bar decision (verdict
+    int8-peak-unmet) and the depth-2 composition the lane already recorded. Records:
+    docs/wsp/verified/int8-window.txt and int8-live.txt.'
   refutes: 'accepted fails if any of: the model window against fp16 is under 1.4x
     in the same session; the share of pixels above 8 levels reaches 0.1% on a held-out
     title at the depth the gate serves; the wall under the gate is under 1.2x on a
@@ -1359,7 +1381,16 @@ tasks:
     with per-tensor activation grids, pct 100, margin 1.0 and six of sixteen hops on the
     three-accumulator kernel; the window with that hybrid is 36.19 ms = 27.63 fps. The GATE-DEPTH half
     of point 4 is a different test and is the lane''s recorded d2 blocker (0.390%/0.166% at depth 2);
-    (1), (5) and (6) need the app under the gate. Records: docs/wsp/verified/int8-window.txt, verdict
-    int8-window-measured. The brief''s ''~1.75x wall ceiling'' is
+    (1), (5) and (6) are now measured in the LIVE app (backend/rve-backend.py with the REAL-2.4.2
+    bundled interpreter, torch 2.9 + trt 10.12): (1) the chain reproduces - the app''s own phase split
+    reads head 4.5 / quantise 1.5 / hops 24.3 / tail 7.6 = 37.9 ms against the offline 36.19 ms, i.e.
+    the same chain to 5%, with the hop loop at 1.52 ms/hop; (6) the phases are that mechanism; (5) the
+    wall under the gate on a 20 s Violet clip is 35.12 ms/frame over 480 frames with the gate reusing
+    69.8% - but WITH INT8 REFUSED: the app''s own probe reads engine 0.006% / composition 0.058% /
+    peak 37 and declines (int8Fit=fp16), because peak 37 is over bar_int8_peak 20. So the remaining
+    blocker is the PEAK BAR, measured by the product itself, and it needs the owner: every
+    configuration measured lands 29-55 (verdict int8-peak-unmet), including the per-tap variant the
+    ledger priced at 2x and measured at peak 33. Records: docs/wsp/verified/int8-window.txt and
+    int8-live.txt, verdicts int8-window-measured, int8-peak-unmet. The brief''s ''~1.75x wall ceiling'' is
     withdrawn: at a 64.6% engine share it
     would need ~3x on the engine.'

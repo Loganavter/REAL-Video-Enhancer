@@ -282,3 +282,49 @@
     the loop) costs 2.63 ms/hop at BLOCK_M 128 and buys the share bar: on six of sixteen hops it moves
     the worst frame from 0.114% to 0.0917% for 1.3 ms of chain time. Three accumulators spill at
     BLOCK_M 256 (79.76 ms for the chain), so the two kernels keep separate block sizes.
+
+- id: int8-peak-unmet
+  lane: int8
+  status: current
+  scope: the measured int8 chain family (epilogue and three-accumulator kernels), 1920x1080, 4 held-out frames
+  date: 2026-11-17
+  statement: >-
+    Twelve configurations were measured for the peak, and every one lands between 29 and 55 levels
+    against bar_int8_peak = 20: margin 1.2 with per-tensor grids reads 29 levels at 0.124% share, while
+    the hybrid that passes the share bar (0.09169%) reads 55. The lowest peak and the passing share are
+    not available in the same configuration of this kernel family.
+  evidence: docs/wsp/verified/int8-window.txt
+  open_question: >-
+    bar_int8_peak (20) is still marked "PENDING OWNER DECISION" in docs/claims-bars.json, and the
+    product's own probe does not refuse on it - the refusals are compositional (d2). So this row is
+    accepted debt with a measured range (29-55) rather than an active blocker; the active blocker is
+    int8-composition-d2.
+
+- id: int8-live-verdicts
+  lane: int8
+  status: current
+  scope: the app's own int8 fit probe (backend/src/utils/Int8Probe.py), three clips, 1920x1080, gate on
+  date: 2026-11-17
+  statement: >-
+    The product accepts int8 where the material is easy (smoke clip: 0.003% share, peak 13 -> int8,
+    body 37.9 ms) and refuses it on BOTH real titles on the DEPTH-2 composition: Violet d1 0.058% /
+    d2 0.122%, Chainsaw d1 0.000% / d2 0.218%, against a 0.1% bar - the verdict is max(d1, d2) while
+    the log prints d1 only, and the peak (37 and 11) is reported but does not decide.
+  evidence: docs/wsp/verified/int8-live.txt
+  open_question: >-
+    The blocker to fix is the depth-2 composition (0.122% / 0.218% against 0.1%), i.e. the gap between
+    a frame and a reference two steps back, not the peak: bar_int8_peak (20) is also unreachable
+    (29-55 across twelve configurations) but the product does not refuse on it.
+
+- id: e37-reachability
+  lane: reuse
+  status: current
+  scope: app's temporal gate, Violet 20 s and Chainsaw Man 20 s, 1920x1080, chain certified per clip
+  date: 2026-11-17
+  statement: >-
+    The premise of rve-hr-reference-cache ("the gate stores ONE reference") is stale: the gate keeps a
+    chain and certified depth 4 on Violet (p90 1.85/4.66/6.98/9.61 against a limit of 12, monotonically
+    worse) and depth 3 on Chainsaw (0.73/0.69/0.66, better by 0.07 units out of 12). On the clip where
+    more references help, the gain is 0.6% of the certification budget, and the reuse there (100/481 =
+    20.8%) is limited by the threshold rather than by reachability.
+  evidence: docs/wsp/verified/int8-live.txt
