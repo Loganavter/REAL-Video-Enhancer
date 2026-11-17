@@ -474,7 +474,7 @@ tasks:
   title: 'B1: map where myelin''s epilogue fusion breaks - width sweep, tactic name,
     time'
   type: experiment
-  status: todo
+  status: done
   owner: null
   priority: P0
   gpu: true
@@ -502,7 +502,22 @@ tasks:
     use - and the PReLU becomes 16 separate passes worth 23 ms. The cost model may
     simply be flipping because GEMM gets 4x cheaper while pointwise only gets 2x cheaper,
     which doubles the relative price of the boundary. C=40 with fusion alive would
-    be K=360 -> 12 steps against 18, ~1.5x.'
+    be K=360 -> 12 steps against 18, ~1.5x. DISCREPANCY 2026-11-17: the ledger''s
+    section ''C=32 fuses and runs at 22.4-24.9 ms: the fusion break was the builder''
+    reports 16 fused myelin at C=32 with an explicit 8 GiB workspace pool. This build,
+    with the same pool and TRT 10.12, gets 0 myelin and 40.6 ms at C=32. Either their
+    C=32 ONNX differed (this probe carries Clip and a separate Resize+Add residual)
+    or ''the builder was the culprit'' does not reproduce in this graph. That is B2''s
+    starting point, not a refutation: the record does not carry the graph the fused
+    C=32 result came from.'
+  resolution: 'measured 2026-11-17 on an independent build (scripts/make_width_probe.py
+    -> build_plan.py with fp16, opt 5, iters 8, 8 GiB workspace, DETAILED inspector;
+    artifact: /home/jorj/.local/share/opencode/shell/sh_1e6d5acdd002ioeVbD0LEJ051R.out).
+    C=64: 25 layers, 20 __myl_, 2 reformat, 0 pointwise, 50.2-56.5 ms. C=48: 23 layers,
+    18 __myl_, 2 reformat, 0 pointwise, 42.41-42.44 ms -> 1.20x for a 1.78x MAC cut.
+    C=32: 105 layers, 0 __myl_, 50 reformat, 18 pointwise, 40.60-41.37 ms -> 1.23x
+    for a 4x MAC cut. The fusion holds at 48 and 64 and breaks completely at 32, and
+    the break eats the MAC saving - E30a reproduced a fourth time on this engine.'
 - id: rve-force-epilogue-tactic-2026-11-15
   title: 'B2: force the epilogue-capable tactic at C=32 (editable timing cache / algorithm
     selector)'
@@ -548,7 +563,12 @@ tasks:
     gives implementation+tactic hash rather than a kernel name. RUNNABLE NOW 2026-11-17:
     TensorRT 10.12.0.36 and torch are installed and the harness can time and profile
     a plan end to end (scripts/build_plan.py, scripts/bench_plan.py, scripts/make_width_probe.py).
-    No environment blocker.'
+    No environment blocker. STARTING POINT 2026-11-17: at C=32 a default build of
+    the synthesized probe does NOT fuse (0 __myl_, 50 reformat, 18 pointwise, 40.6
+    ms), while C=48 and C=64 do. The ledger''s claim that C=32 fuses with an explicit
+    workspace pool did not reproduce here, so this item now has a concrete first question:
+    does any epilogue-capable tactic exist for C=32 at this K, and can an editable
+    timing cache select it?'
 - id: rve-prelu-rewrite-at-32-2026-11-15
   title: 'B3: reopen E17 at C=32 - a*x + (1-a)*ReLU(x) may fuse where PReLU does not'
   type: experiment
