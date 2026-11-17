@@ -236,7 +236,7 @@ tasks:
   title: 'E29: L2-resident layer pyramid - is the 7.9 MB reuse buffer real, and what
     is the ceiling?'
   type: research
-  status: todo
+  status: done
   owner: null
   priority: P2
   gpu: false
@@ -260,6 +260,17 @@ tasks:
     GB, L2 absorption ~1/3, DRAM 19.7 ms, compute floor 33.1 ms, measured 56.8 ms).
     Phase 2, only if phase 1 survives: a boundary search per the Welder model and
     one fused prototype.'
+  resolution: 'phase 1 answered 2026-11-17 (scripts/pyramid_budget.py, CPU only, no GPU job): the
+    16-boundary reuse buffer is 7.5 MB at 1080p and 15.0 MB at 4K, both inside the card''s 32 MiB L2,
+    so the residency half of the refutes does NOT fire. The ceiling half does: at both sizes the fp16
+    compute floor (33.1 / 132.2 ms) is above the unabsorbed DRAM time (29.5 / 118.0 ms), so absorbing
+    traffic cannot raise the roofline at all - at 1080p the reading is 56.8 ms measured against a
+    33.1 ms floor, i.e. 1.72x whatever L2 does, and at 4K DRAM (118 ms) sits below the floor (132.2 ms)
+    so the pyramid buys nothing there either. The 1/3 absorption every version of this item cited is
+    one kernel''s ncu sector-hit rate applied to sixteen boundaries - a population substitution this
+    ledger has withdrawn before, and it changes the ceiling by zero. Phase 2 is not justified ahead of
+    the int8 lanes: a fused prototype would have to beat 56.8 -> 33.1 ms with a schedule the builder
+    cannot emit. Records: docs/wsp/verified/pyramid-budget.txt'
   note: 'MICRO''16 (Alwani et al.) removed intermediate tensors from off-chip entirely
     on the first five VGG layers: 77 MB -> 3.6 MB with 362 KB on-chip, and their recompute-vs-reuse
     fork is our fork too (full fusion of 19 layers would cost +9.6x arithmetic by
@@ -477,7 +488,7 @@ tasks:
 - id: rve-cone-recompute-2026-11-15
   title: 'E36: cone instead of cylinder - per-layer halo for partially changed frames'
   type: research
-  status: todo
+  status: done
   owner: null
   priority: P2
   gpu: false
@@ -501,6 +512,17 @@ tasks:
     cone} at 16 layers with halo k at layer k, for r in {5,10,20,40}, plus the per-frame
     launch cost of the extra regions. Phase 2 only if the ratio is above 2x at a radius
     the gate can actually certify.'
+  resolution: 'phase 1 answered 2026-11-17 (scripts/cone_budget.py, CPU only): the 1-D control
+    reproduces the ledger''s own 2.00x (a 2 px band, cylinder 16*38*L against cone 304*L), so the
+    convention is the one the earlier number used, and the 2-D ratios reproduce the review''s figures
+    (2.54x at r=5, 2.12x at r=10 against 2.6x and 2.16x). The ratio is not the number that decides
+    anything: sixteen launches at ~5 us cost 0.08 ms while the GEMM work for r<=20 is BELOW that, so
+    the recompute is launch-bound and the prize is 0.08-0.27 ms instead of a 56.8 ms full re-render -
+    a 200-700x saving on the frames it applies to, not a 2.1x saving on the engine. Phase 2 is blocked
+    on something this item cannot create: the gate''s veto is frame-level, a cone that underestimates
+    the changed region is wrong by construction, and the seams between a recomputed cone and a reused
+    neighbourhood are the artifact class that made tile reuse read 0.287%. Records:
+    docs/wsp/verified/cone-budget.txt'
   note: 'A different axis from the frame gate: the gate drops or reuses whole frames,
     while this recomputes only a cone (halo k at layer k) for the region that changed.
     The review''s numbers: radius 10 -> 2.16x less work, radius 5 -> 2.6x. It is the

@@ -231,6 +231,45 @@ the docs repo: the board is not a place where several agents write.
 7. E31 phase 1 is CPU; phase 2 is a render, and it changes the metric, so it
    needs the owner in the loop before it costs GPU time.
 
+## Waiting: `scripts/wait_for.py`, not `sleep`
+
+A supervisor turn that ends in `sleep 300` spends a whole model turn on nothing, and one that repeats
+`ls` every minute spends the same turn with less patience. The harness notifies on a **background
+command's completion**, so the right shape is: state the condition once, launch the waiter as a
+background command, and let the notification carry the verdict.
+
+```
+scripts/wait_for.py --file /tmp/opencode/b3/c32_leaky.plan --log /tmp/opencode/b3.log --tail 15
+scripts/wait_for.py --pid-gone "$(cat /tmp/opencode/<id>.pid)" --timeout 3600
+scripts/wait_for.py --log-match "/tmp/opencode/render.log::^DONE " --timeout 7200
+scripts/wait_for.py --gpu-free --timeout 5          # is the card free right now?
+```
+
+Conditions (all by default, `--any` for any): `--file` exists, `--gone` absent, `--pid` alive,
+`--pid-gone` gone, `--log-match PATH::REGEX`, `--log-idle PATH::SECONDS`, `--min-bytes PATH::N`,
+`--gpu-free` (`/var/tmp/opencode/gpu.lock` not held, i.e. the one-GPU-job rule is satisfiable).
+
+Exit codes: **0** condition met, **2** timeout, **4** the watched process died without the condition,
+**130** interrupted. Code 4 exists because a crashed build must not look like a slow one - that is the
+failure mode a bare `sleep` cannot distinguish, and it is how a worker that had already died was once
+waited on for the rest of its slice.
+
+The verdict block is the point:
+
+```
+WAIT met after 412s  file:/tmp/opencode/b3/c32_leaky.plan
+  file=/tmp/opencode/b3/c32_leaky.plan=yes
+  --- /tmp/opencode/b3.log (last 3) ---
+  plan -> /tmp/opencode/b3/c32_leaky.plan  32595604 bytes  397.2s  fp16=True  trt 10.12.0.36
+```
+
+It makes the notification self-contained: the next turn starts from "done, here is the tail", not from
+"let me look again". Polling interval defaults to 2 s and the progress line to 60 s, so a two-hour
+render produces ~120 lines, not 7200.
+
+`--interval` is a poll, not a race-check: it is fine for file and pid conditions, and it is *not* a
+latency measurement - never time a GPU job by subtracting timestamps around a `wait_for.py`.
+
 ## Acceptance, per task type
 
 - **experiment**: the number, the reference it is compared against, the

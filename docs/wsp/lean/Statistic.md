@@ -1,10 +1,24 @@
 # The acceptance statistic, stated formally
 
-Written 2026-11-16 because the Lean spike (`rve-lean-statistic-spike-2026-11-16`) cannot run here:
-there is no Lean toolchain on this host (`lean`, `elan`, `lake` all absent), and installing one is a
-system change with a network dependency. The spike's declared deliverable was never the proof - it was
-**the list of assumptions that had to be made explicit before a statement could be written**. That list
-is below, and it is the part the harness can act on today.
+Written 2026-11-16 because no Lean toolchain was on this host at that moment; <!-- env-ok: describes the past --> the spike's declared
+deliverable was never the proof - it was **the list of assumptions that had to be made explicit before
+a statement could be written**. That list is below, and it is the part the harness can act on today.
+
+**State 2026-11-17: the proof exists and compiles, and the toolchain had to be put back.** Lean 4.36.0
+lives at `~/.elan/toolchains/leanprover--lean4---v4.36.0` (linked as `lean4-4.36.0`). `lean`, `elan`
+and `lake` are still not on `PATH`; call `~/.elan/bin/lean`. Between the two dates the toolchain had
+disappeared from under the shims (`~/.elan/toolchains` did not exist, so every `lean` call failed with
+"no default toolchain configured") while the 607 MB release tarball sat in tmpfs at
+`/tmp/opencode/lean.tar.zst` - one reboot away from losing it. Restored from that tarball
+(`tar --zstd -xf` into `~/.elan/toolchains/`, `elan toolchain link`, `elan default`). Check:
+
+```
+~/.elan/bin/lean docs/wsp/lean/Statistic.lean     # 0.2 s, no output, no `sorry`
+$? && grep -c sorry docs/wsp/lean/Statistic.lean  # 0
+```
+
+A toolchain in `~/.elan` is host state, not repo state, so this line is the only thing that makes the
+artifact checkable on the next reboot - the same failure class `harness.cli env-check` exists for.
 
 ## The statement
 

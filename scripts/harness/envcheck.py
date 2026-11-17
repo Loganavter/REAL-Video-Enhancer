@@ -34,6 +34,10 @@ CLAIMS = [
      "bundled_python", "no bundled interpreter exists on this host (checked)"),
     (re.compile(r"system `?python3`? is 3\.14 with \*\*no torch\*\*", re.I),
      "torch", "torch is importable: {value}"),
+    # `lean` is not on PATH here, so a doc that says "no toolchain" is the stale claim to catch; the
+    # toolchain itself is host state in ~/.elan and was once lost with the tarball in tmpfs.
+    (re.compile(r"no Lean toolchain|`?lean`?[^.]{0,20}\bare\s+absent\b", re.I),
+     "lean", "Lean is installed: {value}"),
 ]
 
 
@@ -64,6 +68,13 @@ def facts() -> dict[str, str]:
     except Exception:                                              # noqa: BLE001
         out["torch"] = "absent in python3"
     out["bundled_python"] = "absent"
+    lean = os.path.expanduser("~/.elan/bin/lean")
+    try:
+        r = subprocess.run([lean, "--version"], capture_output=True, text=True, timeout=60)
+        text = (r.stdout or "") + (r.stderr or "")
+        out["lean"] = text.strip().splitlines()[0] if text.strip() else "no output"
+    except Exception as exc:                                   # noqa: BLE001
+        out["lean"] = f"not runnable ({exc.__class__.__name__})"
     return out
 
 
@@ -84,6 +95,8 @@ def stale(fact: dict[str, str], path: str, text: str) -> list[tuple[int, str, st
             elif key == "trt" and value and not value.startswith(("not installed", "probe failed")):
                 hits.append((lineno, line.strip()[:110], statement.format(value=value)))
             elif key == "torch" and "absent" not in value:
+                hits.append((lineno, line.strip()[:110], statement.format(value=value)))
+            elif key == "lean" and value and not value.startswith(("not runnable", "no output")):
                 hits.append((lineno, line.strip()[:110], statement.format(value=value)))
     return hits
 
