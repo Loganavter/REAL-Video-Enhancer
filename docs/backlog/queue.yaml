@@ -1127,3 +1127,42 @@ tasks:
     their records, refuse() re-derives the A/A, only the specific noqa marker disables
     a check. Residual by design: F17 (nothing ties a record to the artifact it names
     beyond the digest) stays an architectural limit of a schema-only harness.'
+- id: rve-int8-body-lane-2026-11-17
+  title: 'The int8 body path lane: thresholds are bars, acceptance is the six-point
+    report'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P0
+  gpu: true
+  cost: one lane, several sessions
+  tags:
+  - int8
+  - plan
+  - acceptance
+  base_branch: perf/inference
+  relates_to:
+  - docs/PLAN-int8-body-2026-11-17.md
+  - docs/claims-bars.json
+  - docs/wsp/verified/int8-block.txt
+  - docs/wsp/verified/engine-int8.txt
+  owns_files:
+  - docs/PLAN-int8-body-2026-11-17.md
+  refutes: 'accepted fails if any of: the model window against fp16 is under 1.4x
+    in the same session; the share of pixels above 8 levels reaches 0.1% on a held-out
+    title at the depth the gate serves; the wall under the gate is under 1.2x on a
+    clip above the amortisation threshold; or the built chain does not reproduce the
+    simulation''s numbers bit-for-bit.'
+  acceptance: 'The six-point report in the plan: chain reproduces simulation; window
+    vs fp16 same session with NVENC and >=3 rounds; boundaries measured inside the
+    pipeline; accuracy on a spread sample at the gate''s depth per title with the
+    probe''s verdict; wall above break-even including the full price; and for each
+    closed hypothesis the mechanism plus the measurement that isolates it.'
+  note: 'Thresholds are bars: bar_int8_window 1.4x, bar_int8_wall 1.2x, bar_int8_share
+    0.1% worst frame, bar_int8_peak 20 levels (pending), and the runner supports ''at
+    least'' targets now (gates.above, @atleast in the cli) because a speedup is not
+    a ''below''. Two decisions are open and named in the plan: the peak bar (20, not
+    23 - 23 is the tile-reuse opt-in''s peak, an already-declined artifact) and the
+    auto-decline length (recommended 2x break-even: 32 min now, 11 min after head+tail).
+    The brief''s ''~1.75x wall ceiling'' is withdrawn: at a 64.6% engine share it
+    would need ~3x on the engine.'
