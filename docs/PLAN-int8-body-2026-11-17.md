@@ -8,6 +8,42 @@ Why this plan exists: every lever measured so far tops out at 1.23x (channel wid
 quantisation path is the only one that halves the arithmetic. The boundary between operators - not the
 kernel - is what it has to beat (E9', E30a, E30b, reproduced 2026-11-17).
 
+## Starting point (2026-11-17, from `REPORT-int8-lane-2026-11-16.md`)
+
+This plan is a continuation, not a start. The lane was built and run on 2026-11-16 and this is where
+it stands, all figures from that report:
+
+| | |
+|---|---|
+| window, int8 body vs fp16 | **0.991x** (51.54 against 51.06 ms, same session) |
+| certification on the int8 body | **0.00832%** above 8 levels - inside the bar |
+| per-hop cost | 1.753 ms (87.2 TOPS) against TRT's int8 conv at 91 TOPS: the hop closed to 4.3% |
+| projection after the two named fixes | **1.379x** at a realistic 1.3x PReLU floor; the 1.40 gate sits **inside** the 1.36-1.42 range |
+| projection **under the gate** | **1.216-1.236x** |
+
+**And the blocker is not speed.** The body does not run in the shipped configuration at all:
+`--no_temporal_reuse` is a precondition, the gate creates a `tile_upscaler`, and the body branch in
+`_call_single` is never taken. Turning the body on means turning the gate off - 45.36 ms/frame as
+shipped against 104.44 with the gate off and the int8 body, i.e. **2.30x slower per frame**, and on
+the wall it is the frame penalty times the gate's own value: 2.30 x 3.3 = **7.6x** if the gate's
+3.3x is taken as the other factor (11.7 s against 38.85 s), or **6.4x** computed through the render
+times (38.85 x 104.44/54.56 = 74.4 s against 11.7 s).
+
+> **Correction to the source report.** `REPORT-int8-lane-2026-11-16.md` states "~6.9x slower on the
+> wall". That number is derivable from neither of its own factors: the report's own 2.30x and 3.3x
+> give 7.6x, and its own render times give 6.4x. Every other figure in that report's section 1 was
+> re-derived here and holds (0.991x, 87.2 TOPS, 40.3/28.0 ms, -12.2 ms, 1.418x, 1.378x,
+> 1.216-1.236x under the gate, 2.302x per frame). Quote 7.6x or 6.4x and say which.
+
+So the first question this lane has to answer is not "how fast is int8" but "can the body serve the
+frames the gate leaves". The architecture for that exists in the report's own next steps: calibrate and
+certify full-frame before the first tile, then serve tiles on already-certified grids, and merge the
+three consumers of the calibration forwards (otherwise F = 2.65 s and the break-even becomes 43 s
+instead of 14).
+
+The success table below is therefore the *target*, read against a measured 0.991x baseline and a
+1.379x projection - not against zero.
+
 ## Goal
 
 Cut full-render wall clock on **long digital titles** in the shipped configuration (gate on) without
