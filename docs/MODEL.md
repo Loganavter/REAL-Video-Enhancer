@@ -389,6 +389,8 @@ counter is read (§6, item 2).
    investigation, not as a recommendation. The verdict is therefore "the quantised block boundary costs more than int8
    saves on this architecture", not "no int8 kernel exists".
 
+**SUPERSEDED 2026-11-17 - see `int8-graph-launcher` and `int8-triton-block` in docs/wsp/verdicts.yaml.** The delivery half is answered: 16 int8 launches run under one CUDA graph, bit-exactly, and the block's per-channel epilogue is our own kernel at 1.91 ms. What remains is composition, not a route.
+
 6. ~~The non-GEMM 14% of the frame~~ **the largest piece of it is closed, and the rest is now one
    number.** Padding the head convolution to 8 input channels moved it into myelin and removed the
    separate PReLU pass: 5.8% of the model on a raw build, **3.5% of engine time through the app's
@@ -414,7 +416,7 @@ file is the one to edit when a direction is added; this section stays the measur
 
 | scenario | frames through the model | measured |
 |---|---|---|
-| anime, ungated (502 frames, 1080p -> 2160p) | 100% | 16.3 fps |
+| anime, ungated (502 frames, 1080p -> 2160p) | 100% | **16.3 fps = 30.8 s in the session this row was taken in**; 38.85 s = 12.9 fps in the session the gate row below uses, same configuration (26% drift, see the paragraph after the table) |
 | anime, duplicate gate | 29.1% | 51.71 dB average / 48.64 dB worst frame against the ungated render, 70.9% reuse |
 | anime, gate only (default) | 29.1% of frames | **11.7 s against 38.85 s ungated (3.3x)**, 0.009% of pixels above 8 levels (RGB) on the worst of 19 sampled frames, peak 14. Re-taken after the chain-reachability fix: chain 4 still certified, the same **362/498** reuses, 11.93 s, 0.017% on a 13-frame sample (the sample changed, the configuration did not) |
 | anime, gate + tile reuse | 57.7% of tiles | 9.2 s, but **0.287%** above 8 levels and peaks of 98: the tile path has its own staleness, so it is off by default (see the investigation linked below) |

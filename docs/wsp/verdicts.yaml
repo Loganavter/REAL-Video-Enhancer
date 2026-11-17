@@ -1,0 +1,249 @@
+# Verdicts: the current state of each research lane, and what replaced what.
+#
+# Why this file exists: on 2026-11-17 an agent assembled "four walls" for int8 - the TRT two-pass
+# build, a TRT-plan rate, a precondition from an early report, and a plugin cost - and concluded the
+# lane was blocked for weeks. Three of the four had been superseded days earlier by our own
+# measurements, which sat LOWER IN THE FILE than the verdicts they replaced. The harness could not
+# see it: every number was correctly recorded. What was missing was that a record does not only carry
+# a value - it carries a LIFETIME, and a stale verdict outranks a fresh measurement whenever the
+# reader goes top-down.
+#
+# The rule this file enforces (mechanically, in scripts/harness/verdicts.py):
+#   * `scope` is mandatory. "per-channel PReLU cannot join an int8 epilogue" is true of TRT and false
+#     of our own Triton kernel, and without `scope` it is one statement that travels anywhere.
+#   * a verdict with status `superseded` or `refuted` MUST name its replacement, and that replacement
+#     must itself be current. A claim citing a superseded verdict is REFUSED, not warned about.
+#   * `date` is mandatory: a supersession chain without dates cannot tell which measurement is newer.
+#   * this file is the ONLY entry point. The ledger, MODEL.md and the reports are history and may
+#     contain superseded verdicts; `harness.cli current-state` renders what is true now.
+
+- id: trt-int8-two-pass
+  lane: int8
+  status: superseded
+  scope: TRT explicit Q/DQ build, per-tensor activation scales, 2026-11-15
+  date: 2026-11-15
+  statement: >-
+    Per-channel PReLU cannot join a TRT int8 epilogue, so each of the 16 convs pays an
+    int8->fp16->int8 hop: 17 PointWise passes worth 32.7 ms, 21 reformats worth 5.6 ms, 68.11 ms
+    against 55.54 fp16 (0.82x). Rejected as quantised.
+  evidence: docs/wsp/verified/engine-int8.txt
+  superseded_by: int8-triton-block
+  note: >-
+    The measurement is sound and the mechanism it names is real FOR TRT. It is superseded because the
+    epilogue was then written by us: the hop is a property of TRT's builder, not of int8 or of PReLU.
+
+- id: summary-lower-precision-closed
+  lane: int8
+  status: superseded
+  scope: ledger summary table, row "lower precision (INT8/FP8)"
+  date: 2026-11-15
+  statement: >-
+    Lower precision is closed by measurement; the only route left is a plugin with its own int8
+    convolution.
+  evidence: docs/RESEARCH-LEDGER.md
+  superseded_by: int8-triton-block
+  note: The plugin was written. This row is the single most damaging line in the file, because it is the first thing a reader meets.
+
+- id: e17-prelu-rewrite
+  lane: engine
+  status: superseded
+  scope: TRT graph, C=64, 2026-11-15
+  date: 2026-11-15
+  statement: >-
+    Rewriting PReLU as a*x+(1-a)*ReLU(x) does not remove the boundary: it trades one 1.8 ms pass for
+    two. Closed together with E9'.
+  evidence: docs/wsp/verified/prelu-forms.txt
+  superseded_by: b3-prelu-forms
+  note: >-
+    The conclusion survives (the rewrite buys nothing) but the mechanism does not: at C=32 the PReLU
+    fuses on its own and the rewrite is 6% SLOWER, not boundary-for-boundary.
+
+- id: model-exactly-one-route
+  lane: int8
+  status: superseded
+  scope: MODEL.md section 6, "distance to 2x"
+  date: 2026-11-15
+  statement: >-
+    A per-channel slope has no scalar stand-in, so there is exactly one route: a plugin with its own
+    int8 convolution, which is weeks of CUDA against a wheel that ships no NvInfer.h.
+  evidence: docs/RESEARCH-LEDGER.md
+  superseded_by: int8-graph-launcher
+  note: >-
+    Superseded on the delivery half, not on the precision half: 16 int8 launches run under one CUDA
+    graph, bit-exactly, so no custom convolution is needed to serve the body.
+
+- id: report8-no-temporal-reuse
+  lane: int8
+  status: refuted
+  scope: REPORT-int8-lane-2026-11-16 section 8, launch precondition
+  date: 2026-11-16
+  statement: >-
+    The int8 body does not run in the shipped configuration: --no_temporal_reuse is a precondition
+    because the gate creates a tile_upscaler and the body branch in _call_single is never taken.
+  evidence: docs/REPORT-int8-lane-2026-11-16.md
+  superseded_by: int8-restart-under-gate
+  note: >-
+    Refuted by the restart in the same report: tilesize=0 -> tile_upscaler=False, and the temporal
+    gate is a different mechanism that creates no tile_upscaler, so the body branch IS reachable under
+    the gate.
+
+- id: trt-int8-rate-79
+  lane: int8
+  status: current
+  scope: TRT plan c2x_int8_fp16heads.plan, 84 layers, 22 reformat, 19 pointwise
+  date: 2026-11-17
+  statement: >-
+    The TRT int8 plan's convolutions run at a median 79.2 TOPS (min 76.2, max 119.7 over 18 conv
+    layers), and the plan takes 67.67 ms/frame. This is the TRT two-pass build, NOT our kernel.
+  evidence: docs/wsp/verified/int8-tactics.txt
+  note: >-
+    Scope is the whole point of this entry: 79.2 TOPS is a fact about a TRT plan. Our own block
+    measures 79-80 TOPS at 1.91 ms, and the two are not the same object.
+
+- id: int8-triton-block
+  lane: int8
+  status: current
+  scope: our Triton kernel, one conv+per-channel-PReLU+requant block, 1920x1080
+  date: 2026-11-17
+  statement: >-
+    1.91 ms and 79-80 TOPS for one 64->64 3x3 block with the per-channel slope AND a per-channel
+    output scale in the epilogue, bit-exact against the int32 reference.
+  evidence: docs/wsp/verified/int8-block.txt
+  note: >-
+    This is what closes trt-int8-two-pass: the boundary is not inherent to int8, it was inherent to
+    TRT's builder.
+
+- id: int8-graph-launcher
+  lane: int8
+  status: current
+  scope: CUDA graph over 16 int8 launches, head and tail leading out of the graph
+  date: 2026-11-17
+  statement: >-
+    The 16-launch chain is bit-exact under one CUDA graph capture, with the fifth contract (the
+    capture runs on torch's stream) satisfied.
+  evidence: docs/wsp/verified/int8-block.txt
+  note: Delivery mechanism; it is what makes the block usable without a custom convolution.
+
+- id: int8-window
+  lane: int8
+  status: current
+  scope: model window (engine, no encoder), one process, 1920x1080, session stage4
+  date: 2026-11-17
+  statement: >-
+    int8 window 42.75 ms against fp16 51.06 ms in the same session: 1.194x faster, not 0.82x slower.
+  evidence: docs/claims-int8-stage4.txt
+  note: >-
+    The 0.82x belongs to trt-int8-two-pass (a different configuration). Quoting the two together is
+    the population error this file exists to prevent.
+
+- id: int8-asymmetric
+  lane: int8
+  status: current
+  scope: our Triton kernel, asymmetric quantisation with the zero-point folded into the bias
+  date: 2026-11-17
+  statement: >-
+    Asymmetric (uint8) quantisation is implemented in our kernel - zero-point folded into the bias -
+    and measured: 0.102% at peak 32 against 0.058% at peak 37.
+  evidence: docs/wsp/verified/int8-block.txt
+  note: >-
+    TRT's DLA-only asymmetric flag says nothing about our kernel; the earlier "asymmetric is
+    unavailable on this GPU" was a statement about TRT.
+
+- id: int8-probe-f-total
+  lane: int8
+  status: current
+  scope: certification probe, per-title, full price on video
+  date: 2026-11-17
+  statement: >-
+    The probe is built and measured at F_total 65.4 s, which sets break-even at 16.2 min of video
+    (5.6 min once head and tail are fused).
+  evidence: docs/REPORT-int8-lane-2026-11-16.md
+
+- id: int8-split-calibration
+  lane: int8
+  status: current
+  scope: calibration coverage, per-title composition
+  date: 2026-11-17
+  statement: >-
+    Calibration must be split per title: single-set calibration mis-states composition by 20x, and
+    by 7.5x on the second title. This is a correctness condition, not a tuning knob.
+  evidence: docs/REPORT-int8-lane-2026-11-16.md
+
+- id: int8-restart-under-gate
+  lane: int8
+  status: current
+  scope: shipped configuration, temporal gate on, tilesize=0
+  date: 2026-11-17
+  statement: >-
+    With tilesize=0 the gate creates no tile_upscaler, the body branch is reachable, and int8 starts
+    under the gate (int8Fit=int8). The old "--no_temporal_reuse is a precondition" is refuted.
+  evidence: docs/REPORT-int8-lane-2026-11-16.md
+
+- id: int8-composition-d2
+  lane: int8
+  status: current
+  scope: composition at the depth the gate serves, two titles, 6 pairs each
+  date: 2026-11-17
+  statement: >-
+    At depth 2 the passing composition reads 0.390% (Chainsaw) and 0.166% (Violet) against a 0.1%
+    bar, so both titles refuse. At depth 1 the same filter reads 0.002% and 0.104%.
+  evidence: docs/claims-int8-stage4.txt
+  open_question: >-
+    Chainsaw is 195x its own depth-1 and 78x the fp16 gate's 0.005% at the same depth, while Violet is
+    1.6x / 1.73x - inside the measured range. One of the two numbers is probably not the population it
+    is labelled with. The discriminating control needs no int8: fp16(t-2) against fp16(t) on the same
+    pairs, at the gate's depth.
+
+- id: b3-prelu-forms
+  lane: engine
+  status: current
+  scope: synthesized 16-block graph, C=32 and C=64, 1920x1080 fp16, opt 5, 8 GiB workspace
+  date: 2026-11-17
+  statement: >-
+    At C=32 the PReLU fuses (19 myelin, 23.51 ms); the a*x+(1-a)*relu rewrite fuses too and is 6%
+    slower (25.06 ms); scalar-slope LeakyReLU breaks fusion (26.89 ms). The C=32 build is bimodal -
+    39.23 / 39.29 / 20.95 ms from one ONNX - while C=64 is stable at 46.80 ms (probe) and 48.4-51.4 ms
+    (real checkpoint, three builds).
+  evidence: docs/wsp/verified/prelu-forms.txt
+
+- id: streams-no-overlap
+  lane: engine
+  status: current
+  scope: two independent TRT contexts, two streams, 1920x1080 fp16
+  date: 2026-11-17
+  statement: >-
+    A second stream buys 1.001x of throughput on both a 87.9 ms split plan and a 54.0 ms fused one,
+    with SM at 100% and 155-162 W of a 165 W cap: no overlap, so the strips proposal cannot pay its
+    halo tax.
+  evidence: docs/wsp/verified/streams.txt
+
+- id: pyramid-budget
+  lane: engine
+  status: current
+  scope: whole 16-boundary body, 1080p and 4K, CPU arithmetic
+  date: 2026-11-17
+  statement: >-
+    The L2 reuse buffer is 7.5 MB at 1080p and 15.0 MB at 4K, both inside 32 MiB, but the fp16 compute
+    floor (33.1 / 132.2 ms) sits above the unabsorbed DRAM time (29.5 / 118.0 ms), so absorbing the
+    traffic cannot raise the roofline: 1080p is 56.8 ms measured against a 33.1 ms floor = 1.72x
+    whatever L2 does.
+  evidence: docs/wsp/verified/pyramid-budget.txt
+  note: >-
+    Phase 2 (a fused prototype) is not justified: it would have to beat 56.8 -> 33.1 ms with a schedule
+    the builder cannot emit. The 1/3 absorption cited by earlier versions is one kernel's ncu hit rate
+    applied to sixteen boundaries.
+
+- id: cone-budget
+  lane: reuse
+  status: current
+  scope: 16-layer body, changed square r=5..40 px, cone halo (17-L) per layer
+  date: 2026-11-17
+  statement: >-
+    The cone is 2.54x less work than the cylinder at r=5 and 2.12x at r=10 (1-D control reproduces the
+    ledger's 2.00x), but sixteen launches cost 0.08 ms while the work at r<=20 is below that: the prize
+    is 0.08-0.27 ms instead of a 56.8 ms re-render, not a ratio on the engine.
+  evidence: docs/wsp/verified/cone-budget.txt
+  open_question: >-
+    Phase 2 needs a region-level certificate, which does not exist: the gate's veto is frame-level, and
+    the seams between a recomputed cone and a reused neighbourhood are the artifact class that made
+    tile reuse read 0.287%.

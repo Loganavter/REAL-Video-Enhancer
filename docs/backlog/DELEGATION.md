@@ -231,6 +231,21 @@ the docs repo: the board is not a place where several agents write.
 7. E31 phase 1 is CPU; phase 2 is a render, and it changes the metric, so it
    needs the owner in the loop before it costs GPU time.
 
+## Reading the research state: the index, not the ledger
+
+The ledger is history (and is cited by line). What is true now is a query:
+
+```
+python -m harness.cli db build && python -m harness.cli db current
+python -m harness.cli db lineage <verdict-id>        # what replaced what
+```
+
+A worker that needs a verdict must cite a `current` one from `docs/wsp/verdicts.yaml`; the harness
+refuses a superseded one (`verdicts --cite <id>`). Do not assemble a conclusion from several rows of
+`RESEARCH-LEDGER.md` - that is how "int8 is blocked for weeks" was built out of four verdicts that our
+own measurements had replaced. If a lane has no verdict for the question, that is the finding: record
+one, with its `scope`.
+
 ## Waiting: `scripts/wait_for.py`, not `sleep`
 
 A supervisor turn that ends in `sleep 300` spends a whole model turn on nothing, and one that repeats

@@ -288,10 +288,40 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("scope", help="print what this harness does and does not check")
 
+    d = sub.add_parser("db", help="query the evidence index (records, claims, verdicts)")
+    d.add_argument("query", choices=("build", "current", "lane", "lineage", "orphans", "stale",
+                                     "summary", "current-block", "write-block"))
+    d.add_argument("arg", nargs="?")
+    d.add_argument("--db", default="docs/wsp/ledger.db")
+
+    v = sub.add_parser("verdicts", help="validate the verdict registry and list what is current")
+    v.add_argument("--path", default="docs/wsp/verdicts.yaml")
+    v.add_argument("--cite", nargs="*", default=[], help="verdict ids a claim wants to cite")
+
     e = sub.add_parser("env-check", help="check the docs' claims about this machine against it")
     e.add_argument("--root", default=".")
 
     args = ap.parse_args(argv)
+    if args.cmd == "db":
+        from .db import main as db_main
+        return db_main([args.query] + ([args.arg] if args.arg else []) + ["--db", args.db])
+    if args.cmd == "verdicts":
+        from .verdicts import check as check_verdicts, load, refuses
+        import yaml
+        verdicts = load(yaml.safe_load(open(args.path)) or [])
+        problems = check_verdicts(verdicts)
+        for p in problems:
+            print(f"REFUSED: {p}")
+        if args.cite:
+            for p in refuses(verdicts, args.cite):
+                print(f"REFUSED: {p}")
+                problems.append(p)
+        if problems:
+            return 1
+        cur = [v for v in verdicts if v.is_current]
+        print(f"{args.path}: {len(verdicts)} verdicts, {len(cur)} current, "
+              f"{len(verdicts) - len(cur)} superseded/refuted - registry readable")
+        return 0
     if args.cmd == "env-check":
         from .envcheck import main as env_main
         return env_main(["--root", args.root]) if args.root != "." else env_main([])

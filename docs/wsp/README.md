@@ -19,6 +19,48 @@ item hash, synthetic probes, unkeyed sums, cross-session deltas). The 11 that re
 `rve-harness-redteam-residual-2026-11-16`.
 
 
+## Where a finding goes, now that the notebook is closed
+
+`RESEARCH-LEDGER.md` is 2,400 lines of history and is cited by **line number** from the provenance
+tables, so it is not rewritten. It is no longer where anything new goes - a chronological notebook is
+what let four superseded verdicts outrank three fresh measurements on 2026-11-17, because markdown has
+no notion of a record's lifetime.
+
+New work touches three files, and the index is built from them:
+
+| what | where | shape |
+|---|---|---|
+| the numbers | `docs/wsp/verified/records/<lane>.jsonl` + `<lane>.txt` | `Record` tuples, checked by `harness.cli check --bars` |
+| the conclusion, and its lifetime | `docs/wsp/verdicts.yaml` | `id, lane, status, scope, date, statement, evidence, superseded_by` |
+| the prose of a lane | `docs/wsp/history/YYYY-MM-DD-<lane>.md` | free form, linked from the verdict |
+
+Then:
+
+```
+python -m harness.cli verdicts                  # refuse an unreadable registry
+python -m harness.cli db build                  # rebuild the index from the files
+python -m harness.cli db current                # THE entry point: what is true now, by lane
+python -m harness.cli db lane int8              # one lane: verdicts + the records behind them
+python -m harness.cli db lineage trt-int8-two-pass   # what replaced what
+python -m harness.cli db orphans                # records no verdict rests on
+python -m harness.cli db stale                  # verdicts whose evidence file is gone
+python -m harness.cli db write-block docs/RESEARCH-LEDGER.md   # regenerate the ledger's head
+```
+
+The division of labour is the one ML experiment trackers settled on (runs, params/metrics, artifacts, a
+queryable store, generated dashboards), with one difference forced by this repo: the **files** are the
+source of truth and the SQLite index is a cache that can be deleted and rebuilt from a clone with no
+network. `docs/wsp/ledger.db` is gitignored for exactly that reason.
+
+The one rule that makes it work: **a conclusion carries its lifetime.** `status: superseded|refuted`
+requires `superseded_by` resolving to a `current` verdict, and a claim citing a non-current verdict is
+refused rather than warned about:
+
+```
+python -m harness.cli verdicts --cite trt-int8-two-pass
+REFUSED: trt-int8-two-pass: status superseded; current verdict is int8-triton-block
+```
+
 ## Run it
 
 ```
