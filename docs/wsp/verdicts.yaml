@@ -219,30 +219,34 @@
     0.1% bar is not yet a measurement of the material. The population question is now closed by the
     render control: gated against ungated on the product reads 0.494% on the worst frame, so the
     probe's depth-2 number was measuring the right thing - see gate-exceeds-acceptance-bar. What is
-    left is the sample size, and the cost of raising it (probe-cost: ~51 s now, ~100 s at 32 triples).
+    left is the sample size, and the cost of raising it (probe-cost: 45.1 s now, ~90 s at 32 triples).
 
 - id: gate-exceeds-acceptance-bar
   lane: reuse
   status: current
-  scope: the app's shipped fp16 render, Chainsaw Man 20 s, 1920x1080 -> 2160p, auto gate (threshold 4.0,
-    chain 3, 100/481 frames reused) against the same clip with --no_temporal_reuse
+  scope: the app's shipped fp16 render, Chainsaw Man 20 s, 1920x1080 -> 2160p, auto gate (mean_abs,
+    threshold 4.0, chain 3, 100/481 frames reused) against the same clip with --no_temporal_reuse
   date: 2026-11-17
   statement: >-
-    The gate's reuse moves 18 of 481 frames past the project's own acceptance statistic: the worst frame
-    (164) has 0.49372% of its pixels more than 8 levels off the ungated render, peak 14, against a 0.1%
-    bar, and 21 frames are above 0.01%. The A/A is exact - 481 of 481 decoded frames identical - and
-    only reused frames can differ, so the difference is the gate and nothing else. Its own certificate
-    in the same run reads p90 0.73 / 0.69 / 0.66 at depths 1-3 against limits 2 / 12 / 12: a block-mean
-    p90 on the low-resolution input does not bound a per-pixel count on the high-resolution output.
-    This is E25's gap measured on the product's output instead of on a proxy, and it says the shipped
-    fp16 default exceeds the bar on this clip - int8 is not the blocker.
+    The gate's reuse moves 18 of 481 frames past the bar the gate family was certified on: the worst
+    frame (164) has 0.49372% of its pixels more than 8 levels off the ungated render, peak 14, and 21
+    frames are above 0.01%. The A/A is exact - 481 of 481 decoded frames identical - and only reused
+    frames can differ, so the difference is the gate. It is a portability failure inside one title, not
+    a first contact with a foreign criterion: the same configuration on an 8 s sample of Chainsaw Man
+    read 0.005% at 66.4% reuse, and this 20 s clip reads 0.494% at 20.8% - 99x the defect on a third of
+    the reuse. Frame 164's own decision is 3.294 levels in the gate's variable (mean_abs on 32 px
+    blocks, LR luma) at chain depth 3; Markov bounds the share it permits at 41%, and certifying 0.1%
+    would need a block mean of 0.008 levels - 500x below the threshold of 4.0 and 412x
+    below what frame 164 read.
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     One clip, and it is the one with the lowest reuse (20.8%) and the most motion; Violet and static
-    material are unmeasured. The 0.1% bar is the int8 lane's picture criterion and had never been
-    applied to the gate, so whether it is the right bar for reuse is an owner decision. And the 18
-    frames have not been looked at: whether 0.49% of pixels off by up to 14 levels is visible is not
-    decided here.
+    material are unmeasured. The gate already runs mean_abs, the better of the two statistics the module
+    measures (0.004% against 0.460% at threshold 8 on the moving fist), so the fix is not a switch
+    between them - the certificate has to bound the acceptance quantity itself, and what that costs in
+    reuse is unmeasured. The 18 frames have not been looked at: whether 0.49% of pixels off by up to 14
+    levels is visible is not decided here, and the one calibrated point (a viewer rejected 0.287% at
+    peak 98) does not transfer to peak 14.
 
 - id: b3-prelu-forms
   lane: engine

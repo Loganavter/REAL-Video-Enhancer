@@ -1,0 +1,50 @@
+# The gate's own variable on the worst frame is 3.29 levels; the acceptance share is 0.494%
+
+Measured 2026-11-17 by feeding the LR frames of `csm20s.mkv` through the product's own
+`ReferenceFrameGate` with the parameters the render's log reported - `mean_abs`, 32 px blocks,
+threshold 4.0, max chain 3, veto off. The counters reproduce the render exactly (100 reused, 2 scene
+cuts, 0 vetoes), so this is the gate's decision and not a model of it.
+
+| frame | reuse | delta (levels) | chain |
+|---|---|---|---|
+| 160 | no | 10.76 | 0 |
+| 161 | no | 249.78 (scene cut) | 0 |
+| 162 | yes | 0.00 | 1 |
+| 163 | yes | 0.83 | 2 |
+| **164** | **yes** | **3.29** | **3** |
+| 165 | no | 8.84 | 0 |
+
+Frame 164 is served from the HR output of frame 161 - three frames stale, the deepest the cap allows -
+on a decision that says "the worst 32 px block moved by 3.29 levels". The same frame's acceptance
+statistic against the ungated render is **0.494%** of pixels more than 8 levels off, peak 14.
+
+## The bound, not the anecdote
+
+Markov on one block of 1024 pixels: if the block's mean absolute deviation is `tau`, the number of
+pixels above 8 levels is at most `1024*tau/8`, so the share is at most `tau/8`. With the gate's own
+3.29 that bound is **41%** - the certificate permits a share 400 times the bar. To certify 0.1% by this
+statistic the block mean would have to be **0.008 levels**, which is 500x below the threshold of 4.0
+and 412x below what frame 164 actually read.
+
+So the mean cannot be tightened into safety; it has to be replaced by the quantity the bar measures.
+
+## Three substitutions, not one
+
+The gate decides on a block mean of **luma** at **low resolution**; the bar counts pixels of
+**channel-max** error at **full resolution**. The ledger has already measured the third one alone:
+channel-max against luma differs 8x (0.29% against 0.036%) on the reuse artifact, which means a
+chromatic change on a static frame is invisible to this gate without any motion at all. The second is
+the model's amplification, and is not measured here.
+
+## What is already the better half of the choice
+
+The gate runs `mean_abs` (`box(|I - ref|)`), not `block_mean` (`|box(I) - box(ref)|`), and the module's
+own note measures that difference on the moving fist: 0.004% against 0.460% at threshold 8, at the same
+70.2% reuse. So "switch to the other statistic" is not the fix - the better of the two is already
+shipping, and it still cannot certify a per-pixel count.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-decision-vs-acceptance.txt \
+       --records docs/wsp/verified/records/gate-decision-vs-acceptance.jsonl --bars docs/claims-bars.json
+
+@claim R001 3.294 levels "frames [d3dc230812aad7da] n=1" measured
+@claim R002 0.49372 % "frames [d3dc230812aad7da] n=1" measured

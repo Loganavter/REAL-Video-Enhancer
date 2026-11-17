@@ -1,29 +1,28 @@
-# Where the probe's 64.6 s goes
+# Where the probe's cost goes (corrected)
 
 Measured 2026-11-17 by timing each phase of `Int8Probe.probe` on the same clip and interpreter, with a
-`torch.cuda.synchronize()` after each. The question it answers: can the depth-2 sample be raised to the
-protocol's 13-19 without losing the lane's break-even, which sits at 16.2 min of video.
+`torch.cuda.synchronize()` after each. The first version of this measurement ran the depth-2 control
+over every pair; the shipped loop runs it over the pairs the gate would reuse (4 of 8 test pairs here,
+12 forwards), so that row is 1.93 s, not 7.52 s, and the total is 45.1 s, not 50.9 s.
 
 | phase | s | share |
 |---|---|---|
-| decode (`_read_pairs`, 16 triples by ffmpeg seek) | 2.92 | 5.7% |
-| model load and upload | 0.15 | 0.3% |
-| calibrate (24 frames, a hook per conv and per PReLU) | 21.23 | 41.7% |
-| forwards (48 fp16 + 24 `_quantised_forward`) | 19.05 | 37.5% |
-| the depth-2 control's extra pass (48 fp16) | 7.52 | 14.8% |
-| **total** | **50.87** | |
+| decode (`_read_pairs`, 16 triples by ffmpeg seek) | 2.88 | 6.4% |
+| model load and upload | 0.14 | 0.3% |
+| the depth-2 control's extra pass (12 fp16 calls) | 1.93 | 4.3% |
+| calibrate (24 frames, a hook per conv and per PReLU) | 21.14 | 46.8% |
+| forwards (48 fp16 + 24 `_quantised_forward`) | 19.06 | 42.2% |
+| **total** | **45.14** | |
 
-Decode is not the cost. Calibration is the largest single term and the forwards are second, so a
-32-triple sample roughly doubles 80% of the probe: ~100 s against ~51, and the break-even moves from
-16.2 to about 32 min of video. The protocol's sample is therefore not free, and the place to buy it back
-is calibration - 21.2 s for 24 frames is 0.88 s per frame against 0.157 s for a plain fp16 forward, so
-the hooks, not the model, are paying.
+Decode is not the cost. Calibration and the forwards are, so a 32-triple sample roughly doubles 89% of
+the probe and moves the break-even from 16.2 to about 30 min of video. The place to buy it back is
+calibration, where the hooks cost 722 ms a frame - see `hook-cost.txt` for what that is and is not.
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-cost.txt \
        --records docs/wsp/verified/records/probe-cost.jsonl --bars docs/claims-bars.json
 
-@claim R001 2.92 s "frames [576171bffa6ddde3] n=16" measured
-@claim R002 21.23 s "frames [576171bffa6ddde3] n=16" measured
-@claim R003 19.05 s "frames [576171bffa6ddde3] n=16" measured
-@claim R004 7.52 s "frames [576171bffa6ddde3] n=16" measured
-@claim R005 50.87 s "frames [576171bffa6ddde3] n=16" measured
+@claim R001 2.88 s "frames [576171bffa6ddde3] n=16" measured
+@claim R002 21.14 s "frames [576171bffa6ddde3] n=16" measured
+@claim R003 19.06 s "frames [576171bffa6ddde3] n=16" measured
+@claim R004 1.93 s "frames [576171bffa6ddde3] n=16" measured
+@claim R005 45.14 s "frames [576171bffa6ddde3] n=16" measured
