@@ -52,6 +52,7 @@ def main() -> int:
     ap.add_argument("--harness-note", default="one GPU job at a time", help="notes for the record's instrument field")
     ap.add_argument("--dump-layers", action="store_true")
     ap.add_argument("--emit", default="", help="write the repeats as harness records (JSONL)")
+    ap.add_argument("--profile", action="store_true", help="per-layer times from trt.IProfiler")
     args = ap.parse_args()
 
     logger = trt.Logger(trt.Logger.ERROR)
@@ -80,6 +81,18 @@ def main() -> int:
         return 0
 
     ctx = engine.create_execution_context()
+
+    class Layers(trt.IProfiler):
+        def __init__(self) -> None:
+            trt.IProfiler.__init__(self)
+            self.ms: dict[str, float] = {}
+
+        def report_layer_time(self, name, ms) -> None:      # noqa: N802 - TRT API
+            self.ms[name] = self.ms.get(name, 0.0) + float(ms)
+
+    profiler = Layers() if args.profile else None
+    if profiler is not None:
+        ctx.profiler = profiler
     for n in ins:
         ctx.set_tensor_address(n, allocate(engine, n, args.width, args.height).data_ptr())
     for n in outs:
@@ -105,6 +118,12 @@ def main() -> int:
             results.append(ms)
             flops = 2.0 * 64 * 64 * 9 * 16 * args.height * args.width   # 16 body convs, as MODEL.md §1
             print(f"repeat {r}: {ms:.2f} ms/frame -> {flops / ms / 1e9:.1f} TFLOP/s")
+
+    if profiler is not None and profiler.ms:
+        total = sum(profiler.ms.values())
+        print(f"per-layer (one execution, total {total:.2f} ms):")
+        for name, ms in sorted(profiler.ms.items(), key=lambda kv: -kv[1])[:12]:
+            print(f"  {ms:6.2f} ms  {name[:90]}")
 
     if args.emit:
         import statistics
