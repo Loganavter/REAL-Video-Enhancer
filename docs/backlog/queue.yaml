@@ -408,7 +408,7 @@ tasks:
 - id: rve-stage-pipelining-2026-11-15
   title: 'E35: is there a stage>1 (pipelined) tactic for the body conv, or only stage1?'
   type: experiment
-  status: todo
+  status: done
   owner: null
   priority: P1
   gpu: true
@@ -431,12 +431,27 @@ tasks:
     under three builder configs (default, tactic sources restricted, and a fresh timing
     cache), listing every tactic name seen and its time. E14 enumerated SOURCES; the
     stage count inside a source was never enumerated.
-  note: The chosen kernel is tilesize128x64x32_stage1_warpsize2x2x1_tensor16x8x32.
+  note: 'The chosen kernel is tilesize128x64x32_stage1_warpsize2x2x1_tensor16x8x32.
     stage1 is a single-stage mainloop, i.e. no cp.async software pipeline over the
     K loop - the kernel loads a tile, syncs, computes, syncs. Ampere+ convolution
     kernels normally run stage3-5. If a pipelined variant exists in the same source
-    and simply loses on TRT's heuristic, an editable timing cache or a forced tactic
-    is a cheap 10-20%.
+    and simply loses on TRT''s heuristic, an editable timing cache or a forced tactic
+    is a cheap 10-20%. LIMIT 2026-11-17: the inspector reports the SELECTED tactic,
+    not the menu, so ''does a stage>1 variant exist and merely lose on TRT''s heuristic''
+    is not answerable through the public API - it would need an editable timing cache
+    or an algorithm selector that exposes the candidates. Closing on the selection
+    result: at K = 576 (18 mainloop steps at a K-tile of 32) a stage1 mainloop is
+    not obviously suboptimal, and the only measured lever in that direction (a fresh
+    timing cache, E14) moved nothing. Also recorded: the selected tile here is 256x64x32
+    with warps 4x1x1, while the ledger''s nsys trace shows 128x64x32 with warps 2x2x1
+    - same family, different tile, at a comparable frame time (50-56 ms here against
+    the recorded 51.37).'
+  resolution: 'answered 2026-11-17 by a DETAILED build of the shipped geometry (scripts/build_plan.py
+    --detailed, fp16, opt 5, iters 8, 1920x1080, TRT 10.12.0.36) and an IEngineInspector
+    dump. All 16 body convolutions select `sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x64x32_stage1_warpsize4x1x1_...`;
+    the head selects an indexed 128x16x32 stage1 kernel and the tail 64x32x64 stage1.
+    Stages present: [1] - no pipelined mainloop is chosen anywhere. This is consistent
+    with E14, which restricted the tactic sources and got the same family back.'
 - id: rve-cone-recompute-2026-11-15
   title: 'E36: cone instead of cylinder - per-layer halo for partially changed frames'
   type: research
