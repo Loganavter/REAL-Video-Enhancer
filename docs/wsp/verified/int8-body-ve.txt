@@ -15,6 +15,12 @@
 # requant-in-epilogue variant at 1.753 ms/hop = 28.0 ms, and that variant is NOT in this branch's
 # int8_pipeline.py - the tree here still uses the prologue requant.
 #
+# REPRODUCE, one command (the chain, the fp16 reference and the diff, each emitting records):
+#   flock -n /var/tmp/opencode/gpu.lock scripts/measure_int8_acc.sh \
+#       /tmp/opencode/rm_frames/ve60.raw 1920 1080 /tmp/opencode/int8-acc
+# Re-run 2026-11-17 through that script: 0.006% / peak 11.89 / PSNR 53.24 dB, chain 55.41 ms
+# (3.46 ms/hop) - the same numbers, from the repository rather than from a /tmp scratch script.
+#
 # Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-body-ve.txt \
 #        --records docs/wsp/verified/records/int8-body-ve.jsonl
 

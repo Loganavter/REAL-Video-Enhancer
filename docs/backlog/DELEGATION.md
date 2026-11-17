@@ -51,6 +51,34 @@ A frame for calibration or for an accuracy comparison comes from here. Extractin
 `~/Загрузки` and upscaling it to the target grid (done on 2026-11-17 with a 1440x1080 WEB-DL) produces a
 population the project never decided on, and the number then belongs to nothing.
 
+**The TensorRT interpreter lives at `~/.cache/opencode/venvs/trt310` (built 2026-11-17).** It is a
+python 3.10 venv, because the TRT bindings are published for cp310 only:
+
+```
+torch 2.14.1+cu126 (PyPI, cu126 index)   triton 3.8.0   tensorrt 10.12.0.36
+tensorrt-cu12-libs 10.12.0.36            tensorrt-cu12-bindings 10.12.0.36
+numpy, onnx/onnxscript, safetensors, einops, torchvision 0.29.1+cu126, pillow
+```
+
+How it was built, in the order that works (each step failed first otherwise):
+
+1. `python3.10 -m venv <path>` then `pip install --index-url https://pypi.nvidia.com
+   tensorrt-cu12-libs==10.12.0.36 tensorrt-cu12-bindings==10.12.0.36` - the **NVIDIA** index, not PyPI:
+   on PyPI the metapackage resolves to a source tarball under cp313+ and hangs in "Preparing metadata".
+2. `pip install --no-build-isolation --no-deps --index-url https://pypi.nvidia.com
+   tensorrt==10.12.0.36` - the thin `tensorrt` package builds from an sdist that wants its build deps
+   from the NVIDIA index; without `--no-build-isolation` it fails looking for `setuptools` there.
+3. **Write the shim `site-packages/tensorrt/__init__.py`** - NVIDIA's sdist ships no `__init__.py`, so
+   `import tensorrt` yields an empty namespace package. The file must re-export `tensorrt_bindings`
+   (see the file's docstring in that venv). Without it every probe fails on `trt.Logger` not existing.
+4. `pip install torch --index-url https://download.pytorch.org/whl/cu126` - and note that this
+   **downgrades `nvidia-cuda-runtime-cu12` from 12.9 to 12.6**; TRT still loads (verified).
+
+Use it as `~/.cache/opencode/venvs/trt310/bin/python`, always under `flock -n /var/tmp/opencode/gpu.lock`.
+It was built in `/tmp` first and moved here on 2026-11-17: `/tmp` is tmpfs, so 11 GB of it was RAM, and a
+reboot would have taken the interpreter with it. The two stream runners that need it are
+`scripts/measure_int8_acc.sh` and `scripts/build_plan.py`.
+
 **Never calibrate a quantisation model on the CPU at frame resolution (measured 2026-11-17).**
 onnxruntime's `quantize_static` runs the model once per calibration frame on the CPU: 8 frames x
 2.5 TFLOP of 3x3 convolutions at 1920x1080 on 16 threads, plus its arena. It took the desktop down to

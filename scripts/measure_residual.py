@@ -55,6 +55,7 @@ class Compact(nn.Module):
 def main() -> int:
     frame, w, h, model_path = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
     out_path = sys.argv[5] if len(sys.argv) > 5 else ""
+    dump_path = sys.argv[6] if len(sys.argv) > 6 else ""
 
     raw = np.fromfile(frame, dtype=np.uint8)
     if raw.size != w * h * 3:
@@ -72,6 +73,10 @@ def main() -> int:
     with torch.no_grad():
         out = model(x)
 
+    if dump_path:
+        # the fp16 reference as raw fp16 HWC, so compare_raw.py can diff it against another renderer
+        out[0].permute(1, 2, 0).contiguous().cpu().numpy().astype(np.float16).tofile(dump_path)
+        print(f"dumped {dump_path} {tuple(out.shape)}")
     corr = (out - F.interpolate(x, scale_factor=scale, mode="nearest")).abs().mul(255.0).flatten().numpy()
     q = {name: float(np.percentile(corr, p)) for name, p in
          (("median", 50), ("p90", 90), ("p99", 99), ("p99.9", 99.9))}
