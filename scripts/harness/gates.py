@@ -41,7 +41,37 @@ class Bar:
     of: str                     # what this bar is a bar OF: see OF_KINDS
     statistic: str = "worst_of"
     min_n: int = 2              # a bar on a sample needs a sample
+    direction: str = "below"    # "below": value < bar is good; "above": value >= bar is good
     note: str = ""
+
+
+def above(rec: Record, bar: Bar) -> None:
+    """The mirror of ``below``: a target the number has to REACH.
+
+    A speedup, a frame rate and a clip length are all "at least", not "at most" - without this the
+    acceptance thresholds would have to be written as prose, which is the thing the harness exists to
+    stop.
+    """
+    rec.validate()
+    if rec.tier == "assumed":
+        raise RecordError(f"{rec.id} is assumed - an assumed number is not evidence for a target")
+    if rec.unit != bar.unit:
+        raise RecordError(f"{rec.id}: {rec.value:g} {rec.unit} cannot be judged against target "
+                          f"{bar.name} = {bar.value:g} {bar.unit}")
+    if bar.of not in OF_KINDS:
+        raise RecordError(f"target {bar.name}: of={bar.of!r} is not one of {OF_KINDS}")
+    if not bar.of or rec.extra.get("of") != bar.of:
+        raise RecordError(f"{rec.id} measures {rec.extra.get('of')!r} and target {bar.name} is about "
+                          f"{bar.of!r}")
+    if rec.statistic != bar.statistic:
+        raise RecordError(f"{rec.id} is statistic {rec.statistic!r}, target {bar.name} is "
+                          f"{bar.statistic!r}")
+    if rec.population.n < bar.min_n:
+        raise RecordError(f"{rec.id} rests on n={rec.population.n} and target {bar.name} needs "
+                          f"n>={bar.min_n}")
+    if not rec.value >= bar.value:
+        raise RecordError(f"{rec.id} = {rec.value:g} {rec.unit} has not reached {bar.value:g} "
+                          f"({bar.name}) on '{rec.population.claims_text()}'")
 
 
 def below(rec: Record, bar: Bar) -> None:

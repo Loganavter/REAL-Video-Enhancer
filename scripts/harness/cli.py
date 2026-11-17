@@ -20,11 +20,12 @@ import re
 import sys
 
 from .core import RecordError, Store, unit_family
-from .gates import Bar, Claim, Scope, below, check_claims
+from .gates import Bar, Claim, Scope, above, below, check_claims
 
 CLAIM = re.compile(r'@claim\s+(\S+)\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s+(\S+)\s+"([^"]*)"(?:\s+(measured|derived|assumed))?')
 RATIO = re.compile(r'@ratio\s+(\S+)\s+(\S+)\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)')
 BELOW = re.compile(r'@below\s+(\S+)\s+(\S+)')
+ATLEAST = re.compile(r'@atleast\s+(\S+)\s+(\S+)')
 CAUSE = re.compile(r'@cause\s+(\S+)\s+"([^"]*)"\s+(\S+)\s+(\S+)')
 VERDICT = re.compile(r'@verdict\s+(\S+)\s+(.+)')
 SUM = re.compile(r'@sum\s+([\d.]+)%\s+@of\s+(.*)')
@@ -122,6 +123,18 @@ def check(path: str, records_path: str | None, bars_path: str | None = None,
             sc.cover("below")
             try:
                 below(store.get(rid), bars[bar])
+            except RecordError as exc:
+                problems.append(f"{lineno}: {exc}")
+
+        elif m := ATLEAST.match(line):
+            sc.expected.add("atleast")
+            rid, bar = m.groups()
+            if not records_path:
+                sc.miss("atleast", f"line {lineno}: no --records")
+                continue
+            sc.cover("atleast")
+            try:
+                above(store.get(rid), bars[bar])
             except RecordError as exc:
                 problems.append(f"{lineno}: {exc}")
 
