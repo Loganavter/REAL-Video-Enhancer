@@ -255,7 +255,9 @@ tasks:
     memory but does fit 32 MB L2. This is the item that would give the ledger''s ''the
     model has that headroom; the builder cannot collect it'' a number. BLOCKER 2026-11-17:
     needs ncu counters (see rve-ncu-access) or a much more careful L2 experiment than
-    the timing cache allows.'
+    the timing cache allows. RUNNABLE NOW 2026-11-17: ncu is unblocked on this host
+    (RmProfilingAdminOnly=0), so the 7.9 MB reuse-buffer question and the L2 hit rate
+    can be measured directly instead of inferred.'
 - id: rve-channel-width-time-2026-11-15
   title: 'E30a: time of the body at C=64/48/32 - no picture question, no owner'
   type: experiment
@@ -711,7 +713,7 @@ tasks:
   title: 'ncu counters: one line in modprobe.d plus a reboot, still the only way to
     know what is physically left'
   type: ops
-  status: todo
+  status: done
   owner: '@owner'
   priority: P1
   gpu: true
@@ -729,6 +731,16 @@ tasks:
     in this ledger is a bound computed from layer tensor sizes, and lanes C and the
     25-40% remainder cannot be sized. BLOCKER 2026-11-17: owner: one line in /etc/modprobe.d
     plus a reboot (NVreg_RestrictProfilingToAdminUsers=0).'
+  resolution: 'closed 2026-11-17: the item was already done and the queue note was
+    stale. /proc/driver/nvidia/params reads RmProfilingAdminOnly: 0, the rule is in
+    /etc/modprobe.d/nvidia-profiling.conf (NVreg_RestrictProfilingToAdminUsers=0),
+    and the ledger records the first measurement on 2026-11-15 (int8 block 1.88 ms,
+    DRAM read 141.6 MB, write 170.1 MB, 59.4% of DRAM peak, 51.2% tensor pipe, L2
+    sector hit 90.0%). THE POINT of the counters, now available: every DRAM figure
+    in this ledger is a BOUND computed from layer tensor sizes (MODEL.md 6 item 2
+    says so), so the compute-vs-memory split of the remaining 25-35% gap, the real
+    bytes between myelin GEMMs, and the L2 reuse question (E29) become measurable
+    rather than argued.'
 - id: rve-doc-literature-closures-2026-11-15
   title: Record the literature closures so nobody re-enters them (PReLU zeros, 3x3->5x5,
     Strassen)
