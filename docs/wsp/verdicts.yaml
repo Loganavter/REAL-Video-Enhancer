@@ -229,24 +229,24 @@
   date: 2026-11-17
   statement: >-
     The gate's reuse moves 18 of 481 frames past the bar the gate family was certified on: the worst
-    frame (164) has 0.49372% of its pixels more than 8 levels off the ungated render, peak 14, and 21
-    frames are above 0.01%. The A/A is exact - 481 of 481 decoded frames identical - and only reused
-    frames can differ, so the difference is the gate. It is a portability failure inside one title, not
-    a first contact with a foreign criterion: the same configuration on an 8 s sample of Chainsaw Man
-    read 0.005% at 66.4% reuse, and this 20 s clip reads 0.494% at 20.8% - 99x the defect on a third of
-    the reuse. Frame 164's own decision is 3.294 levels in the gate's variable (mean_abs on 32 px
-    blocks, LR luma) at chain depth 3; Markov bounds the share it permits at 41%, and certifying 0.1%
-    would need a block mean of 0.008 levels - 500x below the threshold of 4.0 and 412x
-    below what frame 164 read.
+    frame by share (164) has 0.49372% of its pixels more than 8 levels off the ungated render, and the
+    worst peak on the clip is 75 levels (frame 432) against the 8 s sample's 0.005% and peak 14. The A/A
+    is exact - 481 of 481 decoded frames identical - and only reused frames can differ, so the
+    difference is the gate. The bar is the gate's own criterion (the moved-fist artifact: 0.009%
+    shipping, 0.287% for the rejected tile configuration), so this is a portability failure rather than
+    a foreign yardstick - but the 8 s and 20 s numbers are different populations (worst of ~15 frames in
+    an 8 s window against worst of 481), so a "99x regression" is not established. What is established:
+    the shipped gate exceeds its own bar on 18 of 481 frames of this clip.
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
-    One clip, and it is the one with the lowest reuse (20.8%) and the most motion; Violet and static
-    material are unmeasured. The gate already runs mean_abs, the better of the two statistics the module
-    measures (0.004% against 0.460% at threshold 8 on the moving fist), so the fix is not a switch
-    between them - the certificate has to bound the acceptance quantity itself, and what that costs in
-    reuse is unmeasured. The 18 frames have not been looked at: whether 0.49% of pixels off by up to 14
-    levels is visible is not decided here, and the one calibrated point (a viewer rejected 0.287% at
-    peak 98) does not transfer to peak 14.
+    Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge
+    class, with LR max deltas of 41-75; the pixel veto that would catch them (16 of 18 at 40 levels, for
+    18% of the reuse) is OFF in the shipped auto path. The eighteenth is the worst by share and is a
+    saturated white region shifted 8-14 levels: its LR max delta is 5.25 and not one LR pixel moves by
+    more than 8, and every bad pixel sits at 252/255 - so no LR statistic can see it and its visibility
+    is doubtful. Whether 8-14 levels at 252 counts is an owner decision, and the 18 frames have not been
+    looked at. Separately, whether the 8 s shipping numbers under-sampled the same way is unmeasured:
+    their renders no longer exist and would have to be re-made and swept in full.
 
 - id: b3-prelu-forms
   lane: engine
