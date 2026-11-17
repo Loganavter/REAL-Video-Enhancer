@@ -236,7 +236,10 @@
     shipping, 0.287% for the rejected tile configuration), so this is a portability failure rather than
     a foreign yardstick - but the 8 s and 20 s numbers are different populations (worst of ~15 frames in
     an 8 s window against worst of 481), so a "99x regression" is not established. What is established:
-    the shipped gate exceeds its own bar on 18 of 481 frames of this clip.
+    the shipped gate exceeds its own bar on 18 of 481 frames of this clip. Two 20 s action cuts at the
+    owner's timestamps do NOT fail - noise floors 22.58 and 36.73 put them above the 1.5 limit, the
+    tuner refuses reuse, and the sweep reads 0.00000% on both - so the trigger is clean material with
+    motion the block mean does not see, not motion.
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge

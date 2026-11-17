@@ -1,0 +1,41 @@
+# On real action the gate refuses itself - so "action" is not what breaks it
+
+Two cuts at the timestamps the owner named, both 20 s, both `-c copy` so the source noise is untouched:
+Chainsaw Man ep01 from 19:40 (the start of the battle) and Violet Evergarden ep01 from 14:23. Rendered
+with the shipped defaults against `--no_temporal_reuse`.
+
+| cut | noise floor | gate | full sweep |
+|---|---|---|---|
+| Chainsaw Man 19:40 | **22.58** | **reuse OFF** - above the 1.5 limit | **0.00000%** over 503 frames |
+| Violet Evergarden 14:23 | **36.73** | **reuse OFF** - above the 1.5 limit | **0.00000%** over 487 frames |
+
+The tuner's own words: *"noise floor 22.58 is above the 1.5 limit for this material, so reuse is OFF - at
+this noise the measured worst frame is 0.105-0.470% of pixels above 8 levels, past the 0.1% acceptance
+bar."* With reuse off the gated render is the ungated render, and the sweep confirms it frame for frame.
+
+So the 20 s clip that failed is not "the gate cannot handle action". It is the opposite: on noisy action
+the gate protects the picture by not engaging at all. The clip that failed has a noise floor of **0.66** -
+clean enough to engage - and 20.8% reuse, with 17 of its 18 bad frames in a low-amplitude motion
+sequence. The trigger is *clean material with motion the block mean does not see*, not motion.
+
+## The comparator, and what it cost
+
+The sweep used to run the 8.3-megapixel comparison in numpy: 0.19 s per frame, 234 s for 481 frames.
+Moved to the card (torch.cuda, decode still on the CPU), the same sweep takes **55 s** and produces
+**bit-identical** per-frame shares and peaks - 481 of 481, 18 above the bar, worst 0.49372% on frame 164.
+The decode does not benefit: ffv1 has no GPU decoder, and `-hwaccel cuda` measured 26.9 s against 24.0 s
+for the same file.
+
+One process note worth keeping: `/tmp` is a 20 GiB tmpfs and the renders filled it, truncating one
+`--no_temporal_reuse` render at 338 of 487 frames. Counting frames before the sweep caught it; a sweep
+that trusted the file would have reported 0.00000% over a partial clip. Count frames before any sweep.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-action-scenes.txt \
+       --records docs/wsp/verified/records/gate-action-scenes.jsonl --bars docs/claims-bars.json
+
+@claim R001 22.58 levels "frames [7a3b61d6737107f3] n=503" measured
+@claim R002 0.0 % "frames [7a3b61d6737107f3] n=503" measured
+@claim R003 36.73 levels "frames [34f50873a717f5f7] n=487" measured
+@claim R004 0.0 % "frames [34f50873a717f5f7] n=487" measured
+@claim R005 481.0 frames "frames [0feba889edac9136] n=481" measured
+@claim R006 4.3 x "frames [0feba889edac9136] n=481" measured
