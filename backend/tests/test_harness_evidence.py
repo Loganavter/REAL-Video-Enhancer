@@ -476,3 +476,42 @@ def test_a_record_that_cannot_be_evidence_is_not_stored():
                       config="c", session=s.session, statistic="single",
                       artifact="/nonexistent/capture-never-taken.txt"))
     assert not s.records
+
+
+# ---------------------------------------------------------------- targets ("at least") and env-check
+def test_a_target_must_be_reached():
+    from harness.gates import Bar, above
+    s = Store()
+    slow = mk(s, 1.30, unit="x", stat="single", extra={"of": "speedup"})
+    ok = Bar(name="bar_int8_window", value=1.4, unit="x", of="speedup", statistic="single", min_n=2)
+    with pytest.raises(RecordError, match="has not reached"):
+        above(slow, ok)
+    fast = mk(s, 1.72, unit="x", stat="single", extra={"of": "speedup"})
+    above(fast, ok)                                   # 1.72 >= 1.4
+
+
+def test_a_target_needs_the_right_of_and_a_sample():
+    from harness.gates import Bar, above
+    s = Store()
+    wrong = mk(s, 9.0, unit="x", stat="single", extra={"of": "factor"})
+    bar = Bar(name="win", value=1.4, unit="x", of="speedup", statistic="single")
+    with pytest.raises(RecordError, match="measures"):
+        above(wrong, bar)
+    lonely = mk(s, 2.0, unit="x", stat="single", items=("1",), extra={"of": "speedup"})
+    bar2 = Bar(name="win", value=1.4, unit="x", of="speedup", statistic="single", min_n=2)
+    with pytest.raises(RecordError, match="n>=2"):
+        above(lonely, bar2)
+
+
+def test_env_check_flags_a_stale_claim_and_honours_the_opt_out():
+    from harness.envcheck import stale
+    fact = {"ncu": "0", "trt": "10.12.0.36", "torch": "absent in python3", "bundled_python": "absent"}
+    text = ("ncu is blocked on this host\n"
+            "tensorrt-debug symbols; no libnvinfer anywhere\n"
+            "old text quoted for the record  <!-- env-ok: historical -->\n"
+            "RmProfilingAdminOnly: 1 was true before the reboot  <!-- env-ok -->\n"
+            "torch lives in the .venv\n")
+    hits = stale(fact, "x.md", text)
+    lines = sorted(h[0] for h in hits)
+    assert lines == [1, 2], hits      # line 5 makes no absence claim, so it is not a hit
+    assert all("AUDIT" not in h[2] for h in hits)

@@ -1,0 +1,18 @@
+# The int8 pipeline emitting its own numbers (VE ep01, 1920x1080)
+#
+# `int8_pipeline.py --emit` now writes what it measures instead of only printing it:
+#   certification 0.00644% above 8 levels, peak 12 levels (its own statistic against the fp16 model)
+#   body chain 53.94 ms for 16 launches = 3.37 ms/hop (wall clock around 16 launches after 3 warmups)
+#
+# The cross-check from outside (`int8-body-ve.txt`, comparing dumped frames) reads 0.006% / peak 11.95 /
+# PSNR 53.15 dB on the same run - the internal and external instruments agree.
+#
+# NOTE on the time: 3.37 ms/hop is the PROLOGUE-requant variant that this branch carries. The report
+# records 1.753 ms/hop for the epilogue variant, and that code is not in this tree.
+#
+# Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-pipeline-ve.txt \
+#        --records docs/wsp/verified/records/int8-pipeline-ve.jsonl
+
+@claim R001 0.00644 % "pixels of one frame [128edc8bd3880682] n=1" measured
+@claim R002 12.0 levels "pixels of one frame [128edc8bd3880682] n=1" measured
+@claim R003 53.94 ms "chain launches [b35cf5cb1932f7af] n=16" measured

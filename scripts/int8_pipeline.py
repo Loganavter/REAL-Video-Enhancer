@@ -14,6 +14,7 @@ Usage: int8_pipeline.py <frame.raw> [--W 1920] [--H 1080] [--iters 10]
 """
 import argparse
 import copy
+import os
 import sys
 
 import numpy as np
@@ -80,6 +81,7 @@ def main() -> int:
     ap.add_argument("--sat", action="store_true", help="per-layer saturation share")
     ap.add_argument("--margin", type=float, default=1.0, help="safety factor on every grid")
     ap.add_argument("--dump", default=None, help="write the output image as fp16 raw")
+    ap.add_argument("--emit", default=None, help="write the measurement as harness records (JSONL)")
     ap.add_argument("--per-tensor", action="store_true",
                     help="one scalar grid per layer, as the simulation does, instead of per channel")
     ap.add_argument("--recal", action="store_true",
@@ -239,6 +241,26 @@ def main() -> int:
         print(f"dumped {got.shape[2]}x{got.shape[3]} to {args.dump}")
     share, peak, median = statistic(ref, got)
     print(f"pipeline: >8 {share:.5f}% (bar 0.1)  peak {peak:.0f}  median {median:.2f} levels")
+
+    if args.emit:
+        import hashlib as _h
+        sys.path.insert(0, "scripts")
+        from harness import Population, Record, Store
+        fsha = _h.sha256(open(args.frame, "rb").read()).hexdigest()[:16]
+        store = Store()
+        pop = Population.of("pixels of one frame", [fsha],
+                            label=f"{os.path.basename(args.frame)} {args.width}x{args.height}, "
+                                  f"int8 chain vs fp16 model, {MODEL.split('/')[-1]}")
+        common = dict(population=pop,
+                      instrument="int8_pipeline.py: 16 Triton launches, statistic() worst-channel levels",
+                      config=f"per-tensor input grids, per-channel output grids, {args.width}x{args.height}",
+                      session=store.session, run="run-int8-pipeline",
+                      extra={"artifact_sha256": fsha, "of": "share", "quantity": "accuracy"})
+        store.emit(Record(value=round(float(share), 5), unit="%", statistic="single", **common))
+        store.emit(Record(value=round(float(peak), 1), unit="levels", statistic="max",
+                          **{**common, "extra": {**common["extra"], "of": "peak"}}))
+        store.dump(args.emit)
+        print(f"records -> {args.emit}")
     print(f"          16 kernel launches, per-tensor input scales, per-channel output scales")
 
     if args.iters:
@@ -250,8 +272,24 @@ def main() -> int:
         for _ in range(args.iters):
             run_pipeline()
         torch.cuda.synchronize()
-        print(f"          body chain: {(time.time() - t0) / args.iters * 1000:.2f} ms "
-              f"({(time.time() - t0) / args.iters * 1000 / 16:.2f} ms per layer)")
+        chain_ms = (time.time() - t0) / args.iters * 1000
+        print(f"          body chain: {chain_ms:.2f} ms "
+              f"({chain_ms / 16:.2f} ms per layer)")
+        if args.emit:
+            import sys as _sys
+            _sys.path.insert(0, "scripts")
+            from harness import Population, Record, Store
+            st = Store()
+            pop2 = Population.of("chain launches", [f"launch-{i+1}" for i in range(16)],
+                                 label=f"16 int8 hops at {args.width}x{args.height}")
+            st.emit(Record(value=round(chain_ms, 2), unit="ms", statistic="mean",
+                           population=pop2,
+                           instrument="wall clock around 16 launches after 3 warmups",
+                           config=f"per-tensor in, per-channel out, {args.width}x{args.height}",
+                           session=st.session, run="run-int8-pipeline-time",
+                           extra={"of": "engine_time", "quantity": "speed"}))
+            st.dump(args.emit + ".time")
+            print(f"records -> {args.emit}.time")
     return 0
 
 

@@ -320,9 +320,9 @@ counter is read (§6, item 2).
    and it runs; **this passage used to say the counters were refused** - that was true before 2026-11-15.
    The driver now reads `RmProfilingAdminOnly: 0` (rule in `/etc/modprobe.d/nvidia-profiling.conf`), the
    ledger's "counters are unblocked" section prints the first counter table, and the historical text
-   follows for the record: the driver was loaded with **`RmProfilingAdminOnly: 1`**
+   follows for the record: the driver was loaded with **`RmProfilingAdminOnly: 1`**  <!-- env-ok: historical -->
    (`/proc/driver/nvidia/params`), so counter collection is refused:
-   `ERR_NVGPUCTRPERM`. Unlocking it is one line in `/etc/modprobe.d/` -
+   `ERR_NVGPUCTRPERM`. Unlocking it is one line in `/etc/modprobe.d/` -  <!-- env-ok: historical -->
    `options nvidia NVreg_RestrictProfilingToAdminUsers=0` - plus a reboot, because the module cannot
    be unloaded under a running desktop. Nothing else is missing.
 3. ~~A conv ceiling instead of a GEMM ceiling~~ **done, but the result is unusable for 64->64**

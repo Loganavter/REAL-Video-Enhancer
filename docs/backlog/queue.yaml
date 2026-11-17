@@ -827,7 +827,7 @@ tasks:
   title: 'Route every probe that feeds a claim through scripts/harness: the number
     becomes a record'
   type: code
-  status: in_progress
+  status: done
   owner: null
   priority: P0
   gpu: false
@@ -864,6 +864,14 @@ tasks:
     config = device/triton/BLOCK_M); verified on the GPU at 1.848 ms / 82.8 TOPS with
     the bit-exact row still clean. The remaining probes need the same treatment; the
     engine ones wait on a TRT runtime.'
+  resolution: 'closed 2026-11-17: the probes that feed cited numbers emit records.
+    int8_block_probe (--emit), bench_plan (--emit for plan timing and, with --profile,
+    per-layer times), compare_plans and compare_raw (--emit for the picture), measure_residual
+    (records), and int8_pipeline (--emit for its own certification and body-chain
+    time). Verified end to end: seven files under docs/wsp/verified/ PASS harness.cli
+    check against their records. The remaining scripts print only; none of their numbers
+    is cited by a claim file, and each would need a GPU run to convert - the item''s
+    own refutes said ''it is used or it is not'', and the used ones are done.'
 - id: rve-findings-rederivation-2026-11-16
   title: 'The existing findings are unprotected: 0 of 211 claims carry a tuple; 62
     are decision-bearing'

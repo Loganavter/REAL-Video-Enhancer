@@ -288,7 +288,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("scope", help="print what this harness does and does not check")
 
+    e = sub.add_parser("env-check", help="check the docs' claims about this machine against it")
+    e.add_argument("--root", default=".")
+
     args = ap.parse_args(argv)
+    if args.cmd == "env-check":
+        from .envcheck import main as env_main
+        return env_main(["--root", args.root]) if args.root != "." else env_main([])
     if args.cmd == "below-report":
         return below_report(args.paths, args.bars, args.quiet)
     if args.cmd == "check":
