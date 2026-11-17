@@ -1,10 +1,7 @@
-# probe_int8_app.py --frames 32 /tmp/opencode/csm20s.mkv /tmp/opencode/violet20s.mkv
-# under flock -n /var/tmp/opencode/gpu.lock, bundled interpreter torch 2.9.0+cu130, 2026-11-17
+# probe_int8_app.py --frames 32, same conditions, after the reference fix.
 /tmp/opencode/csm20s.mkv (frames=32)
-  composition d1 0.175% / d2 0.175% -> worst 0.175% > bar 0.1% (own defect 0.000%, 11 of 16 pairs at d1, 5 at d2); fp16 reference on the same pairs: d1 0.159% / d2 0.158%
-  verdict int8=False error=
-  RAW engine=2.4112654273267253e-05 d1=0.1753713353537023 d2=0.1747926347889006 stale_d1=0.15934847760945559 stale_d2=0.15799816465005279 peak=74.520263671875 pairs=11
+  composition d1 0.175% / d2 0.175% -> worst 0.175% > bar 0.1% (own defect 0.001%, 11 of 16 pairs at d1, 5 at d2); fp16 reference on the same pairs: d1 0.159% / d2 0.158%
+  RAW engine=0.0007233796168293338 d1=0.17510609468445182 d2=0.1748046837747097 stale_d1=0.15934847760945559 stale_d2=0.15799816465005279 peak=74.208984375 pairs=11
 /tmp/opencode/violet20s.mkv (frames=32)
-  composition d1 0.010% / d2 0.026% -> worst 0.026% <= bar 0.1% (own defect 0.010%, 16 of 16 pairs at d1, 11 at d2); fp16 reference on the same pairs: d1 0.000% / d2 0.004%
-  verdict int8=True error=
-  RAW engine=0.009862075239652768 d1=0.009862075239652768 d2=0.026451580924913287 stale_d1=0.0 stale_d2=0.00449701001343783 peak=14.6923828125 pairs=16
+  composition d1 0.061% / d2 0.083% -> worst 0.083% <= bar 0.1% (own defect 0.061%, 16 of 16 pairs at d1, 11 at d2); fp16 reference on the same pairs: d1 0.000% / d2 0.004%
+  RAW engine=0.060570985078811646 d1=0.060570985078811646 d2=0.0831886543892324 stale_d1=0.0 stale_d2=0.00449701001343783 peak=20.7000732421875 pairs=16

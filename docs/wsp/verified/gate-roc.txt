@@ -41,15 +41,25 @@ eighteen bad frames are the other class, and they carry LR peaks of 41-75.
 
 Lowering the gate's delta from 4.0:
 
-| threshold | reuse kept | bad caught |
-|---|---|---|
-| 3.9 | 97% | 15/18 |
-| 3.7 | 95% | 13/18 |
-| 3.3 | 90% | 9/18 |
-| 3.0 | 84% | 3/18 |
+| threshold | reuse kept | bad left | bad blocked | good lost |
+|---|---|---|---|---|
+| 4.0 (shipped) | 100% | 18 | 0 | 0 |
+| 3.9 | 97% | 15 | 3 | 0 |
+| 3.7 | 95% | 13 | 5 | 0 |
+| 3.3 | 90% | 9 | 9 | 1 |
+| 3.0 | 84% | 3 | 15 | 1 |
+| 2.5 | 80% | 0 | 18 | 2 |
 
-The three frames with the highest delta are not the three worst frames: 164 has a middling 3.294, so
-catching it needs 3.3, which still leaves 9 bad frames and costs 10% of the reuse.
+The first version of this table had the last two columns swapped, which inverted its conclusion: at
+3.0 the threshold blocks 15 of 18 bad frames for 16% of the reuse and **one** good frame, not "9 left
+and 10% of the reuse". Frame 164 (delta 3.294) is blocked at 3.0 - a threshold above 3.294 is what
+misses it.
+
+Measured on the product at threshold 3.0 (forced, chain 3, same clip): reuse 88/481 = 18.3% and **6
+frames above the bar instead of 18**, with the worst frame unchanged at 0.49372% - 164 is still served
+from the same reference, because in the app's own luma its delta lands just under 3.0 where this
+simulation reads 3.294. Wall cost of the change: 7.14 + 0.817 x 51.06 = 48.85 ms against 47.58, +2.7%,
+and all 12 dropped reuses were defective frames - no good frame lost.
 
 The pixel veto is the sharper instrument and it is **off** in the shipped auto path (`pixel veto=off`).
 At 40 levels on the LR max delta it keeps 82 of 100 reuses and catches **16 of 18** - it is aimed at
