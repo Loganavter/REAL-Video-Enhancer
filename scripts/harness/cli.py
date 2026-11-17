@@ -293,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
                                      "summary", "current-block", "write-block", "export-md"))
     d.add_argument("arg", nargs="?")
     d.add_argument("--db", default="docs/wsp/ledger.db")
+    d.add_argument("--no-evidence", action="store_true")
+    d.add_argument("--with-logs", action="store_true")
 
     v = sub.add_parser("verdicts", help="validate the verdict registry and list what is current")
     v.add_argument("--path", default="docs/wsp/verdicts.yaml")
@@ -304,7 +306,12 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "db":
         from .db import main as db_main
-        return db_main([args.query] + ([args.arg] if args.arg else []) + ["--db", args.db])
+        extra = ["--db", args.db]
+        if args.no_evidence:
+            extra.append("--no-evidence")
+        if args.with_logs:
+            extra.append("--with-logs")
+        return db_main([args.query] + ([args.arg] if args.arg else []) + extra)
     if args.cmd == "verdicts":
         from .verdicts import check as check_verdicts, load, refuses
         import yaml
