@@ -218,7 +218,10 @@
     the 13-19 the protocol asks. A verdict that moves between 0.038% and 0.167% across samples on a
     0.1% bar is not yet a measurement of the material. Every number here was re-measured after the
     reference fix (ref taken from the original weights, not fp16 on int8-rounded ones): Chainsaw moved
-    by 0.02%, Violet by 37-214%, which is why the Violet figures differ from the first version. The population question is now closed by the
+    by 0.02%, Violet by 37-214%, which is why the Violet figures differ from the first version. The
+    gate's own threshold is not a lever here either: 0.2177% at 3.0, 4.0 and 5.0 - the damaged pair is
+    inside the certificate at every setting, so only the statistic or an output-side certificate moves
+    it. The population question is now closed by the
     render control: gated against ungated on the product reads 0.494% on the worst frame, so the
     probe's depth-2 number was measuring the right thing - see gate-exceeds-acceptance-bar. What is
     left is the sample size, and the cost of raising it (probe-cost: 45.1 s now, ~90 s at 32 triples).
@@ -243,7 +246,10 @@
     tuner refuses reuse, and the sweep reads 0.00000% on both - so the trigger is clean material with
     motion the block mean does not see, not motion. A threshold of 3.0, forced and measured on the
     product, removes 12 of the 18 for 18.3% reuse (against 20.8%) - 48.85 ms against 47.58 ms, +2.7% of
-    the wall - and all 12 dropped reuses were defective frames - no good frame lost.
+    the wall - and all 12 dropped reuses were defective frames - no good frame lost. It does NOT
+    unblock int8: the probe's depth-2 number on Chainsaw is 0.2177% at gate thresholds 3.0, 4.0 and
+    5.0, because the damaged pair is already under every threshold in the clamp
+    (probe-threshold-invariance).
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge
