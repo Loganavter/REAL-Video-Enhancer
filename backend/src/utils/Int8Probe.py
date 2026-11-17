@@ -36,7 +36,9 @@ except ImportError:       # pragma: no cover - only in a torch-less cell
 __all__ = ["Int8ProbeResult", "probe"]
 
 FF = "ffmpeg"
-GATE_THRESHOLD = 5.0   # the render's temporalReuseThreshold default, in 8-bit levels
+GATE_THRESHOLD = 5.0   # the render's temporalReuseThreshold default, in 8-bit levels.
+# NOTE: the auto tuner clamps its own choice to (2.0, 4.0), so a probe filtered at 5.0 certifies on pairs
+# the shipped gate can never serve - a superset. Callers that know the gate's threshold should pass it.
 
 
 @dataclass
@@ -171,7 +173,7 @@ def _statistic(a, b, bar=8.0):
 
 
 def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
-          bar: float = 0.1) -> Int8ProbeResult:
+          bar: float = 0.1, gate_threshold: float = GATE_THRESHOLD) -> Int8ProbeResult:
     """Would int8 fit this video? Composition first, own defect second, bar = 0.1% of pixels."""
     try:
         import torch
@@ -204,11 +206,12 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                 return F.avg_pool2d(f.float().mean(dim=1, keepdim=True), 32, ceil_mode=True) * 255.0
             return float((blocks(fb) - blocks(fa)).abs().max())
 
-        reused = [i for i in test_idx if gate_delta(frames_all[i][0], frames_all[i][1]) <= GATE_THRESHOLD]
+        reused = [i for i in test_idx
+                  if gate_delta(frames_all[i][0], frames_all[i][1]) <= gate_threshold]
         # depth 2 only over pairs the gate would reuse at BOTH steps: checking one delta and then
         # comparing frames two apart measures motion, not quantisation (it read 10.7% on Violet).
         reused2 = [i for i in reused if len(frames_all[i]) > 2
-                   and gate_delta(frames_all[i][1], frames_all[i][2]) <= GATE_THRESHOLD]
+                   and gate_delta(frames_all[i][1], frames_all[i][2]) <= gate_threshold]
 
         # The discriminating control for the depth-2 blocker needs no int8: on the SAME pairs, at the
         # SAME separation, compare fp16 against fp16. The render is index 0 and the references are 1 and
