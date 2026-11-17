@@ -1,0 +1,58 @@
+# The shipped fp16 gate exceeds the acceptance bar on Chainsaw, and its own certificate says it does not
+
+Measured 2026-11-17 by rendering the same clip twice through `backend/rve-backend.py` with the bundled
+interpreter (torch 2.9.0+cu130), one GPU job at a time: once with the shipped defaults (auto gate on,
+`threshold 4.0`, chain 3, 100/481 frames reused) and once with `--no_temporal_reuse`. Everything else -
+engine, decoder, model, resolution - is identical.
+
+This is the control `int8-d2-owner-split` left open. The probe's depth-2 number (0.139-0.191% on
+Chainsaw) is not the render's population: the probe renders the earliest frame of a decoded triple
+against later references, uses torch fp16 instead of the TensorRT plan, and approximates the gate's
+served reference with block-mean steps. Any of those three could read 0.19% where the render reads
+0.02%. This control has none of them.
+
+| | |
+|---|---|
+| worst frame (164) | **0.49372%** |
+| frames above the 0.1% bar | **18 of 481** |
+| peak on the worst frame | 14 levels |
+| A/A - the gated render twice | 0.00000%, 481/481 decoded frames identical |
+| the gate's own certificate (its log) | p90 d1 0.73 / d2 0.69 / d3 0.66 against limits 2 / 12 / 12 |
+
+Only reused frames can differ: the render is deterministic (the A/A is exact), so every frame the gate
+recomputed is identical, and all 18 frames above the bar are among the 100 it reused (20.8%). The
+difference is the gate, and nothing else.
+
+**So the answer to the fork is the first outcome.** The default fp16 configuration exceeds the project's
+own acceptance statistic on this clip. int8 is not the blocker here; the gate's certification is.
+
+Both numbers are true, and that is the finding: the gate certifies a p90 of the block-mean delta on the
+low-resolution input (limit 12), while the acceptance statistic counts high-resolution pixels more than
+8 levels off. A mean over a 32x32 block does not bound a per-pixel count - on the worst frame the HR
+block-mean reads 3.91 while 0.49% of the pixels are off by more than 8. This is E25's gap, measured for
+the first time on the product's own output rather than on a proxy.
+
+## What this does not cover
+
+- **One clip.** Chainsaw 20 s is the title where reuse is lowest (20.8%) and motion highest. Violet and
+  the smoke clip are not measured this way, and the result must not be carried to them.
+- **The bar is the int8 lane's picture criterion.** The gate was never certified against it, so this is
+  the first measurement of the gate on that statistic, not a regression. Whether 0.1% is the right bar
+  for a gate that reuses a frame a viewer never sees re-rendered is an owner decision.
+- **The container is not the shipped one.** The renders were written lossless (`ffv1` / `yuv444p`) so
+  the encoder stays out of the comparison; the default is libx264 crf 18. The container round trip
+  reads max 2 levels and 0.000000% above 8 on a synthetic frame, and the A/A is exact.
+- **"Gated vs ungated" is a picture difference, not a visibility judgement.** The 18 frames are the ones
+  to look at; whether they are noticeable is not decided here.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-default-vs-ungated.txt \
+       --records docs/wsp/verified/records/gate-default-vs-ungated.jsonl --bars docs/claims-bars.json
+
+@claim R001 0.49372 % "frames [7219ce9813d28df0] n=481" measured
+@claim R002 18.0 frames "frames [7219ce9813d28df0] n=481" measured
+@claim R003 0.0 % "frames [7219ce9813d28df0] n=481" measured
+@claim R004 14.0 levels "frames [7219ce9813d28df0] n=481" measured
+@claim R005 3.91 levels "frames [7219ce9813d28df0] n=481" measured
+
+# The A/A control must be at zero.
+@below R003 bar_share

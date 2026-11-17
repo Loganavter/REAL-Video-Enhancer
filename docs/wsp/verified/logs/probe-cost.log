@@ -1,0 +1,8 @@
+# Where the probe's cost goes, 2026-11-17. decompose_probe.py, bundled interpreter, one GPU job.
+/tmp/opencode/csm20s.mkv frames=16: 16 triples, 48 fp16 forwards, 24 quantised forwards
+  decode            2.92 s    5.7%
+  load+upload       0.15 s    0.3%
+  calibrate        21.23 s   41.7%
+  forwards         19.05 s   37.5%
+  control pass      7.52 s   14.8%
+  TOTAL            50.87 s
