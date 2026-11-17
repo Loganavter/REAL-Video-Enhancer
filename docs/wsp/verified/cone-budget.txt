@@ -1,20 +1,21 @@
 # The cone against the cylinder (E36 phase 1)
 
-Measured 2026-11-17 by `scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the
-changed region dilated by `17-L` px; the cylinder gives every layer 18. The 1-D control the ledger
-already recorded (2 px band, cylinder 16*38*L against cone 304*L) must print 2.00x and does, so the
-convention is the one the earlier number used.
+Measured 2026-11-17 by `scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
+region dilated by `17-L` px; the cylinder gives every layer 18. The 1-D control the ledger already
+recorded (2 px band, cylinder 16*38*L against cone 304*L) must print 2.00x and does, so the convention
+is the one the earlier number used.
 
 Ratios at the radii the review named reproduce (2.54x at r=5, 2.12x at r=10 against 2.6x and 2.16x).
-The records below are the ratio and the time bound; the bound is `max(work, 16 launches at 5 us)` and
-it is the launch term that binds below r=20, which is why the useful statement is "0.08-0.27 ms
-instead of a 56.8 ms frame", not the ratio.
+The time bound is `max(work, 16 launches at 5 us)` and the launch term binds below r=20, which is why
+the useful statement is "0.08-0.27 ms instead of a 56.8 ms frame", not the ratio.
 
 Not checked: whether a region-level certificate can exist at all - the gate's veto is frame-level and
 the seams are the artifact class that killed tile reuse at 0.287%.
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/cone-budget.txt \
-       --records docs/wsp/verified/records/cone-budget.jsonl@claim R001 18.0 count "body layers [643761b71960b77b] n=16" assumed
+       --records docs/wsp/verified/records/cone-budget.jsonl --bars docs/claims-bars.json
+
+@claim R001 18.0 count "body layers [643761b71960b77b] n=16" assumed
 @claim R002 35344.0 count "layers [b64185a2e7bb5a1c] n=16" assumed
 @claim R003 13904.0 count "layers [b64185a2e7bb5a1c] n=16" assumed
 @claim R004 2.542002 x "layers [b64185a2e7bb5a1c] n=16" derived

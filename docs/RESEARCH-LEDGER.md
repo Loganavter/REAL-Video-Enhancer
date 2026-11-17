@@ -2403,6 +2403,88 @@ neighbourhood are exactly the artifact class that made tile reuse read 0.287% at
 
 Records: `docs/wsp/verified/cone-budget.txt`.
 
+## B3 and the C=32 build: the PReLU fuses at 32 channels - and which build you get is a coin flip (measured 2026-11-17)
+
+Two questions were tangled in this item: does the PReLU epilogue fuse at 32 channels, and does a
+ReLU-shaped rewrite fuse where it does not. The second one has a clean answer; the first one turned out
+to be the wrong question, because the build is **not deterministic**.
+
+### The three activation forms, one session, interleaved rounds
+
+Same 16-block graph, same width, same builder (fp16, opt 5, avg_timing_iters 8, 8 GiB workspace,
+`strategy = probe_prelu_forms.py`), median of rounds 2-3:
+
+| form | fused `__myl_` | reformat | pointwise | ms/frame |
+|---|---|---|---|---|
+| PReLU (what ships) | **19** | 2 | 0 | **23.24** |
+| `a*x + (1-a)*relu(x)` (E17's rewrite) | **20** | 1 | 0 | 24.68 |
+| LeakyReLU, scalar slope (control) | 1 | 5 | 3 | 26.72 |
+
+So: the premise of B3 - "the PReLU does not fuse at 32, so try a ReLU shape" - **is false in this
+graph**. PReLU fuses. The rewrite fuses too and is 6% *slower*. The form that breaks fusion is the
+scalar-slope LeakyReLU, which is the shape an int8 epilogue would want. E17's negative result therefore
+holds at 32 as well, for the same reason as at 64: the rewrite adds operations to the epilogue without
+buying a tactic.
+
+### The census is not the instrument: 19 fused layers, 1.76x apart
+
+The control run - `make_width_probe.py`'s own graph, built through `build_plan.py` (B1's exact path,
+same TRT 10.12.0.36) - produced **the same 19 `__myl_` layers, 1 reformat, 0 pointwise** and measured
+**40.90/41.25/41.29 ms**. Two plans that both report "19 fused myelin layers" are 1.76x apart in time.
+
+The tactic dump says why. The fast plan's body convolution is
+`sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x32x32_stage1_warpsize4x1x1`
+(~2.0 ms per convolution); the slow plan's is
+`sm75_xmma_..._indexed_wo_smem_..._tilesize128x16x32_stage1` (~4.3 ms per convolution). Both are
+"fused" by name; only one has a tile worth having.
+
+**Method consequence, and it applies to every number this project has taken on a synthesized graph:**
+`__myl_` counts prove a fusion happened, not which patience it bought. A width or fusion A/B must print
+the conv tactic and the tile, and must be built more than once.
+
+### The build is bimodal: three rebuilds of one ONNX
+
+Same file (`ctrl_c32.onnx`), same builder, three consecutive builds:
+
+| trial | ms | fused | reformat | pointwise | plan size |
+|---|---|---|---|---|---|
+| 0 | 39.23 | 0 | 51 | 18 | 836 KB |
+| 1 | 39.29 | 0 | 51 | 18 | 789 KB |
+| 2 | **20.95** | 18 | 2 | 0 | 2.51 MB |
+
+Two slow draws and one fast one, from one file and one set of flags. The script is now
+`scripts/probe_build_stability.py` (`--trials N`, `--emit`); this table is what it printed before it was
+promoted from a `/tmp` one-off, so treat the three numbers as an observation with a reproducible
+command rather than as a claim with a record - the emitted records are the ones this session has not
+re-run. That is not a graph difference and
+it is not the builder *call* (B3 and the control differed in both, and the rebuilds differ in neither).
+
+This resolves the three-way conflict E30a's note recorded, rather than adjudicating it:
+
+- the ledger's "C=32 fuses and runs at 22.4-24.9 ms" is a **fast draw**;
+- E30a's measured 1.23x (40.60-41.37 ms, 0 myelin) is a **slow draw**;
+- B1's "C=32: 105 layers, 0 myelin, 50 reformat, 18 pointwise" is also a slow draw, and its conclusion
+  ("the break eats the MAC saving") describes a coin flip, not the width.
+
+The prize is therefore larger than any row claimed, and its size has to be read **inside this session**.
+The same probe at the same settings reads **46.80 ms at C=64** (three rounds within 0.11 ms, one
+tactic, 19 fused layers) and **23.51 ms at C=32**, so the ratio is **1.99x** - and 2.23x against the
+fastest C=32 draw seen (20.95 ms). What must not be quoted is 2.4-2.7x, which is 56.68 divided by a
+number measured in this session: this machine runs ~20% faster than the session that recorded 56.68
+(the protocol section documents up to 26% drift), and that quotient is the same class of error as the
+ten retractions. What stands between the ratio and a decision is not a kernel - it is **making the
+builder choose the fast draw on purpose**, which is what an editable timing cache, an algorithm
+selector, or simply N builds at build time can do.
+
+Two things this does *not* change. **E30b's closure stands**: a 32-channel body cannot represent the
+stack (14-37% per-layer residual, 1.58% of pixels over the bar), so a fast C=32 build is a faster way
+to a picture the bar rejects. And the **shipped C=64 build is unaffected**: three
+rebuilds of one ONNX landed at 44.91/45.04/44.98 ms with one tactic and 18 myelin layers every time,
+which is what a stable selection looks like - the 50.2-56.5 ms the ledger records for C=64 is the same
+stability in a slower session.
+
+Records: `docs/wsp/verified/prelu-forms.txt`.
+
 ## Open questions
 
 - ~~Is the film gate worth its quality cost?~~ **No, and the question is closed by the noise-floor

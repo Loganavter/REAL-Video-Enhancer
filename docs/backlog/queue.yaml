@@ -101,7 +101,9 @@ tasks:
     ms including its epilogue, i.e. 31.2 ms for the body alone, against a 26.9 ms
     compute floor at the 91 TFLOP/s the int8 conv reports. So a perfect plugin lands
     at 1.40x and the rest of the distance to 28.1 ms is GEMM efficiency, not epilogue.'
-  blocked_on: 'an int8 GEMM we control: the TRT python wheel ships no NvInfer.h, and
+  blocked_on: 'an int8 GEMM we control: the TRT python wheel ships no NvInfer.h (re-verified
+    2026-11-17 on the interpreter this repo uses: 0 NvInfer*.h under ~/.cache/opencode/venvs/trt310,
+    and no CUTLASS tree anywhere on the host - so a plugin means a hand-written CUDA kernel), and
     cuDNN''s fused activation takes a scalar slope, which the measured slopes (-1.39..1.70)
     rule out. Hand-written/CUTLASS conv = E10''s cost class.'
   note: 'E9'' closed the TRT path because the PReLU epilogue is a separate 1.8 ms
@@ -326,7 +328,12 @@ tasks:
     THIS note, not the ledger''s later row. Three positions, two of them measured,
     and the record does not carry the graph that fused at C=32. Until someone rebuilds
     that exact graph, quote the ceiling as 1.23x for a default build and 2.07-2.36x
-    only for the fused one, and say which.'
+    only for the fused one, and say which. CONFLICT RESOLVED 2026-11-17: it was not a graph,
+    a builder call or a width - three rebuilds of ONE onnx gave 39.23 / 39.29 / 20.95 ms (myelin
+    0/0/18), i.e. the build is bimodal. 1.23x is the slow draw; the fast one is 1.9-2.2x (44.98 ms at
+    C=64 against 20.95-23.24 at C=32, all four measured in one session - dividing by the recorded
+    56.68 ms would be a cross-session quotient), and the decision needs a deterministic builder
+    (timing cache / selector / N builds), not a narrower layer.'
 - id: rve-pruning-bounds-2026-11-15
   title: 'E30b (closed): channel cut - 32 cannot represent the stack, 48 buys nothing'
   type: code
@@ -627,11 +634,18 @@ tasks:
     ms), while C=48 and C=64 do. The ledger''s claim that C=32 fuses with an explicit
     workspace pool did not reproduce here, so this item now has a concrete first question:
     does any epilogue-capable tactic exist for C=32 at this K, and can an editable
-    timing cache select it?'
+    timing cache select it? STARTING POINT REPLACED 2026-11-17: the tactic exists, the builder finds
+    it on its own, and it is not deterministic. Three rebuilds of one ONNX gave 39.23 / 39.29 / 20.95
+    ms with 0/0/18 myelin layers (ledger B3 section), so the question is no longer "invent an
+    epilogue tactic" but "make the builder choose the fused graph on purpose" - (a) N builds at
+    engine-build time, keep the fastest (no TRT internals, ships as a build-time change), or (b) an
+    editable timing cache / selector pinned to
+    sm75_xmma_..._tilesize256x32x32_stage1_warpsize4x1x1. The acceptance above is ALREADY met by a
+    fast draw (20.95-23.24 ms = ~1.2-1.3 ms per conv); what is missing is repeatability.'
 - id: rve-prelu-rewrite-at-32-2026-11-15
   title: 'B3: reopen E17 at C=32 - a*x + (1-a)*ReLU(x) may fuse where PReLU does not'
   type: experiment
-  status: todo
+  status: done
   owner: null
   priority: P1
   gpu: true
@@ -645,6 +659,15 @@ tasks:
   - docs/RESEARCH-LEDGER.md
   owns_files:
   - scripts/probe_prelu_forms.py
+  resolution: 'answered 2026-11-17 (scripts/probe_prelu_forms.py, one session, interleaved, 1920x1080
+    fp16 opt5 iters8 8 GiB): the PReLU ALREADY FUSES at C=32 - 19 myelin layers, 2 reformat, 0
+    pointwise, 23.24 ms - so the item''s premise is false and the rewrite has nothing to fix. The
+    affine form also fuses (20 myelin, 1 reformat, 24.68 ms) and is 6% SLOWER; the scalar-slope
+    LeakyReLU is the form that breaks fusion (1 myelin, 3 pointwise, 26.72 ms), which matters for int8,
+    not for fp16. E17''s negative result therefore holds at 32 for the same reason as at 64. The
+    control (make_width_probe + build_plan, B1''s path) produced the same 19 myelin and 40.9-41.3 ms,
+    and three rebuilds of ONE onnx gave 39.23 / 39.29 / 20.95 ms - the C=32 build is bimodal and the
+    `__myl_` census does not discriminate; the conv tactic tile does. Ledger B3 section.'
   refutes: The rewrite fuses no better at 32 than PReLU does. Then the boundary needs
     the tactic (B2) or a kernel, and E17 stays closed for this shape too.
   acceptance: 'Same width, same builder, three forms of the same activation: PReLU,
@@ -684,7 +707,12 @@ tasks:
   acceptance: 'Per shot: 2-3 frames through both models, the existing worst-frame
     statistic, then the whole shot on the cheap model if it passes. Report the share
     of shots that pass and the wall-clock saving.'
-  note: 'Not retraining and not replacing the owner''s set - using it. The decision
+  note: 'BLOCKER CONFIRMED 2026-11-17: the collection this item names is not on this host - the
+    app''s custom_models holds 4 .pth files (Futsuu, SPAN, Archivist_AntiLines, realesr-animevideov3),
+    not 78. NARROWING available without it: the item''s core question ("can a cheap model serve a whole
+    shot under the bar?") needs TWO models, not 78 - SPAN against Futsuu on the remastering clips -
+    and that half is measurable here; the "route among 78" half is not. Not retraining and not
+    replacing the owner''s set - using it. The decision
     statistic already exists and the safe granularity is the shot, not the tile: a
     tile-level cascade was killed by seams, and a shot has one model throughout. Arithmetic
     on a tile version for scale: 1.147*(f + (1-f)*c); at f=0.3, c=0.25 that is 1.83x,
@@ -755,7 +783,11 @@ tasks:
     one cached reference, tile coherence is structural instead of bought with dilation,
     which currently removes 4x of the artefact at the cost of a third of the reuse.
     BLOCKER 2026-11-17: pipeline-level: reference selection lives in the app''s reuse
-    chain.'
+    chain. CODE STATE CHECKED 2026-11-17: the single-reference storage is visible in
+    backend/src/utils/TemporalReuse.py (`ReferenceFrameGate`, `decide_reference(delta, chain,
+    threshold, max_chain, ...)`), so the "window of length one" is a property of the storage as the
+    item says; what is missing is a live render to report reuse share against the recorded 146/220 at
+    6.61 s, and that is the supervisor''s live lane, not an offline probe.'
 - id: rve-strip-concurrency-2026-11-15
   title: 'C: horizontal strips on separate streams - hide the boundary instead of
     removing it'
@@ -1251,5 +1283,10 @@ tasks:
     a ''below''. Two decisions are open and named in the plan: the peak bar (20, not
     23 - 23 is the tile-reuse opt-in''s peak, an already-declined artifact) and the
     auto-decline length (recommended 2x break-even: 32 min now, 11 min after head+tail).
-    The brief''s ''~1.75x wall ceiling'' is withdrawn: at a 64.6% engine share it
+    STATE 2026-11-17: the app path is wired further than the plan''s note says - RenderVideo.py has
+    `_probe_int8_fit` (verdict taken once, before the first frame) and passes `int8Fit`/`int8Frames`
+    to the upscaler, so this lane is runnable here in principle. It still needs a live render (the
+    app, a 502-frame clip, NVENC) which is the supervisor''s live lane; the engine-side halves that do
+    not need the app are B2/E33 and they moved on 2026-11-17. The brief''s ''~1.75x wall ceiling'' is
+    withdrawn: at a 64.6% engine share it
     would need ~3x on the engine.'

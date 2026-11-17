@@ -31,6 +31,18 @@ PYTHONPATH=scripts python3 -m harness.astcheck scripts/harness/*.py       # dead
 python3 -m pytest backend/tests/test_harness_evidence.py -q
 ```
 
+Checking the whole verified corpus at once (each file pairs with `records/<name>.jsonl`, and the
+`--bars` flag matters: two files were failing their own documented command because it omitted it, and
+two more cited a `/tmp` records path that a reboot would have taken):
+
+```
+for t in docs/wsp/verified/*.txt; do
+  b=$(basename "$t" .txt); printf '%-18s ' "$b"
+  PYTHONPATH=scripts python3 -m harness.cli check "$t" \
+      --records "docs/wsp/verified/records/$b.jsonl" --bars docs/claims-bars.json | sed -n 2p
+done
+```
+
 `env-check` is the newest piece and it earned its place the hard way: an audit found three documents
 asserting things about this host that were no longer true (ncu blocked, no TensorRT, a bundled  <!-- env-ok: describes the past -->
 interpreter that does not exist). A claim about the machine is checkable, so it is checked: the tool

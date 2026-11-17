@@ -1,6 +1,6 @@
 # Model-level facts, re-derived 2026-11-16 from the public checkpoint with torch.
 # Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/model-prelu.txt \
-#        --records /tmp/opencode/records-model.jsonl --bars docs/claims-bars.json
+#        --records docs/wsp/verified/records/model-prelu.jsonl --bars docs/claims-bars.json
 #
 # The int8 lane (E9') rests on one measured property: the 1088 per-channel PReLU slopes span
 # -1.39..1.70 with a per-node coefficient of variation above 1, so no scalar stands in for them.

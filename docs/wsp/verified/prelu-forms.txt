@@ -1,0 +1,33 @@
+# Three activation forms at C=32, and the C=64 control (B3)
+
+Measured 2026-11-17, one session, interleaved rounds, `scripts/probe_prelu_forms.py`, 1920x1080 fp16
+opt 5 avg_timing_iters 8 workspace 8 GiB, 16-block body, synthesized random weights (tactics depend on
+shapes, not values - the same trick E30a used).
+
+| form | fused `__myl_` | reformat | pointwise | ms/frame |
+|---|---|---|---|---|
+| PReLU (what ships) | 19 | 2 | 0 | 23.51 |
+| `a*x + (1-a)*relu(x)` | 20 | 1 | 0 | 25.06 |
+| LeakyReLU, scalar slope | 1 | 3 | 5 | 26.89 |
+
+The item's premise ("the PReLU does not fuse at 32") is false in this graph: it fuses, and the rewrite
+that was supposed to fix it is 6% slower. The scalar-slope form is the one that breaks fusion, which is
+a result about int8 epilogues, not about fp16.
+
+The C=64 control is the same probe at the same settings in the same session: **46.80 ms**, 19 fused
+layers, one tactic, three rounds within 0.11 ms of each other. The same-session ratio is therefore
+**46.80 / 23.51 = 1.99x**, which is the number to quote - dividing by the ledger's recorded 56.68 ms
+would be a cross-session quotient.
+
+The C=32 build is **bimodal**: three rebuilds of one ONNX gave 39.23 / 39.29 / 20.95 ms with 0/0/18
+fused layers (ledger B3 section; reproducible with `scripts/probe_build_stability.py --trials 3`). The
+19-fused census does not discriminate - the conv tactic tile does, and the fast draw is the one with
+`..._tilesize256x32x32_stage1_...`.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/prelu-forms.txt \
+       --records docs/wsp/verified/records/prelu-forms.jsonl --bars docs/claims-bars.json
+
+@claim R001 23.51 ms "bench rounds [ccf46a14a09fc984] n=3" measured
+@claim R002 25.06 ms "bench rounds [ccf46a14a09fc984] n=3" measured
+@claim R003 26.89 ms "bench rounds [ccf46a14a09fc984] n=3" measured
+@claim R004 46.8 ms "bench rounds [ccf46a14a09fc984] n=3" measured

@@ -9,6 +9,9 @@
 # The recorded 1.91-1.93 ms is 3-7% slower than today's session, which is the drift this machine
 # shows between sessions; the shape of the claim survives.
 
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-block.txt \
+       --records docs/wsp/verified/records/int8-block.jsonl --bars docs/claims-bars.json
+
 @claim R001 1.84 ms "int8 block launch [ea432364037f4b16] n=3" measured
 @claim R002 83.1 TOPS "int8 block launch [ea432364037f4b16] n=3" measured
 
