@@ -215,40 +215,41 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         # 2, exactly as in `comp` and `comp2`, so only the renderer changes. If the gate's own reference
         # already reads ~0.2% two steps out, the blocker is the gate's certification (E25's depth model),
         # not the quantisation - and no int8 work moves it.
-        # It is also the population the gate stores: fp16 arithmetic on the ORIGINAL weights. `_calibrate`
-        # loads int8-rounded weights into `model`, so `ref` below is fp16 on quantised weights.
-        # One pair at a time: a full copy of every output is ~200 MB per 4K triple, and holding it for
-        # the whole sample is what made the spread sample unreachable (see the note on the loop below).
-        stale1, stale2 = [], []
-        with torch.no_grad():
-            for i in sorted(set(reused) | set(reused2)):
-                outs = [model(f).float() for f in frames_all[i]]
-                if i in reused:
-                    stale1.append(_statistic(outs[1], outs[0])[0])
-                if i in reused2:
-                    stale2.append(_statistic(outs[2], outs[0])[0])
-                del outs
-        stale1_worst = max(stale1, default=float("nan"))
-        stale2_worst = max(stale2, default=float("nan"))
+        #
+        # `ref` below is the fp16 model, and `_calibrate` MUTATES `model` into the quantised one, so the
+        # original weights are kept aside and the quantised copy goes into a second module. Computing
+        # `ref` after `_calibrate` (the previous order) made the reference fp16 arithmetic on
+        # int8-rounded weights: peak 4 levels, 0.00000% above 8, not bit-identical - below the bar, but
+        # the reference was not what it is labelled, and a 4-level error against defects clustered at
+        # 8-16 levels is exactly the sensitive regime for a threshold of 8.
+        import copy as _copy
 
+        orig_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         inputs, outputs = _calibrate(model, [f for i in calib_idx for f in frames_all[i]])
         inputs["body.0"] = (0.0, 1.0)      # the head's input range is the clamp's own, not a measurement
-        # One pair at a time, and the three statistics are taken inside the loop: holding `ref` and `got`
-        # for every pair cost ~200 MB per decoded triple at 4K, so a 16-triple sample already sat at
-        # 11.2 GiB and a 32-triple one OOMed. The protocol's spread sample (13-19) was unreachable for
-        # that reason alone, not for want of a GPU.
-        engine, comp, comp2 = [], [], []
+        model_q = _copy.deepcopy(model)    # the quantised twin: `got` must use these weights
+        model.load_state_dict(orig_state)  # and `ref` must be the fp16 model, not fp16 on int8 weights
+
+        # One pair at a time, and every statistic - including the fp16 control - is taken inside the
+        # loop: holding `ref` and `got` for every pair cost ~200 MB per decoded triple at 4K, so a
+        # 16-triple sample already sat at 11.2 GiB and a 32-triple one OOMed. The protocol's spread
+        # sample (13-19) was unreachable for that reason alone, not for want of a GPU.
+        engine, comp, comp2, stale1, stale2 = [], [], [], [], []
         with torch.no_grad():
             for i, pair in enumerate(frames_all):
                 outs_ref = [model(f).float() for f in pair]
-                outs_got = [_quantised_forward(model, f, inputs, outputs).float() for f in pair]
+                outs_got = [_quantised_forward(model_q, f, inputs, outputs).float() for f in pair]
                 if i in test_idx:
                     engine.append(_statistic(outs_ref[1], outs_got[1]))
                 if i in reused:
                     comp.append(_statistic(outs_ref[1], outs_got[0]))
+                    stale1.append(_statistic(outs_ref[1], outs_ref[0])[0])
                 if i in reused2:
                     comp2.append(_statistic(outs_ref[2], outs_got[0]))
+                    stale2.append(_statistic(outs_ref[2], outs_ref[0])[0])
                 del outs_ref, outs_got
+        stale1_worst = max(stale1, default=float("nan"))
+        stale2_worst = max(stale2, default=float("nan"))
         if not engine:
             return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "no test pairs", error="no test pairs")
         engine_worst = max(s for s, _ in engine)
