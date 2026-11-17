@@ -245,8 +245,10 @@
     saturated white region shifted 8-14 levels: its LR max delta is 5.25 and not one LR pixel moves by
     more than 8, and every bad pixel sits at 252/255 - so no LR statistic can see it and its visibility
     is doubtful. Whether 8-14 levels at 252 counts is an owner decision, and the 18 frames have not been
-    looked at. Separately, whether the 8 s shipping numbers under-sampled the same way is unmeasured:
-    their renders no longer exist and would have to be re-made and swept in full.
+    looked at. The 8 s shipping numbers are NOT under-sampled: re-made and swept in full they read
+    0.00274% and 0.04989% with zero frames above the bar (eight-second-sweep), so this failure is the
+    content of this segment - 20.8% reuse at a noise floor of 0.66 against 66% at 0.95 - and no sample
+    size inside a calm cut would have shown it.
 
 - id: b3-prelu-forms
   lane: engine
