@@ -32,7 +32,7 @@ python3 -m pytest backend/tests/test_harness_evidence.py -q
 ```
 
 `env-check` is the newest piece and it earned its place the hard way: an audit found three documents
-asserting things about this host that were no longer true (ncu blocked, no TensorRT, a bundled
+asserting things about this host that were no longer true (ncu blocked, no TensorRT, a bundled  <!-- env-ok: describes the past -->
 interpreter that does not exist). A claim about the machine is checkable, so it is checked: the tool
 reads `/proc` and the installed versions, greps the docs, and fails on a contradiction. A line that
 *quotes* an old claim marks itself `<!-- env-ok -->`, and `AUDIT-*` reports are skipped.
