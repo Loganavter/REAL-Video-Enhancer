@@ -192,7 +192,12 @@ tasks:
     (int8 is 1.7x the fp16 conv while moving the same bytes). RUNNABLE NOW 2026-11-17:
     TensorRT 10.12.0.36 and torch are installed and the harness can time and profile
     a plan end to end (scripts/build_plan.py, scripts/bench_plan.py, scripts/make_width_probe.py).
-    No environment blocker.'
+    No environment blocker. STARTING POINT 2026-11-17 (scripts/probe_int8_tactics.py on the 2026-11-16
+    plan): 67.67 ms/frame, 84 layers, 1 myelin, 22 reformat, 19 pointwise - and the per-conv rate is a
+    median 79.2 TOPS (min 76.2, max 119.7 over 18 conv layers), NOT the 91 this item and E27 assume. At
+    79 the 16-conv floor is 30.9 ms, so the gap to close is a 1.5x on the GEMM. COST REVISED: each
+    configuration now needs >=3 builds to be comparable (the C=32 build is bimodal, ledger B3), so the
+    sweep is more than the 1-2 d this row estimated.'
 - id: rve-welder-onnx-2026-11-15
   title: 'E28: run Welder on our ONNX and compare against the TRT engine'
   type: experiment
@@ -588,7 +593,7 @@ tasks:
   title: 'B2: force the epilogue-capable tactic at C=32 (editable timing cache / algorithm
     selector)'
   type: experiment
-  status: todo
+  status: dropped
   owner: null
   priority: P0
   gpu: true
@@ -603,6 +608,16 @@ tasks:
   - docs/RESEARCH-LEDGER.md
   owns_files:
   - scripts/force_tactic.py
+  resolution: 'closed 2026-11-17 by the premise dissolving, not by a failed method: the epilogue-
+    capable tactic at C=32 EXISTS and the default builder finds it on its own about one build in
+    three (39.23 / 39.29 / 20.95 ms from one ONNX, 0/0/18 fused layers - ledger B3), so there was
+    never a tactic to force. What is left of the item is repeatability, and it has no path to value:
+    the fused C=32 draw is 20.95-23.51 ms, but C=32 cannot represent the stack (E30b: 14-37% per-layer
+    residual, 1.58% of pixels over the bar), and the shipped C=64 configuration is stable across three
+    builds of the real checkpoint (48.40-51.39 ms, 19-20 myelin every time). A deterministic fast draw
+    at a width the picture rejects is worth nothing. Kept as a row because the mechanism is the useful
+    part: any future build that lands outside drift of its siblings should be re-built rather than
+    believed. scripts/probe_build_stability.py is the instrument.'
   refutes: No tactic in the epilogue-capable family can be built for C=32 - then the
     width genuinely needs a kernel of our own with a 32-wide N tile, and the prize
     moves to E27.
@@ -792,7 +807,7 @@ tasks:
   title: 'C: horizontal strips on separate streams - hide the boundary instead of
     removing it'
   type: experiment
-  status: todo
+  status: dropped
   owner: null
   priority: P2
   gpu: true
@@ -807,6 +822,14 @@ tasks:
   - docs/RESEARCH-LEDGER.md
   owns_files:
   - scripts/probe_strips.py
+  resolution: 'closed 2026-11-17 by measurement, and by its own refutes clause: two independent
+    contexts of one plan, on two streams, buy NOTHING - per-frame time is 1.001x the serial time on
+    both a split plan (87.9 ms) and a fused one (54.0 ms), three interleaved rounds each, with SM at
+    100.0% and 155-162 W of the 165 W cap throughout. The card is power-limited at full occupancy, so
+    there is no second lane for a strip to run in, and the halo tax (1.067x at two strips) is never
+    outweighed. No strip geometry needed building. Ledger C section; instrument:
+    scripts/probe_strips.py (wall clock around one synchronize - the first version timed the host by
+    recording events outside the stream and reported 0.1 ms for a 50 ms plan).'
   refutes: 'Two independent streams do not overlap on this GPU: the frame time does
     not improve past the halo tax (2 strips 1.067x, 3 strips 1.10x, 4 strips 1.133x).
     ncu counters would say in advance whether anything is there to hide, and they

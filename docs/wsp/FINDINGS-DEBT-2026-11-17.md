@@ -22,7 +22,7 @@ Nothing about that changed today, and nothing about it *can* change by translati
 name (`ratio_idle`, `body_vs_app`, `engine_idle_ms`) corresponds to no surviving record, so protecting
 it means re-measuring it, not renaming it.
 
-## What the harness does protect: ten files, all green
+## What the harness does protect: thirteen files, all green
 
 `docs/wsp/verified/*.txt` + `records/*.jsonl`, checked in one loop (see `README.md`):
 
@@ -38,6 +38,9 @@ it means re-measuring it, not renaming it.
 | residual-scale-ve | 6 | PASS |
 | pyramid-budget (new) | 8 | PASS |
 | cone-budget (new) | 17 | PASS |
+| prelu-forms (new) | 4 | PASS |
+| int8-tactics (new) | 2 | PASS |
+| streams (new) | 2 | PASS |
 
 Two of these were failing their **own documented command** until today, and both failures were
 documentation, not measurement: `int8-block.txt` had no run line at all, and `model-prelu.txt` plus
@@ -51,6 +54,8 @@ loss that took the Lean toolchain this week. Every run line now names the commit
 - **E36** - the cone/cylinder work ratio with its 1-D control (`cone-budget.txt`).
 - **B3** - the three activation forms at C=32, plus the discovery that the C=32 build is bimodal
   (`prelu-forms.txt`, and the ledger's B3 section for the rebuild evidence).
+- **E33 (first pass)** - the int8 body's per-convolution rate is 79.2 TOPS, not 91 (`int8-tactics.txt`).
+- **C (strips)** - two streams buy 1.00x of throughput, so the halo tax is unpayable (`streams.txt`).
 
 ## Accepted debt, by reason
 

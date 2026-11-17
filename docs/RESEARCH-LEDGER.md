@@ -2478,12 +2478,82 @@ selector, or simply N builds at build time can do.
 
 Two things this does *not* change. **E30b's closure stands**: a 32-channel body cannot represent the
 stack (14-37% per-layer residual, 1.58% of pixels over the bar), so a fast C=32 build is a faster way
-to a picture the bar rejects. And the **shipped C=64 build is unaffected**: three
-rebuilds of one ONNX landed at 44.91/45.04/44.98 ms with one tactic and 18 myelin layers every time,
-which is what a stable selection looks like - the 50.2-56.5 ms the ledger records for C=64 is the same
-stability in a slower session.
+to a picture the bar rejects. And the **shipped configuration is unaffected**, which was checked on the real checkpoint rather than
+on a probe: three builds of `2x-Futsuu-Anime(1).pth` through `scripts/build_plan.py` at 1920x1080 read
+**50.99/51.38, 51.39/51.16 and 48.40/48.45 ms**, every one fused (19-20 myelin, 1-2 reformat, 0
+pointwise). The probe at the same width lands in the same place (44.91/45.04/44.98, one tactic, three
+times). So the bimodality is a narrow-width effect: at C=32 the N tile is half-empty and two tactics
+are close enough for timing noise to decide; at C=64 one is clearly better.
+
+One artifact deserves naming because it looks like a contradiction and is not: the fp16 plan left in
+`/tmp` from 2026-11-16 measures **87.35 ms with 0 myelin, 54 reformat, 19 pointwise** in this session,
+i.e. a *split* build of the real model. Its build command was never recorded, so it is a class-5
+artifact (a plan whose config nobody wrote down), not evidence that the shipped graph also flips.
 
 Records: `docs/wsp/verified/prelu-forms.txt`.
+
+## E33 first pass: the int8 body runs at 79 TOPS, below the 91 the item quotes (measured 2026-11-17)
+
+`scripts/probe_int8_tactics.py` on the int8 plan left from the 2026-11-16 lane
+(`c2x_int8_fp16heads.plan`), same session, 20 executions x 3 rounds:
+
+| | here | the record |
+|---|---|---|
+| frame | **67.67 ms** (67.70 / 67.65 / 67.69) | 64.3-70.4 ms, `engine-int8.txt` |
+| layers | **84**, 1 myelin, **22 reformat**, **19 pointwise** | 84, 19-22 reformat, 19 PointWise |
+| per-conv rate | median **79.2 TOPS**, min 76.2, max **119.7**, 18 conv layers | "91 TOPS" |
+
+The reproduction of the shape and the time is exact, which is what makes the third row readable: the
+convolutions are at **79 TOPS**, ~13% under the 91 the queue and E27's arithmetic both rest on. At 79
+the 16-conv body floor is **30.9 ms**, not 26.9; at the 119.7 the fastest single layer reaches it would
+be 20.4. So the gap E33 exists to close is a 1.5x on the GEMM, and the honest ceiling below it is
+~1.5x, not the 1.6x the item wrote.
+
+One instrument lesson, earned by the first run of this probe: the filter that computed per-layer rates
+excluded only `Reformat`, so the int8 PReLU passes and fused arithmetic layers went into the same list
+and one pointwise layer read **26,886 TOPS**. A pointwise layer does not have the convolution's FLOPs,
+so it cannot be divided by them; the filter now requires a conv name and excludes `PWN`/`PointWise`/
+`Cast`/`MoveAdd`/`Reformat`.
+
+What this does **not** answer: whether a tiling level or tactic source raises 79 above 120 - the sweep
+needs one build per configuration, and after the B3 finding each configuration needs at least three
+builds before it can be compared. The item's 1-2 day estimate was written for one build per point.
+
+Records: `docs/wsp/verified/int8-tactics.txt`.
+
+## C: two streams do not overlap on this card, so the strips idea dies before its halo tax (measured 2026-11-17)
+
+The proposal was to cut the frame into horizontal strips, give each strip its own context and stream,
+and hide the boundary behind concurrency. The halo tax is arithmetic (2 strips 1.067x, 3 strips 1.10x,
+4 strips 1.133x more work), so the idea needs the second stream to buy more than that. It buys nothing.
+
+Protocol: the same plan bytes deserialized into independent engines with independent contexts, one
+stream each; both enqueue N executions, one synchronize; the number is wall time over completed
+executions, i.e. ms per frame through that many streams. Three interleaved rounds:
+
+| plan | 1 context | 2 contexts, serial | 2 contexts, concurrent | ratio |
+|---|---|---|---|---|
+| split fp16 (111 layers, 87 ms) | 87.87 | 87.61-87.82 | 87.36-87.86 | **1.001x** |
+| fused fp16 (24 layers, 54 ms) | 53.76-53.98 | 53.87-54.06 | 53.93-54.06 | **1.001x** |
+
+A ratio of 1.00 means the pair takes twice as long as one frame: **zero overlap**. (0.50 would be
+perfect overlap.) Sampled during the concurrent rounds: SM utilisation 100.0% and 155-162 W against the
+card's 165 W cap, in every round - which is the mechanism, not a coincidence: an execution here is
+power-limited at full SM occupancy, so there is no second lane for a strip to run in.
+
+**The refutes clause fires**: "two independent streams do not overlap on this GPU" - measured, on both a
+split and a fused plan, and the halo tax (1.067x at two strips) is never reached because the second
+stream contributes 1.00x. The item closes by refutation; no strip geometry needs building.
+
+Two instrument notes, because the first two runs of this probe produced believable nonsense. (1) The
+contexts' input/output tensors were local to the bind function and were garbage-collected on return,
+leaving dangling addresses - the engine then "executed" a 50 ms plan in 0.07 ms. (2) CUDA events were
+recorded outside the stream context, so they landed on the default stream and timed the host, not the
+work. Both fixes are in `scripts/probe_strips.py`; the wall-clock-over-synchronize instrument it now
+uses reads 53.9 ms where `bench_plan.py`'s events read 51.0 ms on the same plan, i.e. ~6% higher, and
+that is the enqueue overhead, not a second measurement of the frame.
+
+Records: `docs/wsp/verified/streams.txt`.
 
 ## Open questions
 

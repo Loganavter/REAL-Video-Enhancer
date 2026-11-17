@@ -10,8 +10,12 @@ two executions actually overlap. That is the refutes clause in the queue and it 
   than twice the time.
 
 Timing protocol: the same plan bytes deserialized into two independent engines, each with its own
-context, on two streams. Both streams enqueue N executions, then one synchronize. The ratio
-`concurrent / serial` is 1.0 for perfect overlap and 2.0 for none. Interleaved rounds.
+context, on two streams. Both streams enqueue N executions, then one synchronize; the reported number is
+wall time divided by the executions that completed, so it is "ms per frame through this many streams".
+
+Read the ratio as **work per unit time**, not as a fraction: `concurrent / serial` of 1.00 means the
+second stream bought nothing (the pair takes twice as long as one), 0.50 would be perfect overlap (two
+frames in the time of one). Interleaved rounds.
 
 Usage (one GPU job at a time):
   flock -n /var/tmp/opencode/gpu.lock ~/.cache/opencode/venvs/trt310/bin/python \
@@ -37,8 +41,16 @@ def load_engine(plan_path: str):
 
 
 def bind(engine, h: int, w: int):
+    """Context plus its BUFFERS, returned together.
+
+    The first version returned only the context: the tensors were local, Python freed them on return,
+    and the addresses set on the context dangled. The engine then "executed" in 0.17 ms - a number that
+    looks like perfect overlap and is actually nothing running. Hold the buffers for as long as the
+    context lives.
+    """
     import tensorrt as trt
     ctx = engine.create_execution_context()
+    buffers = []
     for i in range(engine.num_io_tensors):
         n = engine.get_tensor_name(i)
         dt = engine.get_tensor_dtype(n)
@@ -46,7 +58,8 @@ def bind(engine, h: int, w: int):
                trt.DataType.FLOAT: torch.float32}.get(dt, torch.float32)
         t = torch.zeros(tuple(engine.get_tensor_shape(n)), dtype=tdt, device="cuda")
         ctx.set_tensor_address(n, t.data_ptr())
-    return ctx
+        buffers.append(t)
+    return ctx, buffers
 
 
 class Sampler(threading.Thread):
@@ -71,35 +84,37 @@ class Sampler(threading.Thread):
             time.sleep(0.2)
 
 
+# Instrument note: an earlier version recorded CUDA events OUTSIDE the stream context, so the events
+# landed on the default stream while the work ran on another one - and reported 0.1 ms for a 50 ms
+# plan. Wall clock around a device synchronize cannot make that mistake, and at 50 ms the host-side
+# enqueue cost is ~0.1% of what is being measured. The record says "wall clock" for that reason.
 def time_serial(ctxs, streams, iters: int) -> float:
     with torch.cuda.stream(streams[0]):
-        for _ in range(6):
-            ctxs[0].execute_async_v3(streams[0].cuda_stream)
-        for ctx in ctxs[1:]:
+        for ctx in ctxs:
             for _ in range(6):
                 ctx.execute_async_v3(streams[0].cuda_stream)
     torch.cuda.synchronize()
-    s, e = torch.cuda.Event(True), torch.cuda.Event(True)
-    s.record()
-    for ctx in ctxs:
-        for _ in range(iters):
+    t0 = time.perf_counter()
+    for _ in range(iters):
+        for ctx in ctxs:
             ctx.execute_async_v3(streams[0].cuda_stream)
-    e.record()
     torch.cuda.synchronize()
-    return s.elapsed_time(e) / (iters * len(ctxs))
+    return (time.perf_counter() - t0) * 1e3 / (iters * len(ctxs))
 
 
 def time_concurrent(ctxs, streams, iters: int) -> float:
-    torch.cuda.synchronize()
-    s, e = torch.cuda.Event(True), torch.cuda.Event(True)
-    s.record()
     for ctx, stream in zip(ctxs, streams):
         with torch.cuda.stream(stream):
-            for _ in range(iters):
+            for _ in range(6):
                 ctx.execute_async_v3(stream.cuda_stream)
-    e.record()
     torch.cuda.synchronize()
-    return s.elapsed_time(e) / (iters * len(ctxs))
+    t0 = time.perf_counter()
+    for _ in range(iters):
+        for ctx, stream in zip(ctxs, streams):
+            with torch.cuda.stream(stream):
+                ctx.execute_async_v3(stream.cuda_stream)
+    torch.cuda.synchronize()
+    return (time.perf_counter() - t0) * 1e3 / (iters * len(ctxs))
 
 
 def main() -> int:
@@ -117,7 +132,9 @@ def main() -> int:
     engines = [load_engine(args.plan) for _ in range(args.contexts)]
     if any(e is None for e in engines):
         raise SystemExit(f"{args.plan}: the runtime refused the plan")
-    ctxs = [bind(e, args.height, args.width) for e in engines]
+    bound = [bind(e, args.height, args.width) for e in engines]
+    ctxs = [b[0] for b in bound]
+    _keep = [b[1] for b in bound]      # buffers must outlive the contexts; see bind()
     streams = [torch.cuda.Stream() for _ in range(args.contexts)]
 
     print(f"{args.plan}: {engines[0].num_layers} layers, {args.contexts} independent engines/contexts, "
@@ -145,10 +162,10 @@ def main() -> int:
     s_med = statistics.median(serial[1:]) if len(serial) > 1 else serial[0]
     c_med = statistics.median(concurrent[1:]) if len(concurrent) > 1 else concurrent[0]
     ratio = c_med / s_med
-    print(f"\nconcurrent/serial per-context time = {ratio:.3f}x "
-          f"(1.00 = perfect overlap, 2.00 = none)")
-    print(f"throughput gain from the second stream = {1.0 / ratio:.2f}x  "
-          f"(the strips proposal needs this to exceed the halo tax)")
+    print(f"\nconcurrent/serial time per frame = {ratio:.3f}x "
+          f"(1.00 = NO overlap, 0.50 = perfect overlap)")
+    print(f"throughput gain from the extra stream(s) = {1.0 / ratio:.2f}x  "
+          f"(the strips proposal needs this to exceed the halo tax: 1.067x at 2 strips, 1.10x at 3)")
     print("\nNOT checked: the strip geometry itself (needs plans built at the strip height and the "
           "halo tax paid); the picture; whether the app's writer can consume two streams")
 
@@ -161,8 +178,8 @@ def main() -> int:
                             label=f"{args.contexts} independent contexts of one plan, "
                                   f"{args.width}x{args.height}, no encoder")
         store.emit(Record(value=round(ratio, 3), unit="x", statistic="median", population=pop,
-                          instrument="torch.cuda.Event around N executions per stream, one "
-                                     "synchronize, one GPU job at a time",
+                          instrument="wall clock around one device synchronize, N executions per "
+                                     "stream, one GPU job at a time",
                           config=f"trt {trt.__version__}, {torch.cuda.get_device_name(0)}, "
                                  f"{args.contexts} engines from one plan, {args.width}x{args.height}, "
                                  f"iters {args.iters}",

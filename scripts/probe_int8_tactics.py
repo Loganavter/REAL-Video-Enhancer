@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import json
 import os
 import statistics
@@ -130,9 +131,19 @@ def measure(plan_path: str, w: int, h: int, iters: int = 20, rounds: int = 3) ->
             "sha256": hashlib.sha256(open(plan_path, "rb").read()).hexdigest()}
 
 
+CONV_RX = re.compile(r"conv2d_\d+|/conv/Conv|_conv_|Conv2d", re.I)
+NON_CONV_RX = re.compile(r"PWN|PointWise|Reformat|MaxMin|Cast|TranResh|MoveAdd|Slice|Concat", re.I)
+
+
 def conv_rate(name: str, ms: float, w: int, h: int) -> float | None:
-    """TOPS of one layer, if it is a 64->64 3x3 convolution at frame size."""
-    if not ms or "Reformat" in name:
+    """TOPS of one layer, only if the layer IS a 64->64 3x3 convolution at frame size.
+
+    The first version of this filter only excluded Reformat, which put the int8 PReLU passes and fused
+    arithmetic layers on the same list and produced 26886 TOPS from a pointwise pass - a wrong number
+    that looked like a finding. A pointwise layer does not have the conv's FLOPs, so it cannot be
+    divided by them.
+    """
+    if not ms or NON_CONV_RX.search(name) or not CONV_RX.search(name):
         return None
     return 2.0 * 64 * 64 * 9 * w * h / (ms * 1e-3) / 1e12
 

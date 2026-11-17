@@ -1,0 +1,20 @@
+# The int8 body's per-convolution rate (E33, first pass)
+
+Measured 2026-11-17 with `scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
+(`c2x_int8_fp16heads.plan`), same session, 20 executions x 3 rounds, `trt.IProfiler` for the per-layer
+times.
+
+The reproduction is exact: 67.67 ms against the recorded 64.3-70.4, 84 layers, 22 reformat and 19
+PointWise against the recorded 19-22 and 19. What the per-layer split adds is the third number: the
+convolutions run at a **median 79.2 TOPS** (min 76.2, max 119.7 across 18 conv layers), not the 91 the
+queue's ceiling arithmetic assumes. At 79 TOPS the 16-conv body floor is 30.9 ms instead of 26.9.
+
+Not answered by this file: whether any tiling level or tactic source raises it - that is a build per
+configuration, and each configuration now needs >=3 builds (the C=32 build is bimodal, see
+`prelu-forms.txt`).
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tactics.txt \
+       --records docs/wsp/verified/records/int8-tactics.jsonl --bars docs/claims-bars.json
+
+@claim R001 67.67 ms "plan repeats [826cec6405e36217] n=3" measured
+@claim R002 79.2 TOPS "body convolutions [68e9d0cf981c5027] n=18" measured
