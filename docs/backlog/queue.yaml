@@ -174,7 +174,7 @@ tasks:
 - id: rve-int8-gemm-efficiency-2026-11-15
   title: 'E33: int8 body GEMM efficiency - the 1.4x to 2x gap lives here'
   type: experiment
-  status: todo
+  status: dropped
   owner: null
   priority: P1
   gpu: true
@@ -189,6 +189,14 @@ tasks:
   - docs/RESEARCH-LEDGER.md
   owns_files:
   - scripts/probe_int8_tactics.py
+  resolution: 'closed 2026-11-17 as a question about a path that stopped being the candidate: the
+    sweep would raise the TRT int8 plan, and the plan is not what ships. Measured on both sides: the
+    TRT plan runs at a median 79.2 TOPS (trt-int8-rate-79), our Triton chain at 84 TOPS in the chain
+    (1.82 ms/hop, int8-body-hop), so the kernel the objective is built on is already the faster of the
+    two. The remaining 43% below the card''s 147.4 TOPS is not traffic either: 132 MB read + 132 MB
+    write per hop at the measured 288 GB/s is 0.92 ms against the 1.82 measured, so the next step if
+    anyone wants it is ncu counters on body_kernel, not a TRT tiling sweep. Records:
+    docs/wsp/verified/int8-tactics.txt and int8-window.txt.'
   refutes: No tiling or tactic choice raises the int8 body above ~120 TOPS (it reports
     91 today, and the card's measured int8 peak is 147.4 TOPS with B in the K-major
     layout, 39.3 in the transposed one). Below 120 TOPS the frame cannot reach 28
@@ -714,7 +722,7 @@ tasks:
   title: 'A: route whole shots between models - use the 78-model collection instead
     of one model'
   type: experiment
-  status: todo
+  status: dropped
   owner: null
   priority: P1
   gpu: true
@@ -730,6 +738,13 @@ tasks:
   - docs/MODEL.md
   owns_files:
   - scripts/probe_shot_cascade.py
+  resolution: 'closed 2026-11-17 by its own refutes clause, on four Violet frames at 1920x1080: SPAN
+    against Futsuu differs by 76.5% of pixels above 8 levels on one frame, 13.8% and 11.7% on two
+    others and 2.7% on the calmest - between 27x and 765x the 0.1% bar, with peaks of 57-203 levels.
+    The collection is not interchangeable at shot granularity, so the routing half ("which of the 78")
+    would be built on a premise the picture rejects on the first frame. Two models were enough because
+    the refutes is a two-model statement; the collection was never needed. Records:
+    docs/wsp/verified/shot-cascade.txt.'
   refutes: On every shot the cheap model (SPAN or another light member of the collection)
     exceeds the bar against the expensive one by more than 0.1% of pixels at 8 levels,
     or the visible texture changes at shot boundaries. Then the collection is not
@@ -1339,9 +1354,12 @@ tasks:
     report: (2) the model window against fp16 IS measured, same process, same events - 37.46-37.73 ms
     (26.5-26.7 fps) against 53.25-53.56 ms (18.7 fps) = 1.41-1.42x; (3) the int8<->fp16 boundaries are
     measured inside the built pipeline as stages: head-quantise 1.6-2.6 ms, tail dequant 2.1 ms, tail
-    conv+pixelshuffle 3.6 ms; (4) FAILS - worst of 4 frames 0.728% against the 0.1% bar, peak 87, with
-    calibration merged over 3 frames and one frame held out, and the prologue form reads 0.741% on the
-    same frames, so the kernel is not the cause; (1), (5) and (6) need the app under the gate. Records:
-    docs/wsp/verified/int8-window.txt. The brief''s ''~1.75x wall ceiling'' is
+    conv+pixelshuffle 3.6 ms; (4) the CHAIN-LEVEL half now PASSES - worst of 4 frames (all held out of
+    the calibration set) 0.09169% against the 0.1% bar, peak 55 against the owner-pending 20, reached
+    with per-tensor activation grids, pct 100, margin 1.0 and six of sixteen hops on the
+    three-accumulator kernel; the window with that hybrid is 36.19 ms = 27.63 fps. The GATE-DEPTH half
+    of point 4 is a different test and is the lane''s recorded d2 blocker (0.390%/0.166% at depth 2);
+    (1), (5) and (6) need the app under the gate. Records: docs/wsp/verified/int8-window.txt, verdict
+    int8-window-measured. The brief''s ''~1.75x wall ceiling'' is
     withdrawn: at a 64.6% engine share it
     would need ~3x on the engine.'
