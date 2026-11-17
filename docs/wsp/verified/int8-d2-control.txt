@@ -25,6 +25,9 @@ reference is now taken from the original weights before `_calibrate` runs.
 
 ## The product's sample: 16 triples, 8 test pairs, 2-6 of them at depth 2
 
+Label convention for every table here: `frames=N` counts decoded TRIPLES, the test pairs are every other
+triple (`N/2`), and the depth-2 subset is smaller still. So 16 triples = 8 test pairs, 24 = 12, 32 = 16.
+
 `RenderVideo._probe_int8_fit` calls `probe(...)` with the default `frames=16`.
 
 | clip | d2 int8 | d2 fp16 | fp16 share of d2 | d1 int8 | d1 fp16 | verdict |

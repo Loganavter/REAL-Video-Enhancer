@@ -247,9 +247,12 @@
     motion the block mean does not see, not motion. A threshold of 3.0, forced and measured on the
     product, removes 12 of the 18 for 18.3% reuse (against 20.8%) - 48.85 ms against 47.58 ms, +2.7% of
     the wall - and all 12 dropped reuses were defective frames - no good frame lost. It does NOT
-    unblock int8: the probe's depth-2 number on Chainsaw is 0.2177% at gate thresholds 3.0, 4.0 and
-    5.0, because the damaged pair is already under every threshold in the clamp
-    (probe-threshold-invariance).
+    unblock int8: the probe's depth-2 number on Chainsaw is 0.2177% at gate thresholds 5.0, 4.0, 3.0
+    and 2.0 - the whole tuner clamp - because the damaged pair is under the tightest setting the tuner
+    can pick (probe-threshold-invariance). The fix is the projection, not the threshold: recomputing
+    the same statistic in channel-max instead of luma separates all 18 bad frames from all 82 good ones
+    (AUC 1.000 at 6 and 8 levels), puts frame 164 at rank 1 of 100 instead of 27, and a 0.08% threshold
+    blocks exactly the 18 for 4.0% of the wall with no good frame lost (gate-channel-max).
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge
