@@ -110,7 +110,10 @@ tasks:
     1.80) against 266 MB int8 (0.92 ms), and conv writing int8 saves 132 MB (-0.46
     ms), so the block lands near 2.14 ms instead of 2.93. Sixteen blocks => ~43.7
     ms against 56.28 (1.29x). The named risk is per-channel slope against per-tensor
-    activation scales: either add per-channel output scales or measure the loss.'
+    activation scales: either add per-channel output scales or measure the loss. BLOCKER
+    2026-11-17: effort, not environment: a CUDA/CUTLASS kernel with an int8 GEMM and
+    a per-channel epilogue is weeks. The E9'' reproduction (2026-11-17) confirms the
+    mechanism it would remove, so the item is real and correctly sized.'
 - id: rve-int8-prelu-pass-2026-11-15
   title: 'E32: the PReLU pass is at its traffic floor - is there anything above it
     but the plugin?'
@@ -144,7 +147,10 @@ tasks:
   note: 'Kept as a row rather than deleted so the arithmetic is not re-derived: the
     pass moves 530.8 MB and its floor at 288 GB/s is 1.84 ms against 1.71-2.37 measured,
     i.e. it is already doing what the memory system allows. Disappearing into the
-    convolution is the plugin, not a graph fix.'
+    convolution is the plugin, not a graph fix. RUNNABLE NOW 2026-11-17: TensorRT
+    10.12.0.36 and torch are installed and the harness can time and profile a plan
+    end to end (scripts/build_plan.py, scripts/bench_plan.py, scripts/make_width_probe.py).
+    No environment blocker.'
 - id: rve-int8-gemm-efficiency-2026-11-15
   title: 'E33: int8 body GEMM efficiency - the 1.4x to 2x gap lives here'
   type: experiment
@@ -174,7 +180,10 @@ tasks:
     against a 26.9 ms floor at 91 TFLOP/s, and the int8 peak is roughly 148 if the
     borrowed 74 TFLOP/s fp16 figure holds. Closing that 55-60% -> 75% gap is the only
     path from 40 ms to 28 ms; fusion does not help because this GEMM is compute-bound
-    (int8 is 1.7x the fp16 conv while moving the same bytes).'
+    (int8 is 1.7x the fp16 conv while moving the same bytes). RUNNABLE NOW 2026-11-17:
+    TensorRT 10.12.0.36 and torch are installed and the harness can time and profile
+    a plan end to end (scripts/build_plan.py, scripts/bench_plan.py, scripts/make_width_probe.py).
+    No environment blocker.'
 - id: rve-welder-onnx-2026-11-15
   title: 'E28: run Welder on our ONNX and compare against the TRT engine'
   type: experiment
@@ -205,7 +214,11 @@ tasks:
     TensorRT across 34 cases, 2.98x on NAFNet (image restoration, low channel count
     - the nearest class to SRVGG). Two caveats to carry: it LOSES on conv-dominated
     stacks (see E26), and it is a TVM-based research artifact (~5.2k LOC) whose build
-    on a 4060 Ti / current CUDA is unverified.'
+    on a 4060 Ti / current CUDA is unverified. BLOCKER 2026-11-17: external tool:
+    Welder must be built from source (OSDI''23 artifact). Not a blocker of the environment
+    but of a day''s work, and E26 already measured cuDNN''s default algorithm choice
+    as 20% slower - the answer to ''does a fusion compiler win here'' may arrive without
+    it.'
 - id: rve-l2-pyramid-2026-11-15
   title: 'E29: L2-resident layer pyramid - is the 7.9 MB reuse buffer real, and what
     is the ceiling?'
@@ -240,7 +253,9 @@ tasks:
     recompute, but 1.4 MB by reuse). Our version: (K-S)=2 rows x 1920 x 64 ch x 2
     B = 0.49 MB per boundary, 16 boundaries = 7.9 MB, which does not fit 100 KB shared
     memory but does fit 32 MB L2. This is the item that would give the ledger''s ''the
-    model has that headroom; the builder cannot collect it'' a number.'
+    model has that headroom; the builder cannot collect it'' a number. BLOCKER 2026-11-17:
+    needs ncu counters (see rve-ncu-access) or a much more careful L2 experiment than
+    the timing cache allows.'
 - id: rve-channel-width-time-2026-11-15
   title: 'E30a: time of the body at C=64/48/32 - no picture question, no owner'
   type: experiment
@@ -451,7 +466,8 @@ tasks:
     while this recomputes only a cone (halo k at layer k) for the region that changed.
     The review''s numbers: radius 10 -> 2.16x less work, radius 5 -> 2.6x. It is the
     layer-level analogue of a KV cache, and it is the only temporal idea on the list
-    that this engine does not already have in some form.'
+    that this engine does not already have in some form. BLOCKER 2026-11-17: pipeline-level:
+    needs the app''s tile path running (halo per changed region).'
 - id: rve-fusion-break-map-2026-11-15
   title: 'B1: map where myelin''s epilogue fusion breaks - width sweep, tactic name,
     time'
@@ -523,11 +539,14 @@ tasks:
     them. Same for the workspace: a tactic skipped for lack of a scratch buffer is
     absent from the sweep for the wrong reason (the documented CUDA error 2 allocating
     4.2 GB during autotuning).'
-  note: B1 names the tactic family that fuses; this tries to get it back at 32. TRT
+  note: 'B1 names the tactic family that fuses; this tries to get it back at 32. TRT
     10.12 exposes IAlgorithmSelector (deprecated in 10.8 in favour of editable ITimingCache)
     and ITimingCache, so exclusion is possible in principle - the open question is
     whether the selector can identify a tactic by family, since IAlgorithmVariant
-    gives implementation+tactic hash rather than a kernel name.
+    gives implementation+tactic hash rather than a kernel name. RUNNABLE NOW 2026-11-17:
+    TensorRT 10.12.0.36 and torch are installed and the harness can time and profile
+    a plan end to end (scripts/build_plan.py, scripts/bench_plan.py, scripts/make_width_probe.py).
+    No environment blocker.'
 - id: rve-prelu-rewrite-at-32-2026-11-15
   title: 'B3: reopen E17 at C=32 - a*x + (1-a)*ReLU(x) may fuse where PReLU does not'
   type: experiment
@@ -553,7 +572,10 @@ tasks:
   note: 'E17''s negative result was measured at C=64, where fusion already worked
     - so it says nothing about C=32, where the tactic family is different. A verdict
     from one width does not transfer: this investigation has caught that class of
-    error three times (build path, calibration window, statistic population).'
+    error three times (build path, calibration window, statistic population). RUNNABLE
+    NOW 2026-11-17: TensorRT 10.12.0.36 and torch are installed and the harness can
+    time and profile a plan end to end (scripts/build_plan.py, scripts/bench_plan.py,
+    scripts/make_width_probe.py). No environment blocker.'
 - id: rve-shot-cascade-2026-11-15
   title: 'A: route whole shots between models - use the 78-model collection instead
     of one model'
@@ -585,7 +607,8 @@ tasks:
     statistic already exists and the safe granularity is the shot, not the tile: a
     tile-level cascade was killed by seams, and a shot has one model throughout. Arithmetic
     on a tile version for scale: 1.147*(f + (1-f)*c); at f=0.3, c=0.25 that is 1.83x,
-    and the shot version has no 1.147 tax at all.'
+    and the shot version has no 1.147 tax at all. BLOCKER 2026-11-17: pipeline-level:
+    needs the 78-model collection and the app''s per-shot routing.'
 - id: rve-base-grain-split-2026-11-15
   title: 'D (dropped): base + grain split with the real grain composited back'
   type: experiment
@@ -649,7 +672,9 @@ tasks:
     is ~130k comparisons and the full box(|diff|) still runs once, on the winner.
     Second-order effect worth more than the first: with every reused tile pulled from
     one cached reference, tile coherence is structural instead of bought with dilation,
-    which currently removes 4x of the artefact at the cost of a third of the reuse.'
+    which currently removes 4x of the artefact at the cost of a third of the reuse.
+    BLOCKER 2026-11-17: pipeline-level: reference selection lives in the app''s reuse
+    chain.'
 - id: rve-strip-concurrency-2026-11-15
   title: 'C: horizontal strips on separate streams - hide the boundary instead of
     removing it'
@@ -675,11 +700,13 @@ tasks:
     are still blocked.'
   acceptance: Frame time and picture for 1/2/3/4 strips with halo 18, each strip on
     its own stream with its own context, against the single-stream build.
-  note: The engine runs at ~53% of DRAM bandwidth and ~61% of the fp16 peak - neither
+  note: 'The engine runs at ~53% of DRAM bandwidth and ~61% of the fp16 peak - neither
     saturated - which is the condition under which two streams add up. The earlier
-    'concurrent contexts = 0%' result was two torch.jit.load handles of one file with
-    corrupted output (25 dB), i.e. a broken harness, not a property of the card (E13
-    says so). Not worth trying at C=32, where both parts already sit near the bandwidth.
+    ''concurrent contexts = 0%'' result was two torch.jit.load handles of one file
+    with corrupted output (25 dB), i.e. a broken harness, not a property of the card
+    (E13 says so). Not worth trying at C=32, where both parts already sit near the
+    bandwidth. BLOCKER 2026-11-17: pipeline-level: concurrent streams and the app''s
+    writer.'
 - id: rve-ncu-access-2026-11-15
   title: 'ncu counters: one line in modprobe.d plus a reboot, still the only way to
     know what is physically left'
@@ -697,10 +724,11 @@ tasks:
   relates_to:
   - docs/MODEL.md
   owns_files: []
-  note: RmProfilingAdminOnly=1 blocks the counters; nsys' timeline works but its archive
-    refuses CUDA 13. Until this is unblocked, every DRAM-vs-compute claim in this
-    ledger is a bound computed from layer tensor sizes, and lanes C and the 25-40%
-    remainder cannot be sized.
+  note: 'RmProfilingAdminOnly=1 blocks the counters; nsys'' timeline works but its
+    archive refuses CUDA 13. Until this is unblocked, every DRAM-vs-compute claim
+    in this ledger is a bound computed from layer tensor sizes, and lanes C and the
+    25-40% remainder cannot be sized. BLOCKER 2026-11-17: owner: one line in /etc/modprobe.d
+    plus a reboot (NVreg_RestrictProfilingToAdminUsers=0).'
 - id: rve-doc-literature-closures-2026-11-15
   title: Record the literature closures so nobody re-enters them (PReLU zeros, 3x3->5x5,
     Strassen)
