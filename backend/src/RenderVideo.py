@@ -405,6 +405,17 @@ class Render:
                 f"statistic {temporal_reuse_statistic}, "
                 f"max chain {temporal_reuse_max_chain}, pixel veto {temporal_reuse_pixel_veto})")
             self.autoTuner = None
+            # The tuner works in LEVELS and writes its choice into `threshold`. With a share statistic
+            # that write is a unit mismatch, and it fails OPEN: a chosen 3.0 becomes "3% of pixels",
+            # which is never exceeded, so every frame is reused and the defect comes back. Measured
+            # 2026-11-18: threshold 0.07 overwritten by 3.0, reuse 89/122. Refuse the combination
+            # instead of converting silently.
+            if temporal_reuse_auto and str(temporal_reuse_statistic) != "mean_abs":
+                log(f"auto gate: DISABLED - it tunes a threshold in 8-bit levels and the gate is "
+                    f"measuring {temporal_reuse_statistic} (a share); writing one into the other "
+                    f"fails open. Pass --no_temporal_reuse_auto and a threshold in the statistic's "
+                    f"own unit.")
+                temporal_reuse_auto = False
             if temporal_reuse_auto:
                 from .utils.TemporalReuse import AutoGateTuner
                 # "best" asks the tuner to prove the error budget or refuse to reuse at all,
