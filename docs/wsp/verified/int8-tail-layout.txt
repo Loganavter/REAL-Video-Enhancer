@@ -32,7 +32,8 @@ the variants interleaved, so drift lands on both.
 
 Violet does not resolve it, and the reason is in the same table: the hops drifted 25-30 ms across those
 rounds, which is larger than the effect. One Violet `nchw` round is also visibly disturbed (dequant 2.81,
-conv 7.15 against 1.6 and 4.85) - a neighbour or a clock excursion, not a property of the arm.
+conv 7.15 against 1.6 and 4.85), and the run header names the cause: **`# load_avg 4.57`** for that round
+against 1.45 for its neighbour, with the same clocks (2790 MHz) - a CPU neighbour, not a property of the arm.
 
 So: **the tail gain is real and repeated; the wall-clock confirmation exists on one clip at n=2 and does not
 on the other.** This file does not claim a ratio against fp16 - the fp16 arm was not in this session by
