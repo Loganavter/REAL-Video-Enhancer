@@ -25,6 +25,8 @@ Usage from the render path: ``probe(clip, model_path, width, height)`` -> ``Int8
 """
 from __future__ import annotations
 
+import os
+
 import subprocess
 from dataclasses import dataclass
 
@@ -250,7 +252,7 @@ def _statistic(a, b, bar=8.0):
 def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
           bar: float = 0.1, gate_threshold: float = GATE_THRESHOLD,
           filter_statistic: str = "block_mean", adversarial: int = 0,
-          max_chain: int = 3) -> Int8ProbeResult:
+          max_chain: int = 3, engine_ref=None) -> Int8ProbeResult:
     """Would int8 fit this video? Composition first, own defect second, bar = 0.1% of pixels."""
     try:
         import torch
@@ -316,6 +318,20 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         inputs["body.0"] = (0.0, 1.0)      # the head's input range is the clamp's own, not a measurement
         model_q = _copy.deepcopy(model)    # the quantised twin: `got` must use these weights
         model.load_state_dict(orig_state)  # and `ref` must be the fp16 model, not fp16 on int8 weights
+        def reference(x):
+            """fp16 reference for one LR frame: the app's own engine when one is passed.
+
+            The probe measures against torch fp16 by default, while the app falls back to a TensorRT
+            plan. Measured on one frame the two differ by 0.0116% - small, but the reference should be
+            the engine the render actually uses. The engine takes a Frame, so the tensor is wrapped.
+            """
+            if engine_ref is None:
+                return model(x).float()
+            from .Frame import Frame
+            frame = Frame("tensorrt", width, height, "cuda", 0, False, "float16",
+                          high_bitdepth=False)
+            frame.set_frame_tensor(x, copy=True)
+            return engine_ref(frame).get_frame_tensor().detach().float()
 
         # One pair at a time, and every statistic - including the fp16 control - is taken inside the
         # loop: holding `ref` and `got` for every pair cost ~200 MB per decoded triple at 4K, so a
@@ -324,7 +340,7 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         engine, comp, comp2, stale1, stale2 = [], [], [], [], []
         with torch.no_grad():
             for i, pair in enumerate(frames_all):
-                outs_ref = [model(f).float() for f in pair]
+                outs_ref = [reference(f) for f in pair]
                 outs_got = [_quantised_forward(model_q, f, inputs, outputs).float() for f in pair]
                 if i in test_idx:
                     engine.append(_statistic(outs_ref[1], outs_got[1]))
@@ -370,9 +386,9 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                     if lr_share > gate_threshold:
                         discarded += 1
                         continue
-                    ref_r = model(x_r).float()
+                    ref_r = reference(x_r)
                     got_t = _quantised_forward(model_q, x_t, inputs, outputs).float()
-                    fp16_t = model(x_t).float()
+                    fp16_t = reference(x_t)
                     adv_vals.append(_statistic(ref_r, got_t)[0])
                     ctl_vals.append(_statistic(ref_r, fp16_t)[0])
             adv_n = len(adv_vals)
@@ -414,4 +430,7 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                                adversarial=adv, adversarial_control=adv_ctl,
                                adversarial_frames=adv_n)
     except Exception as error:  # noqa: BLE001 - a probe failure must never cost a render
+        import traceback as _tb
+        if os.environ.get("RVE_PROBE_TRACE"):
+            _tb.print_exc()
         return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "probe failed", error=str(error))
