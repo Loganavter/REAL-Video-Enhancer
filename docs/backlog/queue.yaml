@@ -1539,7 +1539,11 @@ tasks:
     certifies, and the 125 records whose instrument is the probe stop being load-bearing - the picture is
     judged on renders (gate_sweep on the encoded pair), not on this module. The cost of the withdrawn half
     is now recorded: 33.37 s of a 62.67 s probe (53%), break-even for int8 on BD falls from 6.1-7.4 min of
-    video to 2.9-3.5 min. NOT withdrawn: the body's own first-frame certificate (`body.certify(frame)`),
+    video to 2.9-3.5 min. CONSEQUENCE FOUND 2026-11-19 AND NOT ANTICIPATED: removing the certificate also
+    changed the PICTURE - two lossless renders differ by 0.45050% (356/494 frames above the bar) while the
+    same tree with the certificate ON is bit-identical to the pre-change tree (int8-certificate-removal.txt,
+    verdict int8-picture-depends-on-warmup). The certificate was treated as reporting plus cost; it was also
+    part of what determines the render. NOT withdrawn: the body's own first-frame certificate (`body.certify(frame)`),
     which is n=1 and read 0.00000% on every int8 run of 2026-11-18 against 0.53% on the whole clip - filed
     as rve-body-first-frame-certificate-2026-11-19. Records: docs/wsp/verified/int8-probe-cost-2026-11-19.txt. NOT done: making the
     pair set a function of the clip - that is the precondition for any future certification, and it is
@@ -2246,3 +2250,44 @@ tasks:
     returns channels_last, so PixelShuffle and the residual add see different memory formats) and the other
     code changes that landed between the two sessions (probe calibrate-only, frame timers, first-frame
     sanity threshold) - the A/A in the acceptance separates them.
+
+- id: rve-render-determinism-2026-11-19
+  title: 'The render depends on warm-up: the certificate moved 0.45% of pixels - pin it or stop comparing code states'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 3h
+  tags:
+  - instrument
+  - determinism
+  - int8
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-certificate-removal.txt
+  - backend/src/RenderVideo.py
+  - backend/src/utils/Int8Probe.py
+  owns_files:
+  - docs/wsp/verified/render-determinism.txt
+  refutes: >-
+    Two renders of the same configuration differ only by their code. Removing the probe's certificate moved
+    0.45050% of pixels on the worst frame (356 of 494 above the bar, peak 60) between two lossless renders,
+    while the same tree with the certificate ON is bit-identical to the pre-change tree and the A/A of two
+    certificate-off runs is identical. If a 2 GB allocation made and freed before the first frame - with no
+    change to any weight, scale or frame - moves half the clip across the bar, then every picture A/A in this
+    lane that compared two code states was measuring the allocation history as much as the change.
+  acceptance: >-
+    Three arms in one session, all lossless ffv1, compared with gate_sweep --reference-kind config: (1) plain
+    render; (2) render preceded by an allocation of the quantised twin's size, allocated and freed before the
+    first frame, nothing else changed; (3) render preceded by warming the fp16 engine on the probe's pair
+    sizes without allocating the twin. Whichever arm reproduces the certificate-on render names the
+    mechanism. Then the PIN: the shrink that makes the undisturbed and the disturbed renders identical
+    (empty_cache at a fixed point, a fixed workspace, cudnn.benchmark with an explicit warm-up, or an
+    explicit algorithm), with a run showing identity. If no pin exists, the lane records that picture A/As
+    are only valid within one allocation history - which is weaker than the protocol assumes - and says so
+    where the protocol lives.
+  note: >-
+    Why P1: it outranks the remaining speed rows because it decides whether any of their picture tests mean
+    anything. The diagnostic hook to reproduce the certificate-on path in a forced run already exists:
+    RVE_INT8_CERTIFY=1 (added with the finding, documented here because it is otherwise invisible).

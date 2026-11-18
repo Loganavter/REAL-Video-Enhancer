@@ -678,3 +678,25 @@
     (`body.certify(frame)` in UpscaleTorch), and it is not a certificate either: n=1, and it read 0.00000%
     on every int8 run of 2026-11-18 while the whole-clip number on the same clip is 0.53% - the exact
     "one frame is a smoke test" trap. Filed as rve-body-first-frame-certificate-2026-11-19.
+
+- id: int8-picture-depends-on-warmup
+  lane: int8
+  status: current
+  scope: the app's render path (RenderVideo probe -> Int8Body), int8 body, reuse off, ffv1 sink, BD Violet
+  date: 2026-11-19
+  statement: >-
+    The rendered pixels are not a function of the configuration alone. Withdrawing the probe's certificate -
+    a change made for cost and reporting - moved 0.45050% of pixels on the worst frame (356 of 494 frames
+    above the 0.1% bar, peak 60) between two lossless renders, while the SAME tree with the certificate ON
+    is bit-identical to the pre-change tree (494/494) and the A/A of two certificate-off renders is also
+    identical. So the difference is carried by whatever the certificate does before the first frame, and the
+    two candidates are the ~2 GB quantised-twin allocation that changes cudnn's free-memory state, and the
+    fp16 TensorRT engine being warmed as the probe's reference. Neither is isolated; the verdict is the
+    fact, not the mechanism.
+  evidence: docs/wsp/verified/int8-certificate-removal.txt
+  open_question: >-
+    Which of the two it is, and how to pin it. Until then: (a) no picture A/A in this lane may compare two
+    code states without holding the warm-up identical - "same code, two runs" reads identity while a
+    one-line change reads 0.45%; (b) every picture number recorded before 2026-11-19 was taken with the
+    certificate present, which the shipped path no longer does, so their population includes a warm-up the
+    product does not have. Filed as rve-render-determinism-2026-11-19.

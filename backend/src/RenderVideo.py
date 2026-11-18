@@ -995,7 +995,11 @@ class Render:
             # anything - a forced int8Fit overwrites it. So a forced caller asks for calibration only and
             # skips the reference forwards; only `auto` still certifies.
             _forced = str(getattr(self, "int8Fit", "auto")).lower()
-            _certify = _forced not in ("int8", "fp16")
+            # a diagnostic override: certifying allocates the quantised twin (~2 GB) and that changes the
+            # process's memory state, which cudnn's algorithm choice can depend on. RVE_INT8_CERTIFY=1
+            # re-runs the certificate in a forced run precisely so that hypothesis can be tested.
+            _certify = _forced not in ("int8", "fp16") or \
+                str(os.environ.get("RVE_INT8_CERTIFY", "")).lower() in ("1", "true", "yes")
             _probe_verdict = self._probe_int8_fit(certify=_certify)
             log(f"int8 calibration frames handed to the body: "
                 f"{len(getattr(self, 'int8Frames', None) or [])} "
