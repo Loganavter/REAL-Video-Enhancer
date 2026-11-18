@@ -1,0 +1,117 @@
+# The head is one kernel now: 5.3 ms of the frame, 0.00018% of pixels
+
+Measured 2026-11-20 (local), RTX 4060 Ti, BD Violet 1920x1080, int8 body. The head is 3 -> 64 3x3 fp16, and
+K = 27 means the whole 3x3x3 window of a pixel is ONE dot padded to 32 - not nine taps.
+Records: `int8-head-fusion.jsonl`; raw: `logs/head-fusion/probe.json`, `logs/head-fusion/ab/`,
+`logs/head-fusion/pair.json`.
+
+Row `rve-head-quantise-fusion-2026-11-19` (researcher's C2). The shipped head is three steps: a cuDNN fp16
+convolution (4.65-4.90 ms in the app), a separate PReLU, and a quantise pass that reads the 265 MB fp16
+activation and writes 133 MB of codes (1.5-1.6 ms). Its arithmetic intensity is 26 FLOP/byte - 3.3x its own
+traffic floor - so no layout knob can save it: what it writes is the target, and fusing the epilogue is how
+you stop writing it.
+
+## Isolated, on one frame
+
+| arm | median of rounds 2+ |
+|---|---|
+| head + PReLU + quantise as shipped | **5.658 ms** |
+| cuDNN head conv alone | 3.813 ms |
+| head conv + quantise pass | 5.577 ms |
+| **one kernel: conv + bias + PReLU + requant** | **0.662 ms** |
+
+**-5.0 ms, 88% of the head block.** The fused kernel is also 5.8x the cuDNN convolution alone, which is what
+a shape with 26 FLOP/byte should look like once it stops writing 265 MB it immediately re-reads: the kernel
+moves ~189 MB (read the 3 planes through nine shifted views, write 133 MB of codes) and 0.66 ms is its
+traffic floor at 288 GB/s, so it is at the floor rather than near it.
+
+Codes: **0.102% differ by 1, never more** - the accumulation order over the 27 terms is not cuDNN's, so this
+is a different-arithmetic change and the picture is what decides it.
+
+## In the app
+
+Null sink, one session, arms alternating, 3 rounds:
+
+| round | head shipped | head fused |
+|---|---|---|
+| 1 | 44.55 | 38.99 |
+| 2 | 44.45 | 39.18 |
+| 3 | 44.43 | 39.34 |
+| **median** | **44.45** | **39.18** |
+
+**-5.27 ms per frame (-11.9%)**, 3 rounds of 3. The phase counter attributes it: head + quantise reads
+**6.20 -> 0.70 ms** (the HEAD line alone 4.90 -> 0.85, the QUANTISE line 1.54 -> 0.01), with the hops and the
+tail unchanged.
+
+One thing the app made clear and the probe could not: the shipped model's head is widened to **8** input
+channels by `PadInputConv` (the engine's fusion trick, zero-padded), so the kernel takes the first three input
+channels of that weight - the zeros contribute nothing, which is why the padded and plain heads compute the
+same function.
+
+## The picture, on the full clip
+
+Lossless ffv1 renders of both arms, then `gate_sweep --reference-kind config`:
+
+```
+494 frames, block 64
+worst share 0.00018% (frame 27), frames above 0.1%: 0
+worst block mean 1.93 (frame 317), peak 13
+```
+
+The worst frame sits **555x inside** the 0.1% bar, and the peak is inside its 20-level bar. Two one-frame
+checks against the MODEL read 0.01057% -> 0.01084% (frame 29, peak 17 -> 15) and 0.01501% -> 0.01461%
+(frame 274, peak 15 -> 15): a wash, both far inside the bar.
+
+## Adopted
+
+`RVE_HEAD_FUSED` defaults to **1** since 2026-11-20; `RVE_HEAD_FUSED=0` restores cuDNN + quantise. The row's
+own falsifier ("if it does not beat 6.25 ms by 1.5 ms, the shape is at its floor") is answered the other way:
+it beats it by 5.3.
+
+Guard: the fused path needs a plain 3-channel (or zero-padded wider) head convolution with `feat` outputs; a
+model that has anything else in `body[0]` is served by the shipped path. The quantise-alone diagnostic is
+skipped when the head is fused, because there is no separate pass left to time.
+
+## Not covered
+
+- One card, one clip, one label. The head's 3 -> 64 is this model family's shape.
+- The picture is a config-vs-config pair plus two model-referenced frames, not 494 frames against the model.
+- The 26 FLOP/byte argument is from `int8-head-conv.txt`; this file does not re-derive it.
+- Timing is null sink, reuse off; the NVENC arm is not measured here, and the ffv1 renders read ~58.6 ms/frame
+  in both arms because the encoder, not the model, owns that loop.
+- Suite: `pytest backend/tests` reads 409 passed, 1 failed - `ModuleNotFoundError: yaml` in
+  `scripts/harness/db.py` under the app's portable interpreter. No file of this change is on that path.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/head_fusion_probe.py --rounds 3 --iters 20 \
+    --out-file docs/wsp/verified/logs/head-fusion/probe.json
+ARMS="plain fused" ARM_ENV_PLAIN="RVE_HEAD_FUSED=0" ARM_ENV_FUSED="RVE_HEAD_FUSED=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+ARMS="plain fused" ARM_ENV_PLAIN="RVE_HEAD_FUSED=0" ARM_ENV_FUSED="RVE_HEAD_FUSED=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/head-fusion scripts/wall_ab.sh
+PYTHONPATH=scripts python3 scripts/gate_sweep.py <plain.mkv> <fused.mkv> --out pair.json \
+  --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix HF
+PYTHONPATH=scripts python3 scripts/head_fusion_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-head-fusion.txt \
+       --records docs/wsp/verified/records/int8-head-fusion.jsonl --bars docs/claims-bars.json
+
+@claim H001 5.658 ms "frames [f166947c421bd81e] n=1" measured
+@claim H002 3.813 ms "frames [f166947c421bd81e] n=1" measured
+@claim H003 5.577 ms "frames [f166947c421bd81e] n=1" measured
+@claim H004 0.662 ms "frames [f166947c421bd81e] n=1" measured
+@claim R001 -4.996 ms "frames [f166947c421bd81e] n=1" derived
+@claim H005 0.10239 % "frames [f166947c421bd81e] n=1" measured
+@claim H006 44.45 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim H007 39.18 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim R002 -5.27 ms "frames [c171112dd7b0ab2c] n=1" derived
+@claim H008 6.2 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim H009 0.7 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim R003 -5.5 ms "frames [c171112dd7b0ab2c] n=1" derived
+@claim HF001 0.00018084490740740742 % "frames [13137e4e7dd10e98] n=494" measured
+@claim HF002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim HF003 1.927978515625 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim HF004 13.0 levels "frames [13137e4e7dd10e98] n=494" measured

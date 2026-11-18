@@ -29,8 +29,8 @@ import os
 import torch
 
 from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
-                          quantise_nchw_to_nhwc, quantise_nchw_to_nhwc_prelu, quantise_nhwc,
-                          quantise_nhwc_prelu, tail_int8_kernel)
+                          head_int8_kernel, quantise_nchw_to_nhwc, quantise_nchw_to_nhwc_prelu,
+                          quantise_nhwc, quantise_nhwc_prelu, tail_int8_kernel)
 
 __all__ = ["Int8Body"]
 
@@ -98,6 +98,22 @@ class Int8Body:
         # fp16 tail on four held-out frames, stage (b) at 0.974 ms against 4.444; in the app it is
         # 45.87 -> 42.71 ms/frame in 3 of 3 interleaved rounds and the 494-frame pair reads 0.00000%
         # worst share / peak 6. DEFAULT ON since 2026-11-20; RVE_TAIL_INT8=0 restores the cuDNN path.
+        # The head as ONE kernel: 3 -> 64 convolution with the bias, the PReLU and the int8 requant in its
+        # epilogue. It writes the codes the first hop reads, so the separate quantise pass - and the 265 MB
+        # fp16 activation it exists to compress - disappear (row rve-head-quantise-fusion-2026-11-19).
+        # DEFAULT ON since 2026-11-20: 44.45 -> 39.18 ms/frame in 3 of 3 interleaved rounds and a 494-frame
+        # pair at 0.00018% worst share / peak 13. RVE_HEAD_FUSED=0 restores the cuDNN + quantise path.
+        # The app's head may be widened to 8 input channels for the ENGINE's fusion (PadInputConv); the
+        # extra channels are zeros, so the first three input channels of its weight are the real 3 -> 64
+        # convolution and are what this kernel runs.
+        _plain_head = self.head_conv
+        if not isinstance(_plain_head, torch.nn.Conv2d) and hasattr(_plain_head, "conv"):
+            _plain_head = _plain_head.conv
+        self._head_conv_plain = _plain_head if isinstance(_plain_head, torch.nn.Conv2d) else None
+        self.head_fused = (str(os.environ.get("RVE_HEAD_FUSED", "1")).lower() in ("1", "true", "yes")
+                           and self._head_conv_plain is not None
+                           and self._head_conv_plain.in_channels >= 3
+                           and self._head_conv_plain.out_channels == feat)
         want_tail_int8 = str(os.environ.get("RVE_TAIL_INT8", "1")).lower() in ("1", "true", "yes")
         self.tail_int8 = bool(want_tail_int8 and self.tail_conv.out_channels <= 16)
         if want_tail_int8 and not self.tail_int8:
@@ -262,9 +278,25 @@ class Int8Body:
             for k, sh in enumerate(shifts):
                 launches[k]["bias"] = (launches[k]["bias"] - sh).contiguous()
         self._launches = launches
+        if self.head_fused:
+            self._build_head_fused()
         if self.tail_int8:
             self._build_tail_int8()
         return launches
+
+    def _build_head_fused(self):
+        """The head's (K, C) weight matrix for the fused kernel: lane k = c*9 + t, exactly as it indexes."""
+        w = self._head_conv_plain.weight.detach().half()[:, :3]     # the widened head's zeros are dropped
+        k = 32
+        w32 = torch.zeros((k, self.feat), device=w.device, dtype=torch.float16)
+        for c in range(3):
+            for i in range(3):
+                for j in range(3):
+                    w32[c * 9 + i * 3 + j] = w[:, c, i, j]
+        self._head_w32 = w32.contiguous()
+        self._head_bias = self._head_conv_plain.bias.detach().float().contiguous()
+        self._head_slope = self.head_prelu.weight.detach().float().contiguous()
+        return w32
 
     def _build_tail_int8(self):
         """Fold the last hop's per-channel dequant scale into the tail's weights, quantise, pad to 16.
@@ -370,58 +402,75 @@ class Int8Body:
         _t1, _t2, _t3 = (_mk() for _ in range(3))
         _e0.record(); _start = _e0; _end = _e4
         with torch.no_grad():
-            head = self.head_conv(x.clamp(0.0, 1.0))      # PReLU is fused into the quantise below
-            _e1.record()
-            # The fused Triton conversion is CORRECT once fed a contiguous tensor (the PReLU output is
-            # not, and the kernel indexes raw memory as ch * n_pix + pix - that mismatch was the 98.34%
-            # of differing codes), but making it contiguous costs more than the four torch passes it
-            # replaces: 89.25 ms against 72.49 ms for this path, both certified at 0.00000%. So the
-            # faster of the two correct versions is the torch one, and the measured win of the earlier
-            # fusion was entirely the wrong codes, not the fusion.
-            if not getattr(self, "_blog", False):
-                self._blog = True
-                _lg.getLogger("RVE").warning(
-                    "int8 quantise branch: channels_last=%s contiguous=%s strides=%s shape=%s QB=%s",
-                    head.is_contiguous(memory_format=torch.channels_last), head.is_contiguous(),
-                    head.stride(), tuple(head.shape), QB)
-            if head.is_contiguous(memory_format=torch.channels_last):
-                # the bytes are already NHWC: read them where they are, no transpose, no copy
+            if self.head_fused:
+                # One kernel from the frame to the codes: conv, bias, PReLU and the requant, so the
+                # separate quantise pass - and the 265 MB fp16 activation it exists to compress -
+                # disappear. The HEAD line reads ~0 and the QUANTISE line carries the kernel.
                 buf = self._int8_buffers(x, h, w)[0]
-                quantise_nhwc_prelu[qgrid](head, self._s_t1, self._slope_half, buf, n_pix,
-                                           BLOCK=QB, C=self.feat, num_warps=4)
+                head_int8_kernel[grid](x.clamp(0.0, 1.0), self._head_w32, self._head_bias,
+                                       self._head_slope, self._s_t1, buf, h, w, BLOCK_M=self.block_m,
+                                       C=self.feat, K=32, CIN=3, num_warps=self.warps)
+                if not getattr(self, "_hf_log", False):
+                    self._hf_log = True
+                    _lg.getLogger("RVE").warning(
+                        "int8 head FUSED: one kernel writes the codes (K=32 from a %d-channel head, "
+                        "no separate quantise pass)", self._head_conv_plain.in_channels)
+                _e1.record()
+                _e2.record()
+                _, self._scratch_a, self._scratch_b = self._int8_buffers(x, h, w)
             else:
-                # the head is plain contiguous NCHW here (the app's conv output). PReLU is FUSED into the
-                # conversion: F.prelu on this tensor allocates 265 MB per frame and the phase measured
-                # 20.2 ms against 1.6 ms for the kernel alone on the very same input.
-                buf = self._int8_buffers(x, h, w)[0]
-                # F.prelu allocates ~265 MB a frame and the phase measured 20.2 ms against 1.6 ms for the
-                # conversion alone. Both attempts to avoid that allocation (a fused Triton kernel, and
-                # torch.where with a reused `out=`) changed the picture to 2.15278% - identical in both,
-                # so the difference is in how PReLU is applied, not in the conversion, and it is not yet
-                # explained. Correctness first: this path certifies at 0.00823%, so it stays until the
-                # allocation cost is removed without moving the picture.
-                # F.prelu is ONE fused ATen kernel (read 265 + write 265 = 530 MB, 1.84 ms). The
-                # torch.where replacement I put here was three eager passes (1856 MB, ~6.4 ms) and made
-                # the phase 9.91 ms against 4.01 - it removed allocations that were already free
-                # (num_alloc_retries = 0) and paid for them with two extra sweeps. Measured A/B:
-                #   F.prelu + quantise      4.01 ms   codes identical to the reference
-                #   torch.where + quantise  9.91 ms   codes identical, 2.5x slower
-                #   fused Triton            1.71 ms   codes WRONG on 34.7% (max 205) - still broken
-                # FUSED head conversion: PReLU + quantisation in one pass (read 265 + write 133 = 398 MB)
-                # against F.prelu (530 MB) plus the conversion (398 MB). Five controlled tests - three
-                # sizes, all-positive slopes, mixed signs, and the model's own slope vector - agree with
-                # the two-pass version on 99.97% of codes (max 1). certify() is the authoritative check.
-                quantise_nchw_to_nhwc_prelu[qgrid](head, self._s_t1, self._slope_half, buf, n_pix,
-                                                   BLOCK=QB, C=self.feat, num_warps=4)
-            # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
-            # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
-            # and the same launch parameters - the aliasing was the whole difference.
-            # pre-allocated scratch: sixteen 132 MB allocations per frame measured ~22 ms of GPU time in
-            # the app (70.8 ms there against 48.6 in the harness) where the allocator had to grow against a
-            # fragmented pool. The destination cycles between two buffers and never returns to `buf`.
-            key = (x.shape[0], h, w)
-            _, self._scratch_a, self._scratch_b = self._int8_buffers(x, h, w)
-            _e2.record()
+                head = self.head_conv(x.clamp(0.0, 1.0))  # PReLU is fused into the quantise below
+                _e1.record()
+                # The fused Triton conversion is CORRECT once fed a contiguous tensor (the PReLU output is
+                # not, and the kernel indexes raw memory as ch * n_pix + pix - that mismatch was the 98.34%
+                # of differing codes), but making it contiguous costs more than the four torch passes it
+                # replaces: 89.25 ms against 72.49 ms for this path, both certified at 0.00000%. So the
+                # faster of the two correct versions is the torch one, and the measured win of the earlier
+                # fusion was entirely the wrong codes, not the fusion.
+                if not getattr(self, "_blog", False):
+                    self._blog = True
+                    _lg.getLogger("RVE").warning(
+                        "int8 quantise branch: channels_last=%s contiguous=%s strides=%s shape=%s QB=%s",
+                        head.is_contiguous(memory_format=torch.channels_last), head.is_contiguous(),
+                        head.stride(), tuple(head.shape), QB)
+                if head.is_contiguous(memory_format=torch.channels_last):
+                    # the bytes are already NHWC: read them where they are, no transpose, no copy
+                    buf = self._int8_buffers(x, h, w)[0]
+                    quantise_nhwc_prelu[qgrid](head, self._s_t1, self._slope_half, buf, n_pix,
+                                               BLOCK=QB, C=self.feat, num_warps=4)
+                else:
+                    # the head is plain contiguous NCHW here (the app's conv output). PReLU is FUSED into the
+                    # conversion: F.prelu on this tensor allocates 265 MB per frame and the phase measured
+                    # 20.2 ms against 1.6 ms for the kernel alone on the very same input.
+                    buf = self._int8_buffers(x, h, w)[0]
+                    # F.prelu allocates ~265 MB a frame and the phase measured 20.2 ms against 1.6 ms for the
+                    # conversion alone. Both attempts to avoid that allocation (a fused Triton kernel, and
+                    # torch.where with a reused `out=`) changed the picture to 2.15278% - identical in both,
+                    # so the difference is in how PReLU is applied, not in the conversion, and it is not yet
+                    # explained. Correctness first: this path certifies at 0.00823%, so it stays until the
+                    # allocation cost is removed without moving the picture.
+                    # F.prelu is ONE fused ATen kernel (read 265 + write 265 = 530 MB, 1.84 ms). The
+                    # torch.where replacement I put here was three eager passes (1856 MB, ~6.4 ms) and made
+                    # the phase 9.91 ms against 4.01 - it removed allocations that were already free
+                    # (num_alloc_retries = 0) and paid for them with two extra sweeps. Measured A/B:
+                    #   F.prelu + quantise      4.01 ms   codes identical to the reference
+                    #   torch.where + quantise  9.91 ms   codes identical, 2.5x slower
+                    #   fused Triton            1.71 ms   codes WRONG on 34.7% (max 205) - still broken
+                    # FUSED head conversion: PReLU + quantisation in one pass (read 265 + write 133 = 398 MB)
+                    # against F.prelu (530 MB) plus the conversion (398 MB). Five controlled tests - three
+                    # sizes, all-positive slopes, mixed signs, and the model's own slope vector - agree with
+                    # the two-pass version on 99.97% of codes (max 1). certify() is the authoritative check.
+                    quantise_nchw_to_nhwc_prelu[qgrid](head, self._s_t1, self._slope_half, buf, n_pix,
+                                                       BLOCK=QB, C=self.feat, num_warps=4)
+                # a FRESH destination per hop, exactly as the validated recipe does. Reusing a ping-pong pair
+                # measured 1.27525% at 512x512 where this measured 0.00000% on the same frame, the same grids
+                # and the same launch parameters - the aliasing was the whole difference.
+                # pre-allocated scratch: sixteen 132 MB allocations per frame measured ~22 ms of GPU time in
+                # the app (70.8 ms there against 48.6 in the harness) where the allocator had to grow against a
+                # fragmented pool. The destination cycles between two buffers and never returns to `buf`.
+                key = (x.shape[0], h, w)
+                _, self._scratch_a, self._scratch_b = self._int8_buffers(x, h, w)
+                _e2.record()
             src, nxt = buf, self._scratch_a
             import time as _time
             _host_launch = 0.0
@@ -436,9 +485,10 @@ class Int8Body:
                 _host_launch += _time.perf_counter() - _h0
                 src = dst
                 nxt = self._scratch_b if dst is self._scratch_a else self._scratch_a
-            if not getattr(self, "_probe_done", False):
+            if not self.head_fused and not getattr(self, "_probe_done", False):
                 self._probe_done = True
                 # the same kernel, alone, in the app's own process: is it slow or is it waiting?
+                # (not run when the head is fused: there is no separate quantise pass to time)
                 _cs, _ce = torch.cuda.Event(True), torch.cuda.Event(True)
                 for _ in range(3):
                     quantise_nchw_to_nhwc[qgrid](head, s_act.contiguous(), buf, n_pix,

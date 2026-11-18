@@ -23,9 +23,50 @@ try:                       # round-half-to-EVEN, which is what torch.round does
 except Exception:          # pragma: no cover - older triton
     _rint = None
 
-__all__ = ["body_prologue_kernel", "tail_int8_kernel", "quantise_nchw_to_nhwc", "quantise_nchw_to_nhwc_prelu",
+__all__ = ["body_prologue_kernel", "head_int8_kernel", "tail_int8_kernel",
+           "quantise_nchw_to_nhwc", "quantise_nchw_to_nhwc_prelu",
            "quantise_nhwc", "quantise_nhwc_prelu",
            "dequantise_nhwc_to_nchw", "dequantise_nhwc"]
+
+
+@triton.jit
+def head_int8_kernel(x_ptr, w_ptr, bias_ptr, slope_ptr, s_ptr, y_ptr, H, W, BLOCK_M: tl.constexpr,
+                     C: tl.constexpr, K: tl.constexpr, CIN: tl.constexpr):
+    """3 -> C fp16 head convolution with the bias, the PReLU and the int8 requant in one kernel.
+
+    The head is 3 -> 64 3x3, so its whole 3x3x3 window is K = 27 terms - ONE dot per pixel, padded to 32 and
+    masked, instead of nine taps. Fused with the epilogue it writes 133 MB of codes where the shipped path
+    writes 265 MB of fp16 and then reads it back in a separate quantise pass; that pass is what the fusion
+    removes, and the write it removes is 0.92 ms of traffic on its own.
+
+    The input is the app's contiguous NCHW fp16 frame, so lane k = c*9 + t indexes plane `c` at the shifted
+    coordinate. Same epilogue ORDER as the shipped path (conv, then bias, then PReLU, then round to the
+    per-channel grid), so the codes are comparable rather than merely plausible.
+    """
+    pid = tl.program_id(0)
+    rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    h = rows // W
+    w = rows % W
+    ki = tl.arange(0, K)
+    c = ki // 9
+    t = ki % 9
+    dy = t // 3 - 1
+    dx = t % 3 - 1
+    yy = h[:, None] + dy[None, :]
+    xx = w[:, None] + dx[None, :]
+    inside = (c[None, :] < CIN) & (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
+    src = c[None, :] * (H * W) + yy * W + xx
+    a = tl.load(x_ptr + src, mask=inside, other=0.0)
+    lo = tl.arange(0, C)
+    b = tl.load(w_ptr + ki[:, None] * C + lo[None, :], mask=(c[:, None] < CIN), other=0.0)
+    acc = tl.dot(a, b)
+    v = acc + tl.load(bias_ptr + lo)[None, :]
+    slope = tl.load(slope_ptr + lo)[None, :]
+    v = tl.where(v >= 0, v, v * slope)
+    s = tl.load(s_ptr + lo)[None, :]
+    q = tl.floor(v / s + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    tl.store(y_ptr + rows[:, None] * C + lo[None, :], q.to(tl.int8))
 
 
 @triton.jit

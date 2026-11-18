@@ -2451,8 +2451,21 @@ tasks:
 - id: rve-head-quantise-fusion-2026-11-19
   title: 'Fuse head conv + PReLU + quantise into one kernel that writes int8 - the 265 MB fp16 pass is the cost'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    ADOPTED 2026-11-20. K=27 (3 channels x 9 taps) padded to 32 makes the whole head ONE dot per pixel;
+    the fused kernel writes the codes directly. Isolated: 5.658 (shipped head + quantise) -> 0.662 ms, and
+    5.8x the cuDNN conv alone (3.813), i.e. at its 189 MB traffic floor. In the app, null sink, 3 interleaved
+    rounds: 44.45 -> 39.18 ms/frame (-5.27, -11.9%), head + quantise phase 6.20 -> 0.70. Codes: 0.102% differ
+    by 1 and never more (accumulation order), so it is different-arithmetic; picture on 494 frames,
+    reference-kind config: worst share 0.00018% (555x inside the 0.1 bar), peak 13. Against the MODEL on two
+    frames it is a wash (0.01057 -> 0.01084; 0.01501 -> 0.01461). Shipped as the default, RVE_HEAD_FUSED=0
+    restores cuDNN + quantise; the app's PadInputConv head (8 input channels) is handled by taking its first
+    three. Two other things this row owned: the 265 MB write is eliminated with the pass (they are the same
+    object), and the isolated-vs-app gap on the head (3.2 isolated against 4.65-4.90 in-app) is now the
+    clamp allocation plus the frame conversion, not the convolution. docs/wsp/verified/int8-head-fusion.txt,
+    records int8-head-fusion.jsonl (H001-H009, R001-R003, HF001-HF004), logs/head-fusion/.
   priority: P1
   gpu: true
   cost: 4h
