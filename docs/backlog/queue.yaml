@@ -2179,8 +2179,15 @@ tasks:
 - id: rve-tail-conv-utilization-2026-11-19
   title: 'The tail conv runs at ~5 of ~176 TFLOPS - C_out=12 underfills the tensor-core tile'
   type: experiment
-  status: todo
+  status: dropped
   owner: '@supervisor'
+  resolution: >-
+    SUPERSEDED 2026-11-20 by rve-tail-as-int8-hop, which was adopted: the fp16 cuDNN convolution this row
+    wanted to make efficient is no longer on the path (the tail is one int8 kernel at 0.96 ms against 2.49 +
+    1.67 for dequant). Both rows attacked the same 28.7 GFLOP convolution; measuring the fp16 shape's
+    utilisation now would buy nothing. Its padding half is answered in the adopting row (12 -> 16 zeros
+    preserve the arithmetic, and the int8 kernel writes 12), and its transpose half (C7) is moot for the same
+    reason. Re-open only if the int8 tail is ever reverted.
   priority: P2
   gpu: true
   cost: 4h
@@ -2533,8 +2540,23 @@ tasks:
 - id: rve-tail-as-int8-hop-2026-11-19
   title: 'Make the tail a 17th int8 hop with the dequant scale folded into its weights'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    ADOPTED 2026-11-20, all three stages. (a) Four held-out BD frames (29, 44, 274, 400): folded-scale int8
+    tail, weights per-output-channel, outputs padded 12->16 - worst share 0.00147% against the 0.1 bar (68x
+    inside), peak 13 against 20; the algebra alone (no weight quantisation) reads 0.00129%, so int8 weights
+    add 0.0002%. (b) One Triton conv 576->16 at 1080p: 0.974 ms against 4.444 for the two-step tail
+    (dequant 1.839 + cuDNN conv 2.556). (c) In the app, null sink, 3 interleaved rounds: 45.87 -> 42.71
+    ms/frame (-3.16, -6.9%); the tail phase line reads dequant 1.67 -> 0.00, conv 2.49 -> 0.96, SUM
+    5.66 -> 2.56. Picture, 494-frame ffv1 pair, reference-kind config: worst share 0.00000%, 0 frames above
+    0.1%, peak 6; and against the MODEL the int8 tail is CLOSER than the cuDNN path on both frames checked
+    (0.01131 -> 0.01057% frame 29; 0.01613 -> 0.01501% frame 274). Shipped as the default (RVE_TAIL_INT8=0
+    restores cuDNN; the kernel declines a tail with more than 16 output channels). Adopted where the
+    epilogue fold was not: 3.16 ms, a pass removed, and closer to the model. docs/wsp/verified/
+    int8-tail-hop.txt, records int8-tail-hop.jsonl (A001-A007, B001-B004, R001-R003, C001-C004, TF001-TF004),
+    logs/tail-hop/. Suite: 409 passed, 1 failed - ModuleNotFoundError: yaml in scripts/harness/db.py under
+    the app interpreter, unrelated to this change.
   priority: P1
   gpu: true
   cost: 4h
