@@ -1717,10 +1717,14 @@ tasks:
     default anywhere. Until then the tooltip states what was measured and on what.
   note: >-
     Everything this lane measured was measured on an RTX 4060 Ti, one 2x SRVGG-style anime model, one title.
-    The body's speed-up is 1.14x on that card in one draw and about even on a second title, and the picture was
-    indistinguishable ON THAT MATERIAL - the tooltip now says exactly that rather than "may get worse or
-    better", because that phrasing was written before the same-input comparison existed. The int8 body also only
-    serves the whole-frame path and needs 64 body channels, so on other models it may not be usable at all.
+    SUPERSEDED on the speed half by rve-int8-wall-ab-2026-11-19: both titles read 1.088-1.141x interleaved, so
+    "about even on a second title" is withdrawn. The picture claim below and the per-card question stand, and
+    the tooltip never quoted a speed-up anyway - it says "the speed-up depends on the card".
+    Old wording kept for the trail: the body's speed-up is 1.14x on that card in one draw and about even on a
+    second title, and the picture was indistinguishable ON THAT MATERIAL - the tooltip now says exactly that
+    rather than "may get worse or better", because that phrasing was written before the same-input comparison
+    existed. The int8 body also only serves the whole-frame path and needs 64 body channels, so on other models
+    it may not be usable at all.
 
 - id: rve-int8-wall-ab-2026-11-19
   title: 'What does int8 actually save? One interleaved wall A/B, both titles, per-phase'
