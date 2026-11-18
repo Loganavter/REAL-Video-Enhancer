@@ -1887,32 +1887,30 @@ tasks:
     THIS tail at 3840x2160x64 channels, and whether the residual add can join without breaking the A/A.
 
 - id: rve-model-class-question-2026-11-19
-  title: 'Our upscaler is ~10x the field''s real-time 4K class - is the picture worth it?'
+  title: 'DROPPED: "use a smaller network" is not a lever here - the model is the product'
   type: research
-  status: todo
+  status: dropped
   owner: '@owner'
   priority: P3
   gpu: false
   cost: 1h
+  resolution: >-
+    dropped 2026-11-19 by the owner, before any measurement: the upscaler's whole point is that the user
+    chooses the model - the ESRGAN-compact family is ~100 different user models - so "our network is 10x
+    the NTIRE real-time class" compares a model MENU with a single-entry benchmark. It is the Linux-desktop
+    argument in reverse: more choice and more control against a fixed, curated stack. NTIRE's 4.75 ms is
+    what one network costs; it is not a bar for a renderer whose quality is whatever the user picked.
+    Consequences for the lane, kept because they are the reusable part: (a) no proposal "swap the model
+    for a smaller one" counts as an optimisation - the lane's levers must be MODEL-GENERIC (accounting,
+    tail fusion, plumbing, encoder path), (b) the int8 body's requirements (64 body channels, whole-frame
+    path) are a COMPATIBILITY ENVELOPE - which of the ~100 models can use Fast at all is a real question,
+    and it lives in rve-fast-preset-per-hardware-2026-11-18, not here, (c) quality comparisons against
+    real-time-class papers are not a bar this product can be measured against.
   tags:
   - product
   - model
-  - quality
+  - dropped
   base_branch: perf/inference
   relates_to:
-  - docs/wsp/verified/int8-wall-ab.txt
   - docs/MODEL.md
-  refutes: >-
-    The 50 ms/frame frame is a floor set by the quantiser and the boundary. It is not: quantisation bought
-    7.1 ms of a 50.6 ms frame, so even a perfect int8 lane moves the product ~14%. The remaining time is
-    the MODEL (16 x 64-channel 3x3 at 1080p = 2.45 TFLOP/frame, ~94 TOPS achieved) and the 4K plumbing.
-    NTIRE 2023's real-time 4K track reports 4.75 ms for a 3x network on a 3090 Ti at PSNR 30.15 dB; whether
-    that quality is acceptable on the owner's material is a product judgement, not a measurement.
-  acceptance: >-
-    An owner decision, informed by: our model's measured quality on the same two BD clips against a
-    real-time-class model, the delta in ms/frame, and whether the product's audience would accept it. No
-    code change, no GPU job.
-  note: >-
-    Filed because two independent lanes keep proposing intra-body optimisations that the boundary rule
-    already bounds, while the largest single lever (a smaller student model) is a product decision nobody
-    has put in front of the owner with numbers. This row is that question, not a plan.
+  - docs/wsp/verified/int8-wall-ab.txt
