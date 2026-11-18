@@ -328,12 +328,18 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                 outs_got = [_quantised_forward(model_q, f, inputs, outputs).float() for f in pair]
                 if i in test_idx:
                     engine.append(_statistic(outs_ref[1], outs_got[1]))
+                # MIRRORED, as the gate does it: the frame that is served is the LATER one, and the
+                # reference is EARLIER. The previous order rendered index 0 against references 1 and 2,
+                # i.e. rendered the earliest frame against later ones - a direction the gate never
+                # serves. That is why the fp16 control on these pairs (0.083% on Chainsaw) exceeded the
+                # worst of the full fp16 sweep (0.07546%): a max over a subset cannot exceed the max
+                # over the set, so the pairs were not a subset of the render's population.
                 if i in reused:
-                    comp.append(_statistic(outs_ref[1], outs_got[0]))
-                    stale1.append(_statistic(outs_ref[1], outs_ref[0])[0])
+                    comp.append(_statistic(outs_ref[0], outs_got[1]))
+                    stale1.append(_statistic(outs_ref[0], outs_ref[1])[0])
                 if i in reused2:
-                    comp2.append(_statistic(outs_ref[2], outs_got[0]))
-                    stale2.append(_statistic(outs_ref[2], outs_ref[0])[0])
+                    comp2.append(_statistic(outs_ref[0], outs_got[2]))
+                    stale2.append(_statistic(outs_ref[0], outs_ref[2])[0])
                 del outs_ref, outs_got
         stale1_worst = max(stale1, default=float("nan"))
         stale2_worst = max(stale2, default=float("nan"))
@@ -344,7 +350,7 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         if adversarial and filter_statistic == "channel_max_share":
             events = _scan_reuse_events(clip, width, height, gate_threshold, max_chain,
                                         limit=int(adversarial))
-            adv_vals, ctl_vals = [], []
+            adv_vals, ctl_vals, discarded = [], [], 0
             need = [i for f, r, _s in events if r is not None for i in (f, r)]
             cache = _read_indices(clip, need, width, height) if need else {}
             with torch.no_grad():
@@ -362,6 +368,7 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                     # and rendering it would report a scene change as a composition error.
                     lr_share = float((x_r - x_t).abs().amax(dim=1).gt(8.0 / 255.0).float().mean()) * 100.0
                     if lr_share > gate_threshold:
+                        discarded += 1
                         continue
                     ref_r = model(x_r).float()
                     got_t = _quantised_forward(model_q, x_t, inputs, outputs).float()
@@ -393,8 +400,13 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                   f"{len(comp)} of {len(test_idx)} pairs at d1, {_n2} at d2); "
                   f"fp16 reference on the same pairs: d1 {stale1_worst:.3f}% / d2 {stale2_worst:.3f}%")
         if adv_n:
+            # A run that had to throw most of its pairs away is not a smaller sample, it is an
+            # invalid one: the discard rate is the share of pairs where the scan's bookkeeping and
+            # the pixels disagree.
+            rate = 100.0 * discarded / max(1, adv_n + discarded)
             reason += (f"; adversarial top-{adv_n} of the clip: {adv:.3f}% "
-                       f"(fp16 control {adv_ctl:.3f}%)")
+                       f"(fp16 control {adv_ctl:.3f}%, discarded {discarded} of "
+                       f"{adv_n + discarded} = {rate:.0f}%{' - INVALID' if rate > 20 else ''})")
         return Int8ProbeResult(verdict, engine_worst, comp_worst, peak, len(comp), bar, reason,
                                frames_used=len(pairs),
                                frames=[f for i in calib_idx for f in frames_all[i]],
