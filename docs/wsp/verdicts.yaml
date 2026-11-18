@@ -258,7 +258,12 @@
     (probe-owner-and-scan-cost). Closing it needs the adversarial path, which costs 11.5 s of scan plus
     ~6.5 s of renders on a 45 s probe (+40%) - a cost decision, not a free default. And the invariant is
     one-sided: `control <= sweep` fires on Violet's int8 side (1.09x, 1.70x) but is blind to Chainsaw's
-    89x under-read. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
+    89x under-read. THE ENGINE IS CLEAN ON CHAINSAW: split by population, int8 reads 0.08876% on the
+    83 reused frames against 0.00034% on the 398 rendered ones - 260x - so the probe's 0.001% engine
+    reading is correct and the whole gap is pair selection. On Violet the split is different: 0.12727%
+    on 336 reused against 0.08738% on 144 rendered, i.e. the engine eats 87% of the bar there
+    (probe-owner-split-and-band). The marginal band around 0.07 holds exactly one frame (475, HR
+    0.07546, under the bar), so the 1.6% simulation/product jitter cannot hide a failure. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
     (`probe(..., adversarial=k)`): scan the whole clip with the gate's statistic, rank the reuses it
     would make, render the top-k. On Chainsaw that moves the number from 0.000% (no depth-2 pair in the
     product's 16 triples) to 0.110% with an fp16 control of 0.083% - from 26x under the render's

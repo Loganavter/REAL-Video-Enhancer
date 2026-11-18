@@ -125,7 +125,7 @@ class Render:
         temporal_reuse_threshold: float = 5.0,
         temporal_reuse_statistic: str = "mean_abs",
         int8_fit: str = "auto",
-        temporal_reuse_block_max: float | None = None,
+        temporal_reuse_max_block_mean: float | None = None,
         temporal_reuse_max_chain: int = 4,
         # 0/None = off. 40 is the TheAnimeScripter value and is right for clean anime, but on
         # grainy film a single ringing pixel exceeds it: measured 43 vetoes in 94 frames and
@@ -401,7 +401,7 @@ class Render:
                 max_chain=temporal_reuse_max_chain,
                 pixel_veto=temporal_reuse_pixel_veto or None,
                 statistic=temporal_reuse_statistic,
-                block_max=temporal_reuse_block_max,
+                max_block_mean=temporal_reuse_max_block_mean,
             )
             log(f"Reference-frame reuse enabled (threshold {temporal_reuse_threshold}/255, "
                 f"statistic {temporal_reuse_statistic}, "

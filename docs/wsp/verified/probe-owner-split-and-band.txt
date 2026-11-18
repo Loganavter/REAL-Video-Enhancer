@@ -1,0 +1,40 @@
+# The representation term, Violet's true owner split, and the marginal band
+
+## The 6.3-level peak is chroma, not rounding
+
+RGB -> yuv420p -> RGB on one 4K frame: **peak 24, share 0.1071%, mean 1.77**. So an engine-RGB output
+against a YUV-stored render carries a representation term three times the bar's 8 levels, and "rounding"
+was the wrong label. Inside the probe both sides are RGB (torch against engine), so the term is not in
+the composition number - it is in any comparison of the engine against the encoded render.
+
+## Violet's owner split, on the render's population
+
+| population | frames | int8 max |
+|---|---|---|
+| reused | 336 | **0.12727%** (3 above the bar) |
+| rendered | 144 | **0.08738%** (0 above) |
+
+The engine's own error is **87% of the bar** on Violet: it eats the budget and composition adds the
+rest. The probe's own-defect reading (0.082%) was close to this, so that number was right even when the
+composition one was not.
+
+## The marginal band is one frame, and it is safe
+
+Around the 0.07 threshold (+-2%), Chainsaw has exactly **one** frame: 475, LR 0.07108, HR 0.07546,
+rejected in the simulation and reused in the product. It is also the worst HR among all rejected
+frames - under the bar. So the 1.6% simulation/product jitter can flip it either way and the frame
+stays inside the bar; no rejected frame hides a failure.
+
+## The second condition is renamed
+
+`--temporal_reuse_block_max` -> `--temporal_reuse_max_block_mean` (and `block_max` ->
+`max_block_mean` in the gate), because it is `max of block means`, not `max within block` - which is
+exactly why it never fired at 4 or 8 levels.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-owner-split-and-band.txt \
+       --records docs/wsp/verified/records/probe-owner-split-and-band.jsonl --bars docs/claims-bars.json
+
+@claim R001 24.0 levels "frames [2c290a810bd19168] n=1" measured
+@claim R002 0.12727 % "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R003 0.08738 % "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R004 1.0 frames "frames [718310b673d2e8ba] n=481" measured
