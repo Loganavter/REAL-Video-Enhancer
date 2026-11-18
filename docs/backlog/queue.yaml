@@ -2024,3 +2024,49 @@ tasks:
     dense int8 peak, so the headroom is in the Triton kernel's tiling/swizzle/K-padding, i.e. CUTLASS and
     Triton tuning guidance, not in fused-layer research. And the measured ranking of the frame's remaining
     cost puts the tail (8.8 ms of 4K passes) and the 6.2 ms of unnamed plumbing ahead of it.
+
+- id: rve-calibration-on-crops-2026-11-19
+  title: 'Calibration runs 24 full 1080p frames for 21 s - the field calibrates on small crops'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 2h
+  tags:
+  - int8
+  - calibration
+  - probe
+  - cost
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/utils/Int8Probe.py
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/verified/int8-probe-cost-2026-11-19.txt
+  owns_files:
+  - docs/wsp/verified/int8-calibration-crops.txt
+  refutes: >-
+    The calibration needs full 1080p frames. It runs 24 of them through the fp16 model with a hook on
+    every conv and PReLU, which is 21.1 s of the 29.3 s the probe now costs, and 49.8 megapixels of
+    material to measure 64 per-channel ranges (2.1 Mpx per channel). Post-training quantisation in the
+    field calibrates on a SMALL unlabelled set - a few forward passes over crops, not full frames - so if
+    24 crops of 256x256 (1.6 Mpx, 32x less work, ~0.7 s) hold the same ranges, the probe's cost drops from
+    29.3 s towards 2-3 s and int8's break-even falls from 2.9-3.5 min of video to well under a minute. If
+    the crops do not hold, the ranges are genuinely scene-statistics and the row closes with the measured
+    reason.
+  acceptance: >-
+    The same body, calibrated two ways on the same clip - 24 spread full frames (today) and 24 crops
+    (256x256, spread over the same frames) - then scored on the SAME held-out full frames against the
+    model's own fp16 output: share >8 levels and peak, worst frame, with a stated A/A per arm. Criterion:
+    the crop-calibrated body is within the session's drift of the full-frame one on both clips. Report the
+    calibration wall clock per arm (fresh process each), because the whole point is the cost, and keep the
+    per-channel range table so a reader can see WHERE the two disagree, if they do.
+  note: >-
+    Why it is filed now: the probe was just cut down to calibration only (33.4 s of certificate removed),
+    and what is left is 21.1 s of calibration on full frames. External practice, read 2026-11-19:
+    "a few forward passes on a small calibration set" is the standard PTQ recipe (arXiv:2610.28537,
+    arXiv:2610.03218), the calibration-set size question has its own paper (Hubara et al., ICML 2021,
+    "Accurate Post Training Quantization With Small Calibration Sets"), and Nagel et al. (ICCV 2019,
+    Data-Free Quantization) even estimates activation ranges analytically. NOT the same question as
+    int8-split-calibration, which is about WHICH TITLES (per-title calibration mis-states composition 20x):
+    that warning is about the scene, this row is about the crop. Do not use its conclusion to refuse crops.
