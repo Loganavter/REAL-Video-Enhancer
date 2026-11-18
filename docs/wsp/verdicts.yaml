@@ -230,7 +230,10 @@
     under the same gate - a 1.18x increment where the probe predicted 1.13x from its pairs, so that
     factor transfers on this material and the additive form does not. Violet under the same 0.07%
     threshold (out-of-sample, 70.8% reuse, chain 4) reads 0.07345% with nothing above the bar, so the
-    threshold transfers too. The probe certifies depths 1-2 while the gate serves 3 (6 of 78 reuses),
+    threshold transfers too - but forcing the body past the probe on Violet reads 0.56613% with 372 of
+    480 frames above the bar, so the refusal there is real and the probe's 0.108% understated it 5x.
+    The probe is systematically optimistic against the render on both clips (Chainsaw 0.000 against
+    0.08876) and is a screen, not a certificate. The probe certifies depths 1-2 while the gate serves 3 (6 of 78 reuses),
     but the damage is at depth 1: worst HR 0.07489 / 0.02670 / 0.00917% at depths 1 / 2 / 3. The population question is now closed by the
     render control: gated against ungated on the product reads 0.494% on the worst frame, so the
     probe's depth-2 number was measuring the right thing - see gate-exceeds-acceptance-bar. What is

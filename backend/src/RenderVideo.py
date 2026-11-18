@@ -124,6 +124,7 @@ class Render:
         # TheAnimeScripter calibration: --dedup_sens 35 / 7 = 5.0 luma levels, max span 4
         temporal_reuse_threshold: float = 5.0,
         temporal_reuse_statistic: str = "mean_abs",
+        int8_fit: str = "auto",
         temporal_reuse_max_chain: int = 4,
         # 0/None = off. 40 is the TheAnimeScripter value and is right for clean anime, but on
         # grainy film a single ringing pixel exceeds it: measured 43 vetoes in 94 frames and
@@ -145,6 +146,8 @@ class Render:
         # the probe runs BEFORE the gate object exists (setupUpscale precedes the gate block), so the
         # filter has to come from the configuration, not from the gate
         self.temporalReuseStatistic = temporal_reuse_statistic
+        # "auto" asks the probe; "int8"/"fp16" force it, for measurement only
+        self.int8Fit = int8_fit
         self.temporalReuseMaxChain = temporal_reuse_max_chain
         self.ffmpegPath = ffmpeg_path
         if quality_preset not in ("best", "fast"):
@@ -892,10 +895,11 @@ class Render:
             # switch: an engine swapped mid-render would mix two error histories inside one gate window.
             if str(getattr(self, "int8Fit", "auto")).lower() == "auto":
                 self.int8Fit = self._probe_int8_fit()
-                # the verdict has to reach the object that runs frames: gen_render keeps it here, the hook
-                # reads it from the upscale option, and until this line existed the body was never built.
-                self.upscaleOption.int8Fit = self.int8Fit
-                self.upscaleOption.int8Frames = getattr(self, "int8Frames", None)
+            # the verdict has to reach the object that runs frames: gen_render keeps it here, the hook
+            # reads it from the upscale option, and until this line existed the body was never built.
+            # It must run for a FORCED verdict too, not only for the probe's.
+            self.upscaleOption.int8Fit = self.int8Fit
+            self.upscaleOption.int8Frames = getattr(self, "int8Frames", None)
             
 
         if self.backend == "ncnn":
