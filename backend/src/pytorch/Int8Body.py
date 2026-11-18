@@ -88,6 +88,11 @@ class Int8Body:
         self.inner_prelus = prels[1:]
         self.scale = int(getattr(model, "upscale", 2))
         self.feat, self.block_m, self.warps = feat, block_m, warps
+        # The epilogue's per-element divide can be folded into the incoming rescale: `a = w_scale/out_scale`
+        # and `b = bias/out_scale` computed once per channel. Kept behind a knob until it has been timed and
+        # its picture measured (row rve-epilogue-divide-2026-11-19) - the rewrite is exact in real arithmetic
+        # but not bit-identical in fp32, so it is a different-arithmetic change, not a layout.
+        self.fold = int(os.environ.get("RVE_INT8_EPILOGUE_FOLD", "0"))
         self._launches = None
         self._grids = None         # (s_act, outs)
         # fp16 for the kernel: an fp32 slope promotes the tile and costs 3x
@@ -388,7 +393,8 @@ class Int8Body:
                 _h0 = _time.perf_counter()
                 body_prologue_kernel[grid](src, launch["w"], launch["mn"], SHIFT, launch["vec"],
                                            launch["bias"], launch["slope"], launch["os"], dst, h, w,
-                                           BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps)
+                                           BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps,
+                                           FOLD=self.fold)
                 _host_launch += _time.perf_counter() - _h0
                 src = dst
                 nxt = self._scratch_b if dst is self._scratch_a else self._scratch_a

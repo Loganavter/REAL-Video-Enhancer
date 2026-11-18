@@ -2484,8 +2484,21 @@ tasks:
 - id: rve-epilogue-divide-2026-11-19
   title: 'The hop epilogue divides per element - fold the output scale into a and b (all 16 hops)'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    closed by measurement 2026-11-20 with a knob, not an adoption. The isolated probe's 8-round session reads
+    the fold faster in 8 of 8 rounds: one hop 1.832 -> 1.772 ms (-0.060, -3.3%), sixteen hops 29.48 -> 28.825
+    (-0.655, -2.2%). An earlier 4-round session read the hop at parity (1.805 vs 1.806), so the SIGN is what
+    reproduces, not the size: the chain swings -0.25..-0.66 ms and the in-app interleaved A/B (3 rounds, null
+    sink) reads hops -0.16 and frame 48.68 -> 48.46 ms (-0.22). Picture: 494-frame ffv1 pair, reference-kind
+    config, worst share 0.00000%, 0 frames above 0.1%, peak 6 (below the 8-level threshold); codes 0/132.7 M
+    on one hop, 0.029% after sixteen (max 53). NOT adopted: 0.22-0.7 ms does not pay for a
+    different-arithmetic change never measured against the MODEL, and it would break byte-identity with every
+    recorded render. RVE_INT8_EPILOGUE_FOLD=1 is the opt-in; FOLD=0 is verified bit-identical to the kernel at
+    HEAD (scripts/epilogue_control.py, 0 differing codes over all sixteen hops). Adopt path is written in the
+    doc. docs/wsp/verified/int8-epilogue-fold.txt, records int8-epilogue-fold.jsonl (E001-E009, R001-R004,
+    EF001-EF004), logs/epilogue-fold/ (probe-r8.json, ab/, ab-ffv1/).
   priority: P1
   gpu: true
   cost: 1h
