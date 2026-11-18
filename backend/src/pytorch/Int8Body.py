@@ -257,6 +257,15 @@ class Int8Body:
         return self._buf, self._scratch_a, self._scratch_b
 
     def __call__(self, x):
+        import os as _os_dbg
+        if _os_dbg.environ.get("RVE_DEBUG_INPUT") == "1" and not getattr(self, "_dbg_input", False):
+            self._dbg_input = True
+            import logging as _lgd
+            _t = x.float()
+            _lgd.getLogger("RVE").warning(
+                "int8 INPUT  shape=%s dtype=%s  mean=%.5f min=%.5f max=%.5f  ch-mean=%s",
+                tuple(x.shape), x.dtype, float(_t.mean()), float(_t.min()), float(_t.max()),
+                [round(float(v), 5) for v in _t[0].mean(dim=(1, 2)).tolist()])
         if self._grids is None:
             self.calibrate(x)
         if self._launches is None:

@@ -1653,7 +1653,15 @@ tasks:
     Dump the tensor that actually arrives in `Int8Body.__call__` in a live render and the tensor that arrives in
     the fp16 engine path on the same frame; compare per-channel mean, min/max and the RGB->YUV conversion used.
     If they differ, name the term, fix the preparation, re-render and re-read ink/rim on frames 169 and 274.
-  note: >-
+  measured: >-
+    2026-11-18, first check done: both branches logged the tensor they receive (RVE_DEBUG_INPUT=1, two 2 s
+    renders). int8 INPUT mean 0.55127 min 0.14905 max 1.00000 ch-mean [0.65111, 0.52043, 0.48228]; fp16 INPUT
+    mean 0.55122 min 0.00000 max 1.00000 ch-mean [0.65105, 0.52038, 0.48223]. The means and per-channel means
+    agree to five decimals, i.e. the two branches see the same preparation and the same colour conversion; only
+    the minimum differs, which is what two DIFFERENT first frames of the clip look like, not two conversions.
+    So the branch-input hypothesis has no support yet - the remaining candidate is that the two first frames
+    are simply not the same frame, and the clean way to close it is to feed ONE decoded frame to both the body
+    and the engine offline and compare their outputs against the model, which is the next step.
     STATE 2026-11-18. The body measured IN-PROCESS (RGB, model as reference) does not lift the ink at all:
     -0.51 at frame 169 and -0.57 at 274 with a 4-frame calibration, -0.80 and -1.23 with the 24-frame set the
     app uses, and the share stays 0.004-0.020% against a 0.1% bar. The RENDERED file, compared the same way

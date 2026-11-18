@@ -492,6 +492,15 @@ class UpscalePytorch:
         _h = {"t0": time.perf_counter()}
         with self.torchUtils.run_stream(self.f2tstream):  # type: ignore
             image_tensor = image.get_frame_tensor()
+        import os as _os_dbg
+        if _os_dbg.environ.get("RVE_DEBUG_INPUT") == "1" and not getattr(self, "_dbg_input", False):
+            self._dbg_input = True
+            import logging as _lgd
+            _t = image_tensor.float()
+            _lgd.getLogger("RVE").warning(
+                "fp16 INPUT shape=%s dtype=%s  mean=%.5f min=%.5f max=%.5f  ch-mean=%s",
+                tuple(image_tensor.shape), image_tensor.dtype, float(_t.mean()), float(_t.min()),
+                float(_t.max()), [round(float(v), 5) for v in _t[0].mean(dim=(1, 2)).tolist()])
         _h["upload"] = time.perf_counter()
         del image
         self.torchUtils.sync_stream(self.f2tstream)
