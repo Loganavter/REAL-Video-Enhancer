@@ -272,6 +272,34 @@ Literature that remains worth reading for this lane: Nagel DFQ (bias correction 
 Finkelstein "Fighting Quantization Bias with Bias" (mean activation shift), the 2021 white paper's section 3.3,
 and SmoothQuant (outlier migration, which is what folding s_in into the weights already does here).
 
+## Corrected: the bias correction is right, tiny, and the stroke lift is NOT in the body
+
+After fixing the unit error (the kernel reads CODES, i.e. x/s_t, and multiplies by w_sc*s_t; feeding it the
+real x over-counted by s_t), the correction no longer breaks anything and it measures:
+
+| frame 169 | self-certification vs the model | ink | rim |
+|---|---|---|---|
+| uncorrected body | 0.00563% | -0.51 | -0.11 |
+| bias-corrected body | **0.00515%** | -0.49 | -0.13 |
+
+| frame 274 | | ink | rim |
+|---|---|---|---|
+| uncorrected | | -0.57 | -0.07 |
+| corrected | | -0.48 | -0.12 |
+
+Two things follow, and the second is the important one:
+
+1. The correction works and is worth ~9% of an already-tiny share. It stays available (`RVE_INT8_BIAS_CORR=1`)
+   and off by default.
+2. **The body does not lift the ink at all: -0.5 levels, with or without the correction.** The +4.40/+6.60
+   reported earlier was measured on the RENDERED FILE against the model, so it belongs to the render path -
+   the yuv420p colour pipe and/or the probe's 24-frame calibration - not to the quantiser. The body, in RGB,
+   is faithful on the stroke to half a level.
+
+That re-opens one question and closes another: the quantiser is not the cause of the pale line (closed by
+measurement here), and whatever shifts the ink by ~5 levels happens between the body's output and the decoded
+file (open, and a colour-pipe question rather than a quantisation one).
+
 ## Records
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt

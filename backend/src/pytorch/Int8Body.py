@@ -166,7 +166,10 @@ class Int8Body:
                 # the first attempt flip the picture to 100% wrong instead of fixing the stroke.
                 bias_f = conv.bias.detach().float().view(-1)
                 with torch.no_grad():
-                    same_q = F.conv2d(fp.float(), w_q, None, padding=1) * (w_sc * s_t).view(1, -1, 1, 1) + bias_f.view(1, -1, 1, 1)
+                    # the kernel reads CODES, i.e. x/s_t, and multiplies by (w_sc * s_t): feeding it the real
+                    # x and the same multiplier over-counts by s_t, which is what made the first two attempts
+                    # subtract a term several times too large and flip the picture.
+                    same_q = F.conv2d((fp.float() / s_t), w_q, None, padding=1) * (w_sc * s_t).view(1, -1, 1, 1) + bias_f.view(1, -1, 1, 1)
                     same_fp = F.conv2d(fp.float(), weight, bias_f, padding=1)
                     shifts[idx] += (same_q - same_fp).mean(dim=(0, 2, 3))
                 q_act = F.prelu(q_pre, self.inner_prelus[idx].weight.detach().float())
