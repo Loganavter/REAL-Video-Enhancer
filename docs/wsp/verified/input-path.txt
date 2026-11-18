@@ -1,0 +1,82 @@
+# The input path's clone and sync: 0.07 ms of a 1.38 ms call, and the call is the H2D copy
+
+Measured 2026-11-20 (local), 1920x1080 yuv420p10le input, one process, one GPU job, round-robin arms with
+torch CUDA events and a wall clock beside them, 10 rounds x 50 calls per arm, medians of rounds 2+.
+Records: `input-path.jsonl`; raw draws: `docs/wsp/verified/logs/input-path/probe.json`.
+
+Why this was measured: `Frame.get_frame_tensor` returns `self._tensor.clone()` on every call with a comment
+that says "have to test later" (`backend/src/utils/Frame.py:322`), and `yuv420p10_to_tensor` ends with an
+explicit `sync_stream` (`backend/src/pytorch/TorchUtils.py:243`). The frame accounting attributes ~2.4 ms to
+the wrapper around the body and could not name any of it (`int8-frame-accounting.txt`); these two were the
+cheapest unnamed items in that window (row `rve-input-clone-sync-2026-11-19`, researcher's C9, estimate
+0.2-0.5 ms).
+
+## The arms
+
+| arm | event ms | min draw | what it is |
+|---|---|---|---|
+| conv+clone | **1.398** | 1.369 | the shipped `get_frame_tensor` path |
+| conv | 1.377 | 1.340 | conversion as shipped (trailing `sync_stream` included) |
+| nosync+clone | 1.306 | 1.256 | sync patched to a no-op, clone kept |
+| conv-nosync | 1.252 | 1.220 | conversion with neither |
+| clone-only | 0.110 | 0.098 | `.clone()` of an already-converted frame |
+
+Paired differences (median over rounds 3-10, so the run's own drift is common to both sides):
+
+| pair | ms | reading |
+|---|---|---|
+| conv - conv-nosync | **+0.125** | the trailing `sync_stream` |
+| conv+clone - conv | **+0.021** | the clone, with the sync still in place |
+| nosync+clone - conv-nosync | +0.033 | the clone, sync removed |
+| nosync+clone - conv | **-0.071** | both removals together - the row's decision number |
+
+## What this says
+
+- **The pair is not worth a code change.** Both removals read **-0.07 ms** on the shipped arm - negative,
+  i.e. below zero within the probe's own resolution - against the estimate of 0.2-0.5 ms. The row's exit
+  condition ("if both together are under 0.1 ms, close it") is met.
+- **The sync is the larger half (0.125 ms) and the clone is at the floor (0.02-0.03 ms).** The 0.110 ms
+  `clone-only` arm is the clone's cost on an otherwise idle stream: 24.9 MB of traffic for the 12.44 MB
+  frame. In the shipped path almost all of it hides under the conversion's own queue -- adding the clone
+  costs 0.021 with the sync present and 0.033 without.
+- **The call is dominated by the pageable host-to-device copy**, not by either of them: 6.22 MB of
+  yuv420p10le per frame plus the bilinear chroma upsample and the BT.709 matrix is 1.25-1.38 ms, and the
+  two suspects together are 5-6% of that. Levers on the copy itself (a pinned staging ring, or consuming
+  the codes an int8 head would need instead of float RGB) are a different row, and this file does not
+  price them.
+
+So the row closes without touching the code. That is also the safer outcome: `get_frame_tensor`'s clone
+is what stops a cached tensor from being overwritten by the next frame, and 0.02 ms is not evidence to
+spend that guarantee on.
+
+## Not covered
+
+- One machine, one card, one resolution, one payload. The 4K output path reads the frame at input
+  resolution, so this does not describe a 4K input.
+- The probe runs the conversion on its own stream with nothing queued behind it. In the app the read
+  thread overlaps the previous frame's inference, which is the configuration the "forfeits overlap"
+  concern is about; this file measures the call in isolation and does NOT measure the overlap it loses.
+- The wall clock and the event time agree to 0.03 ms on every arm here, so nothing in the pair is
+  CPU-side-only cost.
+- Reproducibility: an earlier 6-round x 40-call run gave the same ordering and the same decision
+  (sync +0.083, clone +0.057, both -0.052); the two sessions differ by 0.02-0.04 ms per arm.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock .venv/bin/python scripts/input_path_probe.py --rounds 10 --iters 50 \
+    --out-file docs/wsp/verified/logs/input-path/probe.json
+PYTHONPATH=scripts .venv/bin/python scripts/input_path_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/input-path.txt \
+       --records docs/wsp/verified/records/input-path.jsonl --bars docs/claims-bars.json
+
+@claim I001 1.377 ms "frames [90048fb7661df762] n=1" measured
+@claim I002 1.398 ms "frames [90048fb7661df762] n=1" measured
+@claim I003 1.252 ms "frames [90048fb7661df762] n=1" measured
+@claim I004 1.306 ms "frames [90048fb7661df762] n=1" measured
+@claim I005 0.11 ms "frames [90048fb7661df762] n=1" measured
+@claim R001 0.125 ms "frames [90048fb7661df762] n=1" derived
+@claim R002 0.021 ms "frames [90048fb7661df762] n=1" derived
+@claim R003 -0.071 ms "frames [90048fb7661df762] n=1" derived

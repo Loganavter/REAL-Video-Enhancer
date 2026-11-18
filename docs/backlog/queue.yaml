@@ -2560,8 +2560,15 @@ tasks:
 - id: rve-input-clone-sync-2026-11-19
   title: 'The input path clones and synchronises every frame - 30 minutes to settle'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    closed by measurement 2026-11-20: both removals together read -0.071 ms on the shipped arm (sync +0.125,
+    clone +0.021 once the sync is present, clone 0.110 alone on an idle stream) against the 0.2-0.5 ms
+    estimate - under the row's 0.1 ms exit condition, so no code change. The 1.38 ms call is the pageable
+    6.22 MB H2D plus the chroma upsample and the matrix, not these two. docs/wsp/verified/input-path.txt,
+    records input-path.jsonl (I001-I005, R001-R003), logs/input-path/probe.json. Not covered: the overlap
+    the read thread would have with the previous frame, and a 4K input.
   priority: P2
   gpu: true
   cost: 1h
