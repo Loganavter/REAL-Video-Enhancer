@@ -91,6 +91,29 @@ interpreter that does not exist). A claim about the machine is checkable, so it 
 reads `/proc` and the installed versions, greps the docs, and fails on a contradiction. A line that
 *quotes* an old claim marks itself `<!-- env-ok -->`, and `AUDIT-*` reports are skipped.
 
+`source-check` is the same idea one level up, and it exists because the class-1 failure survived every
+gate: from 2026-11-15 to 2026-11-18 the prose called two h264 **4 Mbps re-encodes** "the BD remaster",
+and the harness hashed those files faithfully while declaring that a population *label* is not checked.
+It is checked now, at least in its mechanical half:
+
+```
+PYTHONPATH=scripts python3 -m harness.cli source-check docs/wsp/sources.yaml --clip-root /tmp/opencode
+PYTHONPATH=scripts python3 -m harness.cli source-check docs/wsp/sources.yaml --prove   # packet proof
+PYTHONPATH=scripts python3 -m harness.cli source-check docs/wsp/sources.yaml \
+    --records "docs/wsp/verified/records/*.jsonl"                                      # contaminated records
+```
+
+It reads bit rate, packet count, pixel format, colour tags and B-frame depth with `ffprobe`; refuses a
+"BD" label below the 35 Mbps floor; proves a `-c copy` cut by locating the clip's video packets as a
+contiguous run inside the source (a re-encode has different packet sizes, so no run matches); and lists
+every record whose population items name a contaminated input - with a name boundary, because
+`bd_violet20s.mkv` CONTAINS `violet20s.mkv`. `docs/wsp/sources.yaml` is the register;
+`docs/wsp/verified/sources-bd.txt` is the finding it produced.
+
+What it still cannot check: whether the population is the one a decision needs, and whether a frame
+index from one cut names the same picture in another. A short cut also has a scene-dependent container
+rate, so the bit-rate floor is not a substitute for the proof.
+
 `harness.migrate` exits non-zero while any decision-bearing finding lacks the tuple. That is the point:
 the gate is the debt counter, and it currently reads **0 protected / 211 claims, 62 of them
 decision-bearing**.
