@@ -43,6 +43,9 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--bar", type=float, default=0.1)
+    ap.add_argument("--filter-statistic", default="block_mean",
+                    choices=("block_mean", "channel_max_share"),
+                    help="the variable the pair filter uses; it must be the gate's own")
     ap.add_argument("--gate-threshold", type=float, default=None,
                     help="the gate's own threshold for the pair filter; the auto tuner clamps to "
                          "(2.0, 4.0), so the probe's 5.0 default certifies on a superset")
@@ -50,6 +53,7 @@ def main() -> int:
 
     for clip in args.clips:
         kw = {} if args.gate_threshold is None else {"gate_threshold": args.gate_threshold}
+        kw["filter_statistic"] = args.filter_statistic
         r = probe(clip, args.model, args.width, args.height, frames=args.frames, bar=args.bar, **kw)
         print(f"{clip} (frames={args.frames})")
         print(f"  {r.reason}")

@@ -173,7 +173,8 @@ def _statistic(a, b, bar=8.0):
 
 
 def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
-          bar: float = 0.1, gate_threshold: float = GATE_THRESHOLD) -> Int8ProbeResult:
+          bar: float = 0.1, gate_threshold: float = GATE_THRESHOLD,
+          filter_statistic: str = "block_mean") -> Int8ProbeResult:
     """Would int8 fit this video? Composition first, own defect second, bar = 0.1% of pixels."""
     try:
         import torch
@@ -201,6 +202,13 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         # Taken BEFORE calibration: it reads the frames, not the weights, and the fp16 control below
         # needs the pair sets to compute its own statistic one pair at a time.
         def gate_delta(fa, fb):
+            # The pair filter has to use the same variable the gate decides on, or the probe
+            # certifies a population the render never serves. Three statistics have lived here:
+            # the gate's (1,2,1)/4 luma block mean, a plain mean(R,G,B) block mean (neither the
+            # gate's nor the bar's), and now the bar's own quantity.
+            if filter_statistic == "channel_max_share":
+                cm = (fb.float() - fa.float()).abs().amax(dim=1)
+                return float((cm > 8.0 / 255.0).float().mean()) * 100.0
             def blocks(f):
                 import torch.nn.functional as F
                 return F.avg_pool2d(f.float().mean(dim=1, keepdim=True), 32, ceil_mode=True) * 255.0
