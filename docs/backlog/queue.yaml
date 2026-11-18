@@ -1675,3 +1675,37 @@ tasks:
     Why it matters: if the branches get different inputs, the "pale line" is a pipeline bug that also affects
     what the body is asked to reproduce, and it is fixable outside the quantiser; if they do not, the stroke is
     a genuine 8-bit cost and the lane closes on picture. Either way this is the last measurement that decides.
+
+- id: rve-fast-preset-per-hardware-2026-11-18
+  title: 'The Fast/Best default and its wording are tuned to one card - re-derive them per GPU and per model'
+  type: research
+  status: todo
+  owner: '@owner'
+  priority: P2
+  gpu: true
+  cost: 1d
+  tags:
+  - product
+  - int8
+  - hardware
+  - ui
+  base_branch: perf/inference
+  relates_to:
+  - src/ui/SettingsTab.py
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/verified/int8-scales-bd.txt
+  owns_files:
+  - src/ui/SettingsTab.py
+  refutes: >-
+    The Fast preset's speed-up and its picture cost are the same on another card or another model. Then the
+    single wording is right and this row closes without a change.
+  acceptance: >-
+    The same one-frame, no-pipe comparison (model vs int8 body vs fp16 engine) plus an interleaved wall A/B, run
+    on at least a second GPU generation (or a second model family), and a decision on whether Fast should be the
+    default anywhere. Until then the tooltip states what was measured and on what.
+  note: >-
+    Everything this lane measured was measured on an RTX 4060 Ti, one 2x SRVGG-style anime model, one title.
+    The body's speed-up is 1.14x on that card in one draw and about even on a second title, and the picture was
+    indistinguishable ON THAT MATERIAL - the tooltip now says exactly that rather than "may get worse or
+    better", because that phrasing was written before the same-input comparison existed. The int8 body also only
+    serves the whole-frame path and needs 64 body channels, so on other models it may not be usable at all.
