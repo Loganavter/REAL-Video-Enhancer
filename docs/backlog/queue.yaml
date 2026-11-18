@@ -2685,8 +2685,19 @@ tasks:
 - id: rve-sub8-codes-2026-11-19
   title: 'Do 6-bit codes between hops survive the picture bar? (emulation only, no GPU)'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-20, before any kernel. Both ways of spending the two bits fail on all four
+    held-out BD frames: rescale (same range, 4.1x the step) reads 2.71% worst share with peak 77 levels, clip
+    (same step, range to +-31) reads 3.04% with peak 90 - against a 0.1% share bar and a 20-level peak bar.
+    The control is the same chain at 8 bits: 0.01536% vs the MODEL, inside the corpus's recorded 0.006-0.016%
+    body-vs-model range, so the chain is the body and the 6-bit readings are 176x it. Consequence for the row
+    that was still open on the hop: its traffic roof (265 MB/launch) is NOT attackable by shrinking the codes,
+    so rve-hop-load-schedule's headroom is in the schedule down to the ~0.92 ms/hop floor and nowhere else.
+    docs/wsp/verified/int8-sub8-codes.txt, records int8-sub8-codes.jsonl (S001-S008), logs/sub8/probe.json.
+    Not covered: packing/unpacking ALU cost (moot now), and other code layouts (blocked scales, shared
+    exponent).
   priority: P3
   gpu: false
   cost: 1h

@@ -1,0 +1,83 @@
+{
+ "take": "2026-11-18T21:48:18Z",
+ "clip": "bd_violet20s.mkv",
+ "calib": [
+  20,
+  60,
+  100,
+  140,
+  180,
+  220,
+  260,
+  300
+ ],
+ "held_out": [
+  29,
+  44,
+  274,
+  400
+ ],
+ "rows": [
+  {
+   "frame": 29,
+   "eight_share": 0.011839313432574272,
+   "eight_peak": 15.06591796875,
+   "rescale_share": 2.384850025177002,
+   "rescale_peak": 77.384033203125,
+   "rescale_model_share": 2.2475526332855225,
+   "rescale_model_peak": 77.757568359375,
+   "clip_share": 2.6796393394470215,
+   "clip_peak": 89.959716796875,
+   "clip_model_share": 2.567214012145996,
+   "clip_model_peak": 87.158203125
+  },
+  {
+   "frame": 44,
+   "eight_share": 0.010971257463097572,
+   "eight_peak": 14.505615234375,
+   "rescale_share": 2.391589403152466,
+   "rescale_peak": 76.4501953125,
+   "rescale_model_share": 2.2554495334625244,
+   "rescale_model_peak": 75.32958984375,
+   "clip_share": 2.679229259490967,
+   "clip_peak": 84.9169921875,
+   "clip_model_share": 2.5661168098449707,
+   "clip_model_peak": 86.66015625
+  },
+  {
+   "frame": 274,
+   "eight_share": 0.015359760262072086,
+   "eight_peak": 16.9647216796875,
+   "rescale_share": 2.714313268661499,
+   "rescale_peak": 73.524169921875,
+   "rescale_model_share": 2.4766950607299805,
+   "rescale_model_peak": 73.524169921875,
+   "clip_share": 3.0355663299560547,
+   "clip_peak": 82.55126953125,
+   "clip_model_share": 2.865149974822998,
+   "clip_model_peak": 83.671875
+  },
+  {
+   "frame": 400,
+   "eight_share": 0.00629340298473835,
+   "eight_peak": 14.7857666015625,
+   "rescale_share": 1.0925322771072388,
+   "rescale_peak": 67.11181640625,
+   "rescale_model_share": 0.9992163777351379,
+   "rescale_model_peak": 65.555419921875,
+   "clip_share": 1.2359544038772583,
+   "clip_peak": 80.745849609375,
+   "clip_model_share": 1.1686197519302368,
+   "clip_model_peak": 76.512451171875
+  }
+ ],
+ "worst": {
+  "rescale_vs_8": 2.714313268661499,
+  "rescale_peak": 77.384033203125,
+  "clip_vs_8": 3.0355663299560547,
+  "clip_peak": 89.959716796875,
+  "rescale_vs_model": 2.4766950607299805,
+  "clip_vs_model": 2.865149974822998
+ },
+ "pass": false
+}
