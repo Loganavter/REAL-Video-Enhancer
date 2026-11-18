@@ -1460,9 +1460,9 @@ tasks:
     this material.
 
 - id: rve-int8-on-bd-2026-11-18
-  title: 'int8 on BD: the body is 0.53% worst and 356/494 frames over the bar - per-tensor scales do not hold'
+  title: 'CLOSED: the "int8 fails on BD" reading was body-vs-engine; against the model the body passes 5-25x'
   type: experiment
-  status: todo
+  status: dropped
   owner: '@supervisor'
   priority: P0
   gpu: true
@@ -1491,6 +1491,14 @@ tasks:
     chain's time unchanged within drift. The discriminating pair is per-tensor against per-channel
     activation scales on the same frames - not another calibration recipe, because the calibration was
     already split per title (int8-split-calibration).
+  resolution: >-
+    closed 2026-11-19, premise withdrawn. The 0.53%/0.42% figure was the body against the fp16 ENGINE on
+    delivered files; against the model's own output the body reads 0.0044-0.0192% over seven frames (verdict
+    int8-body-vs-model), and the per-channel vs per-tensor question it was filed for is now moot because the
+    body already passes the bar by 5-25x. Every scale lever the row listed was measured and was worthless:
+    per-channel (+0.015% of picture), percentile clip (6-16x worse), grid margin (x1.25 doubled the error,
+    x1.5 tripped the body's own self-certification), bias correction (0.00563% -> 0.00515%, i.e. real but
+    irrelevant at this margin). See docs/wsp/verified/int8-scales-bd.txt.
   measured: >-
     2026-11-18, scales isolated in the simulation (scripts/int8_accuracy_sim.py --act-scale / --clip-pct,
     calibration and test frames disjoint): PER-CHANNEL conv-input scales take the worst frame from
@@ -1579,11 +1587,11 @@ tasks:
     to prevent - a stale row outranking a decision.
 
 - id: rve-int8-sim-vs-kernel-2026-11-18
-  title: 'The int8 simulation understates the kernel by 14x - find the missing term before any more scale work'
+  title: 'The int8 simulation reads 4x the kernel on the same frame - both under the bar, so this is now bookkeeping'
   type: experiment
   status: todo
   owner: '@supervisor'
-  priority: P0
+  priority: P2
   gpu: true
   cost: 1d
   tags:
@@ -1609,6 +1617,10 @@ tasks:
     one isolated change that moves the sim's number onto the kernel's (0.065% -> 0.9%). Only then is a
     sim-proposed lever worth a kernel patch.
   note: >-
+    REVISED 2026-11-19: the 14x was the simulation against the ENGINE, which is a different instrument
+    again. Against the BODY the simulation reads 0.06510% on frame 29 where the body reads 0.01684% - 4x, not
+    14x - and both are under the 0.1% bar, so this row no longer gates anything. It stays for the next reader
+    who wonders why the two instruments disagree, not as a blocker.
     ATTEMPTED AND INVALID 2026-11-18 (scripts/int8_hopwise.py): comparing the kernel's hops with the
     simulation's hops measures the difference between two RECIPES - the body quantises symmetrically on
     +-127, the simulation asymmetrically over 0..255 - so the diff came out at 100-290% of the activation
