@@ -275,10 +275,13 @@
     maximum predicted from the 100-frame analysis, to four digits. Frame 164 goes 0.49372% -> 0.00000%.
     Wall +3.8% by the two-point model. int8 opens on Chainsaw as a side effect: depth-2 composition
     0.0034% at 32 triples against 0.1748% under the luma gate. It is NOT a drop-in replacement: on
-    the calm 8 s cut it reads 0.08769% at peak 116 against the luma gate's 0.00274% at peak 16 - both
-    under the bar, but the margin falls from 36x to 1.14x, because a share threshold accepts a small
-    area with a large delta (gate-channel-max-calm). The two statistics are complementary: the gate
-    needs the share for the broad shallow class and a block-max for the narrow deep one.
+    the calm 8 s Chainsaw cut at matched chain 2 it reads 0.02932% at peak 22 against the luma gate's
+    0.00274% at peak 16 - both under the bar, margin 36x to 3.4x - while the calm Violet cut is
+    unchanged (0.04989% at peak 18, 235 of 250 frames byte-identical). A share threshold accepts a
+    small area with a large delta, and the two statistics are complementary: the gate needs the share
+    for the broad shallow class and a block-max for the narrow deep one (gate-channel-max-calm). An
+    earlier reading of 0.08769% at peak 116 came from an unmatched chain (3 against the baseline's 2)
+    and is kept in that file as a labelled row, not as a comparison.
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge

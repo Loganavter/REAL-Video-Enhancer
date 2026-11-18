@@ -1,29 +1,32 @@
-# The channel-max gate fixes the failing clip and eats the margin on a calm one
+# The channel-max gate on the two calm cuts: 10.7x on Chainsaw, nothing on Violet
 
-Two verifications that the previous round left open: the same gate on the calm 8 s cut, and whether the
-auto tuner can be combined with a share statistic.
+The second title was the open check, and running it exposed a confound in the first one.
 
-## The calm cut: worst 0.08769%, peak 116
-
-| gate | worst frame | peak | above 0.1% | reuse |
+| cut | gate | worst | peak | reuse |
 |---|---|---|---|---|
-| luma 4.0 (shipped) | 0.00274% | 16 | 0 | 66.3% |
-| **channel-max 0.07%** | **0.08769%** | **116** | 0 | 66.7% |
+| Chainsaw 8 s | luma 4.0 | 0.00274% (182) | 16 | 66.3% |
+| Chainsaw 8 s | **channel-max 0.07%, chain 2** | **0.02932% (182)** | **22** | 66.3% |
+| Violet 8 s | luma 4.0 | 0.04989% (230) | 18 | 64.0% |
+| Violet 8 s | **channel-max 0.07%, chain 2** | **0.04989% (230)** | **18** | 64.0% |
 
-Both pass the bar, and the new gate is 32x worse on this clip: it accepts a frame on which a few pixels
-moved by up to 116 levels, because the *area* stays under 0.07%. That is the trade the block-max used to
-prevent - a small object moving far is a small area - and the share statistic is blind to it by
-construction. The margin collapses from 36x to 1.14x on material that was never in trouble.
+**Violet is unchanged**: the same worst frame, the same peak, and 235 of 250 frames byte-identical
+between the two renders. On that material the two statistics make the same decisions.
 
-So the channel-max share is not a drop-in replacement: it fixes the highlight class and gives up the
-small-area/large-delta class. The two statistics are complementary, and the gate needs both - a share to
-catch the broad shallow case and a block-max to catch the narrow deep one. The block-max alone does not
-separate (AUC 0.992), but as a second condition it is exactly what this frame would trip.
+**Chainsaw is 10.7x worse** at the same reuse: same worst frame (182), peak 16 -> 22, margin to the bar
+from 36x to 3.4x. Both still pass.
+
+## The confound, and what it would have cost
+
+The first run of the Chainsaw cut used **chain 3** while its luma baseline ran **chain 2**, and it read
+0.08769% at peak **116**. That number was an artefact of the unmatched chain: 0 of 249 frames were
+identical between the two renders, which is the signature of a different reuse set rather than a
+different statistic. Matched at chain 2 the effect is 0.02932% at peak 22, and every frame still differs
+because the two gates pick different references at the same reuse count.
+
+So the calm-cut regression is real but an order of magnitude smaller than the unmatched comparison
+suggested, and it is content-specific: present on Chainsaw, absent on Violet.
 
 ## The tuner fails open with a share statistic, and now refuses
-
-With `--temporal_reuse_statistic channel_max_share` and the auto tuner left ON, the tuner wrote its
-choice - a threshold in 8-bit levels - into the field the gate now reads as a percentage:
 
 ```
 CLI:      --temporal_reuse_threshold 0.07 --temporal_reuse_statistic channel_max_share
@@ -38,7 +41,9 @@ The combination is now refused with a loud log and the tuner disabled; the same 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-channel-max-calm.txt \
        --records docs/wsp/verified/records/gate-channel-max-calm.jsonl --bars docs/claims-bars.json
 
-@claim R001 0.08769 % "frames [5aa8615233f267ff] n=249" measured
-@claim R002 116.0 levels "frames [5aa8615233f267ff] n=249" measured
-@claim R003 73.0 % "frames [f0179b36c2ed4793] n=122" measured
-@claim R004 63.9 % "frames [f0179b36c2ed4793] n=122" measured
+@claim R001 0.02932 % "frames [5aa8615233f267ff] n=249" measured
+@claim R002 22.0 levels "frames [5aa8615233f267ff] n=249" measured
+@claim R003 0.04989 % "frames [d6d2cf753f3d3e34] n=250" measured
+@claim R004 0.08769 % "frames [616bf7a047711cad] n=249" measured
+@claim R005 73.0 % "frames [f0179b36c2ed4793] n=122" measured
+@claim R006 63.9 % "frames [f0179b36c2ed4793] n=122" measured
