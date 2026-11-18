@@ -47,6 +47,11 @@ run_arm() {  # clip arm round
   if [ "$SINK" = null ]; then
     out=null
     args+=(--output null --video_encoder_preset ffv1 --video_pixel_format yuv444p)
+  elif [ "$SINK" = ffv1 ]; then
+    # LOSSLESS sink: the only one whose decoded frames are the pipeline's own output, so a picture
+    # comparison through it is not also a measurement of the encoder
+    out="$RENDERS/$name.mkv"
+    args+=(--output "$out" --video_encoder_preset ffv1 --video_pixel_format yuv444p)
   else
     out="$RENDERS/$name.mkv"
     args+=(--output "$out" --video_encoder_preset x265_nvenc)

@@ -137,8 +137,9 @@ def emit_records(rows: list[dict], s: dict, args, digest: str) -> list[dict]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("gated")
-    ap.add_argument("ungated")
+    # with --from-json the pair is already decoded; the two positional paths are not needed
+    ap.add_argument("gated", nargs="?")
+    ap.add_argument("ungated", nargs="?")
     ap.add_argument("--out", required=True)
     ap.add_argument("--ffmpeg", default="/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg")
     ap.add_argument("--width", type=int, default=3840)
