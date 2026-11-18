@@ -27,6 +27,22 @@ def qualityPresetValueToLabel(value: str) -> str:
             return label
     return "Best quality"
 
+# What the Best/Fast switch actually does since 2026-11-18: it selects the precision of the sixteen body
+# convolutions (fp16 engine against the int8 body). The wording is the measurement, not a promise - the
+# picture effect depends on the model and the material, which is exactly what the tooltip says.
+QUALITY_PRESET_TOOLTIP = (
+    "Best quality: the picture is what the model produces.\n"
+    "Fast: faster, but the picture may get worse - or even better. Which way is not known in advance; "
+    "it depends on the model and the material."
+)
+
+
+def applyQualityPresetTooltip(comboBox) -> None:
+    """Attach the explanation to the Best/Fast switch, once, from one place."""
+    if comboBox is not None and not comboBox.toolTip():
+        comboBox.setToolTip(QUALITY_PRESET_TOOLTIP)
+
+
 
 class SettingsTab:
     def __init__(
@@ -253,6 +269,7 @@ class SettingsTab:
                 "video_encoder_speed", self.parent.video_encoder_speed.currentText()
             )
         )
+        applyQualityPresetTooltip(getattr(self.parent, "qualityPresetComboBox", None))
         self.parent.qualityPresetComboBox.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "quality_preset",

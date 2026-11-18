@@ -518,12 +518,10 @@ class HandleApplication:
         )
         parser.add_argument(
             "--quality_preset",
-            help="best (default): the duplicate gate may only skip a frame when the tuner can "
-                 "prove the error stays inside a 1-level budget on this content, otherwise "
-                 "reuse is switched off for the whole render. fast: when nothing proves out, "
-                 "reuse as little as the threshold range allows and keep going. The difference "
-                 "is measurable: on a grainy film clip 'best' renders every frame, 'fast' "
-                 "reuses 18%% and its worst frame is 39.8 dB against the ungated render.",
+            help="best (default): the body runs in fp16 - the picture is the model's own output. "
+                 "fast: the body runs in int8. Faster, but the picture may get worse or better and "
+                 "which one is not predictable in advance: it depends on the model and the material. "
+                 "--int8_fit overrides this switch.",
             choices=("best", "fast"),
             default="best",
         )
@@ -536,10 +534,11 @@ class HandleApplication:
         )
         parser.add_argument(
             "--int8_fit",
-            help="auto (default): ask the probe. int8: force the body (measurement only - the probe "
-                 "exists to refuse material the body would damage). fp16: force the fp16 engine.",
+            help="unset (default): follow --quality_preset - best runs the fp16 engine, fast runs the "
+                 "int8 body. auto: ask the probe. int8/fp16: force it. The forced values are what the "
+                 "measurement runs in docs/wsp use.",
             choices=("auto", "int8", "fp16"),
-            default="auto",
+            default=None,
         )
         parser.add_argument(
             "--temporal_reuse_statistic",
