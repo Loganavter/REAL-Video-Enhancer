@@ -2252,9 +2252,9 @@ tasks:
     sanity threshold) - the A/A in the acceptance separates them.
 
 - id: rve-render-determinism-2026-11-19
-  title: 'The render depends on warm-up: the certificate moved 0.45% of pixels - pin it or stop comparing code states'
+  title: 'DONE: not warm-up - the certificate built the body before its calibration frames arrived'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -2287,7 +2287,61 @@ tasks:
     explicit algorithm), with a run showing identity. If no pin exists, the lane records that picture A/As
     are only valid within one allocation history - which is weaker than the protocol assumes - and says so
     where the protocol lives.
+  resolution: >-
+    solved 2026-11-19 by the run ORDER, not by warm-up. Three arms in one session: a 2 GB allocation and
+    freed reproduced the plain render exactly (0.45050%), warming the fp16 engine moved it by 0.03 pp
+    (0.41998%), and neither the tail conv nor the calibration grids were unstable in isolation (0.00000%
+    across allocation and warm-up states). The logs then showed the certificate's `engine_ref` call builds
+    the int8 body DURING the probe, i.e. before `int8Frames` exists, so the body calibrated on ONE frame and
+    the 24 spread frames went nowhere - single-frame calibration, the case the record measures as 20x worse
+    (0.116% against 0.006% composition; 0.566% against 0.050% on Violet). Fixed by refusing to build the body
+    without calibration frames, plus a torch fallback in the probe's reference so a refusing upscaler cannot
+    turn the fix into "int8 never starts". After the fix: certificate-ON vs OFF = 0.00318% with ZERO frames
+    above the bar (was 0.45050% / 356), and certificate-OFF is bit-identical to before the fix. Verdict
+    int8-body-built-before-calibration supersedes int8-picture-depends-on-warmup, which was wrong about the
+    mechanism. Record: docs/wsp/verified/int8-calibration-ordering.txt. NOT done: re-taking the app-measured
+    int8 content numbers, all of which were taken in the single-frame configuration
+    (rve-int8-picture-remeasure-2026-11-19).
   note: >-
-    Why P1: it outranks the remaining speed rows because it decides whether any of their picture tests mean
-    anything. The diagnostic hook to reproduce the certificate-on path in a forced run already exists:
+    Why P1 it was: it outranked the remaining speed rows because it decided whether any of their picture
+    tests meant anything. The diagnostic hook to reproduce the certificate-on path in a forced run already exists:
     RVE_INT8_CERTIFY=1 (added with the finding, documented here because it is otherwise invisible).
+
+- id: rve-int8-picture-remeasure-2026-11-19
+  title: 'Every app-measured int8 content number was taken with single-frame calibration - re-take them'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 3h
+  tags:
+  - int8
+  - accuracy
+  - calibration
+  - retraction
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-calibration-ordering.txt
+  - docs/wsp/verified/int8-scales-bd.txt
+  - docs/wsp/verified/gate-bd.txt
+  owns_files:
+  - docs/wsp/verified/int8-content-retaught.txt
+  refutes: >-
+    The app's int8 picture numbers describe the shipped configuration. They do not: until 2026-11-19 the
+    certificate path built the body before its calibration frames arrived, so every certificate-on render -
+    which is every render in this corpus - ran the single-frame calibration that the record measures as 20x
+    worse (0.116% against 0.006% composition). After the fix the same renders differ by 0.00318% from each
+    other but are a different configuration from the ones recorded. If re-taking moves a number that a
+    verdict rests on, that verdict is superseded rather than annotated.
+  acceptance: >-
+    For every verified file whose content number came from an app render on the int8 body: re-run it on the
+    fixed path, same clip, same sink, same statistic, and either show it unchanged within the session's drift
+    or record the new value beside the old with the old marked superseded. Start with gate-bd.txt's int8
+    rows and int8-wall-ab.txt's (those are timing and unaffected, but they name the picture as unchanged, so
+    the claim needs a reference or a deletion). Report which numbers moved and by how much; a table of
+    "unchanged" is the deliverable when nothing moved.
+  note: >-
+    Filed straight after the ordering fix, because the alternative is a corpus where the configuration named
+    in the records no longer exists. The model-referenced numbers (body vs model 0.004-0.019%) are NOT part
+    of this: they come from scripts/ and calibrate explicitly.

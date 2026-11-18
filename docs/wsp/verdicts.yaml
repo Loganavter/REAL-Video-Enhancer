@@ -681,7 +681,8 @@
 
 - id: int8-picture-depends-on-warmup
   lane: int8
-  status: current
+  status: superseded
+  superseded_by: int8-body-built-before-calibration
   scope: the app's render path (RenderVideo probe -> Int8Body), int8 body, reuse off, ffv1 sink, BD Violet
   date: 2026-11-19
   statement: >-
@@ -700,3 +701,27 @@
     one-line change reads 0.45%; (b) every picture number recorded before 2026-11-19 was taken with the
     certificate present, which the shipped path no longer does, so their population includes a warm-up the
     product does not have. Filed as rve-render-determinism-2026-11-19.
+
+- id: int8-body-built-before-calibration
+  lane: int8
+  status: current
+  scope: the app's render path, int8 body, reuse off, BD Violet, lossless ffv1 renders
+  date: 2026-11-19
+  statement: >-
+    The certificate's fp16 reference called the upscaler, the upscaler built the int8 body, and the body -
+    having no calibration frames yet - calibrated on one frame. The 24 spread frames arrived afterwards and
+    went nowhere. That is the whole of the 0.45050% picture difference between certificate-on and
+    certificate-off renders (356 of 494 frames above the bar, peak 60): not a warm-up or allocation effect,
+    which two purpose-built arms failed to reproduce (0.45050% and 0.41998%), and not numerical instability
+    in the conv or the grids, which measured 0.00000% across allocation and warm-up states. Single-frame
+    calibration is the known-bad case: 0.116% composition against 0.006% for a spread sample. Fixed by
+    refusing to build the body without calibration frames, with the probe's reference falling back to the
+    torch model when the upscaler refuses; after the fix the certificate-on and certificate-off renders
+    agree to 0.00318% with ZERO frames above the bar, and certificate-off is bit-identical to what it was
+    before the fix.
+  evidence: docs/wsp/verified/int8-calibration-ordering.txt
+  open_question: >-
+    Every app-measured int8 content number in this corpus was taken with the certificate present, i.e. with
+    single-frame calibration, so those numbers describe a configuration that no longer exists - they need
+    re-taking (rve-int8-picture-remeasure-2026-11-19). The model-referenced numbers (body vs model
+    0.004-0.019%) came from scripts/ and calibrate explicitly, so they stand.

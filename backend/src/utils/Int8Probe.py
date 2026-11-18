@@ -357,7 +357,15 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
             frame = Frame("tensorrt", width, height, "cuda", 0, False, "float16",
                           high_bitdepth=False)
             frame.set_frame_tensor(x, copy=True)
-            return engine_ref(frame).get_frame_tensor().detach().float()
+            out = engine_ref(frame)
+            if out is None:
+                # The upscaler refused this frame. Since 2026-11-19 it refuses when the int8 body has no
+                # calibration frames yet, i.e. exactly here - the probe runs BEFORE the body is built, and
+                # calling the upscaler from the framework's own reference was what built it early and
+                # single-frame. Falling back to the torch model keeps the probe's reference a real
+                # reference instead of turning the ordering fix into "int8 never starts".
+                return model(x).float()
+            return out.get_frame_tensor().detach().float()
 
         # One pair at a time, and every statistic - including the fp16 control - is taken inside the
         # loop: holding `ref` and `got` for every pair cost ~200 MB per decoded triple at 4K, so a

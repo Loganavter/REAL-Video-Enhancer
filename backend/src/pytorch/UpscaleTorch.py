@@ -631,9 +631,17 @@ class UpscalePytorch:
         except Exception:  # noqa: BLE001
             pass
         try:
-            # calibrate on the probe's spread frames when they exist: single-frame grids cost 20x on
-            # composition (0.116% against 0.006% on a5_chainsaw)
-            _frames = getattr(self, "int8Frames", None) or frame
+            # CALIBRATION FRAMES OR NOTHING. A body built before the probe hands its spread sample over
+            # calibrates on a single frame - measured 20x worse on composition (0.116% against 0.006%) and
+            # 0.566% against 0.050% on Violet. That is not hypothetical: the certificate's engine reference
+            # calls the upscaler, which builds the body DURING the probe, i.e. before `int8Frames` exists
+            # (found 2026-11-19, docs/wsp/verified/int8-calibration-ordering.txt). Refusing to build here is
+            # what makes the spread sample mandatory instead of best-effort.
+            if getattr(self, "int8Frames", None) is None:
+                log("int8: no calibration frames yet - the body is built on a later frame, with the "
+                    "probe's spread sample (a single-frame calibration is 20x worse on composition)")
+                return None
+            _frames = self.int8Frames
             body.calibrate(_frames)
             share, ok = body.certify(frame)
             # n=1 and a gross gate: this is a coverage sanity check, not a picture verdict. The wording
