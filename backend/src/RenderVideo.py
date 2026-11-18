@@ -558,6 +558,10 @@ class Render:
                 gate_threshold=float(getattr(self, "temporalReuseThreshold", 5.0)),
                 filter_statistic=("channel_max_share" if gate_stat == "channel_max_share"
                                   else "block_mean"),
+                # the fp16 side of every composition number must be the engine the render falls back
+                # to, not a torch model: measured on Violet the two differ by 0.044% -> 0.081% in the
+                # own defect and 0.168% -> 0.216% at depth 2.
+                engine_ref=getattr(self, "upscaleOption", None),
             )
             log(result.stats())
             if not result.use_int8:
