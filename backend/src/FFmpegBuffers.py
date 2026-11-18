@@ -304,6 +304,9 @@ class FFmpegWrite(Buffer):
         """
         if self.high_bitdepth and not self.hdr_mode:
             return self.pipe_input_pixel_format or "yuv420p10le"
+        if not self.high_bitdepth and self.pipe_input_pixel_format == "yuv420p":
+            # 8-bit planar pipe (RVE_YUV8): what the renderer packed, 1.5 bytes/pixel
+            return "yuv420p"
         return "rgb48le" if self.high_bitdepth else "rgb24"
 
     def _color_tags(self) -> list[str]:
@@ -328,6 +331,15 @@ class FFmpegWrite(Buffer):
             args += ["-color_primaries", self.color_primaries]
         if self.color_transfer:
             args += ["-color_trc", self.color_transfer]
+        # The 8-bit YUV pipe carries samples the PACKER made (BT.709, limited), so its tags must
+        # describe that even when the source declares nothing. The rgb24 branch gets bt709 stamped
+        # for free by `scale=out_color_matrix=bt709`; measured without this, the YUV pipe's output
+        # came out `color_space=unknown` - the same "undeclared matrix" class that cost 5 dB in C3.
+        if not self.hdr_mode and self._pipe_input_pixel_format() == "yuv420p":
+            if not (self.color_space or self.color_primaries):
+                args += ["-colorspace", "bt709"]
+            if not self.color_range:
+                args += ["-color_range", "tv"]
         return args
 
     def _color_convert_args(self) -> list[str]:
@@ -344,7 +356,7 @@ class FFmpegWrite(Buffer):
         """
         if self.hdr_mode or self.custom_encoder is not None:
             return []
-        if self._pipe_input_pixel_format() in ("yuv420p10le", "p010le"):
+        if self._pipe_input_pixel_format() in ("yuv420p10le", "p010le", "yuv420p"):
             return []
         cs = self.color_space or "bt709"
         rng = self.color_range or "tv"

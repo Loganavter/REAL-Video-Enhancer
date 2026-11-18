@@ -353,6 +353,41 @@ class TorchUtils:
             target.copy_(packed, non_blocking=True)
             self.sync_all_streams()  # the writer thread reads it next
             return target
+        return packed.cpu().numpy()
+
+    def tensor_to_yuv420p(self, frame, dest=None):
+        """(1,3,H,W) float 0..1 -> packed planar yuv420p bytes (BT.709, limited range).
+
+        The 8-bit counterpart of `tensor_to_yuv420p10`. Why it exists: the pipe carries `rgb24`
+        = 3 bytes/pixel, while the encoder writes `yuv420p` = 1.5 - so half of every 4K frame
+        crosses to the host for nothing, and ffmpeg then does RGB->YUV on the CPU with a
+        `scale=` filter. Packing here halves the D2H (24.9 -> 12.4 MB at 3840x2160) and removes
+        that filter. It is opt-in (`RVE_YUV8=1`) until an A/B against the rgb24 pipe says the
+        picture is unchanged: this file already carries the scars of two colour-pipe mistakes
+        (a P010/planar mismatch at 12.7 dB, and a bt601 default matrix at |dU| ~6.6 levels).
+        """
+        import torch as _t
+
+        x = frame if frame.dtype == _t.float16 else frame.half()
+        r, g, b = x[0, 0], x[0, 1], x[0, 2]
+        y = (0.2126 * r).add_(g, alpha=0.7152).add_(b, alpha=0.0722)
+        cb = b.sub(y).mul_(0.5 / (1.0 - 0.0722))
+        cr = r.sub(y).mul_(0.5 / (1.0 - 0.2126))
+        if y.shape[0] % 2 or y.shape[1] % 2:
+            pad = (0, y.shape[1] % 2, 0, y.shape[0] % 2)
+            cb = _t.nn.functional.pad(cb[None, None], pad, mode="replicate")[0, 0]
+            cr = _t.nn.functional.pad(cr[None, None], pad, mode="replicate")[0, 0]
+        cb = _t.nn.functional.avg_pool2d(cb[None, None], 2)[0, 0]
+        cr = _t.nn.functional.avg_pool2d(cr[None, None], 2)[0, 0]
+        yq = (y.mul_(219.0).add_(16.0).round_().clamp_(16, 235)).to(_t.uint8).reshape(-1)
+        uq = (cb.mul_(224.0).add_(128.0).round_().clamp_(16, 240)).to(_t.uint8).reshape(-1)
+        vq = (cr.mul_(224.0).add_(128.0).round_().clamp_(16, 240)).to(_t.uint8).reshape(-1)
+        packed = _t.cat((yq, uq, vq))
+        if dest is not None:
+            target = dest if dest.shape == packed.shape else dest.reshape(packed.shape)
+            target.copy_(packed, non_blocking=True)
+            self.sync_all_streams()  # the writer thread reads it next
+            return target
         # Hand back the numpy array itself: it is freshly allocated per frame, so the writer
         # can put it straight into the pipe and we skip a full host copy of the frame
         # (18.6 MB at 2880x2160, measured ~2-3 ms/frame). bytes are only needed if a caller

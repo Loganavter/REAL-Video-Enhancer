@@ -258,6 +258,20 @@ class Render:
             if (os.environ.get("RVE_P010") and video_encoder.getPresetTag() in ("x265_nvenc", "av1_nvenc"))
             else "yuv420p10le"
         )
+        # 8-bit planar YUV pipe: opt-in until the A/B against rgb24 says the picture is unchanged.
+        # Halves the per-frame D2H (24.9 -> 12.4 MB at 4K) and removes ffmpeg's CPU scale filter.
+        if not high_bitdepth and os.environ.get("RVE_YUV8", "1") != "0":
+            # The packer's coefficients are BT.709. A source that declares another matrix (bt601 /
+            # smpte170m) would be converted with the wrong ones and land in the C3 class, so that
+            # case keeps the rgb24 pipe, where ffmpeg is told the source's own matrix explicitly.
+            declared = (color_space or "").lower()
+            if declared in ("", "bt709"):
+                self.pipePixelFormat = "yuv420p"
+                log("8-bit pipe: packing yuv420p on the GPU - 1.5 bytes/px instead of rgb24's 3, "
+                    "and no ffmpeg scale filter (RVE_YUV8=0 reverts)")
+            else:
+                log(f"8-bit pipe: NOT packing yuv420p - the source declares {declared}, and the "
+                    f"packer's matrix is bt709 (keeping rgb24 so ffmpeg uses the declared one)")
         audio_encoder = EncoderSettings(audio_encoder_preset, type="audio")
         subtitle_encoder = EncoderSettings(subtitle_encoder_preset, type="subtitle")
 
@@ -495,7 +509,11 @@ class Render:
             return _NO_PREVIEW
         if type(frame) is bytes:
             return frame
-        if getattr(self, "high_bitdepth", False) and not getattr(frame, "hdr_mode", False):
+        # `get_frame_bytes()` is the PIPE payload, which is packed YUV for both the 10-bit branch
+        # and the opt-in 8-bit one - feeding that to a preview that expects RGB is garbage, so
+        # both build the RGB view from the tensor instead.
+        if ((getattr(self, "high_bitdepth", False) or getattr(frame, "yuv8_output", False))
+                and not getattr(frame, "hdr_mode", False)):
             tensor = frame.get_frame_tensor(clear_cache=False)
             with torch.inference_mode():
                 small = (tensor[0].permute(1, 2, 0).clamp(0, 1) * 255).to(torch.uint8)

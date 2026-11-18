@@ -1,0 +1,5 @@
+/var/tmp/rve-rem/bd_csm_same_luma.mkv vs /var/tmp/rve-rem/bd_csm_same_luma_aa.mkv
+  539 frames, block 64
+  worst share 0.52379% (frame 219), frames above 0.1%: 17
+  worst block mean 11.15 (frame 219), peak 115
+  NOT covered: temporal judgement beyond the pair, perceptual models, whether the ungated reference is right, and whether this clip is representative of the title.

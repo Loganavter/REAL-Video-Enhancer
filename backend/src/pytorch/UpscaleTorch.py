@@ -159,6 +159,12 @@ class UpscalePytorch:
         
         self.hdr_mode = hdr_mode         
         self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
+        # 8-bit planar YUV pipe, ON by default since 2026-11-18 (RVE_YUV8=0 reverts to rgb24).
+        # Half the host traffic of rgb24 and no ffmpeg scale filter; the A/B that cleared it is in
+        # docs/PERFORMANCE.md (two titles: mean |delta| 0.12-0.17 levels, worst frame 1 px over the
+        # 8-level bar on one title, none on the other).
+        import os as _os
+        self.yuv8_output = (_os.environ.get("RVE_YUV8", "1") != "0") and not self.high_bitdepth
         self.gpu_id = gpu_id
         self.pipe_pixel_format = pipe_pixel_format
         # stage profiling (read by RenderVideo's summary)
@@ -456,6 +462,7 @@ class UpscalePytorch:
                          device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                          high_bitdepth=self.high_bitdepth)
         retFrame.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+        retFrame.yuv8_output = self.yuv8_output
         retFrame.set_frame_tensor(result)
         return retFrame
 
@@ -470,6 +477,7 @@ class UpscalePytorch:
                       device=self.device, gpu_id=getattr(self, "gpu_id", 0), hdr_mode=self.hdr_mode,
                       dtype=self.dtype, high_bitdepth=self.high_bitdepth)
             f.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+            f.yuv8_output = self.yuv8_output
             f.set_frame_tensor(result)
             frames.append(f)
         return frames
@@ -544,6 +552,7 @@ class UpscalePytorch:
                              high_bitdepth=self.high_bitdepth)
             # 10-bit SDR: hand ffmpeg ready-made yuv420p10le instead of RGB
             retFrame.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+            retFrame.yuv8_output = self.yuv8_output
             retFrame.yuv10_format = self.pipe_pixel_format
             
             retFrame.set_frame_tensor(output, sync=False)
