@@ -904,8 +904,21 @@ class Render:
             self.modelScale = self.upscaleOption.getScale()
             # the int8 body's verdict is taken ONCE, here, before the first frame. It is not a runtime
             # switch: an engine swapped mid-render would mix two error histories inside one gate window.
-            if str(getattr(self, "int8Fit", "auto")).lower() == "auto":
-                self.int8Fit = self._probe_int8_fit()
+            # ALWAYS run the probe: it is also what decodes the spread frames the body calibrates on.
+            # A forced verdict used to skip it, which silently left the body on a single-frame
+            # calibration (UpscaleTorch falls back to `frame` when int8Frames is None) - on Violet that
+            # read 0.566% against the 0.050% the spread calibration gives, i.e. the flag was measuring
+            # itself. The verdict is overridden below; the frames are not.
+            _forced = str(getattr(self, "int8Fit", "auto")).lower()
+            _probe_verdict = self._probe_int8_fit()
+            log(f"int8 calibration frames handed to the body: "
+                f"{len(getattr(self, 'int8Frames', None) or [])} "
+                f"(forced verdict: {_forced})")
+            if _forced in ("int8", "fp16"):
+                log(f"int8 fit FORCED to {_forced}; the probe said {_probe_verdict}")
+                self.int8Fit = _forced
+            else:
+                self.int8Fit = _probe_verdict
             # the verdict has to reach the object that runs frames: gen_render keeps it here, the hook
             # reads it from the upscale option, and until this line existed the body was never built.
             # It must run for a FORCED verdict too, not only for the probe's.

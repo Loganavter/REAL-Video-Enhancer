@@ -230,10 +230,14 @@
     under the same gate - a 1.18x increment where the probe predicted 1.13x from its pairs, so that
     factor transfers on this material and the additive form does not. Violet under the same 0.07%
     threshold (out-of-sample, 70.8% reuse, chain 4) reads 0.07345% with nothing above the bar, so the
-    threshold transfers too - but forcing the body past the probe on Violet reads 0.56613% with 372 of
-    480 frames above the bar, so the refusal there is real and the probe's 0.108% understated it 5x.
+    threshold transfers too. Forcing the body past the probe on Violet reads 0.12727% with 3 of 480
+    frames above the bar (all three reused), and the refusal there is real - but only after the forced
+    flag stopped bypassing the probe: the first forced run read 0.56613% with 372 frames because
+    `--int8_fit int8` skipped the decode that hands the body its spread calibration, leaving it on one
+    frame (violet-calibration-fix). That reading is withdrawn.
     The probe is systematically optimistic against the render on both clips (Chainsaw 0.000 against
-    0.08876) and is a screen, not a certificate. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
+    0.08876) and is a screen, not a certificate - and on Violet the per-frame int8/fp16 ratio is
+    7.31 median, so the 1.18x measured on Chainsaw is a ratio of maxima, not a transferable factor. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
     (`probe(..., adversarial=k)`): scan the whole clip with the gate's statistic, rank the reuses it
     would make, render the top-k. On Chainsaw that moves the number from 0.000% (no depth-2 pair in the
     product's 16 triples) to 0.110% with an fp16 control of 0.083% - from 26x under the render's
