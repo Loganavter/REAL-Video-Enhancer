@@ -120,7 +120,13 @@ class Render:
         tile_reuse: bool = False,
         tile_reuse_size: int = 512,
         tile_reuse_threshold: float = 0.35,
-        temporal_reuse: bool = True,
+        temporal_reuse: bool = False,
+        # OFF by default since 2026-11-18 (owner decision). On a 1080p source the gate's own noise
+        # floor is almost always above its 1.5 refusal limit - the material always carries digital
+        # noise - and at low contrast a small delta may be real motion rather than noise. Measured on
+        # BD stream copies: Violet refuses (1.67) and renders bit-identically to ungated; the calm
+        # Chainsaw shot engages and then exceeds the acceptance bar (0.52379%, 17/539 frames). It is
+        # an opt-in measurement tool now, not a default. See docs/wsp/verified/gate-bd.txt.
         # TheAnimeScripter calibration: --dedup_sens 35 / 7 = 5.0 luma levels, max span 4
         temporal_reuse_threshold: float = 5.0,
         temporal_reuse_statistic: str = "mean_abs",
@@ -292,6 +298,7 @@ class Render:
 
         if upscaleModel: # load model after interpolation model is loaded, this saves on vram if the user builds 2 separate engines
             self.upscaleOption.hotReload()
+            log(f"DEBUG after hotReload: option={id(self.upscaleOption)} int8Fit={getattr(self.upscaleOption,'int8Fit','<unset>')}")
 
         for extraRestoration in self.extraRestorationModels:
             extraRestoration.hotReload()
@@ -908,6 +915,11 @@ class Render:
 
             self.upscaleOption = self.upscalePytorchObject(self.upscaleModel)
             self.modelScale = self.upscaleOption.getScale()
+            # The render thread can build the body before this method finishes (observed: "int8: start
+            # ... int8Fit=<unset>" logged before the probe's assignment), so a FORCED verdict has to
+            # reach the option here, at creation, not after the probe.
+            if str(getattr(self, "int8Fit", "auto")).lower() in ("int8", "fp16"):
+                self.upscaleOption.int8Fit = str(self.int8Fit).lower()
             # the int8 body's verdict is taken ONCE, here, before the first frame. It is not a runtime
             # switch: an engine swapped mid-render would mix two error histories inside one gate window.
             # ALWAYS run the probe: it is also what decodes the spread frames the body calibrates on.
@@ -930,6 +942,7 @@ class Render:
             # It must run for a FORCED verdict too, not only for the probe's.
             self.upscaleOption.int8Fit = self.int8Fit
             self.upscaleOption.int8Frames = getattr(self, "int8Frames", None)
+            log(f"DEBUG after assign: option={id(self.upscaleOption)} int8Fit={getattr(self.upscaleOption,'int8Fit','<unset>')}")
             
 
         if self.backend == "ncnn":

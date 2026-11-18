@@ -199,10 +199,11 @@
 
 - id: int8-d2-owner-split
   lane: int8
-  status: current
+  status: superseded
   scope: the app's own int8 fit probe, Chainsaw Man 20 s and Violet Evergarden 20 s at 1920x1080, three
     sample sizes (8 / 12 / 16 test pairs)
   date: 2026-11-17
+  superseded_by: int8-fails-on-bd
   statement: >-
     The depth-2 refusal has two different owners, and the control that separated them needed no int8:
     on the same pairs and the same separation, fp16(t) against fp16(t-2) reads 0.191% / 0.139% / 0.158%
@@ -290,10 +291,11 @@
 
 - id: gate-exceeds-acceptance-bar
   lane: reuse
-  status: current
+  status: superseded
   scope: the app's shipped fp16 render, Chainsaw Man 20 s, 1920x1080 -> 2160p, auto gate (mean_abs,
     threshold 4.0, chain 3, 100/481 frames reused) against the same clip with --no_temporal_reuse
   date: 2026-11-17
+  superseded_by: gate-exceeds-bar-on-bd
   statement: >-
     The gate's reuse moves 18 of 481 frames past the bar the gate family was certified on: the worst
     frame by share (164) has 0.49372% of its pixels more than 8 levels off the ungated render, and the
@@ -446,9 +448,10 @@
 
 - id: int8-peak-unmet
   lane: int8
-  status: current
+  status: superseded
   scope: the measured int8 chain family (epilogue and three-accumulator kernels), 1920x1080, 4 held-out frames
   date: 2026-11-17
+  superseded_by: int8-fails-on-bd
   statement: >-
     Twelve configurations were measured for the peak, and every one lands between 29 and 55 levels
     against bar_int8_peak = 20: margin 1.2 with per-tensor grids reads 29 levels at 0.124% share, while
@@ -463,9 +466,10 @@
 
 - id: int8-live-verdicts
   lane: int8
-  status: current
+  status: superseded
   scope: the app's own int8 fit probe (backend/src/utils/Int8Probe.py), three clips, 1920x1080, gate on
   date: 2026-11-17
+  superseded_by: int8-fails-on-bd
   statement: >-
     The product accepts int8 where the material is easy (smoke clip: 0.003% share, peak 13 -> int8,
     body 37.9 ms) and refuses it on BOTH real titles on the DEPTH-2 composition: Violet d1 0.058% /
@@ -490,3 +494,104 @@
     more references help, the gain is 0.6% of the certification budget, and the reuse there (100/481 =
     20.8%) is limited by the threshold rather than by reachability.
   evidence: docs/wsp/verified/int8-live.txt
+
+- id: gate-exceeds-bar-on-bd
+  lane: reuse
+  status: current
+  scope: >-
+    auto gate, default luma cell, BD 1080p24 h264 stream copy of Chainsaw Man ep.01 (calm shot,
+    539 frames), 2026-11-18
+  date: 2026-11-18
+  statement: >-
+    Where the luma gate engages on BD material it exceeds the acceptance bar: 0.52379% of pixels more
+    than 8 levels off on the worst frame (219), 17 of 539 frames above 0.1%, worst 64 px block mean
+    11.15. The gate engaged there because the material is calm (noise floor 1.00 against the 1.5
+    refusal limit), chain 4, 138/539 = 25.6% reused. On the Violet shot the same cell refuses and the
+    render is bit-identical to the ungated one on 494/494 frames.
+  evidence: docs/wsp/verified/gate-bd.txt
+  note: >-
+    Replaces gate-exceeds-acceptance-bar, whose 0.49372% / 18 of 481 frames were measured on a
+    4.038 Mbps re-encode. The magnitude reproduces on BD (0.524% / 17 of 539), so the finding was
+    right and its population was wrong: the re-encode's version of the same defect reads 0.494%,
+    which is not a coincidence but the same clipping class on slightly smoother material.
+
+- id: noise-floor-rises-on-bd
+  lane: reuse
+  status: current
+  scope: >-
+    the auto gate's noise-floor statistic, 16-frame calibration window, same shot at two bit rates,
+    Violet Evergarden ep.01 and the calm Chainsaw Man ep.01 shot, 2026-11-18
+  date: 2026-11-18
+  statement: >-
+    The noise floor RISES when the 4 Mbps re-encode is replaced by the BD: Violet's same shot reads
+    1.23 at 4.038 Mbps and 1.67 at 37.715 Mbps; Chainsaw's calm shot 0.66 against 1.00. The 1.5
+    refusal limit sits between Violet's two numbers, so the re-encode's smoothing is what let the gate
+    engage on that shot - 69.8% reuse there, 0% on the BD. This is the opposite of what the
+    re-measurement row expected ("expect the noise floors to fall").
+  evidence: docs/wsp/verified/gate-bd.txt
+  note: >-
+    Both 4 Mbps floors are re-measured in the same session as the BD ones, because this project has
+    already paid once for a cross-session quotient. The BD cuts start 9-11 frames earlier (a -c copy
+    cut lands on a keyframe), so the window is the same shot, not the same 16 frame indices.
+
+- id: int8-fails-on-bd
+  lane: int8
+  status: current
+  scope: >-
+    the Triton int8 body, per-tensor activation scales, BD 1080p24 stream copy of Violet Evergarden
+    ep.01, 494 frames, reuse off and channel-max forced, 2026-11-18
+  date: 2026-11-18
+  statement: >-
+    On BD material int8's accuracy is a property of the CLIP, not of the engine, and it spans two
+    orders of magnitude: Violet reads 0.53318% of pixels above 8 levels on the worst frame (29) with
+    reuse OFF - 356 of 494 frames above the 0.1% bar, peak 65, and 0.71096% / 432 frames when the
+    channel-max gate reuses - while the calm Chainsaw same-shot cut reads 0.00339% with ZERO frames
+    above the bar (peak 30). The recorded pass for Violet (0.08876%, zero frames) was measured on the
+    4 Mbps re-encode of the same title, so it was a property of the smooth material.
+  evidence: docs/wsp/verified/gate-bd.txt
+  note: >-
+    Replaces int8-live-verdicts, int8-peak-unmet and int8-d2-owner-split, all measured on re-encodes
+    (int8-d2-control.txt alone carries 18 contaminated records). The peak conclusion survives in
+    direction on Violet (25 with the luma probe, 68 in the int8-forced run) but the recorded range
+    "every configuration lands 29-55" does not: the BD Chainsaw cuts read 19-25. The open question is
+    the one the spread names: the per-tensor activation grids are calibrated per clip, so a config
+    accepted on one title can be 150x over the bar on another - per-channel activation scales are
+    queued as rve-int8-on-bd-2026-11-18.
+
+- id: int8-probe-population-shifts
+  lane: int8
+  status: current
+  scope: backend/src/utils/Int8Probe.py through RenderVideo._probe_int8_fit, one BD clip, 2026-11-18
+  date: 2026-11-18
+  statement: >-
+    The probe's numbers are not a function of the clip alone: on BD Violet it reads engine 0.082% /
+    composition 0.266% / peak 25 on 7 pairs in an fp16 run and engine 0.688% / composition 0.918% /
+    peak 68 on 7 pairs in an int8-forced run, and the Chainsaw cuts are probed on 4 and 2 pairs. Both
+    readings are deterministic inside their configuration.
+  evidence: docs/wsp/verified/gate-bd.txt
+  open_question: >-
+    Which of the inputs moves the pair set or the reference: the gate statistic and threshold passed
+    to the probe, or engine_ref=upscaleOption, whose int8Fit a forced verdict now sets before the
+    probe runs. Until it is named, a probe number must state the configuration it was taken in and
+    cannot be compared across them. Queued as rve-int8-probe-population-2026-11-18.
+
+- id: reuse-gate-shelved
+  lane: reuse
+  status: current
+  scope: product roadmap decision, 2026-11-18
+  date: 2026-11-18
+  statement: >-
+    Frame skipping (the temporal reuse gate) is shelved by owner decision AND IS OFF BY DEFAULT: on a
+    1080p source the gate's noise floor is almost always above its 1.5 refusal limit, because the
+    material always carries digital noise, and at low contrast a small delta can be significant motion
+    rather than noise. `--temporal_reuse` is the opt-in flag; `--no_temporal_reuse` is a deprecated
+    no-op. The 4.31x headline therefore comes apart into its engine half - 1.63x, every frame, every
+    clip - and a gate half that ships nowhere. The measurements behind the decision stay current as history:
+    gate-exceeds-bar-on-bd, noise-floor-rises-on-bd and the channel-max cell below.
+  evidence: docs/wsp/verified/gate-bd.txt
+  note: >-
+    The channel-max cell on BD Violet is the one that passes the share and fails the concentration:
+    0.07337% worst frame, zero frames above the bar, 67.8% reuse, but block mean 20.90 and peak 138
+    levels on a saturated edge - three times the concentration of the artifact the owner rejected by
+    eye at 7.57, and the eye agreed with the block mean rather than the share. Recorded with the
+    frames in docs/wsp/EYE-CHECK-2026-11-18.md so the lane is not re-entered on the share alone.

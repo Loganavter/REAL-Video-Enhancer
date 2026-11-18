@@ -1398,7 +1398,7 @@ tasks:
 - id: rve-remeasure-on-bd-2026-11-18
   title: 'Re-measure everything on the BD: the 20 s clips were 4 Mbps re-encodes, not the source'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P0
   gpu: true
@@ -1435,3 +1435,103 @@ tasks:
     a stated A/A; the channel-max cell and int8 re-measured on the same clips; every number in
     docs/wsp/verified/ that cites 4 Mbps material re-taken or marked superseded; the owner's eye
     check repeated on frames from the BD render.
+
+  resolution: >-
+    done 2026-11-18, and the decision it fed is the owner's: FRAME SKIPPING IS SHELVED. What was
+    re-measured on -c copy BD cuts (37.715 / 39.552 Mbps, packet-proved; sources-bd.txt): the luma gate
+    refuses on BD Violet (noise floor 1.67 against the 1.5 limit; gated render BIT-IDENTICAL to ungated
+    on 494/494 frames, A/A also identical) and on the Chainsaw battle cut (22.58, 503/503 identical);
+    it ENGAGES on the calm Chainsaw same-shot cut (floor 1.00, chain 4, 138/539 = 25.6% reused) and
+    there it exceeds the bar - 0.52379% worst frame, 17 of 539 frames above 0.1%, block mean 11.15.
+    Forced channel-max on Violet BD passes the share (0.07337%, 0 frames above the bar, 67.8% reuse)
+    but concentrates the damage: block mean 20.90 and peak 138 on a saturated edge, against the 7.57
+    the owner rejected. The same shot's floor rises from 1.23 (4.038 Mbps) to 1.67 (BD), i.e. the
+    re-encode's smoothing is what let the gate engage on Violet at all - the opposite of what this row
+    expected. int8 on BD is far worse than recorded (0.53318% worst, 356/494 frames; 0.71096% with the
+    channel-max gate) and the probe's own numbers move with the gate config. NOT run, on purpose: the
+    channel-max and int8 cells on the Chainsaw clip - they answered "which gate cell should ship" and
+    nothing ships now. Records: docs/wsp/verified/gate-bd.txt, sources-bd.txt; verdicts
+    gate-exceeds-bar-on-bd, noise-floor-rises-on-bd, int8-fails-on-bd, reuse-gate-shelved.
+  note: >-
+    The row stays in the file after the decision because the invalidation list is the reusable part:
+    the 20 s clips were 4.04 / 3.98 Mbps h264 re-encodes of a 37.8 / 37.2 Mbps BDRemux, 9.4x, and
+    every content number measured on them inherited the wrong label. Mechanism-level results (kernels,
+    engines, launcher, graph, peaks, ceilings, the three pipeline bugs) are unaffected - they never read
+    this material.
+
+- id: rve-int8-on-bd-2026-11-18
+  title: 'int8 on BD: the body is 0.53% worst and 356/494 frames over the bar - per-tensor scales do not hold'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P0
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - accuracy
+  - bd
+  - quantisation
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/gate-bd.txt
+  - docs/PLAN-int8-body-2026-11-17.md
+  owns_files:
+  - scripts/int8_accuracy_sim.py
+  - scripts/int8_heldout.py
+  refutes: >-
+    Per-tensor activation scales cannot represent BD material: the int8 body measured 0.53318% of
+    pixels above 8 levels on the worst frame of a 494-frame BD clip with reuse OFF (356 frames above
+    the 0.1% bar, peak 65), and 0.71096% with the channel-max gate (432 frames, peak 139) - against
+    0.08876% and zero frames on the 4 Mbps re-encode of the same title. If per-channel activation
+    scales (or a wider grid) do not take the worst frame under 0.1%, the body is not shippable on real
+    material and the int8 lane closes here.
+  acceptance: >-
+    The same 494-frame BD clip, reuse off, worst-frame share under 0.1% with a stated A/A, plus the
+    chain's time unchanged within drift. The discriminating pair is per-tensor against per-channel
+    activation scales on the same frames - not another calibration recipe, because the calibration was
+    already split per title (int8-split-calibration).
+  note: >-
+    The recorded 0.09169% pass (int8-window) and the 0.08876% product sweep (int8-and-violet-sweeps)
+    were both measured on the 4 Mbps re-encode. Its smoothing is what hid the error: flat, low-detail
+    areas quantise inside 8 levels, and BD grain does not. Two of the twelve recorded configurations
+    are on BD cuts (csm_battle, violet_action) and both were measured through the probe, whose population
+    moves (see rve-int8-probe-population-2026-11-18).
+
+- id: rve-int8-probe-population-2026-11-18
+  title: 'The int8 probe reads 0.082% or 0.688% on one clip depending on how it is asked'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 2h
+  tags:
+  - int8
+  - probe
+  - population
+  - harness
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/utils/Int8Probe.py
+  - backend/src/RenderVideo.py
+  - docs/wsp/verified/gate-bd.txt
+  owns_files:
+  - backend/src/utils/Int8Probe.py
+  refutes: >-
+    The probe's own pair population changes with the gate configuration and with the forced verdict:
+    on ONE clip (BD Violet) it reads engine 0.082% / composition 0.266% / peak 25 on 7 pairs in an
+    fp16 run, and engine 0.688% / composition 0.918% / peak 68 on 7 pairs in an int8-forced run; the
+    Chainsaw cuts read 4 pairs and 2 pairs. If the pair set is not a function of the clip alone, every
+    probe number in the ledger is a cross-population comparison and the verdict taken before the first
+    frame is a coin toss between configurations.
+  acceptance: >-
+    The probe's pairs printed as frame indices, the pair set shown identical across {fp16 auto luma,
+    int8 forced, no reuse, channel-max forced} on one clip, and the engine/composition statistics
+    reproduced from those indices independently. Until then, probe numbers are only comparable inside
+    one configuration and must say which.
+  note: >-
+    Both readings are deterministic within their configuration (the same run repeated gives the same
+    digits), so this is not noise - it is a different population or a different reference. The probe
+    passes `engine_ref=upscaleOption`, and a forced verdict sets that option's int8Fit before the probe
+    runs, which is the first thing to check.
