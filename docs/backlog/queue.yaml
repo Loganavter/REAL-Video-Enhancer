@@ -1539,7 +1539,9 @@ tasks:
     certifies, and the 125 records whose instrument is the probe stop being load-bearing - the picture is
     judged on renders (gate_sweep on the encoded pair), not on this module. The cost of the withdrawn half
     is now recorded: 33.37 s of a 62.67 s probe (53%), break-even for int8 on BD falls from 6.1-7.4 min of
-    video to 2.9-3.5 min. Records: docs/wsp/verified/int8-probe-cost-2026-11-19.txt. NOT done: making the
+    video to 2.9-3.5 min. NOT withdrawn: the body's own first-frame certificate (`body.certify(frame)`),
+    which is n=1 and read 0.00000% on every int8 run of 2026-11-18 against 0.53% on the whole clip - filed
+    as rve-body-first-frame-certificate-2026-11-19. Records: docs/wsp/verified/int8-probe-cost-2026-11-19.txt. NOT done: making the
     pair set a function of the clip - that is the precondition for any future certification, and it is
     not needed while nothing reads the verdict.
   tags:
@@ -1606,9 +1608,9 @@ tasks:
     to prevent - a stale row outranking a decision.
 
 - id: rve-int8-sim-vs-kernel-2026-11-18
-  title: 'The int8 simulation reads 4x the kernel on the same frame - both under the bar, so this is now bookkeeping'
+  title: 'CLOSED: the bit-exact emulation already answers the sim-vs-kernel gap; the sim is retired as an instrument'
   type: experiment
-  status: todo
+  status: dropped
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -1738,7 +1740,10 @@ tasks:
     Everything this lane measured was measured on an RTX 4060 Ti, one 2x SRVGG-style anime model, one title.
     SUPERSEDED on the speed half by rve-int8-wall-ab-2026-11-19: both titles read 1.088-1.141x interleaved, so
     "about even on a second title" is withdrawn. The picture claim below and the per-card question stand, and
-    the tooltip never quoted a speed-up anyway - it says "the speed-up depends on the card".
+    the tooltip never quoted a speed-up anyway - it says "the speed-up depends on the card". CHECKED
+    AGAINST THE RECORD 2026-11-19: the corpus holds no second-GPU or second-model-family timing at all (the
+    only other-card numbers are external issue reports in docs/MODEL.md, and they are about TRT int8/FP8,
+    not about this body) - so this row cannot be closed from anything already measured.
     Old wording kept for the trail: the body's speed-up is 1.14x on that card in one draw and about even on a
     second title, and the picture was indistinguishable ON THAT MATERIAL - the tooltip now says exactly that
     rather than "may get worse or better", because that phrasing was written before the same-input comparison
@@ -1811,7 +1816,7 @@ tasks:
     the median quotients stayed inside 4.9% (1.088-1.141) and the per-round pairs inside 8.7% - and the load is written into every run's log header.
 
 - id: rve-frame-accounting-2026-11-19
-  title: 'The profile leaves 6.2 ms of a 50.4 ms int8 frame unattributed - more than half the int8 gain'
+  title: 'Reconcile the int8 whole-frame budget: 6.2 ms unnamed, and the ledger already names its components'
   type: experiment
   status: todo
   owner: '@supervisor'
@@ -1831,22 +1836,31 @@ tasks:
   owns_files:
   - docs/wsp/verified/int8-frame-accounting.txt
   refutes: >-
-    The app's own profile accounts for the frame it reports. On 2026-11-18 (BD Violet, int8 body, reuse
-    off) it printed frame total 50.40 ms against named parts summing to 44.17 - gate 0.00, inference 43.90
-    (engine 1.93, handover 0.01), input convert 0.00, read wait 0.27 - so 6.23 ms (12%) has no name. That
-    hole is 88% of what int8 bought (7.12 ms/frame), so until it is named, any optimisation ranking is
-    guesswork and the next claim about "where the time goes" is unsafe.
+    The int8 whole-frame budget is the sum of what the profile prints. On 2026-11-18 (BD Violet, int8 body,
+    reuse off) the profile printed frame total 50.40 ms against parts summing to 44.17 - gate 0.00,
+    inference 43.90 (engine 1.93, handover 0.01), input convert 0.00, read wait 0.27 - so 6.23 ms (12%) is
+    unnamed in THAT line, and it is 88% of what int8 bought. The components are not unknown, though:
+    ledger-export's per-frame budget names the same ones for the tiled fp16 path (get_frame_tensor's 10-bit
+    upload + colour stage 2.80, output Frame construction ~1.6, pack + D2H + queue ~3, writer 12.34
+    concurrent and NOT on the critical path). If those three do not account for the 6.23 ms once they are
+    timed in the no-gate path, the budget is genuinely broken; if they do, the row closes with the int8
+    frame reduced to named parts and every per-phase number in the lane becomes comparable.
   acceptance: >-
     On both BD clips and both arms, the frame total reconstructed from NAMED components to within the
-    session's drift (sum >= 98% of frame total), each component measured by its own timer and printed, and
-    the missing term named (writer queue, colour convert, python/host, the 4K residual, the encoder
-    handoff). Records with the timers' own configuration. No code change is required to close this - a
-    measurement that fails to find the term is still the answer, and it would make every per-phase number
-    in this lane comparable.
+    session's drift (sum >= 98%), each component on its own timer: get_frame_tensor upload + colour, the
+    output Frame construction, pack + D2H + queue, read wait, the body's phase counter, and the writer
+    (reported beside the loop, not added to it - it is concurrent). Records with the timers' own
+    configuration. This is a 1-2 h job, not a hunt: the expectation from the record is that the 6.23 ms IS
+    the three plumbing terms, and either answer is the deliverable.
   note: >-
     Why it is first: int8 bought 1.09-1.14x, i.e. 5.9-7.1 ms per frame, and the unaccounted slice is the
     same size. The 2026-11-18 wall A/B had to quote "frame total" and "body total" as separate numbers with
-    no bridge; the tail (8.8 ms) is now the largest NAMED slice after the hops (27.0).
+    no bridge; the tail (8.8 ms) is now the largest NAMED slice after the hops (27.0). CHECKED AGAINST THE
+    RECORD 2026-11-19 (harness db + corpus grep): nothing reports this hole, and the contrast sharpens it -
+    the CHAIN's own accounting closes in int8-window (16-hop chain 30.48 + head+quantise 1.60 +
+    tail+residual 5.78 against a 36.19 ms window, i.e. the parts sum slightly ABOVE the total), so the
+    missing 6.2 ms is in the PRODUCT's path around the chain, not in the body. That is why the row is a
+    measurement of the app, not of the kernel.
 
 - id: rve-tail-fusion-2026-11-19
   title: 'The 4K tail is 17% of the frame and runs as separate passes - fuse dequant + conv + shuffle + residual'
@@ -1885,6 +1899,11 @@ tasks:
     3090 Ti (PSNR 30.15) - an order of magnitude below this product's ~50 ms, which says the field's
     real-time class fuses these transforms. What is NOT established here: the traffic saved by fusing on
     THIS tail at 3840x2160x64 channels, and whether the residual add can join without breaking the A/A.
+    CHECKED AGAINST THE RECORD 2026-11-19: `backend/src/pytorch/FusedTail.py` already exists, but it fuses
+    for a different purpose - collapsing an x4 model's tail so it emits x2 (functional), not merging
+    passes for bandwidth. NOT to be redone (docs/MODEL.md, measured): CUDA graphs ~0.3%, L2 tiling
+    full-vs-none +0.5%, hand-written conv kernels untested but 4.7x slower in the one public attempt.
+    So the untried part is exactly the pass count over the 4K tensor, nothing else.
 
 - id: rve-model-class-question-2026-11-19
   title: 'DROPPED: "use a smaller network" is not a lever here - the model is the product'
@@ -1914,3 +1933,44 @@ tasks:
   relates_to:
   - docs/MODEL.md
   - docs/wsp/verified/int8-wall-ab.txt
+
+- id: rve-body-first-frame-certificate-2026-11-19
+  title: 'The body still certifies itself on ONE frame, and that frame reads 0.00000%'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1h
+  tags:
+  - int8
+  - certificate
+  - population
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/UpscaleTorch.py
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/verified/int8-probe-cost-2026-11-19.txt
+  owns_files:
+  - docs/wsp/verified/int8-body-certificate.txt
+  refutes: >-
+    The body's self-certification protects the picture. It runs on the FIRST FRAME only (n=1) and printed
+    0.00000% of pixels >8 levels on every int8 run of 2026-11-18 - BD Violet, 494 frames, whole-clip 0.533%
+    and 356 frames over the bar on the same material. A certificate that reads zero on a clip that fails
+    is not a weak screen, it is a label: the same "one frame is a smoke test" error that produced three
+    retractions in a row (0.000% -> 0.019% -> 0.174%) now sits in the shipped path, reading zero before
+    the first frame and telling the log the body is fine.
+  acceptance: >-
+    Say what the number is for. Either (a) name the term it is meant to catch and show it catches it with a
+    stated population (>=13 frames spread, bar 0.1%), or (b) remove it and let the render's own output be
+    the only place the picture is judged, which is where every load-bearing number in this lane comes from
+    anyway. Either way: the log line must not print a percentage that no frame population supports.
+  note: >-
+    Found 2026-11-19 while checking what happens to models the body cannot serve (it falls back cleanly:
+    `Int8Body` raises on !=64 body channels, UpscaleTorch logs "int8: build failed" and the fp16 engine
+    runs). The certify call is a different path and unrelated to the probe change: the probe's certificate
+    is gone, this one is still here. CHECKED AGAINST THE RECORD 2026-11-19: the behaviour is already
+    documented as behaviour in int8-scales-bd.txt:188 - it DID fire there ("0.28825% -> refusing, fp16
+    engine runs"), and the same file shows it firing again at grid margin x1.5 while a 0.288% uncorrected
+    body "serves" in another configuration. So this is not dead code, it is a coin toss on n=1: the row is
+    about which population the number represents, not about a branch that never runs.

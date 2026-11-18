@@ -82,7 +82,11 @@ Median of the four ratios: **1.126x**; span **1.088-1.141x**.
 The hops are 25.8-27.0 ms per frame at 1080p->4K, and head+quantise+tail is another 15.1-15.5 ms of
 body outside the multiply - i.e. **36-38% of the int8 body's frame is boundary work**, which is why
 1.13x and not the 1.4x the arithmetic suggests. The body is 83% of the frame; the other 8.3-8.6 ms
-(17%) is the product's own input convert and handover.
+(17%) sits outside the body, and the product's own profile line names only 2.2 of it (engine 1.93, read
+wait 0.27) - the remaining 6.2 ms are the components `ledger-export.md` already lists for the tiled path
+(get_frame_tensor's 10-bit upload and colour stage, the output Frame's construction, pack + D2H + queue),
+just not attributed when the gate is off. Not a newly discovered cost: a naming gap, queued as
+`rve-frame-accounting-2026-11-19`.
 
 ## Not covered
 
