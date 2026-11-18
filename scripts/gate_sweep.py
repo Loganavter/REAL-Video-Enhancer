@@ -137,7 +137,9 @@ def main(argv=None) -> int:
           "reference is right, and whether this clip is representative of the title.")
 
     if args.emit:
-        digest = hashlib.sha256(open(args.out, "rb").read()).hexdigest()
+        # The digest is of the file the record NAMES: the per-frame table, not the log prose.
+        target = args.artifact if args.artifact and os.path.exists(args.artifact) else args.out
+        digest = hashlib.sha256(open(target, "rb").read()).hexdigest()
         recs = emit_records(rows, s, args, digest)
         with open(args.emit, "w") as fh:
             for r in recs:
