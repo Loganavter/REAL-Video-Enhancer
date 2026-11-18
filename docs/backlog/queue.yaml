@@ -1491,6 +1491,19 @@ tasks:
     chain's time unchanged within drift. The discriminating pair is per-tensor against per-channel
     activation scales on the same frames - not another calibration recipe, because the calibration was
     already split per title (int8-split-calibration).
+  measured: >-
+    2026-11-18, scales isolated in the simulation (scripts/int8_accuracy_sim.py --act-scale / --clip-pct,
+    calibration and test frames disjoint): PER-CHANNEL conv-input scales take the worst frame from
+    0.06510% to 0.00162% on frame 29, 0.02461% -> 0.00187% on f44 and 0.01362% -> 0.00118% on f274, and
+    collapse peak 19 -> 13 and median 2.99 -> 0.75 levels. PERCENTILE CLIPPING IS NOT A LEVER: p99.9 makes
+    the same frames 6-16x WORSE (0.375%, 0.386%, 0.308%), because the activation tail is signal, not
+    clipping noise. So the lever is granularity, and it is one multiply plus 64 scales in the epilogue
+    (the epilogue already applies a per-channel output scale).
+    THE GAP THAT MUST BE CLOSED FIRST: the kernel reads 0.53318% on that same frame - 8x above the sim's
+    own per-tensor baseline (0.06510%). The sim models the PReLU output per-channel while the kernel's
+    hop boundary requantises per-tensor, so the first hypothesis is that the 8x and the 40x are the same
+    knob. Until the kernel is measured with per-channel boundary scales, the number to quote for the
+    product is 0.53%, not 0.0016%. Records: docs/wsp/verified/int8-scales-bd.txt.
   note: >-
     The recorded 0.09169% pass (int8-window) and the 0.08876% product sweep (int8-and-violet-sweeps)
     were both measured on the 4 Mbps re-encode. Its smoothing is what hid the error: flat, low-detail
@@ -1535,3 +1548,32 @@ tasks:
     digits), so this is not noise - it is a different population or a different reference. The probe
     passes `engine_ref=upscaleOption`, and a forced verdict sets that option's int8Fit before the probe
     runs, which is the first thing to check.
+
+- id: rve-reuse-gate-forbidden-2026-11-18
+  title: 'Frame reuse is CLOSED - no further investigation of it is permitted'
+  type: ops
+  status: dropped
+  owner: '@owner'
+  priority: P0
+  gpu: false
+  cost: '0'
+  tags:
+  - reuse
+  - closed
+  - forbidden
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/utils/TemporalReuse.py
+  - docs/wsp/verified/gate-bd.txt
+  owns_files: []
+  resolution: >-
+    Closed by the owner on 2026-11-18: frame skipping is shelved, OFF by default, and any further
+    investigation of frame reuse is FORBIDDEN. Do not open a row, a probe or a sweep on it. The default
+    is already changed (RenderVideo temporal_reuse=False; --temporal_reuse is the opt-in flag,
+    --no_temporal_reuse a deprecated no-op), and the measurements that were taken are recorded in
+    docs/wsp/verified/gate-bd.txt, docs/wsp/EYE-CHECK-2026-11-18.md and verdict reuse-gate-shelved.
+  note: >-
+    This row exists so that the next reader meets the order BEFORE the prose: every other reuse row in
+    this file (gate-exceeds-acceptance-bar's lineage, hr-reference-cache, strip-concurrency, the flip
+    hold) is history. Reading them as open questions is exactly the failure mode this queue is supposed
+    to prevent - a stale row outranking a decision.

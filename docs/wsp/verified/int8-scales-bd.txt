@@ -1,0 +1,70 @@
+# Can int8's accuracy be fixed? Yes - one lever, and it is the boundary scale, not the clip
+
+Measured 2026-11-18 on the BD Violet clip (`bd_violet20s.mkv`, 37.715 Mbps, packet-proved `-c copy`).
+Frames: 1080p RGB dumps at 20, 29, 44, 60, 100, 140, 180, 220, 260, 274, 300. Calibration on the eight
+frames 20/60/100/140/180/220/260/300, test on 29, 44 and 274 - **disjoint sets**, which is what makes the
+result a prediction rather than a fit.
+
+Instrument: `scripts/int8_accuracy_sim.py` (the sim that produced every recorded int8 accuracy number),
+extended with `--act-scale {tensor,channel}` and `--clip PCT`; defaults unchanged, so the recorded recipe
+is what runs when nobody asks.
+
+## The anchor holds first
+
+| policy (frame 29) | share > 8 | peak | median |
+|---|---|---|---|
+| **per-tensor activations (the recorded recipe)** | **0.06510%** | 19 | 2.99 |
+
+That reproduces the recorded simulation exactly, so the extensions below are read against the same
+instrument rather than against a new one.
+
+## The two levers, one at a time
+
+| frame | per-tensor (baseline) | **per-channel activations** | per-tensor + p99.9 clip |
+|---|---|---|---|
+| 29 (worst in the app) | 0.06510% | **0.00162%** | 0.37460% |
+| 44 | 0.02461% | **0.00187%** | 0.38626% |
+| 274 | 0.01362% | **0.00118%** | 0.30799% |
+
+- **Per-channel activation scales are worth 15-40x** on every frame, and they also collapse the peak
+  (19 -> 13) and the median (2.99 -> 0.75 levels). This is the same lever the BD diff pointed at: the
+  error sits at the ends of the range, and one scale for all 64 channels spends its codes on the union.
+- **Percentile clipping makes it 6-16x WORSE.** The tail is not clipping noise, it is signal: the
+  activations genuinely use the range, so giving up the last 0.1% costs far more than it buys. That lever
+  is closed by measurement.
+
+## What this does and does not establish
+
+The sim says the scale granularity is the knob, and that on this material it moves the worst frame by
+more than an order of magnitude. It does **not** yet say int8 passes on the product: the kernel reads
+**0.53318%** on the same frame (frame 29 of the 494-frame render), i.e. **8x above this sim's own
+baseline**. That gap is unexplained and it is the same size and direction as the granularity effect, so
+the first hypothesis is that the kernel's hop boundary requantises with a per-tensor scale while the sim
+models that boundary per-channel. Until the kernel is measured with per-channel boundary scales, the
+number to quote for the product is 0.53%, not 0.0016%.
+
+The kernel change is small in principle: the epilogue already applies a per-channel output scale, and a
+per-channel requant to int8 for the next hop is one multiply plus 64 scales (128 bytes) per hop.
+
+## Not covered
+
+- Three test frames of one title. The app's worst frame is one of them, which is why they were chosen,
+  but a 494-frame sweep of the changed kernel is the acceptance, not this table.
+- The edge class (8-bit rounding on 2-3 px lines) is not addressed by any scale policy - the diff shows
+  it as 55-79% of the defect, and only precision moves it.
+- The sim rounds in float; the kernel accumulates in int32 (which is exact for int8 operands), so that
+  difference is not a candidate for the 8x gap.
+
+## Records
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt
+     --records docs/wsp/verified/records/int8-scales-bd.jsonl --bars docs/claims-bars.json
+@claim I01 0.06510416860692203 % "frames [91a382dda00d38be] n=1" measured
+@claim I02 0.0016155478078871965 % "frames [91a382dda00d38be] n=1" measured
+@claim I03 0.3746021306142211 % "frames [91a382dda00d38be] n=1" measured
+@claim I04 0.02460696268826723 % "frames [de694af1a5df6dea] n=1" measured
+@claim I05 0.00186873076017946 % "frames [de694af1a5df6dea] n=1" measured
+@claim I06 0.3862606128677726 % "frames [de694af1a5df6dea] n=1" measured
+@claim I07 0.013623650011140853 % "frames [49188c6930b3a069] n=1" measured
+@claim I08 0.0011815200195997022 % "frames [49188c6930b3a069] n=1" measured
+@claim I09 0.30799093656241894 % "frames [49188c6930b3a069] n=1" measured
