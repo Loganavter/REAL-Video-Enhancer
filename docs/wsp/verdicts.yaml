@@ -536,7 +536,8 @@
 
 - id: int8-fails-on-bd
   lane: int8
-  status: current
+  status: superseded
+  superseded_by: int8-body-vs-model
   scope: >-
     the Triton int8 body, per-tensor activation scales, BD 1080p24 stream copy of Violet Evergarden
     ep.01, 494 frames, reuse off and channel-max forced, 2026-11-18
@@ -605,3 +606,41 @@
     levels on a saturated edge - three times the concentration of the artifact the owner rejected by
     eye at 7.57, and the eye agreed with the block mean rather than the share. Recorded with the
     frames in docs/wsp/EYE-CHECK-2026-11-18.md so the lane is not re-entered on the share alone.
+
+- id: int8-body-vs-model
+  lane: int8
+  status: current
+  scope: >-
+    the app's Triton int8 body against the model's own fp16 output (torch), RGB, no colour pipe on either
+    side; BD Violet, 7 frames spread over the clip, 2026-11-18
+  date: 2026-11-18
+  statement: >-
+    Against what the weights actually compute, the int8 body is 5-25x under the 0.1% bar: 0.01684, 0.01519,
+    0.00505, 0.00914, 0.01917, 0.00762 and 0.00442% of pixels more than 8 levels off on frames 29, 44, 100,
+    169, 274, 400 and 460. The fp16 TensorRT engine, measured the same way and pushed through the same 4:2:0
+    round trip, sits at 0.055-0.087% on the two frames tested - under the bar, but 3-10x further from the
+    weights than the quantised body. The earlier "int8 fails" numbers (0.42-0.53%) were body-against-ENGINE
+    on delivered files, so they carry the engine's deviation plus the colour pipe, not the quantiser's.
+  evidence: docs/wsp/verified/int8-scales-bd.txt
+  note: >-
+    The colour pipe is the reason this had to be untangled: RGB -> yuv420p -> RGB by itself moves 0.21% of
+    pixels past the bar on frame 29 and 0.13% on 169 ("pipe alone" in engine_vs_model_control.py). So the
+    acceptance statistic is a render-internal instrument - it cannot resolve anything under ~0.2% on a
+    delivered 4:2:0 file, which is also why the encode comparison earlier found the codec's own error at
+    2.1 levels. The body's remaining cost is the stroke contrast (ink +4.4 levels, rim unchanged), which is
+    a signed effect below the 8-level bar and therefore invisible to it.
+
+- id: engine-vs-model-uncertain
+  lane: engine
+  status: current
+  scope: fp16 TensorRT engine (topt 5, tiling full) against the torch fp16 model, BD Violet
+  date: 2026-11-18
+  statement: >-
+    The fp16 engine's own deviation from the weights is 0.055-0.087% of pixels above 8 levels on two frames
+    once both sides are pushed through the same 4:2:0 round trip - under the bar, but not zero, and 3-10x
+    larger than the int8 body's deviation on the same frames. Whether that is TRT's tactics, fp16
+    accumulation or the head pad is not measured.
+  evidence: docs/wsp/verified/int8-scales-bd.txt
+  open_question: >-
+    Which term: tactic family, accumulation precision, or the padded head. Answerable by building the same
+    graph with fp32 accumulation and comparing, which nobody has done.

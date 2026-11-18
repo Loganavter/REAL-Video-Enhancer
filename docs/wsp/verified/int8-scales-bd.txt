@@ -190,6 +190,37 @@ refuses itself above 0.1% ("int8 body self-certification ... 0.28825% -> refusin
 a second, independent guard besides the probe, and it is what made the margin-x1.5 run render fp16 with a
 0.00000% difference - not a quality result.
 
+## The correction that matters: against the MODEL the body is fine, and the pipe is the floor
+
+The emulation of the kernel's own quantiser in torch (`scripts/int8_kernel_emulation.py`) reproduces the body
+**bit-exactly** (share 0.00000%, peak 0.0 on every frame tested), which is what makes the comparison below
+trustworthy rather than another cross-instrument guess. With the reference set to the model's own fp16 output
+(torch, RGB, no colour pipe on either side):
+
+| frame | 29 | 44 | 100 | 169 | 274 | 400 | 460 |
+|---|---|---|---|---|---|---|---|
+| **int8 body vs model** | 0.01684% | 0.01519% | 0.00505% | 0.00914% | 0.01917% | 0.00762% | 0.00442% |
+| fp16 engine vs model (raw) | 0.49237% | 0.49345% | 0.26442% | 0.26794% | 0.46212% | 0.23527% | 0.10531% |
+
+The engine column is not the engine's fault: pushing BOTH sides through the same 4:2:0 round trip drops it
+to 0.087% (frame 29) and 0.055% (169), and **the pipe alone** - the model against itself through the same
+round trip - reads **0.21053%** and **0.12868%** (`scripts/engine_vs_model_control.py`).
+
+Three consequences, in order of how much they change the record:
+
+1. **int8 passes against the model with 5-25x margin.** Every "int8 fails" number in this file (0.42-0.53%)
+   was body-against-ENGINE on delivered files, so it measured the engine's deviation plus the colour pipe.
+   The verdict is superseded by `int8-body-vs-model`.
+2. **The acceptance statistic cannot resolve anything below ~0.2% on a delivered 4:2:0 file.** The colour
+   pipe moves that many pixels past the bar by itself on this material. It stays a valid render-internal
+   instrument and an invalid delivery one - which is also what the encode comparison found independently.
+3. **The engine is the less faithful renderer here**: 0.055-0.087% from the weights against the body's
+   0.004-0.019%, i.e. 3-10x. Whether that is tactics, fp16 accumulation or the padded head is not measured;
+   recorded as `engine-vs-model-uncertain`.
+
+What still costs the body its character is the stroke: the ink lifts +4.4/+6.6 levels while the rim stays,
+a signed effect that sits below the 8-level bar and is therefore invisible to every number above.
+
 ## Records
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt
