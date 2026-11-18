@@ -168,8 +168,6 @@ class Render:
         # the probe runs BEFORE the gate object exists (setupUpscale precedes the gate block), so the
         # filter has to come from the configuration, not from the gate
         self.temporalReuseStatistic = temporal_reuse_statistic
-        # "auto" asks the probe; "int8"/"fp16" force it, for measurement only
-        self.int8Fit = self.int8FitPreset
         self.temporalReuseMaxChain = temporal_reuse_max_chain
         self.ffmpegPath = ffmpeg_path
         if quality_preset not in ("best", "fast"):
@@ -178,7 +176,9 @@ class Render:
         # The window's Best/Fast switch is the int8 switch (2026-11-18). The gate it used to control is
         # off by default, so the old meaning was dead. `None` means "follow the preset"; an explicit
         # --int8_fit still wins, which is what every measurement run in docs/wsp uses.
+        # "auto" asks the probe; "int8"/"fp16" force it, for measurement only
         self.int8FitPreset = resolve_int8_fit(int8_fit, quality_preset)
+        self.int8Fit = self.int8FitPreset
         self.tileReuseMode = tile_reuse if isinstance(tile_reuse, str) else (
             "on" if tile_reuse else "off")
         self.tileReuse = bool(

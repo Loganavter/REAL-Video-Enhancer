@@ -152,6 +152,9 @@ def main(argv=None) -> int:
             for r in recs:
                 fh.write(json.dumps(r) + "\n")
         print(f"  emitted {len(recs)} records -> {args.emit} (artifact sha256 {digest[:16]}...)")
+        from harness.core import Record as _R
+        for r in recs:
+            print("  " + _R.from_dict(r).claims_line())
     return 0
 
 

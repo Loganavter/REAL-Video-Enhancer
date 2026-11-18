@@ -180,7 +180,17 @@ def main(argv=None) -> int:
         ("D per-channel asym p99.9", True, 99.9, False),
         ("E per-tensor  sym  max", False, 100.0, True),
     ]
-    print(f"{'policy':<26}{'worst share':>13}{'peak':>7}   per frame")
+    def luma(x):
+        return 0.2126 * x[..., 0] + 0.7152 * x[..., 1] + 0.0722 * x[..., 2]
+
+    # the ink/rim probe from scripts/tint_attribution.py, run on the SIMULATED outputs: it says whether a
+    # scale policy moves the stroke lift, which the share alone cannot show
+    def trace(i):
+        f = dict(test)[i]
+        with torch.no_grad():
+            return luma(refs[i][0].permute(1, 2, 0).clamp(0, 1).cpu().numpy() * 255.0), None
+
+    print(f"{'policy':<26}{'worst share':>13}{'peak':>7}   ink/rim lift vs model (f{test[0][0]})")
     for label, chans, pct, sym in policies:
         shares, peaks = [], []
         for i, f in test:
@@ -193,6 +203,20 @@ def main(argv=None) -> int:
         k = max(range(len(shares)), key=lambda j: shares[j])
         print(f"{label:<26}{shares[k]:>12.5f}%{max(peaks):>7.0f}   "
               + ", ".join(f"f{test[j][0]} {shares[j]:.4f}%" for j in range(len(shares))))
+
+    print("\nink/rim lift against the model's own fp16 output (luma, top-2% laplacian of the model):")
+    i0, f0 = test[0]
+    lm = luma(refs[i0][0].detach().permute(1, 2, 0).clamp(0, 1).cpu().numpy().astype(np.float32) * 255.0)
+    lap = (4 * lm[1:-1, 1:-1] - lm[:-2, 1:-1] - lm[2:, 1:-1] - lm[1:-1, :-2] - lm[1:-1, 2:])
+    mask = np.abs(lap) > np.percentile(np.abs(lap), 98)
+    ink, rim = mask & (lap < 0), mask & (lap > 0)
+    base_ink, base_rim = lm[1:-1, 1:-1][ink].mean(), lm[1:-1, 1:-1][rim].mean()
+    print(f"  {'model':<22}ink {base_ink:7.2f}  rim {base_rim:7.2f}")
+    for label, chans, pct, sym in policies:
+        got = forward(model, f0, cal, chans, pct, sym=sym).float().detach()[0].permute(1, 2, 0).clamp(0, 1)
+        lg = luma(got.cpu().numpy().astype(np.float32) * 255.0)[1:-1, 1:-1]
+        print(f"  {label:<22}ink {lg[ink].mean():7.2f} ({lg[ink].mean() - base_ink:+5.2f})  "
+              f"rim {lg[rim].mean():7.2f} ({lg[rim].mean() - base_rim:+5.2f})")
     print("\nNot tested: the edge class (8-bit rounding on 2-3 px lines) - no scale policy moves it; "
           "and the kernel's arithmetic (this rounds in float, the kernel accumulates in int32).")
     return 0
