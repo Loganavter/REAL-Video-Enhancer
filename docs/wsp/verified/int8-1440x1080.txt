@@ -22,6 +22,12 @@ followed by a re-encode. Three consequences of that provenance, all of them narr
 So: the answer to "does the body work at 1440x1080" is measured, on a squeezed re-encode of anime; the film
 lane's own material remains unmeasured.
 
+**A native 1440x1080 clip was looked for and is not on this machine** (2026-11-19): the remastering library
+holds 1920x1080 BD sources only, and the one film-class source it has - Cowboy Bebop ep.01, 41.9 Mbps -
+reports `1920x1080 [SAR 1:1 DAR 16:9]`, interlaced 29.97, i.e. NOT an anamorphic 1440-wide storage. So a
+native cut cannot be made here; closing this caveat needs the 94-frame film clip MODEL.md names, or any real
+anamorphic 1440x1080 source.
+
 ## Accuracy against the model (the reference the record requires)
 
 `scripts/calibration_coverage.py --width 1440 --height 1080`, 24 calibration frames, four held-out test
