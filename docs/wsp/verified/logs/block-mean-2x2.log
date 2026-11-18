@@ -1,0 +1,15 @@
+# The block-mean 2x2 on both clips, 2026-11-18. Same comparator, 64x64 blocks, ungated reference.
+
+Chainsaw Man 20 s (481 frames):
+  luma 4.0 (default)    worst share 0.49372% (f164)   worst block mean 11.00 (f164)
+  channel-max 0.07%     worst share 0.07546% (f475)   worst block mean  4.83 (f475)
+  reuse 20.8% vs 17.3%; depth {1:50,2:40,3:9,4:1} vs {1:41,2:36,3:6}
+
+Violet Evergarden 20 s (480 frames):
+  luma 4.0 (default)    worst share 0.07345% (f227)   worst block mean  3.78 (f20)
+  channel-max 0.07%     worst share 0.07345% (f227)   worst block mean 37.27 (f330)
+
+# So the flip is better on BOTH axes on Chainsaw (share 0.494 -> 0.0755, block mean 11.00 -> 4.83)
+# and worse on the block mean on Violet (3.78 -> 37.27) at the same share.
+# The shipped default's Chainsaw block mean (11.00) is also above the owner's 7.57 anchor for the
+# artifact rejected by eye - so the default is bad on both axes on that clip.
