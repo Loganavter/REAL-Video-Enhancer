@@ -34,14 +34,21 @@ Frame, int8 body, reuse off, one session, null sink (records `W039`-`W041`, `W00
 
 Median of the four sink/clip quotients 1.126x, span 1.088-1.141x (`int8-wall-ab.txt`).
 
-**The gap to the constraint is 2.50 ms on Violet** (57.73 / 1.2 = 48.11 against today's 50.61). That is a
-number to close, not an uncertainty to model.
+**UPDATED 2026-11-19, same day, after the tail-layout adoption** (`int8-tail-layout.txt`, records `W009`,
+`W025`): int8 is now **1.221x on Violet and 1.230x on Chainsaw** - both medians clear `bar_int8_wall` = 1.2x,
+by **0.82 and 1.15 ms of margin**. The 2.50 ms gap this section used to describe is closed; what is left of
+that sentence is the caveat that one Violet round (r3, 1.178x) is still below the bar, so the claim is the
+bar's own statistic (median) and not "every round".
+
+That changes the shape of the search: with the constraint met, further speed work is justified only by what
+it buys the product (see the reserve and `rve-fast-preset-per-hardware-2026-11-18`), and the next portfolio
+revision starts from `docs/wsp/RESEARCH-candidates-2026-11-19.md`.
 
 Where the frame goes (Violet, same session; `int8-tail-split.txt`, `int8-frame-accounting.txt`):
 
 | part | ms | status |
 |---|---|---|
-| 16 hops | 26.95 | 152.9 GFLOP per hop at **91 TOPS** - near the practical int8 rate, not near the peak |
+| 16 hops | 26.95 | 152.9 GFLOP per hop at **91 TOPS**; the same hop also moves 265 MB in its 1.68 ms, i.e. **158 GB/s** - so it sits at ~55% of BOTH roofs (176 TOPS dense, 288 GB/s) and is schedule-bound rather than at a practical rate (checked against the researcher's report, 2026-11-19) |
 | head + quantise | 6.25 | 0.72 GFLOP of arithmetic plus a ~400 MB pass |
 | tail total | 7.77 | dequant 1.58, conv 4.86, shuffle 0.40, residual 0.93 |
 | pack + queue | 3.87 | pinned-slot fill + `writeQueue.put` |
