@@ -247,7 +247,7 @@ class ReferenceFrameGate:
 
     def __init__(self, block: Optional[int] = None, threshold: float = REFERENCE_THRESHOLD,
                  statistic: str = "mean_abs", share_level: float = 8.0,
-                 block_max: Optional[float] = None,
+                 max_block_mean: Optional[float] = None,
                  max_chain: int = REFERENCE_MAX_CHAIN,
                  luma_taps: Sequence[float] = REFERENCE_LUMA_TAPS,
                  scene_threshold: float = REFERENCE_SCENE_CUT,
@@ -285,9 +285,11 @@ class ReferenceFrameGate:
         # channel-max statistic is the same quantity the bar measures. `share_level` is that 8; the
         # threshold, in this mode, is a PERCENT of pixels (0.07 means 0.07%), not a level.
         self.share_level = float(share_level)
-        # The share threshold accepts a small area with a large delta; this second condition bounds
-        # the delta itself, as a block-max in the same channel-max variable. None = off.
-        self.block_max = None if block_max is None else float(block_max)
+        # The share threshold accepts a small area with a large delta. This second condition bounds the
+        # per-BLOCK MEAN of the channel-max field - it is `max of block means`, not `max within block`,
+        # so it dilutes a few bright pixels exactly like the old luma statistic did (measured: no
+        # firing at 4 or 8 levels on the calm cut). None = off.
+        self.max_block_mean = None if max_block_mean is None else float(max_block_mean)
         self._ref_rgb = None
         self._ref_luma = None           # its full-res luma (needed by mean_abs and by the veto)
         self._chain = 0                 # consecutive frames served from the reference
@@ -481,10 +483,10 @@ class ReferenceFrameGate:
                 # counts, on the LOW-resolution frame the gate actually sees
                 cm = (frame_tensor.float() - ref_rgb).abs().amax(dim=1, keepdim=True)
                 share = float((cm > self.share_level / 255.0).float().mean()) * 100.0
-                if self.block_max is not None:
+                if self.max_block_mean is not None:
                     # worst 32 px block mean of the same field, in 8-bit levels
                     pooled = torch.nn.functional.avg_pool2d(cm, 32, ceil_mode=True) * 255.0
-                    if float(pooled.max()) > self.block_max:
+                    if float(pooled.max()) > self.max_block_mean:
                         share = float("inf")     # a miss, whatever the area says
 
         elif (self.statistic == "mean_abs" and ref is not None

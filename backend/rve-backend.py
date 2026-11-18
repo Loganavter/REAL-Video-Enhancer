@@ -184,7 +184,7 @@ class HandleApplication:
             temporal_reuse=not self.args.no_temporal_reuse,
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_statistic=self.args.temporal_reuse_statistic,
-            temporal_reuse_block_max=self.args.temporal_reuse_block_max,
+            temporal_reuse_max_block_mean=self.args.temporal_reuse_max_block_mean,
             int8_fit=self.args.int8_fit,
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
             temporal_reuse_pixel_veto=self.args.temporal_reuse_pixel_veto,
@@ -543,7 +543,7 @@ class HandleApplication:
             default="mean_abs",
         )
         parser.add_argument(
-            "--temporal_reuse_block_max",
+            "--temporal_reuse_max_block_mean",
             help="second condition for channel_max_share: a would-be duplicate whose worst 32 px block "
                  "mean (channel-max, 8-bit levels) exceeds this is a miss, whatever its area. None = off.",
             default=None,
