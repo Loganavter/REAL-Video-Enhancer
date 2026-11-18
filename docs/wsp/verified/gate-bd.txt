@@ -1,5 +1,10 @@
 # The gate lane on BD: it fails where it engages, and it is off by default now
 
+> **CLOSED BY THE OWNER, 2026-11-18.** Frame reuse is shelved, off by default, and **any further
+> investigation of it is forbidden** (`rve-reuse-gate-forbidden-2026-11-18`). This file is the record of
+> what was measured before that order, not an open question: do not re-run these cells, do not extend
+> them, and do not treat the rows below as a road map.
+
 Measured 2026-11-18 on BD stream copies (`sources-bd.txt` proves the cuts are `-c copy`). The owner's
 decision, taken on these numbers: **frame skipping is shelved and OFF by default** - on a 1080p source
 the gate's own noise floor is almost always above its 1.5 refusal limit, because the material always

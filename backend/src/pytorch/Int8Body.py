@@ -121,8 +121,59 @@ class Int8Body:
                 s_act = torch.maximum(s_act, s2)
                 outs = [torch.maximum(a, b) for a, b in zip(outs, o2)]
         self._grids = (s_act, outs)
+        self._calib_frames = list(frames)
         self._launches = None
         return self
+
+    @torch.no_grad()
+    def _bias_correction(self, max_frames: int = 4) -> list:
+        """Empirical bias correction (Nagel et al., ICCV 2019): the mean shift of each channel, per hop.
+
+        Quantisation error is not zero-mean. The BD probe shows the drawn line lifting ~5 levels while the rim
+        beside it stays - a signed shift, which is the signature of a biased error rather than noise, and the
+        standard remedy is to measure `E[quantised - full precision]` per output channel on calibration data
+        and subtract it from that layer's bias. The correction lives in the bias, so it costs nothing at
+        inference; this is the one lever that does not eat the speed that int8 exists for.
+
+        The shift is taken at the PRE-activation (before PReLU), because that is where a bias can act.
+        """
+        import torch.nn.functional as F
+
+        s_act, outs = self._grids
+        frames = self._calib_frames[:max_frames]
+        shifts = [torch.zeros(self.feat, device=s_act.device) for _ in self.inner]
+        for f in frames:
+            x = f.clamp(0.0, 1.0)
+            # the model is fp16, the correction arithmetic is fp32: cast once, here, or torch refuses the
+            # mixed conv ("Input type Half and bias type float") - which is how the first attempt at this
+            # correction fell back to fp16 and looked like a perfect result on the render pair.
+            fp_pre = self.head_conv(x).float()
+            fp = F.prelu(fp_pre, self.head_prelu.weight.float())
+            # quantised chain, the kernel's own recipe
+            s_t1 = self._s_t1.view(1, -1, 1, 1)
+            codes = torch.round(fp / s_t1).clamp(-127, 127)
+            for idx, conv in enumerate(self.inner):
+                weight = conv.weight.detach().float()
+                s_in = self._s_t1 if idx == 0 else outs[idx - 1]
+                s_t = float(s_in.max())
+                w_sc = weight.abs().amax(dim=(1, 2, 3)) / 127.0
+                w_q = torch.round(weight / w_sc.view(-1, 1, 1, 1)).clamp(-127, 127)
+                q_pre = F.conv2d(codes.float(), w_q, None, padding=1) * (w_sc * s_t).view(1, -1, 1, 1) \
+                    + conv.bias.detach().float().view(1, -1, 1, 1)
+                shifts[idx] += (q_pre - fp_pre).mean(dim=(0, 2, 3))
+                q_act = F.prelu(q_pre, self.inner_prelus[idx].weight.detach().float())
+                s_out = outs[idx].view(1, -1, 1, 1)
+                q = torch.floor(q_act / s_out + 0.5).clamp(-127, 127)
+                if idx + 1 < len(self.inner):
+                    s_next = outs[idx].max()
+                    m = torch.round(outs[idx] / s_next * (1 << SHIFT)).float()
+                    q = torch.clamp(torch.floor((q * m.view(1, -1, 1, 1) + (1 << (SHIFT - 1))) / (1 << SHIFT)),
+                                    -127, 127)
+                codes = q
+                # advance the full-precision chain by the same layer
+                fp_pre = F.conv2d(fp, weight, conv.bias.detach().float().view(1, -1, 1, 1), padding=1)
+                fp = F.prelu(fp_pre, self.inner_prelus[idx].weight.detach().float())
+        return [s / max(1, len(frames)) for s in shifts]
 
     def _build(self):
         from torch.nn.functional import conv2d  # noqa: F401 - documents what the kernel replaces
@@ -172,6 +223,10 @@ class Int8Body:
         # multiplier and the last hop gets the identity (it stays on its per-channel grid, as before)
         for k in range(len(launches)):
             launches[k]["mn"] = launches[k + 1]["m"] if k + 1 < len(launches) else identity
+        if _os.environ.get("RVE_INT8_BIAS_CORR") == "1":
+            shifts = self._bias_correction()
+            for k, sh in enumerate(shifts):
+                launches[k]["bias"] = (launches[k]["bias"] - sh).contiguous()
         self._launches = launches
         return launches
 

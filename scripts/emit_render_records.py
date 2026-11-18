@@ -67,6 +67,9 @@ def main(argv=None) -> int:
     ap.add_argument("--session", default="s-2026-11-18T08:00:00Z")
     ap.add_argument("--id-prefix", default="B")
     ap.add_argument("--calibration-frames", type=int, default=16)
+    ap.add_argument("--with-time", action="store_true",
+                    help="emit ms/frame even when the log name does not say 'null' - only for runs whose "
+                         "output really was the null sink")
     ap.add_argument("--append", action="store_true")
     ap.add_argument("--start", type=int, default=1, help="first record number")
     args = ap.parse_args(argv)
@@ -91,7 +94,7 @@ def main(argv=None) -> int:
         for key, unit, stat, instrument, pop in specs:
             if key not in f:
                 continue
-            if key == "ms_per_frame" and "null" not in os.path.basename(log).lower():
+            if key == "ms_per_frame" and not (args.with_time or "null" in os.path.basename(log).lower()):
                 continue  # a file sink measures the ffv1 writer; only the null sink measures the render
             seq += 1
             recs.append(Record(value=float(f[key]), unit=unit, population=pop,
