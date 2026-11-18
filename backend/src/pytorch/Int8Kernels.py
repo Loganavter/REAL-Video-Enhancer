@@ -23,9 +23,45 @@ try:                       # round-half-to-EVEN, which is what torch.round does
 except Exception:          # pragma: no cover - older triton
     _rint = None
 
-__all__ = ["body_prologue_kernel", "quantise_nchw_to_nhwc", "quantise_nchw_to_nhwc_prelu", "quantise_nhwc",
-           "quantise_nhwc_prelu",
+__all__ = ["body_prologue_kernel", "tail_int8_kernel", "quantise_nchw_to_nhwc", "quantise_nchw_to_nhwc_prelu",
+           "quantise_nhwc", "quantise_nhwc_prelu",
            "dequantise_nhwc_to_nchw", "dequantise_nhwc"]
+
+
+@triton.jit
+def tail_int8_kernel(x_ptr, w_ptr, sigma_ptr, bias_ptr, y_ptr, H, W, BLOCK_M: tl.constexpr,
+                     CIN: tl.constexpr, COUT: tl.constexpr, COUT_PAD: tl.constexpr):
+    """The tail as one int8 convolution whose weights already carry the dequant scale.
+
+    The shipped tail dequantises the last hop's codes to fp16 (a full pass) and feeds them to a cuDNN fp16
+    convolution. The dequant scale is per INPUT channel, and a convolution is linear in its input, so
+    `w'[k,o] = s_k * w[k,o]` folded offline makes the codes themselves the input: the dequant pass disappears,
+    the output scale is one multiply in the epilogue, and the integer accumulation is exact in fp32
+    (64*9 terms of 127*127 = 9.3e6, far below 2^24).
+
+    Outputs pad 12 -> 16 for the tensor-core tile; the padding contributes nothing (its weights are zero) and
+    is not written, so the caller gets a compact 12-channel NHWC buffer - a channels_last view the upsampler
+    already accepts.
+    """
+    pid = tl.program_id(0)
+    rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    h = rows // W
+    w = rows % W
+    li = tl.arange(0, CIN)
+    lo = tl.arange(0, COUT_PAD)
+    acc = tl.zeros((BLOCK_M, COUT_PAD), dtype=tl.int32)
+    for tap in tl.range(0, 9, num_stages=1):
+        dy = tap // 3 - 1
+        dx = tap % 3 - 1
+        yy = h + dy
+        xx = w + dx
+        inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
+        src = (yy * W + xx)[:, None] * CIN + li[None, :]
+        a = tl.load(x_ptr + src, mask=inside[:, None], other=0)
+        b = tl.load(w_ptr + tap * CIN * COUT_PAD + li[:, None] * COUT_PAD + lo[None, :])
+        acc += tl.dot(a, b, out_dtype=tl.int32)
+    v = acc.to(tl.float32) * tl.load(sigma_ptr + lo)[None, :] + tl.load(bias_ptr + lo)[None, :]
+    tl.store(y_ptr + rows[:, None] * COUT + lo[None, :], v.to(tl.float16), mask=lo[None, :] < COUT)
 
 
 @triton.jit

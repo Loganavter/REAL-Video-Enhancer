@@ -30,7 +30,7 @@ import torch
 
 from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
                           quantise_nchw_to_nhwc, quantise_nchw_to_nhwc_prelu, quantise_nhwc,
-                          quantise_nhwc_prelu)
+                          quantise_nhwc_prelu, tail_int8_kernel)
 
 __all__ = ["Int8Body"]
 
@@ -93,6 +93,18 @@ class Int8Body:
         # its picture measured (row rve-epilogue-divide-2026-11-19) - the rewrite is exact in real arithmetic
         # but not bit-identical in fp32, so it is a different-arithmetic change, not a layout.
         self.fold = int(os.environ.get("RVE_INT8_EPILOGUE_FOLD", "0"))
+        # The tail as a seventeenth int8 hop: the dequant pass and the cuDNN fp16 conv become one kernel
+        # (row rve-tail-as-int8-hop-2026-11-19). Stage (a) put it at 0.00147% share / peak 13 against the
+        # fp16 tail on four held-out frames, stage (b) at 0.974 ms against 4.444; in the app it is
+        # 45.87 -> 42.71 ms/frame in 3 of 3 interleaved rounds and the 494-frame pair reads 0.00000%
+        # worst share / peak 6. DEFAULT ON since 2026-11-20; RVE_TAIL_INT8=0 restores the cuDNN path.
+        want_tail_int8 = str(os.environ.get("RVE_TAIL_INT8", "1")).lower() in ("1", "true", "yes")
+        self.tail_int8 = bool(want_tail_int8 and self.tail_conv.out_channels <= 16)
+        if want_tail_int8 and not self.tail_int8:
+            import logging as _lg
+            _lg.getLogger("RVE").warning(
+                "int8 tail request declined: the tail has %d output channels and this kernel pads to 16",
+                self.tail_conv.out_channels)
         self._launches = None
         self._grids = None         # (s_act, outs)
         # fp16 for the kernel: an fp32 slope promotes the tile and costs 3x
@@ -250,7 +262,33 @@ class Int8Body:
             for k, sh in enumerate(shifts):
                 launches[k]["bias"] = (launches[k]["bias"] - sh).contiguous()
         self._launches = launches
+        if self.tail_int8:
+            self._build_tail_int8()
         return launches
+
+    def _build_tail_int8(self):
+        """Fold the last hop's per-channel dequant scale into the tail's weights, quantise, pad to 16.
+
+        `w'[k,o] = s_k * w[k,o]` is what makes the codes themselves the convolution's input; quantising `w'`
+        per OUTPUT channel then gives the kernel's epilogue a single scale. The 12 -> 16 padding is zeros,
+        which contributes nothing to any output and is therefore arithmetic-preserving.
+        """
+        cout = self.tail_conv.out_channels
+        s_k = self._launches[-1]["os"].detach().float()
+        w_fold = self.tail_conv.weight.detach().float() * s_k.view(1, -1, 1, 1)
+        sigma = (w_fold.abs().amax(dim=(1, 2, 3)) / 127.0).clamp_min(1e-12)
+        w_q = torch.round(w_fold / sigma.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
+        pad = 16
+        taps = torch.zeros((9, self.feat, pad), device=w_q.device, dtype=torch.int8)
+        for i in range(3):
+            for j in range(3):
+                taps[i * 3 + j, :, :cout] = w_q[:, :, i, j].t()
+        self._tail_taps = taps.contiguous()
+        self._tail_sigma = torch.zeros(pad, device=w_q.device, dtype=torch.float32)
+        self._tail_sigma[:cout] = sigma
+        self._tail_bias = torch.zeros(pad, device=w_q.device, dtype=torch.float32)
+        self._tail_bias[:cout] = self.tail_conv.bias.detach().float()
+        return taps
 
     def _int8_buffers(self, x, h, w):
         """One allocation per shape for all three int8 buffers.
@@ -430,19 +468,33 @@ class Int8Body:
             # shuffle and residual from 0.40 + 0.93 to 0.82 + 2.13 ms, so it is not the lever it looks like.
             # RVE_TAIL_NHWC=0 restores the old contiguous path for an A/B.
             channels_last = str(os.environ.get("RVE_TAIL_NHWC", "1")).lower() not in ("0", "false", "no")
-            if channels_last:
-                last_nhwc = torch.empty((x.shape[0], h, w, self.feat), device=x.device,
-                                        dtype=torch.float16)
-                dequantise_nhwc[qgrid](src, self._launches[-1]["os"].contiguous(), last_nhwc, n_pix,
-                                       BLOCK=QB, C=self.feat, num_warps=4)
-                last = last_nhwc.permute(0, 3, 1, 2)      # a channels_last view, no copy
+            if self.tail_int8:
+                # One kernel instead of two: the dequant scale is already inside the weights, so the
+                # last hop's codes are the tail convolution's input and the pass between them is gone.
+                # The fused kernel lands on the CONV line; the dequant line reads ~0 by construction.
+                _t1.record()
+                tail_out = torch.empty((x.shape[0], h, w, self.tail_conv.out_channels),
+                                       device=x.device, dtype=torch.float16)
+                tail_int8_kernel[grid](src, self._tail_taps, self._tail_sigma, self._tail_bias, tail_out,
+                                       h, w, BLOCK_M=self.block_m, CIN=self.feat,
+                                       COUT=self.tail_conv.out_channels, COUT_PAD=16,
+                                       num_warps=self.warps)
+                _conv = tail_out.permute(0, 3, 1, 2)      # a channels_last view, no copy
+                _t2.record()
             else:
-                last = torch.empty((x.shape[0], self.feat, h, w), device=x.device, dtype=torch.float16)
-                dequantise_nhwc_to_nchw[qgrid](src, self._launches[-1]["os"].contiguous(), last, n_pix,
-                                               BLOCK=QB, C=self.feat, num_warps=4)
-            _t1.record()
-            _conv = self.tail_conv(last)
-            _t2.record()
+                if channels_last:
+                    last_nhwc = torch.empty((x.shape[0], h, w, self.feat), device=x.device,
+                                            dtype=torch.float16)
+                    dequantise_nhwc[qgrid](src, self._launches[-1]["os"].contiguous(), last_nhwc, n_pix,
+                                           BLOCK=QB, C=self.feat, num_warps=4)
+                    last = last_nhwc.permute(0, 3, 1, 2)  # a channels_last view, no copy
+                else:
+                    last = torch.empty((x.shape[0], self.feat, h, w), device=x.device, dtype=torch.float16)
+                    dequantise_nhwc_to_nchw[qgrid](src, self._launches[-1]["os"].contiguous(), last, n_pix,
+                                                   BLOCK=QB, C=self.feat, num_warps=4)
+                _t1.record()
+                _conv = self.tail_conv(last)
+                _t2.record()
             out = self.model.upsampler(_conv)
             _t3.record()
             out = out + torch.nn.functional.interpolate(x.clamp(0.0, 1.0), scale_factor=self.scale,

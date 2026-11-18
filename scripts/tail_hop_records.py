@@ -12,11 +12,18 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import statistics
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from harness.core import Population, Record, Store  # noqa: E402
+
+LOOP = re.compile(r"render loop: [\d.]+ s for (\d+) frames \(([\d.]+) ms/frame\)")
+TAIL = re.compile(r"int8 tail: dequant ([\d.]+)\s+conv ([\d.]+)\s+shuffle ([\d.]+)\s+"
+                  r"residual ([\d.]+\s+)?SUM ([\d.]+)")
+STAMP = re.compile(r"^# wall_ab (\S+)", re.M)
 
 
 def sha256(path: str) -> str:
@@ -27,7 +34,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--emul", default="docs/wsp/verified/logs/tail-hop/emulation.json")
     ap.add_argument("--kernel", default="docs/wsp/verified/logs/tail-hop/kernel.json")
+    ap.add_argument("--logs", default="docs/wsp/verified/logs/tail-hop/ab")
     ap.add_argument("--out", default="docs/wsp/verified/records/int8-tail-hop.jsonl")
+    ap.add_argument("--pair", default="")
     args = ap.parse_args(argv)
 
     em = json.load(open(args.emul))
@@ -92,6 +101,65 @@ def main(argv=None) -> int:
                        tier="measured", id=rid, run="scripts/tail_hop_probe.py", artifact=args.kernel,
                        extra={"artifact_sha256": kdig, "arm": arm, "of": "tail_time"}))
     st.delta("B004", "B001", note="the candidate's saving on the tail, one frame")
+
+    # ---- the app: the same configuration with RVE_TAIL_INT8 0/1 alternating in one session
+    loops: dict[str, list[float]] = {}
+    phases: dict[str, list[tuple]] = {}
+    session = "unknown"
+    for name in sorted(os.listdir(args.logs)):
+        m = re.match(r"^(.+)_(tailf16|tailint8)_r(\d+)_null\.log$", name)
+        if not m:
+            continue
+        text = open(os.path.join(args.logs, name), errors="replace").read().replace("\r", "\n")
+        if session == "unknown" and (st0 := STAMP.search(text)):
+            session = f"s-{st0.group(1)}"
+        lm = LOOP.search(text)
+        if lm:
+            loops.setdefault(m.group(2), []).append(float(lm.group(2)))
+        for t in TAIL.finditer(text):
+            phases.setdefault(m.group(2), []).append(
+                (float(t.group(1)), float(t.group(2)), float(t.group(3)), float(t.group(5))))
+    if loops:
+        pop_ab = Population.of("frames", (f"{clip}#first494",),
+                               f"{clip}, 494-frame render, null sink, RVE_TAIL_INT8 0 vs 1 alternating "
+                               f"in one session")
+        inst = "the render loop line, ms/frame (per-round draws, median of 3)"
+        cfg = "int8 fit, null sink, arms alternating in one session"
+        lid = {}
+        for rid, arm in (("C001", "tailf16"), ("C002", "tailint8")):
+            st.emit(Record(value=round(statistics.median(loops[arm]), 2), unit="ms",
+                           population=Population(kind=pop_ab.kind, items=pop_ab.items,
+                                                 label=f"{pop_ab.label}, arm {arm}"),
+                           instrument=inst, config=cfg, session=session, statistic="median",
+                           tier="measured", id=rid,
+                           run=f"rve-backend.py, logs {args.logs}/*_{arm}_r*_null.log",
+                           artifact=f"{args.logs}/{clip.removesuffix('.mkv')}_{arm}_r1_null.log",
+                           extra={"artifact_sha256": sha256(
+                               f"{args.logs}/{clip.removesuffix('.mkv')}_{arm}_r1_null.log"),
+                               "of": "frame_time", "per_round": loops[arm]}))
+            lid[arm] = rid
+        st.delta(lid["tailint8"], lid["tailf16"], note="one int8 tail kernel against the cuDNN path")
+        if phases:
+            pinst = "the body's own CUDA events, 'int8 tail' line, last 8 frames of each run"
+            for rid, arm in (("C003", "tailf16"), ("C004", "tailint8")):
+                st.emit(Record(value=round(statistics.median([p[3] for p in phases[arm]]), 2), unit="ms",
+                               population=Population(kind=pop_ab.kind, items=pop_ab.items,
+                                                     label=f"{pop_ab.label}, arm {arm}"),
+                               instrument=pinst, config=cfg, session=session, statistic="median",
+                               tier="measured", id=rid,
+                               run=f"rve-backend.py, logs {args.logs}/*_{arm}_r*_null.log",
+                               artifact=f"{args.logs}/{clip.removesuffix('.mkv')}_{arm}_r1_null.log",
+                               extra={"artifact_sha256": sha256(
+                                   f"{args.logs}/{clip.removesuffix('.mkv')}_{arm}_r1_null.log"),
+                                   "of": "tail_total",
+                                   "dequant": round(statistics.median([p[0] for p in phases[arm]]), 2),
+                                   "conv": round(statistics.median([p[1] for p in phases[arm]]), 2),
+                                   "draws": len(phases[arm])}))
+            st.delta("C004", "C003", note="the tail's four phases, one kernel instead of two")
+
+    if args.pair:
+        for rid, rec in Store.load(args.pair).records.items():
+            st.emit(rec)
 
     st.dump(args.out)
     print(st.claims_text().strip())
