@@ -30,7 +30,7 @@ __all__ = ["body_prologue_kernel", "quantise_nchw_to_nhwc", "quantise_nchw_to_nh
 
 @triton.jit
 def body_prologue_kernel(x_ptr, w_ptr, m_next_ptr, shift, w_scale_ptr, bias_ptr, slope_ptr, out_scale_ptr,
-                         y_ptr, H, W, BLOCK_M: tl.constexpr, C: tl.constexpr):
+                         y_ptr, H, W, BLOCK_M: tl.constexpr, C: tl.constexpr, FOLD: tl.constexpr = 0):
     pid = tl.program_id(0)
     rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
     h = rows // W
@@ -54,9 +54,21 @@ def body_prologue_kernel(x_ptr, w_ptr, m_next_ptr, shift, w_scale_ptr, bias_ptr,
         acc += tl.dot(a, b, out_dtype=tl.int32)
     v = acc.to(tl.float32) * tl.load(w_scale_ptr + lanes)[None, :] + tl.load(bias_ptr + lanes)[None, :]
     slope = tl.load(slope_ptr + lanes)[None, :]
-    v = tl.where(v >= 0, v, v * slope)
     out_scale = tl.load(out_scale_ptr + lanes)[None, :]
-    q = tl.floor(v / out_scale + 0.5)
+    if FOLD:
+        # The rescale to the output grid is taken ONCE PER CHANNEL per CTA instead of once per element.
+        # PReLU is homogeneous of degree one, so a POSITIVE rescale commutes with it:
+        #     prelu(acc*w + b) / s + 0.5  ==  prelu(acc*(w/s) + b/s) + 0.5
+        # and the only per-element work left is one FMA and one add. The 0.5 cannot move inside for the
+        # same reason the division can: the shift would move the PReLU sign test.
+        inv = 1.0 / out_scale
+        u = acc.to(tl.float32) * (tl.load(w_scale_ptr + lanes)[None, :] * inv) \
+            + tl.load(bias_ptr + lanes)[None, :] * inv
+        u = tl.where(u >= 0, u, u * slope)
+        q = tl.floor(u + 0.5)
+    else:
+        v = tl.where(v >= 0, v, v * slope)
+        q = tl.floor(v / out_scale + 0.5)
     q = tl.minimum(tl.maximum(q, -127.0), 127.0)
     # ...and the requant for the NEXT hop goes here, one multiply and one shift per element
     q = q.to(tl.int32)
