@@ -41,6 +41,21 @@ def remove_shared_memory_block(name):
         print(f"Error removing shared memory block '{name}': {e}")
 
 
+def resolve_int8_fit(int8_fit: str | None, quality_preset: str) -> str:
+    """The Best/Fast switch picks the body's precision; an explicit --int8_fit wins over it.
+
+    `best` runs the fp16 engine (the picture is the model's own output), `fast` runs the int8 body.
+    Plain `--int8_fit` is left alone, which is what every measurement run in docs/wsp passes.
+    """
+    if quality_preset not in ("best", "fast"):
+        raise ValueError(f"quality_preset must be 'best' or 'fast', got {quality_preset!r}")
+    if int8_fit is None:
+        return "fp16" if quality_preset == "best" else "int8"
+    if int8_fit not in ("auto", "int8", "fp16"):
+        raise ValueError(f"int8_fit must be auto/int8/fp16, got {int8_fit!r}")
+    return int8_fit
+
+
 class Render:
     """
     Subclass of FFmpegRender
@@ -130,7 +145,7 @@ class Render:
         # TheAnimeScripter calibration: --dedup_sens 35 / 7 = 5.0 luma levels, max span 4
         temporal_reuse_threshold: float = 5.0,
         temporal_reuse_statistic: str = "mean_abs",
-        int8_fit: str = "auto",
+        int8_fit: str | None = None,
         temporal_reuse_max_block_mean: float | None = None,
         temporal_reuse_max_chain: int = 4,
         # 0/None = off. 40 is the TheAnimeScripter value and is right for clean anime, but on
@@ -154,12 +169,16 @@ class Render:
         # filter has to come from the configuration, not from the gate
         self.temporalReuseStatistic = temporal_reuse_statistic
         # "auto" asks the probe; "int8"/"fp16" force it, for measurement only
-        self.int8Fit = int8_fit
+        self.int8Fit = self.int8FitPreset
         self.temporalReuseMaxChain = temporal_reuse_max_chain
         self.ffmpegPath = ffmpeg_path
         if quality_preset not in ("best", "fast"):
             raise ValueError(f"quality_preset must be 'best' or 'fast', got {quality_preset!r}")
         self.qualityPreset = quality_preset
+        # The window's Best/Fast switch is the int8 switch (2026-11-18). The gate it used to control is
+        # off by default, so the old meaning was dead. `None` means "follow the preset"; an explicit
+        # --int8_fit still wins, which is what every measurement run in docs/wsp uses.
+        self.int8FitPreset = resolve_int8_fit(int8_fit, quality_preset)
         self.tileReuseMode = tile_reuse if isinstance(tile_reuse, str) else (
             "on" if tile_reuse else "off")
         self.tileReuse = bool(
