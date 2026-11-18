@@ -1709,3 +1709,43 @@ tasks:
     indistinguishable ON THAT MATERIAL - the tooltip now says exactly that rather than "may get worse or
     better", because that phrasing was written before the same-input comparison existed. The int8 body also only
     serves the whole-frame path and needs 64 body channels, so on other models it may not be usable at all.
+
+- id: rve-int8-wall-ab-2026-11-19
+  title: 'What does int8 actually save? One interleaved wall A/B, both titles, per-phase'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1h
+  tags:
+  - int8
+  - speed
+  - measurement
+  - protocol
+  base_branch: perf/inference
+  relates_to:
+  - docs/PERFORMANCE.md
+  - docs/wsp/verified/int8-window.txt
+  - docs/wsp/verified/int8-scales-bd.txt
+  owner_notes: 'filed by the owner 2026-11-19'
+  owns_files:
+  - docs/wsp/verified/int8-wall-ab.txt
+  refutes: >-
+    int8 is faster than the shipped fp16 engine in the product. The three numbers on the record disagree by
+    more than drift: the offline window says 1.35-1.42x, one in-app draw says 1.14x on Violet and 0.95x
+    (slower) on Chainsaw, and the app's own phase log puts the body at 52.7-54.8 ms against the engine's
+    52.1-54.5 ms. If the interleaved median lands at or under 1.0x, then the int8 body does not buy wall clock
+    in the product and the Fast preset is a picture decision, not a speed one.
+  acceptance: >-
+    Per clip (Violet BD, Chainsaw same-shot), one idle session: >=3 rounds alternating {fp16, int8}, --output
+    null and a real NVENC encode, median of rounds 2+, pairwise ratios, plus the app's own phase lines
+    (head / quantise / hops / tail / body total) so the difference is attributed rather than just quoted.
+    Report the ratio and, if it is not above 1.05x, say so in the preset description too.
+  note: >-
+    Why it is worth an hour: the preset text and any default depend on this number, and right now the record
+    holds three mutually inconsistent readings, all of them single draws taken while other work ran on the
+    machine. The protocol is the project's own: one GPU job at a time, one session, medians of rounds 2+, and no
+    cross-session quotient. The body's structure explains what to look for - head+quantise 1.5-2.6 ms, sixteen
+    hops ~30-40 ms, tail 5-12 ms, all measured separately in int8-window.txt - so a body total near the
+    engine's frame time means the boundaries are eating the quantiser's win.
