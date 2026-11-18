@@ -160,7 +160,15 @@ class Int8Body:
                 w_q = torch.round(weight / w_sc.view(-1, 1, 1, 1)).clamp(-127, 127)
                 q_pre = F.conv2d(codes.float(), w_q, None, padding=1) * (w_sc * s_t).view(1, -1, 1, 1) \
                     + conv.bias.detach().float().view(1, -1, 1, 1)
-                shifts[idx] += (q_pre - fp_pre).mean(dim=(0, 2, 3))
+                # The bias correction is for the WEIGHT quantisation only (Nagel eq. 25): E[dW x], measured on
+                # the SAME input x. Comparing the two chains' outputs instead also counts the input drift that
+                # the previous hops already caused, and subtracting that double-corrects - which is what made
+                # the first attempt flip the picture to 100% wrong instead of fixing the stroke.
+                bias_f = conv.bias.detach().float().view(-1)
+                with torch.no_grad():
+                    same_q = F.conv2d(fp.float(), w_q, None, padding=1) * (w_sc * s_t).view(1, -1, 1, 1) + bias_f.view(1, -1, 1, 1)
+                    same_fp = F.conv2d(fp.float(), weight, bias_f, padding=1)
+                    shifts[idx] += (same_q - same_fp).mean(dim=(0, 2, 3))
                 q_act = F.prelu(q_pre, self.inner_prelus[idx].weight.detach().float())
                 s_out = outs[idx].view(1, -1, 1, 1)
                 q = torch.floor(q_act / s_out + 0.5).clamp(-127, 127)
@@ -171,7 +179,7 @@ class Int8Body:
                                     -127, 127)
                 codes = q
                 # advance the full-precision chain by the same layer
-                fp_pre = F.conv2d(fp, weight, conv.bias.detach().float().view(1, -1, 1, 1), padding=1)
+                fp_pre = F.conv2d(fp, weight, conv.bias.detach().float().view(-1), padding=1)
                 fp = F.prelu(fp_pre, self.inner_prelus[idx].weight.detach().float())
         return [s / max(1, len(frames)) for s in shifts]
 
