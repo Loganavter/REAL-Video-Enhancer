@@ -221,6 +221,28 @@ Three consequences, in order of how much they change the record:
 What still costs the body its character is the stroke: the ink lifts +4.4/+6.6 levels while the rim stays,
 a signed effect that sits below the 8-level bar and is therefore invisible to every number above.
 
+## The stroke: not proven unsolvable, but the simulation cannot be the instrument
+
+A last check before calling it: the fp16-tail lever (keep the LAST k conv pairs in fp16, where a late hop's
+error is not diluted) was run with the stroke probe attached, frame 169:
+
+| fp16 tail | share >8 | peak | median | ink lift | rim lift |
+|---|---|---|---|---|---|
+| 0 | 0.00633% | 15 | 1.59 | **-0.01** | +0.34 |
+| 2 | 0.00508% | 16 | 1.25 | -0.48 | +0.22 |
+| 4 | 0.00313% | 14 | 1.12 | -0.41 | +0.23 |
+| 6 | 0.00209% | 14 | 1.00 | -0.42 | +0.27 |
+
+The important cell is the k=0 row: the SIMULATION shows no ink lift at all, while the kernel reads +4.40 on the
+same frame. So the simulation cannot answer the stroke question - it does not contain the effect, which is the
+same reason every lever it proposed was worth ~0 in the kernel. What the table does say is that precision
+spent on the late hops buys 3x on the sim's share at k=6 and does not move a stroke it never had.
+
+So the honest state: the stroke lift is real in the kernel (+4.4 at frame 169, +6.6 at 274, on 1.85% of pixels),
+none of the scale levers moved it (per-channel 0.015%, clip and margin worse), and the only untested lever -
+running the last hops in fp16 inside the body - costs 1.2-3 ms per hop, i.e. most of the speed that justifies
+int8. It is testable in hours and unproven either way; the sim cannot predict it.
+
 ## Records
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt
