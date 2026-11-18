@@ -1,0 +1,27 @@
+# The product's probe now measures against the engine it falls back to
+
+`RenderVideo._probe_int8_fit` passes `engine_ref=self.upscaleOption`, so the shipped probe uses the
+app's own TensorRT engine for the fp16 side of every composition number, in the spread path as well as
+in the opt-in adversarial path.
+
+| clip | measurement | torch reference | engine reference | verdict |
+|---|---|---|---|---|
+| Chainsaw | composition | 0.000% | 0.001% | int8 both |
+| Violet | depth-1 composition | 0.108% | **0.139%** | fp16 both |
+| Violet | depth-2 composition | 0.167% | **0.216%** | fp16 both |
+| Violet | own defect | 0.044% | **0.082%** | - |
+
+The verdicts do not change; Violet's margins do, by up to 29% at depth 2 and 86% on the own defect. The
+shipped path had been certifying against a reference that was shown wrong by that much.
+
+What is still opt-in: the adversarial selection. The product runs the spread path, which on Chainsaw
+reads 0.001% with no depth-2 pair at all, against 0.109% with the adversarial top-13 - at the cost of a
+full-clip scan.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/product-probe-engine.txt \
+       --records docs/wsp/verified/records/product-probe-engine.jsonl --bars docs/claims-bars.json
+
+@claim R001 0.001 % "pairs [b6df32dbcbef5fe3] n=4" measured
+@claim R002 0.139 % "pairs [fc270fdbf57a076d] n=7" measured
+@claim R003 0.216 % "pairs [fc270fdbf57a076d] n=7" measured
+@claim R004 0.082 % "pairs [fc270fdbf57a076d] n=7" measured

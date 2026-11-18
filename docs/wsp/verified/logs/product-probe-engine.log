@@ -1,0 +1,18 @@
+# The product's own probe with the app's engine as its fp16 reference, 2026-11-18.
+# RenderVideo._probe_int8_fit now passes engine_ref=self.upscaleOption.
+
+=== Chainsaw Man 20 s
+BACKEND: int8 probe: engine 0.001%  composition 0.001%  peak 11  (4 pairs, bar 0.1%) -> int8
+   (torch reference: engine 0.000%, composition 0.000% -> int8 - same verdict)
+
+=== Violet Evergarden 20 s
+BACKEND: int8 probe: engine 0.082%  composition 0.139%  peak 128  (8 pairs, bar 0.1%) -> fp16
+BACKEND:   composition d1 0.139% / d2 0.216% -> worst 0.216% > bar 0.1% (own defect 0.082%, 8 of 8
+           pairs at d1, 7 at d2); fp16 reference on the same pairs: d1 0.041% / d2 0.078%
+   (torch reference: engine 0.044%, d1 0.108% / d2 0.167% -> fp16 - same verdict, smaller numbers)
+
+# So the shipped path now measures against the engine it actually falls back to. The verdicts do not
+# change; Violet's margins do (d2 0.167 -> 0.216, own defect 0.044 -> 0.082), and the reference is the
+# engine in both the spread and the adversarial paths.
+# The product still runs the SPREAD path only (adversarial=0): on Chainsaw it reads 0.001% with no
+# depth-2 pair, which the adversarial selection raises to 0.109% - opt-in, at the cost of a scan.

@@ -247,7 +247,10 @@
     own defect 0.044% -> 0.081%, while Chainsaw moves 0.110% -> 0.109% (trt-reference). The fp16 control
     stays ~6% above the full sweep on both clips, so the residual gap is the pair set - the probe
     re-decides which frames the gate reuses - and `scripts/check_control_ceiling.py` still reports the
-    violation. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
+    violation. SHIPPED 2026-11-18: `RenderVideo._probe_int8_fit` passes `engine_ref=self.upscaleOption`,
+    so the product's own probe measures against the engine it falls back to. The product reads Chainsaw
+    0.001% (int8) and Violet d1 0.139% / d2 0.216% (fp16) - the verdicts are unchanged, Violet's
+    margins move by 29% at depth 2 and 86% on the own defect (product-probe-engine). ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
     (`probe(..., adversarial=k)`): scan the whole clip with the gate's statistic, rank the reuses it
     would make, render the top-k. On Chainsaw that moves the number from 0.000% (no depth-2 pair in the
     product's 16 triples) to 0.110% with an fp16 control of 0.083% - from 26x under the render's
