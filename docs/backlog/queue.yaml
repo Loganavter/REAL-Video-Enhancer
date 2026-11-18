@@ -1394,3 +1394,44 @@ tasks:
     int8-live.txt, verdicts int8-window-measured, int8-peak-unmet. The brief''s ''~1.75x wall ceiling'' is
     withdrawn: at a 64.6% engine share it
     would need ~3x on the engine.'
+
+- id: rve-remeasure-on-bd-2026-11-18
+  title: 'Re-measure everything on the BD: the 20 s clips were 4 Mbps re-encodes, not the source'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P0
+  gpu: true
+  cost: 6h
+  tags:
+  - measurement
+  - population
+  - gate
+  - int8
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verdicts.yaml
+  - docs/wsp/verified/
+  owns_files:
+  - docs/wsp/verified/
+  - docs/wsp/verdicts.yaml
+  note: >-
+    FOUND 2026-11-18 while the owner was looking at the frames: /tmp/opencode/violet20s.mkv and
+    csm20s.mkv are h264 High at 4.04 and 3.98 Mbps, untagged - a 9.4x re-encode of a 37.8 Mbps
+    BDRemux. Every acceptance number in this lane was measured on that material: the noise floors
+    (0.66-2.27), the gate's 0.49372% / 18 frames on Chainsaw, the channel-max 0.07546%, the int8
+    0.08876% and Violet's 0.12727%, the block-mean 2x2 (11.00 / 4.83 / 3.78 / 37.27), the PSNR and
+    return-to-LR tables, and every image handed to the owner. The blockiness the owner saw in all of
+    them is the re-encode, doubled by the 2x upscaler - not the product.
+    Mechanism-level findings are unaffected (they are common-mode or code-level): the three
+    statistics in three places, the mirrored pair order, the tuner fail-open, the calibration-frame
+    bug, the select=eq(n) B-frame mismatch, the probe's 4.8% coverage, the control-ceiling check.
+    What must be redone: cut both clips with `-c copy` from the remastering library (37.7 and 39.6
+    Mbps, verified), re-render every configuration, and re-take the acceptance numbers, the noise
+    floors, the depth tables, the wall, and the eye checks. Expect the noise floors to fall and the
+    reuse to rise - compression noise was being counted as material noise.
+  acceptance: >-
+    Both clips cut with -c copy at >35 Mbps; the gate's default luma cell re-measured full sweep with
+    a stated A/A; the channel-max cell and int8 re-measured on the same clips; every number in
+    docs/wsp/verified/ that cites 4 Mbps material re-taken or marked superseded; the owner's eye
+    check repeated on frames from the BD render.
