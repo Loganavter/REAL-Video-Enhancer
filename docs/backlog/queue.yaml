@@ -1809,3 +1809,110 @@ tasks:
     not compared. One deviation from the acceptance's "idle session": a neighbouring offscreen pytest suite
     ran throughout (load 1.9-2.6). The interleaving is what absorbs it - within-arm drift reached 9.4% while
     the median quotients stayed inside 4.9% (1.088-1.141) and the per-round pairs inside 8.7% - and the load is written into every run's log header.
+
+- id: rve-frame-accounting-2026-11-19
+  title: 'The profile leaves 6.2 ms of a 50.4 ms int8 frame unattributed - more than half the int8 gain'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 2h
+  tags:
+  - instrument
+  - accounting
+  - int8
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-wall-ab.txt
+  - docs/wsp/verified/logs/wall-ab/
+  - backend/src/RenderVideo.py
+  opens_files: []
+  owns_files:
+  - docs/wsp/verified/int8-frame-accounting.txt
+  refutes: >-
+    The app's own profile accounts for the frame it reports. On 2026-11-18 (BD Violet, int8 body, reuse
+    off) it printed frame total 50.40 ms against named parts summing to 44.17 - gate 0.00, inference 43.90
+    (engine 1.93, handover 0.01), input convert 0.00, read wait 0.27 - so 6.23 ms (12%) has no name. That
+    hole is 88% of what int8 bought (7.12 ms/frame), so until it is named, any optimisation ranking is
+    guesswork and the next claim about "where the time goes" is unsafe.
+  acceptance: >-
+    On both BD clips and both arms, the frame total reconstructed from NAMED components to within the
+    session's drift (sum >= 98% of frame total), each component measured by its own timer and printed, and
+    the missing term named (writer queue, colour convert, python/host, the 4K residual, the encoder
+    handoff). Records with the timers' own configuration. No code change is required to close this - a
+    measurement that fails to find the term is still the answer, and it would make every per-phase number
+    in this lane comparable.
+  note: >-
+    Why it is first: int8 bought 1.09-1.14x, i.e. 5.9-7.1 ms per frame, and the unaccounted slice is the
+    same size. The 2026-11-18 wall A/B had to quote "frame total" and "body total" as separate numbers with
+    no bridge; the tail (8.8 ms) is now the largest NAMED slice after the hops (27.0).
+
+- id: rve-tail-fusion-2026-11-19
+  title: 'The 4K tail is 17% of the frame and runs as separate passes - fuse dequant + conv + shuffle + residual'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - tail
+  - fusion
+  - 4k
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-wall-ab.txt
+  - docs/wsp/verified/int8-window.txt
+  - backend/src/pytorch/Int8Body.py
+  owns_files:
+  - scripts/probe_tail_fusion.py
+  refutes: >-
+    The tail cannot be made cheaper than the 8.2-8.8 ms it costs today. It is the one place where the
+    boundary rule the lane already established (judge by hops removed, not by FLOPs) predicts a win: the
+    tail is four passes over a 4K tensor whose recorded split on the earlier model was dequant 2.1, conv +
+    shuffle 3.6, residual ~2.4 - i.e. 4K bandwidth, not arithmetic. If a fused kernel does not save at
+    least 1.5 ms (3% of the frame), the tail is compute-bound after all and the row closes with a floor.
+  acceptance: >-
+    A/A first: the fused tail's output must be byte-identical to the current one on 494 frames (same
+    arithmetic, different boundary). Then an interleaved wall A/B, >=3 rounds, one session, both BD clips,
+    median of rounds 2+, reporting the tail phase line beside the frame total. Records in
+    docs/wsp/verified/ with the phase attribution, not only the quotient.
+  note: >-
+    Literature basis, to be checked rather than trusted: NTIRE 2023's real-time 4K SR report treats pixel
+    shuffle/unshuffle as THE efficiency transform and reports 4.75 ms for a 3x 1080p->4K network on a
+    3090 Ti (PSNR 30.15) - an order of magnitude below this product's ~50 ms, which says the field's
+    real-time class fuses these transforms. What is NOT established here: the traffic saved by fusing on
+    THIS tail at 3840x2160x64 channels, and whether the residual add can join without breaking the A/A.
+
+- id: rve-model-class-question-2026-11-19
+  title: 'Our upscaler is ~10x the field''s real-time 4K class - is the picture worth it?'
+  type: research
+  status: todo
+  owner: '@owner'
+  priority: P3
+  gpu: false
+  cost: 1h
+  tags:
+  - product
+  - model
+  - quality
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-wall-ab.txt
+  - docs/MODEL.md
+  refutes: >-
+    The 50 ms/frame frame is a floor set by the quantiser and the boundary. It is not: quantisation bought
+    7.1 ms of a 50.6 ms frame, so even a perfect int8 lane moves the product ~14%. The remaining time is
+    the MODEL (16 x 64-channel 3x3 at 1080p = 2.45 TFLOP/frame, ~94 TOPS achieved) and the 4K plumbing.
+    NTIRE 2023's real-time 4K track reports 4.75 ms for a 3x network on a 3090 Ti at PSNR 30.15 dB; whether
+    that quality is acceptable on the owner's material is a product judgement, not a measurement.
+  acceptance: >-
+    An owner decision, informed by: our model's measured quality on the same two BD clips against a
+    real-time-class model, the delta in ms/frame, and whether the product's audience would accept it. No
+    code change, no GPU job.
+  note: >-
+    Filed because two independent lanes keep proposing intra-body optimisations that the boundary rule
+    already bounds, while the largest single lever (a smaller student model) is a product decision nobody
+    has put in front of the owner with numbers. This row is that question, not a plan.
