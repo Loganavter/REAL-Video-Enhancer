@@ -153,13 +153,20 @@
 
 - id: int8-probe-f-total
   lane: int8
-  status: current
+  status: superseded
   scope: certification probe, per-title, full price on video
   date: 2026-11-17
+  superseded_by: int8-certification-withdrawn
   statement: >-
     The probe is built and measured at F_total 65.4 s, which sets break-even at 16.2 min of video
     (5.6 min once head and tail are fused).
   evidence: docs/REPORT-int8-lane-2026-11-16.md
+  note: >-
+    Replaced 2026-11-19 on both terms: the probe measures 62.67 s with the certificate and 29.30 s
+    without it (BD Violet, fresh process per run), and the saving per second of video is larger than this
+    row assumed, so the break-even is 6.1-7.4 min of video with the certificate and 2.9-3.5 min without -
+    not 16.2. The certificate half (33.37 s) is no longer paid in the shipped path.
+    Record: docs/wsp/verified/int8-probe-cost-2026-11-19.txt.
 
 - id: int8-split-calibration
   lane: int8
@@ -578,10 +585,12 @@
     readings are deterministic inside their configuration.
   evidence: docs/wsp/verified/gate-bd.txt
   open_question: >-
-    Which of the inputs moves the pair set or the reference: the gate statistic and threshold passed
-    to the probe, or engine_ref=upscaleOption, whose int8Fit a forced verdict now sets before the
-    probe runs. Until it is named, a probe number must state the configuration it was taken in and
-    cannot be compared across them. Queued as rve-int8-probe-population-2026-11-18.
+    ANSWERED 2026-11-19 by reading the code, not by measuring it: `RenderVideo` assigns
+    `upscaleOption.int8Fit` BEFORE the probe runs and passes that same object as `engine_ref`, so on a
+    forced int8 run the "fp16 reference" IS the int8 body - the two readings are two populations by
+    construction, and the int8-forced one is int8 against itself. Consequence: the certification is
+    withdrawn from the evidence chain and the probe keeps only its calibration job
+    (int8-certification-withdrawn). The arithmetic of the 0.082 -> 0.688 difference was not re-measured.
 
 - id: reuse-gate-shelved
   lane: reuse
@@ -644,3 +653,25 @@
   open_question: >-
     Which term: tactic family, accumulation precision, or the padded head. Answerable by building the same
     graph with fp32 accumulation and comparing, which nobody has done.
+
+- id: int8-certification-withdrawn
+  lane: int8
+  status: current
+  scope: the app's own int8 probe (backend/src/utils/Int8Probe.py, RenderVideo._probe_int8_fit), all render paths
+  date: 2026-11-19
+  statement: >-
+    The probe's certification is withdrawn from the evidence chain, and the probe ships as calibration
+    only. Two reasons, both on the record: its pair set and its reference are not a function of the clip
+    (int8-probe-population-shifts - a forced verdict sets `upscaleOption.int8Fit` before the probe reads
+    it, and that object is the probe's own `engine_ref`, so a forced run measures int8 against int8), and
+    in the shipped path the verdict decided nothing, because the Fast preset forces int8 and the value is
+    overwritten after the probe returns. What stays is the calibration: per-layer scales measured on the
+    video being rendered, without which the body fell back to a single frame and read 0.566% instead of
+    0.050%. The picture is judged on renders (gate_sweep on the encoded pair, 494/494 and 539/539 frames
+    identical in the A/A), not by this module. The withdrawn half cost 33.37 s of a 62.67 s probe.
+  evidence: docs/wsp/verified/int8-probe-cost-2026-11-19.txt
+  open_question: >-
+    A future certificate needs its pair set to be a function of the clip alone and its reference to be
+    the engine the render actually falls back to, and it needs to be worth 33 s of startup - none of the
+    three is established. Note that 125 records in the corpus carry the probe as their instrument and are
+    no longer load-bearing; nothing re-measures the picture in-product until a certificate returns.

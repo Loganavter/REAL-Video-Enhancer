@@ -1,0 +1,22 @@
+# probe cost s-2026-11-18T14:28:21Z clip=/tmp/opencode/bd_violet20s.mkv model=2x-Futsuu-Anime(1).pth width=1920 height=1080 rounds=2
+# mode=calibration exit=0
+PROBE_SECONDS 29.301
+int8 probe: calibration only, 16 frames (certification withdrawn 2026-11-19: its pair set moved with the configuration, so its percentages are not comparable across runs)
+
+# round=1 mode=calibration seconds=29.301
+# mode=certify exit=0
+PROBE_SECONDS 62.669
+int8 probe: engine 0.034%  composition 0.208%  peak 22  (7 pairs, bar 0.1%) -> fp16
+
+# round=1 mode=certify seconds=62.669
+# mode=certify exit=0
+PROBE_SECONDS 62.517
+int8 probe: engine 0.034%  composition 0.208%  peak 22  (7 pairs, bar 0.1%) -> fp16
+
+# round=2 mode=certify seconds=62.517
+# mode=calibration exit=0
+PROBE_SECONDS 28.869
+int8 probe: calibration only, 16 frames (certification withdrawn 2026-11-19: its pair set moved with the configuration, so its percentages are not comparable across runs)
+
+# round=2 mode=calibration seconds=28.869
+# probe cost s-2026-11-18T14:28:21Z clip=/tmp/opencode/bd_violet20s.mkv model=2x-Futsuu-Anime(1).pth width=1920 height=1080 rounds=2

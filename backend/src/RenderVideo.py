@@ -579,13 +579,15 @@ class Render:
             log(f"tile probe failed ({error}); leaving tile reuse off")
             return None
 
-    def _probe_int8_fit(self):
-        """Ask the source whether the int8 body may serve it, before the first frame.
+    def _probe_int8_fit(self, certify: bool = True):
+        """Ask the source for the body's calibration, and (opt-in) for a picture verdict.
 
-        The question is composition - what the temporal gate shows when a frame is served from an int8
-        reference one frame old - not the engine's own defect: on the Violet pair the own defect passes
-        the bar (0.057%) and composition does not (0.170%), so certifying on own-defect would ship them.
-        A probe failure, or anything unexpected, leaves int8 off; the fp16 engine is the default path.
+        The calibration is the part the body cannot run without: per-layer scales measured on THIS video.
+        The verdict is not taken on the shipped path any more - a forced `int8Fit` (which is what the Fast
+        preset sets) overwrites it, and its pair set moved with the configuration, so its percentages are
+        not evidence (2026-11-19; `docs/wsp/verified/int8-wall-ab.txt` and the queue row
+        `rve-int8-probe-population-2026-11-18`). Callers that force the verdict pass `certify=False` and
+        save the reference forwards.
         """
         try:
             from .utils.Int8Probe import probe
@@ -606,23 +608,29 @@ class Render:
                 # to, not a torch model: measured on Violet the two differ by 0.044% -> 0.081% in the
                 # own defect and 0.168% -> 0.216% at depth 2.
                 engine_ref=getattr(self, "upscaleOption", None),
+                certify=certify,
             )
             log(result.stats())
-            if not result.use_int8:
+            if certify and not result.use_int8:
                 log(f"  {result.reason}")
             # hand the decoded calibration frames to the body: they are what makes its grids cover the video
             self.int8Frames = getattr(result, "frames", None)
             verdict = "int8" if result.use_int8 else "fp16"
-            if verdict == "int8":
-                # The probe's answer is not the render's: the body is wired but only into the whole-frame
-                # path, while the app renders tiled. And measured against the TILED engine the app actually
-                # builds, the body loses - 56.8 ms against 35.85 ms. Say the measured reason, not a promise.
-                log("int8 body: the probe admits this video; the body only serves the whole-frame path and "
-                    "loses to the app's tiled engine anyway (56.8 vs 35.85 ms at 1080p) - fp16 engine runs")
+            if certify and verdict == "int8" and not self._int8_body_serves_this_render():
+                # true only when the gate is ON: it renders tiles, and the body is wired into the
+                # whole-frame path only. With the gate off the body DOES run, and the old message here
+                # said "fp16 engine runs" in exactly that case - a log line contradicting the render.
+                log("int8 body: the probe admits this video, but the temporal gate renders tiles and the "
+                    "body is wired into the whole-frame path only - against the tiled engine the body "
+                    "loses (56.8 vs 35.85 ms at 1080p), so the fp16 engine runs")
             return verdict
         except Exception as error:  # a probe failure must never cost the render
             log(f"int8 probe failed ({error}); staying on the fp16 engine")
             return "fp16"
+
+    def _int8_body_serves_this_render(self) -> bool:
+        """The body is wired into the whole-frame path; a created gate means the render is tiled."""
+        return getattr(self, "temporalReuse", None) is None
 
     def _calibrate_gate(self, hr_frame):
         """Feed the auto tuner once per rendered frame: the gate's LR delta is free (it was
@@ -957,20 +965,29 @@ class Render:
             # reach the option here, at creation, not after the probe.
             if str(getattr(self, "int8Fit", "auto")).lower() in ("int8", "fp16"):
                 self.upscaleOption.int8Fit = str(self.int8Fit).lower()
-            # the int8 body's verdict is taken ONCE, here, before the first frame. It is not a runtime
-            # switch: an engine swapped mid-render would mix two error histories inside one gate window.
-            # ALWAYS run the probe: it is also what decodes the spread frames the body calibrates on.
-            # A forced verdict used to skip it, which silently left the body on a single-frame
+            # the int8 body's calibration is taken ONCE, here, before the first frame. It is not a
+            # runtime switch: an engine swapped mid-render would mix two error histories inside one gate
+            # window. ALWAYS run the probe: it is also what decodes the spread frames the body calibrates
+            # on. A forced verdict used to skip it, which silently left the body on a single-frame
             # calibration (UpscaleTorch falls back to `frame` when int8Frames is None) - on Violet that
             # read 0.566% against the 0.050% the spread calibration gives, i.e. the flag was measuring
-            # itself. The verdict is overridden below; the frames are not.
+            # itself.
+            #
+            # The verdict is certification, and certification is withdrawn from the evidence chain
+            # (2026-11-19): its pair set moved with the configuration, and in this path it never decided
+            # anything - a forced int8Fit overwrites it. So a forced caller asks for calibration only and
+            # skips the reference forwards; only `auto` still certifies.
             _forced = str(getattr(self, "int8Fit", "auto")).lower()
-            _probe_verdict = self._probe_int8_fit()
+            _certify = _forced not in ("int8", "fp16")
+            _probe_verdict = self._probe_int8_fit(certify=_certify)
             log(f"int8 calibration frames handed to the body: "
                 f"{len(getattr(self, 'int8Frames', None) or [])} "
                 f"(forced verdict: {_forced})")
             if _forced in ("int8", "fp16"):
-                log(f"int8 fit FORCED to {_forced}; the probe said {_probe_verdict}")
+                # in calibration-only mode there is no verdict to quote - saying "the probe said int8"
+                # would invent one out of the "admitted by default" return value
+                log(f"int8 fit FORCED to {_forced}; " + (f"the probe said {_probe_verdict}"
+                                                          if _certify else "the probe calibrated only"))
                 self.int8Fit = _forced
             else:
                 self.int8Fit = _probe_verdict

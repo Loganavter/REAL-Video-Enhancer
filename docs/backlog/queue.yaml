@@ -1522,11 +1522,26 @@ tasks:
 - id: rve-int8-probe-population-2026-11-18
   title: 'The int8 probe reads 0.082% or 0.688% on one clip depending on how it is asked'
   type: experiment
-  status: todo
+  status: dropped
   owner: '@supervisor'
   priority: P1
   gpu: true
   cost: 2h
+  resolution: >-
+    closed 2026-11-19 by decision, not by measurement: the certification is withdrawn from the evidence
+    chain and the probe keeps only its calibration job. Cause, read in the code: a forced verdict assigns
+    `upscaleOption.int8Fit` BEFORE the probe reads it, and the probe passes that same option as
+    `engine_ref` - so the "fp16 reference" is int8 on exactly the runs that force int8 (0.688% / 0.918% /
+    peak 68 against 0.082% / 0.266% / peak 25 with the real fp16 reference). That is the self-comparison
+    trap the row predicted, and it means the two readings are two populations by construction, not noise.
+    In the shipped path it never mattered either: Fast forces int8 and the verdict is overwritten. So
+    `probe(..., certify=False)` now runs for calibration only (frames + per-layer scales), `auto` still
+    certifies, and the 125 records whose instrument is the probe stop being load-bearing - the picture is
+    judged on renders (gate_sweep on the encoded pair), not on this module. The cost of the withdrawn half
+    is now recorded: 33.37 s of a 62.67 s probe (53%), break-even for int8 on BD falls from 6.1-7.4 min of
+    video to 2.9-3.5 min. Records: docs/wsp/verified/int8-probe-cost-2026-11-19.txt. NOT done: making the
+    pair set a function of the clip - that is the precondition for any future certification, and it is
+    not needed while nothing reads the verdict.
   tags:
   - int8
   - probe
@@ -1539,6 +1554,10 @@ tasks:
   - docs/wsp/verified/gate-bd.txt
   owns_files:
   - backend/src/utils/Int8Probe.py
+  - backend/src/RenderVideo.py
+  - backend/tests/test_int8_probe_modes.py
+  - scripts/probe_cost.py
+  - docs/wsp/verified/int8-probe-cost-2026-11-19.txt
   refutes: >-
     The probe's own pair population changes with the gate configuration and with the forced verdict:
     on ONE clip (BD Violet) it reads engine 0.082% / composition 0.266% / peak 25 on 7 pairs in an
