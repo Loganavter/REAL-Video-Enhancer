@@ -86,6 +86,12 @@ out by 10-14x, and until that is explained no sim-proposed lever should be patch
 one that was cost 0.015% of picture, not the 40x the sim promised. That is queued as
 `rve-int8-sim-vs-kernel-2026-11-18`.
 
+Frames for the eye, `/home/jorj/eye-check/2026-11-19-int8-per-channel/` (frame 274, 1:1 crops, diffs x16):
+`src_f274_crop.png` is the SOURCE read at 1080p and scaled x2 nearest, so the original ink can be compared
+with what the model drew; `src_fp16_int8_f274_montage.png` puts source | fp16 | int8 side by side;
+`pt_vs_fp16_f274_montage.png` and `pc_vs_pt_f42_montage.png` are the two diffs. On all of them the int8
+error is the line art, not the flat fills.
+
 Caveat on the absolute numbers: the 0.41998% row was measured with the yuv420p pipe on both sides (the
 default since this morning), while the earlier 0.53318% was an rgb24-pipe comparison on a 480-frame
 population. Both are int8 against fp16 on the same title; they are not the same population, and this file
