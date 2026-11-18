@@ -303,6 +303,14 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("env-check", help="check the docs' claims about this machine against it")
     e.add_argument("--root", default=".")
 
+    s = sub.add_parser("source-check", help="read what a measurement's input file IS, and refuse a "
+                                            "false population label (bit rate, colour tags, "
+                                            "-c copy proof, contaminated inputs)")
+    s.add_argument("manifest", nargs="?", default="docs/wsp/sources.yaml")
+    s.add_argument("--clip-root", default="")
+    s.add_argument("--records", default="", help="records dir/glob whose populations name an input")
+    s.add_argument("--no-probe", action="store_true")
+
     args = ap.parse_args(argv)
     if args.cmd == "db":
         from .db import main as db_main
@@ -332,6 +340,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "env-check":
         from .envcheck import main as env_main
         return env_main(["--root", args.root]) if args.root != "." else env_main([])
+    if args.cmd == "source-check":
+        from .source import main as source_main
+        extra = [args.manifest]
+        if args.clip_root:
+            extra += ["--clip-root", args.clip_root]
+        if args.records:
+            extra += ["--records", args.records]
+        if args.no_probe:
+            extra.append("--no-probe")
+        return source_main(extra)
     if args.cmd == "below-report":
         return below_report(args.paths, args.bars, args.quiet)
     if args.cmd == "check":

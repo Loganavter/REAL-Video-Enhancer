@@ -30,7 +30,7 @@ from typing import Any, Iterable
 
 UNITS: dict[str, str] = {
     "ms": "time", "s": "time", "us": "time",
-    "TOPS": "rate", "TFLOP/s": "rate", "GFLOP/s": "rate", "GB/s": "rate",
+    "TOPS": "rate", "TFLOP/s": "rate", "GFLOP/s": "rate", "GB/s": "rate", "Mbps": "rate",
     "GFLOP": "work", "TFLOP": "work", "MAC": "work",
     "%": "share", "pp": "delta",
     "levels": "levels", "x": "factor", "dB": "quality",

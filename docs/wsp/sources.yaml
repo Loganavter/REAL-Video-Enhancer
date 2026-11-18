@@ -1,0 +1,89 @@
+# Sources: what each measurement input actually is.
+#
+# Written 2026-11-18 after the population label was found false: from 2026-11-15 to 2026-11-18 the
+# prose called /tmp/opencode/{violet,csm}20s.mkv "the BD remaster". They are 4.04 and 3.98 Mbps h264
+# re-encodes of a 37.8 Mbps BDRemux - 9.4x - and every content number in the int8/gate lane inherited
+# that label. The fields below are read by `ffprobe`, so the label is checkable:
+#
+#   PYTHONPATH=scripts python3 -m harness.cli source-check docs/wsp/sources.yaml \
+#       --records "docs/wsp/verified/records/*.jsonl"
+#
+# A `contaminated: true` clip propagates to every record whose population items name it. Records are
+# not rewritten: their item-set hashes already point at the file, so the lookup is mechanical.
+version: '1.0'
+
+# The label "BDRemux 1080p24 stream copy" is refused below this rate. The re-encode is 4.0 Mbps and
+# the source is 37.2-37.8, so the floor is not a fitted number - it only has to sit between them.
+min_bitrate_mbps: 35.0
+
+clips:
+  - file: bd_violet20s.mkv
+    label: BDRemux 1080p24 h264 High, -c copy (2026-11-18)
+    source: /home/jorj/2Tb/remastering/Violet Evergarden/[anti-raws]Violet Evergarden ep.01[BDRemux].mkv
+    cut: {mode: stream_copy, offset: 14375, compared: 494, packets: 495}
+    title: Violet Evergarden ep.01
+    contaminated: false
+    facts: {bit_rate_mbps: 37.715, packets: 495, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}
+
+  - file: bd_csm20s.mkv
+    label: BDRemux 1080p24 h264 High, -c copy (2026-11-18)
+    source: /home/jorj/2Tb/remastering/Chainsaw Man/01. Dog & Chainsaw.mkv
+    cut: {mode: stream_copy, offset: 28273, compared: 502, packets: 503}
+    title: Chainsaw Man ep.01
+    contaminated: false
+    facts: {bit_rate_mbps: 39.552, packets: 503, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}
+
+  # The two files that carried the false label. They are what every landed content number was
+  # measured on, so they stay in the manifest as CONTAMINATED rather than being deleted: the record
+  # hashes point at these names, and a deleted file cannot explain which numbers are void.
+  - file: violet20s.mkv
+    label: 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18)
+    contaminated: true
+    contamination: >-
+      4.038 Mbps against a 37.8 Mbps BDRemux (9.4x); colour matrix and transfer undeclared, range tv;
+      480 packets against the BD cut's 495, so it is not even frame-aligned with the replacement.
+    facts: {bit_rate_mbps: 4.038, packets: 480, pix_fmt: yuv420p, color_range: tv, has_b_frames: "2"}
+
+  - file: csm20s.mkv
+    label: 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18)
+    contaminated: true
+    contamination: >-
+      3.982 Mbps against a 37.2 Mbps BDRemux (9.4x); undeclared matrix, range tv; 480 packets against
+      the BD cut's 503. The blockiness the owner rejected by eye in every image is this re-encode,
+      doubled by the 2x upscaler.
+    facts: {bit_rate_mbps: 3.982, packets: 480, pix_fmt: yuv420p, color_range: tv, has_b_frames: "2"}
+
+# Cuts already made from the source in the earlier rounds. Their bit rates say they are stream copies;
+# the packet-subsequence proof is recorded when it was run (see the `cut` block).
+  - file: csm8s.mkv
+    label: BDRemux 8 s cut, -c copy
+    source: /home/jorj/2Tb/remastering/Chainsaw Man/01. Dog & Chainsaw.mkv
+    cut: {mode: stream_copy, offset: 7169, compared: 248, packets: 249}
+    contaminated: false
+    # A short cut's container rate follows the scene it was cut from (this one is a calm 8 s), so the
+    # bit-rate floor cannot decide here; the packet-subsequence proof is the exact test.
+    min_bitrate_mbps: 20.0
+    facts: {bit_rate_mbps: 34.828, packets: 249, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}
+
+  - file: violet8s.mkv
+    label: BDRemux 8 s cut, -c copy
+    source: /home/jorj/2Tb/remastering/Violet Evergarden/[anti-raws]Violet Evergarden ep.01[BDRemux].mkv
+    # The proof was interrupted by a kill, so the cut block is left deliberately unproved rather than
+    # filled in: bit rate alone (38.203 Mbps) is what supports it today.
+    cut: {mode: not_proved}
+    contaminated: false
+    facts: {bit_rate_mbps: 38.203, packets: 250, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}
+
+  - file: violet_action.mkv
+    label: BDRemux action-scene cut, -c copy
+    source: /home/jorj/2Tb/remastering/Violet Evergarden/[anti-raws]Violet Evergarden ep.01[BDRemux].mkv
+    cut: {mode: stream_copy, offset: 20689, compared: 486, packets: 487}
+    contaminated: false
+    facts: {bit_rate_mbps: 38.257, packets: 487, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}
+
+  - file: csm_battle.mkv
+    label: BDRemux battle-scene cut, -c copy (the same media as bd_csm20s.mkv)
+    source: /home/jorj/2Tb/remastering/Chainsaw Man/01. Dog & Chainsaw.mkv
+    cut: {mode: stream_copy, offset: 28273, compared: 502, packets: 503}
+    contaminated: false
+    facts: {bit_rate_mbps: 39.552, packets: 503, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}

@@ -1,0 +1,10 @@
+bd_violet20s.mkv             ok            37.715 Mbps h264 yuv420p matrix=undeclared range=undeclared frames=495 | -c copy: recorded offset=14375 compared=494/495, not re-run
+bd_csm20s.mkv                ok            39.552 Mbps h264 yuv420p matrix=undeclared range=undeclared frames=503 | -c copy: recorded offset=28273 compared=502/503, not re-run
+violet20s.mkv                CONTAMINATED  4.038 Mbps h264 yuv420p matrix=undeclared range=tv frames=480
+csm20s.mkv                   CONTAMINATED  3.982 Mbps h264 yuv420p matrix=undeclared range=tv frames=480
+csm8s.mkv                    ok            34.828 Mbps h264 yuv420p matrix=undeclared range=undeclared frames=249 | -c copy: recorded offset=7169 compared=248/249, not re-run
+violet8s.mkv                 ok            38.203 Mbps h264 yuv420p matrix=undeclared range=undeclared frames=250
+violet_action.mkv            ok            38.257 Mbps h264 yuv420p matrix=undeclared range=undeclared frames=487 | -c copy: recorded offset=20689 compared=486/487, not re-run
+csm_battle.mkv               ok            39.552 Mbps h264 yuv420p matrix=undeclared range=undeclared frames=503 | -c copy: recorded offset=28273 compared=502/503, not re-run
+
+NOT checked here: whether this population is the one a DECISION needs; whether the colour matrix the app assumes equals the one the file implies; whether a frame index from another cut names the same picture.
