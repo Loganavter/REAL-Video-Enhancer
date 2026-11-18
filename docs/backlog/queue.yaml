@@ -1623,3 +1623,47 @@ tasks:
     two int8 variants differ by 0.01541% of pixels, 0 frames over the bar between them. So either the
     boundary was never the error source or the frontier simulator and the kernel quantise different
     things; the second is the likely one and it is answerable by dumping one hop's tensor from both.
+
+- id: rve-int8-input-mismatch-2026-11-18
+  title: 'The int8 branch may be fed a differently prepared frame than the fp16 engine - the +4.4 ink lift is not in the body'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: partial
+  cost: 2h
+  tags:
+  - int8
+  - colour
+  - pipeline
+  - stroke
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - backend/src/pytorch/UpscaleTorch.py
+  - backend/src/RenderVideo.py
+  - docs/wsp/verified/int8-scales-bd.txt
+  owns_files:
+  - backend/src/pytorch/UpscaleTorch.py
+  refutes: >-
+    The app feeds the int8 body the same tensor it feeds the fp16 engine, and the two renders differ only in
+    precision. Then the ink lift lives in the quantiser after all, and this row closes as a duplicate of the
+    stroke question.
+  acceptance: >-
+    Dump the tensor that actually arrives in `Int8Body.__call__` in a live render and the tensor that arrives in
+    the fp16 engine path on the same frame; compare per-channel mean, min/max and the RGB->YUV conversion used.
+    If they differ, name the term, fix the preparation, re-render and re-read ink/rim on frames 169 and 274.
+  note: >-
+    STATE 2026-11-18. The body measured IN-PROCESS (RGB, model as reference) does not lift the ink at all:
+    -0.51 at frame 169 and -0.57 at 274 with a 4-frame calibration, -0.80 and -1.23 with the 24-frame set the
+    app uses, and the share stays 0.004-0.020% against a 0.1% bar. The RENDERED file, compared the same way
+    against the model, reads +4.40 and +6.60 on the ink while the rim stays - and the fp16 engine's file reads
+    +1.07/+1.43, reproducing the halo. Both renders go through the same yuv420p pipe, so the pipe cannot explain
+    the difference between them; the calibration set does not either (measured above); the quantiser scheme,
+    the per-channel scales, the percentile clip, the grid margin and the bias correction were each varied and
+    none of them moves the ink in-process. What is left is the difference between the two branches' INPUT: the
+    app converts the frame with cv2 (BT.601 full range) while this lane's model reference is an ffmpeg decode
+    (BT.709 tv), and the int8 body runs on a different route through UpscaleTorch than the engine.
+    Why it matters: if the branches get different inputs, the "pale line" is a pipeline bug that also affects
+    what the body is asked to reproduce, and it is fixable outside the quantiser; if they do not, the stroke is
+    a genuine 8-bit cost and the lane closes on picture. Either way this is the last measurement that decides.
