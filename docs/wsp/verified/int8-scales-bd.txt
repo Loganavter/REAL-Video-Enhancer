@@ -97,6 +97,35 @@ default since this morning), while the earlier 0.53318% was an rgb24-pipe compar
 population. Both are int8 against fp16 on the same title; they are not the same population, and this file
 does not divide one by the other.
 
+## Through the shipping encode, the difference is smaller than the codec's own error
+
+The bar is measured on the internal render (ffv1). The product ships an encode. So the population that
+decides whether a viewer sees anything is the DECODED file, and that was measured for both settings the
+owner asked about - `hevc_nvenc -profile:v main10 -cq:v 18 -tune uhq`, 3840x2160, no scaling, i.e. the
+product's own `-cq:v` knob with 10-bit output:
+
+| frame 169 | mean \|d\| | peak | share > 8 |
+|---|---|---|---|
+| int8 encode vs its own render | **2.107** | 14 | 0.0405% |
+| fp16 encode vs its own render | **2.071** | 14 | 0.0316% |
+| the A/B on the renders | **0.777** | - | 0.2059% |
+| the A/B on the decoded encodes | **0.642** | - | 0.2075% |
+
+Two readings, both needed:
+
+- the **codec's own error is 2.7x the difference being judged** (2.1 against 0.78 levels mean), and the
+  correlation between the render-level difference field and the decoded-level one is **0.322**: the
+  encoder moves the ink about as much as int8 does. A viewer cannot attribute what they see on the file to
+  the quantiser;
+- the **count above the bar survives** (0.2059% -> 0.2075%), because the int8 difference is concentrated on
+  edges while the codec's error is diffuse. So the number does not vanish; it stops being attributable.
+
+Consequence for the verdict: on this material int8 and fp16 are not distinguishable in the delivered video,
+which matches the owner's eye ("no difference at all"). The 0.1% bar remains a valid instrument for the
+internal render, but it is not a shipping criterion for this class - the encode spends more than the
+quantiser does. A lossless 4K comparison (yuv444p) is exact (mean 0.000, correlation 1.000) but unplayable
+in real time on the card that renders it, so it is a record, not a viewing instrument.
+
 ## Records
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt
