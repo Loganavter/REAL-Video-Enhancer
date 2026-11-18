@@ -1,0 +1,44 @@
+# The channel-max gate fixes the failing clip and eats the margin on a calm one
+
+Two verifications that the previous round left open: the same gate on the calm 8 s cut, and whether the
+auto tuner can be combined with a share statistic.
+
+## The calm cut: worst 0.08769%, peak 116
+
+| gate | worst frame | peak | above 0.1% | reuse |
+|---|---|---|---|---|
+| luma 4.0 (shipped) | 0.00274% | 16 | 0 | 66.3% |
+| **channel-max 0.07%** | **0.08769%** | **116** | 0 | 66.7% |
+
+Both pass the bar, and the new gate is 32x worse on this clip: it accepts a frame on which a few pixels
+moved by up to 116 levels, because the *area* stays under 0.07%. That is the trade the block-max used to
+prevent - a small object moving far is a small area - and the share statistic is blind to it by
+construction. The margin collapses from 36x to 1.14x on material that was never in trouble.
+
+So the channel-max share is not a drop-in replacement: it fixes the highlight class and gives up the
+small-area/large-delta class. The two statistics are complementary, and the gate needs both - a share to
+catch the broad shallow case and a block-max to catch the narrow deep one. The block-max alone does not
+separate (AUC 0.992), but as a second condition it is exactly what this frame would trip.
+
+## The tuner fails open with a share statistic, and now refuses
+
+With `--temporal_reuse_statistic channel_max_share` and the auto tuner left ON, the tuner wrote its
+choice - a threshold in 8-bit levels - into the field the gate now reads as a percentage:
+
+```
+CLI:      --temporal_reuse_threshold 0.07 --temporal_reuse_statistic channel_max_share
+tuner:    auto gate: threshold 3.0/255, chain 3 ...
+result:   reference reuse: 89/122 frames reused (73.0%), threshold=3.0/255
+```
+
+3.0 read as "3% of pixels" is never exceeded on this material, so reuse climbs and the defect returns.
+The combination is now refused with a loud log and the tuner disabled; the same command then reuses
+78/122 (63.9%) at the intended 0.07.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-channel-max-calm.txt \
+       --records docs/wsp/verified/records/gate-channel-max-calm.jsonl --bars docs/claims-bars.json
+
+@claim R001 0.08769 % "frames [5aa8615233f267ff] n=249" measured
+@claim R002 116.0 levels "frames [5aa8615233f267ff] n=249" measured
+@claim R003 73.0 % "frames [f0179b36c2ed4793] n=122" measured
+@claim R004 63.9 % "frames [f0179b36c2ed4793] n=122" measured
