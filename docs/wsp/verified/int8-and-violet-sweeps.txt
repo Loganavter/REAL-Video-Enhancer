@@ -1,0 +1,55 @@
+# int8 on the product: 0.08876% worst, zero frames above the bar
+
+Measured 2026-11-18 on the whole clip, the way the fp16 dispute was settled - no probe, no k, no
+extrapolation.
+
+| configuration | worst frame | frames above 0.1% |
+|---|---|---|
+| fp16 + luma gate (shipped) | 0.49372% (164) | **18** |
+| fp16 + channel-max gate | 0.07546% (475) | 0 |
+| **int8 + channel-max gate** | **0.08876%** (441) | **0** |
+
+int8 costs 1.18x over the fp16 gate on the same clip - the probe predicted 1.13x from its pairs, so
+that factor does transfer on this material, and the additive "+0.0267 pp" did not. The margin to the
+bar is 11%.
+
+## Violet, out-of-sample
+
+The 0.07% threshold was chosen on Chainsaw. On Violet, with a chain depth of 4 and **70.8% reuse**
+against 69.8% under the luma gate, the worst frame is **0.07345%** and nothing is above the bar. The
+threshold transfers, and the channel-max statistic is *more* permissive on calm material, not less.
+
+## Coverage: the probe certifies two depths, the gate serves three
+
+Replaying the product's gate over the LR frames: 78 reuses, **38 at depth 1, 34 at depth 2, 6 at depth
+3**. The probe certifies d1-d2. The gap is real, and it is not where the damage is:
+
+| depth | reuses | worst HR |
+|---|---|---|
+| 1 | 38 | **0.07489%** |
+| 2 | 34 | 0.02670% |
+| 3 | 6 | 0.00917% |
+
+The worst frame of the whole clip is a depth-1 reuse. Depth 3 is eight times milder. So the missing
+depth is worth naming but does not invalidate the verdict on this clip.
+
+## The threshold does control the worst frame
+
+The global HR/LR median (2.83 here, 2.04 before) is dominated by frames whose LR share is tiny. In the
+band that actually decides - LR share between 0.04% and 0.10% - the ratio is **1.11 and 1.32**. And the
+worst frame, 475, sits at an LR share of **0.07108%**, i.e. 1.6% above the 0.07% threshold: tightening
+the threshold would block it, so 0.0755% is not a floor of the statistic.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-and-violet-sweeps.txt \
+       --records docs/wsp/verified/records/int8-and-violet-sweeps.jsonl --bars docs/claims-bars.json
+
+@claim R001 0.08876 % "frames [718310b673d2e8ba] n=481" measured
+@claim R002 0.0 frames "frames [718310b673d2e8ba] n=481" measured
+@claim R003 0.07345 % "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R004 0.0 frames "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R005 70.8 % "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R006 6.0 frames "frames [2e459265bb63483a] n=78" measured
+@claim R007 0.07489 % "frames [2e459265bb63483a] n=78" measured
+@claim R008 0.00917 % "frames [2e459265bb63483a] n=78" measured
+@claim R009 1.32 x "frames [f5e485e500fcfd91] n=2" measured
+@claim R010 0.07108 % "frames [2e459265bb63483a] n=78" measured

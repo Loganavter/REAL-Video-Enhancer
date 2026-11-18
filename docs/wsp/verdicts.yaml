@@ -225,7 +225,13 @@
     0.0034% at 32 triples (3 depth-2 pairs) and passes; Violet still fails, on depth 1 (0.108%), where
     no reuse is involved - that is the quantiser's own error on that material, not the gate's. At the
     product's default 16 triples Chainsaw has no depth-2 pair at all, so its verdict there rests on
-    depth 1 alone. The population question is now closed by the
+    depth 1 alone. MEASURED ON THE WHOLE CLIP 2026-11-18: the int8 body under the channel-max gate
+    reads 0.08876% on its worst frame (441) with ZERO frames above the bar, against 0.07546% for fp16
+    under the same gate - a 1.18x increment where the probe predicted 1.13x from its pairs, so that
+    factor transfers on this material and the additive form does not. Violet under the same 0.07%
+    threshold (out-of-sample, 70.8% reuse, chain 4) reads 0.07345% with nothing above the bar, so the
+    threshold transfers too. The probe certifies depths 1-2 while the gate serves 3 (6 of 78 reuses),
+    but the damage is at depth 1: worst HR 0.07489 / 0.02670 / 0.00917% at depths 1 / 2 / 3. The population question is now closed by the
     render control: gated against ungated on the product reads 0.494% on the worst frame, so the
     probe's depth-2 number was measuring the right thing - see gate-exceeds-acceptance-bar. What is
     left is the sample size, and the cost of raising it (probe-cost: 45.1 s now, ~90 s at 32 triples).
