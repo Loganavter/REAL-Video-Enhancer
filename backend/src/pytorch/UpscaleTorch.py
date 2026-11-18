@@ -636,8 +636,18 @@ class UpscalePytorch:
             _frames = getattr(self, "int8Frames", None) or frame
             body.calibrate(_frames)
             share, ok = body.certify(frame)
-            log("int8 body self-certification on the first frame: %.5f%% of pixels >8 levels (bar 0.1%%) -> %s",
-                share, "serving" if ok else "refusing, fp16 engine runs")
+            # n=1 and a gross gate: this is a coverage sanity check, not a picture verdict. The wording
+            # says so, because the old line printed a percentage under the acceptance bar and read as a
+            # certificate (rve-body-first-frame-certificate-2026-11-19).
+            from .Int8Body import FIRST_FRAME_SANITY
+            if ok:
+                log("int8 body first-frame sanity: %.5f%% of pixels >8 levels against the fp16 model "
+                    "(n=1, gross gate %.1f%%; NOT an acceptance number - the picture is judged on renders)",
+                    share, FIRST_FRAME_SANITY)
+            else:
+                log("int8 body first-frame sanity FAILED: %.5f%% of pixels >8 levels against the fp16 "
+                    "model (gross gate %.1f%%) - the quantiser's grid does not cover this frame at this "
+                    "resolution; fp16 engine runs", share, FIRST_FRAME_SANITY)
             if not ok:
                 return None
             self._int8_live = body

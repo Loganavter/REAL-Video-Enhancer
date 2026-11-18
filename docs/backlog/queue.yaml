@@ -1963,9 +1963,9 @@ tasks:
   - docs/wsp/verified/int8-wall-ab.txt
 
 - id: rve-body-first-frame-certificate-2026-11-19
-  title: 'The body still certifies itself on ONE frame, and that frame reads 0.00000%'
+  title: 'DONE: the first-frame check is a gross sanity gate at 1.0%, and the line no longer claims a certificate'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -1993,6 +1993,20 @@ tasks:
     stated population (>=13 frames spread, bar 0.1%), or (b) remove it and let the render's own output be
     the only place the picture is judged, which is where every load-bearing number in this lane comes from
     anyway. Either way: the log line must not print a percentage that no frame population supports.
+  resolution: >-
+    done 2026-11-19 without a new measurement, because the record already carries both clusters. The gate
+    is now a GROSS gate: `FIRST_FRAME_SANITY = 1.0`% of pixels against the fp16 model, sitting ~3.5x above
+    the worst valid reading in the record (0.28825%, a deliberately broken grid margin x1.5) and ~3.5x
+    below the smallest bug signature (3.53% at 1080p against 0.00004% for the validated pipeline; two
+    broken correction experiments read 29.5% and 100% and were refused there - the gate worked). It no
+    longer borrows the acceptance bar (0.1%, a worst-frame-of-a-sample statistic that n=1 cannot
+    evaluate), and the line now reads "first-frame sanity: X% (n=1, gross gate 1.0%; NOT an acceptance
+    number - the picture is judged on renders)"; the refusal names the signature instead of saying only
+    "refusing". The separation is pinned by a pure function (`Int8Body.sanity_ok`) and asserted in
+    backend/tests/test_int8_probe_modes.py against the record's own numbers. Verified in a run: BD Violet,
+    int8 forced, 0.00007% with the new wording. Suite 404 passed, 1 environmental failure unchanged.
+    Record: docs/wsp/verified/int8-body-certificate.txt. NOT done: re-validating the gate against a broken
+    build - that needs the kernel deliberately broken, and the separation is read off the record instead.
   note: >-
     Found 2026-11-19 while checking what happens to models the body cannot serve (it falls back cleanly:
     `Int8Body` raises on !=64 body channels, UpscaleTorch logs "int8: build failed" and the fp16 engine
