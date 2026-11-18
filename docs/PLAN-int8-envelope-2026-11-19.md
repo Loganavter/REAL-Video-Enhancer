@@ -70,8 +70,30 @@ the honest substitute, and it is what decides whether the option is worth its pr
 The largest expected item is the hops and the cheapest probe is the tail layout - which is already measured
 and now unblocked. That ordering is the whole point of writing this down.
 
+## 3b. The reserve: what we know costs time but have never attacked
+
+The portfolio above is the measured part. This is the part where the honest answer is "we do not know what is
+possible here yet", and it is written as a queue of probes, not as a list of hopes.
+
+| reserve | known today | why it is still open | cheapest probe |
+|---|---|---|---|
+| the Python wrapper around the body | ~2.3 ms of the frame (frame total minus named parts, `int8-frame-accounting.txt`) | never isolated; the CUDA-graph result in `docs/MODEL.md` (~0.3%) is about the TRT engine, not about the tensor conversions and handover in this path | time the wrapper with the body replaced by a memcpy: 1 h |
+| quantise pass after the head conv | 1.6 ms as its own phase; the PReLU is already fused into it | the head CONV is not: it runs fp16 and writes a 265 MB tensor the quantise kernel then reads | a Triton 3->64 head that writes int8 codes directly; falsifier is a 4K-identical body at 1080p, 2 h |
+| the output colour path | not in the frame budget at all | the writer's rgb24 payload is twice yuv420p's bytes, and nothing in this corpus isolates the conversion from the transfer | render with a yuv420p payload against rgb24, same sink, 1 h |
+| int8 buffer layout | NHWC, 64 contiguous channels per pixel, 4.25 GB/frame of traffic | never tried sideways: swizzled/Morton order or a channel-blocked layout could change the hop's read pattern at 91 TOPS | one hop with a swizzled index, compare TOPS, 1 h |
+| **batching two frames** | the kernel already carries a batch dimension (`x.shape[0]`); the app feeds 1 | the hop is 152.9 GFLOP at 91 TOPS - whether a doubled M improves MMA occupancy is unmeasured either way | same hop with M x2, compare TOPS, 1 h |
+| int8 head | the head runs fp16 (3 -> 64) | the input is 8-bit RGB without per-channel scales; whether an int8 head is even expressible here is unknown | arithmetic first: what grid would the 3 input channels need? 1 h, no GPU |
+| pipeline depth | one frame in flight | the app's profile total already exceeds the wall clock in the pipelined path (`int8-frame-accounting.txt`), so the depth interacts with measurement itself | vary the queue depth, watch the loop line, 1 h |
+
+The distinction that matters: the first four are **known costs with unknown ceilings**, the last three are
+**unknown whether there is anything there at all**. The known-cost rows have a falsifier that can be run in
+an hour; the unknown rows have a question that has to be phrased before it can be priced. Neither belongs in
+a forecast, and both belong in the queue before they get built.
+
 ## 4. The stop rule
 
+0. **The reserve (3b) is visited only when the constraint is not met and the measured pool (3) is exhausted** -
+   otherwise it is how a lane spends a week on a curve it has not plotted.
 1. **Speed work stops when `bar_int8_wall` is met and no remaining option's ceiling exceeds its probe cost.**
    The bar is 2.50 ms away and one measured lever is worth 2.19-3.20 ms, so stop looking for speed first -
    the remaining question is whether the lever's picture is clean.

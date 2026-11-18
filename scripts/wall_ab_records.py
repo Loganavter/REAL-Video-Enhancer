@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from emit_render_records import facts, read  # noqa: E402  one parser for the loop line
 from harness.core import Population, Record, Store  # noqa: E402
 
-NAME = re.compile(r"^(?P<clip>.+)_(?P<arm>fp16|int8)_r(?P<round>\d+)_(?P<sink>null|nvenc)\.log$")
+NAME = re.compile(r"^(?P<clip>.+)_(?P<arm>[a-z0-9]+)_r(?P<round>\d+)_(?P<sink>null|nvenc)\.log$")
 PHASES = re.compile(r"int8 phases: head ([\d.]+)\s+quantise ([\d.]+)\s+hops ([\d.]+)\s+tail ([\d.]+)"
                     r"\s+SUM ([\d.]+)\s+BODY-TOTAL ([\d.]+)")
 STAMP = re.compile(r"^# wall_ab (\S+)", re.M)
