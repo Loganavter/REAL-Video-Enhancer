@@ -2211,9 +2211,9 @@ tasks:
     FP8, per-channel Q/DQ, scalar-slope, width C=32/48, Winograd through cuDNN, sparsity.
 
 - id: rve-tail-layout-2026-11-19
-  title: 'The tail conv runs 2.5x faster on an NHWC view - but the render changed by 0.87% and nobody knows why'
+  title: 'DONE: the NHWC view is adopted - bit-identical, and int8 now clears the 1.2x wall bar'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -2244,9 +2244,24 @@ tasks:
     --reference-kind config. If the A/A is not identical, the pipeline itself is not deterministic and that
     is the finding; if it is, the patch's effect is isolated and named. The patch is parked at
     /home/jorj/2Tb/tail-layout-nhwc-2026-11-18.patch (uncommitted, deliberately).
+  resolution: >-
+    done 2026-11-19, adopted with `RVE_TAIL_NHWC` (default ON, `0` restores the old path). Three results, in
+    the order they mattered: (1) the variant A/B interleaved inside one session shows the conv at 4.80-4.87 ->
+    2.29-2.43 ms on both clips, tail 7.74-7.82 -> 5.66-5.90, body median on Chainsaw 40.3 -> 37.65 - with the
+    shuffle paying 0.4 ms for the channels_last output; (2) the picture is BIT-IDENTICAL, 494/494 frames,
+    worst share 0.00000%, peak 0, measured on two lossless ffv1 renders after the calibration-ordering fix
+    (the pre-fix identity was not inherited: the fix changed which frames the body calibrates on); (3) the
+    lane ratio re-taken once, both arms in one session: Chainsaw 56.22 -> 45.70 = 1.230x, Violet 58.54 ->
+    47.96 = 1.221x, i.e. BOTH medians clear bar_int8_wall = 1.2x, which the lane did not before
+    (1.088-1.141x). Caveats recorded in the file: one round of one clip is below the bar (Violet r3 1.178),
+    so it is "1.22-1.23x by the bar's own statistic", not "above 1.2 in every round"; and the earlier 0.87%
+    scare is fully explained - it was the calibration ordering bug, not this change
+    (int8-calibration-ordering.txt). Records: docs/wsp/verified/int8-tail-layout.txt, harness check PASS.
+    NOT done, deliberately: the conv now returns channels_last, so the shuffle reads 0.78-1.05 against 0.39;
+    a conv that returns NCHW would trade ~0.4 ms back for a 50 MB copy and is not measured.
   note: >-
-    Why it is not simply adopted: 2.2 ms is 4% of the frame and would take int8 from 1.14x to ~1.19x, but a
-    0.87% picture change is 8.7x the bar and the mechanism is unknown. The tensor test rules out the conv's
+    Why it was not simply adopted at first: 2.2 ms is 4% of the frame, but the 0.87% picture difference at the
+    time was 8.7x the bar and its mechanism was unknown - it turned out to be the calibration ordering bug. The tensor test rules out the conv's
     arithmetic; the remaining suspects are the downstream effect of the conv's OUTPUT format (the conv now
     returns channels_last, so PixelShuffle and the residual add see different memory formats) and the other
     code changes that landed between the two sessions (probe calibrate-only, frame timers, first-frame

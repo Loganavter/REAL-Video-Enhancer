@@ -39,15 +39,45 @@ So: **the tail gain is real and repeated; the wall-clock confirmation exists on 
 on the other.** This file does not claim a ratio against fp16 - the fp16 arm was not in this session by
 design (the two arms were the two variants). A ratio claim needs its own session.
 
-## Picture
+## Picture: bit-identical, after the calibration fix
 
-Not re-measured here. Before the calibration ordering fix this exact change was proven pixel-neutral
-(ffv1, 494/494 identical); after the fix that has to be re-confirmed rather than inherited, which is the
-next step before the change is adopted.
+Two lossless ffv1 renders of the SAME configuration differing only in `RVE_TAIL_NHWC`, one session, then
+`gate_sweep --reference-kind config`:
+
+```
+494 frames, block 64
+worst share 0.00000% (frame 0), frames above 0.1%: 0
+worst block mean 0.00, peak 0
+IDENTITY: every frame is bit-identical between the two files
+```
+
+So the change moves passes, not arithmetic: the view is a layout, and cudnn computed the same numbers through
+it. That is the criterion the lane set for a fusion (`byte-identity only for the variant that keeps the
+algorithm`, arXiv:2609.00363), and it is met.
+
+The same identity had been measured before the calibration ordering fix; re-confirming it afterwards was not
+optional, because the fix changed which frames the body calibrates on and therefore the baseline.
+
+## The lane ratio, taken once (both arms in one session)
+
+The change's own acceptance is the picture above. The ratio is a lane-level number and was re-taken here only
+because this change is material against the 2.50 ms gap to `bar_int8_wall` (>2 ms of frame), not per-change
+policy (`docs/PLAN-int8-envelope-2026-11-19.md` §7).
+
+| clip | fp16 median r2-3 | int8 (NHWC) median r2-3 | ratio | per-round |
+|---|---|---|---|---|
+| Chainsaw same-shot | 56.22 ms | 45.70 ms | **1.230x** | 1.255 (r2) / 1.204 (r3) |
+| Violet BD | 58.54 | 47.96 | **1.221x** | 1.267 (r2) / 1.178 (r3) |
+
+**Both medians clear `bar_int8_wall` = 1.2x**, which the lane did not before (1.088-1.141x). The honest
+caveat: one round of one clip is below the bar (Violet r3, 1.178), so the claim is "1.22-1.23x by the bar's
+own statistic (median)", not "above 1.2 in every round". And this is one session on one card; the recorded
+range from `int8-wall-ab.txt` (1.088-1.141) shows what session drift does to a single draw.
 
 ## Not covered
 
-- n=2 per arm per clip after dropping round 1, so the loop comparison is a weak statistic by construction.
+- n=2 per arm per clip after dropping round 1 in the variant A/B, so that loop comparison is weak by
+  construction - which is why the ratio above comes from its own session, not from it.
 - The shuffle regression is measured, not explained: the conv's output format follows its input's, so the
   shuffle and the residual now read channels_last. A conv that returns NCHW would trade 0.4 ms of shuffle
   for a copy; not tried.
@@ -64,7 +94,7 @@ PYTHONPATH=scripts python3 scripts/tail_split.py --logs docs/wsp/verified/logs/t
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tail-layout.txt \
        --records docs/wsp/verified/records/int8-tail-layout.jsonl --bars docs/claims-bars.json
 
-The nine claims below are the rows the tables quote - Chainsaw rounds 2 (`T007`, `T025`) and the convs
+The claims below are the rows the tables quote - Chainsaw rounds 2 (`T007`, `T025`) and the convs
 (`T009`, `T027`), Violet's disturbed round (`T043`, `T045`) beside its clean ones (`T049`, `T051`, `T063`).
 The remaining 63 records are the per-run split for every arm and round.
 
@@ -77,3 +107,14 @@ The remaining 63 records are the per-run split for every arm and round.
 @claim T045 7.15 ms "clips [0787a8250207fe7f] n=1" measured
 @claim T049 7.83 ms "clips [0787a8250207fe7f] n=1" measured
 @claim T043 11.28 ms "clips [0787a8250207fe7f] n=1" measured
+
+@claim P001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim P002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim P003 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim P004 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim W009 1.230197 x "rounds [03467af95ad930d9] n=2" derived
+@claim W010 1.25547 x "rounds [56d65451bdbceb09] n=1" derived
+@claim W011 1.203886 x "rounds [3e5dc2fd0a589a7b] n=1" derived
+@claim W025 1.220647 x "rounds [f6f0b2fae971ea4a] n=2" derived
+@claim W026 1.266508 x "rounds [1efe91c5d2bea5c7] n=1" derived
+@claim W027 1.177728 x "rounds [a78b69797e1ef313] n=1" derived
