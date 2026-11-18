@@ -250,7 +250,15 @@
     violation. SHIPPED 2026-11-18: `RenderVideo._probe_int8_fit` passes `engine_ref=self.upscaleOption`,
     so the product's own probe measures against the engine it falls back to. The product reads Chainsaw
     0.001% (int8) and Violet d1 0.139% / d2 0.216% (fp16) - the verdicts are unchanged, Violet's
-    margins move by 29% at depth 2 and 86% on the own defect (product-probe-engine). ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
+    margins move by 29% at depth 2 and 86% on the own defect (product-probe-engine). THE 89x GAP IS THE
+    PAIR SELECTION, NOT THE ENGINE: frame 441 (the int8 worst) is a depth-1 reuse with an fp16 share of
+    0.07489%, and over the render's population int8 reads 0.08876% on the 83 reused frames against
+    0.00034% on the 398 rendered ones - the engine's own error is 260x below the composition term, so
+    the probe's 0.001% engine reading is correct and the under-read is entirely in composition
+    (probe-owner-and-scan-cost). Closing it needs the adversarial path, which costs 11.5 s of scan plus
+    ~6.5 s of renders on a 45 s probe (+40%) - a cost decision, not a free default. And the invariant is
+    one-sided: `control <= sweep` fires on Violet's int8 side (1.09x, 1.70x) but is blind to Chainsaw's
+    89x under-read. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
     (`probe(..., adversarial=k)`): scan the whole clip with the gate's statistic, rank the reuses it
     would make, render the top-k. On Chainsaw that moves the number from 0.000% (no depth-2 pair in the
     product's 16 triples) to 0.110% with an fp16 control of 0.083% - from 26x under the render's

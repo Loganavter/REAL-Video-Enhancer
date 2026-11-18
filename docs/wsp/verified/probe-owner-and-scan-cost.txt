@@ -1,0 +1,38 @@
+# Frame 441 is a reuse, the engine is fine, and the invariant is one-sided
+
+## The worst frame is composition, not the engine
+
+Frame 441 - the int8 worst on Chainsaw - is a **depth-1 reuse**, with an fp16 share of 0.07489% against
+int8's 0.08876%. Splitting the whole sweep by population:
+
+| population | frames | int8 max |
+|---|---|---|
+| reused | 83 | **0.08876%** |
+| rendered | 398 | **0.00034%** |
+
+So the engine's own error is 260x below the composition term, and the probe's 0.001% engine reading is
+**correct**. The 89x gap is entirely in composition, where the spread sample found no depth-2 pair at
+all. "The probe reads the engine 89x light" would have been the wrong diagnosis; the pair selection is
+the whole of it.
+
+## The scan costs 11.5 s, not 3
+
+One streaming LR pass, no model: **11.46 s** on Chainsaw, 11.29 on Violet, plus ~6.5 s for the top-13
+renders. Against a 45 s probe that is **+40%**, not a rounding error - so enabling it by default is a
+real cost decision, not free.
+
+## The invariant is one-sided
+
+On the int8 side the check fires on Violet (d1 0.139 against 0.12727 = 1.09x, d2 0.216 = 1.70x) and
+passes on Chainsaw (0.001 against 0.08876) - which is exactly the **under**-read that produces the false
+accept. `control <= sweep` catches over-reads only; the dangerous direction is invisible to it, and only
+the adversarial path closes it.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-owner-and-scan-cost.txt \
+       --records docs/wsp/verified/records/probe-owner-and-scan-cost.jsonl --bars docs/claims-bars.json
+
+@claim R001 0.08876 % "frames [f4c006a5e0f90144] n=1" measured
+@claim R002 0.07489 % "frames [f4c006a5e0f90144] n=1" measured
+@claim R003 0.00034 % "frames [718310b673d2e8ba] n=481" measured
+@claim R004 11.46 s "frames [718310b673d2e8ba] n=481" measured
+@claim R005 1.7 x "pairs [fc270fdbf57a076d] n=7" measured
