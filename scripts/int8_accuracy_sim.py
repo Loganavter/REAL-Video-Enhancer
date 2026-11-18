@@ -161,6 +161,9 @@ def main() -> int:
     ap.add_argument("width", type=int)
     ap.add_argument("height", type=int)
     ap.add_argument("--calib", nargs="*", default=[])
+    ap.add_argument("--fp16-tail", type=int, default=0,
+                    help="keep the LAST k conv pairs in fp16: the error of a late hop is not diluted by "
+                         "anything downstream, so this is the cheapest precision lever in the chain")
     ap.add_argument("--act-scale", choices=("tensor", "channel"), default="tensor",
                     help="granularity of the int8 scale on each conv INPUT (default tensor = recorded)")
     ap.add_argument("--clip-pct", dest="clip", type=float, default=None,
@@ -191,10 +194,11 @@ def main() -> int:
     inputs, outputs, wscales = calibrate(model, calib, act_per_channel=(args.act_scale == "channel"),
                                          clip_pct=args.clip)
     with torch.no_grad():
-        got = quantised_forward(model, test, inputs, outputs, wscales).float()
+        got = quantised_forward(model, test, inputs, outputs, wscales,
+                                fp16_tail=args.fp16_tail).float()
 
     share, peak, median = statistic(ref, got)
-    print(f"int8 simulation (act scale {args.act_scale}"
+    print(f"int8 simulation (fp16 tail {args.fp16_tail}, act scale {args.act_scale}"
           f"{', clip p' + str(args.clip) if args.clip else ''}): >8 {share:.5f}% (bar 0.1)  "
           f"peak {peak:.0f}  median {median:.2f} levels")
     if args.emit:

@@ -139,19 +139,25 @@ class Int8Body:
         # pixels with zero frames over the bar between them) and marginally worse against the fp16
         # reference (1.03% vs 0.91%), so the SHIPPED path stays per-tensor; this is the opt-in A/B knob.
         per_tensor = _os.environ.get("RVE_INT8_PER_CHANNEL") != "1"
+        # Grid margin. The ink/rim probe (docs/wsp/verified/int8-scales-bd.txt) showed int8 lifting the
+        # line by ~+5 levels while the rim stays - the signature the simulation produces only when the
+        # quantiser CLIPS. The kernel does not clip on purpose, but its per-tensor grid comes from 24
+        # calibration frames, so activations outside that range clamp at +-127. A margin widens the grid
+        # and costs resolution; it is the cheapest way to test whether clipping is the mechanism.
+        margin = float(_os.environ.get("RVE_INT8_GRID_MARGIN", "1.0"))
         self._s_t1 = (s_act.max().expand_as(s_act) if per_tensor else s_act).contiguous()
         identity = torch.full((self.feat,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
         launches, s_in = [], s_act
         for idx, conv in enumerate(self.inner, start=1):
             s_out = outs[idx - 1]
-            s_t = float(s_in.max())
+            s_t = float(s_in.max()) * margin
             # per-channel grids: the input scale is inside the weights, so the epilogue's requant is the
             # identity - and that is not cosmetic, a non-identity m here would apply max(s_in) twice.
             m_int = (torch.round(s_in / s_t * (1 << SHIFT)).to(torch.int32)
                      if per_tensor else identity.clone()).contiguous()
             weight = conv.weight.detach().float()
             if not per_tensor:
-                weight = weight * s_in.view(1, -1, 1, 1)
+                weight = weight * (s_in * margin).view(1, -1, 1, 1)
             w_sc = weight.abs().amax(dim=(1, 2, 3)) / 127.0
             w_q = torch.round(weight / w_sc.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
             tap = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
