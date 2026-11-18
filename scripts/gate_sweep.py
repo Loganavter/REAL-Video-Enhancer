@@ -119,11 +119,18 @@ def main(argv=None) -> int:
     ap.add_argument("--run", default="")
     ap.add_argument("--artifact", default="")
     ap.add_argument("--id-prefix", default="RB")
+    ap.add_argument("--from-json", default="",
+                    help="emit from a saved per-frame table instead of re-decoding the pair")
     args = ap.parse_args(argv)
 
-    rows = sweep(args.gated, args.ungated, args.ffmpeg, args.width, args.height, args.block)
-    s = summary(rows, args.block, args.bar)
-    json.dump({"summary": s, "rows": rows}, open(args.out, "w"))
+    if args.from_json:
+        saved = json.load(open(args.from_json))
+        rows, s = saved["rows"], saved["summary"]
+    else:
+        rows = sweep(args.gated, args.ungated, args.ffmpeg, args.width, args.height, args.block)
+        s = summary(rows, args.block, args.bar)
+    if not args.from_json:
+        json.dump({"summary": s, "rows": rows}, open(args.out, "w"))
 
     print(f"{args.gated} vs {args.ungated}")
     print(f"  {s['frames']} frames, block {s['block']}")

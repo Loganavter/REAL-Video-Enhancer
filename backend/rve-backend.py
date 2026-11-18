@@ -181,7 +181,7 @@ class HandleApplication:
             tile_reuse=("on" if self.args.tile_reuse else self.args.tile_reuse_mode),
             tile_reuse_size=self.args.tile_reuse_size,
             tile_reuse_threshold=self.args.tile_reuse_threshold,
-            temporal_reuse=not self.args.no_temporal_reuse,
+            temporal_reuse=bool(self.args.temporal_reuse and not self.args.no_temporal_reuse),
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_statistic=self.args.temporal_reuse_statistic,
             temporal_reuse_max_block_mean=self.args.temporal_reuse_max_block_mean,
@@ -494,9 +494,18 @@ class HandleApplication:
             type=float,
         )
         parser.add_argument(
+            "--temporal_reuse",
+            help="Opt IN to reusing the previous upscaled frame when the current frame is "
+                 "structurally unchanged (skip only, never invents pixels). OFF by default since "
+                 "2026-11-18: on a 1080p source the gate's noise floor is almost always above its "
+                 "1.5 refusal limit, and at low contrast a small delta may be real motion rather "
+                 "than noise. Keep it for measurement, not for shipping.",
+            action="store_true",
+            default=False,
+        )
+        parser.add_argument(
             "--no_temporal_reuse",
-            help="Disable reusing the previous upscaled frame when the current frame is "
-                 "structurally unchanged (on by default; skip only, never invents pixels).",
+            help="Deprecated no-op: temporal reuse is OFF by default now (2026-11-18).",
             action="store_true",
             default=False,
         )
