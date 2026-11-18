@@ -1017,6 +1017,31 @@ class Render:
             # It must run for a FORCED verdict too, not only for the probe's.
             self.upscaleOption.int8Fit = self.int8Fit
             self.upscaleOption.int8Frames = getattr(self, "int8Frames", None)
+            # ---- determinism diagnostics (2026-11-19, rve-render-determinism) ---------------------
+            # Removing the probe's certificate moved 0.45% of pixels between two lossless renders, so the
+            # render depends on what happened before its first frame. These two arms separate the two
+            # candidates: the ~2 GB quantised-twin allocation, and the fp16 engine being warmed as the
+            # probe's reference. Env-gated, no effect when unset, and both run at the point the certificate
+            # would have run.
+            _diag_mb = int(os.environ.get("RVE_DIAG_ALLOC_MB", "0") or 0)
+            if _diag_mb:
+                _blob = torch.empty(_diag_mb * 1024 * 1024 // 2, device="cuda", dtype=torch.float16)
+                del _blob
+                log(f"diag: allocated and released {_diag_mb} MB before the first frame (determinism arm)")
+            if str(os.environ.get("RVE_DIAG_WARM_ENGINE", "")).lower() in ("1", "true", "yes"):
+                try:
+                    from .utils.Frame import Frame as _F
+                    for _ in range(6):
+                        _f = _F("tensorrt", int(self.width), int(self.height), "cuda", 0, False,
+                                "float16", high_bitdepth=False)
+                        _f.set_frame_tensor(torch.rand(1, 3, int(self.height), int(self.width),
+                                                      device="cuda", dtype=torch.float16), copy=True)
+                        _ = self.upscaleOption(_f).get_frame_tensor()
+                        del _f
+                    log("diag: warmed the fp16 engine on 6 frames before the first frame "
+                        "(determinism arm)")
+                except Exception as _error:  # noqa: BLE001 - a diagnostic must not cost a render
+                    log("diag: engine warm-up failed (%s)", _error)
             log(f"DEBUG after assign: option={id(self.upscaleOption)} int8Fit={getattr(self.upscaleOption,'int8Fit','<unset>')}")
             
 
