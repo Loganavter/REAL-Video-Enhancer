@@ -1609,6 +1609,12 @@ tasks:
     one isolated change that moves the sim's number onto the kernel's (0.065% -> 0.9%). Only then is a
     sim-proposed lever worth a kernel patch.
   note: >-
+    ATTEMPTED AND INVALID 2026-11-18 (scripts/int8_hopwise.py): comparing the kernel's hops with the
+    simulation's hops measures the difference between two RECIPES - the body quantises symmetrically on
+    +-127, the simulation asymmetrically over 0..255 - so the diff came out at 100-290% of the activation
+    scale, which is a unit/convention error, not a finding. The corrected design is: emulate the KERNEL's
+    own recipe in torch, verify the emulation matches the kernel (~0), then vary one term at a time
+    (symmetric clamp, shift 20, per-channel weight fold, head quantise, calibration frames).
     Numbers on 2026-11-18, BD Violet: sim per-tensor 0.06510% on frame 29; the kernel 0.90619% on frame
     274 of the same clip (472 of 494 frames over the bar); the product's own probe agrees with the kernel
     (engine 0.688-0.824%), so the sim is the odd one out by 14x. The one kernel-side lever the sim
