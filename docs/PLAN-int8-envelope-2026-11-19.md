@@ -126,5 +126,11 @@ the model for a smaller one (owner decision - the model menu is the product); fr
   changed here only after its record moves.
 - Work items live in `docs/backlog/queue.yaml` with `gpu:`, `refutes:` and `acceptance:`; a probe that this
   page lists as worth its cost must exist there before it is run.
+- **The lane ratio (1.141x) is a lane-level number, not a per-change one.** It is re-taken when a MATERIAL
+  change lands (one that could move the frame by more than the digest of the changes since), or when a
+  decision needs it - not after every optimisation. A per-change acceptance is the change's own property:
+  picture identity for a layout swap, a phase line for a kernel, a byte-identical render for a fusion.
+  Conflict resolution: if a change's own acceptance does not mention the ratio, the ratio is not re-measured
+  for it.
 - A forecast with probabilities in it should not be written again. If one is, the reason must be that its
   falsifiers were listed first.
