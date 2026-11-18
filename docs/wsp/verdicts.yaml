@@ -330,7 +330,12 @@
     small area with a large delta, and the two statistics are complementary: the gate needs the share
     for the broad shallow class and a block-max for the narrow deep one (gate-channel-max-calm). An
     earlier reading of 0.08769% at peak 116 came from an unmatched chain (3 against the baseline's 2)
-    and is kept in that file as a labelled row, not as a comparison.
+    and is kept in that file as a labelled row, not as a comparison. THE FLIP FAILED ITS OWN CONDITION
+    2026-11-18: on Violet 20 s the channel-max gate keeps the same worst share (0.07345%, frame 227)
+    and the same zero violations but raises the peak from 49 to 149, pixels above 55 from 0 to 3399,
+    and the worst 64 px block mean from 2.49 to 37.27 - five times the 7.57 of the artifact the owner
+    rejected by eye (flip-condition). Held until a channel-max pixel veto exists: max_block_mean
+    dilutes the peak and the luma veto cannot see it.
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge
