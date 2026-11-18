@@ -1725,11 +1725,25 @@ tasks:
 - id: rve-int8-wall-ab-2026-11-19
   title: 'What does int8 actually save? One interleaved wall A/B, both titles, per-phase'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
   cost: 1h
+  resolution: >-
+    measured 2026-11-18 16:26-16:57, 24 runs back to back in one session, both BD cuts, both sinks, three rounds
+    each, medians of rounds 2-3: Violet 1.141x (null) / 1.088x (nvenc), Chainsaw same-shot 1.119x (null)
+    / 1.132x (nvenc); median of the four 1.126x, span 1.088-1.141x. A/A: the unchanged arm decodes
+    bit-identically on 494/494 and 539/539 frames (the container bytes differ, the pixels do not). So int8
+    buys wall clock - above 1.0 and above the row's 1.05x line, so the Fast preset text needs no "not
+    faster" caveat - and it does NOT reach the recorded bar_int8_wall = 1.2x, which closes the gap between
+    the 1.35-1.42x offline window and what a user sees (why they differ is not settled: instrument, model and
+    non-body share all differ). The 1.14x Violet draw reproduces (1.141x); the 0.95x Chainsaw draw does not
+    (1.107-1.134x) - the int8 arm on that clip reads 49.64 today against 62.42 then, a 20% cross-session
+    swing on a single draw, which no interleaved pair in this session corroborates. Attribution from the body's phase counter: hops 25.8-27.0 ms,
+    head+quantise+tail 15.1-15.5 ms, body total 41.3-42.0 ms of a 49.6-50.6 ms frame - the boundary is
+    36-38% of the body and the body is 83% of the frame. Record: docs/wsp/verified/int8-wall-ab.txt
+    (harness check PASS, 64 records).
   tags:
   - int8
   - speed
@@ -1743,6 +1757,10 @@ tasks:
   owner_notes: 'filed by the owner 2026-11-19'
   owns_files:
   - docs/wsp/verified/int8-wall-ab.txt
+  - docs/wsp/verified/records/int8-wall-ab.jsonl
+  - docs/wsp/verified/logs/wall-ab/
+  - scripts/wall_ab.sh
+  - scripts/wall_ab_records.py
   refutes: >-
     int8 is faster than the shipped fp16 engine in the product. The three numbers on the record disagree by
     more than drift: the offline window says 1.35-1.42x, one in-app draw says 1.14x on Violet and 0.95x
@@ -1761,3 +1779,10 @@ tasks:
     cross-session quotient. The body's structure explains what to look for - head+quantise 1.5-2.6 ms, sixteen
     hops ~30-40 ms, tail 5-12 ms, all measured separately in int8-window.txt - so a body total near the
     engine's frame time means the boundaries are eating the quantiser's win.
+    MEASURED 2026-11-18: hops 25.8-27.0, head+quantise 6.2-6.8, tail 8.2-8.8, body total 41.3-42.0 of a
+    49.6-50.6 ms frame - boundary (head+quantise+tail) 15.1-15.5 ms is 36-38% of the body, and the body is
+    83% of the frame (17% is the product's own convert/handover). The head is the product's 2x-Futsuu model,
+    not the compact-2x the 1.5-2.6 ms line was measured on, so those two are different populations and are
+    not compared. One deviation from the acceptance's "idle session": a neighbouring offscreen pytest suite
+    ran throughout (load 1.9-2.6). The interleaving is what absorbs it - within-arm drift reached 9.4% while
+    the median quotients stayed inside 4.9% (1.088-1.141) and the per-round pairs inside 8.7% - and the load is written into every run's log header.
