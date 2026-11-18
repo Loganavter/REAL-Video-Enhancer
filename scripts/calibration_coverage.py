@@ -45,6 +45,23 @@ _probe.FF = FFMPEG if os.path.exists(FFMPEG) else _probe.FF
 from src.utils.Int8Probe import _read_indices  # noqa: E402
 
 
+def _frame_count(clip: str) -> int:
+    """Frames in the clip, from ffprobe - the sample is spread over the whole file."""
+    import re as _re
+    import subprocess as _sp
+    import shutil as _sh
+    # the install's bin/ carries ffmpeg only; ffprobe is the host's
+    exe = _sh.which("ffprobe") or "/usr/bin/ffprobe"
+    out = _sp.run([exe,
+                   "-v", "error", "-select_streams", "v:0", "-count_packets",
+                   "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", clip],
+                  capture_output=True, text=True)
+    m = _re.search(r"\d+", out.stdout or "")
+    if m:
+        return int(m.group(0))
+    raise SystemExit(f"cannot count frames in {clip}: {out.stderr.strip()[:120]}")
+
+
 def load_model(path: str, scale: int):
     from src.pytorch.spandrel.architectures.Compact.__arch.SRVGG import SRVGGNetCompact
     state = torch.load(path, map_location="cpu", weights_only=True)
@@ -91,10 +108,15 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default="docs/wsp/verified/records/int8-calibration-crops.jsonl")
     ap.add_argument("--log", default="docs/wsp/verified/logs/int8-calibration-crops.log")
     ap.add_argument("--session", default="")
+    ap.add_argument("--frames-total", type=int, default=0,
+                    help="frame count to spread the sample over; 0 = ask ffprobe")
     args = ap.parse_args(argv)
 
     session = args.session or time.strftime("s-%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    total = int(24 * 2)  # the clip is ~494 frames; spread the sample over it
+    # The sample must be spread over the CLIP, not clustered at its start. This used to be a hardcoded
+    # `total = 48`, i.e. every calibration frame came from the first two seconds - a clustered sample wearing
+    # a spread label (found 2026-11-19 while pointing the script at a 6-minute source).
+    total = args.frames_total or _frame_count(args.clip)
     calib_idx = [round(i * (total - 1) / (args.calib - 1)) for i in range(args.calib)]
     test_idx = [int(t) for t in args.test.split(",")]
     log_lines = [f"# calibration coverage {session} clip={args.clip} crop={args.crop} "
@@ -102,6 +124,12 @@ def main(argv=None) -> int:
 
     model = load_model(args.model, args.scale)
     cache = _read_indices(args.clip, sorted(set(calib_idx + test_idx)), args.width, args.height)
+    # a container can report one more packet than it decodes (495 vs 494 on the BD cuts), so keep only the
+    # indices that actually came back instead of indexing past the decoded set
+    calib_idx = [i for i in calib_idx if i in cache]
+    test_idx = [i for i in test_idx if i in cache]
+    if len(calib_idx) < 3 or len(test_idx) < 2:
+        raise SystemExit(f"not enough frames decoded: calib {len(calib_idx)}, test {len(test_idx)}")
     frames = [cache[i].cuda().half() for i in calib_idx]
     tests = [cache[i].cuda().half() for i in test_idx]
     crops = [c.cuda().half() for c in crops_of(frames, args.crop, args.per_frame)]

@@ -60,3 +60,34 @@ Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-cali
 @claim R002 7.09 s "clips [3a0964f03208b6f8] n=1" measured
 @claim R003 0.01881 % "clips [3a0964f03208b6f8] n=1" measured
 @claim R004 0.45 s "clips [3a0964f03208b6f8] n=1" measured
+
+## Correction 2026-11-19: the sample was clustered, and the numbers are re-taken
+
+The arms above were reported as "24 spread frames", but `scripts/calibration_coverage.py` carried a hardcoded
+`total = 48`, so every calibration frame came from the **first two seconds** of a 494-frame clip - a clustered
+sample wearing a spread label. Found while pointing the script at a 6-minute source; the script now asks
+`ffprobe` for the frame count and clamps to what it decoded.
+
+Re-taken on the same clip with the sample spread over the whole file (records
+`int8-calibration-crops-spread.jsonl`):
+
+| arm | calibrate | worst share | peak |
+|---|---|---|---|
+| 24 full frames, spread | 6.77 s | **0.02159%** | 17 |
+| 96 crops of 256x256 | 0.42 s | **0.02139%** | 16 |
+
+So the conclusion survives and gets cleaner: **16x cheaper, and 0.9% apart on the worst held-out frame**,
+with the crop arm marginally better. Two things the clustered sample had distorted:
+
+- the absolute values (0.02256 / 0.01881 -> 0.02159 / 0.02139) and the calibration cost (7.09 -> 6.77 s);
+- **the peak direction**: the old run moved the peak 26 -> 19 in the direction a lower ceiling should not,
+  and that anomaly is gone here (17 vs 16). It was an artefact of which frames were sampled, not a property
+  of the crops.
+
+The earlier numbers are not deleted: they describe the first two seconds and are labelled as such.
+
+
+@claim S001 0.02159 % "clips [0787a8250207fe7f] n=1" measured
+@claim S002 6.77 s "clips [0787a8250207fe7f] n=1" measured
+@claim S003 0.02139 % "clips [0787a8250207fe7f] n=1" measured
+@claim S004 0.42 s "clips [0787a8250207fe7f] n=1" measured
