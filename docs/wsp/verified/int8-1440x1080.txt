@@ -7,10 +7,20 @@ comparison, not a measurement.
 
 ## The input, and why its label matters
 
-`/tmp/opencode/violet1440.mkv`: 494 frames, 20.6 s, **1440x1080, 18.4 Mbps h264 CRF-12** - produced by
-scaling the packet-proved BD cut (`bd_violet20s.mkv`) at that size, then re-encoding. So it is **not** a stream
-copy and **not** the film source named in MODEL.md; it is a downscaled re-encode, and every number below
-describes that material. Nothing here is a claim about the film clip's own grain.
+`/tmp/opencode/violet1440.mkv`: 494 frames, 20.6 s, **1440x1080 [SAR 4:3 DAR 16:9]**, yuv420p progressive,
+**18.4 Mbps h264 CRF-12**, produced by `scale=1440:1080` on the packet-proved BD cut (`bd_violet20s.mkv`)
+followed by a re-encode. Three consequences of that provenance, all of them narrowing:
+
+- it is **not a stream copy**: the picture went through a scaler and an encoder, so its grain is not the BD's;
+- it is **anamorphic** (SAR 4:3, DAR 16:9): the 1920-wide frame was squeezed into 1440 storage, so horizontal
+  detail is compressed and the body sees a horizontally-reduced picture. That geometry is what a 1080i
+  anamorphic film source stores, so the *shape* is representative of the film lane even though the *material*
+  is not;
+- it is **not the film clip** MODEL.md names (94 frames, 1440p -> 2880p): nothing here describes that clip's
+  grain, telecine or compression artefacts.
+
+So: the answer to "does the body work at 1440x1080" is measured, on a squeezed re-encode of anime; the film
+lane's own material remains unmeasured.
 
 ## Accuracy against the model (the reference the record requires)
 
