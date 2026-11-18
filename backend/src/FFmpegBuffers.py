@@ -537,9 +537,16 @@ class FFmpegWrite(Buffer):
                         "-movflags",
                         "+faststart",
                     ]
-            command +=[
-                f"{self.outputFile}",
-            ]
+            if str(self.outputFile) == "null":
+                # Fixed-cost measurement path: rawvideo encoding is a memcpy and the null muxer
+                # discards the packets, so the wall measures read + gate + inference only. Without
+                # it the encoder's cost depends on the content's entropy, which is what made a
+                # quantised output look 1.55x faster when the engine was not.
+                command += ["-c:v", "rawvideo", "-f", "null", "-"]
+            else:
+                command +=[
+                    f"{self.outputFile}",
+                ]
 
             if self.overwrite:
                 command.append("-y")

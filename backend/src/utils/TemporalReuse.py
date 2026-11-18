@@ -87,6 +87,9 @@ class TemporalReuse:
         self._last_frame = None
         self.processed = 0
         self.reused = 0
+        # reuses per chain depth, so the depth table can be read off the render's own population
+        # instead of a replay that re-decides the gate
+        self.depth_counts: Dict[int, int] = {}
 
     @_inference_mode
     def _tiles(self, tensor: torch.Tensor) -> torch.Tensor:
@@ -115,6 +118,11 @@ class TemporalReuse:
         if reuse:
             self._chain += 1
             self.reused += 1
+            self.depth_counts[self._chain] = self.depth_counts.get(self._chain, 0) + 1
+            if os.environ.get("RVE_DEBUG_DEPTH"):
+                import logging as _lg
+                _lg.getLogger("RVE").warning("reuse frame=%d depth=%d share=%.5f",
+                                             self.processed - 1, self._chain, delta)
         else:
             self._chain = 0
         return reuse
@@ -291,6 +299,9 @@ class ReferenceFrameGate:
         self.last_scene_cut = False
         self.processed = 0
         self.reused = 0
+        # reuses per chain depth, so the depth table can be read off the render's own population
+        # instead of a replay that re-decides the gate
+        self.depth_counts: Dict[int, int] = {}
         self.scene_cuts = 0
         self.vetoes = 0
         self.resets = 0
@@ -333,7 +344,8 @@ class ReferenceFrameGate:
                 f"threshold={self.threshold}/255 over "
                 f"{self.block or 'scaled'}px blocks, "
                 f"max chain={self.max_chain or 'unbounded'}, "
-                f"pixel veto={self.pixel_veto if self.pixel_veto is not None else 'off'}")
+                f"pixel veto={self.pixel_veto if self.pixel_veto is not None else 'off'}; "
+                f"depth histogram {dict(sorted(self.depth_counts.items()))}")
 
     # -- detector ---------------------------------------------------------------------
     def _channel_weights(self, channels: int, device, dtype):
@@ -437,6 +449,11 @@ class ReferenceFrameGate:
         if reuse:
             self._chain += 1
             self.reused += 1
+            self.depth_counts[self._chain] = self.depth_counts.get(self._chain, 0) + 1
+            if os.environ.get("RVE_DEBUG_DEPTH"):
+                import logging as _lg
+                _lg.getLogger("RVE").warning("reuse frame=%d depth=%d share=%.5f",
+                                             self.processed - 1, self._chain, delta)
         else:
             if scene_cut:
                 self.scene_cuts += 1

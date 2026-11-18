@@ -1,0 +1,17 @@
+# Point 3: the wall at a fixed output cost, 2026-11-18.
+# --output null routes the write through rawvideo + the null muxer, so the encoder's entropy
+# dependence is out of the loop: the wall is read + gate + inference.
+BACKEND: render loop: 21.65 s for 481 frames (45.02 ms/frame)   <- int8 body
+BACKEND: render loop: 24.21 s for 481 frames (50.33 ms/frame)   <- fp16 engine
+ratio 50.33 / 45.02 = 1.118x   (the retracted ffv1 pair read 1.55x)
+
+# Point 5b: the depth histogram from the RENDER's own population (RVE_DEBUG_DEPTH=1 logs every reuse)
+BACKEND: reference reuse: 83/481 frames reused (17.3%), max chain=3; depth histogram {1: 41, 2: 36, 3: 6}
+  d1: n=41  worst HR 0.07546%  (frame 475 - the clip's worst)
+  d2: n=36  worst HR 0.02670%
+  d3: n=6   worst HR 0.00917%
+# the earlier table came from a replay of 78 reuses; this one is the render's 83.
+
+# Point 4b: the probe's reference is torch fp16, the app falls back to the TRT fp16 engine
+  torch fp16 vs TRT fp16, Violet frame 100: share 0.0116%, peak 15.1 levels
+  (an order of magnitude below the 0.1% bar, and not the cause of the 4.8% control-vs-sweep gap)

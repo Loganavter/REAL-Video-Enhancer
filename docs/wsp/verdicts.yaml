@@ -237,7 +237,13 @@
     frame (violet-calibration-fix). That reading is withdrawn.
     The probe is systematically optimistic against the render on both clips (Chainsaw 0.000 against
     0.08876) and is a screen, not a certificate - and on Violet the per-frame int8/fp16 ratio is
-    7.31 median, so the 1.18x measured on Chainsaw is a ratio of maxima, not a transferable factor. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
+    7.31 median, so the 1.18x measured on Chainsaw is a ratio of maxima, not a transferable factor.
+    WALL, fixed output cost (wall-fixed-cost): int8 45.02 ms/frame against fp16 50.33 at the same
+    17.3% reuse, i.e. 1.118x - the retracted 1.55x was an ffv1 entropy effect, and 1.118 is below the
+    1.49-1.505 engine ratio as Amdahl requires. Depth table from the render's own log (83 reuses,
+    41/36/6): worst HR 0.07546% at depth 1 (frame 475, the clip's worst), 0.02670 at d2, 0.00917 at
+    d3. The probe's torch reference differs from the app's TRT engine by 0.0116% on one frame - small,
+    and not the cause of the control-vs-sweep gap, which is the pair set (the probe re-decides). ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
     (`probe(..., adversarial=k)`): scan the whole clip with the gate's statistic, rank the reuses it
     would make, render the top-k. On Chainsaw that moves the number from 0.000% (no depth-2 pair in the
     product's 16 triples) to 0.110% with an fp16 control of 0.083% - from 26x under the render's
