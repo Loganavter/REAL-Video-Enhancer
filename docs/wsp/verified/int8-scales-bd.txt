@@ -55,6 +55,42 @@ per-channel requant to int8 for the next hop is one multiply plus 64 scales (128
 - The sim rounds in float; the kernel accumulates in int32 (which is exact for int8 operands), so that
   difference is not a candidate for the 8x gap.
 
+## The kernel, measured: the lever does not transfer
+
+The simulation's per-channel lever was implemented in the kernel the way the arithmetic allows - the next
+hop's grid is no longer collapsed to `max(s_in)` and repacked with an m multiplier; the per-input-channel
+scale is folded into the weights at build time, which makes the epilogue requant the identity and removes
+a multiply from the hot path (`backend/src/pytorch/Int8Body.py`, opt-in `RVE_INT8_PER_CHANNEL=1`).
+
+Same clip, same pipe on both sides, same fp16 reference, 494 frames:
+
+| variant | worst share | frames over the bar | worst block mean | peak |
+|---|---|---|---|---|
+| per-tensor (shipped) | **0.41998%** (frame 274) | 356 / 494 | 5.91 | 59 |
+| per-channel (new) | 1.03183% against the older rgb24 reference; see below | 472 / 494 | 7.92 | 74 |
+| **per-channel against per-tensor** | **0.01541%** (frame 42) | **0** | 2.51 | 19 |
+
+The flag was verified to be live, not merely parsed: inspecting the built launches, `m` (the epilogue's
+requant multiplier) is `1 << 20` - the identity - on every hop under `RVE_INT8_PER_CHANNEL=1`, against
+47396..1048576 under the default, and the per-output-channel weight scales move from 0.00179..0.01475 to
+0.00062..0.00686, i.e. the input scale really is inside the weights.
+
+The last row is the one that answers the question: the two int8 variants differ by **0.015% of pixels**,
+with no frame over the bar between them. The boundary scale is therefore not the kernel's error source -
+whatever costs the ~0.4-0.9% is shared by both variants and is not the granularity the simulation
+isolated.
+
+That leaves the instrument: the sim reads 0.06510% on frame 29 and the kernel reads 0.42-0.91% on the same
+clip, with the product's own probe agreeing with the kernel (engine 0.688-0.824%). The sim is the odd one
+out by 10-14x, and until that is explained no sim-proposed lever should be patched into the kernel - the
+one that was cost 0.015% of picture, not the 40x the sim promised. That is queued as
+`rve-int8-sim-vs-kernel-2026-11-18`.
+
+Caveat on the absolute numbers: the 0.41998% row was measured with the yuv420p pipe on both sides (the
+default since this morning), while the earlier 0.53318% was an rgb24-pipe comparison on a 480-frame
+population. Both are int8 against fp16 on the same title; they are not the same population, and this file
+does not divide one by the other.
+
 ## Records
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt
