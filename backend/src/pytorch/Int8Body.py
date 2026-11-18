@@ -24,6 +24,8 @@ one session with NVENC alongside: 1.489x idle, 1.505x under the encoder, image a
 """
 from __future__ import annotations
 
+import os
+
 import torch
 
 from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
@@ -415,7 +417,13 @@ class Int8Body:
                     "int8 host: 16 launches cost %.2f ms of HOST (%.3f ms each); whole hop loop %.2f ms",
                     _host_launch * 1000.0, _host_launch * 1000.0 / 16.0, _host_loop)
             _e3.record()
-            channels_last = self.tail_conv.weight.is_contiguous(memory_format=torch.channels_last)
+            # The input's memory format is worth 2.5x for this 64 -> 12 layer: 5.296 ms contiguous NCHW
+            # against 2.098 through a channels_last view, measured in isolation
+            # (scripts/tail_conv_probe.py), and C_out 12 -> 16 changes nothing, so it is the VIEW and not
+            # tensor-core tile fill. Converting the WEIGHTS instead also speeds the conv up but moved the
+            # shuffle and residual from 0.40 + 0.93 to 0.82 + 2.13 ms, so it is not the lever it looks like.
+            # RVE_TAIL_NHWC=0 restores the old contiguous path for an A/B.
+            channels_last = str(os.environ.get("RVE_TAIL_NHWC", "1")).lower() not in ("0", "false", "no")
             if channels_last:
                 last_nhwc = torch.empty((x.shape[0], h, w, self.feat), device=x.device,
                                         dtype=torch.float16)

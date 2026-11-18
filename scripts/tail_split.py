@@ -23,7 +23,7 @@ from harness.core import Population, Record, Store  # noqa: E402
 TAIL = re.compile(r"int8 tail: dequant ([\d.]+)\s+conv ([\d.]+)\s+shuffle ([\d.]+)\s+residual ([\d.]+)"
                   r"\s+SUM ([\d.]+) ms")
 PHASE = re.compile(r"int8 phases: .*?tail ([\d.]+)")
-NAME = re.compile(r"^bd_(?P<clip>\w+?)_(?P<arm>fp16|int8)_r(?P<round>\d+)_(?P<sink>\w+)\.log$")
+NAME = re.compile(r"^bd_(?P<clip>\w+?)_(?P<arm>[a-z0-9]+)_r(?P<round>\d+)_(?P<sink>\w+)\.log$")
 
 
 def main(argv=None) -> int:
@@ -38,7 +38,7 @@ def main(argv=None) -> int:
     n = 0
     for name in sorted(os.listdir(args.logs)):
         m = NAME.match(name)
-        if not m or m.group("arm") != "int8":
+        if not m:
             continue
         path = os.path.join(args.logs, name)
         text = read(path)
@@ -61,7 +61,7 @@ def main(argv=None) -> int:
             n += 1
             rec = Record(value=round(value, 2), unit=unit, population=pop,
                          instrument="the body's own CUDA events around each tail step (last 8 frames)",
-                         config=f"int8 body, {m.group('sink')} sink, step {label}",
+                         config=f"int8 body, arm {m.group('arm')}, {m.group('sink')} sink, step {label}",
                          session=args.session, statistic=stat, tier="measured",
                          run=f"rve-backend.py, log {name}", artifact=path,
                          extra={"artifact_sha256": digest, "of": "frame_time", "step": label})

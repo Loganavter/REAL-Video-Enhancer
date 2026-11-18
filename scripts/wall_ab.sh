@@ -22,6 +22,10 @@ APP=/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2
 # installed packages are what every recorded wall number was taken with (REPORT-int8-lane-2026-11-16 10).
 PY=${PY:-"$APP/python/python/bin/python3"}
 CLIPS=${CLIPS:-"bd_violet20s.mkv bd_csm_same.mkv"}
+# ARMS defaults to the fp16-vs-int8 pair. Any other name is an int8 arm with an env override named
+# ARM_ENV_<UPPER>, so two VARIANTS of the same configuration can alternate inside one session:
+#   ARMS="nchw nhwc" ARM_ENV_NCHW="RVE_TAIL_NHWC=0" ARM_ENV_NHWC="RVE_TAIL_NHWC=1" scripts/wall_ab.sh
+ARMS=${ARMS:-"fp16 int8"}
 ROUNDS=${ROUNDS:-3}
 SINK=${SINK:-null}
 CLIPROOT=${CLIPROOT:-/tmp/opencode}
@@ -43,7 +47,9 @@ run_arm() {  # clip arm round
   local clip=$1 arm=$2 round=$3 out preset
   local name="${clip%.mkv}_${arm}_r${round}_${SINK}"
   local log="$LOGDIR/$name.log"
-  local args=("${common[@]}" --input "$CLIPROOT/$clip" --int8_fit "$arm")
+  local fit=$arm
+  case "$arm" in fp16|int8) ;; *) fit=int8 ;; esac
+  local args=("${common[@]}" --input "$CLIPROOT/$clip" --int8_fit "$fit")
   if [ "$SINK" = null ]; then
     out=null
     args+=(--output null --video_encoder_preset ffv1 --video_pixel_format yuv444p)
@@ -62,7 +68,8 @@ run_arm() {  # clip arm round
     echo "# clocks $(nvidia-smi --query-gpu=clocks.sm,clocks.mem,temperature.gpu,power.draw --format=csv,noheader 2>/dev/null || echo unavailable)"
     echo "# cmd rve-backend.py ${args[*]}"
   } > "$log"
-  ( cd "$ROOT/backend" && flock -n "$LOCK" timeout 1800 "$PY" rve-backend.py "${args[@]}" ) >> "$log" 2>&1 \
+  local extra="ARM_ENV_$(echo "$arm" | tr '[:lower:]' '[:upper:]')"
+  ( cd "$ROOT/backend" && flock -n "$LOCK" env ${!extra:-} timeout 1800 "$PY" rve-backend.py "${args[@]}" ) >> "$log" 2>&1 \
     || { echo "# EXIT $?" >> "$log"; }
   grep -ao "render loop: [0-9.]* s for [0-9]* frames ([0-9.]* ms/frame)" "$log" | tail -1 \
     | sed "s|^|$name  |" || echo "$name  NO-LOOP-LINE"
@@ -71,7 +78,7 @@ run_arm() {  # clip arm round
 for clip in $CLIPS; do
   for round in $(seq 1 "$ROUNDS"); do
     # alternate the order so a warm-up trend lands on both arms
-    if [ $((round % 2)) -eq 1 ]; then arms=(fp16 int8); else arms=(int8 fp16); fi
+    if [ $((round % 2)) -eq 1 ]; then arms=($ARMS); else arms=($(echo $ARMS | tr ' ' '\n' | tac)); fi
     for arm in "${arms[@]}"; do
       run_arm "$clip" "$arm" "$round"
     done
