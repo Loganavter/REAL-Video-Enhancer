@@ -233,7 +233,13 @@
     threshold transfers too - but forcing the body past the probe on Violet reads 0.56613% with 372 of
     480 frames above the bar, so the refusal there is real and the probe's 0.108% understated it 5x.
     The probe is systematically optimistic against the render on both clips (Chainsaw 0.000 against
-    0.08876) and is a screen, not a certificate. The probe certifies depths 1-2 while the gate serves 3 (6 of 78 reuses),
+    0.08876) and is a screen, not a certificate. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
+    (`probe(..., adversarial=k)`): scan the whole clip with the gate's statistic, rank the reuses it
+    would make, render the top-k. On Chainsaw that moves the number from 0.000% (no depth-2 pair in the
+    product's 16 triples) to 0.110% with an fp16 control of 0.083% - from 26x under the render's
+    0.08876% to 1.24x over it, flipping the verdict to fp16. The probe now errs by refusing a passing
+    configuration rather than by admitting a failing one (probe-adversarial). On Violet nothing moves
+    (0.168% either way): with 70.8% reuse the spread sample already lands on the damage. The probe certifies depths 1-2 while the gate serves 3 (6 of 78 reuses),
     but the damage is at depth 1: worst HR 0.07489 / 0.02670 / 0.00917% at depths 1 / 2 / 3. The population question is now closed by the
     render control: gated against ungated on the product reads 0.494% on the worst frame, so the
     probe's depth-2 number was measuring the right thing - see gate-exceeds-acceptance-bar. What is
