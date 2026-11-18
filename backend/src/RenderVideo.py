@@ -123,6 +123,7 @@ class Render:
         temporal_reuse: bool = True,
         # TheAnimeScripter calibration: --dedup_sens 35 / 7 = 5.0 luma levels, max span 4
         temporal_reuse_threshold: float = 5.0,
+        temporal_reuse_statistic: str = "mean_abs",
         temporal_reuse_max_chain: int = 4,
         # 0/None = off. 40 is the TheAnimeScripter value and is right for clean anime, but on
         # grainy film a single ringing pixel exceeds it: measured 43 vetoes in 94 frames and
@@ -392,8 +393,10 @@ class Render:
                 threshold=temporal_reuse_threshold,
                 max_chain=temporal_reuse_max_chain,
                 pixel_veto=temporal_reuse_pixel_veto or None,
+                statistic=temporal_reuse_statistic,
             )
             log(f"Reference-frame reuse enabled (threshold {temporal_reuse_threshold}/255, "
+                f"statistic {temporal_reuse_statistic}, "
                 f"max chain {temporal_reuse_max_chain}, pixel veto {temporal_reuse_pixel_veto})")
             self.autoTuner = None
             if temporal_reuse_auto:

@@ -1,0 +1,48 @@
+# The channel-max gate on the product: zero frames above the bar, and int8 opens on Chainsaw
+
+Measured 2026-11-18 by running the shipped backend with `--temporal_reuse_statistic channel_max_share`
+(the gate decides on the percentage of LR pixels whose worst channel moved by more than 8 levels - the
+quantity the acceptance bar counts), threshold 0.07%, chain 3, forced past the auto tuner because the
+tuner works in levels.
+
+| | shipped luma gate | channel-max gate |
+|---|---|---|
+| reuse | 20.8% (100/481) | **17.3% (83/481)** |
+| worst frame | 0.49372% (164) | **0.07546%** (475) |
+| frames above 0.1% | **18** | **0** |
+| frame 164 | 0.49372% | **0.00000%** |
+| wall per output frame | 47.58 ms (measured) | 49.37 ms (projected: 7.14 + 0.827 x 51.06, +3.8%) |
+
+The worst frame under the new gate is 0.07546%, which is the surviving population's maximum predicted
+from the 100-frame analysis (0.0755%) - the prediction and the product agree to four digits.
+
+## What it does to int8
+
+The probe's pair filter now uses the gate's own variable (it used `mean(R,G,B)` - neither the gate's
+`(1,2,1)/4` luma nor the bar's channel-max).
+
+| clip | sample | depth-2 composition | verdict |
+|---|---|---|---|
+| Chainsaw | 16 triples | no depth-2 pairs at all | int8, on depth 1 alone |
+| Chainsaw | 32 triples | **0.0034%** (3 pairs) | **int8** |
+| Violet | 16 triples | 0.167% (7 pairs) | fp16 |
+
+Under the shipped luma gate the same Chainsaw sample read 0.1748% at depth 2 - a 51x reduction, and the
+number now sits 29x under the bar instead of 1.7x over it.
+
+Two things this does not fix:
+
+- **Violet still fails, and on depth 1** (0.108%), where no reuse is involved: that is the quantiser's
+  own error on that material, not the gate's. The gate fix does not touch it.
+- **The product's default sample finds no depth-2 pairs on Chainsaw** (16 triples = 8 test pairs, 17.3%
+  reuse), so its verdict rests on depth 1 alone. A depth-2 certificate needs more triples; the cost of
+  that is in `probe-cost.txt`.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-channel-max-product.txt \
+       --records docs/wsp/verified/records/gate-channel-max-product.jsonl --bars docs/claims-bars.json
+
+@claim R001 0.07546 % "frames [718310b673d2e8ba] n=481" measured
+@claim R002 0.0 frames "frames [718310b673d2e8ba] n=481" measured
+@claim R003 17.3 % "frames [718310b673d2e8ba] n=481" measured
+@claim R004 0.003412 % "pairs [63e6739dd103c9dd] n=3" measured
+@claim R005 0.0 count "pairs [63e6739dd103c9dd] n=3" measured

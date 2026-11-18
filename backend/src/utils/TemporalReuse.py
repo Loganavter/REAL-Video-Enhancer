@@ -238,7 +238,7 @@ class ReferenceFrameGate:
     """
 
     def __init__(self, block: Optional[int] = None, threshold: float = REFERENCE_THRESHOLD,
-                 statistic: str = "mean_abs",
+                 statistic: str = "mean_abs", share_level: float = 8.0,
                  max_chain: int = REFERENCE_MAX_CHAIN,
                  luma_taps: Sequence[float] = REFERENCE_LUMA_TAPS,
                  scene_threshold: float = REFERENCE_SCENE_CUT,
@@ -268,9 +268,15 @@ class ReferenceFrameGate:
         #   share (70.2%): 0.004% of HR pixels above 8 levels for block_mean, 0.000% for
         #   mean_abs, and mean_abs stays at 0.004% up to threshold 8 where block_mean reaches
         #   0.460%.
-        if statistic not in ("block_mean", "mean_abs"):
-            raise ValueError(f"statistic must be 'block_mean' or 'mean_abs', got {statistic!r}")
+        if statistic not in ("block_mean", "mean_abs", "channel_max_share"):
+            raise ValueError(f"statistic must be 'block_mean', 'mean_abs' or 'channel_max_share', "
+                             f"got {statistic!r}")
         self.statistic = statistic
+        # The acceptance bar counts pixels whose worst channel is more than 8 levels off, so the
+        # channel-max statistic is the same quantity the bar measures. `share_level` is that 8; the
+        # threshold, in this mode, is a PERCENT of pixels (0.07 means 0.07%), not a level.
+        self.share_level = float(share_level)
+        self._ref_rgb = None
         self._ref_luma = None           # its full-res luma (needed by mean_abs and by the veto)
         self._chain = 0                 # consecutive frames served from the reference
         # Whether the frame just observed dropped the reference as a scene cut. The gate resets
@@ -295,6 +301,7 @@ class ReferenceFrameGate:
         self._ref = None
         self._ref_mean = 0.0
         self._ref_luma = None
+        self._ref_rgb = None
         self._chain = 0
         self.resets += 1
 
@@ -370,7 +377,7 @@ class ReferenceFrameGate:
         """``(1, C, H, W)`` in [0, 1] -> ``(1, 1, ceil(H/b), ceil(W/b))`` in 8-bit levels."""
         return self.blocks_of(self.luma(frame_tensor))
 
-    def observe(self, blocks, luma=None, decision=None) -> bool:
+    def observe(self, blocks, luma=None, decision=None, share=None, rgb=None) -> bool:
         """The decision and the state update, given a block grid (torch or numpy).
 
         Kept separate from :meth:`blocks` so the state machine - reference keeping, chain
@@ -392,7 +399,12 @@ class ReferenceFrameGate:
         mean = float(blocks.mean().item())
         scene_cut = False
         delta = float("inf")
-        if decision is not None:
+        if share is not None:
+            # already a percentage of pixels above the acceptance level, measured against the
+            # reference - the threshold is in the same unit
+            delta = float(share)
+            self.last_delta = delta
+        elif decision is not None:
             # the error field is already relative to the reference
             delta = float(decision.max().item())
             self.last_delta = delta
@@ -429,6 +441,8 @@ class ReferenceFrameGate:
             self._ref_mean = mean
             self._ref_luma = luma if (self.pixel_veto is not None
                                       or self.statistic == "mean_abs") else None
+            if self.statistic == "channel_max_share":
+                self._ref_rgb = rgb.detach().clone() if rgb is not None else None
             self._chain = 0
         return reuse
 
@@ -437,12 +451,21 @@ class ReferenceFrameGate:
         luma = self.luma(frame_tensor)
         levels = self.blocks_of(luma)
         decision = None
+        share = None
         ref = self._ref_luma
-        if (self.statistic == "mean_abs" and ref is not None
+        if self.statistic == "channel_max_share":
+            ref_rgb = self._ref_rgb
+            if ref_rgb is not None and tuple(ref_rgb.shape) == tuple(frame_tensor.shape):
+                # |I - ref| per channel, then the worst channel per pixel: the quantity the bar
+                # counts, on the LOW-resolution frame the gate actually sees
+                cm = (frame_tensor.float() - ref_rgb).abs().amax(dim=1, keepdim=True)
+                share = float((cm > self.share_level / 255.0).float().mean()) * 100.0
+        elif (self.statistic == "mean_abs" and ref is not None
                 and tuple(ref.shape) == tuple(luma.shape)):
             # box(|I - ref|): one subtraction, one abs, one pool over the frame
             decision = self.blocks_of((luma - ref).abs())
-        return self.observe(levels, luma, decision)
+        return self.observe(levels, luma, decision, share=share,
+                            rgb=frame_tensor if self.statistic == "channel_max_share" else None)
 
     def delta(self, frame_tensor) -> float:
         """Worst block-mean delta of ``frame_tensor`` against the current reference.

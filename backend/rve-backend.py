@@ -183,6 +183,7 @@ class HandleApplication:
             tile_reuse_threshold=self.args.tile_reuse_threshold,
             temporal_reuse=not self.args.no_temporal_reuse,
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
+            temporal_reuse_statistic=self.args.temporal_reuse_statistic,
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
             temporal_reuse_pixel_veto=self.args.temporal_reuse_pixel_veto,
             temporal_reuse_auto=not self.args.no_temporal_reuse_auto,
@@ -521,6 +522,16 @@ class HandleApplication:
                  "rendered frames, where both the LR delta and the real HR delta are known).",
             action="store_true",
             default=False,
+        )
+        parser.add_argument(
+            "--temporal_reuse_statistic",
+            help="What the gate measures. mean_abs (default): the worst 32px block mean of |luma "
+                 "delta|, threshold in 8-bit levels. channel_max_share: the percentage of pixels "
+                 "whose worst CHANNEL moved by more than 8 levels - the quantity the acceptance bar "
+                 "counts - threshold in percent. The share mode ignores the auto tuner (which works "
+                 "in levels), so pair it with --no_temporal_reuse_auto.",
+            choices=("mean_abs", "channel_max_share"),
+            default="mean_abs",
         )
         parser.add_argument(
             "--temporal_reuse_max_chain",

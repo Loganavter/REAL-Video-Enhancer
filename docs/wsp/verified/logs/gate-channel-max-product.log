@@ -1,0 +1,16 @@
+# The channel-max gate on the product, 2026-11-18.
+# backend/rve-backend.py --no_temporal_reuse_auto --temporal_reuse_statistic channel_max_share
+#   --temporal_reuse_threshold 0.07 --temporal_reuse_max_chain 3, ffv1/yuv444p, csm20s.mkv.
+BACKEND: Reference-frame reuse enabled (threshold 0.07/255, statistic channel_max_share, max chain 3, pixel veto 0.0)
+BACKEND: reference reuse: 83/481 frames reused (17.3%), 2 scene cuts, 0 pixel vetoes, threshold=0.07/255 over scaledpx blocks, max chain=3, pixel veto=off
+
+full sweep against --no_temporal_reuse:
+  481 frames, worst 0.07546% on frame 475 (peak 37), frames above 0.1%: 0
+  shipped luma gate on the same clip: worst 0.49372% on 164, 18 frames above 0.1%
+  frame 164: 0.49372% -> 0.00000%
+
+int8 probe with the pair filter on the gate's own variable:
+  --frames 16: d1 0.000% / d2 nan (0 pairs at d2)  -> verdict int8
+  --frames 32: d1 0.001% / d2 0.003% (3 pairs)     -> verdict int8
+      (under the shipped luma gate the same 32-triple sample read d2 0.1748%)
+  Violet --frames 16: d1 0.108% / d2 0.167% -> fp16 (unchanged by the gate fix)

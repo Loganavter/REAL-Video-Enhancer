@@ -221,7 +221,11 @@
     by 0.02%, Violet by 37-214%, which is why the Violet figures differ from the first version. The
     gate's own threshold is not a lever here either: 0.2177% at 3.0, 4.0 and 5.0 - the damaged pair is
     inside the certificate at every setting, so only the statistic or an output-side certificate moves
-    it. The population question is now closed by the
+    it. With the channel-max statistic and the probe's filter on the same variable, Chainsaw reads
+    0.0034% at 32 triples (3 depth-2 pairs) and passes; Violet still fails, on depth 1 (0.108%), where
+    no reuse is involved - that is the quantiser's own error on that material, not the gate's. At the
+    product's default 16 triples Chainsaw has no depth-2 pair at all, so its verdict there rests on
+    depth 1 alone. The population question is now closed by the
     render control: gated against ungated on the product reads 0.494% on the worst frame, so the
     probe's depth-2 number was measuring the right thing - see gate-exceeds-acceptance-bar. What is
     left is the sample size, and the cost of raising it (probe-cost: 45.1 s now, ~90 s at 32 triples).
@@ -257,6 +261,11 @@
     pp under the bar, against a measured int8 increment of 0.0267 pp. And the threshold is a fit to this
     clip - the LR-to-HR ratio has a median of 2.04 and a p90 of 9.50, so a constant LR threshold does
     not transfer and the tuner's own calibration frames are the right place to measure it.
+    SHIPPED AS AN OPTION AND MEASURED ON THE PRODUCT 2026-11-18: the channel-max gate at 0.07% reuses
+    83/481 (17.3%) and puts ZERO frames above the bar, worst 0.07546% on frame 475 - the surviving
+    maximum predicted from the 100-frame analysis, to four digits. Frame 164 goes 0.49372% -> 0.00000%.
+    Wall +3.8% by the two-point model. int8 opens on Chainsaw as a side effect: depth-2 composition
+    0.0034% at 32 triples against 0.1748% under the luma gate.
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge
