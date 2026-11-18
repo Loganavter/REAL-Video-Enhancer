@@ -201,6 +201,19 @@ def main() -> int:
     print(f"int8 simulation (fp16 tail {args.fp16_tail}, act scale {args.act_scale}"
           f"{', clip p' + str(args.clip) if args.clip else ''}): >8 {share:.5f}% (bar 0.1)  "
           f"peak {peak:.0f}  median {median:.2f} levels")
+    # The stroke probe: a signed effect sits below the 8-level bar, so the share cannot see it.
+    def _luma(t):
+        return 0.2126 * t[0] + 0.7152 * t[1] + 0.0722 * t[2]
+
+    lm = _luma(ref[0].clamp(0, 1) * 255.0)
+    lap = (4 * lm[1:-1, 1:-1] - lm[:-2, 1:-1] - lm[2:, 1:-1] - lm[1:-1, :-2] - lm[1:-1, 2:])
+    mask = lap.abs() > torch.quantile(lap.abs().flatten().float(), 0.98)
+    ink, rim = mask & (lap < 0), mask & (lap > 0)
+    lg = _luma(got[0].clamp(0, 1) * 255.0)[1:-1, 1:-1]
+    print(f"  stroke: ink {lg[ink].mean():.2f} ({(lg[ink].mean() - lm[1:-1, 1:-1][ink].mean()):+.2f})  "
+          f"rim {lg[rim].mean():.2f} ({(lg[rim].mean() - lm[1:-1, 1:-1][rim].mean()):+.2f})  "
+          f"against the model")
+
     if args.emit:
         import json as _json
         sys.path.insert(0, "scripts")
