@@ -2194,7 +2194,13 @@ tasks:
     only available to the variant that keeps the algorithm, and arXiv:2609.00363 is the reason a tolerance
     check cannot stand in for it. Report which lever did the work: layout, tile fill, or algorithm choice.
   note: >-
-    The padded-channel variant is the one that keeps the ARITHMETIC (zeros contribute nothing), so it is the
-    only candidate that could be adopted under the lane's byte-identity rule; a cudnn algorithm change is a
+    What it buys if it lands (arithmetic from int8-wall-ab and int8-tail-split): conv 4.86 -> 2.5 on
+    Violet takes the frame 50.61 -> 48.25 and the ratio from 1.141x to 1.196x; 5.99 -> 2.5 on Chainsaw takes
+    it 49.64 -> 46.15 and 1.119x to 1.203x - i.e. the one lever that closes the gap to the recorded
+    bar_int8_wall = 1.2x that int8 misses today. Per hour of video that is 3.5-4.3 minutes on top of the
+    10 minutes int8 already saves; a 24-minute episode drops by 84-103 s. If the conv is at its floor, none
+    of it materialises and the row closes with that measurement. The padded-channel variant is the one that
+    keeps the ARITHMETIC (zeros contribute nothing), so it is the only candidate that could be adopted under
+    the lane's byte-identity rule; a cudnn algorithm change is a
     different kernel and needs the picture test. Do not re-enter the closed levers while here: int8 implicit
     FP8, per-channel Q/DQ, scalar-slope, width C=32/48, Winograd through cuDNN, sparsity.
