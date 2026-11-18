@@ -32,9 +32,10 @@ def qualityPresetValueToLabel(value: str) -> str:
 # picture effect depends on the model and the material, which is exactly what the tooltip says.
 QUALITY_PRESET_TOOLTIP = (
     "Best quality: the picture is what the model produces.\n"
-    "Fast: the body runs in 8-bit. On the material it was measured on - 1080p Blu-ray sources at 4K, one anime "
-    "model, an RTX 4060 Ti - the picture was indistinguishable from Best. Other models and other cards may "
-    "differ; the speed-up depends on the card."
+    "Fast: the body runs in 8-bit. Measured on 1080p Blu-ray sources at 4K with an RTX 4060 Ti: about 1.2x "
+    "faster end to end on TWO model families (a 2x Compact and a 4x animevideov3), and on the 2x model the "
+    "picture was indistinguishable from Best across whole clips. Other models and other cards may differ; the "
+    "speed-up depends on the card."
 )
 
 

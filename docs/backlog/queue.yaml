@@ -1716,8 +1716,23 @@ tasks:
 - id: rve-fast-preset-per-hardware-2026-11-18
   title: 'The Fast/Best default and its wording are tuned to one card - re-derive them per GPU and per model'
   type: research
-  status: todo
+  status: done
   owner: '@owner'
+  resolution: >-
+    CLOSED 2026-11-20 as a wording change plus a decision, not a re-derivation: the MODEL axis is now measured
+    and the CARD axis cannot be measured on this host. Second model family (realesr-animevideov3, 64-channel
+    Compact, 4x): Best 78.22 against Fast 63.66 ms/frame, 1.229x - the same answer the 2x model gives
+    (1.203-1.221x). Two things fell out of it: the int8 tail kernel DECLINED that model ("48 output channels,
+    this kernel pads to 16") and fell back to cuDNN, so its 1.23x is Fast WITHOUT the tail gain; and the fused
+    head kernel did apply, since the app pads that head to 8 channels too. First-frame gross gate against the
+    model on that family: 0.01599%. DECISION: Fast stays an opt-in (--quality_preset defaults to best) -
+    arXiv:2606.14598 has a fused INT8 GEMM winning 2.8-4.2x on consumer Ampere and LOSING on A100/B200, so
+    "int8 is faster" is a property of the card and this machine has one. The tooltip now states what was
+    measured (two model families, ~1.2x, indistinguishable on the 2x model) and keeps the card caveat, which
+    is the one axis still untested. If a second GPU ever exists here, the row's acceptance is already written.
+    docs/wsp/verified/fast-preset-second-family.txt, records fast-preset.jsonl (F001-F003, R001),
+    logs/fast-preset/animevideov3/. scripts/wall_ab.sh gained a MODEL override so one instrument can compare a
+    second family with the model held equal inside the session.
   priority: P2
   gpu: true
   cost: 1d

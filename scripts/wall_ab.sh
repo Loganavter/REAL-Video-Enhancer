@@ -22,6 +22,9 @@ APP=/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2
 # installed packages are what every recorded wall number was taken with (REPORT-int8-lane-2026-11-16 10).
 PY=${PY:-"$APP/python/python/bin/python3"}
 CLIPS=${CLIPS:-"bd_violet20s.mkv bd_csm_same.mkv"}
+# MODEL lets the same instrument compare a SECOND model family: the model is the arm-independent constant
+# of a run, and a per-family question needs it held equal inside each session.
+MODEL=${MODEL:-"$APP/custom_models/2x-Futsuu-Anime(1).pth"}
 # ARMS defaults to the fp16-vs-int8 pair. Any other name is an int8 arm with an env override named
 # ARM_ENV_<UPPER>, so two VARIANTS of the same configuration can alternate inside one session:
 #   ARMS="nchw nhwc" ARM_ENV_NCHW="RVE_TAIL_NHWC=0" ARM_ENV_NHWC="RVE_TAIL_NHWC=1" scripts/wall_ab.sh
@@ -38,7 +41,7 @@ mkdir -p "$LOGDIR" "$RENDERS" /var/tmp/opencode
 common=(
   --ffmpeg_path "$APP/bin/ffmpeg"
   --backend tensorrt
-  --upscale_model "$APP/custom_models/2x-Futsuu-Anime(1).pth"
+  --upscale_model "$MODEL"
   --overwrite
   --no_temporal_reuse
 )
@@ -66,6 +69,7 @@ run_arm() {  # clip arm round
     echo "# wall_ab $(date -Is) clip=$clip arm=$arm round=$round sink=$SINK"
     echo "# load_avg $(cut -d' ' -f1-3 /proc/loadavg)"
     echo "# clocks $(nvidia-smi --query-gpu=clocks.sm,clocks.mem,temperature.gpu,power.draw --format=csv,noheader 2>/dev/null || echo unavailable)"
+    echo "# model $MODEL"
     echo "# cmd rve-backend.py ${args[*]}"
   } > "$log"
   local extra="ARM_ENV_$(echo "$arm" | tr '[:lower:]' '[:upper:]')"

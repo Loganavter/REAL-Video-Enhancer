@@ -1,0 +1,76 @@
+# Fast on a SECOND model family: 1.23x, same shape of answer - and the card question stays open
+
+Measured 2026-11-20 (local), RTX 4060 Ti, BD Violet 1080p -> 4x, null sink, reuse off, two arms alternating in
+one session, 2 rounds. Records: `fast-preset.jsonl`; raw: `logs/fast-preset/animevideov3/`.
+
+Row `rve-fast-preset-per-hardware-2026-11-18`. Its question: the Fast preset's speed-up and its picture cost
+were measured on one card and one model, so is the wording - "the speed-up depends on the card" - backed by
+anything, and should Fast be a default?
+
+## What was measurable here, and what was not
+
+- **A second model family: measurable, and measured.** `realesr-animevideov3` is a 64-channel Compact with a
+  4x upscale, i.e. a different family that the int8 body serves.
+- **A second card: not measurable.** This machine has one GPU. No number in this file speaks to another card,
+  and pretending otherwise would be exactly the population-label error the lane has retracted ten times.
+
+## The second family
+
+| arm | round 1 | round 2 | median |
+|---|---|---|---|
+| Best (fp16 engine) | 78.88 | 77.55 | **78.22** |
+| Fast (int8 body) | 63.67 | 63.64 | **63.66** |
+
+**1.229x**, against 1.203-1.221x for the 2x model in the same session-family of runs. Two implementation notes
+that matter for reading it:
+
+- The int8 tail kernel **declined this model** - "the tail has 48 output channels and this kernel pads to 16"
+  - and fell back to cuDNN, so the 1.23x is Fast *without* the tail gain the 2x model gets. The guard works on
+  a real model family, which is the kind of thing a guard is for and which a unit test cannot show.
+- The fused head kernel **did** apply (the app pads this model's head to 8 input channels exactly as it does
+  the 2x one), so the head side of the comparison is like for like.
+
+First-frame picture against the fp16 model on this family: **0.01599%** of pixels above 8 levels - the body's
+own gross-error gate, on one frame, not an acceptance number.
+
+## The decision
+
+1. **Fast stays an opt-in.** `--quality_preset` defaults to `best`; nothing here argues for changing that,
+   and the one published external result on this question cuts the other way: a fused INT8 GEMM that wins
+   2.8-4.2x per GEMM on consumer Ampere loses to the native bf16/FP8 paths on A100 and B200
+   (arXiv:2606.14598). "Int8 is faster" is a property of the card.
+2. **The wording is updated to say what has now been measured**: two model families, ~1.2x end to end, the
+   picture indistinguishable on the 2x model across whole clips, and the card caveat kept because it is the
+   one axis that remains untested.
+
+So the row closes as the wording getting *more* precise rather than as a re-derivation: the model axis is
+answered (the speed-up survives a second family), and the card axis cannot be answered from this machine at
+all. If a second GPU ever exists on this host, the acceptance is already written: the same one-frame, no-pipe
+comparison (model vs int8 body vs fp16 engine) plus an interleaved wall A/B, and a decision on the default.
+
+## Not covered
+
+- One card. This is the row's own limit, and no reading of these numbers removes it.
+- Two rounds (2 of 2), not three: the two arms differ by 14 ms, far outside the session's drift, and the
+  question is a sign and a rough size rather than a new bar.
+- The 4x family's picture is one frame's gross gate, not a render pair. A full-clip pair on that family is
+  the follow-up if anyone wants Fast justified there at acceptance strength.
+- `Archivist_AntiLines` (48 body channels) is a third family the int8 body **cannot** serve at all - the
+  coverage boundary, stated in `Int8Body` and unchanged by anything here.
+
+## Reproduce
+
+```bash
+MODEL="/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/realesr-animevideov3(1).pth" \
+  ARMS="fp16 int8" CLIPS="bd_violet20s.mkv" ROUNDS=2 SINK=null \
+  LOGDIR=docs/wsp/verified/logs/fast-preset/animevideov3 scripts/wall_ab.sh
+PYTHONPATH=scripts python3 scripts/fast_preset_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/fast-preset-second-family.txt \
+       --records docs/wsp/verified/records/fast-preset.jsonl --bars docs/claims-bars.json
+
+@claim F001 78.22 ms "frames [0e007aba31cbd97f] n=1" measured
+@claim F002 63.66 ms "frames [0e007aba31cbd97f] n=1" measured
+@claim R001 1.228715 x "frames [0e007aba31cbd97f] n=1" derived
+@claim F003 0.01599 % "frames [0e007aba31cbd97f] n=1" measured
