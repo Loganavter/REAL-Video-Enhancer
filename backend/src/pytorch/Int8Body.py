@@ -48,6 +48,10 @@ class _NoEvent:
         return 0.0
 
 SHIFT = 20
+# First-frame gross-error gate, in percent of pixels >8 levels against the fp16 model. NOT the project's
+# acceptance bar (0.1%, a worst-frame-of-a-sample statistic): see certify() for the observed separation.
+FIRST_FRAME_SANITY = 1.0
+
 BLOCK_M = 128   # the rolled loop prefers a wider block: 2.198 ms against 2.919 at BM 64
 WARPS = 4
 QB = 256      # the conversions are register-bound: 1024 measured 2.3 ms against 1.57 at 256
@@ -422,21 +426,40 @@ class Int8Body:
         return out
 
     # ---- self-certification: the body has to prove itself on the frame it calibrated on
-    def certify(self, x, bar: float = 0.1):
+    def certify(self, x, bar: float = FIRST_FRAME_SANITY):
         """Share of pixels this body puts more than 8 levels away from the fp16 model, on `x`.
 
-        The render must call this after `calibrate` and refuse to serve the video if it returns a share
-        above the bar. It is not decoration: at 1920x1080 this body currently reads **3.53%** against the
-        validated pipeline's 0.00004%, and 0.00000% at 256x256 with 1.23% at 512x512 - an error that grows
-        with resolution, which is the signature of a grid that does not cover the activations. A body that
-        cannot pass its own bar on its own calibration frame must not serve a frame, however fast it is.
+        This is a GROSS-ERROR gate on ONE frame, not a picture acceptance. What it exists for: at
+        1920x1080 a body whose grid does not cover the activations reads **3.53%** against the validated
+        pipeline's 0.00004%, and 0.00000% at 256x256 with 1.23% at 512x512 - an error that grows with
+        resolution, which is the signature of a coverage bug. A body that cannot clear a gross gate on its
+        own calibration frame must not serve a frame, however fast it is.
+
+        What it cannot do, and used to pretend to: certify the picture. The project's acceptance statistic
+        is `bar_share` = 0.1% of pixels on the WORST frame of a spread sample (n>=2); one frame has no
+        population, and on this material the number it produces is dominated by which frame the clip opens
+        on (0.00000% on BD Violet's frame 1 against a whole-clip 0.53% body-vs-engine). Borrowing the
+        acceptance bar here also risked the failure class this project has already paid for once - a
+        correct body silently refusing on a hard first frame. The picture is judged on renders.
         """
         with torch.no_grad():
             ref = self.model(x.clamp(0.0, 1.0)).float()
             got = self(x).float()
         diff = ((got - ref).abs() * 255.0).amax(dim=1)
         share = float((diff > 8).float().mean()) * 100.0
-        return share, share <= bar
+        return share, self.sanity_ok(share, bar)
+
+    @staticmethod
+    def sanity_ok(share: float, bar: float = FIRST_FRAME_SANITY) -> bool:
+        """Would a body reading `share` on its first frame be allowed to serve?
+
+        Pure, so the separation can be pinned without a GPU. The numbers are the record's: valid bodies
+        read 0.00000-0.01917% against the model (and 0.28825% with a deliberately broken grid margin
+        x1.5), a coverage bug reads 3.53% at 1080p, and two broken correction experiments read 29.5% and
+        100%. The gate sits at 1.0% - ~3.5x above the worst valid reading and ~3.5x below the smallest
+        observed bug.
+        """
+        return share <= bar
 
     # ---- a helper the render can ask for a one-line verdict, as TileProbe does
     @staticmethod

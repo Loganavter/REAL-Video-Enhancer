@@ -52,3 +52,13 @@ def test_the_body_serves_only_the_whole_frame_path():
     rv = pytest.importorskip("src.RenderVideo")
     assert rv.Render._int8_body_serves_this_render(SimpleNamespace(temporalReuse=None)) is True
     assert rv.Render._int8_body_serves_this_render(SimpleNamespace(temporalReuse=object())) is False
+
+
+def test_the_first_frame_gate_is_a_gross_gate_not_the_acceptance_bar():
+    """The record's own separation, pinned: valid bodies 0.00000-0.28825%, bugs 3.53-100%."""
+    body_mod = pytest.importorskip("src.pytorch.Int8Body")
+    assert body_mod.FIRST_FRAME_SANITY > 0.1, "the gate must not borrow the acceptance bar - n=1 has no population"
+    for share in (0.0, 0.00442, 0.01917, 0.28825):
+        assert body_mod.Int8Body.sanity_ok(share), f"{share}% is a valid body reading"
+    for share in (3.53, 29.5, 100.0):
+        assert not body_mod.Int8Body.sanity_ok(share), f"{share}% is the signature of a coverage bug"
