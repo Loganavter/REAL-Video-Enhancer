@@ -1,0 +1,72 @@
+# The body works at LR 1440x1080: 0.012% against the model, and the frame is 1.22x the fp16 engine
+
+Measured 2026-11-19 on a 1440x1080 version of the BD Violet cut. Why: the body's accuracy had only ever been
+recorded at LR 1920x1080, while the film lane runs at 1440x1080 (94 frames, 1440p -> 2880p, `docs/MODEL.md`),
+and the app's own envelope allows anything up to 2.5 Mpx of LR input. "It will work at 1440x1080" was a size
+comparison, not a measurement.
+
+## The input, and why its label matters
+
+`/tmp/opencode/violet1440.mkv`: 494 frames, 20.6 s, **1440x1080, 18.4 Mbps h264 CRF-12** - produced by
+scaling the packet-proved BD cut (`bd_violet20s.mkv`) at that size, then re-encoding. So it is **not** a stream
+copy and **not** the film source named in MODEL.md; it is a downscaled re-encode, and every number below
+describes that material. Nothing here is a claim about the film clip's own grain.
+
+## Accuracy against the model (the reference the record requires)
+
+`scripts/calibration_coverage.py --width 1440 --height 1080`, 24 calibration frames, four held-out test
+frames (29, 44, 274, 400 - none in either calibration arm), body against the model's own fp16 output:
+
+| calibration | cost | worst share | peak |
+|---|---|---|---|
+| 24 full frames | 5.24 s | **0.01186%** | 22 |
+| 96 crops of 256x256 | 0.47 s | **0.01347%** | 22 |
+
+Both are ~8x under the 0.1% share bar. The peak (22) sits just above `bar_int8_peak` = 20 - consistent with
+the known `int8-peak-unmet` debt (29-55 recorded on the earlier kernel family), not a new failure.
+
+## The frame in the app
+
+One run per arm, null sink, reuse off, same clip:
+
+| arm | render loop | body | hops | head | tail |
+|---|---|---|---|---|---|
+| fp16 engine | 43.71 ms/frame | - | - | - | - |
+| int8 body | **35.80 ms/frame** | 32.6 | 22.6 | 3.9 + 1.4 quantise | 4.7 |
+
+**1.22x on the frame**, in one run each - not a bar claim (that needs >=3 rounds, medians of 2+), but it
+bounds the film lane: the body is allowed here (1.56 Mpx against the 2.5 Mpx refusal) and it pays.
+
+The tail at this size: dequant 1.17, conv 1.97, shuffle 0.90, residual 0.64 = 4.68 ms, i.e. the tail conv
+scales with the LR area as expected (1.97 against 2.35 at 1080p) because it runs on LR.
+
+## What this closes and what it does not
+
+- **Closes**: the body is measured at the film lane's resolution, accuracy first, with the app's envelope
+  respected. The answer to "will 1440x1080 work" is yes, with the numbers above.
+- **Does not close**: the peak bar (22 > 20) is the existing owner-decision debt; the clip is a re-encode, so
+  grain-heavy native 1440p material is still unmeasured; and the 1.22x is one draw per arm.
+
+## Reproduce
+
+```bash
+<ffmpeg> -i /tmp/opencode/bd_violet20s.mkv -vf scale=1440:1080 -c:v libx264 -crf 12 -an /tmp/opencode/violet1440.mkv
+flock -n /var/tmp/opencode/gpu.lock env PYTHONPATH=scripts <install-python> scripts/calibration_coverage.py \
+    --clip /tmp/opencode/violet1440.mkv --width 1440 --height 1080 --calib 24 \
+    --model "<install>/custom_models/2x-Futsuu-Anime(1).pth"
+CLIPS=violet1440.mkv ROUNDS=1 SINK=null LOGDIR=<dir> scripts/wall_ab.sh
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-1440x1080.txt \
+       --records "docs/wsp/verified/records/int8-1440x1080*.jsonl" --bars docs/claims-bars.json
+
+@claim R001 0.01186 % "clips [642494e6c1438e31] n=1" measured
+@claim R002 5.24 s "clips [642494e6c1438e31] n=1" measured
+@claim R003 0.01347 % "clips [642494e6c1438e31] n=1" measured
+@claim R004 0.47 s "clips [642494e6c1438e31] n=1" measured
+@claim T001 4.68 ms "clips [642494e6c1438e31] n=1" measured
+@claim T002 1.17 ms "clips [642494e6c1438e31] n=1" measured
+@claim T003 1.97 ms "clips [642494e6c1438e31] n=1" measured
+@claim T004 0.9 ms "clips [642494e6c1438e31] n=1" measured
+@claim T005 0.64 ms "clips [642494e6c1438e31] n=1" measured
+@claim T006 4.7 ms "clips [642494e6c1438e31] n=1" measured

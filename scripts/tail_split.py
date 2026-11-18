@@ -23,7 +23,7 @@ from harness.core import Population, Record, Store  # noqa: E402
 TAIL = re.compile(r"int8 tail: dequant ([\d.]+)\s+conv ([\d.]+)\s+shuffle ([\d.]+)\s+residual ([\d.]+)"
                   r"\s+SUM ([\d.]+) ms")
 PHASE = re.compile(r"int8 phases: .*?tail ([\d.]+)")
-NAME = re.compile(r"^bd_(?P<clip>\w+?)_(?P<arm>[a-z0-9]+)_r(?P<round>\d+)_(?P<sink>\w+)\.log$")
+NAME = re.compile(r"^(?P<clip>.+)_(?P<arm>[a-z0-9]+)_r(?P<round>\d+)_(?P<sink>\w+)\.log$")
 
 
 def main(argv=None) -> int:
@@ -48,8 +48,8 @@ def main(argv=None) -> int:
             continue
         dequant, conv, shuffle, residual, total = (float(v) for v in tails[-1])
         phase = PHASE.findall(text)
-        pop = Population.of("clips", [f"bd_{m.group('clip')}20s.mkv"],
-                            f"bd_{m.group('clip')}20s.mkv, int8 body, reuse off, last 8 frames of one run")
+        pop = Population.of("clips", [f"{m.group('clip')}.mkv"],
+                            f"{m.group('clip')}.mkv, int8 body, reuse off, last 8 frames of one run")
         digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
         for label, value, stat, unit in (("total", total, "single", "ms"), ("dequant", dequant, "single", "ms"),
                                          ("conv", conv, "single", "ms"), ("shuffle", shuffle, "single", "ms"),

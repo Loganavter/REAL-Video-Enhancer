@@ -2127,9 +2127,9 @@ tasks:
     that warning is about the scene, this row is about the crop. Do not use its conclusion to refuse crops.
 
 - id: rve-int8-at-1440x1080-2026-11-19
-  title: 'The film lane runs at 1440x1080 and the body has never been measured there'
+  title: 'DONE: the body works at LR 1440x1080 - 0.012% against the model, frame 1.22x'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -2159,6 +2159,17 @@ tasks:
     frames, share >8 levels and peak, plus the calibration cost and the body's phase lines, so the film
     lane's speed-up is measured rather than scaled from pixel counts. If the body reads worse there than at
     1080p, the app's 2.5 Mpx gate is the wrong shape and the row says so with numbers.
+  resolution: >-
+    measured 2026-11-19 on a 1440x1080 version of the BD Violet cut (scaled + CRF-12 re-encode, so the
+    population is stated as that material, not the film source). Accuracy against the MODEL on four held-out
+    frames: 0.01186% worst share / peak 22 with 24 full-frame calibration (5.24 s), 0.01347% / peak 22 with
+    96 crops (0.47 s) - ~8x under the 0.1% bar; peak 22 sits just above bar_int8_peak = 20, which is the
+    existing int8-peak-unmet debt, not a new failure. In the app the body is allowed (1.56 Mpx against the
+    2.5 Mpx refusal) and pays: one run per arm, fp16 43.71 -> int8 35.80 ms/frame = 1.22x, body 32.6
+    (hops 22.6, head 3.9 + quantise 1.4, tail 4.7 with conv 1.97 - the tail scales with LR area as expected).
+    Record: docs/wsp/verified/int8-1440x1080.txt (harness check PASS). NOT closed by this: the peak bar
+    (owner decision), grain-heavy NATIVE 1440p material (the clip is a re-encode), and the 1.22x is one draw
+    per arm - a bar claim would need >=3 rounds.
   note: >-
     Filed 2026-11-19 after the owner asked the direct question ("will 1920x1080 and 1440x1080 work?") and
     the honest answer was "by the gates yes, by measurement only 1080p". Cost is one GPU hour: the clip is
