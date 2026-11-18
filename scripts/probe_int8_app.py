@@ -43,6 +43,9 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--bar", type=float, default=0.1)
+    ap.add_argument("--engine", default=None,
+                    help="path to the model; builds the app's own TensorRT/Torch engine for the fp16 "
+                         "reference instead of the torch fp16 model")
     ap.add_argument("--adversarial", type=int, default=0,
                     help="render the top-k reuse events of the whole clip, ranked by the gate's own "
                          "statistic - the only way to reach the frame the bar's worst lives on")
@@ -60,6 +63,11 @@ def main() -> int:
         kw["filter_statistic"] = args.filter_statistic
         kw["adversarial"] = args.adversarial
         kw["max_chain"] = args.max_chain
+        if args.engine:
+            sys.path.insert(0, os.path.join(HERE, "backend"))
+            from src.pytorch.UpscaleTorch import UpscalePytorch
+            kw["engine_ref"] = UpscalePytorch(args.engine, device="cuda", precision="auto", width=1920,
+                                          height=1080, backend="tensorrt", tilesize=0, gpu_id=0)
         r = probe(clip, args.model, args.width, args.height, frames=args.frames, bar=args.bar, **kw)
         print(f"{clip} (frames={args.frames})")
         print(f"  {r.reason}")

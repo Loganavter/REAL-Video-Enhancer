@@ -242,8 +242,12 @@
     17.3% reuse, i.e. 1.118x - the retracted 1.55x was an ffv1 entropy effect, and 1.118 is below the
     1.49-1.505 engine ratio as Amdahl requires. Depth table from the render's own log (83 reuses,
     41/36/6): worst HR 0.07546% at depth 1 (frame 475, the clip's worst), 0.02670 at d2, 0.00917 at
-    d3. The probe's torch reference differs from the app's TRT engine by 0.0116% on one frame - small,
-    and not the cause of the control-vs-sweep gap, which is the pair set (the probe re-decides). ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
+    d3. The probe's reference is now the app's own TRT engine (`probe(..., engine_ref=...)`, falling
+    back to torch when none is passed), and it matters on Violet: depth-2 composition 0.168% -> 0.216%,
+    own defect 0.044% -> 0.081%, while Chainsaw moves 0.110% -> 0.109% (trt-reference). The fp16 control
+    stays ~6% above the full sweep on both clips, so the residual gap is the pair set - the probe
+    re-decides which frames the gate reuses - and `scripts/check_control_ceiling.py` still reports the
+    violation. ADVERSARIAL SELECTION IMPLEMENTED 2026-11-18
     (`probe(..., adversarial=k)`): scan the whole clip with the gate's statistic, rank the reuses it
     would make, render the top-k. On Chainsaw that moves the number from 0.000% (no depth-2 pair in the
     product's 16 triples) to 0.110% with an fp16 control of 0.083% - from 26x under the render's

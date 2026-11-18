@@ -1,0 +1,18 @@
+# The TRT engine as the probe's fp16 reference, 2026-11-18.
+# engine_ref= is the app's own UpscalePytorch (backend=tensorrt); when absent the probe falls back
+# to the torch model. Feasibility was demonstrated first: the engine built standalone returns
+# (1,3,2160,3840) fp16 on cuda and matches the app's own ungated render at share 0.0% (peak 6.3).
+
+=== Chainsaw 20 s, adversarial top-13
+torch reference:  adversarial 0.110%  control 0.083%  d1 0.000%
+TRT reference:    adversarial 0.109%  control 0.080%  d1 0.001%
+full fp16 sweep:  0.07546%
+
+=== Violet 20 s, adversarial top-13
+torch reference:  adversarial 0.168%  control 0.077%  d1 0.095%  d2 0.168%  own defect 0.044%
+TRT reference:    adversarial 0.216%  control 0.078%  d1 0.139%  d2 0.216%  own defect 0.081%
+full fp16 sweep:  0.07345%
+
+# The engine changes Violet materially (d2 0.168 -> 0.216, own defect 0.044 -> 0.081) and Chainsaw
+# barely. The control is still ~6% above the sweep on both clips, so that gap is the pair set (the
+# probe re-decides which frames are reused), not the reference.
