@@ -770,7 +770,11 @@ class Render:
                 _t_frame = _perf_counter()
                 if not hasattr(self, "_profile"):
                     self._profile = {"frames": 0, "gate": 0.0, "infer": 0.0, "conv": 0.0,
-                                     "frame": 0.0, "to_tensor": 0.0}
+                                     "frame": 0.0, "to_tensor": 0.0,
+                                     # the three stages the old line did NOT name, which is why the
+                                     # frame total sat above its own parts by 6.2 ms on 2026-11-18
+                                     # (rve-frame-accounting-2026-11-19)
+                                     "up_wall": 0.0, "preview": 0.0, "pack": 0.0}
                 _t_gate = _perf_counter()
                 if self.upscaleModel:
                     # during auto calibration every frame is rendered: otherwise the tuner only
@@ -798,12 +802,14 @@ class Render:
                         # re-emit the last rendered frame (the gate only decides *whether*)
                         frame = self._lastRenderedFrame
                     else:
+                        _t_up = _perf_counter()
                         frame = self.upscaleOption(
                             frame
                         )
                         if frame is None:
                             # pipelined inference: this frame will come out a call later
                             continue
+                        self._profile["up_wall"] += (_perf_counter() - _t_up) * 1000.0
                         self._lastRenderedFrame = frame
                         if self.autoTuner is not None and not self.autoTuner.ready:
                             self._calibrate_gate(frame)
@@ -822,9 +828,12 @@ class Render:
                 if type(frame) is not bytes and getattr(self, "pooled_output", False):
                     frame.pooled_output = True
                 self.informationHandler.setFramesRendered(frames_rendered)
+                _t_prev = _perf_counter()
                 preview_payload = self._preview_bytes(frame)
+                self._profile["preview"] += (_perf_counter() - _t_prev) * 1000.0
                 self.informationHandler.setPreviewFrame(preview_payload)
                 
+                _t_pack = _perf_counter()
                 if type(frame) is not bytes and getattr(frame, "pooled_output", False):
                     # acquire the pinned slot and fill it (blocks if the writer is a whole
                     # pool behind - it never overwrites a payload still being written)
@@ -832,6 +841,7 @@ class Render:
                     self.writeBuffer.writeQueue.put(frame)
                 else:
                     self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
+                self._profile["pack"] += (_perf_counter() - _t_pack) * 1000.0
                 frames_rendered += int(self.ceilInterpolateFactor)
                 if not hasattr(self, "_t_first_frame"):
                     self._t_first_frame = _time.time()
@@ -871,12 +881,19 @@ class Render:
         prof = getattr(self, "_profile", None)
         if prof and prof["frames"]:
             n = prof["frames"]
+            named = (prof["gate"] + prof.get("up_wall", 0.0) + prof.get("read", 0.0)
+                     + prof.get("preview", 0.0) + prof.get("pack", 0.0))
             log(f"profile over {n} frames: gate {prof['gate']/n:.2f} ms "
                 f"(input to tensor {prof.get('to_tensor', 0.0)/n:.2f}), "
-                f"inference {prof['infer']/n:.2f} ms (engine {prof.get('model', 0.0)/n:.2f}, "
+                f"model wall {prof.get('up_wall', 0.0)/n:.2f} ms "
+                f"(self-reported {prof['infer']/n:.2f}, engine {prof.get('model', 0.0)/n:.2f}, "
                 f"frame handover {prof.get('handover', 0.0)/n:.2f}), "
                 f"input convert {prof['conv']/n:.2f} ms, "
-                f"read wait {prof.get('read', 0.0)/n:.2f} ms, frame total {prof['frame']/n:.2f} ms")
+                f"preview {prof.get('preview', 0.0)/n:.2f} ms, "
+                f"pack+queue {prof.get('pack', 0.0)/n:.2f} ms, "
+                f"read wait {prof.get('read', 0.0)/n:.2f} ms, "
+                f"named {(named/n):.2f} of frame total {prof['frame']/n:.2f} ms, "
+                f"unaccounted {(prof['frame'] - named)/n:.2f} ms")
         if self.upscaleModel and getattr(self, "tileReuse", False):
             up = getattr(self, "upscaleOption", None)
             tu = getattr(up, "tile_upscaler", None)
