@@ -1743,7 +1743,10 @@ tasks:
     the tooltip never quoted a speed-up anyway - it says "the speed-up depends on the card". CHECKED
     AGAINST THE RECORD 2026-11-19: the corpus holds no second-GPU or second-model-family timing at all (the
     only other-card numbers are external issue reports in docs/MODEL.md, and they are about TRT int8/FP8,
-    not about this body) - so this row cannot be closed from anything already measured.
+    not about this body) - so this row cannot be closed from anything already measured. External support
+    for the premise (arXiv:2606.14598, read 2026-11-19): a fused INT8 GEMM that wins 2.8-4.2x per GEMM on
+    consumer Ampere LOSES to the native bf16/FP8 paths on A100 and B200 - i.e. "int8 is faster" is a
+    property of the card, measured on someone else's kernel too.
     Old wording kept for the trail: the body's speed-up is 1.14x on that card in one draw and about even on a
     second title, and the picture was indistinguishable ON THAT MATERIAL - the tooltip now says exactly that
     rather than "may get worse or better", because that phrasing was written before the same-input comparison
@@ -1889,10 +1892,17 @@ tasks:
     shuffle 3.6, residual ~2.4 - i.e. 4K bandwidth, not arithmetic. If a fused kernel does not save at
     least 1.5 ms (3% of the frame), the tail is compute-bound after all and the row closes with a floor.
   acceptance: >-
-    A/A first: the fused tail's output must be byte-identical to the current one on 494 frames (same
-    arithmetic, different boundary). Then an interleaved wall A/B, >=3 rounds, one session, both BD clips,
-    median of rounds 2+, reporting the tail phase line beside the frame total. Records in
-    docs/wsp/verified/ with the phase attribution, not only the quotient.
+    A/A first, and the criterion is not "close": the fused tail must reproduce the current one BYTE FOR
+    BYTE on 494 frames, which is only achievable if the fusion merges passes without changing the order of
+    the arithmetic (conv -> shuffle -> residual stays that arithmetic, computed in one kernel). If
+    byte-identity fails, the change altered the arithmetic and is a different kernel, not a fusion - and
+    arXiv:2609.00363 shows why that must not be waved through: of five epilogue faults (scale precision,
+    double rounding, multiplication order, output truncation, fused ordering) each moves the output by at
+    most ONE bf16 spacing, four of five are detected by no tolerance check at all, and a 1-spacing
+    tolerance is blind to the whole class by construction. Our bar (share of pixels >8 levels) is a
+    tolerance check of exactly that shape, so it cannot certify an epilogue reordering. With identity
+    proven: interleaved wall A/B, >=3 rounds, one session, both BD clips, medians of rounds 2+, the tail
+    phase line reported beside the frame total.
   note: >-
     Literature basis, to be checked rather than trusted: NTIRE 2023's real-time 4K SR report treats pixel
     shuffle/unshuffle as THE efficiency transform and reports 4.75 ms for a 3x 1080p->4K network on a
@@ -1903,7 +1913,12 @@ tasks:
     for a different purpose - collapsing an x4 model's tail so it emits x2 (functional), not merging
     passes for bandwidth. NOT to be redone (docs/MODEL.md, measured): CUDA graphs ~0.3%, L2 tiling
     full-vs-none +0.5%, hand-written conv kernels untested but 4.7x slower in the one public attempt.
-    So the untried part is exactly the pass count over the 4K tensor, nothing else.
+    So the untried part is exactly the pass count over the 4K tensor, nothing else. EXTERNAL TEMPLATE
+    (arXiv:2606.14598, read 2026-11-19): a single fused Triton INT8 GEMM with per-token x per-channel
+    dequantisation and bias folded into the epilogue, autotuned per shape - the same boundary rule this
+    lane arrived at from its own measurements. Their honest end-to-end numbers are the shape to expect
+    here: 2.8-4.2x per GEMM, ~1.1x end to end. Do not quote their speed-up as ours: different operation,
+    different card, different product.
 
 - id: rve-model-class-question-2026-11-19
   title: 'DROPPED: "use a smaller network" is not a lever here - the model is the product'
