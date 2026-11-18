@@ -160,3 +160,29 @@ installed in `~/.cache/opencode/venvs/trt310` (python 3.10 bindings, libs from t
 recipe is in `DELEGATION.md`), and both engines were rebuilt with it: `engine-fp16.txt` and
 `engine-int8.txt` above. What is NOT reproducible is the accuracy half of the int8 claim, and the
 reason is in `engine-int8.txt`.
+
+## Which file is the reference (the 2026-11-18 mistake, closed by a gate)
+
+A render pair says nothing on its own: the second file IS the instrument's reference, and the numbers differ
+by an order of magnitude depending on which one it is.
+
+| reference | what the number means | magnitude on this material |
+|---|---|---|
+| **the model** (torch fp16 output) | the renderer's own error | **0.004-0.019%** for the int8 body |
+| a render of the **fp16 ENGINE** | the pair: engine + colour pipe | **0.42-0.53%** for int8 against it |
+| the same renderer, another **configuration** | that configuration's effect | depends on the change |
+
+The engine deviates from the model by 0.055-0.087%, and the colour pipe alone moves **0.21%** of pixels past
+the 8-level bar on delivered 4:2:0 material - three to fifty times the quantiser's own error. A comparison
+against an engine render therefore cannot answer "how wrong is int8"; it can answer "what does the user see
+between these two renders", which is a different, legitimate question.
+
+It is a gate, not a paragraph: `scripts/gate_sweep.py` **refuses to run** without
+`--reference-kind {model|engine-render|config}`, prints the declaration in its header, and writes
+`extra.reference_kind` + `reference_note` into every record it emits.
+`scripts/check_reference_declarations.py` lists any render-pair record in the corpus that does not carry one
+(exit 1), and `backend/tests/test_reference_declarations.py` pins both halves on CPU.
+
+```
+PYTHONPATH=scripts python3 scripts/check_reference_declarations.py     # the debt list
+```

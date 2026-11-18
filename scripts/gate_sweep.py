@@ -28,6 +28,37 @@ import numpy as np
 
 BAR = 8.0  # levels; the acceptance bar's own threshold
 
+# Which side is the reference, and what the pair can therefore say. The rule exists because a comparison
+# against an FP16 ENGINE RENDER was used once as if it measured the quantiser: the engine deviates from the
+# model by 0.055-0.087% and the colour pipe alone moves 0.21% of pixels past the 8-level bar on delivered
+# 4:2:0 material (int8-scales-bd.txt), while the quantiser's own error against the MODEL is 0.004-0.019%.
+# So the tool asks, the records carry the answer, and `scripts/check_reference_declarations.py` keeps the
+# undeclared ones visible instead of silently forgiven.
+REFERENCE_NOTES = {
+    "model": "reference is the MODEL's own fp16 output (torch): the only reference that measures a "
+             "renderer's own error",
+    "engine-render": "reference is a render of the FP16 ENGINE: the difference includes the engine "
+                     "(0.055-0.087% against the model) and the colour pipe (0.21% on its own), so it "
+                     "measures the PAIR, not the quantiser",
+    "config": "reference is the same renderer in another CONFIGURATION: the difference is that "
+              "configuration's effect, not an error",
+}
+
+
+def declare_reference(kind: str, force: bool = False) -> str:
+    """Refuse to measure a pair without saying what the second file IS."""
+    if kind in REFERENCE_NOTES:
+        return REFERENCE_NOTES[kind]
+    if not force:
+        raise SystemExit(
+            "refusing to compare two files without saying what the reference is.\n"
+            "  Pass --reference-kind {model|engine-render|config}.\n"
+            "  model         - the model's own fp16 output; the only one that measures an error\n"
+            "  engine-render - a render of the fp16 ENGINE; includes engine + colour pipe, measures the pair\n"
+            "  config        - the same renderer in another configuration; measures that change\n"
+            "  (--force-undeclared writes nothing usable: the record would carry no reference)")
+    return "UNDECLARED reference (forced): this number cannot say what it measures"
+
 
 def _frame_iter(path: str, ffmpeg: str, w: int, h: int):
     cmd = [ffmpeg, "-loglevel", "error", "-i", path, "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
@@ -78,19 +109,23 @@ def emit_records(rows: list[dict], s: dict, args, digest: str) -> list[dict]:
 
     items = [f"{args.clip_name}#frame{r['frame']}" for r in rows]
     pop = Population.of("frames", items, args.label)
+    reference_note = declare_reference(args.reference_kind, getattr(args, "force_undeclared", False))
+    instrument = f"{args.instrument} (reference: {args.reference_kind})"
     common = dict(population=pop, session=args.session, run=args.run,
-                  artifact=args.artifact, extra={"artifact_sha256": digest})
+                  artifact=args.artifact,
+                  extra={"artifact_sha256": digest, "reference_kind": args.reference_kind,
+                         "reference_note": reference_note})
     recs = [
-        Record(value=s["worst_share"], unit="%", instrument=f"{args.instrument}, {s['block']}px blocks",
+        Record(value=s["worst_share"], unit="%", instrument=f"{instrument}, {s['block']}px blocks",
                config=args.config + f" (worst frame {s['worst_share_frame']})", statistic="worst_of",
                **common),
         Record(value=float(s["frames_above_bar"]), unit="count",
-               instrument=args.instrument, config=args.config + f" (bar {args.bar}%)",
+               instrument=instrument, config=args.config + f" (bar {args.bar}%)",
                statistic="single", **common),
-        Record(value=s["worst_block_mean"], unit="levels", instrument=args.instrument,
+        Record(value=s["worst_block_mean"], unit="levels", instrument=instrument,
                config=args.config + f" (worst block mean, frame {s['worst_block_mean_frame']})",
                statistic="max", **common),
-        Record(value=float(s["worst_peak"]), unit="levels", instrument=args.instrument,
+        Record(value=float(s["worst_peak"]), unit="levels", instrument=instrument,
                config=args.config + " (peak channel delta on any frame)", statistic="max", **common),
     ]
     out = []
@@ -121,7 +156,13 @@ def main(argv=None) -> int:
     ap.add_argument("--id-prefix", default="RB")
     ap.add_argument("--from-json", default="",
                     help="emit from a saved per-frame table instead of re-decoding the pair")
+    ap.add_argument("--reference-kind", default="undeclared",
+                    choices=("undeclared", "model", "engine-render", "config"),
+                    help="what the SECOND file is - see REFERENCE_NOTES; undeclared is refused")
+    ap.add_argument("--force-undeclared", action="store_true",
+                    help="run anyway; the output says the number cannot say what it measures")
     args = ap.parse_args(argv)
+    reference_note = declare_reference(args.reference_kind, args.force_undeclared)
 
     if args.from_json:
         saved = json.load(open(args.from_json))
@@ -133,6 +174,7 @@ def main(argv=None) -> int:
         json.dump({"summary": s, "rows": rows}, open(args.out, "w"))
 
     print(f"{args.gated} vs {args.ungated}")
+    print(f"  reference ({args.reference_kind}): {reference_note}")
     print(f"  {s['frames']} frames, block {s['block']}")
     print(f"  worst share {s['worst_share']:.5f}% (frame {s['worst_share_frame']}), "
           f"frames above {args.bar}%: {s['frames_above_bar']}")

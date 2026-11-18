@@ -2204,3 +2204,45 @@ tasks:
     the lane's byte-identity rule; a cudnn algorithm change is a
     different kernel and needs the picture test. Do not re-enter the closed levers while here: int8 implicit
     FP8, per-channel Q/DQ, scalar-slope, width C=32/48, Winograd through cuDNN, sparsity.
+
+- id: rve-tail-layout-2026-11-19
+  title: 'The tail conv runs 2.5x faster on an NHWC view - but the render changed by 0.87% and nobody knows why'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 2h
+  tags:
+  - int8
+  - tail
+  - layout
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/verified/int8-tail-split.txt
+  - scripts/tail_conv_probe.py
+  owns_files:
+  - docs/wsp/verified/int8-tail-layout.txt
+  refutes: >-
+    Handing the tail conv a channels_last view instead of a contiguous NCHW tensor is a free win. The
+    isolated probe says it is 2.5x on the conv (5.296 -> 2.098 ms, and C_out 12 -> 16 changes nothing, so the
+    tensor-core tile fill is NOT the lever); in the app the tail went 7.77 -> 5.58 ms with the conv at 2.28.
+    But the two renders differ by 0.87% of pixels (443 of 494 frames above the 0.1% bar, peak 62), and a
+    tensor-level comparison of the two conv paths against an fp32 reference reads 0.00000% share, 0.0 peak,
+    mean difference 0.00000 - i.e. the LAYER is numerically identical, so the render difference comes from
+    somewhere else and has not been found. Until it is, the change is not adoptable and its 2.2 ms stay
+    unspent.
+  acceptance: >-
+    A/A of the current code (two renders, decoded-frame identity) and then one render with the layout patch
+    applied and one without, all three in ONE session, compared with gate_sweep and an explicit
+    --reference-kind config. If the A/A is not identical, the pipeline itself is not deterministic and that
+    is the finding; if it is, the patch's effect is isolated and named. The patch is parked at
+    /home/jorj/2Tb/tail-layout-nhwc-2026-11-18.patch (uncommitted, deliberately).
+  note: >-
+    Why it is not simply adopted: 2.2 ms is 4% of the frame and would take int8 from 1.14x to ~1.19x, but a
+    0.87% picture change is 8.7x the bar and the mechanism is unknown. The tensor test rules out the conv's
+    arithmetic; the remaining suspects are the downstream effect of the conv's OUTPUT format (the conv now
+    returns channels_last, so PixelShuffle and the residual add see different memory formats) and the other
+    code changes that landed between the two sessions (probe calibrate-only, frame timers, first-frame
+    sanity threshold) - the A/A in the acceptance separates them.
