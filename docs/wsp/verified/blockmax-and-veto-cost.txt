@@ -1,0 +1,30 @@
+# The second condition costs nothing because it never fires - and the right one does not exist
+
+Measured on the matched chain (Chainsaw 8 s at 5:00, chain 2), the configuration the calm-cut numbers
+come from:
+
+| second condition | reuse | fires |
+|---|---|---|
+| none | 165/249 (66.3%) | - |
+| block-max 8 | 165/249 (66.3%) | never |
+| block-max 4 | 165/249 (66.3%) | never |
+| pixel veto 40 | 165/249 (66.3%) | 0 vetoes |
+| pixel veto 20 | 165/249 (66.3%) | 0 vetoes |
+
+**The block-max is inert**: it is a 32 px mean of the channel-max delta, and a few pixels of 22 levels
+inside a 1024-pixel block average to ~0.02 levels. It cannot bound a narrow peak - the same dilution
+that makes the gate's original statistic blind, one level up.
+
+**The pixel veto is blind for the same reason the gate was**: it compares luma
+(`abs(luma - ref_luma).max()`), and a red-only change of 22 levels reads 5.5 there, below both 20 and 40.
+
+So neither existing mechanism is the second condition the share needs. A channel-max per-pixel veto
+would be, and it does not exist: adding it is a code change whose cost is unmeasured because there is
+nothing to measure yet.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/blockmax-and-veto-cost.txt \
+       --records docs/wsp/verified/records/blockmax-and-veto-cost.jsonl --bars docs/claims-bars.json
+
+@claim R001 66.3 % "frames [5aa8615233f267ff] n=249" measured
+@claim R002 66.3 % "frames [5aa8615233f267ff] n=249" measured
+@claim R003 0.0 count "frames [5aa8615233f267ff] n=249" measured

@@ -1,0 +1,14 @@
+# Point 7: the cost of a second condition, on the MATCHED chain (Chainsaw 8 s, chain 2), 2026-11-18.
+# All four runs: same clip, same gate (channel_max_share 0.07%), same chain.
+no condition      165/249 reused (66.3%), depth {1: 83, 2: 82}
+block-max 8       165/249 reused (66.3%), depth {1: 83, 2: 82}
+block-max 4       165/249 reused (66.3%), depth {1: 83, 2: 82}
+pixel veto 40     165/249 reused (66.3%), 0 pixel vetoes
+pixel veto 20     165/249 reused (66.3%), 0 pixel vetoes
+
+# The block-max (a 32 px mean of the channel-max delta) is inert here: a few pixels of 22 levels
+# inside a 1024-pixel block give a block mean of ~0.02, so no threshold near the bar ever fires.
+# The pixel veto is luma-based (abs(luma - ref_luma).max()), and a red-only change reads 0.25 x 22
+# in luma, below both 20 and 40 - the same projection blindness as the gate's own statistic.
+# Neither is the second condition the share needs; a channel-max per-pixel veto would be, and does
+# not exist.
