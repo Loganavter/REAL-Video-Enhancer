@@ -2053,9 +2053,9 @@ tasks:
     cost puts the tail (8.8 ms of 4K passes) and the 6.2 ms of unnamed plumbing ahead of it.
 
 - id: rve-calibration-on-crops-2026-11-19
-  title: 'Calibration runs 24 full 1080p frames for 21 s - the field calibrates on small crops'
+  title: 'DONE: crops calibrate 15.7x cheaper and the picture did not get worse'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -2088,8 +2088,20 @@ tasks:
     the crop-calibrated body is within the session's drift of the full-frame one on both clips. Report the
     calibration wall clock per arm (fresh process each), because the whole point is the cost, and keep the
     per-channel range table so a reader can see WHERE the two disagree, if they do.
+  resolution: >-
+    measured 2026-11-18, BD Violet, 1080p, four held-out frames (29/44/274/400) in neither arm.
+    Full-frame arm: 24 frames, 49.8 Mpx, calibrate 7.09 s, worst share 0.02256%, peak 26. Crop arm: 96 crops
+    of 256x256 (4 per frame, fixed offsets), 6.3 Mpx, calibrate 0.45 s, worst share 0.01881%, peak 19. So
+    the maximum over 32x fewer samples did NOT under-cover: the crop-calibrated body is 1.2x better on the
+    worst held-out frame with a lower peak, both far under the 0.1% share bar. Calibration cost drops 15.7x;
+    in the probe (which runs its own hooked forwards) the same ratio applies to its 21.1 s, so what is left
+    of the probe's cost is the 2.9 s decode and int8's break-even on BD falls to roughly that alone.
+    NOT adopted yet: n=1 per arm (not an A/A), one clip, four frames, and the peak moved in the direction
+    that should be harder to explain (26 -> 19); a repeat is needed before the peak is quoted, and the
+    percentile-ceiling fallback was not needed and is not implemented. Record:
+    docs/wsp/verified/int8-calibration-crops.txt (harness check PASS).
   note: >-
-    Why it is filed now: the probe was just cut down to calibration only (33.4 s of certificate removed),
+    Why it was filed: the probe was just cut down to calibration only (33.4 s of certificate removed),
     and what is left is 21.1 s of calibration on full frames. External practice, read 2026-11-19:
     "a few forward passes on a small calibration set" is the standard PTQ recipe (arXiv:2610.28537,
     arXiv:2610.03218), the calibration-set size question has its own paper (Hubara et al., ICML 2021,
@@ -2097,3 +2109,42 @@ tasks:
     Data-Free Quantization) even estimates activation ranges analytically. NOT the same question as
     int8-split-calibration, which is about WHICH TITLES (per-title calibration mis-states composition 20x):
     that warning is about the scene, this row is about the crop. Do not use its conclusion to refuse crops.
+
+- id: rve-int8-at-1440x1080-2026-11-19
+  title: 'The film lane runs at 1440x1080 and the body has never been measured there'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1h
+  tags:
+  - int8
+  - resolution
+  - coverage
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - backend/src/pytorch/UpscaleTorch.py
+  - docs/MODEL.md
+  owns_files:
+  - docs/wsp/verified/int8-1440x1080.txt
+  refutes: >-
+    The body's accuracy is a property of the quantiser, not of the LR resolution. It is inside every
+    explicit gate at 1440x1080 (1.56 Mpx against the app's 2.5 Mpx refusal, 64 body channels, whole-frame
+    path) and nothing in the code constrains the shape - buffers are allocated per (batch, h, w) and the
+    kernel masks rows - yet the ONLY recorded body-vs-model number is at LR 1920x1080 (0.00442-0.01917% on
+    seven frames). The kernel's own docstring warns the error once grew with resolution (0.00000% at
+    256x256, 1.23% at 512x512, 3.53% at 1080p) and that docstring is not a record. So "it will work at
+    1440x1080" is currently an inference from a size comparison, not a measurement - and the film lane
+    (94 frames, 1440p -> 2880p, MODEL.md) is a shipped input shape.
+  acceptance: >-
+    The same statistic as the 1080p row, at LR 1440x1080: body against the model on at least four held-out
+    frames, share >8 levels and peak, plus the calibration cost and the body's phase lines, so the film
+    lane's speed-up is measured rather than scaled from pixel counts. If the body reads worse there than at
+    1080p, the app's 2.5 Mpx gate is the wrong shape and the row says so with numbers.
+  note: >-
+    Filed 2026-11-19 after the owner asked the direct question ("will 1920x1080 and 1440x1080 work?") and
+    the honest answer was "by the gates yes, by measurement only 1080p". Cost is one GPU hour: the clip is
+    the film cut already named in MODEL.md, the body and the model are the same, and the metric is the one
+    the certificate file uses.
