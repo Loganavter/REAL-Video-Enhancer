@@ -300,6 +300,23 @@ That re-opens one question and closes another: the quantiser is not the cause of
 measurement here), and whatever shifts the ink by ~5 levels happens between the body's output and the decoded
 file (open, and a colour-pipe question rather than a quantisation one).
 
+## Closed on the owner's eye: the body is indistinguishable, and the "+4.4 ink lift" was a comparison error
+
+The clean test - one decoded frame fed to the model (torch fp16) and to the int8 body, no colour pipe on either
+side - gives 0.01154% of pixels above the bar (peak 15) on frame 169, and the owner's verdict on the full 4K
+frame is "zero difference".
+
+That closes the stroke question, and it corrects the number the lane has been carrying since the morning: the
++4.40/+6.60 ink lift was measured by comparing a RENDERED FILE (through the yuv420p pipe, decoded by ffmpeg)
+against a model output computed on a raw frame dump. Those two sides are not the same picture - different
+decode path, different colour conversion, and in at least one case a different frame index - so the signed
+difference it reported was the comparison, not the quantiser. Measured on identical input, the body's ink delta
+is -0.51 (4-frame calibration) to -1.23 (24-frame), i.e. it does not lift the line, and the rim moves with it.
+
+What remains true from this file: the acceptance statistic is a render-internal instrument (the 4:2:0 pipe alone
+moves 0.13-0.21% of pixels past the bar), the fp16 engine deviates from the weights 3-10x more than the body
+does, and every scale lever is measurably worthless. What is withdrawn: that int8 flattens the drawing.
+
 ## Records
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt

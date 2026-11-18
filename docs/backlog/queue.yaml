@@ -1625,9 +1625,9 @@ tasks:
     things; the second is the likely one and it is answerable by dumping one hop's tensor from both.
 
 - id: rve-int8-input-mismatch-2026-11-18
-  title: 'The int8 branch may be fed a differently prepared frame than the fp16 engine - the +4.4 ink lift is not in the body'
+  title: 'CLOSED: the +4.4 ink lift was a comparison error, not a branch input mismatch'
   type: experiment
-  status: todo
+  status: dropped
   owner: '@supervisor'
   priority: P1
   gpu: partial
