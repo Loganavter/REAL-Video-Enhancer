@@ -60,6 +60,11 @@ class Int8ProbeResult:
     composition_d2: float = float("nan")
     stale_d1: float = float("nan")
     stale_d2: float = float("nan")
+    # adversarial selection: the worst composition over the top-k reuse events of the whole clip,
+    # ranked by the gate's own statistic. The spread sample cannot reach these by construction.
+    adversarial: float = float("nan")
+    adversarial_control: float = float("nan")
+    adversarial_frames: int = 0
 
     def stats(self) -> str:
         if self.error:
@@ -102,6 +107,76 @@ def _read_pairs(clip, count, w, h):
             pair.append(torch.from_numpy(img).permute(2, 0, 1)[None])
         out.append(pair)
     return out
+
+
+def _read_indices(clip, indices, w, h):
+    """The wanted frames, by index, in ONE streaming pass.
+
+    `select=eq(n,index)` is not usable here: with B-frames the filter's counter does not agree with
+    the pipe's frame order, and 12 of 13 pairs came back as different frames (their measured share
+    was above the gate's threshold, which is how it was caught). Counting the stream is exact.
+    """
+    import subprocess
+
+    import numpy as np
+    import torch
+
+    wanted = set(int(i) for i in indices)
+    size = w * h * 3
+    argv = [FF, "-hide_banner", "-loglevel", "error", "-i", clip, "-vf", f"scale={w}:{h}",
+            "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE)
+    out, index = {}, -1
+    while wanted:
+        raw = proc.stdout.read(size)
+        if len(raw) < size:
+            break
+        index += 1
+        if index in wanted:
+            img = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 3).astype("float32") / 255.0
+            out[index] = torch.from_numpy(img).permute(2, 0, 1)[None]
+            wanted.discard(index)
+    proc.stdout.close()
+    proc.wait()
+    return out
+
+
+def _scan_reuse_events(clip, w, h, gate_threshold, max_chain, limit=64):
+    """Every frame the gate would serve from a reference, ranked by the gate's own statistic.
+
+    The whole clip, low resolution, no model: the gate is cheap and the ranking is what the bar's
+    worst frame lives on. Returns [(frame, reference, share)] worst first.
+    """
+    import subprocess
+
+    import numpy as np
+    import torch
+
+    from .TemporalReuse import ReferenceFrameGate
+
+    gate = ReferenceFrameGate(threshold=gate_threshold, max_chain=max_chain,
+                              statistic="channel_max_share")
+    size = w * h * 3
+    argv = [FF, "-hide_banner", "-loglevel", "error", "-i", clip, "-vf", f"scale={w}:{h}",
+            "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE)
+    events, kept, index = [], None, -1
+    while True:
+        raw = proc.stdout.read(size)
+        if len(raw) < size:
+            break
+        index += 1
+        img = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 3).copy()
+        t = torch.from_numpy(img).permute(2, 0, 1)[None].float() / 255.0
+        duplicate = gate.is_duplicate(t)
+        if duplicate:
+            events.append((index, kept, float(gate.last_delta)))
+        else:
+            kept = index
+    proc.stdout.close()
+    proc.wait()
+    events.sort(key=lambda e: -e[2])
+    return events[:limit]
 
 
 def _quantise_weights(state):
@@ -174,7 +249,8 @@ def _statistic(a, b, bar=8.0):
 
 def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
           bar: float = 0.1, gate_threshold: float = GATE_THRESHOLD,
-          filter_statistic: str = "block_mean") -> Int8ProbeResult:
+          filter_statistic: str = "block_mean", adversarial: int = 0,
+          max_chain: int = 3) -> Int8ProbeResult:
     """Would int8 fit this video? Composition first, own defect second, bar = 0.1% of pixels."""
     try:
         import torch
@@ -261,6 +337,41 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
                 del outs_ref, outs_got
         stale1_worst = max(stale1, default=float("nan"))
         stale2_worst = max(stale2, default=float("nan"))
+        # Adversarial selection: the spread sample can only find the damage it happens to land on.
+        # Scan the whole clip with the gate's own statistic (no model), rank the reuses, and render
+        # the top ones. This is the only path that can reach the frame the bar's worst lives on.
+        adv, adv_ctl, adv_n = float("nan"), float("nan"), 0
+        if adversarial and filter_statistic == "channel_max_share":
+            events = _scan_reuse_events(clip, width, height, gate_threshold, max_chain,
+                                        limit=int(adversarial))
+            adv_vals, ctl_vals = [], []
+            need = [i for f, r, _s in events if r is not None for i in (f, r)]
+            cache = _read_indices(clip, need, width, height) if need else {}
+            with torch.no_grad():
+                for frame_idx, ref_idx, _share in events:
+                    if ref_idx is None:
+                        continue
+                    x_t = cache.get(frame_idx)
+                    x_r = cache.get(ref_idx)
+                    if x_t is None or x_r is None:
+                        continue
+                    x_t = x_t.cuda().half()
+                    x_r = x_r.cuda().half()
+                    # self-check: the scan's bookkeeping must agree with the pixels. A pair whose
+                    # measured share is above the gate's threshold is not a reuse the gate would make,
+                    # and rendering it would report a scene change as a composition error.
+                    lr_share = float((x_r - x_t).abs().amax(dim=1).gt(8.0 / 255.0).float().mean()) * 100.0
+                    if lr_share > gate_threshold:
+                        continue
+                    ref_r = model(x_r).float()
+                    got_t = _quantised_forward(model_q, x_t, inputs, outputs).float()
+                    fp16_t = model(x_t).float()
+                    adv_vals.append(_statistic(ref_r, got_t)[0])
+                    ctl_vals.append(_statistic(ref_r, fp16_t)[0])
+            adv_n = len(adv_vals)
+            adv = max(adv_vals, default=float("nan"))
+            adv_ctl = max(ctl_vals, default=float("nan"))
+
         if not engine:
             return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "no test pairs", error="no test pairs")
         engine_worst = max(s for s, _ in engine)
@@ -274,14 +385,21 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         # The gate serves references up to its chain depth, so the verdict is taken at the WORST depth it may
         # serve - certifying at depth 1 and serving at depth 2 is the blind spot this project already hit once.
         worst_depth = comp_worst if not comp2 else max(comp_worst, c2)
+        if adv_n:
+            worst_depth = max(worst_depth, adv)
         verdict = worst_depth <= bar
         reason = (f"composition d1 {comp_worst:.3f}% / d2 {c2:.3f}% -> worst {worst_depth:.3f}% "
                   f"{'<=' if verdict else '>'} bar {bar}% (own defect {engine_worst:.3f}%, "
                   f"{len(comp)} of {len(test_idx)} pairs at d1, {_n2} at d2); "
                   f"fp16 reference on the same pairs: d1 {stale1_worst:.3f}% / d2 {stale2_worst:.3f}%")
+        if adv_n:
+            reason += (f"; adversarial top-{adv_n} of the clip: {adv:.3f}% "
+                       f"(fp16 control {adv_ctl:.3f}%)")
         return Int8ProbeResult(verdict, engine_worst, comp_worst, peak, len(comp), bar, reason,
                                frames_used=len(pairs),
                                frames=[f for i in calib_idx for f in frames_all[i]],
-                               composition_d2=c2, stale_d1=stale1_worst, stale_d2=stale2_worst)
+                               composition_d2=c2, stale_d1=stale1_worst, stale_d2=stale2_worst,
+                               adversarial=adv, adversarial_control=adv_ctl,
+                               adversarial_frames=adv_n)
     except Exception as error:  # noqa: BLE001 - a probe failure must never cost a render
         return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "probe failed", error=str(error))

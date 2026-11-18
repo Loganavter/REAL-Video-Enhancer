@@ -43,6 +43,10 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--bar", type=float, default=0.1)
+    ap.add_argument("--adversarial", type=int, default=0,
+                    help="render the top-k reuse events of the whole clip, ranked by the gate's own "
+                         "statistic - the only way to reach the frame the bar's worst lives on")
+    ap.add_argument("--max-chain", type=int, default=3)
     ap.add_argument("--filter-statistic", default="block_mean",
                     choices=("block_mean", "channel_max_share"),
                     help="the variable the pair filter uses; it must be the gate's own")
@@ -54,6 +58,8 @@ def main() -> int:
     for clip in args.clips:
         kw = {} if args.gate_threshold is None else {"gate_threshold": args.gate_threshold}
         kw["filter_statistic"] = args.filter_statistic
+        kw["adversarial"] = args.adversarial
+        kw["max_chain"] = args.max_chain
         r = probe(clip, args.model, args.width, args.height, frames=args.frames, bar=args.bar, **kw)
         print(f"{clip} (frames={args.frames})")
         print(f"  {r.reason}")
