@@ -126,6 +126,40 @@ internal render, but it is not a shipping criterion for this class - the encode 
 quantiser does. A lossless 4K comparison (yuv444p) is exact (mean 0.000, correlation 1.000) but unplayable
 in real time on the card that renders it, so it is a record, not a viewing instrument.
 
+## What int8 actually costs the drawing: the stroke loses contrast, the colour does not
+
+The owner's report was "fp16 reproduces the halo, int8 does not, and the tints are unclear". Both halves are
+measurable, and they came out as: colour is fine, the STROKE is what changes.
+
+Method (`scripts/tint_attribution.py`): take the model's own fp16 output, find the pixels on the top 2% of
+its laplacian - the line art - and split them into the ink core (laplacian < 0, the dark line) and the outer
+rim (laplacian > 0, the lighter side next to it). Then read each render's mean luma on those two sets,
+because a halo is a signed effect and an absolute difference cannot see it.
+
+| frame | image | ink core | outer rim | ink - model | rim - model |
+|---|---|---|---|---|---|
+| 169 | model | 77.60 | 143.20 | - | - |
+| 169 | fp16 engine | 78.68 | 144.64 | **+1.07** | **+1.43** |
+| 169 | int8 body | 82.00 | 143.57 | **+4.40** | +0.36 |
+| 274 | model | 58.63 | 149.82 | - | - |
+| 274 | fp16 engine | 59.65 | 151.36 | **+1.02** | **+1.54** |
+| 274 | int8 body | 65.20 | 149.38 | **+6.57** | -0.44 |
+
+Read it as: the fp16 engine lifts the line AND the rim by about the same amount, so the model's halo survives
+intact (the ink-to-rim step is 65.6 in the model, 65.9 in the engine). The int8 body lifts the ink by 4.4-6.6
+levels and leaves the rim where it was (or lowers it), which cuts the ink-to-rim step by ~7-9% - the line
+goes pale, the halo flattens, and the drawing reads softer. That is the class the owner sees, and it is not
+the class the 0.1% share describes: the share counts pixels 8 levels off, this is a systematic +5 on the ink.
+
+Colour is the opposite story: chroma against the source is 0.30-0.45 levels mean for both, and against the
+model each render's block-mean RGB shift is within 0.06 levels of the other's; on 82-87% of blocks int8 is
+marginally CLOSER to the source colour than fp16 (five frames). So "tints" are not where int8 differs - the
+stroke is.
+
+Consequence: 8-bit cannot fix this class either - it is a systematic lift of the ink, produced by quantising
+a 2-3 px excursion, and per-channel scales moved it by 0.015% (the section above). If the pale stroke is
+acceptable the lane ships on picture; if it is not, the fix is precision at the edges, not a scale.
+
 ## Records
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt

@@ -550,6 +550,13 @@
     4 Mbps re-encode of the same title, so it was a property of the smooth material.
   evidence: docs/wsp/verified/gate-bd.txt
   note: >-
+    THE COST IS THE STROKE, MEASURED (2026-11-18): against the model's own fp16 output, on the top-2% laplacian
+    pixels, int8 lifts the ink core by +4.40 (frame 169) and +6.57 (frame 274) levels while leaving the outer
+    rim at +0.36 / -0.44, where the fp16 engine lifts both together (+1.07/+1.43 and +1.02/+1.54). The
+    ink-to-rim step therefore drops ~7-9% in int8 and is preserved in fp16: the line goes pale and the halo
+    flattens. Colour is not the axis - chroma against the source is 0.30-0.45 levels for both, and int8 is
+    marginally closer to the source colour on 82-87% of blocks over five frames. Nor is the axis the 0.1%
+    share, which counts pixels 8 levels off while this effect is a systematic +5 on the ink.
     Replaces int8-live-verdicts, int8-peak-unmet and int8-d2-owner-split, all measured on re-encodes
     (int8-d2-control.txt alone carries 18 contaminated records). The peak conclusion survives in
     direction on Violet (25 with the luma probe, 68 in the int8-forced run) but the recorded range
@@ -590,6 +597,9 @@
     gate-exceeds-bar-on-bd, noise-floor-rises-on-bd and the channel-max cell below.
   evidence: docs/wsp/verified/gate-bd.txt
   note: >-
+    CLOSED BY THE OWNER 2026-11-18: further investigation of frame reuse is FORBIDDEN - it is not a
+    road-map question and no further measurement of it is to be taken. This verdict and gate-bd.txt are
+    the record, not an invitation; queue row rve-reuse-gate-forbidden-2026-11-18 carries the order.
     The channel-max cell on BD Violet is the one that passes the share and fails the concentration:
     0.07337% worst frame, zero frames above the bar, 67.8% reuse, but block mean 20.90 and peak 138
     levels on a saturated edge - three times the concentration of the artifact the owner rejected by
