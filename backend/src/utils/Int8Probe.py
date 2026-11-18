@@ -1,14 +1,20 @@
-"""Decide, before the first frame, whether the int8 body may serve this video.
+"""Supply the int8 body with calibration for THIS video, and (opt-in) certify the picture.
 
-The body is the sixteen 64-channel convolutions between the head and the tail. In int8 they run 1.49x
-faster than the fp16 TensorRT engine (measured, one session, NVENC alongside), but the acceptance bar is
-about pictures, and the picture depends on the material: on title-card-like content the body's own error
-is 0.009% of pixels, on the Violet pair it is 0.057% while *composition* - what the temporal gate
-actually shows when a frame is served from an int8 reference one frame old - is 0.170%.
+The body is the sixteen 64-channel convolutions between the head and the tail. Before it can run, it needs
+per-layer scales measured on the video being rendered: the range of a dark Blu-ray with grain and a flat
+anime fill do not fit the same +-127 grid, and a body calibrated on a single frame read 0.566% where the
+spread calibration reads 0.050%. That calibration is this module's first job, and it is required for every
+video rendered through the body.
 
-So the probe answers the composition question, not the engine's own defect. Certifying on the engine's
-own number would have shipped both Violet titles: measured, their own defect passes the bar and their
-composition does not.
+The second job - certifying that int8 is safe for this video - is **withdrawn from the evidence chain
+(2026-11-19)** and is now opt-in via ``certify=True``. Why: its pair set moved with the configuration it
+was certifying (on one clip, 7 pairs read engine 0.082% / composition 0.266% / peak 25 in an fp16 run and
+engine 0.688% / composition 0.918% / peak 68 in an int8-forced run - because a forced verdict sets the
+reference's own ``int8Fit`` before the probe reads it), so its percentages are not comparable across runs.
+And in the shipped path the verdict never decided anything: the Fast preset forces int8 and the verdict is
+overwritten. The picture is judged on renders (`docs/wsp/verified/` - gate_sweep on the encoded pair),
+not by this module. The certificate code is kept, not deleted: it is how the population defect above was
+found, and a future certification has to start from a pair set that is a function of the clip alone.
 
 Two things this module deliberately is not:
 
@@ -67,10 +73,17 @@ class Int8ProbeResult:
     adversarial: float = float("nan")
     adversarial_control: float = float("nan")
     adversarial_frames: int = 0
+    # False when the probe ran for calibration only: there is no pair population, so there is no
+    # percentage to quote and none to cite. See the module docstring for why that is the shipped mode.
+    certified: bool = True
 
     def stats(self) -> str:
         if self.error:
             return f"int8 probe unavailable ({self.error}); int8 stays off"
+        if not self.certified:
+            return (f"int8 probe: calibration only, {self.frames_used} frames "
+                    f"(certification withdrawn 2026-11-19: its pair set moved with the configuration, "
+                    f"so its percentages are not comparable across runs)")
         return (f"int8 probe: engine {self.engine:.3f}%  composition {self.composition:.3f}%  "
                 f"peak {self.peak:.0f}  ({self.pairs} pairs, bar {self.bar}%) -> "
                 f"{'int8' if self.use_int8 else 'fp16'}")
@@ -252,8 +265,14 @@ def _statistic(a, b, bar=8.0):
 def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
           bar: float = 0.1, gate_threshold: float = GATE_THRESHOLD,
           filter_statistic: str = "block_mean", adversarial: int = 0,
-          max_chain: int = 3, engine_ref=None) -> Int8ProbeResult:
-    """Would int8 fit this video? Composition first, own defect second, bar = 0.1% of pixels."""
+          max_chain: int = 3, engine_ref=None, certify: bool = True) -> Int8ProbeResult:
+    """Calibrate the body on this video; with ``certify=False`` do nothing else.
+
+    ``certify=False`` is what the render path asks for: the calibration frames are the part the body cannot
+    work without, the verdict is the part whose population moved with the configuration (see the module
+    docstring) and which the shipped Fast preset overrides anyway. Skipping it removes the reference
+    forwards and the quantised twin, which is where most of the probe's wall clock went.
+    """
     try:
         import torch
         from ..pytorch.spandrel.architectures.Compact.__arch.SRVGG import SRVGGNetCompact
@@ -316,6 +335,13 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         orig_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         inputs, outputs = _calibrate(model, [f for i in calib_idx for f in frames_all[i]])
         inputs["body.0"] = (0.0, 1.0)      # the head's input range is the clamp's own, not a measurement
+        if not certify:
+            # The body's half of the work is done: the frames and the scales are what it needs. Nothing
+            # below this line produces anything the shipped path reads, and its numbers are not
+            # comparable across configurations (module docstring), so it is not run.
+            return Int8ProbeResult(True, float("nan"), float("nan"), float("nan"), 0, bar,
+                                   "calibration only", frames_used=len(pairs), certified=False,
+                                   frames=[f for i in calib_idx for f in frames_all[i]])
         model_q = _copy.deepcopy(model)    # the quantised twin: `got` must use these weights
         model.load_state_dict(orig_state)  # and `ref` must be the fp16 model, not fp16 on int8 weights
         def reference(x):
