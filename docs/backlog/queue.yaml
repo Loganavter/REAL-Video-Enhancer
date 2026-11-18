@@ -2309,9 +2309,9 @@ tasks:
     RVE_INT8_CERTIFY=1 (added with the finding, documented here because it is otherwise invisible).
 
 - id: rve-int8-picture-remeasure-2026-11-19
-  title: 'Every app-measured int8 content number was taken with single-frame calibration - re-take them'
+  title: 'DONE: audited the corpus - no current number rests on the single-frame calibration'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -2342,7 +2342,20 @@ tasks:
     rows and int8-wall-ab.txt's (those are timing and unaffected, but they name the picture as unchanged, so
     the claim needs a reference or a deletion). Report which numbers moved and by how much; a table of
     "unchanged" is the deliverable when nothing moved.
+  resolution: >-
+    closed 2026-11-19 by audit instead of by re-rendering, and the audit says there is nothing to re-take.
+    All 479 records were classified by instrument; the class "a decode of two APP renders whose config names
+    the int8 body" holds 6 records in 3 files (int8-and-violet-sweeps, violet-calibration-fix,
+    violet-int8-forced) - and all three files are already marked `population: contaminated input`, i.e. they
+    were retired on 2026-11-18 by the BD-population retraction, for a reason unrelated to today's bug; two of
+    the six are additionally the withdrawn single-frame reading itself. The surviving int8 accuracy numbers
+    are the model-referenced ones (body vs model 0.00442-0.01917%), which come from scripts/ where
+    calibration is explicit. So the ordering bug was real (0.45050% between two renders) and its blast radius
+    on the record is zero. Record: docs/wsp/verified/int8-content-reaudit.txt. RESIDUAL GAP stated there:
+    numbers quoted only in prose cannot be classified mechanically - 213 claims for 479 records means a
+    figure can live in a sentence and be inherited by nothing.
   note: >-
-    Filed straight after the ordering fix, because the alternative is a corpus where the configuration named
-    in the records no longer exists. The model-referenced numbers (body vs model 0.004-0.019%) are NOT part
+    Filed straight after the ordering fix, because the alternative was a corpus where the configuration
+    named in the records no longer exists. The audit replaced three hours of renders with ten minutes of
+    classification, which is the point of measuring the scope before doing the work. The model-referenced numbers (body vs model 0.004-0.019%) are NOT part
     of this: they come from scripts/ and calibrate explicitly.
