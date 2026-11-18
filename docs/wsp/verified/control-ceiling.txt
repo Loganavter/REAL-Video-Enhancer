@@ -1,0 +1,23 @@
+# `control_max <= sweep_max`, as a check rather than a sentence
+
+A maximum over a subset cannot exceed the maximum over the set. `scripts/check_control_ceiling.py`
+takes a probe control record and a sweep record and exits 1 when the control is above the sweep.
+
+It fires on both clips:
+
+| clip | probe control | full fp16 sweep | verdict |
+|---|---|---|---|
+| Chainsaw | 0.083% | 0.07546% | **VIOLATION** |
+| Violet | 0.077% | 0.07345% | **VIOLATION** |
+
+That is the honest state and not a formality: the probe re-decides which frames the gate reuses, so its
+pair set is not a subset of the render's, and its composition number is about a different population
+than the one the bar judges. The check is the mechanical form of the rule; making it pass needs the
+probe to replay the render's decisions, which it cannot do without the render.
+
+Usage, and the exact output, are in `logs/control-ceiling.log`.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/control-ceiling.txt \
+       --records docs/wsp/verified/records/control-ceiling.jsonl --bars docs/claims-bars.json
+
+@claim R001 1.0 count "frames [718310b673d2e8ba] n=481" measured
