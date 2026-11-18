@@ -1,0 +1,67 @@
+{
+ "take": "2026-11-18T17:45:25Z",
+ "height": 1080,
+ "width": 1920,
+ "out_channels": 64,
+ "flop_gflop": 7.17,
+ "traffic_mb": 277.9,
+ "floor_ms": 0.965,
+ "rows": [
+  {
+   "cin": 3,
+   "weights": "nchw",
+   "input": "nchw",
+   "ms": 3.788,
+   "tflops": 1.89
+  },
+  {
+   "cin": 3,
+   "weights": "nchw",
+   "input": "nhwc-view",
+   "ms": 3.411,
+   "tflops": 2.1
+  },
+  {
+   "cin": 3,
+   "weights": "channels_last",
+   "input": "nchw",
+   "ms": 3.29,
+   "tflops": 2.18
+  },
+  {
+   "cin": 3,
+   "weights": "channels_last",
+   "input": "nhwc-view",
+   "ms": 3.196,
+   "tflops": 2.24
+  },
+  {
+   "cin": 8,
+   "weights": "nchw",
+   "input": "nchw",
+   "ms": 4.498,
+   "tflops": 1.59
+  },
+  {
+   "cin": 8,
+   "weights": "nchw",
+   "input": "nhwc-view",
+   "ms": 3.675,
+   "tflops": 1.95
+  },
+  {
+   "cin": 8,
+   "weights": "channels_last",
+   "input": "nchw",
+   "ms": 3.936,
+   "tflops": 1.82
+  },
+  {
+   "cin": 8,
+   "weights": "channels_last",
+   "input": "nhwc-view",
+   "ms": 3.663,
+   "tflops": 1.96
+  }
+ ]
+}

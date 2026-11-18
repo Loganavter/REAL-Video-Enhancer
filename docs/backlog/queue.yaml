@@ -2170,7 +2170,7 @@ tasks:
   type: experiment
   status: todo
   owner: '@supervisor'
-  priority: P1
+  priority: P2
   gpu: true
   cost: 4h
   tags:
@@ -2376,11 +2376,11 @@ tasks:
     of this: they come from scripts/ and calibrate explicitly.
 
 - id: rve-head-conv-2026-11-19
-  title: 'The head conv runs at 1.5 TFLOPS - 4.65 ms for 7.17 GFLOP, 4.8x its own traffic floor'
+  title: 'DONE: the head conv is not layout-bound - 19% from the layout lever, and the pass itself is the target'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
-  priority: P2
+  priority: P1
   gpu: true
   cost: 2h
   tags:
@@ -2407,9 +2407,65 @@ tasks:
     fuse the head with its PReLU. Report TFLOPS and ms against the 0.96 ms floor. Then, separately, the
     fused variant: a head that writes int8 codes directly, which removes the 265 MB fp16 write and the 1.58
     ms quantise pass - byte-identity is the criterion, since the arithmetic need not change.
+  resolution: >-
+    measured 2026-11-19 in isolation (scripts/head_conv_probe.py, 1080p fp16, 10 iters, one GPU job). The
+    layout lever that gave the TAIL 2.5x gives the HEAD 19%: NCHW/NCHW 3.788 ms (1.89 TFLOPS), NHWC view +
+    channels_last weights 3.196 (2.24), and the engine's 3 -> 8 padded input is SLOWER (3.66-4.50). So the
+    row's premise is refuted - the head is not layout-bound. Why: intensity 7.17 GFLOP / 278 MB = 26
+    FLOP/byte against the card's ~611 ridge, i.e. 3 input channels writing 265 MB can never be compute-bound,
+    and K=27 fills 27 of a 32-wide tensor-core k-step at best. The best variant is still 3.3x its own 0.96 ms
+    traffic floor, so the remaining 2.2 ms is in serving the write, and the lever is a PASS, not a layout:
+    fuse head conv + PReLU + quantise into one kernel writing int8 (265 MB fp16 write + the 1.58 ms quantise
+    pass both disappear, ceiling 1.5-2.5 ms of the 6.25). Filed as rve-head-quantise-fusion-2026-11-19.
+    Record: docs/wsp/verified/int8-head-conv.txt (harness check PASS). NOT covered: the in-app 4.65-5.2 ms vs
+    3.2 isolated is not decomposed (clamp, input conversion, pipeline).
   note: >-
+    DEMOTED FROM P1 AND RE-PRICED 2026-11-19: the layout adoption (rve-tail-layout) already took the conv to
+    2.35 ms = 12.2 TFLOPS, i.e. under this row's own 2.5 ms target, so what is left here is the further
+    step to ~1.1 ms (25-30 TFLOPS) for a day of Triton. The head conv (7.17 GFLOP in 4.65 ms = 1.5
+    TFLOPS, 4.8x its traffic floor) is twice the remaining cost and 2 h to probe, so it goes first.
     Found while filling the reserve in the plan (docs/PLAN-int8-envelope-2026-11-19.md), from numbers already
     recorded: head+quantise 6.25 ms per frame, quantise 1.58 of it, which leaves 4.65 for a 7.17 GFLOP conv.
     The quantise pass is already at its traffic floor (1.38 of 1.58), so the head conv is the whole remaining
     cost. Cheapest probe in the reserve after the batch test: it is a torch conv on a random tensor, no app,
     no clip. Do not confuse it with the 2.5 Mpx envelope work: this one changes no picture.
+
+- id: rve-head-quantise-fusion-2026-11-19
+  title: 'Fuse head conv + PReLU + quantise into one kernel that writes int8 - the 265 MB fp16 pass is the cost'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 4h
+  tags:
+  - int8
+  - head
+  - fusion
+  - bandwidth
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-head-conv.txt
+  - backend/src/pytorch/Int8Body.py
+  - backend/src/pytorch/Int8Kernels.py
+  owns_files:
+  - docs/wsp/verified/int8-head-fusion.txt
+  refutes: >-
+    The head + quantise 6.25 ms cannot be reduced without changing the model. Everything layout-side is
+    measured and closed (head conv isolate: 3.2-4.5 ms across input/weight/padding variants), and the
+    quantise pass is at its own floor, so what remains is the pass count: the head writes 265 MB of fp16 that
+    the quantise kernel immediately reads to produce 133 MB of int8. If a fused head+PReLU+quantise kernel
+    does not beat the current 6.25 ms by at least 1.5 ms on the frame, the shape is at its floor and this row
+    closes with that number.
+  acceptance: >-
+    A Triton 3 -> 64 head with the PReLU and the int8 requant in its epilogue, writing codes directly. Two
+    criteria, in order: (1) the codes must be comparable to today's - byte-identity if the arithmetic order
+    can be preserved, otherwise the render-pair picture statistic on the full 494 frames (worst frame share,
+    bar 0.1%) with the change recorded as different-arithmetic, because a tolerance check cannot certify an
+    epilogue reorder (arXiv:2609.00363); (2) an interleaved wall A/B against the torch head, >=3 rounds, one
+    session, reporting the head and quantise phase lines beside the frame total.
+  note: >-
+    Filed from the isolation result (int8-head-conv.txt): the head is 1.54 TFLOPS and 26 FLOP/byte, i.e. the
+    most memory-side convolution in the pipeline, and its output is what the quantise pass exists to
+    compress. The saving has two parts and they must be reported separately - the eliminated 265 MB fp16
+    write (~0.92 ms of traffic) and the eliminated pass (1.58 ms) - so a partial win is visible.
