@@ -184,6 +184,7 @@ class HandleApplication:
             temporal_reuse=not self.args.no_temporal_reuse,
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_statistic=self.args.temporal_reuse_statistic,
+            int8_fit=self.args.int8_fit,
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
             temporal_reuse_pixel_veto=self.args.temporal_reuse_pixel_veto,
             temporal_reuse_auto=not self.args.no_temporal_reuse_auto,
@@ -522,6 +523,13 @@ class HandleApplication:
                  "rendered frames, where both the LR delta and the real HR delta are known).",
             action="store_true",
             default=False,
+        )
+        parser.add_argument(
+            "--int8_fit",
+            help="auto (default): ask the probe. int8: force the body (measurement only - the probe "
+                 "exists to refuse material the body would damage). fp16: force the fp16 engine.",
+            choices=("auto", "int8", "fp16"),
+            default="auto",
         )
         parser.add_argument(
             "--temporal_reuse_statistic",
