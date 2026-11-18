@@ -334,8 +334,13 @@
     2026-11-18: on Violet 20 s the channel-max gate keeps the same worst share (0.07345%, frame 227)
     and the same zero violations but raises the peak from 49 to 149, pixels above 55 from 0 to 3399,
     and the worst 64 px block mean from 2.49 to 37.27 - five times the 7.57 of the artifact the owner
-    rejected by eye (flip-condition). Held until a channel-max pixel veto exists: max_block_mean
-    dilutes the peak and the luma veto cannot see it.
+    rejected by eye (flip-condition). The deciding cell is the comparison of the two gates on the
+    SAME clip and comparator (luma-cell-block-mean): Violet's worst block mean is 3.78 under luma and
+    37.27 under channel-max (5.32 / 60.88 at 32x32 blocks), on different frames, with the same worst
+    share and zero violations - so the channel-max gate introduces the class and the luma gate does not
+    have it. Held until a channel-max pixel veto exists: max_block_mean dilutes the peak and the luma
+    veto cannot see it. (The 7.57 'rejected fist' figure is the owner's and is not present in the repo;
+    it is context, not a checked anchor.)
   evidence: docs/wsp/verified/gate-default-vs-ungated.txt
   open_question: >-
     Two classes, and only one is visible to the gate. Seventeen of the eighteen are the moving-edge

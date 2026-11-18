@@ -1,0 +1,28 @@
+# The luma cell, measured: the flip does introduce the class
+
+The comparison the flip decision needed is between the two gates on the same clip, same comparator,
+same ungated reference - not against an anchor from another population.
+
+| Violet 20 s | worst share | worst block mean (64x64) | at 32x32 |
+|---|---|---|---|
+| **luma 4.0** (the default) | 0.07345% (f227) | **3.78** (f20) | 5.32 (f22) |
+| **channel-max 0.07%** | 0.07345% (f227) | **37.27** (f330) | 60.88 (f342) |
+
+Both gates: zero frames above 0.1%. The block-mean maxima sit on **different frames** and differ by
+**7-10x at either block size**, so the hypothesis that the 37.27 frame is reused by both gates is
+refuted: the channel-max gate introduces the class on Violet and the luma gate does not have it.
+
+That is what the hold was waiting for, and it is now measured on the cell that decides rather than
+against an external anchor.
+
+## Provenance of the anchor
+
+The "7.57 rejected fist" figure is the owner's and is **not present anywhere in the repo**; it is
+quoted as context, not as a checked anchor. The record has been corrected to say so.
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/luma-cell-block-mean.txt \
+       --records docs/wsp/verified/records/luma-cell-block-mean.jsonl --bars docs/claims-bars.json
+
+@claim R001 3.78 levels "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R002 37.27 levels "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R003 5.32 levels "frames [3e7bd4c273e44ee9] n=480" measured
