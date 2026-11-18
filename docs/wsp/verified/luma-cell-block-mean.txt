@@ -1,5 +1,13 @@
 # The luma cell, measured: the flip does introduce the class
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 3 record(s) in this file (R001, R002, R003) name
+> `violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 The comparison the flip decision needed is between the two gates on the same clip, same comparator,
 same ungated reference - not against an anchor from another population.
 

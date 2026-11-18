@@ -1,5 +1,13 @@
 # The defect is in the projection: channel-max separates perfectly where luma cannot
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 10 record(s) in this file (R001, R002, R003, R004, R005, R006, R007, R008, R009, R010) name
+> `csm20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 Measured 2026-11-17 by recomputing the same LR statistics in channel-max instead of luma, over the same
 100 reused frames of Chainsaw Man 20 s, joined with the per-frame HR share of the gated-vs-ungated
 decode.

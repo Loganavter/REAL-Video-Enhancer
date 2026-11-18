@@ -1,5 +1,13 @@
 # The representation term, Violet's true owner split, and the marginal band
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 3 record(s) in this file (R002, R003, R004) name
+> `csm20s.mkv, violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 ## The 6.3-level peak is chroma, not rounding
 
 RGB -> yuv420p -> RGB on one 4K frame: **peak 24, share 0.1071%, mean 1.77**. So an engine-RGB output

@@ -1,5 +1,13 @@
 # Points 4, 5 and 7: the mirror, the invariant, the level, the discard rate and the block-max
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 5 record(s) in this file (R001, R002, R003, R004, R005) name
+> `csm20s.mkv, violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 ## The pair order is now the gate's
 
 The probe rendered index 0 (the earliest of a decoded triple) against references 1 and 2 - a direction

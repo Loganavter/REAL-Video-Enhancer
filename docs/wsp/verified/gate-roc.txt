@@ -1,5 +1,13 @@
 # The gate's threshold does separate - except on the one frame that decides
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 8 record(s) in this file (R001, R002, R003, R004, R005, R006, R007, R008) name
+> `csm20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 Measured 2026-11-17 on the 100 frames the shipped gate reused on Chainsaw Man 20 s: the product's own
 `ReferenceFrameGate` fed the LR frames (its counters reproduce the render: 100 reused, 2 scene cuts), and
 the per-frame HR acceptance share of the gated-vs-ungated decode over all 481 frames. Joining the two

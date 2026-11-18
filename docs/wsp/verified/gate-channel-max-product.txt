@@ -1,5 +1,13 @@
 # The channel-max gate on the product: zero frames above the bar, and int8 opens on Chainsaw
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 5 record(s) in this file (R001, R002, R003, R004, R005) name
+> `csm20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 Measured 2026-11-18 by running the shipped backend with `--temporal_reuse_statistic channel_max_share`
 (the gate decides on the percentage of LR pixels whose worst channel moved by more than 8 levels - the
 quantity the acceptance bar counts), threshold 0.07%, chain 3, forced past the auto tuner because the

@@ -1,5 +1,13 @@
 # The gate's threshold does not move the probe's verdict - the damaged pair is already under it
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 3 record(s) in this file (R001, R002, R003) name
+> `csm20s.mkv, violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 Measured 2026-11-17 with the product's own probe, reference taken from the original weights, 16 triples.
 
 | gate threshold | Chainsaw d2 | pairs at d2 | Violet d2 | pairs at d2 |

@@ -1,5 +1,13 @@
 # The increment is additive, the null wall is a lower bound, and the peak clause
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 4 record(s) in this file (R001, R002, R003, R004) name
+> `csm20s.mkv, violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 ## The ratio, with a denominator floor
 
 Only 67 of Violet's 336 reused pairs have an fp16 share of 0.01% or more; over those:

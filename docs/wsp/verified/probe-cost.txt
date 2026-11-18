@@ -1,5 +1,13 @@
 # Where the probe's cost goes (corrected)
 
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 5 record(s) in this file (R001, R002, R003, R004, R005) name
+> `csm20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
 Measured 2026-11-17 by timing each phase of `Int8Probe.probe` on the same clip and interpreter, with a
 `torch.cuda.synchronize()` after each. The first version of this measurement ran the depth-2 control
 over every pair; the shipped loop runs it over the pairs the gate would reuse (4 of 8 test pairs here,
