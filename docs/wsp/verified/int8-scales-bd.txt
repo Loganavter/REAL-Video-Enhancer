@@ -243,6 +243,35 @@ none of the scale levers moved it (per-channel 0.015%, clip and margin worse), a
 running the last hops in fp16 inside the body - costs 1.2-3 ms per hop, i.e. most of the speed that justifies
 int8. It is testable in hours and unproven either way; the sim cannot predict it.
 
+## Bias correction: implemented from the literature, not delivered - and the failure is in my instrument
+
+The stroke lift is a signed shift, which is the textbook "biased quantisation error" (Nagel et al., ICCV
+2019; Finkelstein et al., 2019): `E[W_hat x] != E[W x]` because the clipped tail is not zero-mean, and the
+standard remedy is to measure the biased term on calibration data and subtract it from that layer's bias,
+which is free at inference. Wired behind `RVE_INT8_BIAS_CORR=1` in `Int8Body._bias_correction`.
+
+Three variants, three failures, all mine:
+
+| variant | what it subtracts | result |
+|---|---|---|
+| output drift of the two chains | `E[quant - fp]` per hop | body self-certification **100%** off, refused |
+| weight-quantisation bias on a shared input (Nagel eq. 25) | `E[conv(w_q,x) - conv(w,x)]` | self-certification **29.5%** off, refused |
+| (uncorrected body, for scale) | - | 0.288% off on frame 1, serves |
+
+So the correction as written makes a body that is fine *worse by two orders of magnitude*, which cannot be a
+property of the quantiser - the uncorrected body is 0.009-0.019% from the weights. The inconsistency is in the
+measurement: the per-channel "shift" the instrument reports (|mean| 0.5-1.9 levels, extremes +-11) is not
+reconcilable with a body that is 0.009% off, so what it is measuring is not the term that needs subtracting.
+
+What would settle it: compute the shift with the emulation that is already proven bit-exact against the body
+(`int8_kernel_emulation.py`), not with a second torch transcription - the same lesson as the hop-by-hop
+attempt, which failed the same way. Until then the bias-correction row stays open and the stroke stays
+unexplained rather than "caused by X".
+
+Literature that remains worth reading for this lane: Nagel DFQ (bias correction + cross-layer equalisation),
+Finkelstein "Fighting Quantization Bias with Bias" (mean activation shift), the 2021 white paper's section 3.3,
+and SmoothQuant (outlier migration, which is what folding s_in into the weights already does here).
+
 ## Records
 
 Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt
