@@ -1915,8 +1915,8 @@ tasks:
     full-vs-none +0.5%, hand-written conv kernels untested but 4.7x slower in the one public attempt.
     So the untried part is exactly the pass count over the 4K tensor, nothing else. EXTERNAL TEMPLATE
     (arXiv:2606.14598, read 2026-11-19): a single fused Triton INT8 GEMM with per-token x per-channel
-    dequantisation and bias folded into the epilogue, autotuned per shape - the same boundary rule this
-    lane arrived at from its own measurements. Their honest end-to-end numbers are the shape to expect
+    dequantisation and bias folded into the epilogue, autotuned per shape - i.e. the standard rule this
+    lane measured for itself (E9', E30a: judge by removed hops, not FLOPs), not a technique of ours. Their honest end-to-end numbers are the shape to expect
     here: 2.8-4.2x per GEMM, ~1.1x end to end. Do not quote their speed-up as ours: different operation,
     different card, different product.
 
