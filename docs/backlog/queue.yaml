@@ -1989,3 +1989,38 @@ tasks:
     engine runs"), and the same file shows it firing again at grid margin x1.5 while a 0.288% uncorrected
     body "serves" in another configuration. So this is not dead code, it is a coin toss on n=1: the row is
     about which population the number represents, not about a branch that never runs.
+
+- id: rve-megakernel-body-2026-11-19
+  title: 'DROPPED: fusing the 16 hops (megakernel / fused-layer) has no ceiling left - the boundary is already hidden'
+  type: research
+  status: dropped
+  owner: '@supervisor'
+  priority: P2
+  gpu: false
+  cost: 1h
+  resolution: >-
+    dropped 2026-11-19 by arithmetic on our own records, before any code. The idea: papers 2025-2026 (Hazy
+    Research megakernel; MPK, arXiv:2512.22219, 1.7x end-to-end on LLM serving; Alwani et al. MICRO 2016
+    fused-layer CNN accelerators) all say "keep the intermediates on chip and delete the kernel
+    boundaries". Our boundary traffic is real in bytes - one hop's activation is 133 MB at 1080p int8, so
+    a write+read pair is 0.92 ms at the card's 288 GB/s and 13.8 ms over 15 boundaries - but it is ALREADY
+    OVERLAPPED: measured hops are 26.95 ms / 16 = 1.68 ms per hop, which at 152.9 GFLOP per hop is 91 TOPS,
+    i.e. at or ABOVE the 84 TOPS the isolated hop recorded (1.82 ms). There is no boundary overhead to
+    reclaim, so fusion can only add cost: a 16-layer halo chain inflates compute x4.0 at a 32x32 tile,
+    x1.56 at 128x128, x1.27 at 256x256 - and the intermediate that must stay on chip is 133 MB, three
+    orders above the 128 KB a single SM can hold. Partial fusion (2-4 layers, x1.06-1.13 halo) buys a
+    saving bounded by the same ~0, because there is no measured overhead to remove.
+  tags:
+  - int8
+  - fusion
+  - megakernel
+  - dropped
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-wall-ab.txt
+  - docs/wsp/verified/int8-window.txt
+  note: >-
+    What WOULD still move the hops: MMA utilisation, not the boundaries. 91 TOPS is ~52% of the card's
+    dense int8 peak, so the headroom is in the Triton kernel's tiling/swizzle/K-padding, i.e. CUTLASS and
+    Triton tuning guidance, not in fused-layer research. And the measured ranking of the frame's remaining
+    cost puts the tail (8.8 ms of 4K passes) and the 6.2 ms of unnamed plumbing ahead of it.
