@@ -126,28 +126,44 @@ class Int8Body:
 
     def _build(self):
         from torch.nn.functional import conv2d  # noqa: F401 - documents what the kernel replaces
+        import os as _os
 
         s_act, outs = self._grids
-        # the head now writes straight onto hop 1's per-tensor grid: the prologue no longer requants
-        self._s_t1 = s_act.max().expand_as(s_act).contiguous()
+        # 2026-11-18: the hop boundary keeps its PER-CHANNEL grid instead of being collapsed to
+        # max(s_in) and repacked with an m multiplier. The simulation isolated this as the lever
+        # (docs/wsp/verified/int8-scales-bd.txt: 0.06510% -> 0.00162% on the worst BD frame), and the way
+        # to get it in the kernel is to fold s_in per INPUT channel into the weights at build time - the
+        # integer dot then needs no multiplier at all (m = 1 << SHIFT, identity). Build-time cost: one
+        # requantise of 16 x 64 x 64 x 3 x 3 weights; runtime cost: none.
+        # Measured the same day: the change is picture-neutral (the two variants differ by 0.01541% of
+        # pixels with zero frames over the bar between them) and marginally worse against the fp16
+        # reference (1.03% vs 0.91%), so the SHIPPED path stays per-tensor; this is the opt-in A/B knob.
+        per_tensor = _os.environ.get("RVE_INT8_PER_CHANNEL") != "1"
+        self._s_t1 = (s_act.max().expand_as(s_act) if per_tensor else s_act).contiguous()
+        identity = torch.full((self.feat,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
         launches, s_in = [], s_act
         for idx, conv in enumerate(self.inner, start=1):
             s_out = outs[idx - 1]
             s_t = float(s_in.max())
-            m_int = torch.round(s_in / s_t * (1 << SHIFT)).to(torch.int32).contiguous()
+            # per-channel grids: the input scale is inside the weights, so the epilogue's requant is the
+            # identity - and that is not cosmetic, a non-identity m here would apply max(s_in) twice.
+            m_int = (torch.round(s_in / s_t * (1 << SHIFT)).to(torch.int32)
+                     if per_tensor else identity.clone()).contiguous()
             weight = conv.weight.detach().float()
+            if not per_tensor:
+                weight = weight * s_in.view(1, -1, 1, 1)
             w_sc = weight.abs().amax(dim=(1, 2, 3)) / 127.0
             w_q = torch.round(weight / w_sc.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
             tap = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
             launches.append(dict(
-                w=tap, m=m_int, vec=(w_sc * s_t).contiguous(),
+                w=tap, m=m_int,
+                vec=(w_sc if not per_tensor else w_sc * s_t).contiguous(),
                 bias=conv.bias.detach().float().contiguous(),
                 slope=self.inner_prelus[idx - 1].weight.detach().float().contiguous(),
                 os=s_out.contiguous()))
             s_in = s_out
         # each hop's epilogue requants into the NEXT hop's per-tensor grid, so hop k gets hop k+1's
         # multiplier and the last hop gets the identity (it stays on its per-channel grid, as before)
-        identity = torch.full((self.feat,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
         for k in range(len(launches)):
             launches[k]["mn"] = launches[k + 1]["m"] if k + 1 < len(launches) else identity
         self._launches = launches
