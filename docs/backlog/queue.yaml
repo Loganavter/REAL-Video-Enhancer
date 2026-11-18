@@ -2480,3 +2480,184 @@ tasks:
     most memory-side convolution in the pipeline, and its output is what the quantise pass exists to
     compress. The saving has two parts and they must be reported separately - the eliminated 265 MB fp16
     write (~0.92 ms of traffic) and the eliminated pass (1.58 ms) - so a partial win is visible.
+
+- id: rve-epilogue-divide-2026-11-19
+  title: 'The hop epilogue divides per element - fold the output scale into a and b (all 16 hops)'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1h
+  tags:
+  - int8
+  - hops
+  - epilogue
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Kernels.py
+  - docs/wsp/RESEARCH-candidates-2026-11-19.md
+  owns_files:
+  - docs/wsp/verified/int8-epilogue-fold.txt
+  refutes: >-
+    The hop's epilogue costs what it costs. It computes v = acc*w_scale + bias, applies PReLU, then
+    q = floor(v/out_scale + 0.5) - a per-element fp32 DIVIDE over 132 M elements, in the one kernel that all
+    SIXTEEN hops run. PReLU is homogeneous of degree one, so a positive rescale commutes with it: with
+    a = w_scale/out_scale and b = bias/out_scale + 0.5 the epilogue becomes one FMA and a floor. If folding it
+    does not move a hop's time, the kernel is not ALU-limited and this row closes with that.
+  acceptance: >-
+    One hop, two arms (today's epilogue and the folded one), timed on a real frame, CUDA events, 3 rounds
+    interleaved; plus the code diff on the same frame. The rewrite is exact in real arithmetic but NOT
+    bit-identical in fp32 (one ulp flips a floor at exactly .5), so it is a DIFFERENT-ARITHMETIC change: it
+    must be judged with gate_sweep --reference-kind config on the full clip, not waved through as a layout.
+    Report the hop's ms and the picture delta (worst share, peak) separately.
+  note: >-
+    From the researcher's C5 (docs/wsp/RESEARCH-candidates-2026-11-19.md), which also corrects a misreading
+    worth keeping: the "6 of 16 on the three-accumulator kernel" split belongs to scripts/int8_pipeline.py, a
+    different object - the SHIPPED body runs this one kernel for all sixteen. Estimate 1.3-2.7 ms of the
+    26.95 if the divide is 5-10% of a hop; zero if not, which the same timing settles.
+
+- id: rve-tail-as-int8-hop-2026-11-19
+  title: 'Make the tail a 17th int8 hop with the dequant scale folded into its weights'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 4h
+  tags:
+  - int8
+  - tail
+  - quantisation
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-tail-split.txt
+  - backend/src/pytorch/Int8Kernels.py
+  - docs/wsp/RESEARCH-candidates-2026-11-19.md
+  owns_files:
+  - docs/wsp/verified/int8-tail-hop.txt
+  refutes: >-
+    The tail can only be attacked as a layout problem - which is what the lane did, taking the conv from 4.85
+    to 2.35 ms. It is a QUANTISATION problem too: the last hop writes int8 codes on a known per-channel grid,
+    those codes are dequantised to fp16 (1.58 ms) and fed to a cuDNN fp16 conv (2.33). Folding the dequant
+    scale into the tail's weights offline (w' = w*s_k) makes the tail an ordinary int8 convolution whose
+    input is already codes: one kernel instead of two, and the dequant pass disappears. Padding 12 outputs to
+    16 with zeros contributes nothing and therefore preserves the arithmetic - the property this lane requires
+    of an adoptable variant. If the emulation moves the picture past its margin, stop there.
+  acceptance: >-
+    Staged, cheapest first. (a) Emulate the folded-scale int8 tail against today's fp16 tail on the four
+    held-out BD frames with scripts/int8_kernel_emulation.py (the bit-exact emulation the corpus already
+    trusts) - no GPU, 1-2 h; the share and peak must stay inside their bars. (b) One Triton conv 576 -> 16 at
+    1080p with zero-padded outputs, timed against 2.35 ms. (c) In the app: the tail phase line beside the
+    frame total, interleaved A/B, >=3 rounds, and the picture on the full clip with --reference-kind config.
+  note: >-
+    From the researcher's C1, which also records that PLAN-int8-graph-2026-11-15.md:1257 already named this
+    as the one lever left with a measured size, and that no row or verdict ever took it. THREE of the
+    portfolio's items are now the same shape - C1 here, C2 (head+quantise, filed), and the tail's shuffle and
+    residual into the same epilogue - so the expected end state is "the body, the head and the tail are all
+    our kernels" and the passes between them are gone.
+
+- id: rve-input-clone-sync-2026-11-19
+  title: 'The input path clones and synchronises every frame - 30 minutes to settle'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1h
+  tags:
+  - pipe
+  - wrapper
+  - instrument
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/utils/Frame.py
+  - backend/src/pytorch/TorchUtils.py
+  - docs/wsp/verified/int8-frame-accounting.txt
+  owns_files:
+  - docs/wsp/verified/input-path.txt
+  refutes: >-
+    The 2.3 ms the frame accounting could not attribute is one thing. It is at least two: Frame.get_frame_tensor
+    returns self._tensor.clone() on every call with a comment saying "have to test later"
+    (backend/src/utils/Frame.py:322), and yuv420p10_to_tensor ends with an explicit sync_stream
+    (backend/src/pytorch/TorchUtils.py:243). A per-frame stream sync forfeits the overlap the rest of the
+    pipeline is built for. If both together are under 0.1 ms, close it and say so.
+  acceptance: >-
+    Time get_frame_tensor alone on a decoded frame by CUDA event, with and without the clone and the sync,
+    three arms in one process, one GPU job. No clip needed. Then, if it is worth anything, one in-app run
+    showing the frame total moving - and because removing a clone changes no arithmetic, byte-identity of the
+    render is the expected outcome and must be checked, not assumed.
+  note: >-
+    From the researcher's C9, which found it by reading code rather than a document - nothing in the corpus
+    names the clone. Estimate 0.2-0.5 ms; listed because it is the cheapest item on the list and it is exactly
+    the class of unnamed cost the accounting row hunted for half a day.
+
+- id: rve-hop-load-schedule-2026-11-19
+  title: 'The hop is at 52% of BOTH roofs - vectorise the loads and hoist the weights (1 h to falsify)'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 3h
+  tags:
+  - int8
+  - hops
+  - kernel
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Kernels.py
+  - docs/wsp/RESEARCH-candidates-2026-11-19.md
+  owns_files:
+  - docs/wsp/verified/int8-hop-loads.txt
+  refutes: >-
+    The hop is at its practical rate. It runs 1.68 ms, which is 91 TOPS AND 158 GB/s - ~52-55% of both the
+    compute and the bandwidth roof - so it is schedule-bound, not at a floor. Its loads are nine masked
+    gathers per block with no 128-bit vectorisation, and the weights are re-read per CTA (~0.58 GB of L2
+    traffic per hop, derived). If neither a vectorised/block-pointer load nor a weight-stationary CTA moves
+    the achieved TOPS off 91, the shape is at its floor and the largest line in the frame is closed.
+  acceptance: >-
+    One hop, three arms in one process, CUDA events, >=3 rounds: today, block-pointer/vectorised loads, and
+    the weights hoisted out of a four-tile M loop. Report achieved TOPS and ms. The two negatives already on
+    record (unrolling all nine taps: 2.919 vs 2.198 ms; Triton pipelining at 2-3 stages: 2.497/2.635) are
+    context, not results to repeat - the open part is exactly the vectorised load and the weight hoist.
+  note: >-
+    From the researcher's C3. Ceiling 26.95 -> 20-22 ms, the largest single estimate in the file, and it is
+    BOUNDED BY TRAFFIC: at 150 TOPS the hop needs 260 of the card's 288 GB/s. If a faster load path wins, that
+    roof - not the arithmetic - becomes the next question, which is what made the 6-bit packing idea (C12)
+    interesting and why it is filed separately.
+
+- id: rve-sub8-codes-2026-11-19
+  title: 'Do 6-bit codes between hops survive the picture bar? (emulation only, no GPU)'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P3
+  gpu: false
+  cost: 1h
+  tags:
+  - int8
+  - traffic
+  - accuracy
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/RESEARCH-candidates-2026-11-19.md
+  - scripts/int8_kernel_emulation.py
+  owns_files:
+  - docs/wsp/verified/int8-sub8-codes.txt
+  refutes: >-
+    8 bits is the floor for the codes between hops. Packing them to 6 would cut the 265 MB per hop by 25%,
+    which matters because the hop moves at 158 of 288 GB/s. The question is the picture: the emulation can
+    answer it without a GPU by quantising the body's activations to 6 bits with per-channel scales and reading
+    the share and peak on the same four held-out frames. Today the body sits at 0.003% against a 0.1% bar, so
+    there is room - but two bits is a lot, and if the emulation says no, the row closes before any kernel.
+  acceptance: >-
+    The bit-exact emulation (scripts/int8_kernel_emulation.py) with 6-bit codes between hops, share and peak
+    on four held-out BD frames, against the 8-bit body on the same frames. If the share or the peak leaves its
+    bar, close it. No GPU, no kernel: the emulation is the whole falsifier, and a Triton unpack path is only
+    worth writing after it passes.
+  note: >-
+    From the researcher's C12, filed low on purpose: the win is conditional on the hop being traffic-bound
+    (52% of both roofs, which C3 and C5 may resolve differently) and the picture risk is the whole question.
+    The two compression papers found for it are accelerator/FPGA designs reporting energy and bandwidth, not a
+    tensor-core speedup - so this is arithmetic on our own traffic, not a literature result.
