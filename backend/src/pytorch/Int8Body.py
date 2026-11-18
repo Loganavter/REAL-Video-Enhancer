@@ -313,7 +313,16 @@ class Int8Body:
                     _vals[0], _vals[1], _vals[2], _vals[3], sum(_vals),
                     getattr(self, "_last_body_ms", -1.0),
                     getattr(self, "_last_body_ms", 0.0) - sum(_vals))
+        _prevt = getattr(self, "_tail_ev", None)
+        if _prevt is not None:
+            _tv = [_a.elapsed_time(_b) for _a, _b in _prevt]
+            self._tail_log = getattr(self, "_tail_log", 0) + 1
+            if self._tail_log % 8 == 0:
+                _lg.getLogger("RVE").warning(
+                    "int8 tail: dequant %.2f  conv %.2f  shuffle %.2f  residual %.2f  SUM %.2f ms",
+                    _tv[0], _tv[1], _tv[2], _tv[3], sum(_tv))
         _e0, _e1, _e2, _e3, _e4 = (_mk() for _ in range(5))
+        _t1, _t2, _t3 = (_mk() for _ in range(3))
         _e0.record(); _start = _e0; _end = _e4
         with torch.no_grad():
             head = self.head_conv(x.clamp(0.0, 1.0))      # PReLU is fused into the quantise below
@@ -417,10 +426,15 @@ class Int8Body:
                 last = torch.empty((x.shape[0], self.feat, h, w), device=x.device, dtype=torch.float16)
                 dequantise_nhwc_to_nchw[qgrid](src, self._launches[-1]["os"].contiguous(), last, n_pix,
                                                BLOCK=QB, C=self.feat, num_warps=4)
-            out = self.model.upsampler(self.tail_conv(last))
+            _t1.record()
+            _conv = self.tail_conv(last)
+            _t2.record()
+            out = self.model.upsampler(_conv)
+            _t3.record()
             out = out + torch.nn.functional.interpolate(x.clamp(0.0, 1.0), scale_factor=self.scale,
                                                         mode="nearest")
             _end.record()
+            self._tail_ev = ((_e3, _t1), (_t1, _t2), (_t2, _t3), (_t3, _e4))
         self._ev_pair = (_start, _end, 0)
         self._phase_ev = ((_e0, _e1), (_e1, _e2), (_e2, _e3), (_e3, _e4))
         return out

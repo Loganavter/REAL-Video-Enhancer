@@ -1,0 +1,71 @@
+# The int8 tail is a badly-used convolution, not four bandwidth passes
+
+Measured 2026-11-18 19:0x, BD Violet (494 frames) and the Chainsaw same-shot cut (539 frames), int8 body,
+reuse off, null sink, one run each. The body now times its own four tail steps with CUDA events
+(`int8 tail: dequant / conv / shuffle / residual / SUM`), so the row that proposed fusing the tail's passes
+can be judged on the shipped path instead of on a split recorded on another model.
+
+## The split
+
+| clip | dequant | **conv** | shuffle | residual | total |
+|---|---|---|---|---|---|
+| Violet BD | 1.58 (20%) | **4.86 (63%)** | 0.40 (5%) | 0.93 (12%) | 7.77 ms |
+| Chainsaw same-shot | 1.62 (16%) | **5.99 (58%)** | 0.39 (4%) | 2.36 (23%) | 10.36 ms |
+
+The tail conv is 64 -> 12 channels, 3x3, at 1080p: **28.7 GFLOP per frame**, i.e. **5.9 and 4.8 TFLOPS**.
+The card's fp16 tensor peak is ~176 TFLOPS dense (~44 without tensor cores), so this convolution runs 7-30x
+below what it should - `C_out = 12` underfills a tensor-core tile and the elementwise passes around it are
+not where the time goes.
+
+## What that does to the row's premise
+
+The row assumed the tail was 4K bandwidth and that merging its four passes was the lever. Both halves are
+wrong on this path:
+
+- **Not bandwidth.** The whole tail is 7.8-10.4 ms; a pass over a 4K fp16 3-channel tensor is 50 MB, which
+  is 0.17 ms at the card's 288 GB/s. The dequant (1.58, the largest single pass) is 400 MB of traffic -
+  1.4 ms of the 1.58 - so the passes are already near their own bandwidth floor.
+- **Not four passes to merge.** shuffle is 0.4 ms; the fusion ceiling (folding shuffle + residual into one
+  kernel) is **1.0 ms on Violet and 2.0 on Chainsaw**, part of which is still paid as traffic.
+- **It is the conv.** 4.86-5.99 ms for 28.7 GFLOP, i.e. ~5 TFLOPS. A 2x improvement there saves
+  2.4-3.0 ms - more than the entire fusion ceiling - and it needs no change to the picture's arithmetic
+  order only if the algorithm stays the same; a different algorithm is a different-arithmetic change and
+  must be recorded as such (arXiv:2609.00363: an epilogue/algorithm swap moves the output by about one
+  bf16 spacing and is invisible to a tolerance check, so it cannot be certified by "it looks the same").
+
+The recorded split in `int8-window.txt` (dequant 2.1, conv+shuffle 3.6, residual 2.4) is from a different
+model and output size. It is not wrong for that measurement; it just does not describe this path, and the
+row would have funded the wrong kernel.
+
+## Not covered
+
+- One run per clip (the split is an attribution, not a rate); the tail line prints the last 8 frames.
+- The conv's utilization is measured, not diagnosed: `C_out = 12` is the likely cause (tensor-core tile
+  underfill), but nothing here separates that from the layout, the algorithm cudnn picked, or the fp16
+  accumulate. That is the follow-up's job.
+- Byte-identity is not attempted here: no arithmetic changed, so there is nothing to compare. It becomes
+  the criterion the moment a different algorithm is tried.
+
+## Reproduce
+
+```bash
+CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=1 SINK=null scripts/wall_ab.sh
+grep -a "int8 tail:" docs/wsp/verified/logs/tail/*int8*.log
+PYTHONPATH=scripts python3 scripts/tail_split.py --logs docs/wsp/verified/logs/tail
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tail-split.txt \
+       --records docs/wsp/verified/records/int8-tail-split.jsonl --bars docs/claims-bars.json
+
+@claim T001 10.36 ms "clips [f7652c55c84085cc] n=1" measured
+@claim T002 1.62 ms "clips [f7652c55c84085cc] n=1" measured
+@claim T003 5.99 ms "clips [f7652c55c84085cc] n=1" measured
+@claim T004 0.39 ms "clips [f7652c55c84085cc] n=1" measured
+@claim T005 2.36 ms "clips [f7652c55c84085cc] n=1" measured
+@claim T006 10.4 ms "clips [f7652c55c84085cc] n=1" measured
+@claim T007 7.77 ms "clips [0787a8250207fe7f] n=1" measured
+@claim T008 1.58 ms "clips [0787a8250207fe7f] n=1" measured
+@claim T009 4.86 ms "clips [0787a8250207fe7f] n=1" measured
+@claim T010 0.4 ms "clips [0787a8250207fe7f] n=1" measured
+@claim T011 0.93 ms "clips [0787a8250207fe7f] n=1" measured
+@claim T012 7.8 ms "clips [0787a8250207fe7f] n=1" measured
