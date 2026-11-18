@@ -142,6 +142,9 @@ class Render:
         self.tileReusePad = 18            # LR halo the tile path uses (receptive radius)
         self.tileReuseMaxChain = 2
         self.temporalReuseThreshold = temporal_reuse_threshold
+        # the probe runs BEFORE the gate object exists (setupUpscale precedes the gate block), so the
+        # filter has to come from the configuration, not from the gate
+        self.temporalReuseStatistic = temporal_reuse_statistic
         self.temporalReuseMaxChain = temporal_reuse_max_chain
         self.ffmpegPath = ffmpeg_path
         if quality_preset not in ("best", "fast"):
@@ -526,12 +529,19 @@ class Render:
         """
         try:
             from .utils.Int8Probe import probe
+            # The pair filter must be the gate's own variable and threshold, or the probe certifies a
+            # population the render never serves (it used mean(R,G,B) at 5.0 while the gate's tuner
+            # clamps to (2.0, 4.0) in levels).
+            gate_stat = getattr(self, "temporalReuseStatistic", "mean_abs")
             result = probe(
                 self.inputFile,
                 model_path=self.upscaleModel,
                 width=int(self.width),
                 height=int(self.height),
                 bar=float(getattr(self, "int8FitBar", 0.1)),
+                gate_threshold=float(getattr(self, "temporalReuseThreshold", 5.0)),
+                filter_statistic=("channel_max_share" if gate_stat == "channel_max_share"
+                                  else "block_mean"),
             )
             log(result.stats())
             if not result.use_int8:
