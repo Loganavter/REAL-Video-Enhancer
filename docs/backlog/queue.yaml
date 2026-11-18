@@ -2650,8 +2650,20 @@ tasks:
 - id: rve-hop-load-schedule-2026-11-19
   title: 'The hop is at 52% of BOTH roofs - vectorise the loads and hoist the weights (1 h to falsify)'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-20: the hop is at its floor on this shape. Three arms in one process, 3 interleaved
+    rounds: today 1.756 ms (87.1 TOPS, 49.5% of the 176 roof; 150.9 GB/s, 52.4% of the 288), the vectorisation
+    hint 1.772 (+0.9%, i.e. nothing - the compiler was already doing it, which is what the shipped
+    'already L2-resident' comment claimed and had never been tested against), and the weight hoist (two
+    row-tiles per CTA, each tap's weights loaded once for both dots) 2.696 - 54% SLOWER, because two 128x64
+    int32 accumulators spill and the spill costs more than the halved weight traffic saves. All three arms
+    produce 0 differing codes of 132.7 M. Combined with rve-sub8-codes (6-bit codes read 2.7% of pixels, dead),
+    the hop has now been attacked from both ends - schedule and traffic - and 26.95 ms is the floor here. One
+    idea is named and NOT tried: a persistent-CTA grid that loops over tiles without adding accumulators.
+    docs/wsp/verified/int8-hop-loads.txt, records int8-hop-loads.jsonl (L001-L003, R001-R002),
+    logs/hop-schedule/probe.json.
   priority: P2
   gpu: true
   cost: 3h
