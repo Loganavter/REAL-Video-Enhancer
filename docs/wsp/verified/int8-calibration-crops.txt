@@ -87,7 +87,7 @@ with the crop arm marginally better. Two things the clustered sample had distort
 The earlier numbers are not deleted: they describe the first two seconds and are labelled as such.
 
 
-@claim S001 0.02159 % "clips [0787a8250207fe7f] n=1" measured
-@claim S002 6.77 s "clips [0787a8250207fe7f] n=1" measured
-@claim S003 0.02139 % "clips [0787a8250207fe7f] n=1" measured
-@claim S004 0.42 s "clips [0787a8250207fe7f] n=1" measured
+@claim S001 0.02159 % "clips [3a0964f03208b6f8] n=1" measured
+@claim S002 6.77 s "clips [3a0964f03208b6f8] n=1" measured
+@claim S003 0.02139 % "clips [3a0964f03208b6f8] n=1" measured
+@claim S004 0.42 s "clips [3a0964f03208b6f8] n=1" measured
