@@ -24,3 +24,10 @@ AFTER   violet d1 0.095% / d2 0.168%      chainsaw d1 0.000% / d2 nan
   over the channel-max gate's 78 reuses (replay): none has a block-max above 3.0 except 2, and there
   are no frames above the bar left to catch - the condition buys nothing on this clip.
   Its value is structural: it bounds the per-block delta, which the share does not.
+
+=== 5b. the depth table cannot be produced on the sweep's population
+  the sweep is over the product's 83 reuses; the depth table comes from a replay (78 reuses), because
+  the render logs no per-frame depth. The two differ by 5 frames and the replay's max HR (0.07489%) is
+  not the sweep's (0.07546%): the worst frame, 475, is a MISS in the replay (its share 0.07108 > 0.07)
+  and a reuse in the product. So "the worst frame is a depth-1 reuse" is supported by the replay's
+  population, not by the render's. Closing this needs the render to log (frame, depth, reference).
