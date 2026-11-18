@@ -56,7 +56,11 @@ nothing reads.
 
 Not covered: one clip, one model, one card; the certificate's cost with the product's TRT reference is not
 measured (the direction is stated, the magnitude is not); a 3rd round would tighten the max by a second or
-two and is not worth a GPU job.
+two and is not worth a GPU job. Also not covered - and found while checking this: the shipped path still
+runs a SECOND certificate, the body's own on the first frame (`body.certify(frame)`, n=1), which printed
+0.00000% on every int8 run of 2026-11-18 against a whole-clip 0.53% on the same material. It admits
+everything, so it decides nothing, and it is filed separately
+(`rve-body-first-frame-certificate-2026-11-19`) rather than folded into this row.
 
 ## Reproduce
 

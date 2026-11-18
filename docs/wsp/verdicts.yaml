@@ -674,4 +674,7 @@
     A future certificate needs its pair set to be a function of the clip alone and its reference to be
     the engine the render actually falls back to, and it needs to be worth 33 s of startup - none of the
     three is established. Note that 125 records in the corpus carry the probe as their instrument and are
-    no longer load-bearing; nothing re-measures the picture in-product until a certificate returns.
+    no longer load-bearing. What still runs in-product is the BODY's own first-frame certificate
+    (`body.certify(frame)` in UpscaleTorch), and it is not a certificate either: n=1, and it read 0.00000%
+    on every int8 run of 2026-11-18 while the whole-clip number on the same clip is 0.53% - the exact
+    "one frame is a smoke test" trap. Filed as rve-body-first-frame-certificate-2026-11-19.

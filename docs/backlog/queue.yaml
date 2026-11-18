@@ -1819,9 +1819,9 @@ tasks:
     the median quotients stayed inside 4.9% (1.088-1.141) and the per-round pairs inside 8.7% - and the load is written into every run's log header.
 
 - id: rve-frame-accounting-2026-11-19
-  title: 'Reconcile the int8 whole-frame budget: 6.2 ms unnamed, and the ledger already names its components'
+  title: 'DONE: the 6.2 ms was pack+queue and the wrapper - and the profile total is not wall time'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -1855,8 +1855,21 @@ tasks:
     (reported beside the loop, not added to it - it is concurrent). Records with the timers' own
     configuration. This is a 1-2 h job, not a hunt: the expectation from the record is that the 6.23 ms IS
     the three plumbing terms, and either answer is the deliverable.
+  resolution: >-
+    measured 2026-11-18 18:00-18:15, one run per arm on both BD cuts, three stages newly timed (wrapper
+    around the body call, preview, pinned-slot fill + writeQueue.put) and printed beside named/unaccounted.
+    The 6.2 ms was **pack+queue 3.5-3.9 ms plus ~2.4 ms of wrapper and read wait** - named in the ledger for
+    the tiled path, never printed here; unaccounted is now -0.16..-0.27 ms. The bigger finding: in the
+    PIPELINED int8 path the profile's frame total runs 27-30% ABOVE the render loop's wall clock (67.32
+    against 51.85 on Violet; 58.94 against 46.53 on Chainsaw), because upscaleOption(frame) blocks on the
+    frame already in flight, so summing per-iteration windows double-counts overlapped work. Rule that
+    follows: wall time from the loop line, attribution from the body's phase counter, never a frame budget
+    built by adding profile components. int8-wall-ab's ratios are unaffected (they use the loop). Records:
+    docs/wsp/verified/int8-frame-accounting.txt, harness check PASS. NOT explained and left open there:
+    last_model_ms reads 17.2-17.5 on int8 against 1.93 in the 17:00 session with the same clocks and no
+    throttle reason, so self-reported inference cannot be compared across sessions either.
   note: >-
-    Why it is first: int8 bought 1.09-1.14x, i.e. 5.9-7.1 ms per frame, and the unaccounted slice is the
+    Why it was first: int8 bought 1.09-1.14x, i.e. 5.9-7.1 ms per frame, and the unaccounted slice was the
     same size. The 2026-11-18 wall A/B had to quote "frame total" and "body total" as separate numbers with
     no bridge; the tail (8.8 ms) is now the largest NAMED slice after the hops (27.0). CHECKED AGAINST THE
     RECORD 2026-11-19 (harness db + corpus grep): nothing reports this hole, and the contrast sharpens it -
