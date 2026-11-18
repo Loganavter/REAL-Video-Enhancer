@@ -2359,3 +2359,42 @@ tasks:
     named in the records no longer exists. The audit replaced three hours of renders with ten minutes of
     classification, which is the point of measuring the scope before doing the work. The model-referenced numbers (body vs model 0.004-0.019%) are NOT part
     of this: they come from scripts/ and calibrate explicitly.
+
+- id: rve-head-conv-2026-11-19
+  title: 'The head conv runs at 1.5 TFLOPS - 4.65 ms for 7.17 GFLOP, 4.8x its own traffic floor'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 2h
+  tags:
+  - int8
+  - head
+  - layout
+  - unexplored
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/PLAN-int8-envelope-2026-11-19.md
+  owns_files:
+  - docs/wsp/verified/int8-head-conv.txt
+  refutes: >-
+    The head is small and therefore cheap. It is 7.17 GFLOP at 1080p (3 -> 64, 3x3) and the phase counter
+    puts it at 4.65-5.2 ms, i.e. 1.5 TFLOPS - 3.5% of this card's fp16 CUDA-core peak and 4.8x its own
+    traffic floor of 0.96 ms for 278 MB. It is the second largest single line in the int8 frame after the
+    sixteen hops, and nothing in this corpus has ever timed it in isolation: it has only ever been seen as
+    "head + quantise 6.25 ms" inside a phase.
+  acceptance: >-
+    Isolate the head conv (3 -> 64, 3x3, 1080p, fp16) on a torch conv, then sweep what the shape responds to:
+    input fed as NCHW against an NHWC view (the same lever that gave 2.5x on the tail), weights NCHW against
+    channels_last, and the padded 3 -> 8 input channel variant the engine build already uses to let myelin
+    fuse the head with its PReLU. Report TFLOPS and ms against the 0.96 ms floor. Then, separately, the
+    fused variant: a head that writes int8 codes directly, which removes the 265 MB fp16 write and the 1.58
+    ms quantise pass - byte-identity is the criterion, since the arithmetic need not change.
+  note: >-
+    Found while filling the reserve in the plan (docs/PLAN-int8-envelope-2026-11-19.md), from numbers already
+    recorded: head+quantise 6.25 ms per frame, quantise 1.58 of it, which leaves 4.65 for a 7.17 GFLOP conv.
+    The quantise pass is already at its traffic floor (1.38 of 1.58), so the head conv is the whole remaining
+    cost. Cheapest probe in the reserve after the batch test: it is a torch conv on a random tensor, no app,
+    no clip. Do not confuse it with the 2.5 Mpx envelope work: this one changes no picture.
