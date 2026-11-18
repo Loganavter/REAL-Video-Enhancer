@@ -1577,3 +1577,43 @@ tasks:
     this file (gate-exceeds-acceptance-bar's lineage, hr-reference-cache, strip-concurrency, the flip
     hold) is history. Reading them as open questions is exactly the failure mode this queue is supposed
     to prevent - a stale row outranking a decision.
+
+- id: rve-int8-sim-vs-kernel-2026-11-18
+  title: 'The int8 simulation understates the kernel by 14x - find the missing term before any more scale work'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P0
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - accuracy
+  - instrument
+  - simulation
+  base_branch: perf/inference
+  relates_to:
+  - scripts/int8_accuracy_sim.py
+  - backend/src/pytorch/Int8Body.py
+  - backend/src/pytorch/Int8Kernels.py
+  - docs/wsp/verified/int8-scales-bd.txt
+  owns_files:
+  - scripts/int8_hopwise.py
+  refutes: >-
+    The simulation and the kernel are the same quantiser measured two ways. If the hop-by-hop comparison
+    does not find the term (rounding mode, clamp, grid, the head quantise, the requant shift), then the
+    sim cannot be used to propose kernel changes at all - which is what the 2026-11-18 swap showed: the
+    sim said per-channel activations are worth 15-40x, the kernel measured 0.015%.
+  acceptance: >-
+    Per-hop activations of sim and kernel compared on one BD frame, the hop where they diverge named, and
+    one isolated change that moves the sim's number onto the kernel's (0.065% -> 0.9%). Only then is a
+    sim-proposed lever worth a kernel patch.
+  note: >-
+    Numbers on 2026-11-18, BD Violet: sim per-tensor 0.06510% on frame 29; the kernel 0.90619% on frame
+    274 of the same clip (472 of 494 frames over the bar); the product's own probe agrees with the kernel
+    (engine 0.688-0.824%), so the sim is the odd one out by 14x. The one kernel-side lever the sim
+    proposed - per-channel hop boundaries with the input scale folded into the weights - was implemented
+    (backend/src/pytorch/Int8Body.py, opt-in RVE_INT8_PER_CHANNEL=1) and measured picture-neutral: the
+    two int8 variants differ by 0.01541% of pixels, 0 frames over the bar between them. So either the
+    boundary was never the error source or the frontier simulator and the kernel quantise different
+    things; the second is the likely one and it is answerable by dumping one hop's tensor from both.
