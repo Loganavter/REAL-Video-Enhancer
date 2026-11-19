@@ -3949,6 +3949,13 @@ tasks:
     cheaper model has a cheaper fp16 comparator too (eager fp16 reads 107.6 ms against 203.8 for the production
     model), so the ratio may well stay near 1.6 while the frame gets 12 ms shorter. A render pair is the
     remaining step, and the row stays in_progress until it is run.
+    THE FIRST PAIR WAS AN A/A (2026-11-20): it came back byte-identical on 494 frames, and the identity control
+    said why - Int8Probe still found the tail by the key `34.weight` and built 64 channels x 16 convs, so on an
+    eight-hop model it raised "list index out of range", reported unavailable, int8Frames was never set and the
+    render silently ran the FP16 ENGINE. Both the picture pair and the null-sink A/B of that round were engine
+    against itself and are deleted rather than kept. Fixed with compact_shape() in the probe (width, depth and
+    scale from the weights; 4 cases pinned) and both pairs re-run with the engagement asserted from the log
+    before any share is read.
   note: >-
     Filed 2026-11-20 as tier 1 of the "which model is cheapest to rescue" ranking: the working sibling is the
     production model (same 64-channel Compact), and the difference is a COUNT, not an operation. That is the
