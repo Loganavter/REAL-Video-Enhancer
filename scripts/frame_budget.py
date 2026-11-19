@@ -52,6 +52,8 @@ REJECTED = [
      "batch 1 of the same kernel 1.769 ms/frame", "Y002", "int8-hop-batch.jsonl"),
     ("pack ring (pinned slots)", "the 12.44 MB payload copy is synchronous", "ring off 34.42 ms loop",
      "K002", "int8-pack-ring.jsonl"),
+    ("reverse tile order on alternate hops", "the previous hop's tail is still in L2 (32 MB of 132)",
+     "forward 26.551 ms over 16 hops", "V002", "int8-hop-traverse.jsonl"),
 ]
 
 
@@ -184,6 +186,24 @@ def main(argv=None) -> int:
           f"sum {s:.2f} ms. The zeroes are the second adoption: the dequant pass was folded into the tail's "
           f"weights and the shuffle+residual into its epilogue.")
         A("")
+    per_hop = hops / 16.0
+    A("## The hop against its two roofs - why every single lever came out flat")
+    A("")
+    A("| quantity | value |")
+    A("|---|---|")
+    A(f"| one hop, measured | {per_hop:.3f} ms |")
+    A(f"| its compute floor (152.9 GFLOP at 176 TOPS) | 0.869 ms = **{100*0.869/per_hop:.0f}% of the roof** |")
+    A(f"| its DRAM floor (250.6 MB at 288 GB/s, counter-measured) | 0.870 ms = **{100*0.870/per_hop:.0f}% of the roof** |")
+    A("| the two floors agree | that is what 'on the ridge' means: 610 FLOP/byte against a ridge of 611 |")
+    A("| ncu's own reading | Compute (SM) 74%, DRAM 56%, LSU the busiest pipe (73.9% by instruction count), "
+      "L2 6.1x the DRAM traffic |")
+    A("")
+    A("The 74% and the 57% are not a contradiction: ncu measures **pipe saturation** (including the load/store "
+      "unit), the 57% measures **arithmetic against the int8 roof**. Both say the same thing - the kernel presses "
+      "on compute and on memory at the same time, in equal measure - and that is why a change that improves only "
+      "one of the two reads as flat noise. Thirty configurations in seven families were tried on this line; every")
+    A("one lost (the table three sections down).")
+    A("")
     A("## The frame")
     A("")
     A("| what | ms | floor, and where the floor comes from |")
@@ -218,6 +238,22 @@ def main(argv=None) -> int:
         stem = os.path.splitext(src)[0]
         A(f"| {what} | {expected} | **{val(stem, rid)}** | {against} | `docs/wsp/verified/{stem}.txt` : "
           f"{rid} |")
+    A("")
+    A("## What is still open, and what it costs")
+    A("")
+    A("| idea | expected | what it needs | state |")
+    A("|---|---|---|---|")
+    A("| fuse two hops per launch (cascade) | **+3.1 ms/frame** at T=32: 1.064x of work for one saved launch "
+      "constant of 0.59 ms, eight pairs | a CUDA kernel; the intermediate is 34^2 x 64 B = 74 KB, which fits "
+      "100 KB of shared memory | `rve-hop-fuse2-cascade`, P2, unmeasured |")
+    A("| shared-memory staging of the 3-row window | the 0.59 ms first-tap constant, if it is a round trip | the "
+      "same CUDA kernel; measured negative in its two cheap forms (reordered loads -101%, a CUDA microbenchmark "
+      "-26%) | closed, `int8-hop-prefetch.txt` |")
+    A("| a PCIe 4.0 slot | ~1.2 ms off `pack`, since the link is gen 3 x8 today | hardware | not software |")
+    A("| skipping duplicate frames / static regions | large on anime, and the owner's call forbids it | - | "
+      "closed by policy, `rve-reuse-gate-forbidden` |")
+    A("| cut the model (fewer channels or hops) | 2.9-4.5 ms per hop removed | 14-37% per-layer residual, 1.58% "
+      "of pixels over the picture bar | closed by measurement |")
     A("")
     A("## The ratio this produces")
     A("")
