@@ -1,0 +1,52 @@
+# RRDBNet: 7-28x our arithmetic, and an engine build that was still compiling at 14 minutes
+
+Measured 2026-11-20 while answering "is there anything to catch in RRDBNet". Records `rrdb-scope.jsonl`
+(RB001-RB005), raw `logs/rrdb/build-killed.log`.
+
+## What RRDBNet has going for it
+
+**LeakyReLU instead of PReLU.** The scalar slope fuses into an int8 epilogue, which is exactly what our per-channel
+PReLU cannot do - it is the reason TensorRT split our 25-layer graph back into 60. And the dense concatenations
+are a layout question (a growing K on `tl.dot`), not a blocker.
+
+## Why it still closes: arithmetic
+
+| model | convs | TFLOP per 1080p frame |
+|---|---|---|
+| `2x-sudo-RealESRGAN` | 95 | **18.36** |
+| `2x-UniScale-CartoonRestore-lite` | 185 | 20.76 |
+| `2x_Pooh_RPLKSR_Candidate_1_387k` | 142 | 30.51 |
+| `2x-AnimeSharpV3` (the ESRGAN family proper) | 351 | **69.22** |
+| **our compact net, for scale** | 19 | **2.45** |
+
+At the measured fp16 rate on this card (52 TFLOPS, from the 47.50 ms fp16 engine at 2.45 TFLOP) that is **355 ms**
+for the smallest, **400 ms** for the lite family and **1.34 s** for the 350-convolution models. At the int8 roof
+(100 TOPS, 97% of which our hops already reach) it is **184 ms / 208 ms / 692 ms**. Video needs ~40 ms.
+
+## Why it closes a second time: the build
+
+`trtexec --fp16 --builderOptimizationLevel=5` on the 16 MB ONNX of `2x-sudo-RealESRGAN` was **still compiling at
+14.2 minutes** when it was killed. Our 19-convolution compact takes **280 s** at the same level. The app builds an
+engine per model and shape, so a user would wait that long before the first frame - on top of a 355 ms frame.
+
+That is a third axis the lane had not recorded for any model: build time. A model can be too slow to *start*, not
+just too slow to run.
+
+## Verdict
+
+Closed: RRDB-family models are 7-28x our arithmetic and cost tens of minutes to build. The LeakyReLU advantage is
+real and would matter for a photo upscaler, where 355 ms per image is acceptable; it does not matter for a video
+lane whose bar is 40 ms per frame.
+
+## Reproduce
+
+```bash
+python3 scripts/rrdb_scope_records.py          # TFLOP per checkpoint, from its own conv shapes
+trtexec --onnx=<model>.onnx --fp16 --builderOptimizationLevel=5    # and time the build
+```
+
+@claim RB001 18.36 TFLOP "models [41b1149837f86ea6] n=1" measured
+@claim RB002 30.51 TFLOP "models [26cc76136df1dd9d] n=1" measured
+@claim RB003 20.76 TFLOP "models [33e4c61da50b1226] n=1" measured
+@claim RB004 69.22 TFLOP "models [b011b64c06cfd736] n=1" measured
+@claim RB005 14.2 min "process starts [2f8599cc4f8e8f21] n=1" measured
