@@ -4649,7 +4649,7 @@ tasks:
 - id: rve-calib-fade-2026-11-20
   title: "A clip whose first seconds are black: does the sequential calibration clip later?"
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -4675,6 +4675,15 @@ tasks:
     a few percent below the spread's.
   note: >-
     Filed with rve-calib-decode-2026-11-20 so the risk is a measurement rather than a sentence in a commit message.
+  resolution: >-
+    DONE 2026-11-20 on a REAL clip: the first 25 s of Interstellar 2014 (its first three seconds are black, mean
+    luma 3.5/255), 1280x720, 266 frames. Pure sequential calibration reads worst share 4.13308% with 184 of 266
+    frames above the 0.1% bar and peak 124 - two thirds of the clip damaged, which is exactly the ceiling mechanism
+    the row was filed for. The fix is the HYBRID: 12 triples read sequentially plus 4 at spread timestamps, which
+    always contains the middle of the clip. Hybrid reads 0.03777% (0 frames above the bar) on the black-head cut
+    and 0.00035% on BD Violet; start-up 6.05 s against 4.95 for the pure sequential and 9.79 for the full spread.
+    The earlier row shipped the pure sequential default with the risk in prose - the prose was right and the
+    default was wrong. docs/wsp/verified/int8-calib-fade.txt, logs/calib-fade/, scripts/calib_fade_records.py.
 
 - id: rve-price-curvature-predictor-2026-11-20
   title: "A curvature-priced predictor for K, the class the price paper says is correct"

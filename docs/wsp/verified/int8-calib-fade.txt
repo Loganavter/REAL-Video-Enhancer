@@ -1,0 +1,69 @@
+# A clip that opens on black: pure sequential calibration reads 4.13%, the hybrid reads 0.038%
+
+Measured 2026-11-20 on a real clip, not a synthetic one: the first 25 s of `Interstellar.2014.IMAX.EDITION.720p`,
+whose first three seconds are **black** (mean luma 3.5 of 255 over 72 frames), cut at 1280x720. Records
+`int8-calib-fade.jsonl` (FD001-FD004), raw `logs/calib-fade/`.
+
+The row exists because the sequential decode (`int8-calib-seq.txt`) was shipped on one clip whose head is ordinary
+content - BD Violet cannot see the failure mode it introduces: a sequential sample of the first 48 frames gives the
+grids a **lower ceiling** than the clip contains, and a low ceiling clips later. The 2026-11-18 crop page measured
+the same mechanism between one frame and sixteen (0.116% against 0.006%).
+
+## The failure
+
+`gate_sweep --reference-kind config`, spread decode as the reference:
+
+| arm | worst share | frames above 0.1% | peak |
+|---|---|---|---|
+| **pure sequential**, first 48 frames | **4.13308%** (frame 109) | **184 of 266** | **124** |
+| **hybrid**, 12 sequential triples + 4 spread timestamps | **0.03777%** (frame 101) | 0 | 23 |
+
+The pure-sequential arm is not a small regression: two thirds of the clip is above the bar, and the peak is 124
+levels. That is a visibly damaged picture, and it is what "the head of the clip is black" does to a calibration
+that only looks at the head.
+
+## The fix, and why it is the hybrid
+
+A spread sample is expensive (16 seeks, 4.66 s) and a sequential one is blind to the head (0.63 s). The hybrid
+keeps most of the speed and removes the blindness: **12 triples read sequentially + 4 triples at spread
+timestamps**, so the sample always contains the middle of the clip. Cost is about 1.6 s of decode instead of 4.66.
+
+| clip | hybrid against full spread |
+|---|---|
+| Interstellar cut (opens black, 266 frames) | **0.03777%**, 0 frames above the bar |
+| BD Violet (494 frames) | **0.00035%**, 0 frames above the bar |
+
+Start-up with the hybrid: **6.05 s** (FD004), against 4.95 s for the pure sequential and 9.79 s for the full
+spread. So the safety costs 1.1 s, and the session's start-up still went 33.15 -> 6.05 s.
+
+## What this says about the earlier row
+
+`int8-calib-seq.txt` shipped `RVE_INT8_CALIB_SEQUENTIAL=1` with a pure sequential sample and named this risk in
+prose. The prose was right and the default was wrong: a clip whose head is black is not an edge case (Interstellar
+opens on black, and so do most studio logos), so the risk had to be measured before the default moved, not after.
+The knob now means the hybrid, `RVE_INT8_CALIB_SPREAD=4` sets how many spread timestamps it keeps, and `=0` gives
+the pure sequential sample that this page refutes.
+
+## What is NOT claimed
+
+- **Two clips.** One with a black head, one ordinary. Enough to show the failure and that the hybrid survives it,
+  not enough to set the spread count for every kind of head (a 30 s logo sequence would want more than 4).
+- **The spread count was not swept.** 4 is the smallest number that covers the middle of a clip in four places.
+
+## Reproduce
+
+```bash
+ffmpeg -i <film> -t 25 -c:v libx264 -crf 12 -pix_fmt yuv420p inter25s.mkv     # the head must be kept
+ARMS="spread seq hybrid" ARM_ENV_SPREAD="RVE_INT8_CALIB_SEQUENTIAL=0" \
+    ARM_ENV_SEQ="RVE_INT8_CALIB_SEQUENTIAL=1 RVE_INT8_CALIB_SPREAD=0" \
+    ARM_ENV_HYBRID="RVE_INT8_CALIB_SEQUENTIAL=1" SINK=ffv1 ROUNDS=1 CLIPS="inter25s.mkv" scripts/wall_ab.sh
+PYTHONPATH=scripts python3 scripts/gate_sweep.py <arm>.mkv <spread>.mkv --reference-kind config --out pair.json
+PYTHONPATH=scripts python3 scripts/calib_fade_records.py
+PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-calib-fade.txt \
+    --records docs/wsp/verified/records/int8-calib-fade.jsonl --bars docs/claims-bars.json
+```
+
+@claim FD001 0.03777247299382716 % "frames [e4c87dff62ea95b7] n=266" measured
+@claim FD002 0.000349633487654321 % "frames [746e4196eaaad6d6] n=494" measured
+@claim FD003 4.133077739197531 % "frames [c3bbd80b55a30660] n=266" measured
+@claim FD004 6.05 s "process starts [2a43fd86fb164489] n=1" measured
