@@ -3588,3 +3588,69 @@ tasks:
     DRAM roof, so a third of a hop's reads becoming hits buys little, and the write-back of 132 MB evicts the
     previous launch's tail before it can be reused. Records int8-hop-traverse.jsonl (V001-V003),
     logs/hop-traverse/probe.json.
+
+- id: rve-hop-constant-nature-2026-11-20
+  title: 'Is the hop''s 0.59 ms a per-launch fee? Shrink the frame and find out - it is not'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 30m
+  tags:
+  - int8
+  - hops
+  - instrument
+  base_branch: perf/inference
+  resolution: >-
+    ANSWERED 2026-11-20, and it refutes MY OWN framing as well as an outside reader's top recommendation. The
+    kernel at five sizes: 256x256 0.0572 ms, 512 0.2066, 1024 0.8108, 1080p 1.5949, 4K 5.9124. 127x the pixels
+    costs 103x the time and the per-pixel cost IMPROVES with size (0.873 -> 0.713 ms/Mpx), so the implied
+    per-launch term is 0.011 ms - nothing. Consequences: (1) "9.44 ms/frame sits in a 0.59 ms launch constant" is
+    WRONG, as is my own "0.59 ms per launch" phrasing: the tap profile is SUB-LINEAR (first tap 0.59, next eight
+    0.06 each) because with one tap in flight the kernel waits on it and with nine it overlaps them - memory-level
+    parallelism inside one launch, not a fee. (2) CUDA graphs would recover 0.011 x 17 = 0.19 ms, not 9.4 - not
+    worth a row. (3) The cascade loses its launch argument and keeps only the traffic one: a fused pair never
+    writes and re-reads its intermediate, ~250 MB of DRAM per pair. (4) M x 2 batching reading flat is now
+    expected rather than evidence against host overhead. The kernel is throughput-bound at 96-103 TOPS at every
+    size. docs/wsp/verified/int8-hop-constant.txt, records int8-hop-constant.jsonl (S001-S006),
+    logs/hop-constant/probe.json.
+
+- id: rve-frame-pipeline-overlap-2026-11-20
+  title: 'The 7.68 ms of IO never overlaps the 25.9 ms body - the loop is strictly sequential'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 3h
+  tags:
+  - pipe
+  - streams
+  - latency
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/RenderVideo.py
+  - docs/wsp/verified/int8-pack-ring.txt
+  - docs/FRAME-BUDGET.md
+  owns_files:
+  - docs/wsp/verified/frame-pipeline.txt
+  refutes: >-
+    The loop is already as overlapped as it can be. It is not: read, body, pack and write happen in sequence on
+    the render thread, so of a 33.58 ms frame 25.90 is the body and 7.68 is IO that could in principle sit behind
+    the NEXT frame's body - pack(N) on a copy stream while body(N+1) runs, with the reader for N+2 prefetching.
+    PCIe is full duplex, so H2D and D2H do not contend. The pack-ring experiment does NOT refute this and never
+    claimed to: a pinned ring removes the per-frame tobytes but the copy still happens on the frame's critical
+    path, synchronously, because no second stream and no event guard were introduced. If a double-buffered
+    three-stream pipeline does not move the loop by 2 ms, the stages are already overlapped somewhere the profile
+    cannot see and this closes with that.
+  acceptance: >-
+    Null-sink A/B, arms alternating, >=3 rounds, one session: today against a double-buffered pipeline (body on
+    the compute stream, payload copies on a dedicated copy stream with event guards, reader one frame ahead).
+    Report the loop line, the pack line and the reader's wait. Then byte-identity of the render - a pipeline moves
+    WHEN a payload is copied, not what it contains, so the pair must be IDENTICAL and that is the check that the
+    event guards are right (a slot released early is the 12.6 dB bug this lane already paid for once).
+  note: >-
+    Filed from the outside reader's list, which is right that this is the largest structural win left that needs
+    no CUDA: 7.68 ms of a 33.58 ms frame is not body. It is also the item where "the ring was flat" is genuinely
+    not the same experiment, and the distinction is worth a row because it was filed as a negative without it.

@@ -16,7 +16,7 @@ what its floor is, so a reader who was never in this lane can challenge any of i
 | build | all four opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that tail kernel, zero-halo hop buffers |
 | the bar | `bar_int8_wall` = **1.2x** wall clock against the fp16 engine; the picture bar is the share of pixels more than 8 levels off on the worst frame of a spread sample, 0.1% |
 
-| commit | `cd8eb2fa` - the tree these numbers were taken on |
+| commit | `2738616d` - the tree these numbers were taken on |
 
 The pipeline, in the order a frame is paid for: **decode** (ffmpeg, outside the loop) -> **reader** (yuv420p10 -> a tensor) -> **head** (3 -> 64 channels) -> **sixteen hops** (the body) -> **tail** (64 -> 12 channels, pixel shuffle to 3 at 2x) -> **residual** (add the upsampled input) -> **pack** (4K payload to the host) -> **writer** (ffmpeg stdin). The render loop below is the wall clock of that chain; the body is what the model costs, measured by the app's own events.
 
@@ -84,8 +84,9 @@ An outsider reading this list is the intended use: every entry is a lever someon
 
 | idea | expected | what it needs | state |
 |---|---|---|---|
-| fuse two hops per launch (cascade) | **+3.1 ms/frame** at T=32: 1.064x of work for one saved launch constant of 0.59 ms, eight pairs | a CUDA kernel; the intermediate is 34^2 x 64 B = 74 KB, which fits 100 KB of shared memory | `rve-hop-fuse2-cascade`, P2, unmeasured |
-| shared-memory staging of the 3-row window | the 0.59 ms first-tap constant, if it is a round trip | the same CUDA kernel; measured negative in its two cheap forms (reordered loads -101%, a CUDA microbenchmark -26%) | closed, `int8-hop-prefetch.txt` |
+| fuse two hops per launch (cascade) | **+3.1 ms/frame** at T=32: 1.064x of work against ~250 MB of DRAM per fused boundary removed (the launch-constant argument is dead) | a CUDA kernel; the intermediate is 34^2 x 64 B = 74 KB, which fits 100 KB of shared memory | `rve-hop-fuse2-cascade`, P2, unmeasured |
+| shared-memory staging of the 3-row window | the 0.59 ms first-tap cost, if it is a round trip (it is NOT a per-launch constant: the same kernel at 256x256 takes 0.057 ms, so the implied launch term is 0.011 ms - `int8-hop-constant.txt`) | the same CUDA kernel; measured negative in its two cheap forms (reordered loads -101%, a CUDA microbenchmark -26%) | closed, `int8-hop-prefetch.txt` |
+| **overlap the IO with the body** (three streams, double buffer) | **up to 7.68 ms** - read, body, pack and write are strictly sequential today | software only, no new kernel | `rve-frame-pipeline-overlap`, P1, unmeasured |
 | a PCIe 4.0 slot | ~1.2 ms off `pack`, since the link is gen 3 x8 today | hardware | not software |
 | skipping duplicate frames / static regions | large on anime, and the owner's call forbids it | - | closed by policy, `rve-reuse-gate-forbidden` |
 | cut the model (fewer channels or hops) | 2.9-4.5 ms per hop removed | 14-37% per-layer residual, 1.58% of pixels over the picture bar | closed by measurement |
