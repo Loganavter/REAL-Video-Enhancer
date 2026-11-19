@@ -620,6 +620,10 @@ class FFmpegWrite(Buffer):
                 # A pooled-output item is the Frame itself (its payload is a live view on a
                 # pinned host slot); plain bytes still go through unchanged.
                 payload = frame.get_frame_bytes() if hasattr(frame, "get_frame_bytes") else frame
+                # a payload copied on the side stream is only readable once its event has fired
+                _ev = getattr(frame, "_payload_event", None)
+                if _ev is not None:
+                    _ev.synchronize()
                 _t_write = time.perf_counter()
                 self.writeProcess.stdin.buffer.write(payload)
                 _write_ms = (time.perf_counter() - _t_write) * 1000.0

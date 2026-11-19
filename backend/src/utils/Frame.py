@@ -1,3 +1,4 @@
+import os
 import threading
 from typing import Any, Optional
 try:
@@ -10,6 +11,13 @@ _pytorch_dtype = None
 _pytorch_stream = None
 _torch_utils = None
 _torch = None
+_copy_stream = None      # the D2H copy stream, when RVE_PIPE=1
+_pipe_enabled = os.environ.get("RVE_PIPE") == "1"
+# The payload copy is `copy_(..., non_blocking=True)` into PINNED memory, i.e. asynchronous by contract. The
+# writer used to read the slot with no event guard, which is the same shape as the 12.6 dB bug that got the
+# pooled path disabled once. The guard is on by default; RVE_PAYLOAD_GUARD=0 is only for the A/B that asks
+# whether the race is real.
+_guard_enabled = os.environ.get("RVE_PAYLOAD_GUARD", "1") != "0"
 
 def _init_pytorch(device, gpu_id, dtype, width, height, hdr_mode, high_bitdepth=None):
     global _pytorch_device, _pytorch_dtype, _torch_utils, _torch, _pytorch_stream
@@ -393,14 +401,30 @@ class Frame:
                 "pack: PINNED RING in use - %d slots x %s bytes per frame (no per-frame tobytes)",
                 pool.count, getattr(pool, "num_bytes", "?"))
         slot, view = pool.acquire()
+        self._payload_event = None
         try:
             dest = pool.buffer(slot)
-            if getattr(self, "yuv10_output", False):
-                _torch_utils.tensor_to_yuv420p10(self._tensor, dest=dest)
-            elif getattr(self, "yuv8_output", False):
-                _torch_utils.tensor_to_yuv420p(self._tensor, dest=dest)
+            convert = (self._convert_payload)
+            if _pipe_enabled and _torch is not None:
+                # The copy runs on its OWN stream, so the next frame's body starts while this payload is
+                # still crossing the link. The event is the guard the earlier attempt lacked: the writer
+                # synchronises on it before reading the slot, which is exactly what made the pooled path
+                # read 12.6 dB once (a slot released before its last byte arrived).
+                global _copy_stream
+                if _copy_stream is None:
+                    _copy_stream = _torch.cuda.Stream()
+                _copy_stream.wait_stream(_torch.cuda.current_stream())
+                with _torch.cuda.stream(_copy_stream):
+                    convert(dest)
+                    ev = _torch.cuda.Event()
+                    ev.record(_copy_stream)
+                self._payload_event = ev
             else:
-                _torch_utils.tensor_to_frame(self._tensor, dest=dest)
+                convert(dest)
+                if _guard_enabled and _torch is not None:
+                    ev = _torch.cuda.Event()
+                    ev.record(_torch.cuda.current_stream())
+                    self._payload_event = ev
         except BaseException:
             pool.release(slot)
             raise
@@ -421,6 +445,14 @@ class Frame:
             pool.release(slot)
             return True
         return False
+
+    def _convert_payload(self, dest) -> None:
+        if getattr(self, "yuv10_output", False):
+            _torch_utils.tensor_to_yuv420p10(self._tensor, dest=dest)
+        elif getattr(self, "yuv8_output", False):
+            _torch_utils.tensor_to_yuv420p(self._tensor, dest=dest)
+        else:
+            _torch_utils.tensor_to_frame(self._tensor, dest=dest)
 
     def release_payload(self) -> None:
         """Give a pooled output slot back to the pool. Idempotent; no-op when not pooled.
