@@ -71,6 +71,15 @@ def load_records() -> dict:
     return out
 
 
+def git_commit() -> str:
+    import subprocess
+    try:
+        return subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:                                     # noqa: BLE001
+        return "unknown"
+
+
 def newest_log(logdir: str, arm: str):
     best = None
     for path in glob.glob(os.path.join(logdir, f"*_{arm}_r*_null.log")):
@@ -120,6 +129,7 @@ def main(argv=None) -> int:
         pct = 100.0 * d / a["value"] if a["value"] else 0.0
         return f"-{d:.2f} ms ({pct:.1f}%)"
 
+    commit = git_commit()
     lines = []
     A = lines.append
     A("# The frame budget, as it stands")
@@ -144,6 +154,14 @@ def main(argv=None) -> int:
       "tail kernel, zero-halo hop buffers |")
     A("| the bar | `bar_int8_wall` = **1.2x** wall clock against the fp16 engine; the picture bar is the share "
       "of pixels more than 8 levels off on the worst frame of a spread sample, 0.1% |")
+    A("")
+    A(f"| commit | `{commit}` - the tree these numbers were taken on |")
+    A("")
+    A("The pipeline, in the order a frame is paid for: **decode** (ffmpeg, outside the loop) -> **reader** "
+      "(yuv420p10 -> a tensor) -> **head** (3 -> 64 channels) -> **sixteen hops** (the body) -> **tail** "
+      "(64 -> 12 channels, pixel shuffle to 3 at 2x) -> **residual** (add the upsampled input) -> **pack** "
+      "(4K payload to the host) -> **writer** (ffmpeg stdin). The render loop below is the wall clock of that "
+      "chain; the body is what the model costs, measured by the app's own events.")
     A("")
     A("## The body, from the app's own phase counter")
     A("")
