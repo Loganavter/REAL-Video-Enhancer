@@ -27,8 +27,16 @@ def read_shape(path: str) -> dict:
     sd = torch.load(path, map_location="cpu", weights_only=True)
     sd = sd.get("params", sd)
     convs = [k for k in sd if k.endswith(".weight") and getattr(sd[k], "ndim", 0) == 4]
-    convs.sort(key=lambda s: int(s.split(".")[1]))
-    if len(convs) < 3:
+
+    def _index(key: str) -> int:
+        # Compact keys are `body.N.weight`; other families (SPAN, RRDBNet) use names, and this helper is only
+        # meant for Compact - so a non-numeric segment sorts last instead of raising, and read_shape's shape check
+        # below refuses the file with a message rather than a ValueError from the sort.
+        parts = key.split(".")
+        return int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 10 ** 9
+
+    convs.sort(key=_index)
+    if len(convs) < 3 or _index(convs[0]) == 10 ** 9:
         raise ValueError(f"{os.path.basename(path)}: {len(convs)} convolutions - not a Compact body")
     feat = int(sd[convs[0]].shape[0])
     tail_out = int(sd[convs[-1]].shape[0])

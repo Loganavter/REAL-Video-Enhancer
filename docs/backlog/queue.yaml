@@ -4036,7 +4036,7 @@ tasks:
 - id: rve-span-int8-2026-11-20
   title: 'SPAN family: what int8 would take (five files) - LATER'
   type: experiment
-  status: todo
+  status: dropped
   owner: '@supervisor'
   priority: P3
   gpu: true
@@ -4061,6 +4061,19 @@ tasks:
     whether an int8 path over the 3x3s is worth anything at all: if the 3x3s are a minority of the time, the
     many quantise/dequantise boundaries it would need cost more than they save, and the row closes as
     not-worth-it. Stage (b), only if (a) says otherwise: int8 on the 3x3s with fp16 elsewhere, share + time.
+  resolution: >-
+    STAGE (a) DONE 2026-11-20, and it closes the row: CLOSED AS NOT WORTH A KERNEL, by measurement rather than
+    by difficulty. torch.profiler cannot be used in this build (CUPTI device timing reads 0 even for a matmul),
+    so every Conv2d was bracketed with a CUDA event pair through hooks on 2x_ModernSpanimationV1 (SPAN x2, 3.94M
+    params, 102 convs): forward 302 ms at 1080p->2160p, of which 3x3 convolutions are 197.85 ms (65.5%, 105 of
+    them), 1x1 expanders 7.00 ms (2.3%), and everything else - the parameter-free attention multiply, the
+    four-way concat, pixel shuffle, activations - 97.28 ms (32.2%). So the ceiling for int8 over the 3x3s is
+    65.5%, and a third of the frame is not convolution at all. Next to the Compact lane that ceiling is worse
+    (78% in ONE uniform kernel) and the work is larger: two widths (48 pads to 64, measured to cost what 64
+    costs), ~19 block boundaries needing quantise/dequantise pairs, and a mixed fp16 remainder. docs/wsp/
+    verified/span-int8-scope.txt, logs/span-scope/probe.json, scripts/span_scope_probe.py. If SPAN ever becomes
+    the target model, the first lever is the 32.2% that is elementwise and concat - a graph problem, not a
+    quantisation one.
   note: >-
     Owner's instruction 2026-11-20: tier 3 goes in the queue as "later", not now. Filed with the stage (a)
     instrument named, because the cheap falsifier here is a measurement of where SPAN's time goes, not a kernel.
@@ -4159,6 +4172,19 @@ tasks:
     separate them, the row closes with "per-channel is a per-model choice" and the flag stays. (c) A 494-frame
     pair for whichever model would be adopted under the rule - 2x_Ani4K_Compact (0.3021% per-tensor) and
     1x-Epsilon (1.5394%, refused by the start-up gate) are the two cases that decide it.
+  resolution: >-
+    STAGE (a) DONE 2026-11-20, and it closes the row: CLOSED AS NOT WORTH A KERNEL, by measurement rather than
+    by difficulty. torch.profiler cannot be used in this build (CUPTI device timing reads 0 even for a matmul),
+    so every Conv2d was bracketed with a CUDA event pair through hooks on 2x_ModernSpanimationV1 (SPAN x2, 3.94M
+    params, 102 convs): forward 302 ms at 1080p->2160p, of which 3x3 convolutions are 197.85 ms (65.5%, 105 of
+    them), 1x1 expanders 7.00 ms (2.3%), and everything else - the parameter-free attention multiply, the
+    four-way concat, pixel shuffle, activations - 97.28 ms (32.2%). So the ceiling for int8 over the 3x3s is
+    65.5%, and a third of the frame is not convolution at all. Next to the Compact lane that ceiling is worse
+    (78% in ONE uniform kernel) and the work is larger: two widths (48 pads to 64, measured to cost what 64
+    costs), ~19 block boundaries needing quantise/dequantise pairs, and a mixed fp16 remainder. docs/wsp/
+    verified/span-int8-scope.txt, logs/span-scope/probe.json, scripts/span_scope_probe.py. If SPAN ever becomes
+    the target model, the first lever is the 32.2% that is elementwise and concat - a graph problem, not a
+    quantisation one.
   note: >-
     Tier 0 of the rescue ranking: no code - the flag already exists and rescues the worst offender for free. The
     reason it is worth a row rather than a note is that a flag nobody knows to set is not a capability: the
@@ -4207,6 +4233,19 @@ tasks:
     nothing. NOT measured: the hit's actual start-up saving in the app - the eager calibration is ~4.8 s for 24
     frames (measured when the pick double-calibrated), and the cache removes all of it on a re-render of the same
     clip, but that has not been timed end to end yet.
+  resolution: >-
+    STAGE (a) DONE 2026-11-20, and it closes the row: CLOSED AS NOT WORTH A KERNEL, by measurement rather than
+    by difficulty. torch.profiler cannot be used in this build (CUPTI device timing reads 0 even for a matmul),
+    so every Conv2d was bracketed with a CUDA event pair through hooks on 2x_ModernSpanimationV1 (SPAN x2, 3.94M
+    params, 102 convs): forward 302 ms at 1080p->2160p, of which 3x3 convolutions are 197.85 ms (65.5%, 105 of
+    them), 1x1 expanders 7.00 ms (2.3%), and everything else - the parameter-free attention multiply, the
+    four-way concat, pixel shuffle, activations - 97.28 ms (32.2%). So the ceiling for int8 over the 3x3s is
+    65.5%, and a third of the frame is not convolution at all. Next to the Compact lane that ceiling is worse
+    (78% in ONE uniform kernel) and the work is larger: two widths (48 pads to 64, measured to cost what 64
+    costs), ~19 block boundaries needing quantise/dequantise pairs, and a mixed fp16 remainder. docs/wsp/
+    verified/span-int8-scope.txt, logs/span-scope/probe.json, scripts/span_scope_probe.py. If SPAN ever becomes
+    the target model, the first lever is the 32.2% that is elementwise and concat - a graph problem, not a
+    quantisation one.
   note: >-
     Asked on 2026-11-20 after "isn't there a minute of waiting before int8 starts?". The answer measured is
     6.5 s, not a minute, and the breakdown says where it goes. The alternative - fewer calibration frames - is
@@ -4267,6 +4306,19 @@ tasks:
     ablation, which costs more than the sweep it would replace and is valid only for the model it ran on.
     So the start-up sweep stays (RVE_INT8_GRID_K=auto, ~3 s, guard x2). docs/wsp/verified/int8-grid-k-predict.txt,
     logs/grid-k-predict/rows.json, scripts/grid_k_predict_probe.py.
+  resolution: >-
+    STAGE (a) DONE 2026-11-20, and it closes the row: CLOSED AS NOT WORTH A KERNEL, by measurement rather than
+    by difficulty. torch.profiler cannot be used in this build (CUPTI device timing reads 0 even for a matmul),
+    so every Conv2d was bracketed with a CUDA event pair through hooks on 2x_ModernSpanimationV1 (SPAN x2, 3.94M
+    params, 102 convs): forward 302 ms at 1080p->2160p, of which 3x3 convolutions are 197.85 ms (65.5%, 105 of
+    them), 1x1 expanders 7.00 ms (2.3%), and everything else - the parameter-free attention multiply, the
+    four-way concat, pixel shuffle, activations - 97.28 ms (32.2%). So the ceiling for int8 over the 3x3s is
+    65.5%, and a third of the frame is not convolution at all. Next to the Compact lane that ceiling is worse
+    (78% in ONE uniform kernel) and the work is larger: two widths (48 pads to 64, measured to cost what 64
+    costs), ~19 block boundaries needing quantise/dequantise pairs, and a mixed fp16 remainder. docs/wsp/
+    verified/span-int8-scope.txt, logs/span-scope/probe.json, scripts/span_scope_probe.py. If SPAN ever becomes
+    the target model, the first lever is the 32.2% that is elementwise and concat - a graph problem, not a
+    quantisation one.
   note: >-
     Asked for by the owner on 2026-11-20: "can the optimal K be determined without the 2-4 s delay - maybe there
     are empirical signals in the weights?" The honest starting point is that the sweep is cheap in absolute

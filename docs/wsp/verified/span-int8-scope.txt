@@ -1,0 +1,52 @@
+# SPAN scope: 65.5% of the frame is in 3x3 convolutions, and that is not enough to justify a kernel
+
+Measured 2026-11-20 (local), probe `scripts/span_scope_probe.py`, raw `logs/span-scope/probe.json`,
+model `2x_ModernSpanimationV1.pth` (SPAN, x2, 3.94M parameters, 102 convolutions).
+
+The row asked one question before any int8 work on this family: if only the 3x3 convolutions could be quantised,
+would there be anything left to win? Answer, measured rather than argued.
+
+## Where the 302 ms go (1080p in, 2160p out, eager fp16)
+
+| category | ms | share | count |
+|---|---|---|---|
+| **3x3 convolutions** | 197.85 | **65.5%** | 105 |
+| 1x1 convolutions (the expanders) | 7.00 | 2.3% | 5 |
+| everything else: attention multiply, concat, pixel shuffle, activations | 97.28 | 32.2% | - |
+
+So the ceiling for an int8 path over the 3x3 convs is **65.5% of the frame**, and a third of the frame is
+elementwise/concat work that int8 would not touch at all.
+
+## Why that ceiling is worse than it looks, next to the family the lane already runs
+
+The Compact lane's hop is 78% of the frame in **one uniform kernel**: sixteen identical 64-channel 3x3 convs, one
+quantisation boundary per hop and a single `C` constexpr. SPAN is the opposite shape:
+
+- **105 convolutions at two widths** (48/96 in the span48 variants, 64/128 here). 48 is not a power of two, so it
+  pads to 64 - the width work this lane already measured as "48 costs what 64 costs" (`int8-native-width.txt`);
+- **~19 block boundaries**, each of which would need a quantise/dequantise pair, against one per hop in the
+  Compact lane. At the boundary cost this lane has measured, 38 passes are not free;
+- **32.2% of the frame is not convolution at all** - the parameter-free attention is an elementwise sigmoid
+  multiply, and the four-way concat fusion is a copy. Neither is a `tl.dot`.
+
+## Verdict
+
+**Closed as not worth a kernel.** The prize (65.5%) is smaller than the Compact lane's (78%) and the work is a
+family-specific kernel set with 19 boundaries, two widths and a mixed fp16 remainder - against a lane that already
+gets its 78% from a single kernel. If SPAN ever becomes the target model, the first lever is not int8: it is the
+32.2% that is elementwise and concat, which is a graph problem, not a quantisation one.
+
+## What this does not say
+
+- One model, one card, eager fp16 at 1080p. A different SPAN variant (span48, 48 channels) would move the conv
+  share slightly, not the structure.
+- The 302 ms is eager PyTorch, so the *shares* are what is quoted, not the absolute time: the app would run this
+  model through a TensorRT engine, where the same structure holds but every number is smaller.
+- No int8 was attempted here, by design: this is the scope measurement that decides whether to attempt it.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/span_scope_probe.py \
+    --out-file docs/wsp/verified/logs/span-scope/probe.json
+```
