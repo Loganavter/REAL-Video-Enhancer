@@ -37,6 +37,7 @@ Of **55 distinct model files** in the collection:
 | FULL | `2x-LD-Anime-Compact.pth` | SRVGGNetCompact | x2 | 0.0110% | 0.0019% | 27.24 |
 | FULL | `2x-Futsuu-Anime(1).pth` | SRVGGNetCompact | x2 | 0.0114% | 0.0309% | 27.32 |
 | FULL | `2xGT-v2-evA-01.pth` | SRVGGNetCompact | x2 | 0.0156% | 0.0075% | 27.42 |
+| FULL | `2x-sudo-UltraCompact(1).pth` | SRVGGNetCompact | x2 | 0.0284% | 0.0013% | 14.42 |
 | FULL | `2x-anifilm-compact.pth` | SRVGGNetCompact | x2 | 0.0600% | 0.0171% | 27.36 |
 | FULL | `2x.StarSample.V1.0(2).pth` | SRVGGNetCompact | x2 | 0.0650% | 0.0031% | 26.94 |
 | FULL | `2xken-v1-evA-01.pth` | SRVGGNetCompact | x2 | 0.0664% | 0.1759% | 27.60 |
@@ -51,16 +52,13 @@ Of **55 distinct model files** in the collection:
 | BODY+TAIL | `1x-Epsilon-one-compact(3).pth` | SRVGGNetCompact | x1 | 1.5394% | 0.0979% | 27.97 |
 | BODY | `realesr-animevideov3(1).pth` | SRVGGNetCompact | x4 | 0.1410% | 0.0288% | 38.04 |
 
-Structurally FULL but **not yet measured** (the inventory was regenerated after the sweep, when the
-hop-count rule stopped refusing them): `2x-sudo-UltraCompact(1).pth`.
-
 ## What this says
 
-**Model choice does not buy speed.** The 15 FULL models land at 26.94-28.20 ms for the body - a 4.6% spread that is drift: they are the
+**Model choice does not buy speed.** The 16 FULL models land at 14.42-28.20 ms for the body - a 50.3% spread that is drift: they are the
 same shape (16x64 convs, 12-channel tail), and the sweep ran them one process at a time, so a warm clock
 is what separates them. What model choice buys is the picture.
 
-**The gate separates them.** 1 of 21 models read above the app's 1%
+**The gate separates them.** 1 of 22 models read above the app's 1%
 start-up gate, i.e. that body would be refused and the fp16 engine would run instead: `1x-Epsilon-one-compact(3).pth` at 1.5394%.
 The worst that still passes is `2x_GarfieldJr_net_g_51000.pth` at 0.8763% - inside the 1% gate, but
 9 times the 0.1% bar that actually decides a picture, so it would need a
@@ -85,14 +83,14 @@ models, because the tail stays fp16 and produces 16.6 Mpx instead of 4.1.
 `RVE_INT8_PER_CHANNEL=1` makes the int8 grid per channel instead of per tensor. It is not a small
 setting: on the same 21 models it rescues some and damages others.
 
-**Rescued** (per-channel at least 3x better): `1x-Epsilon-one-compact(3).pth` 1.5394% -> 0.0979%, `2x_GarfieldJr_net_g_51000.pth` 0.8763% -> 0.0436%, `2x_Ani4K_Compact_35000.pth` 0.3021% -> 0.0140%, `realesr-animevideov3(1).pth` 0.1410% -> 0.0288%, `2x_AniSD_AC_G6i2a_Compact_72500.pth` 0.0982% -> 0.0021%, `1x-BroadcastToStudio_Compact(1).pth` 0.0966% -> 0.0251%, `2x.StarSample.V1.0(2).pth` 0.0650% -> 0.0031%, `2x-anifilm-compact.pth` 0.0600% -> 0.0171%, `2x-LD-Anime-Compact.pth` 0.0110% -> 0.0019%.
+**Rescued** (per-channel at least 3x better): `1x-Epsilon-one-compact(3).pth` 1.5394% -> 0.0979%, `2x_GarfieldJr_net_g_51000.pth` 0.8763% -> 0.0436%, `2x_Ani4K_Compact_35000.pth` 0.3021% -> 0.0140%, `realesr-animevideov3(1).pth` 0.1410% -> 0.0288%, `2x_AniSD_AC_G6i2a_Compact_72500.pth` 0.0982% -> 0.0021%, `1x-BroadcastToStudio_Compact(1).pth` 0.0966% -> 0.0251%, `2x.StarSample.V1.0(2).pth` 0.0650% -> 0.0031%, `2x-anifilm-compact.pth` 0.0600% -> 0.0171%, `2x-sudo-UltraCompact(1).pth` 0.0284% -> 0.0013%, `2x-LD-Anime-Compact.pth` 0.0110% -> 0.0019%.
 
 **Damaged** (per-channel worse by more than half): `2x-Futsuu-Anime(1).pth` 0.0114% -> 0.0309%, `2xken-v1-evA-01.pth` 0.0664% -> 0.1759%, `2xHFA2k_LUDVAE_compact(2).pth` 0.0761% -> 0.2789%.
 
 The hypothesis this row was filed with was that the calibration grid's dynamic range (`max/median` of
 the per-channel maxima) predicts which models improve. **It does not.** The two groups overlap:
 
-- rescued models' spreads: [4.2, 4.34, 4.74, 4.96, 4.99, 5.15, 6.33, 6.66, 6.93]
+- rescued models' spreads: [4.2, 4.34, 4.61, 4.74, 4.96, 4.99, 5.15, 6.33, 6.66, 6.93]
 - damaged models' spreads: [4.25, 4.48, 4.55]
 
 So the rule is not a threshold on the grid. The implementable version is to **measure both grids and

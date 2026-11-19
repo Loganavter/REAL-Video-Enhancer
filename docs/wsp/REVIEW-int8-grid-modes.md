@@ -68,20 +68,39 @@ The split is not marginal:
 the layer maximum. `K = 1` is the per-tensor grid reached through the folding path, `K → ∞` is per-channel, and
 the fold cancels exactly for any `s[c]`, so **every K costs the same arithmetic** — this is a picture axis only.
 
-Same 6 models, same calibration, same three held-out frames:
+All 22 models the pipeline can run, same calibration, same three held-out frames (records GK001-GK132):
 
-| model | per-tensor | K=1 | K=2 | K=3 | K=4 | per-channel | best |
+| model | per_tensor | K=1 | K=2 | K=3 | K=4 | per_channel | best |
 |---|---|---|---|---|---|---|---|
-| Futsuu | 0.0114 | 0.0126 | **0.0002** | 0.0019 | 0.0043 | 0.0309 | K=2 |
-| LUDVAE | 0.0761 | 0.0904 | **0.0448** | 0.0443 | 0.1511 | 0.2789 | K=2/3 |
-| ken-v1 | 0.0664 | 0.0434 | 0.0141 | **0.0037** | 0.0310 | 0.1759 | K=3 |
-| Garfield | 0.8763 | 0.2435 | 0.0030 | 0.0156 | **0.0029** | 0.0436 | K=4 |
-| AniSD | 0.0982 | 0.0760 | 0.0059 | 0.0016 | **0.0014** | 0.0021 | K=4 |
-| AniScale | 0.0001 | 0.0002 | **0.0000** | 0.0000 | 0.0000 | 0.0002 | K≥2 |
+| `2x-anifilm-compact.pth` | 0.0600 | 0.0456 | **0.0005** | 0.0029 | 0.0026 | 0.0171 | K=2 |
+| `2x-AniScale.pth` | 0.0001 | 0.0002 | **0.0000** | 0.0001 | 0.0000 | 0.0002 | K=2 |
+| `2x-Bubble-AnimeScale-Compact-v1(3).pth` | 0.0012 | 0.0010 | 0.0001 | 0.0002 | **0.0000** | 0.0004 | K=4 |
+| `2x-Futsuu-Anime(1).pth` | 0.0114 | 0.0126 | **0.0002** | 0.0019 | 0.0043 | 0.0309 | K=2 |
+| `2x-LD-Anime-Compact.pth` | 0.0110 | 0.0091 | **0.0001** | 0.0006 | 0.0002 | 0.0019 | K=2 |
+| `2x-sudo-UltraCompact(1).pth` | 0.0284 | 0.0246 | 0.0006 | **0.0003** | 0.0006 | 0.0013 | K=3 |
+| `2x.StarSample.V1.0(2).pth` | 0.0650 | 0.0610 | 0.0040 | **0.0010** | 0.0011 | 0.0031 | K=3 |
+| `2x_Ani4K_Compact_35000.pth` | 0.3021 | 0.1589 | 0.0166 | 0.0054 | **0.0053** | 0.0140 | K=4 |
+| `2x_AniSD_AC_G6i2a_Compact_72500.pth` | 0.0982 | 0.0760 | 0.0059 | 0.0016 | **0.0014** | 0.0021 | K=4 |
+| `2x_GarfieldJr_net_g_51000.pth` | 0.8763 | 0.2434 | 0.0030 | 0.0157 | **0.0029** | 0.0436 | K=4 |
+| `2xGT-v2-evA-01.pth` | 0.0156 | 0.0101 | 0.0006 | **0.0002** | 0.0003 | 0.0075 | K=3 |
+| `2xHFA2k_compact_multijpg(1).pth` | 0.0000 | 0.0000 | **0.0000** | 0.0000 | 0.0000 | 0.0001 | K=2 |
+| `2xHFA2k_LUDVAE_compact(2).pth` | 0.0761 | 0.0904 | 0.0448 | **0.0443** | 0.1511 | 0.2789 | K=3 |
+| `2xHFA2kAVCCompact(1).pth` | 0.0000 | 0.0000 | **0.0000** | 0.0000 | 0.0000 | 0.0000 | K=2 |
+| `2xken-v1-evA-01.pth` | 0.0664 | 0.0434 | 0.0141 | **0.0037** | 0.0311 | 0.1759 | K=3 |
+| `WoEiCS_2x(1).pth` | 0.0001 | 0.0000 | **0.0000** | 0.0000 | 0.0000 | 0.0000 | K=2 |
+| `1x-AnimeUndeint-Compact(1).pth` | 0.0001 | 0.0000 | **0.0000** | 0.0000 | 0.0001 | 0.0000 | K=2 |
+| `1x-BleedOut-Compact.pth` | 0.0014 | 0.0000 | **0.0000** | 0.0000 | 0.0000 | 0.0000 | K=2 |
+| `1x-BroadcastToStudio_Compact(1).pth` | 0.0966 | 0.0630 | 0.0018 | **0.0018** | 0.0049 | 0.0251 | K=3 |
+| `1x-Dotzilla-Compact.pth` | 0.0000 | 0.0000 | **0.0000** | 0.0000 | 0.0000 | 0.0000 | K=2 |
+| `1x-Epsilon-one-compact(3).pth` | 1.5394 | 1.0937 | 0.0962 | **0.0665** | 0.0998 | 0.0979 | K=3 |
+| `realesr-animevideov3(1).pth` | 0.1410 | 0.1246 | 0.0504 | **0.0071** | 0.0446 | 0.0288 | K=3 |
 
-**An intermediate K beat both shipped modes on all six models.** The dichotomy this note was written about is
-the two ends of this axis, and each end is dominated. That is the answer to the original question: per-channel
-is not "bad for three models", it is one end of a ladder whose optimum is in the middle.
+An intermediate K beats both shipped modes on 17 of 22 models.
+
+Five of the 22 read 0.0000% at every K (they were already clean), so "beats both ends" is strict for the other
+**17 of 22**. Two entries are worth naming: `1x-Epsilon-one-compact` was at 1.5394% — above the app's 1%
+start-up gate, i.e. refused outright — and reads 0.0665% at K=3, inside the bar; and `realesr-animevideov3`
+(4x, 48-channel tail) goes 0.1410% → 0.0071%.
 
 `K = 1` also isolates the epilogue term (d) that §5 lists: it produces the per-tensor *grid* without the
 epilogue's multiply-and-shift. Against the shipped per-tensor it reads better on Garfield (0.8763 → 0.2435),

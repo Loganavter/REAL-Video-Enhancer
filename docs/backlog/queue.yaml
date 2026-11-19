@@ -3942,9 +3942,13 @@ tasks:
     (a) DONE, 2026-11-20: backend/tests/test_int8_body_shape.py (6 cases) passes; the constructor and
     supports() now read the model's count (>= 2 inner convs) and its width, and refuse with the reason.
     The inventory flips 2x-sudo-UltraCompact from NO to FULL as a result - same architecture, nine hops.
-    (b) PENDING: the measurement on the nine-hop body (share + time) is queued behind the per-channel sweep
-    that is running on the same card; the expected shape is hops ~9/16 of 24.5 ms, i.e. a body near 15 ms and a
-    frame near 20, but that is an expectation, not a number, and this row is not done until it is measured.
+    (b) MEASURED 2026-11-20 on 2x-sudo-UltraCompact (64 channels, EIGHT inner convs - the inventory used to
+    count the tail and say nine): body 14.42 ms against 27.2 for the sixteen-hop production body, i.e. 1.88x,
+    and the share against its own fp16 is 0.0284% per-tensor / 0.0013% per-channel on three held-out frames.
+    So the prediction "8/16 of the hops" holds within 6%. What that does NOT yet say is the lane's RATIO: a
+    cheaper model has a cheaper fp16 comparator too (eager fp16 reads 107.6 ms against 203.8 for the production
+    model), so the ratio may well stay near 1.6 while the frame gets 12 ms shorter. A render pair is the
+    remaining step, and the row stays in_progress until it is run.
   note: >-
     Filed 2026-11-20 as tier 1 of the "which model is cheapest to rescue" ranking: the working sibling is the
     production model (same 64-channel Compact), and the difference is a COUNT, not an operation. That is the
