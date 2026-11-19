@@ -103,6 +103,11 @@ class Int8Body:
         self.inner_prelus = prels[1:]
         self.scale = int(getattr(model, "upscale", 2))
         self.feat, self.block_m, self.warps = feat, block_m, warps
+        # `tl.arange` needs a POWER OF TWO, so a width like 48 or 24 is padded up (48 -> 64, 24 -> 32) with
+        # zero weights and neutral scales: the padding channels carry 0 through every hop and the tail reads
+        # only the first `cout`. The cost is the pad ratio - 1.33x work for 48 and for 24 - which is why a
+        # power-of-two width (32, 64) is the cheap case and 48 is not (row rve-body-native-width).
+        self.cpad = 1 << (int(feat) - 1).bit_length() if int(feat) > 1 else 16
         # The epilogue's per-element divide can be folded into the incoming rescale: `a = w_scale/out_scale`
         # and `b = bias/out_scale` computed once per channel. Kept behind a knob until it has been timed and
         # its picture measured (row rve-epilogue-divide-2026-11-19) - the rewrite is exact in real arithmetic
@@ -167,6 +172,13 @@ class Int8Body:
         self.tail_yuv = bool(str(os.environ.get("RVE_TAIL_YUV", "1")).lower() in ("1", "true", "yes")
                              and self.tail_shuffle and self.tail_scale == 2)
         self.out_yuv = self.tail_yuv
+        # the padded-width guards belong HERE: they need the two opt-ins' decisions, which are made above
+        if self.cpad != int(feat) and not self.head_fused:
+            raise ValueError(f"a padded width ({feat} -> {self.cpad}) needs the fused head kernel; this model "
+                             f"would take the separate quantise pass, which is not padded")
+        if self.cpad != int(feat) and not self.tail_int8:
+            raise ValueError(f"a padded width ({feat} -> {self.cpad}) needs the int8 tail: the fp16 dequant "
+                             f"pass writes {feat} channels while the hops wrote {self.cpad}")
         if want_tail_int8 and not self.tail_int8:
             import logging as _lg
             _lg.getLogger("RVE").warning(
@@ -329,14 +341,16 @@ class Int8Body:
             else:
                 s_grids.append(s_in * margin)
             s_in = outs[idx - 1]
-        self._s_t1 = s_grids[0].contiguous()
+        _g0 = torch.full((self.cpad,), 1.0, device=s_grids[0].device, dtype=s_grids[0].dtype)
+        _g0[: s_grids[0].numel()] = s_grids[0].reshape(-1)
+        self._s_t1 = _g0.contiguous()
         import logging as _lgg
         _lgg.getLogger("RVE").warning(
             "int8 grid: %s (RVE_INT8_GRID_K=%s, RVE_INT8_PER_CHANNEL=%s) - s[c] = max(s_in[c], s_t/K)",
             "per-tensor" if per_tensor else (f"clamp K={grid_k:g}" if grid_k > 0 else "per-channel"),
             _k_env if _k_env not in (None, "") else "default", _pc_env)
 
-        identity = torch.full((self.feat,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
+        identity = torch.full((self.cpad,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
         launches, s_in = [], s_act
         for idx, conv in enumerate(self.inner, start=1):
             s_out = outs[idx - 1]
@@ -381,14 +395,18 @@ class Int8Body:
         """The head's (K, C) weight matrix for the fused kernel: lane k = c*9 + t, exactly as it indexes."""
         w = self._head_conv_plain.weight.detach().half()[:, :3]     # the widened head's zeros are dropped
         k = 32
-        w32 = torch.zeros((k, self.feat), device=w.device, dtype=torch.float16)
+        w32 = torch.zeros((k, self.cpad), device=w.device, dtype=torch.float16)
         for c in range(3):
             for i in range(3):
                 for j in range(3):
                     w32[c * 9 + i * 3 + j] = w[:, c, i, j]
         self._head_w32 = w32.contiguous()
-        self._head_bias = self._head_conv_plain.bias.detach().float().contiguous()
-        self._head_slope = self.head_prelu.weight.detach().float().contiguous()
+        def _hc(t, fill):
+            out = torch.full((self.cpad,), fill, device=t.device, dtype=t.dtype)
+            out[: t.numel()] = t.reshape(-1)
+            return out.contiguous()
+        self._head_bias = _hc(self._head_conv_plain.bias.detach().float(), 0.0)
+        self._head_slope = _hc(self.head_prelu.weight.detach().float(), 1.0)
         return w32
 
     def _build_tail_int8(self):
@@ -404,7 +422,7 @@ class Int8Body:
         sigma = (w_fold.abs().amax(dim=(1, 2, 3)) / 127.0).clamp_min(1e-12)
         w_q = torch.round(w_fold / sigma.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
         pad = 16
-        taps = torch.zeros((9, self.feat, pad), device=w_q.device, dtype=torch.int8)
+        taps = torch.zeros((9, self.cpad, pad), device=w_q.device, dtype=torch.int8)
         for i in range(3):
             for j in range(3):
                 taps[i * 3 + j, :, :cout] = w_q[:, :, i, j].t()
@@ -419,7 +437,7 @@ class Int8Body:
         """Three (h+2, w+2, C) code buffers with a zeroed one-pixel border, reused across frames."""
         key = (x.shape[0], h, w)
         if getattr(self, "_halo_key", None) != key:
-            self._halo = [torch.zeros((h + 2, w + 2, self.feat), device=x.device, dtype=torch.int8)
+            self._halo = [torch.zeros((h + 2, w + 2, self.cpad), device=x.device, dtype=torch.int8)
                           for _ in range(3)]
             self._halo_key = key
         for p in self._halo:
@@ -438,7 +456,7 @@ class Int8Body:
         """
         key = (x.shape[0], h, w)
         if getattr(self, "_buf_key", None) != key:
-            self._buf = torch.empty((x.shape[0], h, w, self.feat), device=x.device, dtype=torch.int8)
+            self._buf = torch.empty((x.shape[0], h, w, self.cpad), device=x.device, dtype=torch.int8)
             self._scratch_a = torch.empty_like(self._buf)
             self._scratch_b = torch.empty_like(self._buf)
             self._buf_key = key
@@ -516,7 +534,7 @@ class Int8Body:
                 buf = self._int8_buffers(x, h, w)[0]
                 head_int8_kernel[grid](x.clamp(0.0, 1.0), self._head_w32, self._head_bias,
                                        self._head_slope, self._s_t1, buf, h, w, BLOCK_M=self.block_m,
-                                       C=self.feat, K=32, CIN=3, num_warps=self.warps)
+                                       C=self.cpad, K=32, CIN=3, num_warps=self.warps)
                 if not getattr(self, "_hf_log", False):
                     self._hf_log = True
                     _lg.getLogger("RVE").warning(
@@ -602,7 +620,7 @@ class Int8Body:
                     _h0 = _time.perf_counter()
                     hop_padded_kernel[grid](src_h, launch["w"], launch["mn"], SHIFT, launch["vec"],
                                             launch["bias"], launch["slope"], launch["os"], dst_h, h, w,
-                                            BLOCK_M=self.block_m, C=self.feat, READ_PADDED=rp,
+                                            BLOCK_M=self.block_m, C=self.cpad, READ_PADDED=rp,
                                             WRITE_PADDED=wp, num_warps=self.warps)
                     _host_launch += _time.perf_counter() - _h0
                     src = dst_h
@@ -612,7 +630,7 @@ class Int8Body:
                     _h0 = _time.perf_counter()
                     body_prologue_kernel[grid](src, launch["w"], launch["mn"], SHIFT, launch["vec"],
                                                launch["bias"], launch["slope"], launch["os"], dst, h, w,
-                                               BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps,
+                                               BLOCK_M=self.block_m, C=self.cpad, num_warps=self.warps,
                                                FOLD=self.fold)
                     _host_launch += _time.perf_counter() - _h0
                     src = dst
@@ -671,7 +689,7 @@ class Int8Body:
                     out = torch.empty(6 * n_pix, device=x.device, dtype=torch.uint8)
                     tail_int8_yuv_kernel[grid](src, self._tail_taps, self._tail_sigma, self._tail_bias,
                                                x.clamp(0.0, 1.0), out, h, w, BLOCK_M=self.block_m,
-                                               CIN=self.feat, COUT=self.tail_conv.out_channels,
+                                               CIN=self.cpad, COUT=self.tail_conv.out_channels,
                                                COUT_PAD=16, SCALE=self.tail_scale,
                                                num_warps=self.warps)
                 else:
@@ -679,7 +697,7 @@ class Int8Body:
                                         device=x.device, dtype=torch.float16)
                     tail_int8_shuffle_kernel[grid](src, self._tail_taps, self._tail_sigma,
                                                    self._tail_bias, x.clamp(0.0, 1.0), final, h, w,
-                                                   BLOCK_M=self.block_m, CIN=self.feat,
+                                                   BLOCK_M=self.block_m, CIN=self.cpad,
                                                    COUT=self.tail_conv.out_channels, COUT_PAD=16,
                                                    SCALE=self.tail_scale, num_warps=self.warps)
                     out = final.permute(0, 3, 1, 2)      # a channels_last view, no copy
@@ -698,14 +716,14 @@ class Int8Body:
                 tail_out = torch.empty((x.shape[0], h, w, self.tail_conv.out_channels),
                                        device=x.device, dtype=torch.float16)
                 tail_int8_kernel[grid](src, self._tail_taps, self._tail_sigma, self._tail_bias, tail_out,
-                                       h, w, BLOCK_M=self.block_m, CIN=self.feat,
+                                       h, w, BLOCK_M=self.block_m, CIN=self.cpad,
                                        COUT=self.tail_conv.out_channels, COUT_PAD=16,
                                        num_warps=self.warps)
                 _conv = tail_out.permute(0, 3, 1, 2)      # a channels_last view, no copy
                 _t2.record()
             else:
                 if channels_last:
-                    last_nhwc = torch.empty((x.shape[0], h, w, self.feat), device=x.device,
+                    last_nhwc = torch.empty((x.shape[0], h, w, self.cpad), device=x.device,
                                             dtype=torch.float16)
                     dequantise_nhwc[qgrid](src, self._launches[-1]["os"].contiguous(), last_nhwc, n_pix,
                                            BLOCK=QB, C=self.feat, num_warps=4)
