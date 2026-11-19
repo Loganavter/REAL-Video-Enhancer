@@ -93,10 +93,11 @@ class Int8Body:
         feat = width if feat is None else int(feat)
         if width != feat:
             raise ValueError(f"int8 body was asked for {feat} channels; this model has {width}")
-        # The int8 dot needs K (= C) to be a multiple of 16 for the tensor-core tile; 24 is not.
-        if feat % 16:
-            raise ValueError(f"int8 body needs a channel count that is a multiple of 16 for the int8 dot; "
-                             f"this model has {feat}")
+        # The int8 dot needs K (= C) to be a multiple of 16 for the tensor-core tile AND `tl.arange` needs a
+        # power of two, so any width is padded up to the next power of two (48 -> 64, 24 -> 32). The cost is the
+        # pad ratio; a width that is already a power of two pays nothing.
+        if feat < 8:
+            raise ValueError(f"int8 body needs at least 8 channels; this model has {feat}")
         self.model = model
         self.head_conv, self.inner, self.tail_conv = head, rest[:-1], rest[-1]
         self.head_prelu = prels[0]
@@ -417,7 +418,8 @@ class Int8Body:
         which contributes nothing to any output and is therefore arithmetic-preserving.
         """
         cout = self.tail_conv.out_channels
-        s_k = self._launches[-1]["os"].detach().float()
+        # `os` is cpad long; the tail's weight has the model's own input width, so take the real channels
+        s_k = self._launches[-1]["os"].detach().float()[: self.tail_conv.in_channels]
         w_fold = self.tail_conv.weight.detach().float() * s_k.view(1, -1, 1, 1)
         sigma = (w_fold.abs().amax(dim=(1, 2, 3)) / 127.0).clamp_min(1e-12)
         w_q = torch.round(w_fold / sigma.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
@@ -800,6 +802,6 @@ class Int8Body:
             head = list(model.body)[0]
             rest = convs[1:] if isinstance(head, torch.nn.Conv2d) else convs
             width = int(rest[0].out_channels)
-            return len(rest) >= 3 and width % 16 == 0 and width >= 16
+            return len(rest) >= 3 and width >= 8      # padded to the next power of two inside the body
         except Exception:  # noqa: BLE001
             return False

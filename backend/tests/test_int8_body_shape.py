@@ -66,11 +66,15 @@ def test_a_native_width_is_read_from_the_model():
         Int8Body(_Body(16, feat=48, tail=3, scale=1), feat=64)
 
 
-def test_a_width_the_int8_dot_cannot_tile_is_refused():
-    """24 channels is not a multiple of 16, and the int8 dot's K must be - so a 24-channel Compact is refused
-    with the reason instead of failing inside Triton."""
-    with pytest.raises(ValueError, match="multiple of 16"):
-        Int8Body(_Body(16, feat=24, tail=3, scale=1))
+def test_a_width_that_is_not_a_power_of_two_is_padded_not_refused():
+    """`tl.arange` needs a power of two and the int8 dot needs K a multiple of 16, so 24 and 48 are padded up to
+    32 and 64 rather than refused - the padding channels carry zero and the tail reads only `cout`."""
+    body = Int8Body(_Body(16, feat=24, tail=3, scale=1))
+    assert body.feat == 24 and body.cpad == 32
+    body = Int8Body(_Body(16, feat=48, tail=3, scale=1))
+    assert body.feat == 48 and body.cpad == 64
+    body = Int8Body(_Body(16, feat=32, tail=3, scale=1))
+    assert body.cpad == 32, "a power of two must pay nothing"
 
 
 def test_supports_follows_the_same_rule():
@@ -79,7 +83,8 @@ def test_supports_follows_the_same_rule():
     assert Int8Body.supports(_Body(9))
     assert Int8Body.supports(_Body(16))
     assert Int8Body.supports(_Body(16, feat=48)), "a native width is supported; it is just not tuned"
-    assert not Int8Body.supports(_Body(16, feat=24)), "24 is not a multiple of 16: the dot cannot tile it"
+    assert Int8Body.supports(_Body(16, feat=24)), "24 is padded to 32, not refused"
+    assert not Int8Body.supports(_Body(16, feat=4)), "below 8 channels there is nothing to tile"
     assert not Int8Body.supports(_Body(1))
 
 
