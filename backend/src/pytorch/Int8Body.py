@@ -30,7 +30,7 @@ import torch
 
 from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
                           head_int8_kernel, quantise_nchw_to_nhwc, quantise_nchw_to_nhwc_prelu,
-                          quantise_nhwc, quantise_nhwc_prelu, tail_int8_kernel,
+                          hop_padded_kernel, quantise_nhwc, quantise_nhwc_prelu, tail_int8_kernel,
                           tail_int8_shuffle_kernel)
 
 __all__ = ["Int8Body"]
@@ -94,6 +94,14 @@ class Int8Body:
         # its picture measured (row rve-epilogue-divide-2026-11-19) - the rewrite is exact in real arithmetic
         # but not bit-identical in fp32, so it is a different-arithmetic change, not a layout.
         self.fold = int(os.environ.get("RVE_INT8_EPILOGUE_FOLD", "0"))
+        # Zero-haloed hop buffers: no bounds mask in the kernel, and every hop writes into the NEXT hop's
+        # padded interior, so the halo costs one border zeroing per frame (0.08 ms) instead of a copy per hop.
+        # Measured on the 16-hop chain: +0.61 ms/frame net (+2.3%) with identical codes
+        # (docs/wsp/verified/int8-hop-halo-chain.txt). RVE_HOP_HALO=0 restores the plain buffers.
+        # DEFAULT ON since 2026-11-19: 34.50 -> 33.51 ms/frame (-0.99, -2.9%) in 3 of 3 interleaved rounds, and
+        # the render is byte-identical (0 differing pixels on two frames, IDENTITY on the 494-frame pair).
+        # Costs 382 MB of buffers (three padded ones); RVE_HOP_HALO=0 restores the plain layout.
+        self.hop_halo = str(os.environ.get("RVE_HOP_HALO", "1")).lower() in ("1", "true", "yes")
         # The tail as a seventeenth int8 hop: the dequant pass and the cuDNN fp16 conv become one kernel
         # (row rve-tail-as-int8-hop-2026-11-19). Stage (a) put it at 0.00147% share / peak 13 against the
         # fp16 tail on four held-out frames, stage (b) at 0.974 ms against 4.444; in the app it is
@@ -335,6 +343,20 @@ class Int8Body:
         self._tail_bias[:cout] = self.tail_conv.bias.detach().float()
         return taps
 
+    def _halo_buffers(self, x, h, w):
+        """Three (h+2, w+2, C) code buffers with a zeroed one-pixel border, reused across frames."""
+        key = (x.shape[0], h, w)
+        if getattr(self, "_halo_key", None) != key:
+            self._halo = [torch.zeros((h + 2, w + 2, self.feat), device=x.device, dtype=torch.int8)
+                          for _ in range(3)]
+            self._halo_key = key
+        for p in self._halo:
+            p[0, :, :] = 0
+            p[-1, :, :] = 0
+            p[:, 0, :] = 0
+            p[:, -1, :] = 0
+        return self._halo, key
+
     def _int8_buffers(self, x, h, w):
         """One allocation per shape for all three int8 buffers.
 
@@ -488,16 +510,41 @@ class Int8Body:
             import time as _time
             _host_launch = 0.0
             _host_total0 = _time.perf_counter()
-            for launch in self._launches:
-                dst = nxt
-                _h0 = _time.perf_counter()
-                body_prologue_kernel[grid](src, launch["w"], launch["mn"], SHIFT, launch["vec"],
-                                           launch["bias"], launch["slope"], launch["os"], dst, h, w,
-                                           BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps,
-                                           FOLD=self.fold)
-                _host_launch += _time.perf_counter() - _h0
-                src = dst
-                nxt = self._scratch_b if dst is self._scratch_a else self._scratch_a
+            if self.hop_halo:
+                # zero-haloed buffers: hop 0 reads the plain quantised codes and writes a padded interior,
+                # hops 1..14 pad-to-pad, the LAST hop writes the plain buffer the tail reads - so no pass
+                # exists anywhere for the halo, only one border zeroing per frame
+                consts, _ = self._halo_buffers(x, h, w)
+                if not getattr(self, "_halo_log", False):
+                    self._halo_log = True
+                    _lg.getLogger("RVE").warning(
+                        "int8 hops: ZERO-HALO buffers in use - %d launches unmasked, one border zeroing/frame",
+                        len(self._launches))
+                for k, launch in enumerate(self._launches):
+                    if k == 0:
+                        src_h, dst_h, rp, wp = buf, consts[0], 0, 1
+                    elif k == len(self._launches) - 1:
+                        src_h, dst_h, rp, wp = src, buf, 1, 0
+                    else:
+                        src_h, dst_h, rp, wp = src, consts[k % 3], 1, 1
+                    _h0 = _time.perf_counter()
+                    hop_padded_kernel[grid](src_h, launch["w"], launch["mn"], SHIFT, launch["vec"],
+                                            launch["bias"], launch["slope"], launch["os"], dst_h, h, w,
+                                            BLOCK_M=self.block_m, C=self.feat, READ_PADDED=rp,
+                                            WRITE_PADDED=wp, num_warps=self.warps)
+                    _host_launch += _time.perf_counter() - _h0
+                    src = dst_h
+            else:
+                for launch in self._launches:
+                    dst = nxt
+                    _h0 = _time.perf_counter()
+                    body_prologue_kernel[grid](src, launch["w"], launch["mn"], SHIFT, launch["vec"],
+                                               launch["bias"], launch["slope"], launch["os"], dst, h, w,
+                                               BLOCK_M=self.block_m, C=self.feat, num_warps=self.warps,
+                                               FOLD=self.fold)
+                    _host_launch += _time.perf_counter() - _h0
+                    src = dst
+                    nxt = self._scratch_b if dst is self._scratch_a else self._scratch_a
             if not self.head_fused and not getattr(self, "_probe_done", False):
                 self._probe_done = True
                 # the same kernel, alone, in the app's own process: is it slow or is it waiting?
