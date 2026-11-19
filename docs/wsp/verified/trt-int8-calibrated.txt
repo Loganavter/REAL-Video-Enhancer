@@ -69,14 +69,46 @@ That is consistent with what the hardware allows: **symmetric-only quantisation*
 zero-point is a DLA-only switch, `engine-int8.txt`), plus 16 PReLU boundaries each rounding the same activation.
 The shadows are where a symmetric range spends the fewest codes, and sixteen boundaries accumulate it.
 
+## The same-instrument run: one process, three arms, one reference
+
+`trtexec` cannot time the body (it loads plans; the body is Triton kernels), so the profile above is not a fair
+pair for it. `scripts/trt_vs_body_probe.py` runs all three arms in ONE process on ONE input frame, interleaved,
+each bracketed by the same CUDA events, median of rounds 2+:
+
+| arm | ms |
+|---|---|
+| fp16 engine | **48.401** |
+| TensorRT int8 (entropy) | **38.814** |
+| **Triton int8 body** | **27.051** |
+
+**The body is 1.435x faster than TensorRT's calibrated int8** (TV004), 1.789x faster than the fp16 engine (TV005);
+TensorRT's int8 is 1.247x over fp16 (TV006). This is the number the earlier cross-instrument sentence could not
+give, and it agrees with the profile: the body fuses what TRT splits into 17 separate PReLU passes.
+
+Picture, both arms against the SAME fp16 output, both frames held out from calibration:
+
+| frame | arm | max | share >8 codes | PSNR |
+|---|---|---|---|---|
+| csm t=10 | TensorRT int8 | 5.85 | 0.0000% | 51.57 dB |
+| csm t=10 | **body** | 5.79 | 0.0000% | 49.86 dB |
+| violet t=5 | TensorRT int8 | 91.14 | **1.0715%** | 39.34 dB |
+| violet t=5 | **body** | 17.62 | **0.0089%** | 49.36 dB |
+
+On the bright frame they are comparable (the body is 1.7 dB lower); on the dark frame the body is **120x better**
+in the share above 8 codes and 10 dB better. Both arms here are whole-frame; the app's tiled engine and its pack
+are in neither, which is what makes this a model-scope comparison rather than a product one. The body's calibration
+in this probe is the eight raw RGB frames, not the app's pipeline frames - so its accuracy here is a probe number,
+and the shipped pair remains the 494-frame one (0.00125%).
+
 ## What it means for the lane
 
 - **The hand body is justified by measurement, not by preference.** On the same model and card the vendor's
   int8 gives 1.21x over its own fp16 and a visible shadow lift; the body gives 1.665x end-to-end and 0.00125% above
   the bar over 494 frames.
-- **The two speeds are not one ratio.** The engine numbers here are a whole-frame `trtexec` build; the body's
-  26.1 ms is the app's phase counter on its tiled engine. What is same-instrument is: 46.854 vs 38.867 (trtexec),
-  and 52.39 vs 31.47 (the app). The conclusion does not depend on mixing them.
+- **The speed claim is now one instrument.** The trtexec pair (46.854 vs 38.867) and the app pair (52.39 vs
+  31.47) are separate measurements with different scopes; the claim that the body beats TensorRT's int8 rests on
+  the one-process run above (48.401 / 38.814 / 27.051, one bracket, one input), not on mixing them. The app's
+  tiled engine and pack are outside that run by construction - it is a model-scope comparison.
 - **What TRT int8 would need to compete** is per-layer precision control (keep head and tail fp16 - the Q/DQ page
   did exactly that and still lost), asymmetric activation quantisation (not available), and the 16 PReLU
   boundaries removed (a kernel, i.e. the body). None of that is cheaper than the body that exists.
@@ -92,11 +124,13 @@ python3 scripts/trt_int8_calibrate.py --onnx /tmp/opencode/futsuu.onnx --frames 
 python3 scripts/trt_int8_accuracy.py --fp16 /tmp/opencode/futsuu_fp16.trt \
     --int8 /tmp/opencode/futsuu_int8_entropy.trt --int8 /tmp/opencode/futsuu_int8_minmax.trt \
     --frames /tmp/opencode/eval-frames --height 1080 --width 1920
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/trt_vs_body_probe.py \
+    --fp16 /tmp/opencode/futsuu_fp16.trt --int8 /tmp/opencode/futsuu_int8_entropy.trt \
+    --calib /tmp/opencode/calib-frames --frames /tmp/opencode/eval-frames --rounds 4 --iters 10
 PYTHONPATH=scripts python3 scripts/trt_int8_records.py
 PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/trt-int8-calibrated.txt \
     --records docs/wsp/verified/records/trt-int8-calibrated.jsonl --bars docs/claims-bars.json
 ```
-
 @claim TI001 46.8535 ms "layers [a43a488db5aab724] n=25" measured
 @claim TI002 38.8674 ms "layers [09f5719fbdd2a8b2] n=60" measured
 @claim TI003 38.8748 ms "layers [56957989cc2d7780] n=60" measured
@@ -123,3 +157,21 @@ PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/trt-int8-calib
 @claim TI024 0.0136 % "pixels of one frame [1d7d92d92663a29c] n=1" measured
 @claim TI025 44.9497 dB "pixels of one frame [1d7d92d92663a29c] n=1" measured
 @claim TI026 1.1208 levels "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TV001 48.401 ms "rounds [fc6d90edfe041d81] n=3" measured
+@claim TV002 38.8141 ms "rounds [fc6d90edfe041d81] n=3" measured
+@claim TV003 27.0509 ms "rounds [fc6d90edfe041d81] n=3" measured
+@claim TV004 1.434854 x "rounds [fc6d90edfe041d81] n=3" derived
+@claim TV005 1.789257 x "rounds [fc6d90edfe041d81] n=3" derived
+@claim TV006 1.246995 x "rounds [fc6d90edfe041d81] n=3" derived
+@claim TV007 5.852 levels "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TV008 0.0 % "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TV009 51.574 dB "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TV010 5.79 levels "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TV011 0.0 % "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TV012 49.864 dB "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TV013 91.143 levels "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TV014 1.071494 % "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TV015 39.343 dB "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TV016 17.618 levels "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TV017 0.008942 % "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TV018 49.358 dB "pixels of one frame [1d7d92d92663a29c] n=1" measured

@@ -4375,10 +4375,16 @@ tasks:
     The failing pixels are shadows lifted by ~0.3 in 0-1 units, spread across the whole frame (row/column
     profiles flat), which is what symmetric-only quantisation plus sixteen PReLU boundaries does. Against the
     lane's own bar (0.1% of pixels above 8 levels) the body reads 0.00125% on 494 frames and TensorRT's int8
-    reads 1.07% on one frame. So the hand body is faster (1.665x end-to-end, 26.1 ms body) AND three orders of
-    magnitude better on the picture; a 494-frame pair of the calibrated engine would only confirm what one
-    held-out frame already shows, so it is not run. docs/wsp/verified/trt-int8-calibrated.txt,
-    logs/trt-int8/, scripts/trt_int8_{calibrate,accuracy,records}.py.
+    reads 1.07% on one frame. So the hand body is faster AND three orders of magnitude better on the picture; a
+    494-frame pair of the calibrated engine would only confirm what one held-out frame already shows, so it is
+    not run. The speed half is then closed with ONE instrument instead of a comparison of two:
+    scripts/trt_vs_body_probe.py runs the fp16 engine, TensorRT's int8 and the Triton body in one process on one
+    input frame, interleaved, same CUDA event bracket - 48.401 / 38.814 / 27.051 ms (TV001-TV003), i.e. the body
+    is 1.435x faster than TensorRT's int8 (TV004) and 1.789x faster than fp16 (TV005); pictures against the SAME
+    fp16 reference: bright frame 5.79 vs 5.85 codes (body 1.7 dB lower), dark frame 0.0089% vs 1.0715% above 8
+    codes and 49.36 vs 39.34 dB (TV007-TV018). Model scope: no tiling, no pack, both arms whole-frame.
+    docs/wsp/verified/trt-int8-calibrated.txt, logs/trt-int8/, scripts/trt_int8_{calibrate,accuracy,records}.py,
+    scripts/trt_vs_body_probe.py.
 
 - id: rve-grid-k-learned-2026-11-20
   title: 'Make the grid clamp a LEARNED per-layer parameter (PAMS), instead of a swept constant'
