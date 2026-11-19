@@ -29,6 +29,21 @@ quantisation boundary per hop and a single `C` constexpr. SPAN is the opposite s
 - **32.2% of the frame is not convolution at all** - the parameter-free attention is an elementwise sigmoid
   multiply, and the four-way concat fusion is a copy. Neither is a `tl.dot`.
 
+## In the app, through the TensorRT engine
+
+The scope probe above is eager PyTorch, so its *shares* are the result and its 302 ms is not. The same model,
+same clip, through the app's own engine (`logs/span-app/`, record SP001):
+
+```
+2x_ModernSpanimationV1, bd_violet20s, null sink, 494 frames:  73.36 ms/frame  =  13.6 fps
+  for comparison: Futsuu fp16 engine 52.39 ms (19.1 fps)   int8 K=2 31.47 ms (31.8 fps)
+```
+
+So SPAN is 1.40x slower than the production model on its own fp16 engine, and 2.33x slower than the int8 lane.
+And the ceiling arithmetic is unforgiving: even if int8 made **every** 3x3 convolution 2x faster, the frame would
+go 73.36 -> 49.3 ms, i.e. 20.3 fps - still 1.57x slower than the int8 lane and only just level with the production
+model's fp16 engine.
+
 ## Verdict
 
 **Closed as not worth a kernel.** The prize (65.5%) is smaller than the Compact lane's (78%) and the work is a
