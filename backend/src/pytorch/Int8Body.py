@@ -269,7 +269,12 @@ class Int8Body:
         if _path and os.path.exists(_path):
             try:
                 blob = torch.load(_path, map_location="cpu", weights_only=True)
-                self._grids = (blob["s_act"].to(torch.float32), [o.to(torch.float32) for o in blob["outs"]])
+                # the cache stores CPU tensors; the body runs wherever its weights are, and a grid on the wrong
+                # device does not fail until the first kernel launch (measured: certify raised "Expected all
+                # tensors to be on the same device" on the first cached run)
+                _dev = getattr(self.head_conv, "conv", self.head_conv).weight.device
+                self._grids = (blob["s_act"].to(device=_dev, dtype=torch.float32),
+                               [o.to(device=_dev, dtype=torch.float32) for o in blob["outs"]])
                 self._calib_frames = list(frames)
                 self._launches = None
                 import logging as _lgc
@@ -870,39 +875,49 @@ class Int8Body:
         references computed once - about 3 s on the production model, which is why it is opt-in
         (`RVE_INT8_GRID_K=auto`) until it has been measured in the app.
         """
+        import time as _t
+
         was_yuv = self.out_yuv
         self.out_yuv = False
+        t_build = t_score = 0.0
         try:
             with torch.no_grad():
                 refs = [self.model(f.clamp(0.0, 1.0)).float() for f in holdout]
-            scores: dict[float, float] = {}
-            for k in candidates:
-                self.grid_k = float(k)
-                self.per_tensor = False          # every candidate is on the folding path
+
+            def score(k: float) -> float:
+                """Build at K and read the app's own gate on the holdout frames."""
+                nonlocal t_build, t_score
+                self.grid_k, self.per_tensor = float(k), False
                 self._launches = None
+                _b = _t.perf_counter()
                 self._build()
+                t_build += _t.perf_counter() - _b
                 worst = 0.0
+                _s = _t.perf_counter()
                 for f, ref in zip(holdout, refs):
                     with torch.no_grad():
                         got = self(f).float()
                     d = ((got - ref).abs() * 255.0).amax(dim=1)
                     worst = max(worst, float((d > 8).float().mean()) * 100.0)
-                if float(k) == float(default):
-                    # kept for the self-check below: if the pick refuses, these two means are the evidence
-                    self._pick_probe = (float(refs[0].mean()), float(got.mean()), tuple(got.shape),
-                                        tuple(refs[0].shape))
-                scores[float(k)] = worst
-            # SELF-CHECK, because a pick that reads nonsense would still "win" and the guard would hide it: the
-            # default's score must agree with the app's own certify() on the same frame. They are the same
-            # expression over the same frames, so a disagreement means the references here do not correspond to
-            # what the body produces - and in that case the pick must refuse rather than choose.
-            _k0 = float(default) if float(default) in scores else float(next(iter(scores)))
+                t_score += _t.perf_counter() - _s
+                return worst
+
+            # FAIL FAST: the default is scored first and checked against certify() before any other candidate is
+            # built. When they disagree the pick refuses, and spending the other three builds first bought nothing.
+            # The check is also the only thing standing between a broken reference and a silent wrong choice.
+            scores = {float(default): score(default)}
+            self._pick_probe = None
             _sh, _ok = self.certify(holdout[0])
-            if scores[_k0] > 10.0 * max(_sh, 1e-6) and scores[_k0] > 1.0:
+            if scores[float(default)] > 10.0 * max(_sh, 1e-6) and scores[float(default)] > 1.0:
                 raise RuntimeError(
-                    f"pick refused: its own score for K={_k0:g} is {scores[_k0]:.4f}% but certify reads "
-                    f"{_sh:.5f}% on the same frame - ref/got means and shapes "
-                    f"{getattr(self, '_pick_probe', '?')}")
+                    f"pick refused after one build: its own score for K={default:g} is "
+                    f"{scores[float(default)]:.4f}% but certify reads {_sh:.5f}% on the same frame - the "
+                    f"references here are not the body's output")
+            for k in candidates:
+                if float(k) == float(default):
+                    continue
+                scores[float(k)] = score(k)
+            self._pick_timing = (round(t_build, 2), round(t_score, 2))
             best = self.choose_grid_k(scores, default=default, guard=guard)
             self.grid_k, self.per_tensor = best, False
             self._launches = None

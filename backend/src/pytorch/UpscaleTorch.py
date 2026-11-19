@@ -696,8 +696,9 @@ class UpscalePytorch:
                 try:
                     _k, _scores = body.pick_grid_k(hold)
                     log("int8 grid PICKED K=%g (scores %s; guard x2 over K=2, chosen on %d frames, "
-                        "certificate on another slice)", _k,
-                        {f"K={k:g}": round(v, 4) for k, v in sorted(_scores.items())}, len(hold))
+                        "certificate on another slice; build %.2f s, score %.2f s)", _k,
+                        {f"K={k:g}": round(v, 4) for k, v in sorted(_scores.items())}, len(hold),
+                        *getattr(body, "_pick_timing", (0.0, 0.0)))
                 except Exception as error:  # noqa: BLE001 - never let the pick cost a render
                     log("int8 grid pick failed (%s); keeping K=%g", error, getattr(body, "grid_k", 2.0))
             share, ok = body.certify(frame)
