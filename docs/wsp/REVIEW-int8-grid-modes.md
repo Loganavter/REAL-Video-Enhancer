@@ -62,6 +62,46 @@ The split is not marginal:
 
 (Full table in `docs/MODEL-FIT.md`.)
 
+## 2b. The mode was the wrong axis: a clamp beats both ends
+
+`s[c] = max(s_in[c], s_t / K)` is the same code path with a floor on how far one channel's grid may fall below
+the layer maximum. `K = 1` is the per-tensor grid reached through the folding path, `K → ∞` is per-channel, and
+the fold cancels exactly for any `s[c]`, so **every K costs the same arithmetic** — this is a picture axis only.
+
+Same 6 models, same calibration, same three held-out frames:
+
+| model | per-tensor | K=1 | K=2 | K=3 | K=4 | per-channel | best |
+|---|---|---|---|---|---|---|---|
+| Futsuu | 0.0114 | 0.0126 | **0.0002** | 0.0019 | 0.0043 | 0.0309 | K=2 |
+| LUDVAE | 0.0761 | 0.0904 | **0.0448** | 0.0443 | 0.1511 | 0.2789 | K=2/3 |
+| ken-v1 | 0.0664 | 0.0434 | 0.0141 | **0.0037** | 0.0310 | 0.1759 | K=3 |
+| Garfield | 0.8763 | 0.2435 | 0.0030 | 0.0156 | **0.0029** | 0.0436 | K=4 |
+| AniSD | 0.0982 | 0.0760 | 0.0059 | 0.0016 | **0.0014** | 0.0021 | K=4 |
+| AniScale | 0.0001 | 0.0002 | **0.0000** | 0.0000 | 0.0000 | 0.0002 | K≥2 |
+
+**An intermediate K beat both shipped modes on all six models.** The dichotomy this note was written about is
+the two ends of this axis, and each end is dominated. That is the answer to the original question: per-channel
+is not "bad for three models", it is one end of a ladder whose optimum is in the middle.
+
+`K = 1` also isolates the epilogue term (d) that §5 lists: it produces the per-tensor *grid* without the
+epilogue's multiply-and-shift. Against the shipped per-tensor it reads better on Garfield (0.8763 → 0.2435),
+worse on LUDVAE (0.0761 → 0.0904) and neutral on Futsuu (0.0114 → 0.0126) — so the epilogue term is real,
+model-dependent, and not the main driver.
+
+## 2c. On a 494-frame pair, against the engine
+
+The 3-frame gate is a smoke test. For the production model the ladder was rendered and compared properly
+(`logs/grid-k-pair/`, records GK/GB):
+
+```
+494 frames, ffv1 4:4:4, reference: the FP16 ENGINE's own render
+  shipped per-tensor  vs  K=2    worst share 0.00625%   frames over the 0.1% bar: 0
+  K=2                 vs  engine worst share 0.00125%   frames over the 0.1% bar: 0   (peak 19)
+```
+
+So the clamp is not a marginal reshuffle of a broken picture: both configurations are far inside the bar on the
+full clip, and K=2 is the closer of the two to the engine by a factor of five on this statistic.
+
 ## 3. The predictor we filed the row with, and its refutation
 
 The hypothesis was that the calibration grid's dynamic range — `max / median` of the per-channel activation
@@ -113,7 +153,11 @@ models while the outcome is not.
 exceeds ±127 is 0.00000–0.00001% in both modes, on all three held-out frames. A tight per-channel box is not
 clipping here, so the classic resolution-vs-headroom trade is not what decides the sign.
 
-**(c) Channel-wise weight collapse.** NOT MEASURED — this is the measurement we would run next. The relative
+**(c) Channel-wise weight collapse.** PARTIALLY ADDRESSED by the ladder: if a crushed low-range channel were the
+damage, harm should appear as K grows and vanish at small K. It does appear at the top of the ladder (per-channel
+is the worst end for four of six models) and an intermediate K repairs it — consistent with the mechanism, but
+not proof: the clamp also changes the *input* grid, so both terms move together. The per-input-channel weight
+error remains the measurement that would separate them. The relative
 weight error above is an aggregate. Folding `w * s_in[c]` and then normalising per *output* channel means a
 low-range input channel contributes tiny folded weights, which can quantise to one or two integer levels:
 a per-channel failure, invisible in an aggregate L2. The discriminating measurement is per *input* channel:
@@ -134,11 +178,24 @@ disjoint slice — otherwise the gate would pass by construction. Cost: one extr
 frame pass per render; benefit: the six models above stop looking unquantisable when the grid was the problem,
 and the three damaged ones keep the shipped grid.
 
+## 6b. The timing expectation: per-channel cannot be faster here
+
+An earlier reply expected the identity multiplier to remove a multiply and a shift from the epilogue. It cannot:
+`m_next` is a **pointer to a runtime tensor**, not a `tl.constexpr`, so the kernel executes the multiply in every
+mode. The measurement agrees — body time across the ladder ran 27.28 → 27.68 ms monotonically with K, which
+cannot be causal because the arithmetic is identical, i.e. it is clock drift; and `K = 1` (no multiply) is not
+faster than the shipped per-tensor (27.28 against 26.93 ms, one draw each).
+
 ## 7. What is not claimed
 
 - These are three held-out frames of one clip (BD Violet, 1080p, 10-bit source). The acceptance statistic of
-  this project is a worst frame of a 494-frame pair at 0.1%; **none of the models here has one**, and the 1%
-  start-up gate is a smoke test, not a verdict on a picture.
+  this project is a worst frame of a 494-frame pair at 0.1%. **Only the production model has one** (§2c); the
+  other twenty are ranked by a smoke test and must not be quoted as verdicts.
+- **A retraction of my own:** I first reported that the 494-frame pair reads 0.42% for the shipped body, making
+  the smoke test understate by ~37x. That number came from `int8-scales-bd.txt`, whose own text flags a
+  different reference for its per-channel row, and it does not survive the measurement above: on one
+  instrument, the shipped body reads 0.00625% against K=2. Two records with different references were
+  multiplied, which is the exact error class this project keeps retracting.
 - The fp16 reference is eager PyTorch, not the app's TensorRT engine. That is right for comparing the two
   grid modes (the reference is identical in both arms) and wrong for quoting a product ratio.
 - The statistic is thresholded (pixels >8 levels), which is deliberately nonlinear — a mode can improve a mean
@@ -159,4 +216,14 @@ PYTHONPATH=scripts python3 scripts/model_fit_report.py
 # the two first-order terms, per layer, both modes, one process
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/int8_grid_modes_probe.py \
     --out-file docs/wsp/verified/logs/grid-modes/probe.json
+
+# the clamp ladder, any Compact (width and depth read from the weights)
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/int8_grid_k_probe.py \
+    "2x-Futsuu-Anime(1).pth,2x_GarfieldJr_net_g_51000.pth" \
+    --out-file docs/wsp/verified/logs/grid-k/ladder.jsonl
+
+# the 494-frame pair: fp16 engine, shipped per-tensor, and K=2
+ARMS="fp16 base k2" ARM_ENV_K2="RVE_INT8_GRID_K=2" CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 \
+  LOGDIR=docs/wsp/verified/logs/grid-k-pair RENDERS=/home/jorj/2Tb/grid-k scripts/wall_ab.sh
+PYTHONPATH=scripts python3 scripts/gate_sweep.py <fp16.mkv> <k2.mkv> --reference-kind engine-render ...
 ```
