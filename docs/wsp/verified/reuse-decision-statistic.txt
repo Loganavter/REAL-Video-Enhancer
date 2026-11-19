@@ -63,6 +63,35 @@ Two results, one positive and one negative:
   the channel-max cell passed the share and was rejected by eye; nothing here addresses that half.
 - Scope: one episode, one cut, one model, fp16 engine, t-1 reference where the gate serves a chain of up to 2.
 
+
+## The artifact the acceptance statistic cannot see: frozen grain
+
+The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so
+on flat static areas the output stops changing. `scripts/reuse_texture.py` measures exactly that: per frame,
+the median over flat static blocks of the block temporal |diff| in the gated render divided by the same in the
+ungated one. Ratio ~1 means the output changes like a fresh render; ~0 means the grain is frozen.
+
+On the same 1040 s pair (204 pairs, 130 reused frames, 74 rendered):
+
+| population | n | median ratio | share below 0.5 |
+|---|---|---|---|
+| reused frames | 130 | **0.000** | **91.5%** |
+| reused, **and under** the 0.1% bar | 93 | 0.000 | 88.2% |
+| rendered (fresh) | 74 | **1.026** | **0.0%** |
+
+So the acceptance statistic flags 37 frames, while **119 of the 130 reuses are frozen in the flat areas** -
+the bar sees less than a third of the artifact class, and 82 of the frames it passes are frozen. That is the
+owner's report ("even if it reuses, it looks bad") in a number, and it says the lane needs a second
+acceptance criterion, not a better threshold on the first one.
+
+The criterion is not yet a threshold: what ratio a viewer accepts is a perceptual question, and the
+reference implementation of "fresh" here is the same pipeline's own ungated render, not the source.
+
+@claim RU006 91.5 % "frames [daf6a8af857c8c1f] n=204" measured
+@claim RU007 1.026 x "frames [97eac994605e678e] n=74" measured
+@claim RU008 0.0 % "frames [97eac994605e678e] n=74" measured
+@claim RU009 88.2 % "frames [ff1ac1390b061f1f] n=93" measured
+
 @claim RU001 0.844 AUC "reused frames [b7010cf3b0acf799] n=130" measured
 @claim RU002 0.723 AUC "reused frames [b7010cf3b0acf799] n=130" measured
 @claim RU003 0.855 AUC "reused frames [b7010cf3b0acf799] n=130" measured
@@ -82,4 +111,6 @@ python3 backend/rve-backend.py ... --input cut.mkv --output off.mkv
 python3 scripts/gate_sweep.py on.mkv off.mkv --out damage.json --reference-kind config
 # the candidate statistics and their ranking
 python3 scripts/reuse_stats.py --clip cut.mkv --damage damage.json --emit stats.json
+# the temporal-texture criterion (frozen grain), joined to the gate's own per-frame decisions
+python3 scripts/reuse_texture.py --gated on.mkv --ungated off.mkv --depth-log gate.log --emit tex.json
 ```
