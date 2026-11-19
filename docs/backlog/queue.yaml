@@ -3432,3 +3432,53 @@ tasks:
     for the real shape, and Windows packaging was explicitly out of scope (the owner's call). Records:
     int8-hop-prefetch.jsonl (P001-P006), docs/wsp/verified/int8-hop-prefetch.txt,
     logs/hop-prefetch/, logs/hop-smem-theory/ (smem_bench.cu + smem_drive.py, both runnable).
+
+- id: rve-hop-fuse2-cascade-2026-11-20
+  title: 'Fuse two hops per launch: the halo costs 27%, the launch constant is 0.59 ms - nobody priced both'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P3
+  gpu: true
+  cost: 4h
+  tags:
+  - int8
+  - hops
+  - cascade
+  - kernel
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-hop-occupancy.txt
+  - docs/wsp/verified/int8-hop-dram.txt
+  - docs/wsp/verified/int8-hop-ncu.txt
+  owns_files:
+  - docs/wsp/verified/int8-hop-fuse2.txt
+  refutes: >-
+    The megakernel/fused-layer family was dropped on 2026-11-19 with the argument "the measured hop is already at
+    or above the isolated rate, so there is no boundary overhead to remove". That is a CORRELATION, not a
+    measurement, and the counters taken on 2026-11-19 contradict it: each hop moves 250.6 MB through DRAM
+    (132.8 read + 117.6 write, int8-hop-dram.txt), half of which IS the boundary with the previous hop, and LSU
+    is the highest-utilised pipe by instruction count (73.9%, int8-hop-ncu.txt). What nobody has priced is the
+    pair: a fused launch of F hops saves F-1 launches, and a launch costs 0.59 ms of constant (one tap costs
+    0.59, three cost 1.072, nine cost 1.551 - int8-hop-occupancy.txt), while the halo you pay for fusing is
+    (T+2F)^2/T^2, and the honest arithmetic - CORRECTED after a first pass that overstated it 2x - is: per fused
+    pair, extra work = (((T+4)^2 + (T+2)^2)/(2T^2) - 1) x 2 x 1.55 ms against 0.59 ms of saved constant, i.e.
+    T=16 gives -0.69 ms (the halo eats it), T=32 gives -0.02 (a wash), T=64 gives +0.29, and 8 pairs over the
+    frame give ~+2.3 ms. F=4 at T=64 reads 1.06x of work for 12 saved launches, so the family improves with
+    depth - but the intermediate a 64x64 tile needs (262 KB of int8) does not fit a register/vector tile either,
+    which is the same instrument wall as the smem row. If an F=2 kernel does not beat two single-hop launches on
+    the same codes, the family is dead and this row closes it with a measurement instead of an argument.
+  acceptance: >-
+    One CTA computes a T x T tile for TWO consecutive hops: the intermediate never leaves the CTA's registers or
+    shared memory, and the halo is (T+2)^2 input pixels per tile. Arms in one process, CUDA events, >=3 rounds:
+    two separate launches (today) against one fused launch, at T = 16, 32 and 64, and against the 0.59 ms
+    constant arithmetic above. Codes MUST be identical on the same input codes (0 of 132.7 M) - fusing changes
+    the schedule, not the arithmetic - and if they are not, the halo indexing is wrong and the row stops there.
+    Report ms per hop-pair, and the measured DRAM bytes of the fused arm (ncu) so the boundary saving is a
+    counter and not a claim.
+  note: >-
+    Filed from the owner's question "did we ever frame this differently, or look at the chain as a cascade" -
+    and the answer was yes, once, on 2026-11-19, with an argument the same day's profiling can now test. The
+    halo arithmetic is the part that was never done, and the corrected price (~2.3 ms/frame at T=64) is why this
+    is P3 and not P1: it attacks the one quantity that survived every other lever, the per-launch constant, but
+    it needs the same CUDA kernel that the smem row would need and would have to earn the same 2 ms.
