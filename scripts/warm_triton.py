@@ -5,8 +5,18 @@ warm and **2.531 s** when it is cold - 19 kernels compiled from scratch. The cac
 persists, so the price is paid once per machine, on the user's first render. Running this after installation moves
 that price to the install, where nobody is waiting for a video.
 
-Shapes: the app's envelope allows up to 2.5 Mpx of LR input, and the two that matter are 1920x1080 and 1440x1080.
-Each shape compiles its own kernels, so both are warmed.
+Shapes: ONE is enough for the app's two real cases, and that is measured, not assumed. The kernels specialise on
+the channel count, the tile height and the warp count - not on the frame geometry - so a cache warmed at 1920x1080
+serves 1440x1080 for free:
+
+  1920x1080, empty cache   2.58 s      (compiles)
+  1440x1080, same cache    0.48 s      (reuses everything)
+  2560x1440, same cache    1.84 s      (some new kernels)
+
+So the default is the single shape the lane renders, and a larger one pays only the difference on its first use.
+Warming "for the shape the user actually runs" cannot be done at install time - the installer does not know it -
+and it would not help anyway: the compile happens on first use in that process, so moving it earlier only moves the
+wait.
 
 Usage (the app's own interpreter, once per machine):
   python3 scripts/warm_triton.py --model <model>.pth --shapes 1920x1080,1440x1080
@@ -31,7 +41,7 @@ from src.pytorch.Int8Body import Int8Body  # noqa: E402
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
-    ap.add_argument("--shapes", default="1920x1080,1440x1080")
+    ap.add_argument("--shapes", default="1920x1080")
     ap.add_argument("--calib", default="")
     a = ap.parse_args(argv)
 
