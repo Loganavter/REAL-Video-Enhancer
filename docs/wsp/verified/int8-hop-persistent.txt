@@ -28,7 +28,9 @@ cost.
 ## What this closes, for good
 
 With the traffic lever dead on the picture (`int8-sub8-codes`: 6-bit codes read 2.71% of pixels) and all three
-schedule variants measured negative, **25.7 ms of sixteen hops is the floor for this shape on this card**. The
+schedule variants measured negative, **no known lever remains unmeasured** - which is NOT the same as a floor,
+and `int8-hop-roof.txt` (measured the same day) shows why: 0.59 ms of every launch does not scale with the tap
+count, so 9.4 ms of the 25.7 is a fixed per-launch cost that none of these three variants touched. The
 honest statement of what binds it is not "bad scheduling" but "nine gathers and one 64-byte write per pixel,
 and the two costs do not overlap" - 51% of the arithmetic roof and 54% of the traffic roof at the same time is
 what that shape does here.

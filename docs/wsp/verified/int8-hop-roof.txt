@@ -1,0 +1,78 @@
+# The hop decomposed: the write is at its floor, the gathers are not, and a third is tap-independent
+
+Measured 2026-11-19 (local), RTX 4060 Ti, one hop of the int8 body on its own codes (frame 169 of BD Violet),
+five arms in one process, 3 interleaved rounds, medians of rounds 2+. `ncu` was NOT used: the copy on this host
+is a truncated install (`ncu` and the target libraries were wiped with `/tmp`), so this decomposes the kernel by
+removing one component at a time instead.
+Records: `int8-hop-roof.jsonl`; raw: `logs/hop-roof/probe.json`.
+
+Why this exists: the lane's plan says the hop runs at "91 TOPS and 157 GB/s - 52-55% of both roofs, therefore
+schedule-bound", and the lane's own later prose says "25.7 ms is the floor". Those are different claims and the
+second one was never measured - the five levers tried (vectorised loads, weight hoist, persistent grid, 6-bit
+codes, epilogue fold) each changed the FORMULA around the kernel, none isolated the cost inside it.
+
+## The decomposition
+
+| arm | ms | what it is |
+|---|---|---|
+| full, 9 taps | **1.551** | the shipped kernel |
+| store-only, 0 taps | **0.485** | epilogue + the 132.7 MB int8 write |
+| 3 taps | 1.072 | 6 fewer gathers + dots |
+| 1 tap (centre) | 1.073 | 8 fewer gathers + dots |
+| no store | *0.018* | **INVALID** - with no store the compiler deletes the whole kernel |
+
+Two facts, both new:
+
+1. **The write is at its traffic floor.** 132.7 MB written in 0.485 ms is **274 GB/s**, against the card's
+   nominal 288 - i.e. 95% of the roof, with the epilogue's arithmetic and the 16-bit-per-lane stores included.
+   Whatever the hop's problem is, it is not the store, and "the write is inefficient" is now a measured no.
+2. **The gathers + dots cost 1.066 ms of the 1.551, and a large part of that does not scale with the number of
+   taps.** One tap and three taps both cost 1.072-1.073 ms - flat - while nine taps cost 1.551. So ~0.59 ms of
+   every launch is paid before any tap-specific work is counted: the per-row index arithmetic (`rows // W`,
+   `rows % W` with W a RUNTIME value), the mask construction, the address computation, the launch ramp.
+
+That second number is the one the plan's diagnosis predicted and nobody had isolated: **0.59 ms x 16 hops =
+9.4 ms of the 25.7 is a fixed per-launch cost, and no tap-side lever can touch it.** It is also why the five
+previously-tried levers all came out flat or negative - every one of them was a tap-side or grid-side change.
+
+## What this does to the word "floor"
+
+The other agent's correction is right and this measurement supports it: **there is no measured floor, there is
+a measured decomposition, and one of its three parts (0.59 ms/launch, 27% of the hop line) has never been
+attacked.** The honest statement is "no known lever remains UNMEASURED", and even that is now too strong: the
+index arithmetic inside the kernel is a named lever that nobody has tried.
+
+The next falsifier is cheap and does not need `ncu`: pass `W` as a `tl.constexpr` (1920 is known at build time)
+so the two integer divisions per row become shifts, and/or restructure the block as a 2-D tile so `h` is
+constant within a CTA. If the 0.59 ms constant is the index arithmetic, that shows up immediately; if it does
+not move, the constant is the launch ramp and the memory system, and then the "floor" has evidence it lacked.
+
+**A first attempt at exactly that test was botched and is not reported as evidence**: its "runtime W" arm read
+a scalar from one element past the end of the weight buffer as a stand-in for W, which silently masked the
+loads and made that arm do less work (0.485 ms). A wrong-stand-in arm is the same class of error as the
+`no-store` arm above, and both are named here rather than quietly dropped.
+
+## Not covered
+
+- No `ncu` counters: no stall breakdown, no DRAM bytes. The 132.7 MB figure is the compulsory traffic by
+  construction (2.0736 Mpx x 64 B), not a measured DRAM counter - the objection that "a sum of tensors is not
+  a floor" applies to the 265 MB/hop figure used elsewhere in the corpus and is NOT resolved here.
+- One card, one hop, one frame's codes, taps chosen from the centre outwards.
+- The tap arms change the arithmetic, so no code comparison is possible or attempted.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_roof_probe.py --rounds 3 --iters 20 \
+    --out-file docs/wsp/verified/logs/hop-roof/probe.json
+PYTHONPATH=scripts python3 scripts/hop_roof_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-roof.txt \
+       --records docs/wsp/verified/records/int8-hop-roof.jsonl --bars docs/claims-bars.json
+
+@claim R001 1.551 ms "frames [10cff28ea287d300] n=1" measured
+@claim R002 1.073 ms "frames [10cff28ea287d300] n=1" measured
+@claim R003 1.072 ms "frames [10cff28ea287d300] n=1" measured
+@claim R004 0.485 ms "frames [10cff28ea287d300] n=1" measured
+@claim R005 0.018 ms "frames [10cff28ea287d300] n=1" measured

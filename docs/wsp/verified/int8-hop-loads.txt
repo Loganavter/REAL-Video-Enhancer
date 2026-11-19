@@ -29,7 +29,8 @@ schedule against another and not one arithmetic against another.
 
 The row's own falsifier: *"If neither a vectorised/block-pointer load nor a weight-stationary CTA moves the
 achieved TOPS off 91, the shape is at its floor and the largest line in the frame is closed."* Both were
-tried and neither moved it, so **26.95 ms of hops is the floor for this shape on this card**. The account of
+tried and neither moved it, so **no known lever remains unmeasured on the tap side** - see `int8-hop-roof.txt`
+for why that is not a floor: a 0.59 ms per-launch constant sits outside the taps entirely. The account of
 why the two roofs are both at ~50% is now open in a different way than the row assumed: not "the schedule is
 wasteful" but "the shape costs one of each per element and the two costs do not overlap" - the 9 taps read
 per pixel and the single 64-byte write are both irreducible at int8.

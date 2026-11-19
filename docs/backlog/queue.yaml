@@ -3071,3 +3071,44 @@ tasks:
     that cannot be closed that way: it is a threshold choice, and inventing a threshold would be the
     instrument-vs-population error in its purest form. Everything measurable around it has been measured;
     what remains is whose number it is.
+
+- id: rve-hop-index-arithmetic-2026-11-20
+  title: 'The hop pays 0.59 ms per launch that no tap touches - and W is divided at runtime'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 3h
+  tags:
+  - int8
+  - hops
+  - kernel
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Kernels.py
+  - docs/wsp/verified/int8-hop-roof.txt
+  owns_files:
+  - docs/wsp/verified/int8-hop-index.txt
+  refutes: >-
+    The hop line has no lever left. Decomposing the kernel says otherwise: one tap and three taps both cost
+    1.072-1.073 ms while nine taps cost 1.551, so ~0.59 ms of every launch is paid before any tap work is
+    counted (docs/wsp/verified/int8-hop-roof.txt). 0.59 x 16 = 9.4 ms of the 25.7 ms hop line - the largest
+    unmeasured line in the frame - and every lever tried so far (vectorised loads, weight hoist, persistent
+    grid, 6-bit codes, epilogue fold) was a tap-side or grid-side change. The suspects inside that constant
+    are the two integer divisions per row (`rows // W`, `rows % W` with W a runtime value), the mask and
+    address construction, and the launch ramp. If making W a constexpr and/or restructuring the block as a 2-D
+    tile (h constant per CTA) does not move the 1-tap arm by 20%, the constant is the launch and the memory
+    system and the word "floor" finally has evidence.
+  acceptance: >-
+    One hop, arms in one process, CUDA events, >=3 rounds, medians of rounds 2+: (a) today, (b) W as
+    tl.constexpr, (c) 2-D tile with h constant per CTA, (d) the best of (b)/(c) at 1, 3 and 9 taps to see
+    whether the constant moved or only the slope. Report ms, TOPS and GB/s per arm, and the codes against
+    today (differences must be explained - a constexpr W changes no arithmetic and must be 0). If an arm wins
+    by >=10%, the 16-hop chain in the app with the phase line beside the loop, then the full-clip picture.
+  note: >-
+    Two arms of the first attempt at this are INVALID and named in the record rather than dropped: a "no-store"
+    arm reads 0.018 ms because the compiler deletes the kernel, and a "runtime W" arm read a scalar from one
+    element past the weight buffer, which silently masked the loads (0.485 ms). Both are the same class of
+    error - a stand-in that changes the work instead of the thing under test - and both are why this row
+    exists with a written acceptance rather than a quick probe.
