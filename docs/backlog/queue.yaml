@@ -4386,6 +4386,73 @@ tasks:
     docs/wsp/verified/trt-int8-calibrated.txt, logs/trt-int8/, scripts/trt_int8_{calibrate,accuracy,records}.py,
     scripts/trt_vs_body_probe.py.
 
+- id: rve-certificate-picture-2026-11-20
+  title: "The certificate was withdrawn to save 33 s and it moved the picture 0.45% - re-measure and decide"
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - picture
+  - startup
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-certificate-removal.txt
+  - docs/wsp/verified/int8-scales-bd.txt
+  owns_files:
+  - docs/wsp/verified/int8-certificate-picture.txt
+  refutes: >-
+    Withdrawing the probe's certificate was a change to reporting and to cost. It was also a change to the picture:
+    the 494-frame ffv1 pair read worst share 0.45050%, 356 frames above 0.1%, peak 60, and the A/A on the same code
+    state read identity - so the difference is the certificate, not the pipeline. The mechanism was never
+    identified (cudnn's algorithm choice under a different free-memory state, and the engine warm-up the
+    certificate does, are the two candidates). Every picture number in this lane was measured with the certificate
+    PRESENT and the shipped path does not run it, so the shipped pixels are not the measured pixels.
+  acceptance: >-
+    (a) The pair re-run on the CURRENT tree (after the tail-CSC payload and the crop calibration), certificate on
+    against off, 494 frames, lossless sink. (b) The allocation-only discriminator the old page named: allocate the
+    certificate's ~2 GB, free it, and render without the certificate - if that reproduces the difference, the
+    mechanism is memory state and not the certificate's forwards. (c) A decision: ship the certificate, or
+    re-baseline every picture number against the certificate-off path and say so in FRAME-BUDGET.
+  note: >-
+    Found by the 2026-11-20 audit for measured-but-not-applied work. This is the largest such item: 0.45% of pixels
+    above the bar between what was measured and what ships, with 33 s of start-up as the reason for the gap.
+
+- id: rve-ink-lift-2026-11-20
+  title: "The rendered file lifts line art by ~5 levels against the model, and it is not the quantiser"
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - picture
+  - colour
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-scales-bd.txt
+  - docs/wsp/verified/int8-tail-csc.txt
+  owns_files:
+  - docs/wsp/verified/int8-ink-lift.txt
+  refutes: >-
+    The pale line in the rendered file is the quantiser. It is not: the body in RGB is faithful on the stroke to
+    half a level (-0.5), with or without the bias correction, while the RENDERED FILE against the model reads
+    +4.40/+6.60. So whatever lifts the ink happens between the body's output and the decoded file - the yuv420p
+    colour pipe, the pack, or the probe's calibration - and that was left open.
+  acceptance: >-
+    (a) Localise the lift on ONE frame: body output in RGB, the same tensor after the pack to yuv420p and back,
+    and the decoded file, each against the model. (b) The same three points with the tail-CSC payload (RVE_TAIL_YUV
+    1) and the RGB tail (0), because the colour pipe changed after that page was written. (c) Verdict: which stage
+    adds the ~5 levels, and whether the BT.709 limited-range conversion is the whole of it.
+  note: >-
+    Found by the 2026-11-20 audit. A visible picture effect (line art brightness) that was traced away from the
+    quantiser and then not chased; the colour pipe has changed twice since.
+
 - id: rve-beacon-scale-2026-11-20
   title: "Beacon's closed-form scale against the swept grid clamp K"
   type: experiment
