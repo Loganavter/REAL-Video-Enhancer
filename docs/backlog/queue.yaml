@@ -3093,13 +3093,13 @@ tasks:
   refutes: >-
     The hop line has no lever left. Decomposing the kernel says otherwise: one tap and three taps both cost
     1.072-1.073 ms while nine taps cost 1.551, so ~0.59 ms of every launch is paid before any tap work is
-    counted (docs/wsp/verified/int8-hop-roof.txt). 0.59 x 16 = 9.4 ms of the 25.7 ms hop line - the largest
-    unmeasured line in the frame - and every lever tried so far (vectorised loads, weight hoist, persistent
-    grid, 6-bit codes, epilogue fold) was a tap-side or grid-side change. The suspects inside that constant
-    are the two integer divisions per row (`rows // W`, `rows % W` with W a runtime value), the mask and
-    address construction, and the launch ramp. If making W a constexpr and/or restructuring the block as a 2-D
-    tile (h constant per CTA) does not move the 1-tap arm by 20%, the constant is the launch and the memory
-    system and the word "floor" finally has evidence.
+    counted (docs/wsp/verified/int8-hop-roof.txt), and every lever tried so far was a tap-side or grid-side
+    change. CORRECTED by ncu the same day (docs/wsp/verified/int8-hop-ncu.txt): the SM runs at 74% and store-only
+    is already at 95% of the DRAM roof, so the headroom is ~26% (25.7 -> ~19 ms), and a tap-independent constant
+    at that utilisation is most plausibly the EPILOGUE's per-element arithmetic rather than index arithmetic.
+    So this row now tests a weaker hypothesis, and it tests the epilogue too: an arm with the epilogue reduced
+    to a bare integer store. If neither the constexpr-W arm nor the reduced-epilogue arm moves the 1-tap arm by
+    20%, the constant is the launch ramp and the memory system and the "floor" finally has evidence.
   acceptance: >-
     One hop, arms in one process, CUDA events, >=3 rounds, medians of rounds 2+: (a) today, (b) W as
     tl.constexpr, (c) 2-D tile with h constant per CTA, (d) the best of (b)/(c) at 1, 3 and 9 taps to see
@@ -3110,5 +3110,6 @@ tasks:
     Two arms of the first attempt at this are INVALID and named in the record rather than dropped: a "no-store"
     arm reads 0.018 ms because the compiler deletes the kernel, and a "runtime W" arm read a scalar from one
     element past the weight buffer, which silently masked the loads (0.485 ms). Both are the same class of
-    error - a stand-in that changes the work instead of the thing under test - and both are why this row
-    exists with a written acceptance rather than a quick probe.
+    error - a stand-in that changes the work instead of the thing under test. ncu is now installed (2026.4.0,
+    from the CUDA apt repo, no root) and adds one more arm worth taking: Compute Workload Analysis, which names
+    the saturated pipe.

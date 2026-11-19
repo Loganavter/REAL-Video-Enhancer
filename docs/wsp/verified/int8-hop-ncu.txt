@@ -1,0 +1,87 @@
+# ncu on the hop: 74% of the SM, 56% of DRAM, and the stall counters do not exist on this chip
+
+Profiled 2026-11-19 (local) with **ncu 2026.4.0** on one `body_prologue_kernel` launch, inside the app's own
+process (launch 21 of a real body run, so the kernel sees real codes, real weights and its real neighbours).
+Report: `logs/hop-ncu/report.txt`; records: `int8-hop-ncu.jsonl`.
+
+Why this exists: the lane's diagnosis said "91 TOPS and 157 GB/s - 52-55% of BOTH roofs, therefore
+schedule-bound", and its later prose said "25.7 ms is the floor". Neither had a profiler behind it, because the
+copy on this host was a truncated install. It is now installed from the CUDA apt repository (extracted with
+`ar` + `tar`, no root, no proxy) and it answered both.
+
+## What it says
+
+| counter | value |
+|---|---|
+| duration | **1.60 ms** (my CUDA events read 1.55 - 3% apart) |
+| Compute (SM) Throughput | **73.97%** |
+| Memory Throughput | 73.97%, **156.6 GB/s** |
+| DRAM Throughput | 55.98% |
+| L2 Hit Rate | 91.32% |
+| L1/TEX Hit Rate | 22.30% |
+| Warp Cycles Per Issued Instruction | 9.04 |
+| Local Memory Spilling Requests | **0** |
+
+And ncu's own verdict line: *"Compute and Memory are well-balanced: to reduce runtime, both computation and
+memory traffic must be reduced."*
+
+## Three consequences
+
+1. **The hop is NOT at "52% of both roofs".** The SM side reads **74%**, not 52%: the "91 TOPS of 176" figure
+   divided by the card's *theoretical* dense int8 peak, which this kernel's shape does not reach. Measured
+   against what the chip actually delivers, the hop is three-quarters busy - so the honest headroom is
+   **~26%, i.e. 1.60 -> ~1.18 ms per hop, 25.7 -> ~19 ms for sixteen** - and that matches the original plan's
+   "~20 ms" ceiling rather than the "floor" language that replaced it.
+2. **The tap-independent 0.59 ms is probably not removable overhead.** With the SM at 74% and store-only
+   already at 95% of the DRAM roof (`int8-hop-roof.txt`), a constant that does not scale with taps is most
+   plausibly the **epilogue** (a per-element multiply, PReLU, floor, requant, clamp over 132.7 M elements) -
+   real work, counted in the SM throughput, not index arithmetic. The hypothesis in
+   `rve-hop-index-arithmetic` is therefore weaker than it looked from the decomposition alone, and that row
+   says so now.
+3. **The per-reason stall breakdown is genuinely unavailable here, and this is now proven rather than
+   assumed.** All 20 `smsp__warps_issue_stalled_*` counters exist in ncu's catalogue and every one reads
+   `(!) n/a` on this GPU; `smsp__pcsamp_*` has zero entries. A consumer Ada part does not expose SM warp-state
+   sampling, so "which stall dominates" cannot be answered on this card by any profiler - the ledger's note
+   ("stall breakdown did not return counters") was a real limitation of the hardware, not of the install.
+
+## What is left that a profiler can still buy
+
+- **Compute Workload Analysis** (which pipe actually saturates: the int8 tensor pipe, the LSU, or the ALU) was
+  not collected in this run. That is one more section, not a new instrument, and it decides whether the
+  remaining 26% is arithmetic or memory.
+- The epilogue's share can be measured without ncu, by the same removal trick that produced
+  `int8-hop-roof.txt`: an arm with the epilogue reduced to a store of the accumulated integer. That separates
+  "the epilogue is the constant" from "the constant is the launch".
+
+## Not covered
+
+- **One launch, one frame, one card.** Counters are per-launch, not per-run; nothing here is a timing claim -
+  the timing claim remains the CUDA-event one, and this corroborates it to 3%.
+- No PC sampling, no source-level attribution (unavailable, see above).
+- DRAM *bytes* were not collected as a counter in this run (throughput percentage only); the 132.7 MB figure
+  in `int8-hop-roof.txt` remains a construction, and this file does not convert it into a measurement.
+
+## Reproduce
+
+```bash
+# nsight-compute, no root needed: the CUDA apt repo's .deb, extracted with ar + tar
+curl -s https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/\
+nsight-compute-2026.4.0_2026.4.0.10-1_amd64.deb -o ncu.deb
+ar x ncu.deb && tar -xf data.tar.xz && cp -a opt/nvidia/nsight-compute/2026.4.0 ~/.local/nsight/
+flock -n /var/tmp/opencode/gpu.lock ~/.local/nsight/2026.4.0/ncu \
+  --target-processes all -k regex:body_prologue_kernel --launch-skip 20 --launch-count 1 \
+  --section SpeedOfLight --section MemoryWorkloadAnalysis <install-python> <body-target.py>
+PYTHONPATH=scripts python3 scripts/hop_ncu_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-ncu.txt \
+       --records docs/wsp/verified/records/int8-hop-ncu.jsonl --bars docs/claims-bars.json
+
+@claim N001 1.6 ms "frames [10cff28ea287d300] n=1" measured
+@claim N002 73.97 % "frames [10cff28ea287d300] n=1" measured
+@claim N003 55.98 % "frames [10cff28ea287d300] n=1" measured
+@claim N004 156.6 GB/s "frames [10cff28ea287d300] n=1" measured
+@claim N005 91.32 % "frames [10cff28ea287d300] n=1" measured
+@claim N006 22.3 % "frames [10cff28ea287d300] n=1" measured
+@claim N007 9.04 count "frames [10cff28ea287d300] n=1" measured
+@claim N008 0.0 count "frames [10cff28ea287d300] n=1" measured
