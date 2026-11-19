@@ -3436,7 +3436,7 @@ tasks:
 - id: rve-hop-fuse2-cascade-2026-11-20
   title: 'Reuse the 3x3 taps inside the CTA: 9 reads per pixel become 1.13 - the only lever that hits LSU'
   type: experiment
-  status: todo
+  status: dropped
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -3473,6 +3473,21 @@ tasks:
     full pair tiles, so occupancy must be reported beside the time. (b) ncu on the winning arm: L2 sectors and
     LSU utilisation, so "the read volume fell 8x" is a counter and not a claim. (c) only on a >=10% win: the
     16-hop chain in the app, the phase line, and the full-clip picture.
+  resolution: >-
+    CLOSED 2026-11-20 after actually trying it in Triton, which was the cheap half of the plan and the decisive
+    one. Triton 3.5 HAS tl.gather, so the horizontal shift inside a tile - the thing that made this family look
+    inexpressible - is expressible. Measured on one hop, codes identical in every arm: today's nine gathers
+    1.478 ms, three rows loaded once plus nine register gathers 19.895 ms at BLOCK_M 128 and 11.928 at 64. So
+    tl.gather costs THIRTEEN times the whole kernel: it lowers to a lane permutation (a shared-memory round trip
+    per element), and nine of those per output row is far worse than nine L1/L2-resident loads. On top of that,
+    tl.arange needs a power of two, so the three-row band cannot be BLOCK_M+2 wide and is loaded 2*BLOCK_M wide -
+    capping this formulation at 1.5x fewer reads instead of the 3.05x a hand-written band gets. The mechanism
+    (fewer reads, LSU is the limiter at 73.9%) is untouched and still real; every in-language expression of it is
+    now measured and lost: register gathers -1246%, pipelined taps -12/-20%, reordered loads -101%, hoisted
+    weights -54%. What remains is a CUDA kernel, whose prior is unfavourable (a microbenchmark of the same
+    staging measured -26%) and whose ceiling is the largest in the queue (-10.4 ms). That is now a DECISION, not
+    an open experiment. docs/wsp/verified/int8-hop-tapreuse.txt, records int8-hop-tapreuse.jsonl (U001-U003),
+    logs/hop-tapreuse/probe.json.
   note: >-
     Filed originally as "fuse two hops per launch" (the megakernel family) and re-priced twice: first at ~4 ms
     with a halo formula that used the input extent as the work extent, then at ~2.3 ms, then to ~0 when the
