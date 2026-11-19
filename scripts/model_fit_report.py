@@ -21,12 +21,17 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--inventory", default="docs/wsp/verified/logs/model-fit/inventory.json")
     ap.add_argument("--fit", default="docs/wsp/verified/logs/model-fit/all.json")
+    ap.add_argument("--fit-pc", default="docs/wsp/verified/logs/model-fit/all-perchannel.json",
+                    help="the same sweep with RVE_INT8_PER_CHANNEL=1; the two grids are compared per model")
     ap.add_argument("--out", default="docs/MODEL-FIT.md")
     args = ap.parse_args(argv)
 
     inv = json.load(open(args.inventory))
     fit = json.load(open(args.fit))
     rows_inv = {r["file"]: r for r in inv["rows"]}
+    pc = {}
+    if args.fit_pc and os.path.exists(args.fit_pc):
+        pc = {r["file"]: r for r in json.load(open(args.fit_pc))["rows"] if "share" in r}
     fit_rows = [r for r in fit["rows"] if "share" in r and "error" not in r]
     err_rows = [r for r in fit["rows"] if "error" in r]
     counts = inv["counts"]
@@ -79,12 +84,19 @@ def main(argv=None) -> int:
     A("8 levels off in any channel, worst of three held-out frames. It is the gate the app applies at start-up")
     A("(1%), **not** the acceptance bar (0.1% on a 494-frame pair) - see the caveat below.")
     A("")
-    A("| verdict | model | arch | scale | share (worst of 3) | body int8, ms |")
-    A("|---|---|---|---|---|---|")
+    A("| verdict | model | arch | scale | share, per-tensor | share, per-channel | body int8, ms |")
+    A("|---|---|---|---|---|---|---|")
     for r in fit_rows:
         i = rows_inv.get(r["file"], {})
+        p = pc.get(r["file"])
+        pc_cell = f"{p['share']:.4f}%" if p else "-"
         A(f"| {r['verdict']} | `{r['file']}` | {i.get('arch', '?')} | x{r['scale']} | "
-          f"{r['share']:.4f}% | {r['int8_ms']:.2f} |")
+          f"{r['share']:.4f}% | {pc_cell} | {r['int8_ms']:.2f} |")
+    unmeasured = [f for f, r in rows_inv.items() if r["verdict"] == "FULL" and f not in fit and f not in pc]
+    if unmeasured:
+        A("")
+        A("Structurally FULL but **not yet measured** (the inventory was regenerated after the sweep, when the")
+        A("hop-count rule stopped refusing them): " + ", ".join(f"`{f}`" for f in unmeasured) + ".")
     if err_rows:
         A("")
         A("Refused at probe time (the inventory said they fit, the build or the gate said otherwise):")
@@ -123,6 +135,39 @@ def main(argv=None) -> int:
     A(f"{next(r['int8_ms'] for r in fit_rows if r['verdict'] == 'BODY'):.2f} ms - about a third more than the 2x")
     A("models, because the tail stays fp16 and produces 16.6 Mpx instead of 4.1.")
     A("")
+    if pc:
+        fit_by = {r["file"]: r for r in fit_rows}
+        # only models where the grid actually matters: a 2x change of 0.0000% is not a rescue or a damage
+        meaningful = {f for f in pc if f in fit_by and max(pc[f]["share"], fit_by[f]["share"]) >= 0.01}
+        better = [(f, pc[f]["share"], fit_by[f]["share"]) for f in meaningful
+                  if pc[f]["share"] * 3 < fit_by[f]["share"]]
+        worse = [(f, pc[f]["share"], fit_by[f]["share"]) for f in meaningful
+                 if pc[f]["share"] > fit_by[f]["share"] * 1.5]
+        spreads_better = [fit_by[f].get("grid_spread") for f, _a, _b in better]
+        spreads_worse = [fit_by[f].get("grid_spread") for f, _a, _b in worse]
+        A("## Two grids, and the predictor that failed")
+        A("")
+        A("`RVE_INT8_PER_CHANNEL=1` makes the int8 grid per channel instead of per tensor. It is not a small")
+        A("setting: on the same 21 models it rescues some and damages others.")
+        A("")
+        A(f"**Rescued** (per-channel at least 3x better): "
+          + ", ".join(f"`{f}` {b:.4f}% -> {a:.4f}%" for f, a, b in sorted(better, key=lambda t: -t[2])) + ".")
+        A("")
+        A(f"**Damaged** (per-channel worse by more than half): "
+          + ", ".join(f"`{f}` {b:.4f}% -> {a:.4f}%" for f, a, b in sorted(worse, key=lambda t: t[1])) + ".")
+        A("")
+        A("The hypothesis this row was filed with was that the calibration grid's dynamic range (`max/median` of")
+        A("the per-channel maxima) predicts which models improve. **It does not.** The two groups overlap:")
+        A("")
+        A(f"- rescued models' spreads: {sorted(round(x, 2) for x in spreads_better if x is not None)}")
+        A(f"- damaged models' spreads: {sorted(round(x, 2) for x in spreads_worse if x is not None)}")
+        A("")
+        A("So the rule is not a threshold on the grid. The implementable version is to **measure both grids and")
+        A("keep the better one**, choosing on frames disjoint from the ones the start-up gate certifies on -")
+        A("otherwise the gate would pass by construction. That is a small change, and its cost is one extra")
+        A("build per render; the alternative (a flag nobody sets) leaves six models looking unquantisable when")
+        A("the grid was the problem.")
+        A("")
     A("## Not covered")
     A("")
     A("- **The fp16 column in the records is eager PyTorch, not the app's TensorRT engine.** It reads ~204 ms")

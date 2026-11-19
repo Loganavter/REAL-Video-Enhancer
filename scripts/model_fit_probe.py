@@ -86,6 +86,11 @@ def main(argv=None) -> int:
             body._build()
             out.update(flags={k: bool(getattr(body, k, False)) for k in
                               ("head_fused", "tail_int8", "tail_shuffle", "tail_yuv")})
+            # the calibration grid's DYNAMIC RANGE: a per-tensor grid is one wide box, so a model whose
+            # channel maxima span an order of magnitude loses resolution for most of its channels. That
+            # ratio is the predictor for "would per-channel grids rescue this model".
+            s_act = body._grids[0].float()
+            out.update(grid_spread=round(float(s_act.max() / s_act.median().clamp_min(1e-9)), 2))
             # three held-out frames, worst share: one frame is the app's start-up gate, not a picture claim
             shares = []
             for f in (100, FRAME, 250):

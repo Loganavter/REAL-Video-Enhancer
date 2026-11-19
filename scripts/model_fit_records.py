@@ -25,6 +25,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--probe", default="docs/wsp/verified/logs/model-fit/all.json")
     ap.add_argument("--out", default="docs/wsp/verified/records/model-fit.jsonl")
+    ap.add_argument("--probe-pc", default="docs/wsp/verified/logs/model-fit/all-perchannel.json",
+                    help="the same sweep with per-channel grids: its shares are records too, because the page "
+                         "quotes them")
     args = ap.parse_args(argv)
 
     pr = json.load(open(args.probe))
@@ -73,6 +76,26 @@ def main(argv=None) -> int:
         ratio.id = f"MF{len(out) + 1:03d}"
         store.records[ratio.id] = ratio
         out.append(ratio)
+
+    # the per-channel shares: same instrument, different grid - a separate record set, never merged with the
+    # per-tensor ones, because the grid is the thing under test
+    if args.probe_pc and os.path.exists(args.probe_pc):
+        pcpr = json.load(open(args.probe_pc))
+        pcdig = hashlib.sha256(open(args.probe_pc, "rb").read()).hexdigest()
+        for row in pcpr["rows"]:
+            if "error" in row or "share" not in row:
+                continue
+            popf = Population.of("frames", [f"{row['file']}#frame{i}" for i in frames],
+                                 f"{row['file']}, three held-out frames, per-channel grid, worst of three")
+            rec = Record(value=row["share"], unit="%", population=popf, instrument=instr,
+                         config=f"{row['file']}, {row['verdict']}, RVE_INT8_PER_CHANNEL=1",
+                         session=store.session, statistic="worst_of", tier="measured",
+                         run="scripts/model_fit_probe.py", artifact=args.probe_pc,
+                         extra={"artifact_sha256": pcdig, "of": "gross_error_share",
+                                "grid": "per_channel", "grid_spread": row.get("grid_spread")})
+            rec.id = f"MG{len(out) + 1:03d}"
+            store.emit(rec)
+            out.append(rec)
 
     store.dump(args.out)
     for rec in out:
