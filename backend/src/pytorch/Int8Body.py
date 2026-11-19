@@ -63,7 +63,7 @@ QB = 256      # the conversions are register-bound: 1024 measured 2.3 ms against
 class Int8Body:
     """Head (fp16) -> sixteen int8 hops (Triton) -> tail (fp16)."""
 
-    def __init__(self, model, feat: int = 64, block_m: int = BLOCK_M, warps: int = WARPS):
+    def __init__(self, model, feat: int | None = None, block_m: int = BLOCK_M, warps: int = WARPS):
         convs = [m for m in model.body if isinstance(m, torch.nn.Conv2d)]
         prels = [m for m in model.body if isinstance(m, torch.nn.PReLU)]
         # THE HEAD IS NOT ALWAYS A Conv2d. The app widens body[0] to 8 input channels and wraps it in
@@ -86,9 +86,17 @@ class Int8Body:
         if len(rest) < 3 or len(prels) != len(rest):
             raise ValueError(f"int8 body expects n inner convs plus a tail (n+1 Conv2d and n+1 PReLU, n>=2); "
                              f"this model has {len(rest)} convs and {len(prels)} PReLUs")
-        if rest[0].out_channels != feat:
-            raise ValueError(f"int8 body needs {feat} body channels; this model has "
-                             f"{rest[0].out_channels}")
+        # THE WIDTH COMES FROM THE MODEL unless the caller pins it. Every kernel takes C as a `tl.constexpr`,
+        # so a 48-channel body is a recompile, not a rewrite - but the tile tuning (BLOCK_M, warps) was measured
+        # at 64, so a native width has to be re-tuned before it is trusted (row rve-body-native-width).
+        width = int(rest[0].out_channels)
+        feat = width if feat is None else int(feat)
+        if width != feat:
+            raise ValueError(f"int8 body was asked for {feat} channels; this model has {width}")
+        # The int8 dot needs K (= C) to be a multiple of 16 for the tensor-core tile; 24 is not.
+        if feat % 16:
+            raise ValueError(f"int8 body needs a channel count that is a multiple of 16 for the int8 dot; "
+                             f"this model has {feat}")
         self.model = model
         self.head_conv, self.inner, self.tail_conv = head, rest[:-1], rest[-1]
         self.head_prelu = prels[0]
@@ -282,10 +290,19 @@ class Int8Body:
         # Measured the same day: the change is picture-neutral (the two variants differ by 0.01541% of
         # pixels with zero frames over the bar between them) and marginally worse against the fp16
         # reference (1.03% vs 0.91%), so the SHIPPED path stays per-tensor; this is the opt-in A/B knob.
-        # A grid clamp implies the folding path (that is where it is expressible), so RVE_INT8_GRID_K alone is
-        # enough to switch modes - one knob, not two that must agree.
-        grid_k = float(_os.environ.get("RVE_INT8_GRID_K", "0") or 0)
-        per_tensor = _os.environ.get("RVE_INT8_PER_CHANNEL") != "1" and grid_k <= 0
+        # THE GRID CLAMP, DEFAULT K=2 since 2026-11-20 (row rve-perchannel-grid-rule).
+        # `s[c] = max(s_in[c], s_t/K)` interpolates between the two grids the lane used to choose between:
+        # K=1 is the per-tensor grid reached through the folding path, K->inf is per-channel. The fold cancels
+        # exactly for any s[c], so every K costs the same arithmetic - this is a picture axis only.
+        # Why K=2 as the default: on 22 models an intermediate K beat BOTH shipped modes on 17 (the other 5 read
+        # 0.0000% at every K), and for the production model the 494-frame pair against the fp16 engine reads
+        # 0.00125% at K=2 against 0.00353% for the per-tensor default, 0 frames over the bar in both.
+        # K=2 is not the optimum for every model (8 prefer K=3/4, by 2.5-7x) - a start-up pick is the next row.
+        # RVE_INT8_PER_CHANNEL=1 still means pure per-channel, RVE_INT8_GRID_K=0 means the old per-tensor path.
+        _pc_env = _os.environ.get("RVE_INT8_PER_CHANNEL") == "1"
+        _k_env = _os.environ.get("RVE_INT8_GRID_K")
+        grid_k = float(_k_env) if _k_env not in (None, "") else (0.0 if _pc_env else 2.0)
+        per_tensor = (not _pc_env) and grid_k <= 0
         # GRID CLAMP (K): `s[c] = max(s_in[c], s_t/K)`. K=1 is the per-tensor grid reached through the
         # per-channel code path (no epilogue multiply), K=inf is per-channel, and intermediate K bounds how
         # far one channel's grid can fall below the layer maximum - so no channel can be crushed by more than
@@ -313,6 +330,11 @@ class Int8Body:
                 s_grids.append(s_in * margin)
             s_in = outs[idx - 1]
         self._s_t1 = s_grids[0].contiguous()
+        import logging as _lgg
+        _lgg.getLogger("RVE").warning(
+            "int8 grid: %s (RVE_INT8_GRID_K=%s, RVE_INT8_PER_CHANNEL=%s) - s[c] = max(s_in[c], s_t/K)",
+            "per-tensor" if per_tensor else (f"clamp K={grid_k:g}" if grid_k > 0 else "per-channel"),
+            _k_env if _k_env not in (None, "") else "default", _pc_env)
 
         identity = torch.full((self.feat,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
         launches, s_in = [], s_act
@@ -752,13 +774,14 @@ class Int8Body:
     def supports(model):
         """Can this body take the int8 path: n>=2 inner convs and a tail, at 64 channels, head wrapped or not.
 
-        The count is not sixteen - it is whatever the model has (the hop loop is data-driven); what 64 pins is
-        the kernel's `C` constexpr, which is the width the shipped opt-ins were tuned at.
+        The count is not sixteen - it is whatever the model has (the hop loop is data-driven). The width is the
+        kernel's `C` constexpr: any multiple of 16 compiles, and 64 is the one the tile tuning was measured at.
         """
         try:
             convs = [m for m in model.body if isinstance(m, torch.nn.Conv2d)]
             head = list(model.body)[0]
             rest = convs[1:] if isinstance(head, torch.nn.Conv2d) else convs
-            return len(rest) >= 3 and rest[0].out_channels == 64
+            width = int(rest[0].out_channels)
+            return len(rest) >= 3 and width % 16 == 0 and width >= 16
         except Exception:  # noqa: BLE001
             return False
