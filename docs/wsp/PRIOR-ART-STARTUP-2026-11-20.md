@@ -82,6 +82,11 @@ ladder (22 models, 6 K values, 3 held-out frames) is a ready-made test set for i
 Ordered by cost, and each has a falsifier that costs less than the experiment it replaces - which is the only reason
 to run them at all.
 
+**Outcome, 2026-11-20: experiment 1 is run and refuted.** The closed form is 2000x worse than K=2 (0.36669% against
+0.00018% mean share) and the mechanism is clipping: the fitted grid is 1.5-2.8x tighter and the late hops saturate
+up to 31.25% of channels at the int8 rail, against 0.000% for K=2. A least-squares objective has no clipping term,
+and in our setting the grid *is* the clipping bound. Details and records: `int8-beacon-scale.txt`. The sweep stays.
+
 ## Sources
 
 - arXiv:2508.20293v2 Beacon · arXiv:2404.03296v1 AdaBM · arXiv:2406.06649v1 2DQuant · arXiv:2502.15478v1 CondiQuant

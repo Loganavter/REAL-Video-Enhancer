@@ -4386,6 +4386,123 @@ tasks:
     docs/wsp/verified/trt-int8-calibrated.txt, logs/trt-int8/, scripts/trt_int8_{calibrate,accuracy,records}.py,
     scripts/trt_vs_body_probe.py.
 
+- id: rve-beacon-scale-2026-11-20
+  title: "Beacon's closed-form scale against the swept grid clamp K"
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - quantisation
+  - prior-art
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/PRIOR-ART-STARTUP-2026-11-20.md
+  - docs/wsp/verified/int8-grid-k-predict.txt
+  owns_files:
+  - docs/wsp/verified/int8-beacon-scale.txt
+  refutes: >-
+    The grid clamp K has to be SWEPT. Beacon (arXiv:2508.20293) shows the scale can be solved instead of searched:
+    quantise on an unscaled integer grid, then take the least-squares optimal scale c = <Xw,Xq>/||Xq||^2 per
+    channel. If a closed-form scale fitted to the fp16 reference reaches the swept K's picture on the ladder, the
+    sweep, its two candidates and the start-up guard all disappear. If it lands at the linear proxy's 4/22, then
+    the refutation has a citation and a number instead of a hunch.
+  acceptance: >-
+    (a) Per-hop output scales fitted in closed form from the int8 codes and the fp16 reference activation, no
+    backprop and no build. (b) The same ladder as `int8-grid-k-predict.txt`: 22 models, 3 held-out frames, the same
+    picture statistic, so the comparison is per model and not an average. (c) Verdict on agreement with the ladder's
+    per-model winner and on the share itself. Falsifier: agreement <= 4/22, i.e. no better than the linear error
+    sum that was already refuted.
+  note: >-
+    From the prior-art pass on 2026-11-20 (docs/wsp/PRIOR-ART-STARTUP-2026-11-20.md). The point is not to save the
+    3 s the sweep costs - the sweep is cheap - but to stop choosing a quantisation parameter by rendering, which is
+    the only one reason the start-up needs a guard and a cache key.
+  resolution: >-
+    DONE 2026-11-20, REFUTED by 2000x with the mechanism identified. Per-hop, per-channel scales fitted in closed
+    form (c = <y,q>/||q||^2) from the fp16 activations, injected into the build through RVE_INT8_GRID_FIT, on
+    Futsuu and three held-out frames: fitted mean share 0.36669% against K=2's 0.00018% (K=3 0.00124%, K=4
+    0.00250%); identical 0.00000% on the clean csm frame, which is why one frame is not enough to see it. The
+    mechanism is clipping, not the fit: the least-squares grid comes out 1.5-2.8x tighter than the K=2 grid and the
+    late hops saturate at the int8 rail - 3.13% of codes at hop 11, 12.50% at hop 14, 31.25% at the last hop,
+    against 0.000% for K=2. A least-squares objective has no clipping term, and our grid IS the clipping bound, so
+    the closed form is the wrong estimator here (in Beacon's own setting the grid is asymmetric min-max and the
+    scale is fitted after rounding). The EC variant corrects the input distribution, not the rail, so it is not the
+    reason for the verdict. docs/wsp/verified/int8-beacon-scale.txt, logs/beacon/,
+    scripts/beacon_scale_{probe,records}.py.
+
+- id: rve-draq-online-range-2026-11-20
+  title: "Per-frame activation range (DRAQ) instead of the 16-frame calibration"
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - quantisation
+  - startup
+  - prior-art
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/verified/startup-split.txt
+  - docs/wsp/PRIOR-ART-STARTUP-2026-11-20.md
+  owns_files:
+  - docs/wsp/verified/int8-online-range.txt
+  refutes: >-
+    The per-layer scales must come from a decoded calibration set. LSGQuant (arXiv:2602.03182) computes the range
+    online from the current input's per-channel max-abs, so no calibration pass exists at all. Ours is the block
+    that actually costs: 23.89 s in-app, 29.30 s standalone. If an online range holds the 494-frame pair inside the
+    bar, the calibration half of the start-up goes away and the cache key stops being frame-dependent.
+  acceptance: >-
+    (a) A per-frame range path behind a knob, no change to the default. (b) The 494-frame pair on BD Violet, worst
+    frame share, the lane's own bar (0.1% above 8 levels). (c) A temporal check the bar does not cover: the
+    frame-to-frame swing of the per-layer range, and the picture delta between consecutive frames against the same
+    render with calibration. Falsifier: any frame above the bar, or a visible swing that the pair shows.
+  note: >-
+    The risk is exactly what the paper does not measure for video SR: a range that moves per frame moves the
+    picture per frame. Our harness already measures that - this row is a render pair, not a new instrument.
+
+- id: rve-price-curvature-predictor-2026-11-20
+  title: "A curvature-priced predictor for K, the class the price paper says is correct"
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 2d
+  tags:
+  - int8
+  - quantisation
+  - prior-art
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-grid-k-predict.txt
+  - docs/wsp/PRIOR-ART-STARTUP-2026-11-20.md
+  owns_files:
+  - docs/wsp/verified/int8-grid-k-price.txt
+  refutes: >-
+    K cannot be predicted from the weights. What was refuted is a specific class of predictor: five weight
+    statistics and a linear sum of the two measured errors (4/22 at every beta). Predicting Quantization Price
+    (arXiv:2609.28270) shows why - reconstruction and diagonal scores drop the output-side curvature and the input
+    covariance, so they preserve rankings only when those are constant across candidates. The class that survives
+    that argument is the candidate's layer-output error covariance weighted by the fp16 reference's curvature, and
+    it has never been scored on our ladder.
+  acceptance: >-
+    (a) Curvature from the fp16 reference (output-side, per hop) and the candidate's error covariance, computed at
+    calibration time, no rendering. (b) The ladder's 22 models x 6 K x 3 held-out frames, same statistic. (c) The
+    verdict compared against BOTH baselines: the linear sum (4/22) and the sweep (22/22 by construction). Falsifier:
+    ranking no better than 4/22.
+  note: >-
+    This is the only predictor class in the literature that is not the one we already refuted, and the ladder is a
+    ready-made test set. If it fails too, the honest statement becomes stronger: not "we could not predict K" but
+    "the correct-priced predictor does not predict K either".
+
 - id: rve-grid-k-learned-2026-11-20
   title: 'Make the grid clamp a LEARNED per-layer parameter (PAMS), instead of a swept constant'
   type: experiment

@@ -1,0 +1,85 @@
+# Beacon's closed-form scale loses to the swept K by 2000x, and the reason is clipping
+
+Measured 2026-11-20 on `2x-Futsuu-Anime(1).pth`, 1920x1080, calibrated on 8 frames, measured on 3 held-out frames
+from the same two bluray cuts. Records `int8-beacon-scale.jsonl` (BK001-BK014), raw
+`logs/beacon/beacon.json`, `logs/beacon/beacon-clipping.json`, probe `scripts/beacon_scale_probe.py`.
+
+The question came out of the prior-art pass (`PRIOR-ART-STARTUP-2026-11-20.md`): Beacon (arXiv:2508.20293) says the
+scale does not have to be searched - pick the integer codes on an unscaled grid, then take the least-squares
+optimal scale, `c = <Xw,Xq>/||Xq||²` per channel. Our grid clamp K *is* a scale search: two candidate builds, six
+frames, a render to decide. If the closed form works, the sweep and its start-up guard disappear.
+
+## The result
+
+| policy | csm t=10 | violet t=15 | violet t=5 | mean |
+|---|---|---|---|---|
+| K=2 (shipped default) | 0.00000% | 0.00016% | 0.00038% | **0.00018%** |
+| K=3 | 0.00000% | 0.00092% | 0.00279% | 0.00124% |
+| K=4 | 0.00000% | 0.00353% | 0.00397% | 0.00250% |
+| **fitted (Beacon)** | 0.00000% | **0.62345%** | **0.47663%** | **0.36669%** |
+
+Share of pixels with channel-max |delta| above 8 levels against the fp16 model. The fitted grids are **2000x
+worse** than K=2 on the two frames that discriminate, and identical on the one that does not (the clean csm frame,
+where every policy reads 0).
+
+## Why: the closed form does not model clipping
+
+The fit minimises `||y - c·q||²` over the codes, which is dominated by the bulk of the distribution. A grid that is
+too tight improves the bulk and clips the tail - and our grid is per-channel *activation* scale, so a tight grid
+saturates at ±127. Measured per hop on the failing frame:
+
+| | K=2 | fitted |
+|---|---|---|
+| grid, mean over channels, last hop | 0.04240 | 0.01509 (**2.81x tighter**) |
+| codes at the int8 rail, last hop | 0.000% | **31.25%** |
+| codes at the rail, hop 14 | 0.000% | 12.50% |
+| codes at the rail, hop 11 | 0.000% | 3.13% |
+
+So the fitted scale is 1.5-2.8x tighter than the K=2 grid and the late hops saturate up to a third of their
+channels. The sweep's winner is not a better least-squares solution - it is the one that **does not clip**, and the
+closed form cannot know that because the L2 objective has no clipping term.
+
+This is not an argument against Beacon in its own setting: there the grid is asymmetric min-max per column and the
+scale is fitted *after* rounding, so clipping is bounded by the zero point. Here the scale is the clipping bound
+itself, and a least-squares fit to it is the wrong estimator.
+
+## What was NOT tried, and why it is not the reason for the verdict
+
+- **The error-correction variant.** Beacon's EC form fits against the partially quantised model's inputs, which
+  would need per-hop capture inside the body. It corrects the *input distribution* mismatch, not the clipping term -
+  the failing hops saturate at 12-31% of channels, and no input correction recovers codes that hit the rail.
+- **A clipping-aware fit** (minimise L2 subject to a saturation budget) is the obvious repair, and it is a different
+  method: it needs a saturation target, which is a hyper-parameter we would then have to choose - which is the
+  sweep again, with a proxy in the middle.
+- **The ladder's 22 models.** Not run: one model, three frames, and a 2000x gap with an identified mechanism. If the
+  gap were within 2x, the ladder would be the next step; at this size it would only re-measure the same failure.
+
+## Verdict
+
+Row `rve-beacon-scale-2026-11-20` closes as **refuted**: the closed-form scale does not replace the sweep, and the
+mechanism is that the least-squares objective ignores the clipping that our per-channel activation grid exists to
+control. The sweep stays, at its 3 s, with the K=2-clean skip.
+
+## Reproduce
+
+```bash
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/beacon_scale_probe.py \
+    --calib /tmp/opencode/calib-frames --frames /tmp/opencode/eval3 --out-file /tmp/opencode/beacon.json
+PYTHONPATH=scripts python3 scripts/beacon_scale_records.py
+PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-beacon-scale.txt \
+    --records docs/wsp/verified/records/int8-beacon-scale.jsonl --bars docs/claims-bars.json
+```
+@claim BK001 0.0 % "pixels of one frame [d2f9ebcd690f7ba2] n=1" measured
+@claim BK002 0.000161 % "pixels of one frame [02daaf4aa6b17c17] n=1" measured
+@claim BK003 0.000382 % "pixels of one frame [2a07ae34370919da] n=1" measured
+@claim BK004 0.0 % "pixels of one frame [d46f6f3c9687c031] n=1" measured
+@claim BK005 0.00092 % "pixels of one frame [771bb90df2a3d91c] n=1" measured
+@claim BK006 0.002793 % "pixels of one frame [8e4a69caa8d6790c] n=1" measured
+@claim BK007 0.0 % "pixels of one frame [8fcfb0b072ebfa24] n=1" measured
+@claim BK008 0.003533 % "pixels of one frame [cd003e64701cd992] n=1" measured
+@claim BK009 0.003967 % "pixels of one frame [9f7dabf9f21621b8] n=1" measured
+@claim BK010 0.0 % "pixels of one frame [d7f8cef762d808b1] n=1" measured
+@claim BK011 0.623453 % "pixels of one frame [3268656eba044403] n=1" measured
+@claim BK012 0.476631 % "pixels of one frame [2699c53de1d53650] n=1" measured
+@claim BK013 31.2502 % "layers [abd9011aec4f16e4] n=16" measured
+@claim BK014 2.8101 x "layers [abd9011aec4f16e4] n=16" measured
