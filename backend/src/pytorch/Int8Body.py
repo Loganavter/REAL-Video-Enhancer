@@ -366,16 +366,25 @@ class Int8Body:
                 weight = weight * s_grid.view(1, -1, 1, 1)
             w_sc = weight.abs().amax(dim=(1, 2, 3)) / 127.0
             w_q = torch.round(weight / w_sc.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
-            tap = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
+            tap = torch.zeros((9, self.cpad, self.cpad), device=w_q.device, dtype=torch.int8)
+            tap[:, : self.feat, : self.feat] = torch.stack(
+                [w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
+
+            def _pc(t, fill):
+                """A per-output-channel vector padded to cpad with a neutral value."""
+                out = torch.full((self.cpad,), fill, device=t.device, dtype=t.dtype)
+                out[: t.numel()] = t.reshape(-1)
+                return out.contiguous()
+
             # the scale the epilogue divides by: the next layer's grid in the folding modes, s_out in
             # per-tensor (where `m` does the conversion)
             os_next = s_grids[idx] if (not per_tensor and idx < len(self.inner)) else s_out
             launches.append(dict(
-                w=tap, m=m_int,
-                vec=(w_sc if not per_tensor else w_sc * s_t).contiguous(),
-                bias=conv.bias.detach().float().contiguous(),
-                slope=self.inner_prelus[idx - 1].weight.detach().float().contiguous(),
-                os=os_next.contiguous()))
+                w=tap.contiguous(), m=_pc(m_int, 1 << SHIFT),
+                vec=_pc(w_sc if not per_tensor else w_sc * s_t, 1.0),
+                bias=_pc(conv.bias.detach().float(), 0.0),
+                slope=_pc(self.inner_prelus[idx - 1].weight.detach().float(), 1.0),
+                os=_pc(os_next, 1.0)))
             s_in = s_out
         # each hop's epilogue requants into the NEXT hop's per-tensor grid, so hop k gets hop k+1's
         # multiplier and the last hop gets the identity (it stays on its per-channel grid, as before)
@@ -400,7 +409,8 @@ class Int8Body:
         for c in range(3):
             for i in range(3):
                 for j in range(3):
-                    w32[c * 9 + i * 3 + j] = w[:, c, i, j]
+                    # the row is cpad wide, the head has the model's own width: write the real channels only
+                    w32[c * 9 + i * 3 + j, : w.shape[0]] = w[:, c, i, j]
         self._head_w32 = w32.contiguous()
         def _hc(t, fill):
             out = torch.full((self.cpad,), fill, device=t.device, dtype=t.dtype)
@@ -427,7 +437,9 @@ class Int8Body:
         taps = torch.zeros((9, self.cpad, pad), device=w_q.device, dtype=torch.int8)
         for i in range(3):
             for j in range(3):
-                taps[i * 3 + j, :, :cout] = w_q[:, :, i, j].t()
+                # w_q is (cout, cin, 3, 3), so its dim 1 is the tail's INPUT width - the channels to write;
+                # the rest of the row is padding and stays zero
+                taps[i * 3 + j, : w_q.shape[1], :cout] = w_q[:, :, i, j].t()
         self._tail_taps = taps.contiguous()
         self._tail_sigma = torch.zeros(pad, device=w_q.device, dtype=torch.float32)
         self._tail_sigma[:cout] = sigma
