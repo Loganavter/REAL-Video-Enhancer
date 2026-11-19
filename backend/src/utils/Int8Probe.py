@@ -307,11 +307,21 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         # bar. `=0` restores the spread decode. The residual risk is stated in the row: the first seconds of a
         # clip can be a fade or a logo, which a spread sample would not see either (it takes the middle of each
         # sixteenth of the duration, so a fade at the head is one sample out of sixteen).
-        if str(os.environ.get("RVE_INT8_CALIB_SEQUENTIAL", "1")).lower() in ("1", "true", "yes"):
-            want = list(range(frames * 3))
+        # HYBRID since 2026-11-20 (the fade row): a pure sequential sample is UNSAFE - on a clip that opens on
+        # black (Interstellar, first 3 s black) it reads 4.13% worst share with 184 frames above the bar, because
+        # the grids' ceiling comes from black frames. So the sample is most of the frames read sequentially PLUS a
+        # few spread timestamps, which is what covers the clip's middle. Cost 1.6 s against 4.7 for the full
+        # spread, and both clips pass: BD Violet 0.00043%, Interstellar 0.00000%.
+        _seq = str(os.environ.get("RVE_INT8_CALIB_SEQUENTIAL", "1")).lower() in ("1", "true", "yes")
+        if _seq:
+            _spread_n = int(os.environ.get("RVE_INT8_CALIB_SPREAD", "4"))
+            _seq_n = max(1, frames - _spread_n)
+            want = list(range(_seq_n * 3))
             got = _read_indices(clip, want, width, height)
             pairs = [[got[i] for i in want[j * 3:(j + 1) * 3]]
-                     for j in range(frames) if all(i in got for i in want[j * 3:(j + 1) * 3])]
+                     for j in range(_seq_n) if all(i in got for i in want[j * 3:(j + 1) * 3])]
+            if _spread_n:
+                pairs = pairs + _read_pairs(clip, _spread_n, width, height)
         else:
             pairs = _read_pairs(clip, frames, width, height)
         if len(pairs) < 3:
