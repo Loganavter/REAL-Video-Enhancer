@@ -290,7 +290,9 @@ class Int8Body:
         _margin = float(os.environ.get("RVE_INT8_GRID_MARGIN", "1.0"))
         # crops are a DIFFERENT population of samples, so they must be a different cache entry: the same frames
         # and the same margin with crops on and off are two calibrations, not one.
-        _crop_n = int(os.environ.get("RVE_INT8_CALIB_CROPS", "0"))
+        # DEFAULT ON since 2026-11-20: 494-frame pair worst share 0.00005%, 0 frames above the 0.1% bar, and
+        # the start-up falls from 33.15 s to 9.79 s. `=0` restores full-frame calibration.
+        _crop_n = int(os.environ.get("RVE_INT8_CALIB_CROPS", "4"))
         _path = self._cache_path(self._cache_key(frames, _margin, _crop_n))
         if _path and os.path.exists(_path):
             try:

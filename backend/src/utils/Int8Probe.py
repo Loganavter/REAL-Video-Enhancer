@@ -247,7 +247,7 @@ def _calibrate(model, frames):
             handles.append(module.register_forward_hook(post_hook))
     import os as _os
     from ..pytorch.Int8Body import calib_crops as _crops
-    _crop_n = int(_os.environ.get("RVE_INT8_CALIB_CROPS", "0"))
+    _crop_n = int(_os.environ.get("RVE_INT8_CALIB_CROPS", "4"))
     with torch.no_grad():
         for frame in frames:
             model(_crops(frame, _crop_n))

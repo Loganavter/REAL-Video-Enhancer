@@ -4434,6 +4434,51 @@ tasks:
     reason for the verdict. docs/wsp/verified/int8-beacon-scale.txt, logs/beacon/,
     scripts/beacon_scale_{probe,records}.py.
 
+- id: rve-calib-crops-wiring-2026-11-20
+  title: "Wire the measured 15.7x-cheaper crop calibration into the shipped path"
+  type: task
+  status: done
+  owner: '@supervisor'
+  priority: P0
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - startup
+  - calibration
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - backend/src/utils/Int8Probe.py
+  - docs/wsp/verified/int8-calibration-crops.txt
+  - docs/wsp/verified/startup-split.txt
+  owns_files:
+  - docs/wsp/verified/int8-calib-crops-wired.txt
+  refutes: >-
+    Calibration has to run the fp16 model over full 1080p frames. `int8-calibration-crops.txt` measured the
+    opposite on 2026-11-18: 96 crops of 256x256 calibrate in 0.45 s against 7.09 s for 24 full frames (15.7x), and
+    the worst held-out share got BETTER (0.01881% against 0.02256%). That measurement was never wired: there is no
+    crop code in Int8Body or Int8Probe today, and the app still pays 12.62 s measuring 16 full frames plus 4.69 s
+    decoding them, inside a 23.89 s block.
+  acceptance: >-
+    (a) Crops behind a knob (RVE_INT8_CALIB_CROPS, default off until measured), used by BOTH calibration paths -
+    the probe's and the body's, because the body measures its own grids on the 24 frames the app hands it.
+    (b) The start-up split re-measured on the same instrument: the 12.62 s measure block and the 23.89 s total.
+    (c) The 494-frame pair on BD Violet against the shipped calibration, worst-frame share, the lane's 0.1% bar -
+    the crops page has n=1 per arm and says a repeat is owed before the default moves. Falsifier: any frame above
+    the bar, or a start-up that does not fall.
+  note: >-
+    This is the only lever found so far that attacks the block that actually costs. The prior-art pass suggested
+    DRAQ (per-frame range) for it, but that mechanism is incompatible with weights-baked grids (see the DRAQ row).
+  resolution: >-
+    DONE 2026-11-20 and ON BY DEFAULT (RVE_INT8_CALIB_CROPS=4, both calibration paths; =0 restores full frames).
+    Probe calibration 12.635 -> 0.563 s (22.4x), body calibration 2.095 -> 0.287 s (7.3x), start-up to the first
+    frame 33.15 -> 9.79 s (SC001-SC004 against ST001-ST004, same timestamped-stdout instrument). Picture: three
+    held-out frames equal or better (0.000161 -> 0.000117%, 0.000382 -> 0.000201%), and the 494-frame lossless
+    pair reads worst share 0.00005% (frame 276), 0 frames above the 0.1% bar, worst block mean 1.65, peak 11.
+    Crop count is part of the calibration-cache key, so an entry cannot be read across the two populations.
+    docs/wsp/verified/int8-calib-crops-wired.txt, logs/calib-crops/, scripts/calib_crops_{probe,records}.py.
+
 - id: rve-draq-online-range-2026-11-20
   title: "Per-frame activation range (DRAQ) instead of the 16-frame calibration"
   type: experiment
@@ -4467,6 +4512,12 @@ tasks:
   note: >-
     The risk is exactly what the paper does not measure for video SR: a range that moves per frame moves the
     picture per frame. Our harness already measures that - this row is a render pair, not a new instrument.
+    FINDING 2026-11-20, before any code: DRAQ's mechanism does not map onto this body. Their scale multiplies the
+    activations at runtime; ours is folded into the int8 WEIGHTS at build time (`weight * s_grid` in `_build`), so
+    a per-frame range needs a per-frame rebuild (0.44 s x 494 frames). The only shape that survives is calibrating
+    from the first N frames of the sequential stream instead of a spread decode, and that is strictly worse than
+    the crop row (rve-calib-crops-wiring-2026-11-20) unless crops fail. Row parked at todo until the crop path is
+    measured.
 
 - id: rve-price-curvature-predictor-2026-11-20
   title: "A curvature-priced predictor for K, the class the price paper says is correct"
