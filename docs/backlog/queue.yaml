@@ -4325,6 +4325,45 @@ tasks:
     terms (four extra builds from the same calibration maxima) but it doubles a 6.5 s start-up, and the
     calibration cache row removes the frames half of that, which makes the sweep's share the remaining cost.
 
+- id: rve-trt-int8-calibrated-2026-11-20
+  title: "Build TensorRT's own int8 with a calibrator and put it against the Triton body"
+  type: experiment
+  status: in_progress
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - quantisation
+  - tensorrt
+  base_branch: perf/inference
+  relates_to:
+  - scripts/trt_int8_calibrate.py
+  - scripts/trt_int8_accuracy.py
+  - docs/wsp/verified/fp16-engine-layers.txt
+  owns_files:
+  - docs/wsp/verified/trt-int8-calibrated.txt
+  refutes: >-
+    The hand-written Triton body is necessary. What was measured here is the EXPLICIT Q/DQ route (lossless but
+    slower, and it went through torch_tensorrt); TensorRT's own IMPLICIT int8 with a calibrator was never built,
+    and it is the one comparator that can say whether 26.1 ms of hand kernel buys anything over the vendor's
+    quantiser on the same graph. If calibrated int8 lands in the same class at the same picture, the body is
+    redundant; if it lands slower or visibly worse, the body is justified by measurement instead of by preference.
+  acceptance: >-
+    (a) Three engines from one ONNX at the app's builder level (fp16, int8 entropy, int8 min-max), each with its
+    build time and size in a manifest that names the calibration frames by sha256. (b) Frame time and per-layer
+    precision from `trtexec --loadEngine --dumpProfile --dumpLayerInfo` - the same instrument that produced the
+    fp16 budget, so the int8/fp16 quotient is same-instrument. (c) Picture on frames HELD OUT from calibration:
+    max and mean |delta| in 8-bit codes, share off by more than one code, PSNR against the fp16 engine. (d) Only
+    if (b)+(c) are in the same class as the body: the 494-frame pair in the app, which is this lane's own bar.
+  note: >-
+    Asked for by the owner on 2026-11-20 ("also test TRT's own int8 with a calibrator"). Calibration population is
+    eight frames, four from each of the two bluray cuts the lane already renders (bd_violet20s, bd_csm_same); the
+    evaluation frames are different timestamps from the same cuts, because a delta measured on the calibration set
+    is a fit, not a result. The app's own `.engine` is a TorchScript archive, so every arm here is built from ONNX
+    at 1920x1080 - a whole-frame engine, not the app's tiled one; that difference is stated in the write-up.
+
 - id: rve-grid-k-learned-2026-11-20
   title: 'Make the grid clamp a LEARNED per-layer parameter (PAMS), instead of a swept constant'
   type: experiment
