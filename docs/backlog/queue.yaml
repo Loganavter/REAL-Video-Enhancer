@@ -3959,7 +3959,7 @@ tasks:
 - id: rve-body-native-width-2026-11-20
   title: 'Native widths: 24 / 32 / 48-channel Compact bodies (10 files)'
   type: experiment
-  status: todo
+  status: in_progress
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -3986,6 +3986,14 @@ tasks:
     body, and BLOCK_M / warps swept (the shipped 128/4 was tuned at 64 and need not be right at 48). Stage (b):
     the same for 32 (three RGB-max-Denoise files) and 24 (two SuperUltraCompact files, nine hops). Stage (c): a
     494-frame pair for any width whose share is within 3x of the 0.1% bar.
+  progress: >-
+    STARTED 2026-11-20. `Int8Body` now reads the width from the model (feat=None -> rest[0].out_channels)
+    instead of defaulting to 64, and `supports()` accepts any multiple of 16 rather than exactly 64, so the
+    constructor and the render's pre-flight check agree. One structural limit is now measured rather than
+    assumed: the int8 dot's K must be a multiple of 16, so the 24-channel SuperUltraCompact pair CANNOT run
+    as-is - it is refused with that reason, and running it would need C padded to 32 with zero channels
+    (+33% work per hop for that model). That leaves 8 of the 10 files reachable without padding: five
+    Archivist denoisers at 48 channels and three RGB-max-Denoise at 32.
   note: >-
     Tier 2 of the rescue ranking: the working sibling exists and the difference is a CONSTANT (the channel
     count), which is why this is a day rather than a project - but the per-width tile tuning and the memory of
@@ -4134,4 +4142,43 @@ tasks:
     6.5 s, not a minute, and the breakdown says where it goes. The alternative - fewer calibration frames - is
     already measured as a bad trade: single-frame grids read 0.566% where spread calibration reads 0.050%, 11x
     worse. Caching keeps the spread calibration and drops the repetition.
+
+- id: rve-grid-k-predict-2026-11-20
+  title: 'Can the optimal grid clamp K be known without the 2-4 s start-up sweep?'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: false
+  cost: 6h
+  tags:
+  - int8
+  - quantisation
+  - models
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/REVIEW-int8-grid-modes.md
+  owns_files:
+  - docs/wsp/verified/int8-grid-k-predict.txt
+  refutes: >-
+    The best K can only be found by building and scoring five grids. It can only be found that way TODAY: the
+    ladder shows the optimum sits at K=2 for some models and K=3/4 for others (by 2.5-7x), and the one cheap
+    predictor tried so far - the calibration grid's dynamic range - does not separate them (rescued spreads
+    2.71-6.93 against damaged 4.25-4.55). But the ladder also produced 22 x 6 (model, K) points with their
+    weights on disk, which is exactly the dataset a predictor needs. If a weight-only statistic ranks the best K
+    correctly on held-out models, the sweep disappears and the start-up cost with it.
+  acceptance: >-
+    (a) A candidate set measured, not guessed, each computable from the weights and the calibration maxima with
+    no forward pass: per-input-channel weight norms against their maxima (the crushed-channel hypothesis),
+    the per-layer condition number of w' in the codes' domain, the spread of per-output-channel w_sc, and the
+    ratio of the largest to the median folded weight. (b) The test is ranking, not correlation: leave-one-out
+    over the 22 models, and the predictor must name the best K (or a K within 1.5x of it) for at least 18 of
+    them - below that the sweep stays. (c) If it passes, it is a build-time rule with its own log line and its
+    threshold in FRAME-BUDGET; if it fails, the row closes with the negative result and the sweep is the answer.
+  note: >-
+    Asked for by the owner on 2026-11-20: "can the optimal K be determined without the 2-4 s delay - maybe there
+    are empirical signals in the weights?" The honest starting point is that the sweep is cheap in absolute
+    terms (four extra builds from the same calibration maxima) but it doubles a 6.5 s start-up, and the
+    calibration cache row removes the frames half of that, which makes the sweep's share the remaining cost.
 

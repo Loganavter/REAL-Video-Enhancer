@@ -57,13 +57,20 @@ def test_a_single_hop_body_is_refused_with_a_reason():
         Int8Body(_Body(1))
 
 
-def test_a_native_width_is_a_parameter_not_a_constant():
-    """The width is the kernel's `C` constexpr, so a 48-channel model is a constructor argument - and asking
-    for 64 channels on it must say why it cannot."""
-    body = Int8Body(_Body(16, feat=48, tail=3, scale=1), feat=48)
-    assert body.feat == 48
-    with pytest.raises(ValueError, match="body channels"):
-        Int8Body(_Body(16, feat=48, tail=3, scale=1))
+def test_a_native_width_is_read_from_the_model():
+    """The width is the kernel's `C` constexpr, so a 48-channel model is a recompile, not a rewrite - the
+    constructor reads it from the model, and pinning a different one must say why it cannot."""
+    body = Int8Body(_Body(16, feat=48, tail=3, scale=1))
+    assert body.feat == 48, "the width must come from the model, not from a default"
+    with pytest.raises(ValueError, match="asked for 64"):
+        Int8Body(_Body(16, feat=48, tail=3, scale=1), feat=64)
+
+
+def test_a_width_the_int8_dot_cannot_tile_is_refused():
+    """24 channels is not a multiple of 16, and the int8 dot's K must be - so a 24-channel Compact is refused
+    with the reason instead of failing inside Triton."""
+    with pytest.raises(ValueError, match="multiple of 16"):
+        Int8Body(_Body(16, feat=24, tail=3, scale=1))
 
 
 def test_supports_follows_the_same_rule():
@@ -71,5 +78,6 @@ def test_supports_follows_the_same_rule():
     would say "supported" and the build would raise."""
     assert Int8Body.supports(_Body(9))
     assert Int8Body.supports(_Body(16))
-    assert not Int8Body.supports(_Body(16, feat=48))
+    assert Int8Body.supports(_Body(16, feat=48)), "a native width is supported; it is just not tuned"
+    assert not Int8Body.supports(_Body(16, feat=24)), "24 is not a multiple of 16: the dot cannot tile it"
     assert not Int8Body.supports(_Body(1))
