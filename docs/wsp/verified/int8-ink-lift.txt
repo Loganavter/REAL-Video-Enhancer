@@ -1,0 +1,58 @@
+# The ink lift is 0.5-0.8 levels today and it lives in the decode, not the quantiser
+
+Measured 2026-11-20, `2x-Futsuu-Anime(1)` at 1920x1080 -> 4K, BD Violet frame at t=5 s, crop calibration. Records
+`int8-ink-lift.jsonl` (IK001-IK005), raw `logs/ink-lift.json`, probe `scripts/ink_lift_probe.py`.
+
+`int8-scales-bd.txt` (2026-11-19) found the rendered file reading **+4.40/+6.60 levels** on line art against the
+model while the body in RGB read **-0.5**, and left it open: "whatever shifts the ink by ~5 levels happens between
+the body's output and the decoded file". Three stages on one frame, each against the same fp16 model output:
+
+| stage | ink signed | ink mean abs | share >8 |
+|---|---|---|---|
+| body RGB (the quantiser) | **-0.234** | 0.607 | 0.0002% |
+| body -> yuv420p -> RGB (the colour pipe) | **-0.264** | 0.827 | 0.1032% |
+| decoded frame of the rendered file | **+0.535** | 1.041 | 0.1308% |
+| decoded frame against the pipe round-trip | **+0.838** | 1.265 | 0.0500% |
+
+## What that says
+
+- **The quantiser does not lift the ink** - it is 0.23 levels *darker* than the model on the line core, which is
+  what the 2026-11-19 page already concluded and this repeats.
+- **The colour pipe does not lift it either**: the yuv420p round trip is -0.26, i.e. the same direction and the same
+  size as the body. Whatever the pipe costs, it is not a lift.
+- **The decode adds the lift**, and it is small: +0.54 against the model and +0.84 against the pipe round-trip. The
+  second number is the honest one - it is the part that the file's own decode contributes, and it includes the
+  difference between my nearest-neighbour chroma upsample and ffmpeg's filter on a 4:4:4 file that started as 4:2:0.
+- **The +4.40/+6.60 of 2026-11-19 does not reproduce.** Today's worst number anywhere in this chain is +0.84 on the
+  ink core, an order of magnitude smaller. Two pipeline changes landed in between (the tail writing the yuv420p
+  payload, and the crop calibration), and this page does not attribute the difference to either - it only says the
+  old number is stale and should not be quoted again.
+
+## What is NOT claimed
+
+- **One frame, one clip.** The 2026-11-19 page also used one frame; this is a repeat, not a population.
+- **The decode comparison is not an A/A.** ffmpeg's chroma upsampling differs from the probe's, so part of the
+  +0.84 is the comparison's own instrument, which is why the body/pipe/decoded rows are reported separately.
+- **No conclusion about perceptibility.** 0.5-0.8 levels on the ink core is below the lane's 8-level statistic and
+  below the one-level rounding the tail-CSC row already accepted.
+
+## Verdict
+
+Row `rve-ink-lift-2026-11-20` closes: the lift is in the file decode, it is 0.5-0.8 levels on the ink core today,
+the body and the pack are faithful in the opposite direction, and the 4-6 level figure of 2026-11-19 is stale.
+
+## Reproduce
+
+```bash
+ffmpeg -ss 5 -i <render>.mkv -frames:v 1 -pix_fmt rgb24 -f rawvideo /tmp/opencode/decoded_frame5.rgb
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/ink_lift_probe.py --decoded /tmp/opencode/decoded_frame5.rgb
+PYTHONPATH=scripts python3 scripts/ink_lift_records.py
+PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-ink-lift.txt \
+    --records docs/wsp/verified/records/int8-ink-lift.jsonl --bars docs/claims-bars.json
+```
+
+@claim IK001 -0.2336 levels "frames [412f977a0d40a48b] n=1" measured
+@claim IK002 -0.2635 levels "frames [412f977a0d40a48b] n=1" measured
+@claim IK003 0.5352 levels "frames [412f977a0d40a48b] n=1" measured
+@claim IK004 0.8382 levels "frames [412f977a0d40a48b] n=1" measured
+@claim IK005 0.130807 % "frames [412f977a0d40a48b] n=1" measured

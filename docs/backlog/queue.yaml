@@ -4433,7 +4433,7 @@ tasks:
 - id: rve-ink-lift-2026-11-20
   title: "The rendered file lifts line art by ~5 levels against the model, and it is not the quantiser"
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -4461,6 +4461,15 @@ tasks:
   note: >-
     Found by the 2026-11-20 audit. A visible picture effect (line art brightness) that was traced away from the
     quantiser and then not chased; the colour pipe has changed twice since.
+  resolution: >-
+    DONE 2026-11-20, localised and the old number is stale. Four stages on one frame against the same fp16 model:
+    body RGB -0.234 levels on the ink core (the quantiser is DARKER, not brighter); body -> yuv420p -> RGB -0.264
+    (the pipe is innocent); decoded file +0.535 against the model and +0.838 against the pipe round-trip (the
+    decode adds the lift, and part of that is ffmpeg's chroma filter against the probe's nearest upsample). So the
+    +4.40/+6.60 of 2026-11-19 does not reproduce - today's worst is +0.84 on the ink core, an order of magnitude
+    smaller, with the tail-CSC payload and the crop calibration having landed in between (not attributed). Below
+    the lane's 8-level statistic and below the one-level rounding the tail-CSC row accepted. No action.
+    docs/wsp/verified/int8-ink-lift.txt, logs/ink-lift.json, scripts/ink_lift_{probe,records}.py.
 
 - id: rve-beacon-scale-2026-11-20
   title: "Beacon's closed-form scale against the swept grid clamp K"
