@@ -4844,9 +4844,11 @@ tasks:
     Artifacts (scratch, not committed): /tmp/opencode/prelu-exp/{rewrite_prelu.py,run_engines.py,check_a.py,
     check_fp16_a.py,accept.py,RESULT.md}, engines under {base,a,base_ent,a_ent,base_ent,a_fp16}/.
   acceptance: >-
-    (a) The same rewrite applied where the app builds its engine, with a BD render pair against the shipped
-    cell - the engine numbers here are whole-frame and the app builds tiled, so the product number is unquoted
-    until one pair exists (gate_sweep, --reference-kind config). (b) DONE for one second model (Ani4K, see progress); still owed for a different tail scale
+    (a) DONE 2026-11-20: the app has a prebuilt-plan path (TensorRTHandler.load_engine -> RawTRTEngine when
+    RVE_RAW_TRT=1 and <engine>.plan exists), so both implicit-int8 plans were rendered by the app itself, plan
+    swapped between arms inside one session, 52 frames of bd_violet20s, null sink, reuse off: 49.08 against
+    39.24 ms/frame (1.251x, against 1.341x on the engine), and the lossless ffv1 pair reads worst share
+    0.01767%, 0 of 52 frames over the bar, block mean 2.64, peak 18. (b) DONE for one second model (Ani4K, see progress); still owed for a different tail scale
     (4x realesr-animevideov3's 48-channel tail, or a 1x denoiser) and for a model where the rewrite changes
     the picture in the same direction as on Futsuu. (c) DONE, and it CLOSES: the explicit Q/DQ arm re-run
     with this form reads 141.6-145.5 ms against 67.4-69.2 for the baseline (0.47x, i.e. 2.1x slower) with the

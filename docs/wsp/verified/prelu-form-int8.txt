@@ -74,6 +74,24 @@ every row, so this is a margin change and not a violation, but "equal or better"
 smoother than real 4K, which is why the 4K shares are ~100x smaller: the row tests the **engine geometry**
 (tactic set and fusion change with the shape), not a 4K picture, and it is not comparable to the 1080p row.
 
+## The app path: the plan loads and the win is 1.25x at the product level
+
+The app has a TensorRT path that takes a prebuilt plan: `TensorRTHandler.load_engine` returns
+`RawTRTEngine(<engine>.plan)` when `RVE_RAW_TRT=1` and that file exists, with no code change. Both int8 plans
+above were therefore dropped in as `<engine>.plan` for the same engine name and rendered by the app itself
+(`backend/rve-backend.py`, `--output null`, reuse off), the plan swapped between arms inside one session so the
+drift is common to both, 52 frames of `bd_violet20s`:
+
+| arm | round 1 | round 2 | median |
+|---|---|---|---|
+| int8 as-is | 48.91 | 49.24 | **49.08 ms/frame** |
+| int8 rewritten | 39.40 | 39.07 | **39.24 ms/frame** |
+
+**1.251x in the render loop** against 1.341x on the engine - the difference is pack + queue and read wait,
+which both arms pay. Lossless ffv1 pair of the same 52 frames, `gate_sweep --reference-kind config`:
+**worst share 0.01767% (frame 30), 0 of 52 frames above the 0.1% bar, worst block mean 2.64, peak 18** - the
+app-level picture moves the same way as the engine-level one, far inside the bar.
+
 ## Calibrator and fp16 controls
 
 - **entropy calibrator**: both arms fail on Violet (3.03037% against 2.99672% worst, 13 of 16 frames over
@@ -89,9 +107,15 @@ smoother than real 4K, which is why the 4K shares are ~100x smaller: the row tes
 1. The first variant was `x + (a-1)*relu(x)`, which is **not** PRelu (for `x < 0` it returns `x`, not
    `a*x`). It built without complaint and looked 25% faster; the fp16 control read **100.00000%** of pixels
    off with peak 126-227, which is what identified the error as algebra rather than quantisation.
-2. `scripts/build_plan.py --parse` sets only `BuilderFlag.FP16`, so a Q/DQ graph built through it runs the
-   quantise/dequantise nodes in fp16 and reads 133-135 ms. The Q/DQ numbers above come from
-   `build_int8dq.py`-equivalent code in the scratch dir: the same builder plus `BuilderFlag.INT8`.
+2. `scripts/build_plan.py --parse` sets only `BuilderFlag.FP16`, and a Q/DQ plan built through it read
+   133-135 ms against 68 ms for the same graph built with `BuilderFlag.INT8`. **The flag is not the cause**,
+   and this was measured rather than assumed: two builds of the identical `qdq_base.onnx` with
+   `EXPLICIT_BATCH`, opt 5 and 8 timing iterations, differing only in the INT8 flag, read **73.48 / 69.80**
+   (flag on) and **69.76 / 71.72** (flag off), 83 and 82 layers, and the flag-off plan's picture against the
+   fp16 engine is the same 0.000% / peak 7.43. So int8 on a Q/DQ graph comes from the Q/DQ nodes, as
+   `scripts/probe_int8_tactics.py` says. The 133 ms plan is an outlier whose cause is not established - the
+   build took 468 s against 450 s here and ran while other work was on the card, which is the documented way
+   a builder picks worse tactics (`avg_timing_iterations` measures under whatever load is present).
 
 ## What this changes in the record
 
@@ -100,7 +124,8 @@ smoother than real 4K, which is why the 4K shares are ~100x smaller: the row tes
   (1.599x at 1080p, 1.650x at 4K).
 - The lever is **mode- and model-specific**: it costs 18% on Futsuu fp16, is fp16-neutral on Ani4K, and is
   2.1x worse under explicit Q/DQ. `E9'` stands: the Q/DQ route is not fixed by this form.
-- Not checked: the app's build path and render pair, NVENC, and a native-4K picture.
+- Not checked: a native-4K picture (the 4K row's population is 1080p upscaled with lanczos), NVENC, and a
+  second card.
 
 @claim PF001 45.22 ms "frames [6e0a5548b0cef84f] n=1" measured
 @claim PF002 33.71 ms "frames [6e0a5548b0cef84f] n=1" measured
@@ -114,6 +139,9 @@ smoother than real 4K, which is why the 4K shares are ~100x smaller: the row tes
 @claim PF010 0.06647 % "frames [35d3b78e7c6523cc] n=16" measured
 @claim PF011 0.00012 % "frames [368c1cde9d2bd5eb] n=16" measured
 @claim PF012 0.00030 % "frames [368c1cde9d2bd5eb] n=16" measured
+@claim PF013 49.08 ms "renders [868724bf32194909] n=2" measured
+@claim PF014 39.24 ms "renders [f7b62b3cb32b3d2d] n=2" measured
+@claim PF015 0.01767 % "renders [2692c6b087c8d2c1] n=2" measured
 
 ## Reproduce
 
