@@ -773,3 +773,90 @@ def test_a_slow_writer_through_frames_never_tears_a_payload():
     assert pool is not None and pool.max_in_use == 1
     assert pool.blocked >= len(tensors) - 1, "the pool must have applied backpressure"
     assert pool.in_use == 0, "every slot must be back in the pool"
+
+
+# ======================================================================================
+# the payload the int8 tail wrote itself (RVE_TAIL_YUV)
+#
+# The body can hand the frame a finished yuv420p payload instead of an RGB tensor: PixelShuffle(2)
+# makes the 4:2:0 chroma average register-local, so the tail's epilogue produces the six bytes per
+# input pixel directly (row rve-tail-csc-yuv-2026-11-20). The frame's job then is to COPY those
+# bytes, and the failure this guards against is the pack running the colour conversion over samples
+# that are already yuv - silent, plausible-looking, and wrong.
+# ======================================================================================
+
+
+def _payload_frame(FrameModule, torch, width, height, pooled):
+    """A frame holding a packed yuv420p payload of the given OUTPUT geometry."""
+    n = width * height
+    chroma = (height // 2) * (width // 2)
+    data = torch.arange(n + 2 * chroma, dtype=torch.uint8)
+    frame = FrameModule.Frame(
+        backend="pytorch", width=width, height=height, device="cpu", gpu_id=0,
+        hdr_mode=False, dtype="float32",
+    )
+    frame.pooled_output = pooled
+    frame.yuv8_output = True
+    frame._tensor = data
+    return frame, data
+
+
+def test_a_packed_yuv420p_payload_is_recognised_and_sized_by_the_payload():
+    torch, FrameModule = _torch_env()
+    width, height = 8, 6
+    frame, data = _payload_frame(FrameModule, torch, width, height, pooled=True)
+    assert frame._is_raw_payload(), "a flat uint8 CUDA buffer is the pipe payload, not an image"
+    assert frame._pooled_numel() == data.numel(), \
+        "the slot must follow the payload: the image formula would ask for 3 bytes/pixel"
+
+
+def test_a_packed_payload_is_copied_into_the_slot_not_converted():
+    """The production copy path: a real pinned slot, a real `copy_`, and 1.5 bytes/pixel of payload.
+
+    A conversion here would be arithmetic over samples that are already yuv; the check is that the
+    slot holds exactly the payload's bytes (the colour conversion would not reproduce them)."""
+    torch, FrameModule = _torch_env()
+    width, height = 8, 6
+    frame, data = _payload_frame(FrameModule, torch, width, height, pooled=True)
+    payload = frame.get_frame_bytes()
+    assert isinstance(payload, memoryview)
+    assert len(payload) == data.numel() == width * height + 2 * (height // 2) * (width // 2)
+    assert bytes(payload) == data.numpy().tobytes(), "the bytes must arrive unchanged"
+    assert frame._pool is not None and frame._tensor is None
+    frame.release_payload()
+    assert frame._pool is None and frame._pool_slot is None
+
+
+def test_a_packed_payload_without_the_ring_is_handed_on_as_bytes():
+    torch, FrameModule = _torch_env()
+    width, height = 8, 6
+    frame, data = _payload_frame(FrameModule, torch, width, height, pooled=False)
+    out = frame.get_frame_bytes()
+    assert isinstance(out, np.ndarray) and out.dtype == np.uint8
+    assert out.tobytes() == data.numpy().tobytes()
+
+
+def test_a_packed_payload_preview_is_rgb():
+    """The information channel wants RGB HWC; a payload frame has no RGB tensor, so the frame
+    decodes its own Y plane and chroma. Grey in, grey out is enough to pin the shape and range."""
+    torch, FrameModule = _torch_env()
+    width, height = 8, 6
+    frame, _data = _payload_frame(FrameModule, torch, width, height, pooled=False)
+    frame._tensor = torch.full((width * height + 2 * (height // 2) * (width // 2),), 128,
+                               dtype=torch.uint8)
+    preview = frame.raw_payload_preview()
+    assert len(preview) == width * height * 3, "HWC rgb24, the preview channel's format"
+    levels = np.frombuffer(preview, np.uint8)
+    assert levels.min() > 100 and levels.max() < 160, "neutral yuv must come out neutral grey"
+
+
+def test_an_image_tensor_is_never_mistaken_for_a_payload():
+    torch, FrameModule = _torch_env()
+    frame = FrameModule.Frame(
+        backend="pytorch", width=8, height=6, device="cpu", gpu_id=0,
+        hdr_mode=False, dtype="float32",
+    )
+    frame._tensor = torch.rand(1, 3, 6, 8)
+    assert not frame._is_raw_payload()
+    frame._tensor = torch.zeros(1, 3, 4, 4, dtype=torch.uint16)
+    assert not frame._is_raw_payload(), "a 16-bit frame is an image, not a payload"

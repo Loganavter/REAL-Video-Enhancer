@@ -613,6 +613,14 @@ class UpscalePytorch:
                 try:
                     from .Int8Body import Int8Body
                     body = Int8Body(model)
+                    # The tail may write the pipe payload itself (RVE_TAIL_YUV), but only when the pipe
+                    # really carries 8-bit yuv420p. Two conditions, both from the pipe decision and not
+                    # from the bit depth alone: `yuv8_output` (the packer's own flag) and the format the
+                    # writer was told. On an rgb24 pipe - HDR, 10-bit, or an 8-bit source that declares a
+                    # non-bt709 matrix, where the app deliberately keeps rgb24 so ffmpeg uses the source's
+                    # matrix - the body must keep returning RGB.
+                    body.out_yuv = bool(getattr(body, "tail_yuv", False) and self.yuv8_output
+                                        and self.pipe_pixel_format == "yuv420p")
                     log("int8: built (supports=%s)", Int8Body.supports(model))
                 except Exception as error:  # noqa: BLE001
                     log("int8: build failed (%s)", error)

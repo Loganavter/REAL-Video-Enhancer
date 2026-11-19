@@ -3691,25 +3691,8 @@ tasks:
 - id: rve-tail-csc-yuv-2026-11-20
   title: 'Let the tail write the final yuv420p payload: PixelShuffle makes 4:2:0 chroma register-local'
   type: experiment
-  status: in_progress
+  status: done
   owner: '@supervisor'
-  next_step_first: >-
-    Read docs/wsp/HANDOFF-2026-11-19.md first - it carries the state, the closed families and the invariants, and
-    it exists because the session is about to be compacted. The five integration steps for this row are numbered
-    there under "The one thing in flight".
-  progress: >-
-    KERNEL AND GATE DONE 2026-11-19, integration open. tail_int8_yuv_kernel writes packed yuv420p from the tail's
-    own epilogue: Y, Cb and Cr are each linear in (R,G,B) so each is a weighted sum over the channel axis of the
-    reshaped (16) tile, and the residual adds one value per position because it adds the same LR pixel to all
-    four subpixels. Offline gate before any kernel: both orders run in torch from the SAME tail output, payload
-    (12 441 600 bytes) agrees with max |delta| = 1 level, 4.6% of bytes off by one, 0.00000% off by more. Isolated,
-    conversion inside each arm: 5.123 ms (fp16 RGB 49.77 MB + tensor_to_yuv420p) against 0.869 ms (yuv8 12.44 MB
-    directly) = -4.25 ms of the job; in the app the expectation is tail 1.00 -> ~0.87 and pack 4.36 -> ~2.0
-    (~2.5 ms on the loop) because the pack keeps its 1.9 ms transfer. NOT DONE: the integration - the body must
-    hand back a uint8 yuv420p buffer and the pack needs a copy-instead-of-convert branch; that also removes the
-    cat() intermediate, so RVE_PAYLOAD_GUARD=1 must stay on or the 12.6 dB race returns. Then the in-app A/B and
-    the 494-frame pair (this is different-arithmetic: judge it on the picture, not on byte-identity).
-    docs/wsp/verified/int8-tail-csc.txt, records int8-tail-csc.jsonl (N001-N003), logs/tail-csc/probe.json.
   priority: P1
   gpu: true
   cost: 1d
@@ -3742,6 +3725,23 @@ tasks:
     directly; byte-identity is NOT expected (the arithmetic order changes), so judge on the 494-frame pair with
     reference-kind config. (c) The frame: interleaved A/B, >=3 rounds, the tail phase line and pack line beside
     the loop - the expected split is tail -0.13 (37 MB less write) and pack 4.36 -> ~2.0 (a pure copy).
+  resolution: >-
+    ADOPTED 2026-11-20, all three stages read. (a) Offline gate before any kernel: both orders from the SAME tail
+    output agree on the 12 441 600-byte payload with max |delta| = 1 level, 4.6% of bytes off by one, 0.00000% off
+    by more - so it is different-arithmetic and the picture decides. (b) The kernel: tail_int8_yuv_kernel writes
+    packed yuv420p from the epilogue; isolated with the conversion inside each arm 5.123 -> 0.869 ms. The 494-frame
+    ffv1 pair (reference-kind config) reads worst share 0.00000%, 0 frames above the 0.1% bar, worst block mean
+    0.52 levels, peak 6 levels (TC001-TC004). (c) The frame, three arms in one session, medians of rounds 2-3:
+    fp16 52.39, int8 with the RGB tail 33.63, int8 with the yuv tail 31.47 ms - ratio 1.665x against the bar's
+    1.2x, from 1.558x (JC001-JC006). Attribution went where the phase lines said, not where the isolated probe
+    did: tail 1.00 -> 1.00 (a wash - the fused CSC costs what the 24.9 MB of fp16 stores did) and pack+queue
+    4.37 -> 2.06, so the saving is YCbCr arithmetic leaving the pack, leaving the pack 0.16 ms above the link's
+    own floor (JC007-JC010). DEFAULT ON (RVE_TAIL_YUV=1); the path declines itself on HDR/10-bit/non-bt709
+    sources because `out_yuv` is gated on the same flag that chose the pipe format. The safety coupling is now
+    load-bearing and written down: writing the payload directly removes the cat() intermediate that made the old
+    copy effectively synchronous, so RVE_PAYLOAD_GUARD=1 is not optional on this path.
+    docs/wsp/verified/int8-tail-csc.txt, records int8-tail-csc.jsonl (N001-N003, JC001-JC013, TC001-TC004),
+    logs/tail-csc{,-ratio,-pair,-nvenc}.
   note: >-
     Filed 2026-11-20 from an outside reader who noticed that the pack's 4.36 ms is NOT a copy (frame-pipeline.txt
     measured the stream pipeline at -0.01) but GPU-side YCbCr over 8.3 Mpx, and that PixelShuffle's channel
@@ -3751,3 +3751,48 @@ tasks:
     intermediate, and that intermediate is the only reason the current payload copy is effectively synchronous
     (frame-pipeline.txt section 2). Anyone taking this must keep RVE_PAYLOAD_GUARD=1 on, or they reintroduce the
     12.6 dB race that once had the pooled path disabled.
+
+- id: rve-yuv8-flag-divergence-2026-11-20
+  title: 'The packer decides yuv420p from bit depth alone while the writer decides from the source matrix'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: false
+  cost: 2h
+  tags:
+  - colour
+  - pipe
+  - ffmpeg
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/RenderVideo.py
+  - backend/src/pytorch/UpscaleTorch.py
+  - backend/src/FFmpegBuffers.py
+  owns_files:
+  - docs/wsp/verified/yuv8-flag-divergence.txt
+  refutes: >-
+    The 8-bit pipe is consistent with its own flag. It is not: `RenderVideo` decides `pipePixelFormat` from
+    the source's DECLARED matrix (keeping rgb24 when the source declares bt601/smpte170m, so ffmpeg uses the
+    source's own matrix rather than the packer's BT.709), while `UpscaleTorch.yuv8_output` is derived from
+    the bit depth alone. On an 8-bit source that declares a non-bt709 matrix the two disagree: the frame
+    becomes yuv420p bytes (1.5 B/px) and the writer is told rgb24 (3 B/px). The log even says "8-bit pipe:
+    NOT packing yuv420p ... keeping rgb24" while the packer packs. Nothing fails loudly - the sizes differ
+    by 2x, so ffmpeg reads a torn frame, which is the class of the P010/planar mismatch that cost 12.7 dB.
+  acceptance: >-
+    Stage (a), no GPU: a unit test that constructs the two decisions from the same inputs (a non-bt709
+    declaration, 8-bit, RVE_YUV8 unset) and asserts they agree; it must FAIL on the current tree, which is
+    the point. Stage (b): the one-line fix - derive `yuv8_output` from the pipe format the upscaler is
+    already handed (`pipe_pixel_format == "yuv420p"`) instead of from `high_bitdepth` - and the test passes
+    with the bt709 8-bit case still packing yuv and the 10-bit/HDR cases unchanged (the existing
+    test_yuv8_pipe and test_pinned_payload suites are the controls). Stage (c), if a bt601 8-bit clip is in
+    sources.yaml: one 494-frame ffv1 pair before/after, reference-kind config, to show the picture moved
+    from broken to consistent rather than the reverse.
+  note: >-
+    Found 2026-11-20 while answering "does the tail-CSC row break 10-bit?" - it does not (the 10-bit run is
+    in logs/tail-csc-10bit: out dtype float16, no payload line, and the tail-CSC gate in UpscaleTorch now
+    also requires pipe_pixel_format == "yuv420p"). But the check made the divergence visible: it is
+    PRE-EXISTING, not caused by that row, and it is the exact shape this repo has already paid for twice (a
+    format disagreement between packer and writer cannot fail loudly). No row existed for it, which is why
+    it survived.
+

@@ -31,7 +31,7 @@ import torch
 from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
                           head_int8_kernel, quantise_nchw_to_nhwc, quantise_nchw_to_nhwc_prelu,
                           hop_padded_kernel, quantise_nhwc, quantise_nhwc_prelu, tail_int8_kernel,
-                          tail_int8_shuffle_kernel)
+                          tail_int8_shuffle_kernel, tail_int8_yuv_kernel)
 
 __all__ = ["Int8Body"]
 
@@ -137,6 +137,22 @@ class Int8Body:
             str(os.environ.get("RVE_TAIL_SHUFFLE", "1")).lower() in ("1", "true", "yes")
             and self.tail_int8 and _r == 2 and self.tail_conv.out_channels == 3 * _r * _r)
         self.tail_scale = _r
+        # The tail writes the FINAL PIPE PAYLOAD instead of fp16 RGB (row rve-tail-csc-yuv-2026-11-20).
+        # PixelShuffle(2) makes 4:2:0 chroma register-local - the 12 tail channels of one input pixel
+        # become exactly the 2x2 block the chroma average covers - so the same epilogue can emit 6 bytes
+        # per input pixel (12.44 MB) instead of 49.77 MB of fp16 RGB, and the pack becomes a copy instead
+        # of YCbCr over 8.3 Mpx. Isolated with the conversion inside each arm: 5.123 -> 0.869 ms.
+        # Off by default until the render pair's picture is in: it is a DIFFERENT-ARITHMETIC change (the
+        # offline gate put it at max 1 level over the payload), so it is judged on renders, not bytes.
+        # ADOPTED 2026-11-20 and default ON: three arms in one session read 52.39 / 33.63 / 31.47 ms
+        # (fp16 / RGB-tail / yuv-tail, medians of rounds 2-3) = -2.16 ms and ratio 1.558 -> 1.665, and the
+        # 494-frame pair reads 0.00000% worst share / peak 6 levels (int8-tail-csc.txt). The whole saving
+        # is in the pack (4.37 -> 2.06); the tail phase is a wash (1.00 -> 1.00).
+        # `out_yuv` additionally requires that the pipe really carries yuv420p (set by the upscaler from
+        # `yuv8_output`, the same flag that chose the pipe format); RVE_TAIL_YUV=0 restores the RGB tail.
+        self.tail_yuv = bool(str(os.environ.get("RVE_TAIL_YUV", "1")).lower() in ("1", "true", "yes")
+                             and self.tail_shuffle and self.tail_scale == 2)
+        self.out_yuv = self.tail_yuv
         if want_tail_int8 and not self.tail_int8:
             import logging as _lg
             _lg.getLogger("RVE").warning(
@@ -586,14 +602,31 @@ class Int8Body:
                     self._ts_log = True
                     _lg.getLogger("RVE").warning(
                         "int8 tail FUSED with shuffle+residual: one kernel, scale %d", self.tail_scale)
-                final = torch.empty((x.shape[0], h * self.tail_scale, w * self.tail_scale, 3),
-                                    device=x.device, dtype=torch.float16)
-                tail_int8_shuffle_kernel[grid](src, self._tail_taps, self._tail_sigma, self._tail_bias,
-                                               x.clamp(0.0, 1.0), final, h, w, BLOCK_M=self.block_m,
+                if self.out_yuv:
+                    # conv + shuffle + residual + BT.709 limited-range colour, one kernel, straight into
+                    # the pipe's yuv420p layout: 6 bytes per input pixel, no second pass and no cat().
+                    # 4 Y in the 2H x 2W plane, then U and V in two H x W planes.
+                    if not getattr(self, "_ty_log", False):
+                        self._ty_log = True
+                        _lg.getLogger("RVE").warning(
+                            "int8 tail writes the payload: yuv420p %.2f MB directly from the epilogue "
+                            "(no fp16 RGB intermediate, pack copies instead of converting)",
+                            6.0 * n_pix / 2**20)
+                    out = torch.empty(6 * n_pix, device=x.device, dtype=torch.uint8)
+                    tail_int8_yuv_kernel[grid](src, self._tail_taps, self._tail_sigma, self._tail_bias,
+                                               x.clamp(0.0, 1.0), out, h, w, BLOCK_M=self.block_m,
                                                CIN=self.feat, COUT=self.tail_conv.out_channels,
                                                COUT_PAD=16, SCALE=self.tail_scale,
                                                num_warps=self.warps)
-                out = final.permute(0, 3, 1, 2)          # a channels_last view, no copy
+                else:
+                    final = torch.empty((x.shape[0], h * self.tail_scale, w * self.tail_scale, 3),
+                                        device=x.device, dtype=torch.float16)
+                    tail_int8_shuffle_kernel[grid](src, self._tail_taps, self._tail_sigma,
+                                                   self._tail_bias, x.clamp(0.0, 1.0), final, h, w,
+                                                   BLOCK_M=self.block_m, CIN=self.feat,
+                                                   COUT=self.tail_conv.out_channels, COUT_PAD=16,
+                                                   SCALE=self.tail_scale, num_warps=self.warps)
+                    out = final.permute(0, 3, 1, 2)      # a channels_last view, no copy
                 _t2.record()
                 _t3.record()
                 _end.record()
@@ -657,7 +690,13 @@ class Int8Body:
         """
         with torch.no_grad():
             ref = self.model(x.clamp(0.0, 1.0)).float()
-            got = self(x).float()
+            # the payload path returns bytes, not an RGB tensor: the gross gate needs the tensor, so
+            # turn the packing off for the one call that compares against the model
+            _yuv, self.out_yuv = self.out_yuv, False
+            try:
+                got = self(x).float()
+            finally:
+                self.out_yuv = _yuv
         diff = ((got - ref).abs() * 255.0).amax(dim=1)
         share = float((diff > 8).float().mean()) * 100.0
         return share, self.sanity_ok(share, bar)

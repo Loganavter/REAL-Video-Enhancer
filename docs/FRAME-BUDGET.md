@@ -10,13 +10,13 @@ what its floor is, so a reader who was never in this lane can challenge any of i
 |---|---|
 | card | NVIDIA GeForce RTX 4060 Ti, 34 SMs, **176 dense int8 TOPS** and **288 GB/s** (the two roofs every number below is measured against) |
 | ridge | 176 TOPS / 288 GB/s = **611 FLOP/byte** - and the hop sits at 610, i.e. exactly on it |
-| clip | `bd_violet20s` - BD Violet, 494 frames, 1920x1080 in, 4K out |
+| clip | `bd_violet20s_yuv_r3_null.log` - BD Violet, 494 frames, 1920x1080 in, 4K out |
 | model | `2x-Futsuu-Anime(1).pth`, SRVGGNetCompact 2x, 64 body channels, 18 convolutions |
 | precision | fp16 engine vs the int8 body: 8-bit codes between the 16 body hops, fp16 head and tail weights where noted |
-| build | all four opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that tail kernel, zero-halo hop buffers |
+| build | all five opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that tail kernel, zero-halo hop buffers, and the tail writing the yuv420p payload itself |
 | the bar | `bar_int8_wall` = **1.2x** wall clock against the fp16 engine; the picture bar is the share of pixels more than 8 levels off on the worst frame of a spread sample, 0.1% |
 
-| commit | `9b814a0d` - the tree these numbers were taken on |
+| commit | `c9134cba` - the tree these numbers were taken on |
 
 The pipeline, in the order a frame is paid for: **decode** (ffmpeg, outside the loop) -> **reader** (yuv420p10 -> a tensor) -> **head** (3 -> 64 channels) -> **sixteen hops** (the body) -> **tail** (64 -> 12 channels, pixel shuffle to 3 at 2x) -> **residual** (add the upsampled input) -> **pack** (4K payload to the host) -> **writer** (ffmpeg stdin). The render loop below is the wall clock of that chain; the body is what the model costs, measured by the app's own events.
 
@@ -26,17 +26,17 @@ The pipeline, in the order a frame is paid for: **decode** (ffmpeg, outside the 
 |---|---|---|---|
 | head | 0.60 | 2% | the first convolution, 3 -> 64 channels, 3x3, fused with its PReLU and with the quantisation into int8 codes (one kernel) |
 | quantise | 0.00 | 0% | 0.00 by construction: the head writes codes directly, so this pass no longer exists |
-| hops | 24.30 | 94% | the body proper: sixteen 64 -> 64 int8 convolutions, 3x3, one Triton kernel launched sixteen times |
+| hops | 24.50 | 94% | the body proper: sixteen 64 -> 64 int8 convolutions, 3x3, one Triton kernel launched sixteen times |
 | tail | 1.00 | 4% | the last convolution 64 -> 12 channels, its pixel shuffle to 3 channels at 2x, and the residual add - all three in one kernel now |
-| **BODY TOTAL** | **25.90** | 100% | measured with the app's own CUDA events, window by window |
+| **BODY TOTAL** | **26.20** | 100% | measured with the app's own CUDA events, window by window |
 
-Tail split on the same run: dequant 0.00, conv 1.01, shuffle 0.00, residual 0.00, sum 1.02 ms. The zeroes are the second adoption: the dequant pass was folded into the tail's weights and the shuffle+residual into its epilogue.
+Tail split on the same run: dequant 0.00, conv 1.00, shuffle 0.00, residual 0.00, sum 1.00 ms. The zeroes are the second adoption: the dequant pass was folded into the tail's weights and the shuffle+residual into its epilogue.
 
 ## The hop against its two roofs - why every single lever came out flat
 
 | quantity | value |
 |---|---|
-| one hop, measured | 1.519 ms |
+| one hop, measured | 1.531 ms |
 | its compute floor (152.9 GFLOP at 176 TOPS) | 0.869 ms = **57% of the roof** |
 | its DRAM floor (250.6 MB at 288 GB/s, counter-measured) | 0.870 ms = **57% of the roof** |
 | the two floors agree | that is what 'on the ridge' means: 610 FLOP/byte against a ridge of 611 |
@@ -49,10 +49,10 @@ one lost (the table three sections down).
 
 | what | ms | floor, and where the floor comes from |
 |---|---|---|
-| body (above) | 25.90 | **13.9 ms** for the hops alone at the 176 TOPS roof (152.9 GFLOP per hop x 16); DRAM floor **13.9 ms** (250.6 MB per hop x 16 at 288 GB/s) - the two agree, which is the ridge again |
-| pack + queue | 4.36 | **1.9-2.4 ms**: the 4K yuv payload is 12.44 MB and the link is **PCIe gen 3 x8** - measured under load at 6.55 GB/s round-trip, 25 of 25 samples, against 7.88 GB/s theoretical. The card is a PCIe 4.0 part but the slot negotiates gen 3, so this floor is a property of the motherboard |
-| **render loop** | **33.58** | what the user waits for; `null` sink, so no encoder |
-| everything else | +3.32 | reader, the wrapper around the model call, and the writer's back-pressure. The input path inside it is measured at 1.38 ms, of which 0.07 was removable |
+| body (above) | 26.20 | **13.9 ms** for the hops alone at the 176 TOPS roof (152.9 GFLOP per hop x 16); DRAM floor **13.9 ms** (250.6 MB per hop x 16 at 288 GB/s) - the two agree, which is the ridge again |
+| pack + queue | 2.06 | **1.9-2.4 ms**: the 4K yuv payload is 12.44 MB and the link is **PCIe gen 3 x8** - measured under load at 6.55 GB/s round-trip, 25 of 25 samples, against 7.88 GB/s theoretical. The card is a PCIe 4.0 part but the slot negotiates gen 3, so this floor is a property of the motherboard |
+| **render loop** | **31.48** | what the user waits for; `null` sink, so no encoder |
+| everything else | +3.22 | reader, the wrapper around the model call, and the writer's back-pressure. The input path inside it is measured at 1.38 ms, of which 0.07 was removable |
 
 ## What is in this frame because it was measured and adopted
 
@@ -62,6 +62,7 @@ one lost (the table three sections down).
 | tail as a 17th int8 hop | -3.16 ms (6.9%) | int8-tail-hop:C001 / C002 |
 | tail shuffle + residual folded in | -0.80 ms (2.0%) | int8-tail-shuffle:Q005 / Q006 |
 | zero-halo hop buffers (mask-free) | -0.98 ms (2.8%) | int8-hop-halo:H004 / H005 |
+| tail writes the yuv420p payload itself | -2.16 ms (6.4%) | int8-tail-csc:JC002 / JC003 |
 
 ## What was measured and deliberately NOT adopted
 
@@ -84,9 +85,8 @@ An outsider reading this list is the intended use: every entry is a lever someon
 
 | idea | expected | what it needs | state |
 |---|---|---|---|
-| fuse two hops per launch (cascade) | **+3.1 ms/frame** at T=32: 1.064x of work against ~250 MB of DRAM per fused boundary removed (the launch-constant argument is dead) | a CUDA kernel; the intermediate is 34^2 x 64 B = 74 KB, which fits 100 KB of shared memory | `rve-hop-fuse2-cascade`, P2, unmeasured |
-| shared-memory staging of the 3-row window | the 0.59 ms first-tap cost, if it is a round trip (it is NOT a per-launch constant: the same kernel at 256x256 takes 0.057 ms, so the implied launch term is 0.011 ms - `int8-hop-constant.txt`) | the same CUDA kernel; measured negative in its two cheap forms (reordered loads -101%, a CUDA microbenchmark -26%) | closed, `int8-hop-prefetch.txt` |
-| **overlap the IO with the body** (three streams, double buffer) | **up to 7.68 ms** - read, body, pack and write are strictly sequential today | software only, no new kernel | `rve-frame-pipeline-overlap`, P1, unmeasured |
+| the hop: taps, staging, cascade, tiles, schedules | -5.3 ms at the very best, and only by removing the FIRST tap's exposed latency | **closed by mechanism**: staging ADDS LSU instructions (9 -> 11.26 at a 2-D tile, 9 -> 15.09 for a band) on the busiest pipe, `tl.gather` prices the register route at 13.5x, a register-local dp4a roofs at 44.2 TOPS against the 103.4 already reached, and the per-launch constant does not exist (a whole 256x256 hop is 0.057 ms) | `int8-hop-tapreuse.txt`, `int8-hop-constant.txt` |
+| overlap the IO with the body (streams) | the pack was expected to be a copy that could hide | **-0.01 ms**: it is YCbCr arithmetic, and the tail-CSC adoption removed that arithmetic instead | `frame-pipeline.txt` |
 | a PCIe 4.0 slot | ~1.2 ms off `pack`, since the link is gen 3 x8 today | hardware | not software |
 | skipping duplicate frames / static regions | large on anime, and the owner's call forbids it | - | closed by policy, `rve-reuse-gate-forbidden` |
 | cut the model (fewer channels or hops) | 2.9-4.5 ms per hop removed | 14-37% per-layer residual, 1.58% of pixels over the picture bar | closed by measurement |
@@ -97,8 +97,8 @@ The bar is a RATIO, `fp16 / int8`, so a millisecond saved is not worth the same 
 
 | a millisecond saved in | int8 becomes | fp16 becomes | ratio |
 |---|---|---|---|
-| the int8 body only (a kernel) | 32.58 | 52.12 | **1.600** |
-| a stage BOTH arms pay (pack, reader, writer) | 32.58 | 51.12 | 1.569 |
+| the int8 body only (a kernel) | 30.47 | 52.39 | **1.719** |
+| a stage BOTH arms pay (pack, reader, writer) | 30.47 | 51.39 | 1.687 |
 
 So a body-side millisecond is worth ~2.8x a shared one against this bar, and the largest wall-clock win in
 the budget can be the smallest ratio win. That is why `rve-hop-fuse2-cascade` (body) and the pack (shared)
@@ -106,9 +106,9 @@ must not be reported as if their milliseconds were interchangeable.
 
 ## The ratio this produces
 
-Measured last in `logs/wall-final` (Violet, null sink, 3 rounds, the shipped default):
-`int8-wall-final.jsonl` W009 = **1.552x** against `bar_int8_wall` = 1.2x. Older, pre-halo:
-`int8-wall-defaults.txt` 1.399x / 1.481x null and 1.511x / 1.506x under `hevc_nvenc`.
+Three arms in one session, 3 interleaved rounds, shipped default (`int8-tail-csc.jsonl`): the fp16 engine at 52.39 ms, the int8 body at 31.47 ms, so **1.66476 x** against `bar_int8_wall` = 1.2x. The same session WITHOUT the tail-CSC row read 1.557835 x, i.e. the row is worth 1.068637 x on the int8 arm.
+
+With `hevc_nvenc` in the loop - the product's own condition - the same two arms read 52.59 ms and 31.54 ms, so the product's ratio is **1.667406 x**. On this clip the encoder is almost entirely overlapped: the loop sits within 0.2 ms of the null sink in both arms.
 
 ## What this file is NOT
 

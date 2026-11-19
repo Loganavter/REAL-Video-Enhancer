@@ -532,6 +532,9 @@ class Render:
             return _NO_PREVIEW
         if type(frame) is bytes:
             return frame
+        if frame._is_raw_payload():
+            # the tail wrote the pipe payload itself: no RGB tensor exists to build a preview from
+            return frame.raw_payload_preview()
         # `get_frame_bytes()` is the PIPE payload, which is packed YUV for both the 10-bit branch
         # and the opt-in 8-bit one - feeding that to a preview that expects RGB is garbage, so
         # both build the RGB view from the tensor instead.
@@ -642,12 +645,18 @@ class Render:
         import torch.nn.functional as F
         # no clone: the frame already owns the tensor and this runs before it is handed on
         tensor = getattr(hr_frame, "_tensor", None)
-        if tensor is None:
-            tensor = hr_frame.get_frame_tensor()
         block = 32 * max(1, int(self.modelScale or 1))
         # stride-2 subsample first: the statistic is a block mean, so halving the grid changes
         # it by well under a level while cutting the read by 4x
-        luma = tensor[:, :, ::2, ::2].mean(dim=1, keepdim=True).float()
+        if tensor is not None and hr_frame._is_raw_payload():
+            # the tail wrote the pipe payload itself: the Y plane IS the luma, no decode needed
+            h, w = int(hr_frame.height), int(hr_frame.width)
+            luma = tensor[: h * w].view(1, 1, h, w).float() / 255.0
+            luma = luma[:, :, ::2, ::2]
+        else:
+            if tensor is None:
+                tensor = hr_frame.get_frame_tensor()
+            luma = tensor[:, :, ::2, ::2].mean(dim=1, keepdim=True).float()
         k = max(1, block // 16)
         grid = F.avg_pool2d(F.avg_pool2d(luma, 8), k, ceil_mode=True) * 255.0
         # The tuner has to score a candidate the way the gate will actually use it: a frame
