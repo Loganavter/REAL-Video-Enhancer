@@ -77,9 +77,15 @@ class Int8Body:
             rest = convs                      # head wrapped: the list holds the 16 inner convs + the tail
         else:
             rest = convs[1:]                  # head is a Conv2d: drop it
-        if len(rest) != 17 or len(prels) != 17:
-            raise ValueError(f"int8 body expects 16 inner convs plus a tail (17 Conv2d, 17 PReLU); "
-                             f"this model has {len(rest)} and {len(prels)}")
+        # THE HOP COUNT IS DATA, NOT 16. The loop, the halo buffers and the requant chain are all driven by
+        # `len(self._launches)`; the only thing that used to assume sixteen was this check. A model with nine
+        # inner convs (SuperUltraCompact) or seventeen (the Archivist denoisers) needs no new kernel - it needs
+        # this check to read the model instead of a constant (row rve-hop-count-general-2026-11-20).
+        # Two is the floor, not one: with a single inner conv the first and last hop are the same launch, and
+        # the zero-halo scheme assumes the last hop writes the PLAIN buffer the tail reads.
+        if len(rest) < 3 or len(prels) != len(rest):
+            raise ValueError(f"int8 body expects n inner convs plus a tail (n+1 Conv2d and n+1 PReLU, n>=2); "
+                             f"this model has {len(rest)} convs and {len(prels)} PReLUs")
         if rest[0].out_channels != feat:
             raise ValueError(f"int8 body needs {feat} body channels; this model has "
                              f"{rest[0].out_channels}")
@@ -716,11 +722,15 @@ class Int8Body:
     # ---- a helper the render can ask for a one-line verdict, as TileProbe does
     @staticmethod
     def supports(model):
-        """The coverage boundary: 16 inner convs, a tail, 64 body channels - head wrapped or not."""
+        """Can this body take the int8 path: n>=2 inner convs and a tail, at 64 channels, head wrapped or not.
+
+        The count is not sixteen - it is whatever the model has (the hop loop is data-driven); what 64 pins is
+        the kernel's `C` constexpr, which is the width the shipped opt-ins were tuned at.
+        """
         try:
             convs = [m for m in model.body if isinstance(m, torch.nn.Conv2d)]
             head = list(model.body)[0]
             rest = convs[1:] if isinstance(head, torch.nn.Conv2d) else convs
-            return len(rest) == 17 and rest[0].out_channels == 64
+            return len(rest) >= 3 and rest[0].out_channels == 64
         except Exception:  # noqa: BLE001
             return False
