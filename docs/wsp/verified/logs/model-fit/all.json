@@ -1,0 +1,701 @@
+{
+ "take": "2026-11-19T07:48:56Z",
+ "frame": 169,
+ "rounds": 3,
+ "iters": 10,
+ "rows": [
+  {
+   "file": "2x-anifilm-compact.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.05998,
+   "shares": [
+    0.04341,
+    0.02579,
+    0.05998
+   ],
+   "fp16_ms": 203.641,
+   "int8_ms": 27.297,
+   "ratio": 7.4601,
+   "draws": {
+    "fp16": [
+     203.45272216796874,
+     203.62884521484375,
+     203.65352783203124
+    ],
+    "int8": [
+     27.227749633789063,
+     27.26143798828125,
+     27.33321533203125
+    ]
+   }
+  },
+  {
+   "file": "2x-AniScale.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 8e-05,
+   "shares": [
+    8e-05,
+    0.0,
+    7e-05
+   ],
+   "fp16_ms": 203.781,
+   "int8_ms": 27.309,
+   "ratio": 7.4619,
+   "draws": {
+    "fp16": [
+     203.57642822265626,
+     203.78572998046874,
+     203.775390625
+    ],
+    "int8": [
+     27.211874389648436,
+     27.27434387207031,
+     27.344281005859376
+    ]
+   }
+  },
+  {
+   "file": "2x-Bubble-AnimeScale-Compact-v1(3).pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.00117,
+   "shares": [
+    0.00053,
+    0.00058,
+    0.00117
+   ],
+   "fp16_ms": 203.661,
+   "int8_ms": 27.402,
+   "ratio": 7.4325,
+   "draws": {
+    "fp16": [
+     203.55767822265625,
+     203.55,
+     203.772509765625
+    ],
+    "int8": [
+     27.4218994140625,
+     27.399783325195312,
+     27.403265380859374
+    ]
+   }
+  },
+  {
+   "file": "2x-Futsuu-Anime(1).pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.01136,
+   "shares": [
+    0.00415,
+    0.00757,
+    0.01136
+   ],
+   "fp16_ms": 203.772,
+   "int8_ms": 27.339,
+   "ratio": 7.4535,
+   "draws": {
+    "fp16": [
+     203.54744873046874,
+     203.7791748046875,
+     203.7644287109375
+    ],
+    "int8": [
+     27.268798828125,
+     27.32779541015625,
+     27.350424194335936
+    ]
+   }
+  },
+  {
+   "file": "2x-LD-Anime-Compact.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.01098,
+   "shares": [
+    0.00731,
+    0.00633,
+    0.01098
+   ],
+   "fp16_ms": 203.767,
+   "int8_ms": 27.204,
+   "ratio": 7.4903,
+   "draws": {
+    "fp16": [
+     203.545703125,
+     203.761669921875,
+     203.77303466796874
+    ],
+    "int8": [
+     27.239321899414062,
+     27.164468383789064,
+     27.244134521484376
+    ]
+   }
+  },
+  {
+   "file": "2x.StarSample.V1.0(2).pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.06497,
+   "shares": [
+    0.05419,
+    0.04662,
+    0.06497
+   ],
+   "fp16_ms": 203.776,
+   "int8_ms": 26.886,
+   "ratio": 7.5792,
+   "draws": {
+    "fp16": [
+     203.5313720703125,
+     203.778662109375,
+     203.77406005859376
+    ],
+    "int8": [
+     26.91962890625,
+     26.88532409667969,
+     26.886962890625
+    ]
+   }
+  },
+  {
+   "file": "2x_Ani4K_Compact_35000.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.30206,
+   "shares": [
+    0.10892,
+    0.04802,
+    0.30206
+   ],
+   "fp16_ms": 203.779,
+   "int8_ms": 27.361,
+   "ratio": 7.4479,
+   "draws": {
+    "fp16": [
+     203.5626953125,
+     203.76842041015624,
+     203.79013671875
+    ],
+    "int8": [
+     27.329434204101563,
+     27.343359375,
+     27.377764892578124
+    ]
+   }
+  },
+  {
+   "file": "2x_AniSD_AC_G6i2a_Compact_72500.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.09822,
+   "shares": [
+    0.01959,
+    0.01301,
+    0.09822
+   ],
+   "fp16_ms": 203.768,
+   "int8_ms": 27.091,
+   "ratio": 7.5216,
+   "draws": {
+    "fp16": [
+     203.56126708984374,
+     203.7620849609375,
+     203.774365234375
+    ],
+    "int8": [
+     27.034637451171875,
+     27.110195922851563,
+     27.071795654296874
+    ]
+   }
+  },
+  {
+   "file": "2x_GarfieldJr_net_g_51000.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.87628,
+   "shares": [
+    0.87628,
+    0.42822,
+    0.16247
+   ],
+   "fp16_ms": 203.785,
+   "int8_ms": 27.396,
+   "ratio": 7.4385,
+   "draws": {
+    "fp16": [
+     203.5725341796875,
+     203.79146728515624,
+     203.778662109375
+    ],
+    "int8": [
+     27.388006591796874,
+     27.3554443359375,
+     27.436236572265624
+    ]
+   }
+  },
+  {
+   "file": "2xGT-v2-evA-01.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.01558,
+   "shares": [
+    0.00368,
+    0.00803,
+    0.01558
+   ],
+   "fp16_ms": 203.794,
+   "int8_ms": 27.439,
+   "ratio": 7.4271,
+   "draws": {
+    "fp16": [
+     203.53984375,
+     203.80364990234375,
+     203.78377685546874
+    ],
+    "int8": [
+     27.382373046875,
+     27.45354309082031,
+     27.424880981445312
+    ]
+   }
+  },
+  {
+   "file": "2xHFA2k_compact_multijpg(1).pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 1e-05,
+   "shares": [
+    0.0,
+    1e-05,
+    0.0
+   ],
+   "fp16_ms": 203.768,
+   "int8_ms": 27.567,
+   "ratio": 7.3917,
+   "draws": {
+    "fp16": [
+     203.5492919921875,
+     203.76883544921876,
+     203.768017578125
+    ],
+    "int8": [
+     27.529318237304686,
+     27.590655517578124,
+     27.543655395507812
+    ]
+   }
+  },
+  {
+   "file": "2xHFA2k_LUDVAE_compact(2).pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.07609,
+   "shares": [
+    0.07248,
+    0.05084,
+    0.07609
+   ],
+   "fp16_ms": 203.776,
+   "int8_ms": 27.801,
+   "ratio": 7.3297,
+   "draws": {
+    "fp16": [
+     203.5641357421875,
+     203.7792724609375,
+     203.7728271484375
+    ],
+    "int8": [
+     27.712408447265624,
+     27.794534301757814,
+     27.807962036132814
+    ]
+   }
+  },
+  {
+   "file": "2xHFA2kAVCCompact(1).pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "fp16_ms": 203.814,
+   "int8_ms": 28.159,
+   "ratio": 7.238,
+   "draws": {
+    "fp16": [
+     203.66151123046876,
+     203.84869384765625,
+     203.7791748046875
+    ],
+    "int8": [
+     28.14166259765625,
+     28.16040954589844,
+     28.15703125
+    ]
+   }
+  },
+  {
+   "file": "2xken-v1-evA-01.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.06643,
+   "shares": [
+    0.03736,
+    0.03272,
+    0.06643
+   ],
+   "fp16_ms": 203.761,
+   "int8_ms": 27.586,
+   "ratio": 7.3865,
+   "draws": {
+    "fp16": [
+     203.53587646484374,
+     203.75970458984375,
+     203.76268310546874
+    ],
+    "int8": [
+     27.54314270019531,
+     27.667047119140626,
+     27.504129028320314
+    ]
+   }
+  },
+  {
+   "file": "WoEiCS_2x(1).pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 6e-05,
+   "shares": [
+    0.0,
+    5e-05,
+    6e-05
+   ],
+   "fp16_ms": 203.784,
+   "int8_ms": 27.683,
+   "ratio": 7.3612,
+   "draws": {
+    "fp16": [
+     203.54947509765626,
+     203.7986328125,
+     203.77005615234376
+    ],
+    "int8": [
+     27.620864868164062,
+     27.644207763671876,
+     27.722650146484376
+    ]
+   }
+  },
+  {
+   "file": "1x-AnimeUndeint-Compact(1).pth",
+   "verdict": "BODY+TAIL",
+   "scale": 1,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": false,
+    "tail_yuv": false
+   },
+   "share": 5e-05,
+   "shares": [
+    0.0,
+    0.0,
+    5e-05
+   ],
+   "fp16_ms": 202.278,
+   "int8_ms": 28.24,
+   "ratio": 7.1628,
+   "draws": {
+    "fp16": [
+     202.08353271484376,
+     202.27215576171875,
+     202.28433837890626
+    ],
+    "int8": [
+     28.301107788085936,
+     28.2745849609375,
+     28.205380249023438
+    ]
+   }
+  },
+  {
+   "file": "1x-BleedOut-Compact.pth",
+   "verdict": "BODY+TAIL",
+   "scale": 1,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": false,
+    "tail_yuv": false
+   },
+   "share": 0.00145,
+   "shares": [
+    0.0,
+    0.0,
+    0.00145
+   ],
+   "fp16_ms": 202.295,
+   "int8_ms": 28.106,
+   "ratio": 7.1977,
+   "draws": {
+    "fp16": [
+     202.0641845703125,
+     202.27318115234374,
+     202.31669921875
+    ],
+    "int8": [
+     28.14361572265625,
+     28.10511474609375,
+     28.106137084960938
+    ]
+   }
+  },
+  {
+   "file": "1x-BroadcastToStudio_Compact(1).pth",
+   "verdict": "BODY+TAIL",
+   "scale": 1,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": false,
+    "tail_yuv": false
+   },
+   "share": 0.09664,
+   "shares": [
+    0.0896,
+    0.05758,
+    0.09664
+   ],
+   "fp16_ms": 202.31,
+   "int8_ms": 27.491,
+   "ratio": 7.3593,
+   "draws": {
+    "fp16": [
+     202.0580322265625,
+     202.31884765625,
+     202.30185546875
+    ],
+    "int8": [
+     27.590655517578124,
+     27.497677612304688,
+     27.483544921875
+    ]
+   }
+  },
+  {
+   "file": "1x-Dotzilla-Compact.pth",
+   "verdict": "BODY+TAIL",
+   "scale": 1,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": false,
+    "tail_yuv": false
+   },
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "fp16_ms": 202.282,
+   "int8_ms": 27.701,
+   "ratio": 7.3023,
+   "draws": {
+    "fp16": [
+     202.27879638671874,
+     202.286181640625,
+     202.27686767578126
+    ],
+    "int8": [
+     27.684674072265626,
+     27.683737182617186,
+     27.718655395507813
+    ]
+   }
+  },
+  {
+   "file": "1x-Epsilon-one-compact(3).pth",
+   "verdict": "BODY+TAIL",
+   "scale": 1,
+   "ok": false,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": false,
+    "tail_yuv": false
+   },
+   "share": 1.5394,
+   "shares": [
+    0.50694,
+    0.42921,
+    1.5394
+   ],
+   "fp16_ms": 202.317,
+   "int8_ms": 28.035,
+   "ratio": 7.2165,
+   "draws": {
+    "fp16": [
+     202.05076904296874,
+     202.33349609375,
+     202.29990234375
+    ],
+    "int8": [
+     28.067019653320312,
+     28.037738037109374,
+     28.032717895507812
+    ]
+   }
+  },
+  {
+   "file": "realesr-animevideov3(1).pth",
+   "verdict": "BODY",
+   "scale": 4,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": false,
+    "tail_shuffle": false,
+    "tail_yuv": false
+   },
+   "share": 0.141,
+   "shares": [
+    0.10629,
+    0.09732,
+    0.141
+   ],
+   "fp16_ms": 211.646,
+   "int8_ms": 37.984,
+   "ratio": 5.5719,
+   "draws": {
+    "fp16": [
+     211.4144287109375,
+     211.6255859375,
+     211.6666259765625
+    ],
+    "int8": [
+     37.95968017578125,
+     38.09300537109375,
+     37.875814819335936
+    ]
+   }
+  }
+ ]
+}

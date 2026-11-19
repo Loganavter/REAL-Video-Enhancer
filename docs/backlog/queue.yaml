@@ -3861,3 +3861,52 @@ tasks:
     because they are the same class as the labels this lane keeps tripping over: a ramp that included illegal
     codes measured the clamp (83 levels), and block-constant chroma with an outer margin instead of a per-block
     one read 17.75% then 6.31% of codes as "off" while a uniform plane of the same codes is exact.
+
+- id: rve-model-fit-sweep-2026-11-20
+  title: 'Which of the collection models the int8 pipeline can run, and what the quantiser does to each'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 3h
+  tags:
+  - int8
+  - coverage
+  - models
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/MODEL-FIT.md
+  owns_files:
+  - docs/MODEL-FIT.md
+  refutes: >-
+    The lane is about the model, not about one model. It is about one SHAPE: sixteen 64-channel convolutions
+    between head and tail, which is a tl.constexpr in the kernel. The collection holds 55 distinct files; the
+    honest answer to "which of mine does this run" is a per-file verdict with the reason, and a per-model
+    measurement of the quantiser, not a promise that a Compact-family model will be fine.
+  acceptance: >-
+    (a) Static: load every file with the app's own spandrel, and classify by structure - int8 body yes/no and
+    which of the four opt-ins apply - refusing with a reason, never by file name. (b) Dynamic: for every file
+    that passes (a), build the body, calibrate on the same spread frames, and record the gross-error share
+    against its OWN fp16 model on three held-out frames (worst), plus the body time. (c) A generated page, so
+    no number is typed by hand.
+  resolution: >-
+    DONE 2026-11-20. 55 distinct files: 15 FULL (all five opt-ins), 5 BODY+TAIL (1x denoise/restore), 1 BODY
+    (4x, 48-channel tail), 34 refused with reasons (RRDBNet / SPAN / OmniSR / RealPLKSR / DAT, 24-channel
+    compacts, two files that are not models). Measured on three held-out frames: the 15 FULL models' bodies
+    all land at 26.89-28.16 ms - a 4.6% spread that is clock drift, because the shape is identical, so model
+    choice does not buy speed; it buys the picture. The quantiser separates them: one model (a 1x Compact)
+    reads 1.5394% and would be REFUSED by the app's 1% start-up gate, the worst that passes reads 0.8763%
+    (9x the 0.1% bar that decides a picture, so it needs a render pair), and the cleanest four read <=0.0001%
+    against 0.0114% for the production model. The bluray folder - the owner's most valuable - is 4 of 6:
+    AniScale 0.0001%, LD-Anime 0.0110%, Futsuu 0.0114%, Ani4K 0.0302%; AnimeSharpV3 (RRDBNet) and
+    ModernSpanimation (SPAN) have no body to replace.
+    docs/MODEL-FIT.md (generated), records model-fit.jsonl, logs/model-fit/{inventory,all}.json.
+  note: >-
+    Asked for by the owner on 2026-11-20 ("better to measure which of my models fits the pipeline") after
+    concluding that 4K->8K is not a target. The measurement deliberately reports the gross gate, not the
+    acceptance bar: n=3 frames of one clip is a smoke test, and calling 0.0114% an acceptance number is the
+    exact mistake this repo keeps retracting. Also recorded: the fp16 column in the records is EAGER PyTorch
+    (~204 ms) and not the app's TensorRT engine (52.39), so those ratios compare models, not the product.
+
