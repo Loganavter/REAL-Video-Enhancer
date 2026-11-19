@@ -87,3 +87,20 @@ clips:
     cut: {mode: stream_copy, offset: 28273, compared: 502, packets: 503}
     contaminated: false
     facts: {bit_rate_mbps: 39.552, packets: 503, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}
+
+  # NATIVE 1440x1080 material, added 2026-11-19 on the owner's instruction. Every 1440 number in the corpus
+  # before this came from either `violet1440.mkv` (an anamorphic 4:3-squeeze RE-ENCODE of the BD cut - i.e. a
+  # 1920-wide picture squeezed into 1440 columns) or `native1440*.mkv` of unlabelled provenance. This one is
+  # the master: 1440x1080, SAR 1:1, DAR 4:3 (a genuinely 4:3 picture, not anamorphic), 10-bit hevc.
+  # The durable copy lives OUTSIDE /tmp so a reboot does not take it: see `path`.
+  - file: native1440_20s.mkv
+    path: /home/jorj/2Tb/remastering/native1440_20s.mkv
+    label: native 1440x1080 10-bit hevc, -c copy from the remastering master (2026-11-19)
+    source: /home/jorj/Загрузки/projects/remastering/Untitled78.mov
+    cut: {mode: stream_copy, offset: 864, seconds: 36.036, compared: 493, packets: 493}
+    title: Untitled78.mov, 6:25 master -> 20.65 s
+    # The label does not claim a BD bit rate (this source is 9.7 Mbps, not 37), so the bit-rate floor that
+    # guards the "BDRemux" labels does not apply; the exact test is the packet subsequence (`--prove`).
+    label_requires_bitrate: false
+    contaminated: false
+    facts: {bit_rate_mbps: 9.71, packets: 493, pix_fmt: yuv420p10le, color_range: tv, has_b_frames: "1"}

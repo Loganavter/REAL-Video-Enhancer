@@ -2950,8 +2950,24 @@ tasks:
 - id: rve-int8-defaults-second-material-2026-11-20
   title: 'Both adopted changes were measured on one clip - retake them on 1440x1080 and the second title'
   type: measurement
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    BOTH HOLD 2026-11-20, on three clips of two resolutions and two bit depths. Head as one fused kernel:
+    -5.64 ms on Chainsaw (44.02 -> 38.38), -4.42 on the native 1440x1080 10-bit cut (33.46 -> 29.04), -4.85 on
+    the anamorphic 1440 (33.05 -> 28.20) - against -5.27 measured on Violet, i.e. 13-15% of the frame each
+    time. Tail (the int8 convolution, the removed dequant pass and the shuffle fold together, since
+    RVE_TAIL_INT8=0 also disables the fold's precondition): -3.46 on Chainsaw, -3.08 on native 1440x1080,
+    against -3.16 on Violet. Per clip, never pooled; one first-round outlier named (bd_csm_same_tail0_r1
+    42.98 against 38.02 for rounds 2-3) and kept in the draws rather than smoothed. NEW MATERIAL made for this
+    row at the owner's instruction: docs/wsp/sources.yaml entry `native1440_20s.mkv` - a native 1440x1080 4:3
+    SAR 1:1 10-bit hevc stream copy of 493 frames from the 6:25 remastering master, durable copy at
+    /home/jorj/2Tb/remastering/native1440_20s.mkv, facts verified by `harness.cli source-check`. The old
+    `violet1440.mkv` is an anamorphic squeeze and is kept in the table only as a second draw on the same
+    geometry. NOT covered: the picture on these clips (the acceptance pairs are on Violet; a 4:3 10-bit clip
+    has its own colour path and its own record), and one card / null sink / gate off.
+    docs/wsp/verified/int8-defaults-material.txt, records int8-defaults-material.jsonl (M001-M014,
+    R001-R005), logs/second-material/.
   priority: P1
   gpu: true
   cost: 3h
