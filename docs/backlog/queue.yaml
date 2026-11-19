@@ -3619,9 +3619,26 @@ tasks:
 - id: rve-frame-pipeline-overlap-2026-11-20
   title: 'The 7.68 ms of IO never overlaps the 25.9 ms body - the loop is strictly sequential'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-20, both halves. (1) The payload copy on its own CUDA stream with an event guard:
+    loop 33.55 -> 33.53, pack+queue 4.36 -> 4.36, i.e. nothing - because THE PACK IS NOT A COPY: 12.44 MB at the
+    measured 6.55 GB/s is 1.9 ms of transfer, but the line reads 4.36 and is the GPU-side YCbCr conversion over
+    8.3 Mpx plus the queue. A compute-bound stage moved to another stream does the same work on the same SMs.
+    The reader was right that a pinned ring is not a pipeline; a pipeline was built and tested, and the answer is
+    the WORK, not the schedule. (2) While wiring it, the payload hand-off turned out to be
+    copy_(..., non_blocking=True) into PINNED memory with NO event guard before the writer read the slot - the
+    same shape as the 12.6 dB bug that got the pooled path disabled once. Tested rather than assumed: 494 frames
+    guard-off against guard-on read IDENTITY, and the guard costs 0.00 ms (33.54 vs 33.53), so the copy is
+    effectively synchronous in practice and the race does not materialise. The guard is KEPT ON by default
+    (RVE_PAYLOAD_GUARD=1) because it costs nothing and turns an implicit assumption into an explicit one; the
+    copy stream stays behind RVE_PIPE=1. WHAT THIS LEAVES: the 4.36 ms of pack must be attacked by FUSING the
+    colour conversion into the tail kernel (which already holds those pixels), not by rescheduling; and the 3.32
+    of 'everything else' is the H2D conversion (1.38 measured, 0.07 removable) plus the writer wait, with the
+    reader already on its own thread. docs/wsp/verified/frame-pipeline.txt, records frame-pipeline.jsonl
+    (F001-F008, R001-R004, PG001-PG004), logs/frame-pipeline/.
   gpu: true
   cost: 3h
   tags:

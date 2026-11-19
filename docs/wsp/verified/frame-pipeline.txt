@@ -1,0 +1,93 @@
+# Overlapping the IO with the body: no win, and the reason is that the pack is arithmetic, not a copy
+
+Measured 2026-11-19 (local), BD Violet 494 frames, null sink, arms alternating, 3 rounds; plus a lossless pair for
+each of the two questions below. Records: `frame-pipeline.jsonl`; raw: `logs/frame-pipeline/`.
+
+Row `rve-frame-pipeline-overlap-2026-11-20`, filed from an outside reader's list: read, body, pack and write look
+sequential on the render thread, so 7.68 ms of a 33.58 ms frame is IO that "could sit behind the next frame's
+body". Both halves of that were tested.
+
+## 1. The payload copy on its own CUDA stream - nothing
+
+| arm | loop median | pack+queue median |
+|---|---|---|
+| copies on the compute stream (today) | **33.55** | **4.36** |
+| copies on a dedicated copy stream, event-guarded | **33.53** | **4.36** |
+
+-0.01 ms on the loop and 0.00 on the pack line, with the guard in place. **The pack line does not move because
+it is not a copy**: 12.44 MB at the measured 6.55 GB/s is 1.9 ms of transfer, but the line reads 4.36 and is made
+of the GPU-side YCbCr conversion over 8.3 Mpx plus the queue. Moving a compute-bound stage to another stream
+does not reduce it - the same SMs do the same work, only in a different order.
+
+This is the distinction the pack-ring experiment (`int8-pack-ring.txt`, ring off 34.42 / on 34.36) could not make
+on its own, and the reader was right that a pinned ring is not a pipeline. A pipeline was built and tested; it is
+the *work*, not the schedule.
+
+## 2. The latent race in the payload hand-off - real in principle, absent in practice
+
+While wiring the stream it became visible that the payload copy is
+`copy_(..., non_blocking=True)` into **pinned** memory, i.e. asynchronous by contract, and that the writer read
+the slot with **no event guard**. That is the same shape as the 12.6 dB bug that got the pooled path disabled
+once, so it was tested rather than assumed: 494 frames with the guard off against the guard on.
+
+```
+IDENTITY: every frame is bit-identical between the two files
+```
+
+No corruption, and the guard costs nothing measurable (33.54 against 33.53). So the copy is effectively
+synchronous in practice - most plausibly because `packed` comes from a `cat()` and torch stages the transfer -
+but nothing in the code said so, and nothing would have caught it if a driver change made it truly async.
+
+**The guard is kept on by default** (`RVE_PAYLOAD_GUARD=1`): it costs 0.00 ms, changes no pixel, and turns an
+implicit assumption into an explicit one. The copy stream stays available behind `RVE_PIPE=1` for an experiment
+that would need it (it does not).
+
+## What this leaves for the 7.68 ms
+
+The non-body time is **not** recoverable by rescheduling, which is what both the reader and I assumed. Its two
+parts have different owners:
+
+| part | ms | what would actually move it |
+|---|---|---|
+| pack + queue | 4.36 | **fusing the colour conversion into the tail kernel** - the work is the YCbCr math over 8.3 Mpx, and the tail already holds those pixels in registers |
+| everything else | 3.32 | the H2D conversion (1.38 measured, 0.07 removable) plus the wrapper and the writer wait; the reader already runs on its own thread |
+
+So the next honest lever on this line is the colour conversion, not the schedule, and it is a kernel change of the
+same family as the tail work already done.
+
+## Not covered
+
+- One clip, one card, null sink for the timing (the identity pair is a real render).
+- The writer's own back-pressure was not isolated: a null writer would separate "the slot is free" from "ffmpeg is
+  draining".
+
+## Reproduce
+
+```bash
+ARMS="pipe0 pipe1" ARM_ENV_PIPE0="RVE_PIPE=0" ARM_ENV_PIPE1="RVE_PIPE=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+ARMS="guard0 guard1" ARM_ENV_GUARD0="RVE_PAYLOAD_GUARD=0" ARM_ENV_GUARD1="RVE_PAYLOAD_GUARD=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+ARMS="guard0 guard1" ... ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/payload-guard scripts/wall_ab.sh
+PYTHONPATH=scripts python3 scripts/frame_pipeline_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/frame-pipeline.txt \
+       --records docs/wsp/verified/records/frame-pipeline.jsonl --bars docs/claims-bars.json
+
+@claim F001 33.52 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim F002 4.36 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim F003 33.55 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim F004 4.36 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim F005 33.54 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim F006 4.36 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim F007 33.53 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim F008 4.36 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim PG001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim PG002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim PG003 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim PG004 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim R001 0.03 ms "frames [c171112dd7b0ab2c] n=1" derived
+@claim R002 0.0 ms "frames [c171112dd7b0ab2c] n=1" derived
+@claim R003 -0.01 ms "frames [c171112dd7b0ab2c] n=1" derived
+@claim R004 0.0 ms "frames [c171112dd7b0ab2c] n=1" derived
