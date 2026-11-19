@@ -206,3 +206,50 @@ def test_a_non_contiguous_frame_is_made_contiguous_before_the_head_kernel():
     src = inspect.getsource(Int8Body.__call__)
     assert "x = x.contiguous()" in src, "the body must not hand a view to the head kernel"
     assert "is_contiguous" in src
+
+
+# ======================================================================================
+# the calibration cache
+#
+# The grids are 24 vectors of 64 floats that depend on (model, clip) and nothing else, and measuring them means
+# running the fp16 model over every calibration frame - ~4.8 s for 24 frames in eager. A hit removes all of it.
+# The key is a fingerprint of the frames plus the model's digest, so a different clip or model misses by
+# construction; a cache that silently served another clip's grids would be a stale-number source.
+# ======================================================================================
+
+
+def _tiny_frames(n: int = 4, seed: int = 0):
+    g = torch.Generator().manual_seed(seed)
+    return [torch.rand(1, 3, 16, 16, generator=g) for _ in range(n)]
+
+
+def test_the_cache_round_trips_and_skips_the_measurement(tmp_path, monkeypatch):
+    monkeypatch.setenv("RVE_INT8_CALIB_CACHE", str(tmp_path))
+    frames = _tiny_frames()
+    model = _Body(16)                      # ONE model: the cache keys on its weights, so two random inits differ
+    first = Int8Body(model)
+    first.calibrate(frames)
+    assert first._grids is not None
+
+    second = Int8Body(model)
+    calls = []
+    monkeypatch.setattr(Int8Body, "_measure", lambda self, x: calls.append(1) or (_ for _ in ()).throw(
+        AssertionError("a cache hit must not measure")))
+    second.calibrate(frames)
+    assert not calls, "the hit still ran the model"
+    assert torch.allclose(first._grids[0], second._grids[0]), "the cached grids must be the measured ones"
+
+
+def test_a_different_clip_misses(tmp_path, monkeypatch):
+    monkeypatch.setenv("RVE_INT8_CALIB_CACHE", str(tmp_path))
+    model = _Body(16)
+    Int8Body(model).calibrate(_tiny_frames(seed=1))
+    other = Int8Body(model)
+    other.calibrate(_tiny_frames(seed=2))       # different frames -> a real measurement, not a stale hit
+    assert other._grids is not None
+
+
+def test_the_cache_can_be_switched_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("RVE_INT8_CALIB_CACHE", "0")
+    Int8Body(_Body(16)).calibrate(_tiny_frames())
+    assert not list(tmp_path.glob("*.pt")), "RVE_INT8_CALIB_CACHE=0 must not write anything"

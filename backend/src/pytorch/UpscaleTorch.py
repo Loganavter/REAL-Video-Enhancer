@@ -682,13 +682,17 @@ class UpscalePytorch:
                     getattr(_f0, "dtype", None), getattr(_f0, "device", None),
                     tuple(frame.shape) if frame is not None else None,
                     getattr(frame, "dtype", None), getattr(frame, "device", None))
-            body.calibrate(_frames)
             # THE GRID PICK (RVE_INT8_GRID_K=auto): choose K on a slice of the calibration frames and keep the
             # certificate on another slice, because picking on the frames you certify on makes the gate pass by
             # construction. The guard (x2 over K=2) is what stops it chasing noise on a handful of frames.
+            # The calibration is split, not repeated: calibrating on all 24 and then again on 18 cost 4.8 s of
+            # eager forwards (measured: start-up 39.84 s against 33.08 without the pick).
             if getattr(body, "grid_auto", False) and len(_frames) >= 8:
                 hold = list(_frames[3::4])
                 body.calibrate([f for i, f in enumerate(_frames) if i % 4 != 3])
+            else:
+                body.calibrate(_frames)
+            if getattr(body, "grid_auto", False) and len(_frames) >= 8:
                 try:
                     _k, _scores = body.pick_grid_k(hold)
                     log("int8 grid PICKED K=%g (scores %s; guard x2 over K=2, chosen on %d frames, "
