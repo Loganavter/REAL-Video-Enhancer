@@ -3234,3 +3234,108 @@ tasks:
     This is the same family as the pipelining attempts recorded as negative inside Int8Kernels.py
     (num_stages 2-3: 2.497/2.635 ms), so the prior is unfavourable and the row is written to fail fast: the 1-tap
     arm alone decides it, in one measurement, before any integration work.
+
+# ---------------------------------------------------------------------------------------------------------
+# Filed 2026-11-19 from a literature pass against the measured hop account (int8-hop-occupancy/dram/ncu).
+# The rule stands: a paper establishes facts in ITS domain, not about our kernel. Each row below names the
+# falsifier that would make it about ours.
+# ---------------------------------------------------------------------------------------------------------
+
+- id: rve-hop-halo-maskless-2026-11-20
+  title: 'Im2win: contiguous, mask-free access - test it in Triton with a zero halo buffer'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  resolution: >-
+    MEASURED, NOT ADOPTED 2026-11-19: a zero-halo (H+2, W+2, C) buffer with an unmasked kernel is 2.3% faster
+    (1.590 -> 1.552 ms, codes identical, 0 of 132.7 M differ), which is below this row's own 5% bar, and the
+    halo's measured build cost is 1.591 ms per hop = 25.5 ms/frame for sixteen - 25x the gain. The repair is
+    named in the record rather than funded here: each hop can STORE into the next hop's padded buffer at a
+    (+1,+1) offset, so no separate pass exists, and only the border needs zeroing once per frame (~0.5 MB
+    instead of 134 MB) - that is a path to +0.6 ms/frame and needs its own row if anyone wants it. Also filed
+    from the same literature pass and closed in the same record: 2-D CTA tiles (32x4, 16x8, 64x2) halve the
+    window amplification on paper (3.05x -> 1.59/1.41x) and are 3.0-7.5% SLOWER measured, with identical codes,
+    because the kernel is not traffic-bound (L2 44-50%, DRAM 54%) and a rectangle scatters both its reads and
+    its writes. docs/wsp/verified/int8-hop-tiles.txt, records int8-hop-tiles.jsonl (T001-T007),
+    logs/hop-halo/, logs/hop-tile2d/.
+  priority: P2
+  gpu: true
+  cost: 2h
+  tags:
+  - int8
+  - hops
+  - kernel
+  - literature
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Kernels.py
+  - docs/wsp/verified/int8-hop-occupancy.txt
+  owns_files:
+  - docs/wsp/verified/int8-hop-halo.txt
+  refutes: >-
+    The hop's nine masked gathers cannot be improved without leaving Triton. Im2win (arXiv:2306.14316) argues
+    that direct convolution loses to GEMM-based convolution precisely because of DISCONTINUOUS memory access,
+    and fixes it with window-ordered contiguous loads plus shared memory - which we cannot express. But the
+    contiguity half IS expressible: a (H+2, W+2, C) buffer whose one-pixel border is zeros removes the bounds
+    mask entirely (three compares and a select per tap per row, and ncu reads "not predicated off threads per
+    warp" 30.45 of 32, i.e. ~5% predication), and makes every tap's row segment a fixed-stride contiguous read.
+    If a halo buffer does not take at least 5% off the hop, the masks were not the cost and only explicit
+    shared memory remains - which is the row `rve-hop-smem-staging` already closed as inexpressible.
+  acceptance: >-
+    One hop, two arms in one process, CUDA events, >=3 rounds: today's buffer against a zero-haloed
+    (H+2, W+2, C) buffer with an unmasked kernel. Codes MUST be identical (0 differing of 132.7 M) - a halo
+    changes no arithmetic, and any difference is an indexing bug, not a picture change. Report ms and TOPS. On a
+    >=5% win: the 16-hop chain in the app with the phase line, then the full-clip picture, and note the halo's
+    cost (one zeroing pass, +1.3% memory).
+  note: >-
+    The halo also makes an untested intermediate cheaper to imagine: with a zero border, a CTA could load a
+    (BLOCK_M+2, C) row span unmasked and the tap shift becomes a static offset. That is still not smem staging,
+    which is why this row tests only the cheap half first.
+
+- id: rve-hop-io-bound-2026-11-20
+  title: 'What is the MINIMUM traffic for this tile? Apply the I/O lower bound instead of guessing'
+  type: analysis
+  status: done
+  owner: '@supervisor'
+  resolution: >-
+    ANSWERED 2026-11-19, and the answer retires the question rather than the traffic. The bound for a direct
+    convolution tiled (Tw x Th) is the window amplification (Tw+2)(Th+2)/(Tw*Th): 3.05x for the shipped 128x1
+    tile, 1.59x for 32x4, 1.41x for 16x8. It was then TESTED, not just computed: the tiles that meet the bound
+    best are 3.0-7.5% SLOWER (1.504 -> 1.550 / 1.617 ms, identical codes, docs/wsp/verified/int8-hop-tiles.txt),
+    because the resource the bound constrains is not the one that saturates - L2 sits at 44-50% and DRAM at 54%
+    while the kernel is held by the first gather's round trip at 3.96 of 12 warps. A bound is actionable only
+    when its resource is the bottleneck; here it is not, so no dataflow change can collect it. This is also why
+    arXiv:2306.14316's contiguity argument yields 2.3% here instead of a win, and why arXiv:2609.01864 (DSMEM
+    clusters, 1.32-1.47x) is the only remaining lead with a number behind it - and it needs a CUDA kernel.
+    Arithmetic shown in docs/wsp/verified/int8-hop-tiles.txt; no GPU job was needed for the bound itself.
+  priority: P3
+  gpu: false
+  cost: 1h
+  tags:
+  - int8
+  - hops
+  - literature
+  - analysis
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-hop-dram.txt
+  - docs/wsp/verified/int8-hop-occupancy.txt
+  owns_files:
+  - docs/wsp/verified/int8-hop-io-bound.txt
+  refutes: >-
+    The hop's L2 traffic (1528 MB, 6.1x DRAM) is what this shape costs. arXiv:2012.15667 derives I/O lower bounds
+    for direct convolution under the red-blue model and then designs near-I/O-optimal dataflows from them, which
+    is exactly the question we answered by hand ("staging would take ~1528 to ~750 MB"). If the bound for a
+    (BLOCK_M, C) tile on this card's L2 is close to what we measure, the traffic story closes with a proof and
+    the CUDA-kernel temptation is not worth anyone's time. If the bound is 2-3x below, then a different dataflow
+    is provably available and `rve-hop-smem-staging`'s negative becomes an argument for a CUDA kernel, not
+    against one.
+  acceptance: >-
+    The bound computed for OUR shape (64 channels, 3x3, 2.0736 Mpx, 32 MB L2), the dataflow it implies, and the
+    ratio to the two measured numbers (1528 MB L2, 250.6 MB DRAM). No GPU job: this is arithmetic on a published
+    theorem plus our counters, and the arithmetic must be shown, not asserted - the corpus has retracted
+    "upper bound" arguments twice for skipping exactly that.
+  note: >-
+    Low priority on purpose: it cannot improve the frame by itself. It can only tell the next person whether the
+    remaining ~26% that ncu leaves is reachable by dataflow or not, and that is the difference between funding a
+    CUDA kernel and closing the lane.
