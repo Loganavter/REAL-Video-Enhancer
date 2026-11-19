@@ -3755,7 +3755,7 @@ tasks:
 - id: rve-yuv8-flag-divergence-2026-11-20
   title: 'The packer decides yuv420p from bit depth alone while the writer decides from the source matrix'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: false
@@ -3788,6 +3788,21 @@ tasks:
     test_yuv8_pipe and test_pinned_payload suites are the controls). Stage (c), if a bt601 8-bit clip is in
     sources.yaml: one 494-frame ffv1 pair before/after, reference-kind config, to show the picture moved
     from broken to consistent rather than the reverse.
+  resolution: >-
+    FIXED 2026-11-20, stages (a) and (b). (a) The test comes first and pins the invariant over every
+    combination the app can produce (8-bit x {yuv420p, yuv420p10le, p010le}, 10-bit x {yuv420p10le, p010le}):
+    the packer emits yuv420p exactly when the writer reads yuv420p. It also asserts the guard for the
+    combination the app does NOT produce - a 16-bit frame is never packed as 8-bit yuv, whatever string
+    reaches the upscaler. (b) The fix is one pure function, `pipe_is_yuv8(high_bitdepth, pipe_pixel_format)`,
+    called where `yuv8_output` used to be derived from the bit depth alone; `RVE_YUV8=0` still opts out
+    because it leaves the pipe at `yuv420p10le`. The 10-bit proof next to it (tenbit-pipe.txt) shows the
+    change left the 10-bit branch untouched: 877 legal luma codes round-trip at max 1 level, 429 in-gamut
+    chroma codes at 0-1, and the real clip keeps 648-809 distinct codes in and 647-805 out.
+    NOT DONE, and it cannot be done here: stage (c), a picture pair on a bt601 8-bit clip. No such clip exists
+    in docs/wsp/sources.yaml - every 8-bit title there declares no matrix (ffprobe: color_space=unknown), so
+    the divergence never triggered on this material and the fix is pinned by the argument-level invariant
+    rather than by a render. If such a clip appears, one 494-frame pair with reference-kind config is the
+    remaining step.
   note: >-
     Found 2026-11-20 while answering "does the tail-CSC row break 10-bit?" - it does not (the 10-bit run is
     in logs/tail-csc-10bit: out dtype float16, no payload line, and the tail-CSC gate in UpscaleTorch now
@@ -3796,3 +3811,53 @@ tasks:
     format disagreement between packer and writer cannot fail loudly). No row existed for it, which is why
     it survived.
 
+
+
+- id: rve-tenbit-pipe-proof-2026-11-20
+  title: 'Pin that ten bits survive the reader and the packer, code by code'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 4h
+  tags:
+  - colour
+  - tenbit
+  - pipe
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/TorchUtils.py
+  - docs/wsp/sources.yaml
+  owns_files:
+  - docs/wsp/verified/tenbit-pipe.txt
+  refutes: >-
+    Ten-bit material keeps its ten bits through the lane, and that is established. An 8-bit collapse inside a
+    10-bit container is a legal file of a legal size with a merely posterised picture, so the claim needs the
+    two conversions around the model pinned by measurement: the reader (yuv420p10le -> fp16 tensor) and the
+    packer (tensor -> yuv420p10le). If a legal luma code or an in-gamut chroma code does not round-trip within
+    one 10-bit level, the lane is quietly quantising and the row closes as a defect.
+  acceptance: >-
+    (a) A legal luma ramp: every code 64..940 once with neutral chroma, max |delta| <= 1 and 0.00% off by more.
+    Excluding codes outside the limited range is part of the criterion - the packer clamps there by design and
+    including them measures the clamp. (b) Chroma as UNIFORM planes, one frame per in-gamut code, because a
+    ramp is low-passed by the reader's bilinear upsample and the packer's box filter, and blocks were wrong
+    twice (seams). Report the share of the legal range the sweep could reach. (c) Real frames: distinct Y codes
+    in and out (an 8-bit collapse cannot exceed 256) plus the share of pixels the reader clips, so the residual
+    is not blamed on depth. (d) The app's own run on the 10-bit clip must show the 10-bit branch selected.
+  resolution: >-
+    PASSED 2026-11-20, all four. (a) 877 of 877 legal luma codes round-trip at max 1 level, 0.00% off by more
+    (TB001). (b) U at 0 levels over 429 codes, V at 1 level over 429 (TB002, TB003), covering 48% of the legal
+    chroma range - the codes that can coexist with neutral other components inside the gamut. (c) Real frames:
+    in-gamut Y max 2 levels, p99 1 level, 99.899% of samples within one code; distinct Y codes 648/694/673/809/
+    711 in and 647/689/672/805/708 out (TB004-TB008). The residual on those frames is the reader's clamp at
+    1.96% of pixels sitting within 1% of the gamut edge (TB009), which is the same conversion validated at mean
+    |d| 1.85/255 against ffmpeg - not depth. (d) The 10-bit clip runs the old path end to end: no payload line,
+    `out dtype torch.float16`, no 8-bit pipe (logs/tail-csc-10bit). docs/wsp/verified/tenbit-pipe.txt, records
+    tenbit-pipe.jsonl, logs/tenbit-pipe/probe.json, scripts/tenbit_pipe_probe.py.
+  note: >-
+    Asked for by the owner on 2026-11-20: "we must not lose the ten bits on the way in or on the way out".
+    Two of the three instruments were wrong before they were right, and both errors are recorded on the page
+    because they are the same class as the labels this lane keeps tripping over: a ramp that included illegal
+    codes measured the clamp (83 levels), and block-constant chroma with an outer margin instead of a per-block
+    one read 17.75% then 6.31% of codes as "off" while a uniform plane of the same codes is exact.

@@ -17,6 +17,22 @@ from ..utils.Frame import Frame
 # built, so `last_model_ms` is attributable to the engine instead of overlapping with
 # the Frame's construction. It costs that overlap, so it is never a production path.
 _SPLIT_TIMING = os.environ.get("RVE_TRT_SPLIT") == "1"
+
+
+def pipe_is_yuv8(high_bitdepth: bool, pipe_pixel_format: str) -> bool:
+    """Does the packer emit 8-bit planar yuv420p on this pipe?
+
+    The WRITER's answer is `FFmpegBuffers._pipe_input_pixel_format()`, and it reads the same string, so
+    this must be derived from the pipe format and nothing else. It used to be derived from the bit depth
+    alone (`RVE_YUV8 != 0 and not high_bitdepth`), which diverges on exactly one combination: an 8-bit
+    source that DECLARES a non-bt709 matrix. `RenderVideo` then keeps rgb24 (so ffmpeg applies the
+    source's own matrix instead of the packer's BT.709) while the packer still packed yuv - 1.5 bytes per
+    pixel on a pipe the writer read as 3, i.e. a torn frame with nothing failing loudly (found 2026-11-20,
+    row rve-yuv8-flag-divergence-2026-11-20; the same class as the P010/planar mismatch, ledger C4).
+    `RVE_YUV8=0` still opts out: it leaves the pipe at `yuv420p10le`, which this reads as "not yuv8".
+    """
+    return (not high_bitdepth) and pipe_pixel_format == "yuv420p"
+
 HAS_PYTORCH_CUDA = CudaChecker().HAS_PYTORCH_CUDA
 import numpy as np
 def process_output(output, hdr_mode):
@@ -163,10 +179,11 @@ class UpscalePytorch:
         # Half the host traffic of rgb24 and no ffmpeg scale filter; the A/B that cleared it is in
         # docs/PERFORMANCE.md (two titles: mean |delta| 0.12-0.17 levels, worst frame 1 px over the
         # 8-level bar on one title, none on the other).
-        import os as _os
-        self.yuv8_output = (_os.environ.get("RVE_YUV8", "1") != "0") and not self.high_bitdepth
-        self.gpu_id = gpu_id
+        # The decision follows the PIPE FORMAT, not the bit depth: the writer is told the same string and
+        # these two must never disagree (see pipe_is_yuv8).
         self.pipe_pixel_format = pipe_pixel_format
+        self.yuv8_output = pipe_is_yuv8(self.high_bitdepth, pipe_pixel_format)
+        self.gpu_id = gpu_id
         # stage profiling (read by RenderVideo's summary)
         self.last_inference_ms = 0.0
         self.last_convert_ms = 0.0

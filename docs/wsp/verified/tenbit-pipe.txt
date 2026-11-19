@@ -1,0 +1,79 @@
+# Ten bits survive the reader and the packer - measured code by code, not asserted
+
+Measured 2026-11-20 (local), records `tenbit-pipe.jsonl` (TB001-TB009), probe
+`scripts/tenbit_pipe_probe.py`, raw `logs/tenbit-pipe/probe.json`, clip `native1440_20s.mkv` (1440x1080 HEVC
+10-bit, `color_range=tv`, bt709 - the same file registered in `docs/wsp/sources.yaml`).
+
+Why this page exists: an 8-bit collapse inside a 10-bit container produces a legal file of a legal size and a
+picture that is merely posterised, so "it looks fine" cannot be the test. The lane's five opt-ins all sit
+between exactly two conversions - the reader (`yuv420p10le` -> fp16 tensor) and the packer (tensor ->
+`yuv420p10le`) - so those two are what has to be pinned.
+
+## Three instruments, because they answer three different questions
+
+| instrument | what it isolates | why not the other two |
+|---|---|---|
+| **legal luma ramp** - every code 64..940 once, chroma neutral | depth and rounding on Y | a ramp that included codes outside the limited range measured the packer's clamp (max 83 codes at code 0) and would have been reported as a depth loss |
+| **uniform chroma planes** - one frame per in-gamut chroma code, luma co-varied so RGB stays inside `[0,1]` | depth on U/V | a chroma *ramp* is low-passed by the reader's bilinear upsample and the packer's box filter; two attempts at constant 16x16 blocks read 17.75% and then 6.31% of codes as "off": the block seams, and then a single outer margin around the tiled area instead of a margin per block. A uniform plane is the identity under both filters, so nothing but depth can move |
+| **real frames plus a clipping diagnostic** | the material's own count of distinct codes, and how much of the residual is gamut clipping rather than depth | on real frames the round trip also runs the reader's RGB conversion, which clamps at saturated pixels; reporting one number for both would blame the depth |
+
+## Results
+
+| population | n | max \|delta\| |
+|---|---|---|
+| Y, every legal code 64..940 (synthetic, neutral chroma) | 877 codes | **1 level**, 0.00% off by more than one |
+| U, every in-gamut code as a uniform plane | 429 codes (48% of the legal range) | **0 levels** |
+| V, same | 429 codes (48% of the legal range) | **1 level** |
+| real frames, Y, pixels more than 1% inside the gamut | 5 frames, 1.56 Mpx each | **2 levels** worst pixel, **1 level** p99 |
+| real frames, share of Y samples within one code | 5 frames | **99.899%** worst frame |
+
+The distinct-code counts are the direct answer to "did it collapse to 8 bits":
+
+```
+Y codes in the clip:  648, 694, 673, 809, 711
+Y codes after the round trip: 647, 689, 672, 805, 708
+```
+
+Several hundred codes, not <=256. A collapse would also show as a step of 4 between neighbouring codes, which
+is what the 99.899% within-one-level figure rules out.
+
+## The residual on real frames is gamut clipping, and it is the reader's
+
+On the worst frame 1.96% of pixels have a channel within 1% of the gamut edge; there the reader's
+`clamp(0,1)` is lossy by construction and no round trip through RGB can return the original. It is the same
+conversion that was validated at mean |d| 1.85/255 against ffmpeg, i.e. it was never an identity instrument -
+it is the reader's chroma upsampling design, not a depth loss. In-gamut pixels read 1 level at p99.
+
+## Not covered
+
+- **The model is not in the loop.** This page is about the two conversions around it. The int8 body's own
+  precision is a different question with its own gate (`int8-tail-csc.txt`, `int8-scales-bd.txt`).
+- **Chroma is swept over 48% of its legal range** - the codes that can be carried at co-varied luma without
+  leaving the gamut. The other half cannot appear in legal material with the other components neutral, so it
+  cannot be measured this way at all; a co-varied sweep in two channels would be the way to extend it.
+- **One clip, one card.** `native1440_20s.mkv` is 10-bit limited-range bt709; a full-range or HDR source
+  follows a different branch (`hdr_mode`, rgb48le) which this probe does not touch.
+- **The geometric resampling is a design property, not a defect**: the reader upsamples chroma bilinearly and
+  the packer box-filters it back, so real material loses some chroma detail in the round trip. That is what
+  the packer has always done; this page only pins that it does not also lose *depth*.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/tenbit_pipe_probe.py --frames 5 \
+    --out-file docs/wsp/verified/logs/tenbit-pipe/probe.json
+PYTHONPATH=scripts python3 scripts/tenbit_pipe_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/tenbit-pipe.txt \
+       --records docs/wsp/verified/records/tenbit-pipe.jsonl --bars docs/claims-bars.json
+
+@claim TB001 1.0 levels "codes [4f1be0a446d28941] n=877" measured
+@claim TB002 0.0 levels "codes [2afcf186abba0ba9] n=429" measured
+@claim TB003 1.0 levels "codes [3d666355c2c00cb9] n=429" measured
+@claim TB004 2.0 levels "frames [d7f3b5052f83c1af] n=5" measured
+@claim TB005 1.0 levels "frames [d7f3b5052f83c1af] n=5" measured
+@claim TB006 648.0 count "frames [d7f3b5052f83c1af] n=5" measured
+@claim TB007 647.0 count "frames [d7f3b5052f83c1af] n=5" measured
+@claim TB008 99.899 % "frames [d7f3b5052f83c1af] n=5" measured
+@claim TB009 1.957 % "frames [d7f3b5052f83c1af] n=5" measured

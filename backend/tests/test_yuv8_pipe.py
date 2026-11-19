@@ -110,3 +110,48 @@ def test_the_yuv8_pipe_gets_no_rgb_to_yuv_filter():
 
 def test_the_default_8bit_pipe_is_still_rgb24():
     assert _writer("rgb24")._pipe_input_pixel_format() == "rgb24"
+
+
+# ======================================================================================
+# packer and writer must agree about what is on the wire
+#
+# Two places decide the 8-bit pipe: `RenderVideo` chooses `pipePixelFormat` from the source's DECLARED
+# matrix (keeping rgb24 when the source declares bt601/smpte170m, so ffmpeg applies the source's matrix
+# rather than the packer's BT.709), and the packer decides whether to emit yuv420p bytes. The packer used
+# to decide from the bit depth alone, so an 8-bit source declaring bt601 got 1.5 bytes/pixel of yuv on a
+# pipe the writer read as 3 bytes/pixel of rgb. Nothing fails loudly: ffmpeg reads a torn frame - the
+# class of the P010/planar mismatch that cost 12.7 dB (ledger C4).
+# ======================================================================================
+
+
+def test_the_packer_emits_what_the_writer_reads():
+    """The invariant, over every combination the app can produce: the packer emits yuv420p exactly when
+    the writer was told yuv420p - no combination may disagree, for any bit depth and any pipe format."""
+    from src.pytorch.UpscaleTorch import pipe_is_yuv8
+
+    # the combinations the app can actually produce (a 10-bit frame is never given the "yuv420p" pipe:
+    # RenderVideo only picks it for `not high_bitdepth`)
+    cases = [(False, "yuv420p"), (False, "yuv420p10le"), (False, "p010le"),
+             (True, "yuv420p10le"), (True, "p010le")]
+    for high_bitdepth, pipe in cases:
+        writer = _writer(pipe, high_bitdepth=high_bitdepth)
+        emitted_yuv = pipe_is_yuv8(high_bitdepth, pipe)
+        read_yuv = writer._pipe_input_pixel_format() == "yuv420p"
+        assert emitted_yuv == read_yuv, (
+            f"high_bitdepth={high_bitdepth} pipe={pipe}: the packer emits "
+            f"{'yuv420p' if emitted_yuv else 'rgb/rgb48'}, the writer reads "
+            f"{writer._pipe_input_pixel_format()}")
+    # and the guard for the combination the app does NOT produce: a 16-bit frame must never be packed as
+    # 8-bit yuv, whatever string someone hands the upscaler later
+    assert not pipe_is_yuv8(True, "yuv420p")
+
+
+def test_an_8bit_source_declaring_another_matrix_does_not_pack_yuv():
+    """The case that motivated the invariant: RenderVideo keeps rgb24 for a non-bt709 declaration, so the
+    packer must not pack. (Before the fix this read True - the packer followed the bit depth only.)"""
+    from src.pytorch.UpscaleTorch import pipe_is_yuv8
+
+    assert pipe_is_yuv8(False, "yuv420p"), "the bt709 8-bit pipe is the one that packs"
+    assert not pipe_is_yuv8(False, "yuv420p10le"), \
+        "8-bit source, non-bt709 declaration: the pipe is rgb24, so nothing may be packed"
+    assert not pipe_is_yuv8(True, "yuv420p10le"), "10-bit: the 10-bit packer owns the pipe"
