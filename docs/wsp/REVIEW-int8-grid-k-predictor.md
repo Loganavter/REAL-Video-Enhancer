@@ -92,27 +92,39 @@ Garfield is the one real case, and 0.0157% is still six times inside the 0.1% ba
 without losing a decision - which is a better answer than a predictor that does not exist. `K=1` can also go: it
 was never the winner on any model.
 
-## 8. An open problem, and it is not about prediction
+## 8. The app-side discrepancy, resolved: the body trusted its caller's layout
 
-Wired into the app, the pick's own scores came back at **99.98% for every K**, while `certify()` - which uses the
-same expression over the same frames - read **0.00001%** on the same model, immediately after. In isolation the
-same pick reproduces the ladder exactly (Futsuu K=2 at 0.0005, realesr K=3, Ani4K K=4, Epsilon K=2 under the
-guard). So something about the app's context makes `self.model(f)` and `self(f)` disagree by a factor of ~10^4,
-and the pick now **refuses** in that case rather than choosing (it compares its own default score against
-`certify()` and raises when they differ by 10x, keeping K=2).
+Wired into the app, the pick's scores came back at **99.98% for every K** while `certify()` - the same expression
+over the same frames - read **0.00001%** on the render frame. The diagnostic line showed the frames identical in
+shape, dtype and device (24 x `(1,3,1080,1920)` fp16 cuda, render frame the same), so the difference was not the
+geometry.
 
-Candidates, none measured yet:
+It was the **layout**. `Int8Probe` builds its frames as `torch.from_numpy(img).permute(2, 0, 1)[None]` - a view
+with stride `(3, 1, 5760, 3)` - while the render path's `frame_to_tensor` ends with `.contiguous()`. The head
+kernel indexes the frame as `c*H*W + y*W + x`, so on a view it reads garbage codes. Calibration never noticed
+because `_measure` runs the *torch* model, which handles strides; only the body's kernel needs the layout, and only
+the pick ever fed it those frames.
 
-- the app's model is the wrapper's - a `SRVGGNetCompact` whose head is widened to 8 input channels and wrapped in
-  a `PadInputConv`; `certify` and the pick both call `self.model(...)`, so this should cancel, but it is the
-  first thing to check;
-- the calibration frames come from `Int8Probe`, not from the render loop, and may differ in layout, scale or
-  resolution from the frame `certify` sees;
-- the body's `out_yuv` / `tail_yuv` state during the pick (it is forced off, but the flag and the effective value
-  are two different attributes).
+The body now makes its input contiguous at the top of `__call__` and logs when it had to. After that the pick
+works in the app on the production model:
 
-A reader who has seen this shape before will recognise it: two components agreeing in isolation and disagreeing
-in the app is usually a *context* difference - a flag, a dtype, a frame source - not arithmetic.
+```
+int8 grid PICKED K=2 (scores {'K=1': 0.0042, 'K=2': 0.0018, 'K=3': 0.0019, 'K=4': 0.0046};
+                     guard x2 over K=2, chosen on 6 frames, certificate on another slice)
+int8 body first-frame sanity: 0.00001%
+```
+
+K=2 wins, and K=3 is only 1.05x better, so the guard keeps the default - which is what the ladder said for this
+model.
+
+**Cost, measured twice.** The first working version started in 39.84 s against 33.08 s without the pick, because
+it calibrated on all 24 frames and then again on the 18-frame slice - 4.8 s of eager forwards for nothing. With
+the split (calibrate on 3/4, pick on 1/4) the pick costs **0.77 s** (33.85 s against 33.08 s). A calibration
+cache now also removes the remaining ~5 s on a re-render of the same clip, since the grids depend on (model, clip)
+and nothing else.
+
+This is the third bug of one class in this lane - the body trusting a caller's shape or layout (the padded width,
+the tail's channel dim, now the stride) - and in all three the fix belongs at the boundary, not inside the kernel.
 
 ## 9. Not covered
 

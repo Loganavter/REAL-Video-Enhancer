@@ -4068,7 +4068,7 @@ tasks:
 - id: rve-perchannel-grid-rule-2026-11-20
   title: 'Per-channel int8 grids as a RULE keyed on the calibration spread, not a per-model flag'
   type: experiment
-  status: in_progress
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -4133,6 +4133,15 @@ tasks:
     the build logs which one it resolved. NOT adopted: a per-model optimum - eight models prefer K=3/4 by
     2.5-7x, which is the start-up pick, and rve-grid-k-predict asks whether that pick can be known without the
     sweep.
+  pick_verified: >-
+    THE START-UP PICK IS IN AND MEASURED (2026-11-20). RVE_INT8_GRID_K=auto builds at K=1..4, scores each with
+    the app's own gate on a held-out slice, and keeps the winner only if it beats K=2 by 2x. In the app on the
+    production model it picks K=2 with scores 0.0042/0.0018/0.0019/0.0046 and the certificate then reads
+    0.00001%; K=3 is 1.05x better, so the guard correctly keeps the default. Cost 0.77 s (start-up 33.85 against
+    33.08 without it) after fixing a double calibration that had made it 6.8 s. It first read 99.98% for every K
+    because Int8Probe hands the body non-contiguous views (stride (3,1,5760,3)) and the head kernel indexes
+    contiguous NCHW - the body now makes its input contiguous and logs when it had to. A calibration cache
+    removes the remaining ~5 s on a re-render of the same clip.
   acceptance: >-
     (a) All 21 compatible models in BOTH grid modes, with the calibration grid's dynamic range (max/median of the
     per-channel maxima) recorded next to each - the predictor has to be a number, not a hunch. (b) The rule: if
@@ -4151,7 +4160,7 @@ tasks:
 - id: rve-int8-calibration-cache-2026-11-20
   title: 'Cache the calibration grids per (model, clip): 6.5 s of start-up, ~5 of it recomputed every run'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P3
   gpu: false
@@ -4179,6 +4188,16 @@ tasks:
     494-frame pair as the uncached run, because the whole point is that nothing but time changes.
     (c) The start-up delta re-measured in the app: the int8 arm's "first frame enqueued" against the fp16 arm's
     in the same session, hit versus miss.
+  resolution: >-
+    DONE 2026-11-20. `Int8Body.calibrate` now caches the grids under a key built from a fingerprint of the
+    calibration frames (a 32-bin luma histogram per frame at 1/16 resolution - microseconds, versus 300 MB to
+    hash) and the model's own digest (first and last conv weights plus their shapes, so it is stable across
+    processes and does not depend on a file path). A hit skips every eager forward; `RVE_INT8_CALIB_CACHE=0`
+    disables it; a broken cache logs and measures instead of costing a render. Three tests pin it: a hit must not
+    call `_measure` and must return the measured grids, a different clip must miss, and the off switch must write
+    nothing. NOT measured: the hit's actual start-up saving in the app - the eager calibration is ~4.8 s for 24
+    frames (measured when the pick double-calibrated), and the cache removes all of it on a re-render of the same
+    clip, but that has not been timed end to end yet.
   note: >-
     Asked on 2026-11-20 after "isn't there a minute of waiting before int8 starts?". The answer measured is
     6.5 s, not a minute, and the breakdown says where it goes. The alternative - fewer calibration frames - is

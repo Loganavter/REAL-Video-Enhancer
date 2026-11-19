@@ -214,6 +214,42 @@ class Int8Body:
                 outs.append((act.abs().amax(dim=(0, 2, 3)).float() / 127.0).clamp_min(1e-8))
         return s_act, outs
 
+    # ---- calibration cache -------------------------------------------------------------------------------
+    @staticmethod
+    def _cache_key(frames, margin: float) -> str:
+        """A key that is stable for the same model and the same frames, and cheap to compute.
+
+        Hashing the frames themselves would mean reading 300 MB of tensors; a coarse per-frame fingerprint (a
+        32-bin histogram of the luma at 1/16 resolution) is enough to tell clips apart and costs microseconds.
+        The model is identified by the digest of its first and last conv weights plus their shapes - the two
+        ends of the stack - which is stable across processes and does not depend on a file path.
+        """
+        import hashlib
+
+        h = hashlib.sha256()
+        for f in frames:
+            x = f.float()
+            small = x[:, :, ::16, ::16]
+            hist = torch.histc(small.clamp(0.0, 1.0), bins=32, min=0.0, max=1.0)
+            h.update(hist.cpu().numpy().tobytes())
+        return h.hexdigest()[:16] + f"-{margin:g}"
+
+    def _model_digest(self) -> str:
+        import hashlib
+
+        h = hashlib.sha256()
+        for conv in (self.head_conv, self.tail_conv):
+            w = getattr(conv, "conv", conv).weight.detach().float()
+            h.update(str(tuple(w.shape)).encode())
+            h.update(w.reshape(-1)[:4096].cpu().numpy().tobytes())
+        return h.hexdigest()[:16]
+
+    def _cache_path(self, key: str) -> str:
+        base = os.environ.get("RVE_INT8_CALIB_CACHE", "~/.cache/rve/int8-calib")
+        if base in ("0", "off", ""):
+            return ""
+        return os.path.expanduser(os.path.join(base, f"{self._model_digest()}-{key}.pt"))
+
     def calibrate(self, frames):
         """Take the grids from the SPREAD frames the probe already decoded.
 
@@ -224,6 +260,25 @@ class Int8Body:
         """
         if torch.is_tensor(frames):
             frames = [frames]
+        # THE CACHE. The grids are 24 vectors of 64 floats that depend on (model, clip) and nothing else, and
+        # measuring them means running the fp16 model over every calibration frame (~200 ms each in eager, 4.8 s
+        # for 24). A hit removes all of it. The key is a fingerprint of the frames plus the model's digest, so a
+        # different clip or a different model misses by construction; RVE_INT8_CALIB_CACHE=0 disables it.
+        _margin = float(os.environ.get("RVE_INT8_GRID_MARGIN", "1.0"))
+        _path = self._cache_path(self._cache_key(frames, _margin))
+        if _path and os.path.exists(_path):
+            try:
+                blob = torch.load(_path, map_location="cpu", weights_only=True)
+                self._grids = (blob["s_act"].to(torch.float32), [o.to(torch.float32) for o in blob["outs"]])
+                self._calib_frames = list(frames)
+                self._launches = None
+                import logging as _lgc
+                _lgc.getLogger("RVE").warning("int8 calibration: CACHE HIT %s (%d frames not measured)",
+                                              os.path.basename(_path), len(frames))
+                return self
+            except Exception as error:                 # noqa: BLE001 - a broken cache must not cost a render
+                import logging as _lgc
+                _lgc.getLogger("RVE").warning("int8 calibration: cache unreadable (%s); measuring", error)
         s_act, outs = None, None
         for f in frames:
             s2, o2 = self._measure(f)
@@ -235,6 +290,13 @@ class Int8Body:
         self._grids = (s_act, outs)
         self._calib_frames = list(frames)
         self._launches = None
+        if _path:
+            try:
+                os.makedirs(os.path.dirname(_path), exist_ok=True)
+                torch.save({"s_act": s_act.cpu(), "outs": [o.cpu() for o in outs]}, _path)
+            except Exception as error:                 # noqa: BLE001
+                import logging as _lgc
+                _lgc.getLogger("RVE").warning("int8 calibration: cache not written (%s)", error)
         return self
 
     @torch.no_grad()
