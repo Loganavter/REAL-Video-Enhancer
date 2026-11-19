@@ -88,6 +88,17 @@ clips:
     contaminated: false
     facts: {bit_rate_mbps: 39.552, packets: 503, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}
 
+  - file: bd_csm_same.mkv
+    label: >-
+      UNPROVED cut of the same Chainsaw Man media, found in /tmp/opencode and used by wall_ab.sh's default
+      pair. Registered 2026-11-20 so a measurement on it can name its input at all: 1920x1080 h264, 539
+      packets, 8-bit yuv420p, no declared matrix or range. The "same shot as bd_csm20s" claim is the name's,
+      NOT established here - no packet subsequence proof exists for this file.
+    cut: {mode: not_proved}
+    contaminated: false
+    label_requires_bitrate: false
+    facts: {pix_fmt: yuv420p, color_range: "", packets: 539, codec: h264, width: 1920, height: 1080}
+
   # NATIVE 1440x1080 material, added 2026-11-19 on the owner's instruction. Every 1440 number in the corpus
   # before this came from either `violet1440.mkv` (an anamorphic 4:3-squeeze RE-ENCODE of the BD cut - i.e. a
   # 1920-wide picture squeezed into 1440 columns) or `native1440*.mkv` of unlabelled provenance. This one is

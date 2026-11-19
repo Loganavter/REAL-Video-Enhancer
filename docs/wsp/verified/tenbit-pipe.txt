@@ -44,6 +44,14 @@ On the worst frame 1.96% of pixels have a channel within 1% of the gamut edge; t
 conversion that was validated at mean |d| 1.85/255 against ffmpeg, i.e. it was never an identity instrument -
 it is the reader's chroma upsampling design, not a depth loss. In-gamut pixels read 1 level at p99.
 
+## Why a bit-depth gate on the same mechanism is a scope decision
+
+The tail-CSC rule is register-local chroma, and none of it depends on the bit depth: on 10-bit material the
+coefficients, the rounding and the stride change, the mechanism does not. The app nevertheless keeps its
+10-bit and HDR pipes in RGB/rgb48, so the tail declines that path - and the render log now prints the
+resolution (`int8 tail output: fp16 RGB tensor (RVE_TAIL_YUV=1 -> ...)`) rather than the flag, because a
+refused gate under a default-on flag would otherwise make a 10-bit A/B read two identical arms.
+
 ## Not covered
 
 - **The model is not in the loop.** This page is about the two conversions around it. The int8 body's own

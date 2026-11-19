@@ -84,6 +84,24 @@ of pixels with any channel more than 8 levels off, on the worst frame of the pai
 the more sensitive read, because a systematic shift would show there rather than in a peak, and it is half a
 level.
 
+## Why the isolated stand and the app read different numbers
+
+The isolated arms read 5.123 against 0.869 (-4.25), the app phases read -2.31. That difference is not the stand
+lying, it is a boundary: in the isolated pair the `copy_` into the host buffer sat INSIDE the "today" arm (it is
+what `tensor_to_yuv420p` does) and inside the fused arm there was nothing, while in the app both arms pay the
+transfer. The arithmetic closes on the app's own number: 4.254 - 2.31 = 1.944, and 12.4416 MB at the measured
+6.55 GB/s is 1.90 ms, leaving 0.044. So the two instruments differ by a stated boundary, and the lesson is to
+name the boundary - not to distrust the probe.
+
+The same goes for the 0.15 ms between the phase lines (-2.31) and the loop (-2.16): it lands in `everything
+else`, i.e. the payload branch in `Frame`, the Y-plane reads for the preview and the gate's luma, and the
+guard's event. Named, not absorbed.
+
+**And the reason the tail phase did not move is a floor argument, not a mystery.** Its floor is the traffic it
+cannot avoid - 132.71 MB of codes + 12.44 MB of residual to read, plus the output: 0.677 ms when the output was
+49.77 MB of fp16 RGB, 0.547 with the payload. The floor moved 0.13 ms; the measured phase moved by zero. So the
+tail was never bounded by its write, and removing bytes from a member that is not binding buys nothing in time.
+
 ## The safety coupling, now load-bearing
 
 Writing the payload directly removes the `cat()` intermediate that made the old payload copy effectively
@@ -101,6 +119,11 @@ the guard became a default rather than a knob that happens to be on.
 - The ffv1 sink carries 4:4:4, so the pair was decoded after ffmpeg upsampled 4:2:0 to 4:4:4 on both arms. A
   chroma defect both arms share through that upsample would be invisible here - the same limitation the halo and
   ring identity pairs have.
+- **The gate is a scope decision, not a limit of the mechanism.** Register-local chroma does not depend on the
+  bit depth: on 10-bit material the coefficients, the rounding and the stride change, the mechanism does not.
+  What the gate encodes is that the app keeps an RGB/rgb48 pipe there, so a yuv420p payload would be the wrong
+  bytes on the wire. The render log prints the RESOLUTION (`int8 tail output: ...`) rather than the flag,
+  because with `RVE_TAIL_YUV=1` by default a refused gate would otherwise read as two identical A/B arms.
 - 8-bit SDR only, and that was RUN, not argued: the 10-bit native clip (`native1440_20s.mkv`, 1440x1080 HEVC
   10-bit) rendered with `RVE_TAIL_YUV=1` keeps the old path end to end - `10-bit source detected`, no `8-bit
   pipe: packing yuv420p` line, no `int8 tail writes the payload` line, and the frame handover still reports
