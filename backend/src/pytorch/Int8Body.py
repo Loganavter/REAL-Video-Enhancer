@@ -109,6 +109,15 @@ class Int8Body:
         # only the first `cout`. The cost is the pad ratio - 1.33x work for 48 and for 24 - which is why a
         # power-of-two width (32, 64) is the cheap case and 48 is not (row rve-body-native-width).
         self.cpad = 1 << (int(feat) - 1).bit_length() if int(feat) > 1 else 16
+        # THE GRID MODE, resolved ONCE here so a start-up pick can change it and rebuild - `_build` reads
+        # `self.grid_k` and `self.per_tensor`, it does not re-read the environment (that bug made the first
+        # pick score every candidate identically: `_build` reset K from the env on each call).
+        _pc_env = os.environ.get("RVE_INT8_PER_CHANNEL") == "1"
+        _k_env = os.environ.get("RVE_INT8_GRID_K")
+        self.grid_auto = str(_k_env or "").lower() in ("auto", "pick")
+        self.grid_k = float(_k_env) if (_k_env not in (None, "") and not self.grid_auto) else (
+            0.0 if _pc_env else 2.0)
+        self.per_tensor = (not _pc_env) and self.grid_k <= 0
         # The epilogue's per-element divide can be folded into the incoming rescale: `a = w_scale/out_scale`
         # and `b = bias/out_scale` computed once per channel. Kept behind a knob until it has been timed and
         # its picture measured (row rve-epilogue-divide-2026-11-19) - the rewrite is exact in real arithmetic
@@ -312,10 +321,6 @@ class Int8Body:
         # 0.00125% at K=2 against 0.00353% for the per-tensor default, 0 frames over the bar in both.
         # K=2 is not the optimum for every model (8 prefer K=3/4, by 2.5-7x) - a start-up pick is the next row.
         # RVE_INT8_PER_CHANNEL=1 still means pure per-channel, RVE_INT8_GRID_K=0 means the old per-tensor path.
-        _pc_env = _os.environ.get("RVE_INT8_PER_CHANNEL") == "1"
-        _k_env = _os.environ.get("RVE_INT8_GRID_K")
-        grid_k = float(_k_env) if _k_env not in (None, "") else (0.0 if _pc_env else 2.0)
-        per_tensor = (not _pc_env) and grid_k <= 0
         # GRID CLAMP (K): `s[c] = max(s_in[c], s_t/K)`. K=1 is the per-tensor grid reached through the
         # per-channel code path (no epilogue multiply), K=inf is per-channel, and intermediate K bounds how
         # far one channel's grid can fall below the layer maximum - so no channel can be crushed by more than
@@ -335,10 +340,10 @@ class Int8Body:
         s_grids, s_in = [], s_act
         for idx, conv in enumerate(self.inner, start=1):
             s_t = float(s_in.max()) * margin
-            if per_tensor:
+            if self.per_tensor:
                 s_grids.append(s_in.max().expand_as(s_in) * margin)
-            elif grid_k > 0:
-                s_grids.append(torch.maximum(s_in, torch.full_like(s_in, s_t / grid_k)))
+            elif self.grid_k > 0:
+                s_grids.append(torch.maximum(s_in, torch.full_like(s_in, s_t / self.grid_k)))
             else:
                 s_grids.append(s_in * margin)
             s_in = outs[idx - 1]
@@ -347,9 +352,10 @@ class Int8Body:
         self._s_t1 = _g0.contiguous()
         import logging as _lgg
         _lgg.getLogger("RVE").warning(
-            "int8 grid: %s (RVE_INT8_GRID_K=%s, RVE_INT8_PER_CHANNEL=%s) - s[c] = max(s_in[c], s_t/K)",
-            "per-tensor" if per_tensor else (f"clamp K={grid_k:g}" if grid_k > 0 else "per-channel"),
-            _k_env if _k_env not in (None, "") else "default", _pc_env)
+            "int8 grid: %s (RVE_INT8_GRID_K=%s, auto=%s) - s[c] = max(s_in[c], s_t/K)",
+            "per-tensor" if self.per_tensor else (f"clamp K={self.grid_k:g}" if self.grid_k > 0
+                                                  else "per-channel"),
+            os.environ.get("RVE_INT8_GRID_K", "default"), self.grid_auto)
 
         identity = torch.full((self.cpad,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
         launches, s_in = [], s_act
@@ -360,9 +366,9 @@ class Int8Body:
             # per-channel grids: the input scale is inside the weights, so the epilogue's requant is the
             # identity - and that is not cosmetic, a non-identity m here would apply max(s_in) twice.
             m_int = (torch.round(s_in / s_t * (1 << SHIFT)).to(torch.int32)
-                     if per_tensor else identity.clone()).contiguous()
+                     if self.per_tensor else identity.clone()).contiguous()
             weight = conv.weight.detach().float()
-            if not per_tensor:
+            if not self.per_tensor:
                 weight = weight * s_grid.view(1, -1, 1, 1)
             w_sc = weight.abs().amax(dim=(1, 2, 3)) / 127.0
             w_q = torch.round(weight / w_sc.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
@@ -378,10 +384,10 @@ class Int8Body:
 
             # the scale the epilogue divides by: the next layer's grid in the folding modes, s_out in
             # per-tensor (where `m` does the conversion)
-            os_next = s_grids[idx] if (not per_tensor and idx < len(self.inner)) else s_out
+            os_next = s_grids[idx] if (not self.per_tensor and idx < len(self.inner)) else s_out
             launches.append(dict(
                 w=tap.contiguous(), m=_pc(m_int, 1 << SHIFT),
-                vec=_pc(w_sc if not per_tensor else w_sc * s_t, 1.0),
+                vec=_pc(w_sc if not self.per_tensor else w_sc * s_t, 1.0),
                 bias=_pc(conv.bias.detach().float(), 0.0),
                 slope=_pc(self.inner_prelus[idx - 1].weight.detach().float(), 1.0),
                 os=_pc(os_next, 1.0)))
@@ -758,6 +764,61 @@ class Int8Body:
         self._ev_pair = (_start, _end, 0)
         self._phase_ev = ((_e0, _e1), (_e1, _e2), (_e2, _e3), (_e3, _e4))
         return out
+
+    # ---- picking the grid clamp at start-up ------------------------------------------------------------
+    @staticmethod
+    def choose_grid_k(scores: dict, default: float = 2.0, guard: float = 2.0) -> float:
+        """Which K to keep, given each candidate's gross-error share on HELD-OUT frames.
+
+        One guard, and it is the whole point: the winner must be at least `guard` times better than the default,
+        or the default stays. On three frames the difference between two adjacent K values is often a single
+        pixel, so an unguarded pick would chase noise - Epsilon (1.4x at K=3 over K=2) and LUDVAE (1.0x) are
+        exactly those cases, and both are left alone by this rule.
+        """
+        if not scores:
+            return default
+        best = min(scores, key=scores.get)
+        if default in scores:
+            if scores[best] >= scores[default]:
+                return default                      # a tie or worse: the default wins, and ties are common
+            if scores[best] * guard > scores[default]:
+                return default                      # not a clear enough win to be worth the change
+        return best
+
+    def pick_grid_k(self, holdout, candidates=(1.0, 2.0, 3.0, 4.0), guard: float = 2.0,
+                    default: float = 2.0):
+        """Build at each candidate K, score the app's own gate on `holdout`, keep the winner under the guard.
+
+        `holdout` must be frames the certificate will NOT use: choosing on the frames you certify on makes the
+        gate pass by construction. Cost is one build (~0.3 s) and one forward per candidate, with the fp16
+        references computed once - about 3 s on the production model, which is why it is opt-in
+        (`RVE_INT8_GRID_K=auto`) until it has been measured in the app.
+        """
+        was_yuv = self.out_yuv
+        self.out_yuv = False
+        try:
+            with torch.no_grad():
+                refs = [self.model(f.clamp(0.0, 1.0)).float() for f in holdout]
+            scores: dict[float, float] = {}
+            for k in candidates:
+                self.grid_k = float(k)
+                self.per_tensor = False          # every candidate is on the folding path
+                self._launches = None
+                self._build()
+                worst = 0.0
+                for f, ref in zip(holdout, refs):
+                    with torch.no_grad():
+                        got = self(f).float()
+                    d = ((got - ref).abs() * 255.0).amax(dim=1)
+                    worst = max(worst, float((d > 8).float().mean()) * 100.0)
+                scores[float(k)] = worst
+            best = self.choose_grid_k(scores, default=default, guard=guard)
+            self.grid_k, self.per_tensor = best, False
+            self._launches = None
+            self._build()
+            return best, scores
+        finally:
+            self.out_yuv = was_yuv
 
     # ---- self-certification: the body has to prove itself on the frame it calibrated on
     def certify(self, x, bar: float = FIRST_FRAME_SANITY):

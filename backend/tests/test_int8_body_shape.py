@@ -157,3 +157,37 @@ def test_a_padded_width_needs_the_two_int8_boundaries():
 
     with pytest.raises(ValueError, match="needs the int8 tail"):
         Int8Body(_Wide())
+
+
+# ======================================================================================
+# the start-up pick's rule
+#
+# The pick builds the body at several clamp values and keeps the best by the app's own gate on HELD-OUT frames.
+# The rule has one guard - the winner must be twice as good as the default - because on three frames the gap
+# between adjacent K values is often a single pixel and an unguarded pick would chase noise.
+# ======================================================================================
+
+
+def test_the_pick_keeps_a_clear_winner():
+    assert Int8Body.choose_grid_k({1: 0.012, 2: 0.0002, 3: 0.002, 4: 0.004}) == 2
+
+
+def test_the_pick_leaves_a_marginal_winner_alone():
+    """Epsilon's real numbers: K=3 is 1.4x better than K=2 - below the guard, so K=2 stays."""
+    assert Int8Body.choose_grid_k({1: 1.09, 2: 0.0962, 3: 0.0665, 4: 0.0998}) == 2
+
+
+def test_the_pick_takes_a_doubling_win_at_another_k():
+    """realesr-animevideov3's real numbers: K=3 is 7x better than K=2, so the pick leaves the default."""
+    assert Int8Body.choose_grid_k({1: 0.1246, 2: 0.0504, 3: 0.0071, 4: 0.0446}) == 3
+
+
+def test_the_pick_keeps_the_default_when_the_best_other_k_only_ties_it():
+    """Garfield's real numbers: K=4 reads 0.0029 against K=2's 0.0030 - a tie, not a win, and the 300x win was
+    against the per-tensor grid, not against K=2. A tie must not move the default."""
+    assert Int8Body.choose_grid_k({1: 0.24, 2: 0.0030, 3: 0.0157, 4: 0.0029}) == 2
+
+
+def test_the_pick_is_stable_when_every_candidate_is_clean():
+    """All-clean models read 0.0000% at every K; the default must win ties rather than drift."""
+    assert Int8Body.choose_grid_k({1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}) == 2

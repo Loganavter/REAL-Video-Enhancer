@@ -675,6 +675,19 @@ class UpscalePytorch:
                 return None
             _frames = self.int8Frames
             body.calibrate(_frames)
+            # THE GRID PICK (RVE_INT8_GRID_K=auto): choose K on a slice of the calibration frames and keep the
+            # certificate on another slice, because picking on the frames you certify on makes the gate pass by
+            # construction. The guard (x2 over K=2) is what stops it chasing noise on a handful of frames.
+            if getattr(body, "grid_auto", False) and len(_frames) >= 8:
+                hold = list(_frames[3::4])
+                body.calibrate([f for i, f in enumerate(_frames) if i % 4 != 3])
+                try:
+                    _k, _scores = body.pick_grid_k(hold)
+                    log("int8 grid PICKED K=%g (scores %s; guard x2 over K=2, chosen on %d frames, "
+                        "certificate on another slice)", _k,
+                        {f"K={k:g}": round(v, 4) for k, v in sorted(_scores.items())}, len(hold))
+                except Exception as error:  # noqa: BLE001 - never let the pick cost a render
+                    log("int8 grid pick failed (%s); keeping K=%g", error, getattr(body, "grid_k", 2.0))
             share, ok = body.certify(frame)
             # n=1 and a gross gate: this is a coverage sanity check, not a picture verdict. The wording
             # says so, because the old line printed a percentage under the acceptance bar and read as a
