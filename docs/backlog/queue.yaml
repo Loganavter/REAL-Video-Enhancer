@@ -3183,8 +3183,25 @@ tasks:
 - id: rve-hop-smem-staging-2026-11-20
   title: 'The first gather is one round trip the SM cannot hide - stage the three-row window instead'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-19 on the instrument axis. The premise was measured (L2 traffic 6.1x the DRAM
+    traffic, L1/TEX hit only 22.3%), so five cache policies were swept on the real kernel with identical codes
+    (0 of 132.7 M differ): evict_last on the activations - the arm this row existed to test - is 0.9% SLOWER,
+    evict_last + weights evict_first 1.5% slower, evict_first 4.5% slower, and the best arm (.cg, skipping L1
+    ENTIRELY) is +1.0%, inside the arm's own draw spread (1.504/1.580/1.579). Conclusion: L2 absorbs the 6.1x
+    amplification at a 91% hit rate, so it never reaches DRAM and never costs time - L1 contributes nothing
+    either way. The idea that WOULD cut L2 traffic - load the three-row window once per CTA and form the nine
+    taps from it in shared memory - is not expressible in Triton (no explicit smem, no register permutation),
+    and the nearest native attempt is the pipelining already recorded as negative in Int8Kernels.py
+    (2.497/2.635 against 2.198). That version needs a hand-written CUDA kernel, which is a different piece of
+    software from this lane's Triton body behind a Python renderer; per the lane's own rule (judge by passes
+    removed, not by rewriting the stack) it is not taken. HOP ACCOUNT FINAL: write 0.37 ms (95% of the DRAM
+    roof) + epilogue 0.11 (7%) + gathers/dots 1.07 of which 0.59 is the first tap's round trip; DRAM 250.6 MB at
+    156 GB/s (54%), L2 1528 MB at 955 GB/s (91% hit), SM 74% with 3.96 of 12 warps per scheduler. Every axis
+    this software can turn has been turned. docs/wsp/verified/int8-hop-smem.txt, records int8-hop-cache.jsonl
+    (C001-C005), logs/hop-cache/probe.json.
   priority: P2
   gpu: true
   cost: 4h

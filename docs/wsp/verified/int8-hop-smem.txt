@@ -1,0 +1,81 @@
+# The window cannot be kept closer: five cache policies move the hop by 1%
+
+Measured 2026-11-19 (local), one hop of the int8 body on its own codes (frame 169), three interleaved rounds,
+medians of rounds 2+, shipped BLOCK_M 128 / 4 warps. Records: `int8-hop-cache.jsonl`; raw:
+`logs/hop-cache/probe.json`.
+
+Row `rve-hop-smem-staging-2026-11-20`, the last one. Its premise came from two measurements: ncu reads **L2
+traffic 6.1x the DRAM traffic** (1528 MB against 250.6 MB) with an **L1/TEX hit rate of only 22.3%**
+(`int8-hop-dram.txt`, `int8-hop-ncu.txt`). A CTA's three-row window is 128 x 3 x 64 B = 25 KB, which fits an SM's
+L1 several times over, so the obvious question was whether the nine taps could be served from L1 instead of L2.
+
+## What Triton lets you express, measured
+
+| policy | ms | GB/s | vs shipped |
+|---|---|---|---|
+| shipped (normal) | **1.580** | 158.6 | - |
+| activations `evict_last` | 1.594 | 157.2 | -0.9% |
+| `evict_last` + weights `evict_first` | 1.603 | 156.3 | -1.5% |
+| activations `evict_first` | 1.650 | 151.8 | -4.5% |
+| activations `.cg` (skip L1 entirely) | 1.563 | 160.3 | **+1.0%** |
+
+All five produce **identical codes** (0 differing of 132.7 M), so this compares one schedule against another.
+
+**Nothing moves it.** `evict_last` - the arm the row was written to test, keeping the row that is about to be
+re-read - is 0.9% SLOWER. The best arm, `.cg`, *skips L1 entirely* and is 1% faster, i.e. within the arm's own
+draw-to-draw spread (the shipped arm's three draws are 1.504 / 1.580 / 1.579). The honest reading is that L1
+contributes nothing either way: **L2 absorbs the amplification at a 91% hit rate**, so the 6.1x never reaches
+DRAM and never costs time.
+
+## Why the row closes here rather than with a kernel
+
+The idea that would actually cut the L2 traffic - load the three-row window once per CTA and form the nine taps
+from it in shared memory - is **not expressible in Triton**: there is no explicit shared-memory allocation, and
+a horizontal shift inside a loaded tile is a register permutation the language does not expose. The nearest
+Triton-native attempt is the pipelining recorded as negative inside `Int8Kernels.py` (num_stages 2-3: 2.497 and
+2.635 ms against 2.198), and this file adds the policy axis, which is flat.
+
+So the line of attack is exhausted on the *instrument* side, not because the physics says no: a hand-written
+CUDA kernel with an explicit smem window is the version of this idea that could work, and that is a different
+piece of software from the one this lane maintains (a Triton body behind a Python renderer). The lane's own rule
+applies - judge by passes removed, not by rewriting the stack - and no pass is removed here, only a traffic
+amplification that L2 already hides.
+
+## The hop, final account
+
+| component | ms | how it sits |
+|---|---|---|
+| write (132.7 MB) | 0.37 | 95% of the DRAM roof |
+| epilogue | 0.11 | 7% of the hop, arithmetic |
+| nine gathers + dots | 1.07 | of which **0.59 is the first tap's round trip** |
+| DRAM | 250.6 MB at 156 GB/s | 54% of the roof (counter) |
+| L2 | 1528 MB at 955 GB/s | 6.1x DRAM, 91% hit |
+| SM | 74% of the highest pipe | 3.96 of 12 warps per scheduler, 56% no eligible warp |
+
+Every axis that this software can turn has been turned: launch shape (nine configurations, shipped best), tap
+count and staging (pipelining negative), cache policy (flat), codes (6-bit dead on the picture), epilogue
+(7%, folded where it could be). **25.7 ms of sixteen hops is what this shape costs on this card in Triton.**
+
+## Not covered
+
+- One card, one hop, one frame's codes.
+- An explicit-smem CUDA kernel is NOT written, and that is the one remaining idea with a mechanism behind it.
+- The 1% `.cg` result is not adopted: it is smaller than the arm's own spread and would make the kernel
+  depend on a default that a driver change can flip.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_cache_probe.py --rounds 3 --iters 20 \
+    --out-file docs/wsp/verified/logs/hop-cache/probe.json
+PYTHONPATH=scripts python3 scripts/hop_cache_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-smem.txt \
+       --records docs/wsp/verified/records/int8-hop-cache.jsonl --bars docs/claims-bars.json
+
+@claim C001 1.58 ms "frames [10cff28ea287d300] n=1" measured
+@claim C002 1.594 ms "frames [10cff28ea287d300] n=1" measured
+@claim C003 1.603 ms "frames [10cff28ea287d300] n=1" measured
+@claim C004 1.65 ms "frames [10cff28ea287d300] n=1" measured
+@claim C005 1.563 ms "frames [10cff28ea287d300] n=1" measured
