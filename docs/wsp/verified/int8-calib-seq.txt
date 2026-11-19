@@ -17,7 +17,13 @@ the timestamps.
 | spread, 16 seeks x 3 frames | **4.662 s** | `-ss` before `-i`, one ffmpeg per timestamp |
 | sequential, first 48 frames | **0.630 s** | one pass, `_read_indices` stops as soon as it has them |
 
-7.4x cheaper, and it removes ~4.0 s from the start-up (9.79 -> ~5.8 s, to be confirmed by the next full run).
+7.4x cheaper. The end-to-end start-up with both changes on, measured on the same timestamped-stdout instrument:
+
+| configuration | start-up to the first frame |
+|---|---|
+| before this session (full frames, spread decode) | **33.15 s** |
+| + crop calibration | 9.79 s |
+| **+ sequential decode** | **4.95 s** |
 
 ## Picture
 
@@ -62,3 +68,4 @@ PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-calib-seq
 @claim SQ001 4.662 s "runs [be7709676d52862f] n=2" measured
 @claim SQ002 0.63 s "runs [be7709676d52862f] n=2" measured
 @claim SQ003 0.00043402777777777775 % "frames [13137e4e7dd10e98] n=494" measured
+@claim SQ004 4.95 s "process starts [389630a8bda54f09] n=1" measured
