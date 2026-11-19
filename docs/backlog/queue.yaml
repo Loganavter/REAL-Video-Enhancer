@@ -4188,7 +4188,7 @@ tasks:
 - id: rve-grid-k-predict-2026-11-20
   title: 'Can the optimal grid clamp K be known without the 2-4 s start-up sweep?'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: false
@@ -4218,6 +4218,18 @@ tasks:
     over the 22 models, and the predictor must name the best K (or a K within 1.5x of it) for at least 18 of
     them - below that the sweep stays. (c) If it passes, it is a build-time rule with its own log line and its
     threshold in FRAME-BUDGET; if it fails, the row closes with the negative result and the sweep is the answer.
+  resolution: >-
+    DONE 2026-11-20, NEGATIVE RESULT - the answer is "no, not from the weights". Four weight-only statistics were
+    computed per model (no forward pass): the coefficient of variation and the max/median of the per-output-channel
+    weight energy, the max/median of the per-input-position energy, and the log10 median condition number of the
+    folded matrix. Against the ladder's split - 14 models where some K beats K=2 by >=2x, 8 where it does not -
+    EVERY statistic overlaps, and not marginally (a mover reads row_cv 0.074 while a stayer reads 0.300). With
+    five statistics tried (these four plus the calibration spread refuted earlier) and no separation, the
+    property that decides K is not a summary of the weights: it is how the quantisation error propagates through
+    sixteen layers into a thresholded picture statistic. The measurement that WOULD capture that is a per-layer
+    ablation, which costs more than the sweep it would replace and is valid only for the model it ran on.
+    So the start-up sweep stays (RVE_INT8_GRID_K=auto, ~3 s, guard x2). docs/wsp/verified/int8-grid-k-predict.txt,
+    logs/grid-k-predict/rows.json, scripts/grid_k_predict_probe.py.
   note: >-
     Asked for by the owner on 2026-11-20: "can the optimal K be determined without the 2-4 s delay - maybe there
     are empirical signals in the weights?" The honest starting point is that the sweep is cheap in absolute

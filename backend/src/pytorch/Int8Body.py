@@ -811,7 +811,22 @@ class Int8Body:
                         got = self(f).float()
                     d = ((got - ref).abs() * 255.0).amax(dim=1)
                     worst = max(worst, float((d > 8).float().mean()) * 100.0)
+                if float(k) == float(default):
+                    # kept for the self-check below: if the pick refuses, these two means are the evidence
+                    self._pick_probe = (float(refs[0].mean()), float(got.mean()), tuple(got.shape),
+                                        tuple(refs[0].shape))
                 scores[float(k)] = worst
+            # SELF-CHECK, because a pick that reads nonsense would still "win" and the guard would hide it: the
+            # default's score must agree with the app's own certify() on the same frame. They are the same
+            # expression over the same frames, so a disagreement means the references here do not correspond to
+            # what the body produces - and in that case the pick must refuse rather than choose.
+            _k0 = float(default) if float(default) in scores else float(next(iter(scores)))
+            _sh, _ok = self.certify(holdout[0])
+            if scores[_k0] > 10.0 * max(_sh, 1e-6) and scores[_k0] > 1.0:
+                raise RuntimeError(
+                    f"pick refused: its own score for K={_k0:g} is {scores[_k0]:.4f}% but certify reads "
+                    f"{_sh:.5f}% on the same frame - ref/got means and shapes "
+                    f"{getattr(self, '_pick_probe', '?')}")
             best = self.choose_grid_k(scores, default=default, guard=guard)
             self.grid_k, self.per_tensor = best, False
             self._launches = None
