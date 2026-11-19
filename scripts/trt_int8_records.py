@@ -47,6 +47,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default="docs/wsp/verified/logs/trt-int8")
     ap.add_argument("--out", default="docs/wsp/verified/records/trt-int8-calibrated.jsonl")
+    ap.add_argument("--probe", default="docs/wsp/verified/logs/trt-int8/trt-vs-body.json")
     a = ap.parse_args(argv)
 
     def path(name: str) -> str:
@@ -126,6 +127,45 @@ def main(argv=None) -> int:
                      statistic=stat, n=1 if stat != "mean" else row.get("n", 1),
                      note=f"{arm_name}, {note}", extra={"of": field, "arm": arm_name})
                 ids += 1
+
+    # -- the same-instrument run: the body, TRT's int8 and the fp16 engine in one process -------------
+    if os.path.exists(a.probe):
+        pr = json.load(open(a.probe))
+        frame = pr["frames"][0]
+        n_rounds = len(next(iter(pr["rounds"].values()))[1:])
+        items = tuple(f"{frame}#round-{i}" for i in range(2, 2 + n_rounds))
+        pop = Population.of("rounds", items, f"{frame}, interleaved rounds 2+ in one process, three arms")
+        cfg = (f"2x-Futsuu-Anime(1).pth, {pr['shape'][2]}x{pr['shape'][3]}, one input frame, three arms "
+               f"interleaved in one process")
+        instr = ("torch.cuda.Event bracket over 10 iterations per round, 4 interleaved rounds, median of rounds 2+")
+        dprobe = sha(a.probe)
+        order = {"fp16-engine": "TV001", "trt-int8": "TV002", "triton-body": "TV003"}
+        for arm, rid in order.items():
+            st.emit(Record(value=float(pr["median_ms"][arm]), unit="ms", population=pop, instrument=instr,
+                           config=cfg, session=st.session, statistic="median", tier="measured", id=rid,
+                           run="scripts/trt_vs_body_probe.py", artifact=a.probe,
+                           extra={"artifact_sha256": dprobe, "arm": arm,
+                                  "rounds": pr["rounds"][arm]}))
+        rb = st.ratio("TV002", "TV003", note="TRT int8 / Triton body: how much faster the body is")
+        rb.id = "TV004"
+        rf = st.ratio("TV001", "TV003", note="fp16 engine / Triton body")
+        rf.id = "TV005"
+        rt = st.ratio("TV001", "TV002", note="fp16 engine / TRT int8")
+        rt.id = "TV006"
+        print(f"# same-instrument: body vs TRT int8 {rb.value}x, body vs fp16 {rf.value}x, "
+              f"TRT int8 vs fp16 {rt.value}x")
+        n = 7
+        for fname, arms in pr["accuracy"].items():
+            p_pop = Population.of("pixels of one frame", (f"{fname}:{frames.get(fname.replace('.rgb', ''), 'eval')}",),
+                                  f"{fname}, held out from calibration")
+            for arm, row in arms.items():
+                for field, unit, stat in (("max_codes", "levels", "max"), ("share_gt8_pct", "%", "single"),
+                                          ("psnr_db", "dB", "single")):
+                    st.emit(Record(value=float(row[field]), unit=unit, population=p_pop, instrument=instr,
+                                   config=cfg, session=st.session, statistic=stat, tier="measured",
+                                   id=f"TV{n:03d}", run="scripts/trt_vs_body_probe.py", artifact=a.probe,
+                                   extra={"artifact_sha256": dprobe, "arm": arm, "of": field}))
+                    n += 1
 
     st.dump(a.out)
     print(st.claims_text().strip())
