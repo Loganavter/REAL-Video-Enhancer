@@ -29,6 +29,9 @@ def sha256(p: str) -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--logs", default="docs/wsp/verified/logs/pack-ring/ab")
+    ap.add_argument("--sink", default="null", help="null | nvenc - the sink decides what the loop contains")
+    ap.add_argument("--id-base", type=int, default=0,
+                    help="offset added to the record numbers, so two sinks can share one file")
     ap.add_argument("--pair", default="docs/wsp/verified/records/int8-pack-ring-pair.jsonl")
     ap.add_argument("--out", default="docs/wsp/verified/records/int8-pack-ring.jsonl")
     args = ap.parse_args(argv)
@@ -38,7 +41,7 @@ def main(argv=None) -> int:
     session = "unknown"
     n_frames = 0
     for name in sorted(os.listdir(args.logs)):
-        m = re.match(r"^(.+)_(ring0|ring1)_r(\d+)_null\.log$", name)
+        m = re.match(rf"^(.+)_(ring0|ring1)_r(\d+)_{args.sink}\.log$", name)
         if not m:
             continue
         text = open(os.path.join(args.logs, name), errors="replace").read().replace("\r", "\n")
@@ -54,26 +57,30 @@ def main(argv=None) -> int:
             packs.setdefault(m.group(2), []).append(float(pm.group(1)))
 
     clip = "bd_violet20s.mkv"
-    pop = Population.of("rounds", [f"{clip}#null#round-{r}" for r in (2, 3)],
-                        f"{clip}, null sink, rounds 2-3 of one session, {n_frames} frames")
-    cfg = "int8 fit, null sink, reuse off, arms alternating in one session"
+    pop = Population.of("rounds", [f"{clip}#{args.sink}#round-{r}" for r in (2, 3)],
+                        f"{clip}, {args.sink} sink, rounds 2-3 of one session, {n_frames} frames")
+    cfg = f"int8 fit, {args.sink} sink, reuse off, arms alternating in one session"
     st = Store(session=session)
     ids = {}
-    for rid, arm, what, src, unit in (("K001", "ring0", "loop", loops, "ms"),
-                                      ("K002", "ring1", "loop", loops, "ms"),
-                                      ("K004", "ring0", "pack", packs, "ms"),
-                                      ("K005", "ring1", "pack", packs, "ms")):
-        art = f"{args.logs}/{clip.removesuffix('.mkv')}_{arm}_r2_null.log"
+    def rid(n: int) -> str:
+        return f"K{args.id_base + n:03d}"
+
+    for ridx, arm, what, src, unit in ((1, "ring0", "loop", loops, "ms"),
+                                       (2, "ring1", "loop", loops, "ms"),
+                                       (4, "ring0", "pack", packs, "ms"),
+                                       (5, "ring1", "pack", packs, "ms")):
+        art = f"{args.logs}/{clip.removesuffix('.mkv')}_{arm}_r2_{args.sink}.log"
         label = ("per-frame bytes payload (tobytes)" if arm == "ring0" else "pinned ring slots")
         st.emit(Record(value=round(statistics.median(src[arm]), 2), unit=unit,
                        population=Population(kind=pop.kind, items=pop.items,
                                              label=f"{pop.label}, arm {arm}: {label}"),
                        instrument=("the render loop line, ms/frame" if what == "loop"
                                    else "the profile's pack+queue line, ms/frame"),
-                       config=cfg, session=session, statistic="median", tier="measured", id=rid,
-                       run=f"rve-backend.py, logs {args.logs}/*_{arm}_r*_null.log", artifact=art,
-                       extra={"artifact_sha256": sha256(art), "of": what, "per_round": src[arm]}))
-        ids[(what, arm)] = rid
+                       config=cfg, session=session, statistic="median", tier="measured", id=rid(ridx),
+                       run=f"rve-backend.py, logs {args.logs}/*_{arm}_r*_{args.sink}.log", artifact=art,
+                       extra={"artifact_sha256": sha256(art), "of": what, "per_round": src[arm],
+                              "sink": args.sink}))
+        ids[(what, arm)] = rid(ridx)
     st.delta(ids[("loop", "ring1")], ids[("loop", "ring0")], note="the ring's effect on the frame")
     st.delta(ids[("pack", "ring1")], ids[("pack", "ring0")], note="the ring's effect on pack+queue")
 

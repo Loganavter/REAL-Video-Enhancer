@@ -42,6 +42,28 @@ effective throughput, i.e. about half the recorded link rate, plus whatever the 
 imposes. Neither is addressed by a ring, and this file does not separate them - it says only which one it is
 NOT.
 
+## Under the encoder - the one configuration where this could have flipped
+
+The row named the NVENC arm as the case that could turn a null-sink negative into a positive, because a real
+encoder is a slower writer and a slower writer is what a payload ring is for. Measured anyway, `SINK=nvenc`,
+3 rounds, same clip:
+
+| arm | render loop | pack+queue |
+|---|---|---|
+| ring off | **34.54 ms** | **4.31 ms** |
+| ring on | **34.61 ms** | **4.40 ms** |
+| delta | **+0.07 ms** | **+0.09 ms** |
+
+**It does not flip - it goes the other way, by a hair.** With the encoder present the ring is 0.07 ms slower
+on the loop and 0.09 ms more expensive on the pack line, which is the semaphore and the slot bookkeeping
+costing slightly more than the 12.44 MB copy they replace. Both differences are at the edge of the draw-to-draw
+spread (ring0 34.49/34.56/34.52), so the honest reading is "no effect, sign if anything negative", and the
+conclusion does not depend on the sink: **the pack cost is the transfer and the reader, not the copy.**
+
+The encoder also explains why the pack line barely moves between sinks at all (4.36 null against 4.31 nvenc):
+the writer consumes pinned slots at the same rate either way, because the payload is copied into ffmpeg's own
+buffer before the encoder sees it - which is exactly why a deeper ring has nothing to buy.
+
 ## The picture: the pool is now correct
 
 Lossless ffv1 renders of both arms, then `gate_sweep --reference-kind config`:
@@ -66,12 +88,10 @@ one-line instrumented warning names the pool when it is live.
 
 ## Not covered
 
-- The NVENC arm this row also asked for. With the encoder in the loop the writer is slower, so back-pressure
-  grows and the ring's trade could differ - that is the one configuration where this negative could flip, and
-  nobody has measured it.
+- The split inside the 4.3 ms is NOT separated here (see below): the NVENC arm was run and did not move it.
 - The split inside the 4.32 ms (transfer vs writer consumption) is NOT separated here. Separating it needs a
   null writer, which is a different experiment.
-- One card, one clip, one resolution, null sink.
+- One card, one clip, one resolution. Two sinks (null and nvenc) - both negative.
 
 ## Reproduce
 
@@ -94,6 +114,12 @@ Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-pack
 @claim K005 4.32 ms "rounds [95af4551238ca2b0] n=2" measured
 @claim R001 -0.06 ms "rounds [95af4551238ca2b0] n=2" derived
 @claim R002 -0.04 ms "rounds [95af4551238ca2b0] n=2" derived
+@claim K101 34.54 ms "rounds [0f938831d44909aa] n=2" measured
+@claim K102 34.61 ms "rounds [0f938831d44909aa] n=2" measured
+@claim K104 4.31 ms "rounds [0f938831d44909aa] n=2" measured
+@claim K105 4.4 ms "rounds [0f938831d44909aa] n=2" measured
+@claim R101 0.07 ms "rounds [0f938831d44909aa] n=2" derived
+@claim R102 0.09 ms "rounds [0f938831d44909aa] n=2" derived
 @claim PK001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
 @claim PK002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
 @claim PK003 0.0 levels "frames [13137e4e7dd10e98] n=494" measured

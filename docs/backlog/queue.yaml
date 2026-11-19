@@ -2777,9 +2777,14 @@ tasks:
     so nobody re-derives the disabled-comment. Not adopted (0.06 ms does not pay for a second payload path
     that is incompatible with temporal reuse); the knob and its one-line warning stay. The 4.32 splits into a
     12.44 MB transfer at 2.9 GB/s effective plus the writer's slot consumption, and this file does NOT
-    separate them. NOT measured: the NVENC arm, which is the one configuration where a slow writer could
-    make the ring matter. Docs: docs/wsp/verified/int8-pack-ring.txt, records int8-pack-ring.jsonl
-    (K001-K005, R001-R002, PK001-PK004), logs/pack-ring/.
+    separate them. THE NVENC ARM WAS RUN (2026-11-19, the configuration the row named as the only one where a
+    slow writer could flip this): loop 34.54 -> 34.61 ms (+0.07) and pack+queue 4.31 -> 4.40 (+0.09), i.e. the
+    sign is if anything NEGATIVE and at the edge of the draw spread - the semaphore and slot bookkeeping cost a
+    hair more than the copy they replace. It does not flip, and the reason is visible in the two sinks agreeing
+    on the pack line (4.36 null against 4.31 nvenc): the payload is copied into ffmpeg's own buffer before the
+    encoder sees it, so a deeper ring has nothing to buy either way. Docs:
+    docs/wsp/verified/int8-pack-ring.txt, records int8-pack-ring.jsonl (K001-K005, R001-R002, K101-K105,
+    R101-R102, PK001-PK004), logs/pack-ring/{ab,ab-nvenc}/.
   priority: P1
   gpu: true
   cost: 4h
@@ -2920,16 +2925,18 @@ tasks:
   status: done
   owner: '@supervisor'
   resolution: >-
-    DONE 2026-11-20: the shipped default reads 1.399x on Violet (55.99 fp16 against 40.01 int8, medians of
-    rounds 2-3 of one interleaved session) and 1.481x on Chainsaw (52.17 against 35.22) - against the recorded
-    bar_int8_wall = 1.2x, i.e. cleared by 0.20 and 0.28. Phase lines on the same runs (Chainsaw): head 0.70,
+    DONE 2026-11-20, both arms. NULL SINK: 1.399x on Violet (55.99 fp16 against 40.01 int8, medians of
+    rounds 2-3) and 1.481x on Chainsaw (52.17 against 35.22). UNDER NVENC (the configuration the product
+    actually runs): 1.511x on Violet (52.16 against 34.53) and 1.506x on Chainsaw (52.20 against 34.65) - the
+    encoder is a fixed cost both arms pay, so the ratio RISES. Against bar_int8_wall = 1.2x that is cleared by
+    0.31 under the encoder and by 0.20-0.28 on a null sink. Phase lines on the same runs (Chainsaw): head 0.70,
     quantise 0.00, hops 25.35, tail 2.60, body 28.55 - so the frame is now 25.4 of 28.6 body and the two
     boundary kernels together are 3.3 ms. One draw is missing: bd_csm_same_fp16_r1 was killed by the script's
     1800 s timeout at frame 281 (FPS 0) and has no loop line; that arm's rounds 2-3 agree to 0.02 ms, so the
     median stands and the cause is NOT explained (engine rebuild or a machine stall - recorded, not smoothed).
-    The bar's VALUE was not touched. NOT done: the NVENC arm this row also asked for - until it runs, the
-    product ratio under an encoder stays unquoted. docs/wsp/verified/int8-wall-defaults.txt, records
-    int8-wall-defaults.jsonl (W001-W031), logs/wall-defaults/null/.
+    The bar's VALUE was not touched. docs/wsp/verified/int8-wall-defaults.txt, records
+    int8-wall-defaults.jsonl (W001-W031 null sink, W101-W132 nvenc), logs/wall-defaults/{null,nvenc}/,
+    renders /home/jorj/2Tb/wall-defaults-nvenc/.
   priority: P1
   gpu: true
   cost: 2h

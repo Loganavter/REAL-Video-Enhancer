@@ -1,0 +1,950 @@
+# wall_ab 2026-11-19T06:29:34+03:00 clip=bd_violet20s.mkv arm=ring1 round=1 sink=nvenc
+# load_avg 1.62 1.71 1.94
+# clocks 2790 MHz, 8751 MHz, 49, 73.23 W
+# model /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth
+# cmd rve-backend.py --ffmpeg_path /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg --backend tensorrt --upscale_model /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth --overwrite --no_temporal_reuse --input /tmp/opencode/bd_violet20s.mkv --int8_fit int8 --output /home/jorj/2Tb/pack-ring-nvenc/bd_violet20s_ring1_r1_nvenc.mkv --video_encoder_preset x265_nvenc
+BACKEND: Getting Input Video Properties
+==============
+RVE Backend Version: 2.4.1-dev16
+==============
+CLI Arguments: 
+['rve-backend.py', '--ffmpeg_path', '/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '--backend', 'tensorrt', '--upscale_model', '/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth', '--overwrite', '--no_temporal_reuse', '--input', '/tmp/opencode/bd_violet20s.mkv', '--int8_fit', 'int8', '--output', '/home/jorj/2Tb/pack-ring-nvenc/bd_violet20s_ring1_r1_nvenc.mkv', '--video_encoder_preset', 'x265_nvenc']
+==============
+BACKEND: No Working Directory specified, using current directory: /home/jorj/Загрузки/projects/REAL-Video-Enhancer/backend
+BACKEND: Getting Input Video Properties
+BACKEND: 8-bit pipe: packing yuv420p on the GPU - 1.5 bytes/px instead of rgb24's 3, and no ffmpeg scale filter (RVE_YUV8=0 reverts)
+BACKEND: Using backend: tensorrt
+BACKEND: Setting up Upscale
+BACKEND: Handling device: auto, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: auto
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: head convolution body.0: 3 input channels -> 8 (zeros, padded inside the head so the model's own residual keeps its 3 channels), so the engine can fuse it with its PReLU
+Loading TensorRT engine from /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth_fp16_NVIDIA GeForce RTX 4060 Ti_trt-10.12.0.36_torch_tensorrt-2.9.0+cu130_opt-5_tiling-full_headpad5_1920x1080.engine_2.4.1-dev16.engine.
+BACKEND: int8 probe: calibration only, 16 frames (certification withdrawn 2026-11-19: its pair set moved with the configuration, so its percentages are not comparable across runs)
+BACKEND: int8 calibration frames handed to the body: 24 (forced verdict: int8)
+BACKEND: int8 fit FORCED to int8; the probe calibrated only
+BACKEND: DEBUG after assign: option=139983453058832 int8Fit=int8
+BACKEND: Using Upscaling Model: /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth
+BACKEND: head convolution body.0: 3 input channels -> 8 (zeros, padded inside the head so the model's own residual keeps its 3 channels), so the engine can fuse it with its PReLU
+Loading TensorRT engine from /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth_fp16_NVIDIA GeForce RTX 4060 Ti_trt-10.12.0.36_torch_tensorrt-2.9.0+cu130_opt-5_tiling-full_headpad5_1920x1080.engine_2.4.1-dev16.engine.
+BACKEND: DEBUG after hotReload: option=139983453058832 int8Fit=int8
+BACKEND: Upscale Times: 2
+BACKEND: Interpolate Factor: 1.0
+BACKEND: Total Output Frames: 498
+BACKEND: Model Scale: 2
+BACKEND: HDR Mode: False
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', '/tmp/opencode/bd_violet20s.mkv', '-vf', 'crop=1920:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1920x1080', '-']
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', '/tmp/opencode/bd_violet20s.mkv', '-vf', 'crop=1920:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1920x1080', '-']
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', '/tmp/opencode/bd_violet20s.mkv', '-vf', 'crop=1920:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1920x1080', '-']
+BACKEND: 
+FFMPEG WRITE COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-loglevel', 'error', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-framerate', '23.976023976023978', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-colorspace', 'bt709', '-color_range', 'tv', '-vcodec', 'rawvideo', '-s', '3840x2160', '-i', '-', '-r', '23.976023976023978', '-fflags', '+genpts', '-i', '/tmp/opencode/bd_violet20s.mkv', '-map', '0:v', '-map', '1:a?', '-map', '1:s?', '-avoid_negative_ts', 'make_zero', '-max_interleave_delta', '0', '-muxpreload', '0', '-muxdelay', '0', '-c:v', 'hevc_nvenc', '-preset', 'p1', '-cq:v', '18', '-c:a', 'copy', '-c:s', 'copy', '-pix_fmt', 'yuv420p', '/home/jorj/2Tb/pack-ring-nvenc/bd_violet20s_ring1_r1_nvenc.mkv', '-y']
+
+BACKEND: Rendering
+Duration: 20.77075 seconds
+Total Frames: 498
+Resolution: 1920x1080
+FPS: 23.976023976023978
+Color Space: None
+Color Transfer: None
+Color Primaries: None
+Pixel Format: yuv420p
+Video Codec: h264
+Video Bitrate: 37715 kbps
+Is HDR: False
+Bit Depth: 8
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling device: auto, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: auto
+int8: start (tilesize=0, tile_upscaler=False, int8Fit=int8)
+int8: wrapper=UpscaleModelWrapper model=SRVGGNetCompact
+int8: built (supports=True)
+int8 head FUSED: one kernel writes the codes (K=32 from a 8-channel head, no separate quantise pass)
+int8 tail FUSED with shuffle+residual: one kernel, scale 2
+int8 body first-frame sanity: 0.00002% of pixels >8 levels against the fp16 model (n=1, gross gate 1.0%; NOT an acceptance number - the picture is judged on renders)
+host timeline: upload 7.93  upload_sync 0.01  model-call 6551.32  frame-ctor 0.01  final-sync 26.02  | total 6585.28 ms | last_inference_ms 6577.35 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x None bytes per frame (no per-frame tobytes)
+BACKEND: startup: first frame enqueued 33.05 s after process start (interpreter, engine, ffmpeg/NVENC init)
+host timeline: upload 1.98  upload_sync 0.01  model-call 1.49  frame-ctor 0.01  final-sync 25.34  | total 28.83 ms | last_inference_ms 26.84 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+host timeline: upload 2.34  upload_sync 0.01  model-call 0.97  frame-ctor 0.01  final-sync 25.76  | total 29.09 ms | last_inference_ms 26.73 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.43 ms of HOST (0.027 ms each); whole hop loop 0.44 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 57.65 ms/frame (last 8), frame 8
+int8 phases: head 0.7  quantise 0.0  hops 25.7  tail 1.0  SUM 27.4  BODY-TOTAL 27.4 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.02  shuffle 0.00  residual 0.00  SUM 1.03 ms
+host timeline: upload 2.28  upload_sync 0.01  model-call 1.26  frame-ctor 0.01  final-sync 29.85  | total 33.41 ms | last_inference_ms 31.11 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.73 ms/frame (last 8); alloc_retries 0
+
+
+Initialized Frame PyTorch utils
+FPS: 1 Current Frame: 7 ETA: 0:08:11pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.34 ms of HOST (0.021 ms each); whole hop loop 0.35 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 28.23 ms/frame (last 8), frame 16
+int8 phases: head 0.7  quantise 0.0  hops 26.4  tail 1.0  SUM 28.0  BODY-TOTAL 28.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.38  upload_sync 0.01  model-call 0.86  frame-ctor 0.01  final-sync 26.71  | total 29.96 ms | last_inference_ms 27.58 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.96 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.60 ms of HOST (0.037 ms each); whole hop loop 0.60 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                    FPS: 3 Current Frame: 22 ETA: 0:02:42int8 body GPU: 27.76 ms/frame (last 8), frame 24
+int8 phases: head 0.7  quantise 0.0  hops 25.9  tail 1.0  SUM 27.6  BODY-TOTAL 27.6 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.99  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.55  upload_sync 0.01  model-call 0.94  frame-ctor 0.01  final-sync 26.59  | total 30.09 ms | last_inference_ms 27.53 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.90 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.31 ms of HOST (0.020 ms each); whole hop loop 0.32 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.73 ms/frame (last 8), frame 32
+int8 phases: head 0.6  quantise 0.0  hops 25.7  tail 1.0  SUM 27.3  BODY-TOTAL 27.3 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.66  upload_sync 0.01  model-call 0.91  frame-ctor 0.01  final-sync 26.70  | total 30.29 ms | last_inference_ms 27.62 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.81 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                     FPS: 4 Current Frame: 36 ETA: 0:01:42pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.37 ms of HOST (0.023 ms each); whole hop loop 0.38 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.58 ms/frame (last 8), frame 40
+int8 phases: head 0.7  quantise 0.0  hops 25.4  tail 1.0  SUM 27.1  BODY-TOTAL 27.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.02  shuffle 0.00  residual 0.00  SUM 1.02 ms
+host timeline: upload 2.48  upload_sync 0.01  model-call 0.79  frame-ctor 0.01  final-sync 27.03  | total 30.32 ms | last_inference_ms 27.83 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.68 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.38 ms of HOST (0.024 ms each); whole hop loop 0.39 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.50 ms/frame (last 8), frame 48
+int8 phases: head 0.6  quantise 0.0  hops 25.4  tail 1.0  SUM 27.0  BODY-TOTAL 27.0 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.98  shuffle 0.00  residual 0.00  SUM 0.98 ms
+host timeline: upload 2.50  upload_sync 0.01  model-call 0.80  frame-ctor 0.01  final-sync 26.41  | total 29.73 ms | last_inference_ms 27.22 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.50 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                     FPS: 6 Current Frame: 51 ETA: 0:01:14pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.54 ms of HOST (0.034 ms each); whole hop loop 0.55 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.39 ms/frame (last 8), frame 56
+int8 phases: head 0.7  quantise 0.0  hops 26.2  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.68  upload_sync 0.02  model-call 1.11  frame-ctor 0.01  final-sync 26.96  | total 30.77 ms | last_inference_ms 28.07 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.56 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.32 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.55 ms/frame (last 8), frame 64
+int8 phases: head 0.6  quantise 0.0  hops 26.2  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.52  upload_sync 0.01  model-call 1.14  frame-ctor 0.01  final-sync 26.29  | total 29.96 ms | last_inference_ms 27.44 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.55 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                     FPS: 7 Current Frame: 65 ETA: 0:00:59pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.37 ms of HOST (0.023 ms each); whole hop loop 0.38 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.40 ms/frame (last 8), frame 72
+int8 phases: head 0.6  quantise 0.0  hops 25.9  tail 1.0  SUM 27.5  BODY-TOTAL 27.5 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.29  upload_sync 0.01  model-call 1.09  frame-ctor 0.01  final-sync 26.20  | total 29.60 ms | last_inference_ms 27.29 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.45 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.55 ms of HOST (0.035 ms each); whole hop loop 0.56 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.49 ms/frame (last 8), frame 80
+int8 phases: head 0.7  quantise 0.0  hops 25.4  tail 1.0  SUM 27.1  BODY-TOTAL 27.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.02  shuffle 0.00  residual 0.00  SUM 1.03 ms
+host timeline: upload 2.59  upload_sync 0.01  model-call 0.97  frame-ctor 0.01  final-sync 26.78  | total 30.36 ms | last_inference_ms 27.76 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.62 ms/frame (last 8); alloc_retries 0
+                                     FPS: 8 Current Frame: 79 ETA: 0:00:50pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.58 ms of HOST (0.036 ms each); whole hop loop 0.58 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.50 ms/frame (last 8), frame 88
+int8 phases: head 0.6  quantise 0.0  hops 25.4  tail 1.0  SUM 27.0  BODY-TOTAL 27.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.98  shuffle 0.00  residual 0.00  SUM 0.98 ms
+host timeline: upload 2.36  upload_sync 0.01  model-call 1.07  frame-ctor 0.01  final-sync 27.13  | total 30.57 ms | last_inference_ms 28.20 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.72 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.36 ms of HOST (0.023 ms each); whole hop loop 0.37 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.60 ms/frame (last 8), frame 96
+int8 phases: head 0.6  quantise 0.0  hops 26.2  tail 1.0  SUM 27.8  BODY-TOTAL 27.8 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+                                     FPS: 9 Current Frame: 94 ETA: 0:00:42host timeline: upload 1.84  upload_sync 0.01  model-call 1.45  frame-ctor 0.01  final-sync 27.41  | total 30.72 ms | last_inference_ms 28.86 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.74 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.52 ms of HOST (0.033 ms each); whole hop loop 0.53 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.54 ms/frame (last 8), frame 104
+int8 phases: head 0.7  quantise 0.0  hops 26.3  tail 1.0  SUM 28.0  BODY-TOTAL 28.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.24  upload_sync 0.01  model-call 0.83  frame-ctor 0.01  final-sync 27.21  | total 30.30 ms | last_inference_ms 28.05 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.60 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                     FPS: 10 Current Frame: 108 ETA: 0:00:37pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.35 ms of HOST (0.022 ms each); whole hop loop 0.35 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.57 ms/frame (last 8), frame 112
+int8 phases: head 0.7  quantise 0.0  hops 26.3  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.51  upload_sync 0.01  model-call 1.00  frame-ctor 0.01  final-sync 26.30  | total 29.82 ms | last_inference_ms 27.30 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.55 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.46 ms of HOST (0.029 ms each); whole hop loop 0.46 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.36 ms/frame (last 8), frame 120
+int8 phases: head 0.6  quantise 0.0  hops 25.5  tail 1.0  SUM 27.2  BODY-TOTAL 27.2 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.01  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.33  upload_sync 0.01  model-call 0.76  frame-ctor 0.01  final-sync 26.60  | total 29.71 ms | last_inference_ms 27.37 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.43 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 11 Current Frame: 123 ETA: 0:00:33pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.46 ms of HOST (0.028 ms each); whole hop loop 0.46 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.50 ms/frame (last 8), frame 128
+int8 phases: head 0.7  quantise 0.0  hops 25.5  tail 1.0  SUM 27.2  BODY-TOTAL 27.2 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.98  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 2.62  upload_sync 0.01  model-call 1.14  frame-ctor 0.01  final-sync 26.97  | total 30.75 ms | last_inference_ms 28.12 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.67 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.39 ms of HOST (0.024 ms each); whole hop loop 0.40 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.64 ms/frame (last 8), frame 136
+int8 phases: head 0.7  quantise 0.0  hops 26.8  tail 1.0  SUM 28.5  BODY-TOTAL 28.5 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.04  shuffle 0.00  residual 0.00  SUM 1.04 ms
+host timeline: upload 2.54  upload_sync 0.01  model-call 0.81  frame-ctor 0.01  final-sync 27.23  | total 30.59 ms | last_inference_ms 28.04 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.71 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 12 Current Frame: 137 ETA: 0:00:30pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.35 ms of HOST (0.022 ms each); whole hop loop 0.35 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.59 ms/frame (last 8), frame 144
+int8 phases: head 0.7  quantise 0.0  hops 26.3  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 1.97  upload_sync 0.03  model-call 1.83  frame-ctor 0.01  final-sync 26.69  | total 30.53 ms | last_inference_ms 28.52 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.81 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.021 ms each); whole hop loop 0.34 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.54 ms/frame (last 8), frame 152
+int8 phases: head 0.7  quantise 0.0  hops 26.3  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.99  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.63  upload_sync 0.01  model-call 0.87  frame-ctor 0.01  final-sync 26.52  | total 30.04 ms | last_inference_ms 27.39 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.56 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 13 Current Frame: 152 ETA: 0:00:27pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.37 ms of HOST (0.023 ms each); whole hop loop 0.37 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.50 ms/frame (last 8), frame 160
+int8 phases: head 0.6  quantise 0.0  hops 26.0  tail 1.0  SUM 27.7  BODY-TOTAL 27.7 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.49  upload_sync 0.01  model-call 0.94  frame-ctor 0.01  final-sync 26.38  | total 29.82 ms | last_inference_ms 27.32 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.57 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.49 ms of HOST (0.031 ms each); whole hop loop 0.49 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.58 ms/frame (last 8), frame 168
+int8 phases: head 0.6  quantise 0.0  hops 25.4  tail 1.0  SUM 27.1  BODY-TOTAL 27.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.02  shuffle 0.00  residual 0.00  SUM 1.03 ms
+                                       FPS: 13 Current Frame: 166 ETA: 0:00:25host timeline: upload 2.56  upload_sync 0.01  model-call 0.95  frame-ctor 0.01  final-sync 26.67  | total 30.19 ms | last_inference_ms 27.62 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.77 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.51 ms/frame (last 8), frame 176
+int8 phases: head 0.6  quantise 0.0  hops 25.4  tail 1.0  SUM 27.0  BODY-TOTAL 27.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.98  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 2.48  upload_sync 0.01  model-call 0.83  frame-ctor 0.01  final-sync 26.43  | total 29.76 ms | last_inference_ms 27.27 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.54 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.40 ms of HOST (0.025 ms each); whole hop loop 0.41 ms
+                                       FPS: 14 Current Frame: 181 ETA: 0:00:22pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.49 ms/frame (last 8), frame 184
+int8 phases: head 0.7  quantise 0.0  hops 26.1  tail 1.0  SUM 27.8  BODY-TOTAL 27.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.64  upload_sync 0.02  model-call 0.95  frame-ctor 0.01  final-sync 27.36  | total 30.97 ms | last_inference_ms 28.32 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.70 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.41 ms of HOST (0.026 ms each); whole hop loop 0.42 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.57 ms/frame (last 8), frame 192
+int8 phases: head 0.7  quantise 0.0  hops 26.3  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.44  upload_sync 0.01  model-call 0.86  frame-ctor 0.01  final-sync 27.29  | total 30.61 ms | last_inference_ms 28.15 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.74 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 14 Current Frame: 195 ETA: 0:00:20pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.47 ms of HOST (0.029 ms each); whole hop loop 0.47 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.60 ms/frame (last 8), frame 200
+int8 phases: head 0.6  quantise 0.0  hops 26.4  tail 1.0  SUM 28.0  BODY-TOTAL 28.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 1.81  upload_sync 0.01  model-call 1.51  frame-ctor 0.01  final-sync 26.59  | total 29.93 ms | last_inference_ms 28.11 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.84 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.49 ms/frame (last 8), frame 208
+int8 phases: head 0.6  quantise 0.0  hops 26.0  tail 1.0  SUM 27.6  BODY-TOTAL 27.6 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.18  upload_sync 0.01  model-call 1.03  frame-ctor 0.01  final-sync 26.26  | total 29.49 ms | last_inference_ms 27.30 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.55 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 15 Current Frame: 210 ETA: 0:00:19pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.51 ms of HOST (0.032 ms each); whole hop loop 0.51 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.53 ms/frame (last 8), frame 216
+int8 phases: head 0.6  quantise 0.0  hops 25.5  tail 1.0  SUM 27.1  BODY-TOTAL 27.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.02  shuffle 0.00  residual 0.00  SUM 1.02 ms
+host timeline: upload 2.61  upload_sync 0.01  model-call 0.84  frame-ctor 0.01  final-sync 26.63  | total 30.10 ms | last_inference_ms 27.47 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.62 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.40 ms of HOST (0.025 ms each); whole hop loop 0.40 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.51 ms/frame (last 8), frame 224
+int8 phases: head 0.6  quantise 0.0  hops 25.4  tail 1.0  SUM 27.0  BODY-TOTAL 27.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.99  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 2.32  upload_sync 0.01  model-call 1.06  frame-ctor 0.01  final-sync 27.06  | total 30.46 ms | last_inference_ms 28.13 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.66 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 15 Current Frame: 224 ETA: 0:00:17pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.021 ms each); whole hop loop 0.34 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.55 ms/frame (last 8), frame 232
+int8 phases: head 0.7  quantise 0.0  hops 25.7  tail 1.0  SUM 27.3  BODY-TOTAL 27.3 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.99  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.69  upload_sync 0.01  model-call 0.91  frame-ctor 0.01  final-sync 27.29  | total 30.91 ms | last_inference_ms 28.21 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.64 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.021 ms each); whole hop loop 0.34 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.67 ms/frame (last 8), frame 240
+int8 phases: head 0.6  quantise 0.0  hops 26.3  tail 1.0  SUM 28.0  BODY-TOTAL 28.0 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.59  upload_sync 0.01  model-call 0.91  frame-ctor 0.01  final-sync 27.54  | total 31.06 ms | last_inference_ms 28.46 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 16 Current Frame: 239 ETA: 0:00:16fp16 engine GPU: 27.87 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.64 ms/frame (last 8), frame 248
+int8 phases: head 0.7  quantise 0.0  hops 26.3  tail 1.0  SUM 28.0  BODY-TOTAL 28.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.64  upload_sync 0.02  model-call 1.15  frame-ctor 0.01  final-sync 27.24  | total 31.05 ms | last_inference_ms 28.39 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.79 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.34 ms of HOST (0.022 ms each); whole hop loop 0.35 ms
+                                       FPS: 16 Current Frame: 253 ETA: 0:00:15pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.65 ms/frame (last 8), frame 256
+int8 phases: head 0.6  quantise 0.0  hops 26.4  tail 1.0  SUM 28.1  BODY-TOTAL 28.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.59  upload_sync 0.01  model-call 0.93  frame-ctor 0.01  final-sync 27.26  | total 30.80 ms | last_inference_ms 28.20 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.70 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.42 ms of HOST (0.026 ms each); whole hop loop 0.42 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.69 ms/frame (last 8), frame 264
+int8 phases: head 0.6  quantise 0.0  hops 26.5  tail 1.0  SUM 28.1  BODY-TOTAL 28.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.38  upload_sync 0.01  model-call 1.04  frame-ctor 0.01  final-sync 26.67  | total 30.11 ms | last_inference_ms 27.72 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.71 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 17 Current Frame: 267 ETA: 0:00:13pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.65 ms/frame (last 8), frame 272
+int8 phases: head 0.6  quantise 0.0  hops 26.3  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.48  upload_sync 0.01  model-call 0.93  frame-ctor 0.01  final-sync 26.48  | total 29.90 ms | last_inference_ms 27.42 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.68 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.54 ms of HOST (0.033 ms each); whole hop loop 0.54 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.64 ms/frame (last 8), frame 280
+int8 phases: head 0.6  quantise 0.0  hops 25.6  tail 1.0  SUM 27.3  BODY-TOTAL 27.3 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.46  upload_sync 0.01  model-call 0.83  frame-ctor 0.01  final-sync 26.58  | total 29.88 ms | last_inference_ms 27.42 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.71 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 17 Current Frame: 282 ETA: 0:00:12pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.43 ms of HOST (0.027 ms each); whole hop loop 0.44 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.67 ms/frame (last 8), frame 288
+int8 phases: head 0.7  quantise 0.0  hops 25.5  tail 1.0  SUM 27.2  BODY-TOTAL 27.2 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.98  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 2.49  upload_sync 0.01  model-call 1.13  frame-ctor 0.01  final-sync 26.98  | total 30.62 ms | last_inference_ms 28.12 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.85 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.56 ms of HOST (0.035 ms each); whole hop loop 0.57 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.61 ms/frame (last 8), frame 296
+int8 phases: head 0.6  quantise 0.0  hops 25.4  tail 1.0  SUM 27.1  BODY-TOTAL 27.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.98  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 2.63  upload_sync 0.01  model-call 0.83  frame-ctor 0.01  final-sync 27.42  | total 30.90 ms | last_inference_ms 28.26 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.79 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 17 Current Frame: 296 ETA: 0:00:11pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.021 ms each); whole hop loop 0.34 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.63 ms/frame (last 8), frame 304
+int8 phases: head 0.6  quantise 0.0  hops 26.0  tail 1.0  SUM 27.6  BODY-TOTAL 27.6 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.64  upload_sync 0.01  model-call 1.03  frame-ctor 0.01  final-sync 27.26  | total 30.94 ms | last_inference_ms 28.29 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.71 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.34 ms of HOST (0.021 ms each); whole hop loop 0.35 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.64 ms/frame (last 8), frame 312
+int8 phases: head 0.6  quantise 0.0  hops 26.2  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.63  upload_sync 0.01  model-call 0.77  frame-ctor 0.01  final-sync 27.56  | total 30.98 ms | last_inference_ms 28.34 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 18 Current Frame: 311 ETA: 0:00:10fp16 engine GPU: 27.80 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.31 ms of HOST (0.019 ms each); whole hop loop 0.31 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.72 ms/frame (last 8), frame 320
+int8 phases: head 0.6  quantise 0.0  hops 26.4  tail 1.0  SUM 28.1  BODY-TOTAL 28.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.45  upload_sync 0.01  model-call 0.72  frame-ctor 0.01  final-sync 27.14  | total 30.33 ms | last_inference_ms 27.87 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.73 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.32 ms
+                                       FPS: 18 Current Frame: 325 ETA: 0:00:09pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.67 ms/frame (last 8), frame 328
+int8 phases: head 0.6  quantise 0.0  hops 26.6  tail 1.0  SUM 28.3  BODY-TOTAL 28.3 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.42  upload_sync 0.01  model-call 0.86  frame-ctor 0.01  final-sync 26.61  | total 29.90 ms | last_inference_ms 27.47 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.68 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.39 ms of HOST (0.024 ms each); whole hop loop 0.39 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.60 ms/frame (last 8), frame 336
+int8 phases: head 0.6  quantise 0.0  hops 25.8  tail 1.0  SUM 27.4  BODY-TOTAL 27.4 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.61  upload_sync 0.01  model-call 0.90  frame-ctor 0.01  final-sync 26.47  | total 30.00 ms | last_inference_ms 27.38 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.66 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 18 Current Frame: 340 ETA: 0:00:08pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.32 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.48 ms/frame (last 8), frame 344
+int8 phases: head 0.7  quantise 0.0  hops 25.4  tail 1.0  SUM 27.1  BODY-TOTAL 27.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.03  shuffle 0.00  residual 0.00  SUM 1.03 ms
+host timeline: upload 2.42  upload_sync 0.01  model-call 0.83  frame-ctor 0.01  final-sync 27.01  | total 30.28 ms | last_inference_ms 27.84 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.62 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.54 ms of HOST (0.034 ms each); whole hop loop 0.54 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.61 ms/frame (last 8), frame 352
+int8 phases: head 0.6  quantise 0.0  hops 26.1  tail 1.0  SUM 27.8  BODY-TOTAL 27.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.58  upload_sync 0.01  model-call 0.76  frame-ctor 0.01  final-sync 26.58  | total 29.95 ms | last_inference_ms 27.35 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.61 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 19 Current Frame: 354 ETA: 0:00:07pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.55 ms of HOST (0.034 ms each); whole hop loop 0.55 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.59 ms/frame (last 8), frame 360
+int8 phases: head 0.6  quantise 0.0  hops 25.6  tail 1.0  SUM 27.3  BODY-TOTAL 27.3 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.50  upload_sync 0.01  model-call 0.74  frame-ctor 0.01  final-sync 26.76  | total 30.01 ms | last_inference_ms 27.50 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.68 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.021 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.59 ms/frame (last 8), frame 368
+int8 phases: head 0.6  quantise 0.0  hops 25.4  tail 1.0  SUM 27.1  BODY-TOTAL 27.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.98  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 2.63  upload_sync 0.01  model-call 1.11  frame-ctor 0.01  final-sync 26.98  | total 30.73 ms | last_inference_ms 28.09 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.81 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 19 Current Frame: 368 ETA: 0:00:06pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.31 ms of HOST (0.019 ms each); whole hop loop 0.31 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.85 ms/frame (last 8), frame 376
+int8 phases: head 0.6  quantise 0.0  hops 25.5  tail 1.0  SUM 27.1  BODY-TOTAL 27.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.99  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 2.45  upload_sync 0.01  model-call 0.94  frame-ctor 0.01  final-sync 27.16  | total 30.57 ms | last_inference_ms 28.11 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 28.01 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.47 ms of HOST (0.029 ms each); whole hop loop 0.47 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.57 ms/frame (last 8), frame 384
+int8 phases: head 0.6  quantise 0.0  hops 25.7  tail 1.0  SUM 27.4  BODY-TOTAL 27.4 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.99  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.58  upload_sync 0.01  model-call 0.86  frame-ctor 0.01  final-sync 27.32  | total 30.78 ms | last_inference_ms 28.18 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 19 Current Frame: 383 ETA: 0:00:06fp16 engine GPU: 27.71 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.34 ms of HOST (0.022 ms each); whole hop loop 0.35 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.59 ms/frame (last 8), frame 392
+int8 phases: head 0.7  quantise 0.0  hops 26.3  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 1.82  upload_sync 0.01  model-call 1.77  frame-ctor 0.01  final-sync 26.79  | total 30.39 ms | last_inference_ms 28.56 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.71 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.34 ms of HOST (0.021 ms each); whole hop loop 0.34 ms
+                                       FPS: 19 Current Frame: 397 ETA: 0:00:05pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.69 ms/frame (last 8), frame 400
+int8 phases: head 0.6  quantise 0.0  hops 26.5  tail 1.0  SUM 28.1  BODY-TOTAL 28.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.56  upload_sync 0.01  model-call 0.80  frame-ctor 0.01  final-sync 26.89  | total 30.28 ms | last_inference_ms 27.70 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.67 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.36 ms of HOST (0.023 ms each); whole hop loop 0.37 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.63 ms/frame (last 8), frame 408
+int8 phases: head 0.7  quantise 0.0  hops 26.2  tail 1.0  SUM 27.9  BODY-TOTAL 27.9 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.36  upload_sync 0.01  model-call 1.13  frame-ctor 0.01  final-sync 26.28  | total 29.79 ms | last_inference_ms 27.42 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.67 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 20 Current Frame: 412 ETA: 0:00:04pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.40 ms of HOST (0.025 ms each); whole hop loop 0.40 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.59 ms/frame (last 8), frame 416
+int8 phases: head 0.6  quantise 0.0  hops 25.7  tail 1.0  SUM 27.4  BODY-TOTAL 27.4 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.69  upload_sync 0.01  model-call 0.89  frame-ctor 0.01  final-sync 26.50  | total 30.09 ms | last_inference_ms 27.39 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.66 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.65 ms/frame (last 8), frame 424
+int8 phases: head 1.2  quantise 0.0  hops 25.4  tail 1.0  SUM 27.7  BODY-TOTAL 27.7 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.02  shuffle 0.00  residual 0.00  SUM 1.02 ms
+host timeline: upload 2.59  upload_sync 0.01  model-call 0.78  frame-ctor 0.01  final-sync 26.92  | total 30.30 ms | last_inference_ms 27.70 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.77 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 20 Current Frame: 426 ETA: 0:00:03pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.72 ms/frame (last 8), frame 432
+int8 phases: head 0.6  quantise 0.0  hops 25.4  tail 1.0  SUM 27.0  BODY-TOTAL 27.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.98  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 2.36  upload_sync 0.01  model-call 0.97  frame-ctor 0.01  final-sync 26.33  | total 29.68 ms | last_inference_ms 27.31 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.84 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.30 ms of HOST (0.019 ms each); whole hop loop 0.30 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.44 ms/frame (last 8), frame 440
+int8 phases: head 0.6  quantise 0.0  hops 26.2  tail 1.0  SUM 27.8  BODY-TOTAL 27.8 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.01  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 2.22  upload_sync 0.01  model-call 1.04  frame-ctor 0.01  final-sync 27.37  | total 30.66 ms | last_inference_ms 28.42 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.65 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 20 Current Frame: 440 ETA: 0:00:02pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.30 ms of HOST (0.019 ms each); whole hop loop 0.31 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.68 ms/frame (last 8), frame 448
+int8 phases: head 0.6  quantise 0.0  hops 26.4  tail 1.0  SUM 28.0  BODY-TOTAL 28.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.12  upload_sync 0.01  model-call 0.86  frame-ctor 0.01  final-sync 26.70  | total 29.70 ms | last_inference_ms 27.57 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.64 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.60 ms/frame (last 8), frame 456
+int8 phases: head 0.7  quantise 0.0  hops 25.8  tail 1.0  SUM 27.5  BODY-TOTAL 27.5 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 1.00  shuffle 0.00  residual 0.00  SUM 1.00 ms
+host timeline: upload 2.34  upload_sync 0.01  model-call 0.90  frame-ctor 0.01  final-sync 26.55  | total 29.80 ms | last_inference_ms 27.45 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.66 ms/frame (last 8); alloc_retries 0
+                                       FPS: 20 Current Frame: 455 ETA: 0:00:02pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.59 ms/frame (last 8), frame 464
+int8 phases: head 0.7  quantise 0.0  hops 25.6  tail 1.0  SUM 27.2  BODY-TOTAL 27.2 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.99  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 1.96  upload_sync 0.01  model-call 0.86  frame-ctor 0.01  final-sync 27.52  | total 30.36 ms | last_inference_ms 28.39 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.79 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.31 ms of HOST (0.020 ms each); whole hop loop 0.32 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.75 ms/frame (last 8), frame 472
+int8 phases: head 0.6  quantise 0.0  hops 26.5  tail 1.0  SUM 28.2  BODY-TOTAL 28.2 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.01  shuffle 0.00  residual 0.00  SUM 1.01 ms
+                                       FPS: 20 Current Frame: 470 ETA: 0:00:01host timeline: upload 1.79  upload_sync 0.01  model-call 0.88  frame-ctor 0.01  final-sync 27.04  | total 29.73 ms | last_inference_ms 27.92 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.76 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.33 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.65 ms/frame (last 8), frame 480
+int8 phases: head 0.6  quantise 0.0  hops 25.9  tail 1.0  SUM 27.5  BODY-TOTAL 27.5 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.01  shuffle 0.00  residual 0.00  SUM 1.01 ms
+host timeline: upload 1.78  upload_sync 0.01  model-call 0.82  frame-ctor 0.01  final-sync 26.60  | total 29.22 ms | last_inference_ms 27.43 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.66 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+                                       FPS: 21 Current Frame: 484 ETA: 0:00:00pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.32 ms
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+int8 body GPU: 27.64 ms/frame (last 8), frame 488
+int8 phases: head 0.6  quantise 0.0  hops 25.7  tail 1.0  SUM 27.3  BODY-TOTAL 27.3 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.99  shuffle 0.00  residual 0.00  SUM 0.99 ms
+host timeline: upload 1.77  upload_sync 0.01  model-call 0.76  frame-ctor 0.01  final-sync 27.46  | total 30.02 ms | last_inference_ms 28.23 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig False stride (24883200, 1, 11520, 3)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+fp16 engine GPU: 27.80 ms/frame (last 8); alloc_retries 0
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+BACKEND: render loop: 17.08 s for 494 frames (34.57 ms/frame), total 50.13 s since process start
+BACKEND: profile over 494 frames: gate 0.00 ms (input to tensor 0.00), model wall 43.52 ms (self-reported 41.07, engine 14.16, frame handover 0.01), input convert 0.00 ms, preview 0.00 ms, pack+queue 4.39 ms, read wait 0.23 ms, named 48.14 of frame total 47.92 ms, unaccounted -0.22 ms
+BACKEND: 
+Time to complete render: 23.89
+BACKEND: writer: 494 frames, write 5.14 ms/frame (max 138.3), wait for frames 43.02 ms/frame, 6146 MB total, busy 2.54 s of 23.89 s, queue max 3
