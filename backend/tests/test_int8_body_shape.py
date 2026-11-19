@@ -81,3 +81,24 @@ def test_supports_follows_the_same_rule():
     assert Int8Body.supports(_Body(16, feat=48)), "a native width is supported; it is just not tuned"
     assert not Int8Body.supports(_Body(16, feat=24)), "24 is not a multiple of 16: the dot cannot tile it"
     assert not Int8Body.supports(_Body(1))
+
+
+# ======================================================================================
+# the probe's loader reads the same shape from the weights
+# ======================================================================================
+
+
+def _state(feat: int, inner: int, scale: int) -> dict:
+    """A Compact state dict with the shapes the loader reads (values are irrelevant)."""
+    out = {"body.0.weight": torch.zeros(feat, 3, 3, 3), "body.0.bias": torch.zeros(feat)}
+    for i in range(inner):
+        out[f"body.{2 + 2 * i}.weight"] = torch.zeros(feat, feat, 3, 3)
+    out[f"body.{2 + 2 * inner}.weight"] = torch.zeros(3 * scale * scale, feat, 3, 3)
+    return out
+
+
+@pytest.mark.parametrize("feat,inner,scale", [(64, 16, 2), (64, 8, 2), (48, 16, 1), (32, 16, 1)])
+def test_the_probe_reads_width_depth_and_scale_from_the_weights(feat, inner, scale):
+    from src.utils.Int8Probe import compact_shape
+
+    assert compact_shape(_state(feat, inner, scale)) == (feat, inner, scale)
