@@ -64,6 +64,37 @@ Two results, one positive and one negative:
 - Scope: one episode, one cut, one model, fp16 engine, t-1 reference where the gate serves a chain of up to 2.
 
 
+
+## The hold-out: the ranking gain does not transfer
+
+The 1040 s row cannot calibrate a threshold (all 37 positives are in its second half), so a second failure was
+found by the gate's own behaviour and only then measured: ten more 8 s `-c copy` windows of the same episode,
+one render to null each to read the auto gate's noise floor. Seven engaged (offsets 120, 240, 400, 560, 700,
+960, 1360 s; floors 0.35-1.48), three refused (820, 1120, 1240 s; floors 3.45-31.55). Of the four engaging
+windows rendered as a lossless pair, one fails: **960 s - 200 frames, 123 reused, 7 above the 0.1% bar
+(worst 0.52019% at frame 56)**; 240, 400 and 560 s are clean (0.008%, 0.002%, 0.004%).
+
+Threshold picked on 1040 s by Youden's J over its reused frames, applied unchanged to 960 s:
+
+| statistic | threshold (1040 s) | AUC, 1040 s | **AUC, 960 s** | caught, 960 s | false alarms |
+|---|---|---|---|---|---|
+| `block_maxabs` (shipped) | 2.172 levels | 0.844 | **0.994** | 3 / 7 | 0 / 116 |
+| `mctf_mean` | 0.498 levels | 0.906 | **0.489** | 3 / 7 | 5 / 116 (4 per 100 clean) |
+
+**The motion-compensated residual's advantage does not survive the hold-out.** On the clip it was measured on
+it ranks better (0.906 against 0.844); on the held-out clip it collapses to chance (0.489) while the shipped
+block statistic is nearly perfect (0.994) - and at its own 1040 s threshold the MCTF mean buys five false
+alarms where the block statistic has none for the same three catches.
+
+That is the honest state of the first hypothesis: "the decision should be made under motion" is not supported
+as a general fix, and the 1040 s ranking was a property of that segment. What the two clips do say together is
+that the failure class is *not stationary*: the statistic that ranks one segment's damage perfectly ranks the
+other's at chance, in both directions. A decision variable for this artifact has to be evaluated per segment,
+which is a stronger claim than either statistic makes.
+
+
+
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so
@@ -92,6 +123,8 @@ reference implementation of "fresh" here is the same pipeline's own ungated rend
 @claim RU008 0.0 % "frames [97eac994605e678e] n=74" measured
 @claim RU009 88.2 % "frames [ff1ac1390b061f1f] n=93" measured
 
+@claim RU010 0.994 AUC "reused frames [5f0cfcb6920156cd] n=123" measured
+@claim RU011 0.489 AUC "reused frames [5f0cfcb6920156cd] n=123" measured
 @claim RU001 0.844 AUC "reused frames [b7010cf3b0acf799] n=130" measured
 @claim RU002 0.723 AUC "reused frames [b7010cf3b0acf799] n=130" measured
 @claim RU003 0.855 AUC "reused frames [b7010cf3b0acf799] n=130" measured

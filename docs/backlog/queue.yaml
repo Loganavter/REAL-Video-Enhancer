@@ -4906,3 +4906,57 @@ tasks:
     points: MCTF / motion-adaptive temporal filtering (Guo et al. ICIP'06; BM3D/VBM3D) for the decision;
     film-grain separation and re-synthesis (AV1 FG; ITU-T H Suppl.21 2025; deep FG removal and synthesis,
     IEEE TIP 2023) for the artifact.
+
+- id: rve-reuse-holdout-clip-2026-11-19
+  title: 'A second provable clip with a reuse failure, so the decision threshold is not a fit to one segment'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1d
+  tags:
+  - reuse
+  - gate
+  - holdout
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/reuse-decision-statistic.txt
+  - docs/backlog/queue.yaml
+  - docs/wsp/sources.yaml
+  owns_files:
+  - docs/wsp/verified/reuse-holdout.txt
+  refutes: >-
+    A statistic that only ranks well on the segment it was computed on is not a decision variable. The 1040 s
+    cut has all 37 damaged reuses in its second temporal half, so no threshold can be calibrated on it. The
+    falsifier is the hold-out: pick the threshold on the 1040 s cut, then apply it unchanged to a second
+    provable cut whose failure was found BEFORE the statistic was looked at. If mctf_mean at the 1040 s
+    threshold does not catch more of that clip's bad reuses than block_maxabs at its own 1040 s threshold -
+    with no more false alarms - the ranking gain is a property of one segment and the row closes with that.
+  acceptance: >-
+    (a) The second cut is PROVABLE: -c copy from a named source with the offset, the frame count and the
+    packet counts recorded in sources.yaml, so the population survives /tmp being wiped (the closed lane's
+    539-frame clip was cut: {mode: not_proved} and is gone). (b) The failure is found by the gate's own
+    behaviour, not by the statistic: a window where the auto gate reuses >= 40% of frames and >= 5% of those
+    reuses land over the 0.1% bar. (c) Both statistics calibrated on 1040 s and applied unchanged to the new
+    clip, reported as caught / false alarms per 100 clean reuses. (d) The same hold-out for the temporal-texture
+    criterion (ratio < 0.5 counts a frozen reuse), because on 1040 s the share flagged 37 frames while 119 of
+    130 reuses were frozen - a threshold on the share alone would certify a frozen output.
+  resolution: >-
+    DONE 2026-11-19, and it REFUTES the first hypothesis. Ten more 8 s -c copy windows of the same episode, one
+    null render each to read the gate's own noise floor: seven engage (120/240/400/560/700/960/1360 s, floors
+    0.35-1.48), three refuse (820/1120/1240 s, 3.45-31.55). Four engaging windows rendered as lossless pairs;
+    960 s is the second failure - 200 frames, 123 reused, 7 above the bar, worst 0.52019% at frame 56 - while
+    240/400/560 s are clean (0.008/0.002/0.004%). Threshold picked on 1040 s by Youden's J and applied
+    unchanged: block_maxabs (the shipped statistic) hits AUC 0.994 on the held-out clip with 3 of 7 caught and
+    0 false alarms in 116 clean reuses; mctf_mean, which ranked better on 1040 s (0.906 against 0.844),
+    collapses to AUC 0.489 and adds 5 false alarms for the same 3 catches. So the motion-compensated advantage
+    is a property of the segment it was measured on, and the failure class is not stationary: the statistic
+    that ranks one segment's damage perfectly ranks the other's at chance, in both directions.
+    docs/wsp/verified/reuse-decision-statistic.txt (hold-out section), records RU010-RU011.
+  note: >-
+    Filed rather than started from the reopened row's acceptance (b). The scan that found 1040 s is the
+    instrument: eight 8 s -c copy windows, one render to null each to read the auto gate's noise floor and
+    reuse share, then the ffv1 pair only for the windows that engage. Three of the first eight engaged
+    (1040 s floor 0.87, 340 s 0.93, 900 s 1.00) and one of those three failed (1040 s); the other two were
+    clean, which is why a second failure needs more windows rather than a different analysis.
