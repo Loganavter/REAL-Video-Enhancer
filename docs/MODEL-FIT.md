@@ -16,10 +16,10 @@ Of **55 distinct model files** in the collection:
 
 | verdict | count | meaning |
 |---|---|---|
-| **FULL** | 15 | every opt-in applies: int8 hops, int8 tail, shuffle fold, the tail writing the pipe payload |
+| **FULL** | 16 | every opt-in applies: int8 hops, int8 tail, shuffle fold, the tail writing the pipe payload |
 | BODY+TAIL | 5 | int8 hops and int8 tail; 1x upsamplers, so no shuffle fold and the pack converts colour |
 | BODY | 1 | int8 hops only - the tail is wider than the kernel's 16-channel pad (4x models carry 48) |
-| **NO** | 34 | RRDBNet / SPAN / OmniSR / RealPLKSR / DAT families, 24-channel compacts, and two files that are not models at all |
+| **NO** | 33 | RRDBNet / SPAN / OmniSR / RealPLKSR / DAT families, 24-channel compacts, and two files that are not models at all |
 
 ## Measured, per model
 
@@ -27,33 +27,36 @@ Of **55 distinct model files** in the collection:
 8 levels off in any channel, worst of three held-out frames. It is the gate the app applies at start-up
 (1%), **not** the acceptance bar (0.1% on a 494-frame pair) - see the caveat below.
 
-| verdict | model | arch | scale | share (worst of 3) | body int8, ms |
-|---|---|---|---|---|---|
-| FULL | `2xHFA2kAVCCompact(1).pth` | SRVGGNetCompact | x2 | 0.0000% | 28.16 |
-| FULL | `2xHFA2k_compact_multijpg(1).pth` | SRVGGNetCompact | x2 | 0.0000% | 27.57 |
-| FULL | `WoEiCS_2x(1).pth` | SRVGGNetCompact | x2 | 0.0001% | 27.68 |
-| FULL | `2x-AniScale.pth` | SRVGGNetCompact | x2 | 0.0001% | 27.31 |
-| FULL | `2x-Bubble-AnimeScale-Compact-v1(3).pth` | SRVGGNetCompact | x2 | 0.0012% | 27.40 |
-| FULL | `2x-LD-Anime-Compact.pth` | SRVGGNetCompact | x2 | 0.0110% | 27.20 |
-| FULL | `2x-Futsuu-Anime(1).pth` | SRVGGNetCompact | x2 | 0.0114% | 27.34 |
-| FULL | `2xGT-v2-evA-01.pth` | SRVGGNetCompact | x2 | 0.0156% | 27.44 |
-| FULL | `2x-anifilm-compact.pth` | SRVGGNetCompact | x2 | 0.0600% | 27.30 |
-| FULL | `2x.StarSample.V1.0(2).pth` | SRVGGNetCompact | x2 | 0.0650% | 26.89 |
-| FULL | `2xken-v1-evA-01.pth` | SRVGGNetCompact | x2 | 0.0664% | 27.59 |
-| FULL | `2xHFA2k_LUDVAE_compact(2).pth` | SRVGGNetCompact | x2 | 0.0761% | 27.80 |
-| FULL | `2x_AniSD_AC_G6i2a_Compact_72500.pth` | SRVGGNetCompact | x2 | 0.0982% | 27.09 |
-| FULL | `2x_Ani4K_Compact_35000.pth` | SRVGGNetCompact | x2 | 0.3021% | 27.36 |
-| FULL | `2x_GarfieldJr_net_g_51000.pth` | SRVGGNetCompact | x2 | 0.8763% | 27.40 |
-| BODY+TAIL | `1x-Dotzilla-Compact.pth` | SRVGGNetCompact | x1 | 0.0000% | 27.70 |
-| BODY+TAIL | `1x-AnimeUndeint-Compact(1).pth` | SRVGGNetCompact | x1 | 0.0001% | 28.24 |
-| BODY+TAIL | `1x-BleedOut-Compact.pth` | SRVGGNetCompact | x1 | 0.0014% | 28.11 |
-| BODY+TAIL | `1x-BroadcastToStudio_Compact(1).pth` | SRVGGNetCompact | x1 | 0.0966% | 27.49 |
-| BODY+TAIL | `1x-Epsilon-one-compact(3).pth` | SRVGGNetCompact | x1 | 1.5394% | 28.04 |
-| BODY | `realesr-animevideov3(1).pth` | SRVGGNetCompact | x4 | 0.1410% | 37.98 |
+| verdict | model | arch | scale | share, per-tensor | share, per-channel | body int8, ms |
+|---|---|---|---|---|---|---|
+| FULL | `2xHFA2kAVCCompact(1).pth` | SRVGGNetCompact | x2 | 0.0000% | 0.0000% | 28.20 |
+| FULL | `2xHFA2k_compact_multijpg(1).pth` | SRVGGNetCompact | x2 | 0.0000% | 0.0001% | 27.59 |
+| FULL | `WoEiCS_2x(1).pth` | SRVGGNetCompact | x2 | 0.0001% | 0.0000% | 27.75 |
+| FULL | `2x-AniScale.pth` | SRVGGNetCompact | x2 | 0.0001% | 0.0002% | 27.31 |
+| FULL | `2x-Bubble-AnimeScale-Compact-v1(3).pth` | SRVGGNetCompact | x2 | 0.0012% | 0.0004% | 27.46 |
+| FULL | `2x-LD-Anime-Compact.pth` | SRVGGNetCompact | x2 | 0.0110% | 0.0019% | 27.24 |
+| FULL | `2x-Futsuu-Anime(1).pth` | SRVGGNetCompact | x2 | 0.0114% | 0.0309% | 27.32 |
+| FULL | `2xGT-v2-evA-01.pth` | SRVGGNetCompact | x2 | 0.0156% | 0.0075% | 27.42 |
+| FULL | `2x-anifilm-compact.pth` | SRVGGNetCompact | x2 | 0.0600% | 0.0171% | 27.36 |
+| FULL | `2x.StarSample.V1.0(2).pth` | SRVGGNetCompact | x2 | 0.0650% | 0.0031% | 26.94 |
+| FULL | `2xken-v1-evA-01.pth` | SRVGGNetCompact | x2 | 0.0664% | 0.1759% | 27.60 |
+| FULL | `2xHFA2k_LUDVAE_compact(2).pth` | SRVGGNetCompact | x2 | 0.0761% | 0.2789% | 27.73 |
+| FULL | `2x_AniSD_AC_G6i2a_Compact_72500.pth` | SRVGGNetCompact | x2 | 0.0982% | 0.0021% | 27.10 |
+| FULL | `2x_Ani4K_Compact_35000.pth` | SRVGGNetCompact | x2 | 0.3021% | 0.0140% | 27.38 |
+| FULL | `2x_GarfieldJr_net_g_51000.pth` | SRVGGNetCompact | x2 | 0.8763% | 0.0436% | 27.40 |
+| BODY+TAIL | `1x-Dotzilla-Compact.pth` | SRVGGNetCompact | x1 | 0.0000% | 0.0000% | 27.64 |
+| BODY+TAIL | `1x-AnimeUndeint-Compact(1).pth` | SRVGGNetCompact | x1 | 0.0001% | 0.0000% | 28.17 |
+| BODY+TAIL | `1x-BleedOut-Compact.pth` | SRVGGNetCompact | x1 | 0.0014% | 0.0000% | 28.15 |
+| BODY+TAIL | `1x-BroadcastToStudio_Compact(1).pth` | SRVGGNetCompact | x1 | 0.0966% | 0.0251% | 27.45 |
+| BODY+TAIL | `1x-Epsilon-one-compact(3).pth` | SRVGGNetCompact | x1 | 1.5394% | 0.0979% | 27.97 |
+| BODY | `realesr-animevideov3(1).pth` | SRVGGNetCompact | x4 | 0.1410% | 0.0288% | 38.04 |
+
+Structurally FULL but **not yet measured** (the inventory was regenerated after the sweep, when the
+hop-count rule stopped refusing them): `2x-sudo-UltraCompact(1).pth`.
 
 ## What this says
 
-**Model choice does not buy speed.** The 15 FULL models land at 26.89-28.16 ms for the body - a 4.6% spread that is drift: they are the
+**Model choice does not buy speed.** The 15 FULL models land at 26.94-28.20 ms for the body - a 4.6% spread that is drift: they are the
 same shape (16x64 convs, 12-channel tail), and the sweep ran them one process at a time, so a warm clock
 is what separates them. What model choice buys is the picture.
 
@@ -74,8 +77,29 @@ is exact for any r), but the kernel's `scale == 2` condition is what the shipped
 deliberate scope line, and the reason a 1x model is not a FULL verdict here.
 
 **4x pays twice.** `realesr-animevideov3` (r=4, 48 tail channels) gets hops only and its body reads
-37.98 ms - about a third more than the 2x
+38.04 ms - about a third more than the 2x
 models, because the tail stays fp16 and produces 16.6 Mpx instead of 4.1.
+
+## Two grids, and the predictor that failed
+
+`RVE_INT8_PER_CHANNEL=1` makes the int8 grid per channel instead of per tensor. It is not a small
+setting: on the same 21 models it rescues some and damages others.
+
+**Rescued** (per-channel at least 3x better): `1x-Epsilon-one-compact(3).pth` 1.5394% -> 0.0979%, `2x_GarfieldJr_net_g_51000.pth` 0.8763% -> 0.0436%, `2x_Ani4K_Compact_35000.pth` 0.3021% -> 0.0140%, `realesr-animevideov3(1).pth` 0.1410% -> 0.0288%, `2x_AniSD_AC_G6i2a_Compact_72500.pth` 0.0982% -> 0.0021%, `1x-BroadcastToStudio_Compact(1).pth` 0.0966% -> 0.0251%, `2x.StarSample.V1.0(2).pth` 0.0650% -> 0.0031%, `2x-anifilm-compact.pth` 0.0600% -> 0.0171%, `2x-LD-Anime-Compact.pth` 0.0110% -> 0.0019%.
+
+**Damaged** (per-channel worse by more than half): `2x-Futsuu-Anime(1).pth` 0.0114% -> 0.0309%, `2xken-v1-evA-01.pth` 0.0664% -> 0.1759%, `2xHFA2k_LUDVAE_compact(2).pth` 0.0761% -> 0.2789%.
+
+The hypothesis this row was filed with was that the calibration grid's dynamic range (`max/median` of
+the per-channel maxima) predicts which models improve. **It does not.** The two groups overlap:
+
+- rescued models' spreads: [4.2, 4.34, 4.74, 4.96, 4.99, 5.15, 6.33, 6.66, 6.93]
+- damaged models' spreads: [4.25, 4.48, 4.55]
+
+So the rule is not a threshold on the grid. The implementable version is to **measure both grids and
+keep the better one**, choosing on frames disjoint from the ones the start-up gate certifies on -
+otherwise the gate would pass by construction. That is a small change, and its cost is one extra
+build per render; the alternative (a flag nobody sets) leaves six models looking unquantisable when
+the grid was the problem.
 
 ## Not covered
 
