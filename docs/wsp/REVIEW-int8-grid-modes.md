@@ -95,9 +95,13 @@ The 3-frame gate is a smoke test. For the production model the ladder was render
 
 ```
 494 frames, ffv1 4:4:4, reference: the FP16 ENGINE's own render
-  shipped per-tensor  vs  K=2    worst share 0.00625%   frames over the 0.1% bar: 0
-  K=2                 vs  engine worst share 0.00125%   frames over the 0.1% bar: 0   (peak 19)
+  shipped per-tensor  vs  engine   worst share 0.00353%   frames over the 0.1% bar: 0  (peak 24)
+  K=2                 vs  engine   worst share 0.00125%   frames over the 0.1% bar: 0  (peak 19)
+  shipped per-tensor  vs  K=2      worst share 0.00625%   frames over the 0.1% bar: 0
 ```
+
+The triangle is consistent: the two int8 configurations differ from each other (0.00625%) by more than either
+differs from the engine, which is what happens when the engine sits between them.
 
 So the clamp is not a marginal reshuffle of a broken picture: both configurations are far inside the bar on the
 full clip, and K=2 is the closer of the two to the engine by a factor of five on this statistic.
@@ -191,8 +195,8 @@ faster than the shipped per-tensor (27.28 against 26.93 ms, one draw each).
 - These are three held-out frames of one clip (BD Violet, 1080p, 10-bit source). The acceptance statistic of
   this project is a worst frame of a 494-frame pair at 0.1%. **Only the production model has one** (§2c); the
   other twenty are ranked by a smoke test and must not be quoted as verdicts.
-- **A retraction of my own:** I first reported that the 494-frame pair reads 0.42% for the shipped body, making
-  the smoke test understate by ~37x. That number came from `int8-scales-bd.txt`, whose own text flags a
+- **A retraction of my own:** I first reported that the 494-frame pair reads 0.42% for the shipped body (0.00353%
+  is the measured value), making the smoke test understate by ~37x. That number came from `int8-scales-bd.txt`, whose own text flags a
   different reference for its per-channel row, and it does not survive the measurement above: on one
   instrument, the shipped body reads 0.00625% against K=2. Two records with different references were
   multiplied, which is the exact error class this project keeps retracting.
