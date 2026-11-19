@@ -4325,3 +4325,41 @@ tasks:
     terms (four extra builds from the same calibration maxima) but it doubles a 6.5 s start-up, and the
     calibration cache row removes the frames half of that, which makes the sweep's share the remaining cost.
 
+- id: rve-grid-k-learned-2026-11-20
+  title: 'Make the grid clamp a LEARNED per-layer parameter (PAMS), instead of a swept constant'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 3d
+  tags:
+  - int8
+  - quantisation
+  - prior-art
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/PRIOR-ART-2026-11-20.md
+  owns_files:
+  - docs/wsp/verified/int8-grid-k-learned.txt
+  refutes: >-
+    The grid clamp has to be chosen: swept at start-up, or predicted from the weights. PAMS (ECCV 2020,
+    arXiv:2011.04212) says neither - a trainable truncated parameter per layer explores the quantisation range
+    itself, and their 8-bit model BEATS its own FP32 baseline on Set5 (32.095 -> 32.124 dB). Our measurements point
+    the same way: the optimum K is interior (weight error has an interior minimum at K=4), model-dependent (2/3/4),
+    and unpredictable from any of five weight statistics or from a linear argmin over the two measured errors
+    (4/22). If a learned per-layer scale lands at least as low as the best fixed K on the ladder, the start-up
+    sweep, its 2x guard and the whole "which K" question disappear.
+  acceptance: >-
+    (a) Read PAMS properly and state exactly which parameter is learned and against what loss, before writing code.
+    (b) Offline first, no training: take the ladder's best fixed K as the baseline and check whether the
+    per-layer optimum (a K per layer instead of one per model) beats it on the same three held-out frames - if a
+    per-layer choice buys nothing, a learned one will not either, and the row closes there. (c) Only then: a
+    training loop that learns the scale (fine-tune the scale only, weights frozen), and a 494-frame pair against
+    the current best fixed K.
+  note: >-
+    Found by the prior-art search of 2026-11-20 (docs/wsp/PRIOR-ART-2026-11-20.md). Filed rather than started
+    because it needs a training loop this lane does not have, and because stage (b) - a per-layer K with no
+    training - is the cheap falsifier that decides whether the expensive half is worth it.
+
