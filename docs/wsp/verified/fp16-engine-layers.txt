@@ -79,21 +79,20 @@ PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/fp16-engine-la
   and shape. A timing cache is a start-up cost, not a frame cost.
 - `--useCudaGraph`: the launch overhead of 25 kernels - small at this layer count, unmeasured.
 - `--minShapes/--optShapes/--maxShapes`: what the engine costs at 4K, where the int8 body refuses to run.
-
-@claim FE001 78.328 ms "layers [fe1e66ed531ab1e0] n=60" measured
-@claim FE002 35.468 ms "layers [4c0b9628942c1e83] n=17" measured
-@claim FE003 37.483 ms "layers [6f6c40f21f5e8400] n=16" measured
-@claim FE004 1.233 ms "layers [b2c7ff784df89e77] n=21" measured
-@claim FE005 60.0 count "layers [fe1e66ed531ab1e0] n=60" measured
-@claim FE017 132.955 s "layers [fe1e66ed531ab1e0] n=60" measured
-@claim FE006 47.503 ms "layers [2165b9460d7fadca] n=25" measured
-@claim FE007 40.577 ms "layers [050dde6d0bb039f2] n=16" measured
-@claim FE008 2.193 ms "layers [53f9319257ca9aff] n=1" measured
-@claim FE009 1.625 ms "layers [049ce6c2983cb982] n=1" measured
-@claim FE010 1.104 ms "layers [e3af888782cf8825] n=1" measured
-@claim FE011 0.92 ms "layers [5e49614dab4bc1d0] n=1" measured
-@claim FE012 0.692 ms "layers [512088e41d863406] n=2" measured
-@claim FE013 0.301 ms "layers [2d7f3c85c811ceb5] n=1" measured
-@claim FE014 0.548 ms "layers [e26e93d9700a5093] n=1" measured
-@claim FE015 25.0 count "layers [2165b9460d7fadca] n=25" measured
-@claim FE016 280.72 s "layers [2165b9460d7fadca] n=25" measured
+@claim FE001 78.328 ms "layers [cd012d869ff15364] n=60" measured
+@claim FE002 35.468 ms "layers [3ce57f9e49ac6040] n=17" measured
+@claim FE003 37.483 ms "layers [7f5eb194d0c98255] n=16" measured
+@claim FE004 1.233 ms "layers [47fec237447e8413] n=21" measured
+@claim FE005 60.0 count "layers [cd012d869ff15364] n=60" measured
+@claim FE017 132.955 s "layers [cd012d869ff15364] n=60" measured
+@claim FE006 47.503 ms "layers [1658c37c90b82508] n=25" measured
+@claim FE007 40.577 ms "layers [ef8eaa01a3a98fd0] n=16" measured
+@claim FE008 2.193 ms "layers [be8872d181b725d8] n=1" measured
+@claim FE009 1.625 ms "layers [4e46a3684b4bf5ed] n=1" measured
+@claim FE010 1.104 ms "layers [5b4b6a565826df63] n=1" measured
+@claim FE011 0.92 ms "layers [8da650be1dce5d01] n=1" measured
+@claim FE012 0.692 ms "layers [d6f7c3aca6c17d24] n=2" measured
+@claim FE013 0.301 ms "layers [c54c91415170ac63] n=1" measured
+@claim FE014 0.548 ms "layers [d78728f5185a2e3f] n=1" measured
+@claim FE015 25.0 count "layers [1658c37c90b82508] n=25" measured
+@claim FE016 280.72 s "layers [1658c37c90b82508] n=25" measured

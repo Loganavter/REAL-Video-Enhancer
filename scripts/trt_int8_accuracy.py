@@ -4,7 +4,8 @@ The comparator question is narrow: TensorRT's own int8 (calibrated, implicit qua
 engine on the same card and shape. A speed number alone would say "int8 is faster" without saying what it did
 to the picture, and this project's int8 body is judged on picture pairs - so the same discipline here:
 
-  max |delta| in 8-bit codes, mean |delta|, the share of samples off by more than one code, and PSNR.
+  max |delta| in 8-bit codes, mean |delta|, the share of samples off by more than 1, 2 and 8 codes (the last
+is the threshold `engine-int8.txt` uses, so the two pages are comparable), and PSNR.
 
 Frames must be held out from calibration: a delta measured on the calibration set is a fit, not a result.
 
@@ -100,6 +101,7 @@ def main(argv=None) -> int:
                 "mean_codes": round(float(d.mean()), 5),
                 "share_gt1_pct": round(float((d > 1.0).float().mean() * 100), 6),
                 "share_gt2_pct": round(float((d > 2.0).float().mean() * 100), 6),
+                "share_gt8_pct": round(float((d > 8.0).float().mean() * 100), 6),
                 "psnr_db": round(float(10 * np.log10(1.0 / max(mse, 1e-12))), 4),
                 "out_range": [round(float(out.min()), 5), round(float(out.max()), 5)],
                 "ref_range": [round(float(ref.min()), 5), round(float(ref.max()), 5)],

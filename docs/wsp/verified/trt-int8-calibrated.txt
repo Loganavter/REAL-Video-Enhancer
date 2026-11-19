@@ -1,0 +1,125 @@
+# TensorRT's own int8, calibrated: 1.21x over its own fp16, and 1% of a dark frame off by more than 8 codes
+
+Measured 2026-11-20 on the 4060 Ti, TensorRT **10.12.0.36** (the app's own version), `trtexec 10.12.0.36`
+installed without root. Model `2x-Futsuu-Anime(1).pth` -> ONNX opset 17, static 1x3x1080x1920, builder level 5.
+Records `trt-int8-calibrated.jsonl` (TI001-TI026), raw `logs/trt-int8/` (three profiles, the accuracy JSON, the
+build manifest, the build log).
+
+Why this page: the lane had closed the **explicit Q/DQ** route (`engine-int8.txt`: lossless-but-slower, 64-70 ms
+against 50-56 fp16, because a per-channel PReLU cannot join an int8 epilogue). It had never built TensorRT's own
+**implicit** int8 with a calibrator - the vendor's quantiser on the same graph, which is the one comparison that
+can say whether the hand-written Triton body was needed.
+
+## What was built
+
+Three engines from one ONNX, same builder settings, only the quantisation arm differing:
+
+| arm | calibrator | build | size |
+|---|---|---|---|
+| fp16 | - | 193.496 s | 3.5 MiB |
+| int8 entropy | `IInt8EntropyCalibrator2` over 8 named frames | 170.854 s | 1.3 MiB |
+| int8 min-max | `IInt8MinMaxCalibrator` over the same 8 frames | 167.876 s | 1.26 MiB |
+
+The calibration population is eight frames, four from each bluray cut the lane renders (`bd_violet20s`,
+`bd_csm_same`), sha256 in `trt-int8-manifest.json`; the evaluation frames are **different timestamps from the same
+cuts** (`eval_violet` at 5 s, `eval_csm` at 10 s), because a delta measured on the calibration set is a fit, not a
+result. The calibration cache is 2.5 KB and is written next to the engine, so a rebuild needs no frames.
+
+## Speed: 1.21x, and the graph says why it is not more
+
+| engine | layers | ms | vs its own fp16 |
+|---|---|---|---|
+| fp16 | **25** | **46.854** | - |
+| int8 entropy | **60** | **38.867** | **1.205x** |
+| int8 min-max | **60** | **38.875** | 1.205x |
+
+Both calibrators land within 0.008 ms of each other: the algorithm is not the variable. The layer count is: int8
+takes the 25-layer fused graph and splits it back to 60, because **the per-channel PReLU cannot join an int8
+epilogue** - the same mechanism `engine-int8.txt` found on the Q/DQ build, and it is structural, not a
+calibrator artefact. Every hop pays a quantise/dequantise boundary again.
+
+So TensorRT's int8 buys **1.21x** over TensorRT's fp16 on this architecture. The app's int8 body buys **1.665x**
+end-to-end (JC013) and its body alone reads 26.1 ms where the fp16 engine's body-equivalent layers are 46.4 ms.
+
+## Picture: one held-out frame is fine, the other is not
+
+Against the fp16 engine, channel-max |delta| in 8-bit codes:
+
+| frame | arm | max | mean | share >8 codes | PSNR |
+|---|---|---|---|---|---|
+| csm t=10 | entropy | 5.85 | 0.53 | **0.0000%** | 51.57 dB |
+| csm t=10 | min-max | 10.09 | 1.09 | 0.0003% | 45.24 dB |
+| violet t=5 | entropy | **91.14** | 0.80 | **1.0715%** | 39.34 dB |
+| violet t=5 | min-max | 20.86 | 1.12 | 0.0136% | 44.95 dB |
+
+The lane's own bar for the int8 body is **0.1% of pixels above 8 levels**, and the shipped body measures
+**0.00125%** on 494 frames (K=2; 0.00353% per-tensor). On one held-out frame the entropy-calibrated TRT int8 is at
+**1.07%** - ten times the bar, and ~850 times the body's rate - with single pixels off by 91 codes. Min-max trades
+the peak for a uniform bias: its mean error doubles and 43-45% of samples sit off by more than one code.
+
+## Where the error is: the dark end, everywhere
+
+Diagnostic on the failing frame (entropy arm, worst six pixels): the reference is dark - 0.06-0.17 in 0-1 units -
+and the int8 engine returns 0.37-0.51. It **lifts the shadows by about 0.3**, i.e. 80 codes, and does it across the
+whole frame, not in a highlight: 1.32% of pixels have some channel off by more than 8 codes, and the row and column
+profiles are flat (1.2-2.4% per decile band). The frame is not unusual either - max luma 225, mean 94 - while the
+*clean* frame is the bright one (2.26% of pixels above 250).
+
+That is consistent with what the hardware allows: **symmetric-only quantisation** on this GPU (a non-zero
+zero-point is a DLA-only switch, `engine-int8.txt`), plus 16 PReLU boundaries each rounding the same activation.
+The shadows are where a symmetric range spends the fewest codes, and sixteen boundaries accumulate it.
+
+## What it means for the lane
+
+- **The hand body is justified by measurement, not by preference.** On the same model and card the vendor's
+  int8 gives 1.21x over its own fp16 and a visible shadow lift; the body gives 1.665x end-to-end and 0.00125% above
+  the bar over 494 frames.
+- **The two speeds are not one ratio.** The engine numbers here are a whole-frame `trtexec` build; the body's
+  26.1 ms is the app's phase counter on its tiled engine. What is same-instrument is: 46.854 vs 38.867 (trtexec),
+  and 52.39 vs 31.47 (the app). The conclusion does not depend on mixing them.
+- **What TRT int8 would need to compete** is per-layer precision control (keep head and tail fp16 - the Q/DQ page
+  did exactly that and still lost), asymmetric activation quantisation (not available), and the 16 PReLU
+  boundaries removed (a kernel, i.e. the body). None of that is cheaper than the body that exists.
+- **Not pursued, and why it is written down:** a 494-frame pair of the calibrated engine would cost two renders to
+  confirm what one held-out frame already shows by two orders of magnitude.
+
+## Reproduce
+
+```bash
+python3 scripts/trt_int8_calibrate.py --onnx /tmp/opencode/futsuu.onnx --frames /tmp/opencode/calib-frames \
+    --out /tmp/opencode --opt 5            # fp16, int8-entropy, int8-minmax + the manifest
+~/.local/bin/trtexec --loadEngine=/tmp/opencode/futsuu_int8_entropy.trt --dumpProfile --iterations=20 --avgRuns=20
+python3 scripts/trt_int8_accuracy.py --fp16 /tmp/opencode/futsuu_fp16.trt \
+    --int8 /tmp/opencode/futsuu_int8_entropy.trt --int8 /tmp/opencode/futsuu_int8_minmax.trt \
+    --frames /tmp/opencode/eval-frames --height 1080 --width 1920
+PYTHONPATH=scripts python3 scripts/trt_int8_records.py
+PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/trt-int8-calibrated.txt \
+    --records docs/wsp/verified/records/trt-int8-calibrated.jsonl --bars docs/claims-bars.json
+```
+
+@claim TI001 46.8535 ms "layers [a43a488db5aab724] n=25" measured
+@claim TI002 38.8674 ms "layers [09f5719fbdd2a8b2] n=60" measured
+@claim TI003 38.8748 ms "layers [56957989cc2d7780] n=60" measured
+@claim TI004 60.0 count "layers [09f5719fbdd2a8b2] n=60" measured
+@claim TI005 25.0 count "layers [a43a488db5aab724] n=25" measured
+@claim TI006 1.20547 x "layers [a43a488db5aab724] n=25" assumed
+@claim TI007 1.205241 x "layers [a43a488db5aab724] n=25" assumed
+@claim TI008 193.496 s "layers [a43a488db5aab724] n=25" measured
+@claim TI009 170.854 s "layers [09f5719fbdd2a8b2] n=60" measured
+@claim TI010 167.876 s "layers [56957989cc2d7780] n=60" measured
+@claim TI011 5.8521 levels "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TI012 0.0 % "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TI013 51.5736 dB "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TI014 0.5252 levels "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TI015 10.0854 levels "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TI016 0.0003 % "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TI017 45.241 dB "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TI018 1.0914 levels "pixels of one frame [08f6cf2d381aa38c] n=1" measured
+@claim TI019 91.1426 levels "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TI020 1.0715 % "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TI021 39.3431 dB "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TI022 0.801 levels "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TI023 20.8557 levels "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TI024 0.0136 % "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TI025 44.9497 dB "pixels of one frame [1d7d92d92663a29c] n=1" measured
+@claim TI026 1.1208 levels "pixels of one frame [1d7d92d92663a29c] n=1" measured

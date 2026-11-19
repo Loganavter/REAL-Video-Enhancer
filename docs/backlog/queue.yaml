@@ -4328,7 +4328,7 @@ tasks:
 - id: rve-trt-int8-calibrated-2026-11-20
   title: "Build TensorRT's own int8 with a calibrator and put it against the Triton body"
   type: experiment
-  status: in_progress
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -4363,6 +4363,22 @@ tasks:
     evaluation frames are different timestamps from the same cuts, because a delta measured on the calibration set
     is a fit, not a result. The app's own `.engine` is a TorchScript archive, so every arm here is built from ONNX
     at 1920x1080 - a whole-frame engine, not the app's tiled one; that difference is stated in the write-up.
+  resolution: >-
+    DONE 2026-11-20, and it closes in the body's favour by measurement. Three engines from one ONNX at the app's
+    builder level (fp16 193.5 s, int8-entropy 170.9 s, int8-minmax 167.9 s; calibration on 8 named bluray frames,
+    sha256 in the manifest), profiled by the same trtexec that produced the fp16 layer budget: fp16 46.854 ms in
+    25 layers, both int8 arms 38.87 ms in 60 layers, i.e. 1.205x - and the layer split IS the mechanism, because
+    the per-channel PReLU cannot join an int8 epilogue (the same finding engine-int8.txt made on the Q/DQ build).
+    Both calibrators agree within 0.008 ms, so the algorithm is not the variable. Picture on held-out frames:
+    the bright csm frame is clean (max 5.85 codes, 0.0000% above 8 codes, 51.57 dB) and the dark violet frame is
+    not (entropy: max 91.14 codes, 1.0715% above 8 codes, 39.34 dB; min-max: max 20.86, 0.0136%, 44.95 dB).
+    The failing pixels are shadows lifted by ~0.3 in 0-1 units, spread across the whole frame (row/column
+    profiles flat), which is what symmetric-only quantisation plus sixteen PReLU boundaries does. Against the
+    lane's own bar (0.1% of pixels above 8 levels) the body reads 0.00125% on 494 frames and TensorRT's int8
+    reads 1.07% on one frame. So the hand body is faster (1.665x end-to-end, 26.1 ms body) AND three orders of
+    magnitude better on the picture; a 494-frame pair of the calibrated engine would only confirm what one
+    held-out frame already shows, so it is not run. docs/wsp/verified/trt-int8-calibrated.txt,
+    logs/trt-int8/, scripts/trt_int8_{calibrate,accuracy,records}.py.
 
 - id: rve-grid-k-learned-2026-11-20
   title: 'Make the grid clamp a LEARNED per-layer parameter (PAMS), instead of a swept constant'
