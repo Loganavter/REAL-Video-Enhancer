@@ -4142,6 +4142,15 @@ tasks:
     because Int8Probe hands the body non-contiguous views (stride (3,1,5760,3)) and the head kernel indexes
     contiguous NCHW - the body now makes its input contiguous and logs when it had to. A calibration cache
     removes the remaining ~5 s on a re-render of the same clip.
+  pick_cost: >-
+    COST, after the review's section 5 (2026-11-20): candidates are {K=2, K=3} (K=1 never won on any model, and
+    K=3 captures K=4's outcome except Garfield at 0.0157% - six times inside the bar), the holdout is six frames,
+    and the sweep is SKIPPED when K=2's own share is <= 0.002% (the ladder's largest gain is 7.1x, so 0.002% x 7.1
+    = 0.014%, seven times inside the bar - argued from that maximum, not from a 3-to-494 multiplier that does not
+    exist between the two references). Measured in the app with the calibration cache warm: start-up 28.48 s
+    against 33.08 without either change and 26.6 for the fp16 arm, i.e. the int8 premium is ~1.9 s instead of
+    6.5 s. On the production model both fire (K=2 reads 0.0018% on the holdout, sweep skipped, build 1.21 s +
+    score 0.43 s); on realesr (0.0504%) and Ani4K (0.0166%) the sweep still runs and still finds K=3/K=4.
   acceptance: >-
     (a) All 21 compatible models in BOTH grid modes, with the calibration grid's dynamic range (max/median of the
     per-channel maxima) recorded next to each - the predictor has to be a number, not a hunch. (b) The rule: if

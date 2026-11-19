@@ -102,21 +102,32 @@ uses two equations for two unknowns - exact at those two points, and the predict
 unconstrained with only four K values. That is the sweep with extra steps: two scored candidates *are* half the
 sweep, and what it would buy is the other half.
 
-## 7. The cheap win that does exist: two candidates, not four
+## 7. What was adopted instead: two candidates, six frames, and no sweep when it cannot matter
 
-The sweep's cost is proportional to the number of candidates. From the ladder, `K=2` and `K=3` capture the
-outcome for 21 of 22 models:
+The predictor does not exist, so the sweep stays - but two of its costs were removable, both on the review's
+argument and both measured in the app.
+
+**Two candidates, not four.** `{K=2, K=3}`: K=1 never won on any of the 22 models, and K=3 captures the outcome
+wherever K=4 does except Garfield, where dropping K=4 costs 0.0029 -> 0.0157 - still six times inside the bar.
+The holdout is six frames, so this halves the pass count while keeping the label on six frames rather than three.
+
+**No sweep when K=2 is already clean.** If K=2's own share is <= 0.002%, the sweep is skipped after the first
+build. The threshold comes from the ladder's largest gain (7.1x): 0.002% x 7.1 = 0.014%, seven times inside the
+bar. It is deliberately *not* derived from a 3-frame-to-494-frame multiplier, because none exists between the two
+references - the smoke test compares against the model, the 494-frame pair against the engine - and inventing one
+is the same error class as the retracted x37.
+
+In the app on the production model both fire, and together with the calibration cache the start-up falls:
 
 ```
-keeping only {K=2, K=3} instead of {1,2,3,4}:
-  median cost vs the best of {K=3, K=4}        0.0%
-  worst absolute loss                         Garfield 0.0029 -> 0.0157 (K=4 is the only good one there)
-  worst ratio loss (on already-clean models)  Bubble 0.0000 -> 0.0002
+cold, first run of a clip   calibration measured + sweep skipped     ~33.5 s
+warm, cache hit             28.48 s  (fp16 arm 26.6 s -> the int8 premium is now ~1.9 s, was 6.5 s)
+log:  int8 calibration: CACHE HIT ... (18 frames not measured)
+      int8 grid PICKED K=2 (K=2 already clean, sweep skipped) (scores {'K=2': 0.0018}; build 1.21 s, score 0.43 s)
 ```
 
-Garfield is the one real case, and 0.0157% is still six times inside the 0.1% bar. So the sweep can be halved
-without losing a decision - which is a better answer than a predictor that does not exist. `K=1` can also go: it
-was never the winner on any model.
+For a model whose K=2 is not clean (realesr at 0.0504%, Ani4K at 0.0166%) the sweep still runs and still finds
+K=3 and K=4 - which is what it exists for.
 
 ## 8. The app-side discrepancy, resolved: the body trusted its caller's layout
 
