@@ -129,6 +129,27 @@ reuses through - and (b) any criterion at all for the frozen texture, which 82 o
 @claim RU013 0.988 AUC "reused frames [af066356217e17b1] n=124" measured
 @claim RU014 0.488 AUC "reused frames [af066356217e17b1] n=124" measured
 
+
+## Reuse with a correction: the texture comes back, and the pixel cost falls
+
+The review's step 1 - reuse with a residual instead of verbatim - was measured on the same 130 reused frames:
+output = the gated frame + nearest-2x of `(LR_t - LR_ref)` with the reference the gate actually served.
+
+| construction | worst share | frames over 0.1% | texture ratio (median) | frames frozen |
+|---|---|---|---|---|
+| verbatim skip (ships) | 0.44121% | 37 / 130 | **0.000** | 91.5% |
+| skip + upscaled LR residual | **0.26648%** | **30 / 130** | **0.989** | **0%** |
+
+So the correction is a strict improvement on both instruments at once: the texture stops freezing (ratio 0.989
+against the fresh render's 1.026) and **fewer** frames cross the pixel bar than with the plain skip, not more -
+the opposite of what the perception-distortion concern predicted for this particular correction, because the
+added LR-band difference is small in amplitude while being temporally alive. It is still not sufficient: 30
+frames remain over the bar, and the added grain is LR-band (nearest 2x), so its spectrum is not the source's at
+4K.
+
+@claim RU015 0.26648 % "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU016 0.989 x "reused frames [55a222f0b8bdd68b] n=130" measured
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so

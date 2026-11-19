@@ -4904,10 +4904,14 @@ tasks:
     the review's reference-free rho1 of the HF residual does not separate here (fresh 0.918-0.931 against
     frozen 1.000) because the render's HF energy is static line detail, not grain.
   acceptance: >-
-    (a) DONE for the ranking test (see progress). (b) A threshold on a held-out *clip*, not a held-out half:
-    this one has no positives in its first half. (c) The temporal-texture criterion - the 0.1% share cannot see
-    frozen grain, which is why the channel-max cell passed the share and was rejected by eye. (d) Only then a
-    product question, with the default staying OFF.
+    (a) DONE for the ranking test (see progress): against the served reference the shipped statistic ranks the
+    damaged reuses at 0.991/0.988, so the ranker is not the missing piece. (b) DONE as a hold-out: thresholds
+    calibrated on one clip never beat the block branch on the other, and "non-stationary" was our t-1 artefact.
+    (c) DONE for the criterion: 119 of 130 reuses freeze the flat-area texture and 82 of them pass the 0.1% bar,
+    so acceptance needs a second instrument - and reuse with an upscaled LR residual (RU015/RU016) brings the
+    texture back to 0.989 while REDUCING the frames over the bar from 37 to 30. (d) OPEN: the denoise-then-reuse
+    prototype (motion-rejected temporal filter on LR, gate on the clean plate, source grain re-added on ALL
+    frames) and a certification rule, with the default staying OFF.
   note: >-
     Owner order 2026-11-19 reopens the investigation that reuse-gate-shelved and rve-reuse-gate-forbidden
     2026-11-18 closed; the product decision (frame skipping off by default) is untouched. Literature entry
