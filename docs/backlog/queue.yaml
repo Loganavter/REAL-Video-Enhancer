@@ -4607,6 +4607,38 @@ tasks:
     the crop row (rve-calib-crops-wiring-2026-11-20) unless crops fail. Row parked at todo until the crop path is
     measured.
 
+- id: rve-calib-decode-2026-11-20
+  title: "The decode of 16 spread frames is now the largest start-up item at 4.69 s"
+  type: task
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1d
+  tags:
+  - startup
+  - decode
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/utils/Int8Probe.py
+  - docs/wsp/verified/int8-startup-split2.txt
+  owns_files:
+  - docs/wsp/verified/int8-calib-decode.txt
+  refutes: >-
+    The spread decode is what calibration needs. It was: the grids are per-channel maxima over frames chosen for
+    variety, and the probe seeks sixteen timestamps to get them. With crops the samples per frame fell 32x, so the
+    question is now whether sixteen SEEKS are needed at all - a sequential decode of the first N frames costs one
+    pass, and the 494-frame pair is the acceptance either way.
+  acceptance: >-
+    (a) The decode split: seek cost against decode cost for the sixteen frames, and the same for the first sixteen
+    frames of a sequential read. (b) The 494-frame pair, crops+spread against crops+sequential, worst-frame share.
+    (c) The start-up re-measured on the same instrument. Falsifier: any frame above the 0.1% bar, or a start-up
+    that does not fall by at least 2 s.
+  note: >-
+    From the 2026-11-20 split: after crops the start-up is 9.79 s, of which interpreter 2.38, decode 4.69, probe
+    calibration 0.56, engine ~0.5, body block 1.28. The decode is now the largest single item, and it exists only
+    because calibration used to want a spread of timestamps.
+
 - id: rve-price-curvature-predictor-2026-11-20
   title: "A curvature-priced predictor for K, the class the price paper says is correct"
   type: experiment
