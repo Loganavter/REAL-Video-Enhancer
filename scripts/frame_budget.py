@@ -243,12 +243,17 @@ def main(argv=None) -> int:
     A("")
     A("| idea | expected | what it needs | state |")
     A("|---|---|---|---|")
-    A("| fuse two hops per launch (cascade) | **+3.1 ms/frame** at T=32: 1.064x of work for one saved launch "
-      "constant of 0.59 ms, eight pairs | a CUDA kernel; the intermediate is 34^2 x 64 B = 74 KB, which fits "
-      "100 KB of shared memory | `rve-hop-fuse2-cascade`, P2, unmeasured |")
-    A("| shared-memory staging of the 3-row window | the 0.59 ms first-tap constant, if it is a round trip | the "
+    A("| fuse two hops per launch (cascade) | **+3.1 ms/frame** at T=32: 1.064x of work against ~250 MB of DRAM "
+      "per fused boundary removed (the launch-constant argument is dead) | a CUDA kernel; the intermediate is "
+      "34^2 x 64 B = 74 KB, which fits 100 KB of shared memory | `rve-hop-fuse2-cascade`, P2, unmeasured |")
+    A("| shared-memory staging of the 3-row window | the 0.59 ms first-tap cost, if it is a round trip (it is "
+      "NOT a per-launch constant: the same kernel at 256x256 takes 0.057 ms, so the implied launch term is "
+      "0.011 ms - `int8-hop-constant.txt`) | the "
       "same CUDA kernel; measured negative in its two cheap forms (reordered loads -101%, a CUDA microbenchmark "
       "-26%) | closed, `int8-hop-prefetch.txt` |")
+    A("| **overlap the IO with the body** (three streams, double buffer) | **up to 7.68 ms** - read, body, pack "
+      "and write are strictly sequential today | software only, no new kernel | `rve-frame-pipeline-overlap`, P1, "
+      "unmeasured |")
     A("| a PCIe 4.0 slot | ~1.2 ms off `pack`, since the link is gen 3 x8 today | hardware | not software |")
     A("| skipping duplicate frames / static regions | large on anime, and the owner's call forbids it | - | "
       "closed by policy, `rve-reuse-gate-forbidden` |")
