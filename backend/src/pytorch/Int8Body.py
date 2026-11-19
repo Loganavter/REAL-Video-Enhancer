@@ -414,6 +414,27 @@ class Int8Body:
             else:
                 s_grids.append(s_in * margin)
             s_in = outs[idx - 1]
+        # Beacon's closed-form scale, injected instead of swept (row rve-beacon-scale-2026-11-20): a file of
+        # per-hop, per-channel grids fitted by least squares to the fp16 activations of the same frames. The
+        # weights are scaled by these grids below, so the injection has to happen HERE and not on `os` after
+        # the build - `os` is what the epilogue divides by, `s_grids` is also what the weights were built on.
+        _fit_path = _os.environ.get("RVE_INT8_GRID_FIT", "")
+        if _fit_path and os.path.exists(_fit_path):
+            import logging as _lgg
+            import numpy as np
+            _fit = np.load(_fit_path)
+            _grids = [torch.from_numpy(_fit[f"grid_{i}"]).to(s_grids[0].device).float()
+                      for i in range(len(s_grids))]
+            if all(g.numel() == s_grids[i].numel() for i, g in enumerate(_grids)):
+                s_grids = [g.reshape(s_grids[i].shape) for i, g in enumerate(_grids)]
+                _lgg.getLogger("RVE").warning(
+                    "int8 grid: FITTED per-hop scales from %s (Beacon closed form, %d hops) - the sweep is "
+                    "bypassed", _fit_path, len(s_grids))
+            else:
+                _lgg.getLogger("RVE").warning(
+                    "int8 grid: fit file %s does not match this model's %d hops - ignored", _fit_path,
+                    len(s_grids))
+        self._hop_grids = s_grids   # the per-hop grids this build baked into the weights
         _g0 = torch.full((self.cpad,), 1.0, device=s_grids[0].device, dtype=s_grids[0].dtype)
         _g0[: s_grids[0].numel()] = s_grids[0].reshape(-1)
         self._s_t1 = _g0.contiguous()
