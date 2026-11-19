@@ -2754,3 +2754,234 @@ tasks:
     (52% of both roofs, which C3 and C5 may resolve differently) and the picture risk is the whole question.
     The two compression papers found for it are accelerator/FPGA designs reporting energy and bandwidth, not a
     tensor-core speedup - so this is arithmetic on our own traffic, not a literature result.
+
+# ---------------------------------------------------------------------------------------------------------
+# Filed 2026-11-20, after the tail (int8 hop) and head (fused kernel) adoptions closed the last two rows.
+# The frame is 39.18 ms in the shipped default (record: 45.87 -> 42.71 -> 39.18 across the two changes).
+# These five are what is left above the floor; the sixth is a decision, not a measurement.
+# ---------------------------------------------------------------------------------------------------------
+
+- id: rve-pack-async-ring-2026-11-20
+  title: 'The deliverable pack is synchronous and on the critical path - 3.59 ms whose floor is 2.44'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 4h
+  tags:
+  - pipe
+  - pack
+  - bandwidth
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/utils/Frame.py
+  - backend/src/pytorch/RenderVideo.py
+  - docs/wsp/verified/int8-frame-accounting.txt
+  - docs/PERFORMANCE.md
+  owns_files:
+  - docs/wsp/verified/pack-async-ring.txt
+  refutes: >-
+    The 3.59 ms pack+queue is what moving a 12.44 MB frame off the card costs. It is not: the payload at the
+    measured 1.5 bytes/px is 12.44 MB at 4K, the recorded PCIe 3.0 x8 link moves it at 5.1-6.0 GB/s, so the
+    copy's own floor is 2.07-2.44 ms - the stage is already 1.2-1.5 ms above its floor, and it runs
+    synchronously inside the frame window. A pinned ring filled by cudaMemcpyAsync on a copy stream, with
+    release guarded by a CUDA event and the wait deferred into the writer, should take most of that off the
+    critical path. If the loop line does not move by at least 1.0 ms, the 3.59 is the writer's back-pressure
+    and the row closes with that.
+  acceptance: >-
+    Null-sink A/B first, because that is where the line is visible: arms RVE_PACK_RING=0/1, interleaved, >=3
+    rounds, one session, reporting the pack+queue line beside the render loop. Then the byte-identity check -
+    the payload is a copy, so the render must be BI-IDENTICAL, and that is checked, not assumed. Then one
+    NVENC arm: a ring that overlaps the copy is only worth anything if the encoder is not already the wall at
+    that point. Report the two halves separately - the traffic removed and the overlap added.
+  note: >-
+    From the researcher's C4, the only candidate in that file that was never filed. It matters more now than
+    when it was written: at 39.18 ms the frame's non-body share is ~10 ms, and pack+queue is the largest
+    single line in it. PERFORMANCE.md records a pooled-pinned attempt that read 12.6 dB and was "disabled" -
+    that was a BUG (a slot released before its last byte had been copied) and the same file says so; it is not
+    a refutation, and quoting it as one would be wrong.
+
+- id: rve-tail-epilogue-shuffle-residual-2026-11-20
+  title: 'The tail is our kernel now: put the shuffle and the residual in its epilogue (1.62 ms of 2.5)'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 3h
+  tags:
+  - int8
+  - tail
+  - fusion
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Kernels.py
+  - backend/src/pytorch/Int8Body.py
+  - docs/wsp/verified/int8-tail-hop.txt
+  owns_files:
+  - docs/wsp/verified/int8-tail-epilogue.txt
+  refutes: >-
+    The tail is done at 2.50 ms. It is one int8 conv (0.88) plus two separate element-wise passes: shuffle
+    0.74 and residual 0.88. Both are the tail kernel's own output work - the shuffle is a write-side index
+    map and the residual is a nearest read of the 6 MB LR input - so they belong in the epilogue the same way
+    the dequant scale already does. If folding them into the kernel does not save 0.8 ms, the two passes are
+    already at their traffic floor and the row closes with that.
+  acceptance: >-
+    Staged. (a) One kernel writing the shuffled, residual-added output, timed in isolation against the three
+    today (conv 0.88 + shuffle 0.74 + residual 0.88), same codes, >=3 rounds. (b) In the app: the tail phase
+    line beside the frame total, interleaved A/B >=3 rounds. (c) The picture: this changes the ORDER of the
+    residual add against the pixel shuffle, which is arithmetic, so byte-identity is not available - judge it
+    with gate_sweep --reference-kind config on the full clip, share and peak.
+  note: >-
+    rve-tail-fusion-2026-11-19 was dropped on 2026-11-18 with the reason "the fusion ceiling 1.0-2.0 ms is
+    LESS than a 2x improvement of the conv (2.4-3.0)". That ordering is gone: the conv was then attacked and
+    won (4.86 -> 0.88, rve-tail-as-int8-hop), so shuffle + residual are now 65% of the tail and the fusion is
+    the larger lever. That is why this is filed as a new row and not a resurrection - the premise the drop
+    rested on was measured away.
+
+- id: rve-hop-persistent-cta-2026-11-20
+  title: 'The hop at 25.7 ms: one grid-shape idea left, a persistent CTAs that loops over tiles'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 4h
+  tags:
+  - int8
+  - hops
+  - kernel
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Kernels.py
+  - docs/wsp/verified/int8-hop-loads.txt
+  owns_files:
+  - docs/wsp/verified/int8-hop-persistent.txt
+  refutes: >-
+    The hop is closed at 1.756 ms per launch. Two of its three schedule levers are measured negative
+    (vectorised loads +0.9%, weight hoist -54% on spill, docs/wsp/verified/int8-hop-loads.txt) and the traffic
+    lever is dead on the picture (6-bit codes 2.71%, int8-sub8-codes). The third is a grid smaller than the SM
+    count where each CTA loops over several M tiles keeping ONE accumulator: the weights stay hot across the
+    loop without a second accumulator, so it is the one variant the spill does not kill. If it does not beat
+    1.756 ms by 8%, the hop is at its floor and 25.7 ms is final on this card.
+  acceptance: >-
+    One hop, three arms in one process, CUDA events, >=3 rounds: today, persistent grid at SM-count CTAs,
+    persistent grid at 2x SM-count. Report ms, achieved TOPS and GB/s against the 176 / 288 roofs, plus the
+    codes against today (0 differing or the arm is a different arithmetic and must say so). Then, only if it
+    wins: the 16-hop chain in the app, phase line beside the frame total, and a full-clip picture.
+  note: >-
+    Named explicitly in int8-hop-loads.txt as the idea that was NOT tried, so this row is the follow-through
+    rather than a new idea. Ceiling is the arithmetic floor, not a guess: 152.9 GFLOP per hop at 176 TOPS is
+    0.87 ms, so sixteen hops cannot go below 13.9 ms however good the schedule is - the whole row is worth at
+    most 25.7 -> 20-22 in the optimistic case and zero in the likely one.
+
+- id: rve-bar-int8-wall-retake-2026-11-20
+  title: 'bar_int8_wall is recorded on a 47.96 ms frame - the shipped default is 39.18, so the claim is stale'
+  type: measurement
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 2h
+  tags:
+  - int8
+  - bar
+  - product
+  base_branch: perf/inference
+  relates_to:
+  - docs/claims-bars.json
+  - docs/wsp/verified/int8-wall-ab.txt
+  - docs/wsp/verified/int8-head-fusion.txt
+  - docs/wsp/verified/int8-tail-hop.txt
+  owns_files:
+  - docs/wsp/verified/int8-wall-defaults.txt
+  refutes: >-
+    The product ratio is still ~1.2x. The bar was recorded when the int8 frame was 47.96 ms; the two changes
+    adopted on 2026-11-20 took it to 42.71 and then 39.18 in null-sink A/Bs, so the recorded ratio now
+    understates the default by the size of two adopted changes. This is not a new optimisation - it is the
+    number that gets quoted, and it is currently a different configuration's.
+  acceptance: >-
+    The full bar protocol on the SHIPPED default: fp16 against int8, interleaved, >=3 rounds, one session,
+    both BD clips, null sink AND an NVENC arm (the encoder moves the loop by ~10 ms on this class of frame, so
+    a null-sink-only ratio is not the product's). Record the median of rounds 2+ per arm, the ratio through
+    Store.ratio, and write the result beside bar_int8_wall in the record it belongs to. Do not edit the bar's
+    VALUE: the bar is a threshold, the record is the measurement.
+  note: >-
+    Deliberately separated from the optimisation rows. Every number in the ledger for the wall clock predates
+    the defaults, and a reader who quotes 1.2x today is quoting yesterday's build - the class-8 error the
+    harness exists to catch, arriving through the door marked "still true".
+
+- id: rve-int8-defaults-second-material-2026-11-20
+  title: 'Both adopted changes were measured on one clip - retake them on 1440x1080 and the second title'
+  type: measurement
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 3h
+  tags:
+  - int8
+  - material
+  - replay
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-head-fusion.txt
+  - docs/wsp/verified/int8-tail-hop.txt
+  - docs/wsp/verified/int8-1440x1080.txt
+  owns_files:
+  - docs/wsp/verified/int8-defaults-material.txt
+  refutes: >-
+    The head and tail gains are properties of the path and hold on other material. Both were measured on ONE
+    clip (BD Violet, 494 frames, null sink, reuse off): head -5.27 ms, tail -3.16 ms, and the picture pairs are
+    that same clip. Two of the lane's own histories say the material matters - the anamorphic 1440x1080 BD cut
+    had its own record because the calibration sample was clustered, and Chainsaw's residual was 2.4 ms against
+    Violet's 0.9. If the tail's epilogue work or the head's traffic behave differently there, the frame change
+    is smaller than claimed and the records say so with a different population, not a different number.
+  acceptance: >-
+    The same paired protocol on 1440x1080 (the native BD cut) and on the Chainsaw same-shot cut: interleaved
+    A/B of the shipped default against each change reverted (RVE_HEAD_FUSED=0, RVE_TAIL_INT8=0), >=3 rounds,
+    one session per clip, the phase lines beside the loop. Picture on both: the shipped default against the
+    fp16 engine on the full clip, reference-kind engine-render, worst share and peak. Report per clip, never
+    pooled - the two cuts are different populations.
+  note: >-
+    This is the cheapest way to find out that an adoption does not generalise, and the second cheapest way to
+    find that it does. A 5.3 ms head gain measured on one clip is a proposition about that clip until it is
+    replayed; the lane has withdrawn ten conclusions for applying one population's number to another.
+
+- id: rve-bar-int8-peak-decision-2026-11-20
+  title: 'bar_int8_peak = 20 against a measured 29-55: a DECISION, not a measurement, and it is open'
+  type: decision
+  status: todo
+  owner: '@owner'
+  priority: P1
+  gpu: false
+  cost: 30m
+  tags:
+  - int8
+  - bar
+  - decision
+  base_branch: perf/inference
+  relates_to:
+  - docs/claims-bars.json
+  - docs/RESEARCH-LEDGER.md
+  owns_files:
+  - docs/claims-bars.json
+  refutes: >-
+    Nothing measurable: the bar carries its own note ("PENDING OWNER DECISION: 20 is the project's existing
+    peak bar; 23 is the tile-reuse opt-in's peak, not an int8 number") and the ledger records that twelve
+    configurations of the int8 family all land between 29 and 55 levels. Either 20 is the peak the product
+    accepts - in which case the int8 path FAILS that bar and the shipped default is out of spec on the peak
+    axis - or 20 was never an int8 number and the bar needs a second value for this family. A measurement
+    cannot choose between those.
+  acceptance: >-
+    A written decision in docs/claims-bars.json and the verdict registry, with the reasoning, and - whichever
+    way it goes - the shipped default's OWN peak recorded against it (the head and tail adoptions each changed
+    the peak: 13 and 6 levels as deltas between int8 configurations, which is not the same quantity). If the
+    decision is "20 stands", the int8 default needs a named consequence: either it is labelled out of spec on
+    the peak axis or the peak work becomes a P1 lane.
+  note: >-
+    Filed because the objective was to close the queue without waiting for the owner, and this is the one row
+    that cannot be closed that way: it is a threshold choice, and inventing a threshold would be the
+    instrument-vs-population error in its purest form. Everything measurable around it has been measured;
+    what remains is whose number it is.
