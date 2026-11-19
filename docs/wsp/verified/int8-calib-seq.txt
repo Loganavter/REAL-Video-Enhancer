@@ -1,0 +1,64 @@
+# Sequential calibration decode: 4.66 -> 0.63 s, and the 494-frame pair reads 0.00043%
+
+Measured 2026-11-20, BD Violet, `2x-Futsuu-Anime(1)`, crops on both arms. Records `int8-calib-seq.jsonl`
+(SQ001-SQ003), raw `logs/calib-seq/`. Knob `RVE_INT8_CALIB_SEQUENTIAL` (default 1 since this row; `=0` restores
+the spread decode).
+
+`startup-split2.txt` left the decode as the largest start-up item: 4.69 s of the 9.79 s, spent seeking sixteen
+timestamps to find calibration frames. The spread existed because the grids are per-channel maxima and the sample
+had to cover the clip's brightness range. Two changes since then made the spread questionable: the grids are
+measured on **crops** now (32x fewer samples per frame), and the sixteen frames were already the population, not
+the timestamps.
+
+## Cost
+
+| decode | time | how |
+|---|---|---|
+| spread, 16 seeks x 3 frames | **4.662 s** | `-ss` before `-i`, one ffmpeg per timestamp |
+| sequential, first 48 frames | **0.630 s** | one pass, `_read_indices` stops as soon as it has them |
+
+7.4x cheaper, and it removes ~4.0 s from the start-up (9.79 -> ~5.8 s, to be confirmed by the next full run).
+
+## Picture
+
+Lossless ffv1 pair of all 494 frames, `gate_sweep --reference-kind config`:
+
+```
+494 frames, block 64
+worst share 0.00043% (frame 281), frames above 0.1%: 0
+worst block mean 1.87 (frame 103), peak 15
+```
+
+Two orders inside the bar, no frame above it.
+
+## What this does not settle
+
+- **The first seconds of a clip can be a fade, a logo, or black.** A sequential sample of the first 48 frames would
+  then see a lower range than the clip contains, and a low ceiling clips later - the failure mode the 2026-11-18
+  page measured between one frame and sixteen (0.116% against 0.006%). The spread decode is not immune either (it
+  takes the middle of each sixteenth of the duration, so a head fade is one sample of sixteen), but it is less
+  exposed. Filed as `rve-calib-fade-2026-11-20`: a clip whose first three seconds are black, pair against spread.
+- **One clip, one draw.** Same caveat as the crop row: enough to stop treating the spread as necessary, not enough
+  to call the two decodes equivalent.
+- **The cache key does not include the decode mode**, but it does include a fingerprint of the decoded frames, and
+  the two modes decode different frames - so a cache entry cannot be read across them by construction.
+
+## Verdict
+
+Row `rve-calib-decode-2026-11-20` closes: sequential by default, pair 0.00043%, decode 7.4x cheaper, with the
+fade-in risk named and filed rather than assumed away.
+
+## Reproduce
+
+```bash
+ARMS="spread seq" ARM_ENV_SPREAD="RVE_INT8_CALIB_SEQUENTIAL=0" ARM_ENV_SEQ="RVE_INT8_CALIB_SEQUENTIAL=1" \
+    SINK=ffv1 ROUNDS=1 CLIPS="bd_violet20s.mkv" scripts/wall_ab.sh
+PYTHONPATH=scripts python3 scripts/gate_sweep.py <seq.mkv> <spread.mkv> --reference-kind config --out pair.json
+PYTHONPATH=scripts python3 scripts/calib_seq_records.py
+PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-calib-seq.txt \
+    --records docs/wsp/verified/records/int8-calib-seq.jsonl --bars docs/claims-bars.json
+```
+
+@claim SQ001 4.662 s "runs [be7709676d52862f] n=2" measured
+@claim SQ002 0.63 s "runs [be7709676d52862f] n=2" measured
+@claim SQ003 0.00043402777777777775 % "frames [13137e4e7dd10e98] n=494" measured

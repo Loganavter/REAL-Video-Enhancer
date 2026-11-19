@@ -299,7 +299,21 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
         import torch
         from ..pytorch.spandrel.architectures.Compact.__arch.SRVGG import SRVGGNetCompact
 
-        pairs = _read_pairs(clip, frames, width, height)
+        # SEQUENTIAL instead of spread (2026-11-20): sixteen seeks cost 4.69 s and the samples per frame fell
+        # 32x when calibration moved to crops, so the spread may no longer be buying anything. This reads the
+        # first `frames` triples in ONE pass - `_read_indices` stops as soon as it has them - and the 494-frame
+        # pair decides. Off by default until that pair lands.
+        # DEFAULT ON since 2026-11-20: decode 4.662 -> 0.63 s, 494-frame pair 0.00043% worst, 0 frames above the
+        # bar. `=0` restores the spread decode. The residual risk is stated in the row: the first seconds of a
+        # clip can be a fade or a logo, which a spread sample would not see either (it takes the middle of each
+        # sixteenth of the duration, so a fade at the head is one sample out of sixteen).
+        if str(os.environ.get("RVE_INT8_CALIB_SEQUENTIAL", "1")).lower() in ("1", "true", "yes"):
+            want = list(range(frames * 3))
+            got = _read_indices(clip, want, width, height)
+            pairs = [[got[i] for i in want[j * 3:(j + 1) * 3]]
+                     for j in range(frames) if all(i in got for i in want[j * 3:(j + 1) * 3])]
+        else:
+            pairs = _read_pairs(clip, frames, width, height)
         if len(pairs) < 3:
             return Int8ProbeResult(False, 0.0, 0.0, 0.0, 0, bar, "not enough frames", error="too few pairs")
 

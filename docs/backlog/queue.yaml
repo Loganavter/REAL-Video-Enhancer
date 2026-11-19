@@ -4610,7 +4610,7 @@ tasks:
 - id: rve-calib-decode-2026-11-20
   title: "The decode of 16 spread frames is now the largest start-up item at 4.69 s"
   type: task
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -4638,6 +4638,43 @@ tasks:
     From the 2026-11-20 split: after crops the start-up is 9.79 s, of which interpreter 2.38, decode 4.69, probe
     calibration 0.56, engine ~0.5, body block 1.28. The decode is now the largest single item, and it exists only
     because calibration used to want a spread of timestamps.
+  resolution: >-
+    DONE 2026-11-20, ON BY DEFAULT (RVE_INT8_CALIB_SEQUENTIAL=1; =0 restores the spread). Decode 4.662 -> 0.630 s
+    (7.4x, ~4.0 s off the start-up) and the 494-frame pair reads worst share 0.00043% (frame 281), 0 frames above
+    the 0.1% bar, worst block mean 1.87, peak 15. The residual risk is named rather than assumed away: the first
+    seconds of a clip can be a fade or a logo, which would give a lower ceiling than the clip contains - filed as
+    rve-calib-fade-2026-11-20 with a black-head clip as the test. docs/wsp/verified/int8-calib-seq.txt,
+    logs/calib-seq/, scripts/calib_seq_records.py.
+
+- id: rve-calib-fade-2026-11-20
+  title: "A clip whose first seconds are black: does the sequential calibration clip later?"
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1d
+  tags:
+  - startup
+  - calibration
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/utils/Int8Probe.py
+  - docs/wsp/verified/int8-calib-seq.txt
+  owns_files:
+  - docs/wsp/verified/int8-calib-fade.txt
+  refutes: >-
+    The sequential decode is safe because the pair on BD Violet read 0.00043%. Violet's head is ordinary content,
+    so that pair cannot see the failure mode the sequential sample introduces: a clip that opens on black, a fade,
+    or a logo gives the grids a LOWER ceiling than the clip contains, and a low ceiling clips later. The
+    2026-11-18 page measured exactly this between one frame and sixteen (0.116% against 0.006%).
+  acceptance: >-
+    (a) A clip whose first ~3 s are black or a fade (built from an existing cut, provenance recorded).
+    (b) The 494-frame pair, sequential against spread, worst-frame share. (c) The grids' maxima compared hop by
+    hop: how much lower is the sequential ceiling. Falsifier: any frame above the 0.1% bar, or a ceiling more than
+    a few percent below the spread's.
+  note: >-
+    Filed with rve-calib-decode-2026-11-20 so the risk is a measurement rather than a sentence in a commit message.
 
 - id: rve-price-curvature-predictor-2026-11-20
   title: "A curvature-priced predictor for K, the class the price paper says is correct"
