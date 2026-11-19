@@ -2805,8 +2805,20 @@ tasks:
 - id: rve-tail-epilogue-shuffle-residual-2026-11-20
   title: 'The tail is our kernel now: put the shuffle and the residual in its epilogue (1.62 ms of 2.5)'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    ADOPTED 2026-11-20, and it is the cleanest kind: a LAYOUT fold, not arithmetic. PixelShuffle is a
+    permutation and the residual adds one LR pixel to all four subpixels, so the fold computes the same two
+    additions in the same order (the conv rounds to fp16 before the residual, as the stored intermediate does).
+    Proof: 0 of 24 883 200 values differ on the tensor, and the 494-frame ffv1 pair reads IDENTITY - every frame
+    bit-identical. Timing: isolated 2.704 -> 0.883 ms (-1.821, -67%) against the three-step tail; in the app
+    39.35 -> 38.55 ms/frame (-0.80) in 3 of 3 interleaved rounds, the smaller figure because the app already
+    overlapped part of those passes - which is why the isolated number is not the product number. Shipped as
+    the default (RVE_TAIL_SHUFFLE=1; =0 restores the three-step path); the guard needs the int8 tail and a
+    plain PixelShuffle(r) with 3*r*r channels, so the 4x family's 48-channel tail stays on the shipped path.
+    docs/wsp/verified/int8-tail-epilogue.txt, records int8-tail-shuffle.jsonl (Q001-Q006, R001-R002,
+    SJ001-SJ004), logs/tail-shuffle/.
   priority: P2
   gpu: true
   cost: 3h
@@ -2879,8 +2891,19 @@ tasks:
 - id: rve-bar-int8-wall-retake-2026-11-20
   title: 'bar_int8_wall is recorded on a 47.96 ms frame - the shipped default is 39.18, so the claim is stale'
   type: measurement
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    DONE 2026-11-20: the shipped default reads 1.399x on Violet (55.99 fp16 against 40.01 int8, medians of
+    rounds 2-3 of one interleaved session) and 1.481x on Chainsaw (52.17 against 35.22) - against the recorded
+    bar_int8_wall = 1.2x, i.e. cleared by 0.20 and 0.28. Phase lines on the same runs (Chainsaw): head 0.70,
+    quantise 0.00, hops 25.35, tail 2.60, body 28.55 - so the frame is now 25.4 of 28.6 body and the two
+    boundary kernels together are 3.3 ms. One draw is missing: bd_csm_same_fp16_r1 was killed by the script's
+    1800 s timeout at frame 281 (FPS 0) and has no loop line; that arm's rounds 2-3 agree to 0.02 ms, so the
+    median stands and the cause is NOT explained (engine rebuild or a machine stall - recorded, not smoothed).
+    The bar's VALUE was not touched. NOT done: the NVENC arm this row also asked for - until it runs, the
+    product ratio under an encoder stays unquoted. docs/wsp/verified/int8-wall-defaults.txt, records
+    int8-wall-defaults.jsonl (W001-W031), logs/wall-defaults/null/.
   priority: P1
   gpu: true
   cost: 2h

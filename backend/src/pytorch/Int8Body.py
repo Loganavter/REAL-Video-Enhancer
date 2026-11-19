@@ -30,7 +30,8 @@ import torch
 
 from .Int8Kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhwc_to_nchw,
                           head_int8_kernel, quantise_nchw_to_nhwc, quantise_nchw_to_nhwc_prelu,
-                          quantise_nhwc, quantise_nhwc_prelu, tail_int8_kernel)
+                          quantise_nhwc, quantise_nhwc_prelu, tail_int8_kernel,
+                          tail_int8_shuffle_kernel)
 
 __all__ = ["Int8Body"]
 
@@ -116,6 +117,18 @@ class Int8Body:
                            and self._head_conv_plain.out_channels == feat)
         want_tail_int8 = str(os.environ.get("RVE_TAIL_INT8", "1")).lower() in ("1", "true", "yes")
         self.tail_int8 = bool(want_tail_int8 and self.tail_conv.out_channels <= 16)
+        # The tail, the pixel shuffle and the residual in ONE kernel: pixel_shuffle is a permutation and the
+        # residual adds one LR pixel to all four subpixels, so the fold is exact and the render IS
+        # byte-identical - 0 differing values on the tensor and all 494 frames of the clip identical
+        # (row rve-tail-epilogue-shuffle-residual-2026-11-20). DEFAULT ON since 2026-11-20. Needs the int8
+        # tail (it is its
+        # epilogue) and a plain `nn.PixelShuffle` upsampler of the matching 3*r^2 channel count.
+        _up = getattr(model, "upsampler", None)
+        _r = int(getattr(_up, "upscale_factor", 0) or 0) if isinstance(_up, torch.nn.PixelShuffle) else 0
+        self.tail_shuffle = bool(
+            str(os.environ.get("RVE_TAIL_SHUFFLE", "1")).lower() in ("1", "true", "yes")
+            and self.tail_int8 and _r == 2 and self.tail_conv.out_channels == 3 * _r * _r)
+        self.tail_scale = _r
         if want_tail_int8 and not self.tail_int8:
             import logging as _lg
             _lg.getLogger("RVE").warning(
@@ -518,6 +531,29 @@ class Int8Body:
             # shuffle and residual from 0.40 + 0.93 to 0.82 + 2.13 ms, so it is not the lever it looks like.
             # RVE_TAIL_NHWC=0 restores the old contiguous path for an A/B.
             channels_last = str(os.environ.get("RVE_TAIL_NHWC", "1")).lower() not in ("0", "false", "no")
+            if self.tail_shuffle:
+                # conv + shuffle + residual, one launch. Same two additions on the same 12 values in the same
+                # order, so this is a fold and not an approximation - byte-identity is the acceptance.
+                _t1.record()
+                if not getattr(self, "_ts_log", False):
+                    self._ts_log = True
+                    _lg.getLogger("RVE").warning(
+                        "int8 tail FUSED with shuffle+residual: one kernel, scale %d", self.tail_scale)
+                final = torch.empty((x.shape[0], h * self.tail_scale, w * self.tail_scale, 3),
+                                    device=x.device, dtype=torch.float16)
+                tail_int8_shuffle_kernel[grid](src, self._tail_taps, self._tail_sigma, self._tail_bias,
+                                               x.clamp(0.0, 1.0), final, h, w, BLOCK_M=self.block_m,
+                                               CIN=self.feat, COUT=self.tail_conv.out_channels,
+                                               COUT_PAD=16, SCALE=self.tail_scale,
+                                               num_warps=self.warps)
+                out = final.permute(0, 3, 1, 2)          # a channels_last view, no copy
+                _t2.record()
+                _t3.record()
+                _end.record()
+                self._tail_ev = ((_e3, _t1), (_t1, _t2), (_t2, _t3), (_t3, _e4))
+                self._ev_pair = (_start, _end, 0)
+                self._phase_ev = ((_e0, _e1), (_e1, _e2), (_e2, _e3), (_e3, _e4))
+                return out
             if self.tail_int8:
                 # One kernel instead of two: the dequant scale is already inside the weights, so the
                 # last hop's codes are the tail convolution's input and the pass between them is gone.
