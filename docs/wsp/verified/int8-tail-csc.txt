@@ -1,0 +1,81 @@
+# The tail can write yuv420p itself: -4.25 ms isolated, payload agrees to one level
+
+Measured 2026-11-19 (local), frame 169, one tail launch plus the colour conversion in each arm, three interleaved
+rounds. Records: `int8-tail-csc.jsonl`; raw: `logs/tail-csc/probe.json`; kernel:
+`tail_int8_yuv_kernel` in `backend/src/pytorch/Int8Kernels.py`.
+
+Row `rve-tail-csc-yuv-2026-11-20`, from an outside reader who noticed two things the lane had not: the pack's
+4.36 ms is **not a copy** (the stream pipeline measured -0.01), it is YCbCr arithmetic over 8.3 Mpx; and
+**PixelShuffle(2) makes 4:2:0 chroma register-local** - the 12 tail channels of one input pixel become a 2x2
+output block, and that block is exactly what the chroma average covers.
+
+## Why it can be done inside the tail kernel at all
+
+Y, Cb and Cr are each LINEAR in (R, G, B), so each is a weighted sum over the channel axis of the reshaped
+(16, ...) epilogue tile. With BT.709 and limited range:
+
+```
+Y  =  0.2126 R + 0.7152 G + 0.0722 B                    -> Yq  = round(219 Y + 16),   clamp 16..235
+Cb = (B - Y) * 0.5/(1-0.0722) = -0.11459 R - 0.38547 G + 0.50000 B
+Cr = (R - Y) * 0.5/(1-0.2126) =  0.50000 R - 0.45419 G - 0.04585 B
+Uq = round(224 mean(Cb) + 128)                        -> clamp 16..240
+```
+
+The residual adds the SAME LR pixel to all four subpixels, so its contribution collapses to one value per
+position per output channel - no second pass. Output: **6 bytes per input pixel** (4 Y in the 2H x 2W plane, then
+U and V in two H x W planes) = 12.44 MB against the 49.77 MB of fp16 RGB the tail writes today.
+
+## The payload agrees, and that was checked first
+
+An offline gate ran both orders in torch from the SAME tail output before any kernel was written, and the kernel
+then reproduced it:
+
+```
+payload 12 441 600 bytes:  max |delta| 1 level, mean 0.046, 4.6% of bytes off by one, 0.00000% off by more
+```
+
+So this is a **different-arithmetic** change with a bounded one-level difference, not a bit-identical one - the
+order of the rounding relative to the chroma average moves. The acceptance criterion is therefore the render pair,
+not byte-identity.
+
+## Timing, isolated, with the conversion inside each arm
+
+| arm | ms |
+|---|---|
+| tail kernel -> fp16 RGB (49.77 MB) -> `tensor_to_yuv420p` | **5.123** |
+| tail kernel -> yuv420p (12.44 MB) directly | **0.869** |
+
+**-4.25 ms of the tail-plus-conversion job.** In the app the saving is smaller, because the pack keeps its
+transfer (12.44 MB at the measured 6.55 GB/s, 1.9 ms): the expectation is **tail 1.00 -> ~0.87 and pack
+4.36 -> ~2.0**, i.e. ~2.5 ms on the loop.
+
+## What is NOT done
+
+**The integration is not done, and it is the part that decides the frame.** The body returns a tensor and the
+frame converts it; writing the payload from the kernel means the body hands back a uint8 CUDA buffer already in
+yuv420p layout, and the pack path needs a branch that copies instead of converting. That also removes the `cat()`
+intermediate which is the only reason today's payload copy is effectively synchronous - so
+**`RVE_PAYLOAD_GUARD=1` must stay on** or the 12.6 dB race returns.
+
+Until that branch exists, this row's measured content is: the arithmetic agrees to one level, and the fused job is
+4.25 ms cheaper in isolation. The in-app A/B and the 494-frame pair are the next step, not a conclusion.
+
+## Not covered
+
+- One frame, one card. The one-level difference is measured on one frame's payload, not on 494.
+- fp16 vs fp32 arithmetic order is the source of the difference; nothing was done to match the shipped rounding.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/tail_csc_probe.py --rounds 3 --iters 20 \
+    --out-file docs/wsp/verified/logs/tail-csc/probe.json
+PYTHONPATH=scripts python3 scripts/tail_csc_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tail-csc.txt \
+       --records docs/wsp/verified/records/int8-tail-csc.jsonl --bars docs/claims-bars.json
+
+@claim N001 5.123 ms "frames [10cff28ea287d300] n=1" measured
+@claim N002 0.869 ms "frames [10cff28ea287d300] n=1" measured
+@claim N003 1.0 levels "frames [10cff28ea287d300] n=1" measured

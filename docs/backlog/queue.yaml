@@ -3691,8 +3691,21 @@ tasks:
 - id: rve-tail-csc-yuv-2026-11-20
   title: 'Let the tail write the final yuv420p payload: PixelShuffle makes 4:2:0 chroma register-local'
   type: experiment
-  status: todo
+  status: in_progress
   owner: '@supervisor'
+  progress: >-
+    KERNEL AND GATE DONE 2026-11-19, integration open. tail_int8_yuv_kernel writes packed yuv420p from the tail's
+    own epilogue: Y, Cb and Cr are each linear in (R,G,B) so each is a weighted sum over the channel axis of the
+    reshaped (16) tile, and the residual adds one value per position because it adds the same LR pixel to all
+    four subpixels. Offline gate before any kernel: both orders run in torch from the SAME tail output, payload
+    (12 441 600 bytes) agrees with max |delta| = 1 level, 4.6% of bytes off by one, 0.00000% off by more. Isolated,
+    conversion inside each arm: 5.123 ms (fp16 RGB 49.77 MB + tensor_to_yuv420p) against 0.869 ms (yuv8 12.44 MB
+    directly) = -4.25 ms of the job; in the app the expectation is tail 1.00 -> ~0.87 and pack 4.36 -> ~2.0
+    (~2.5 ms on the loop) because the pack keeps its 1.9 ms transfer. NOT DONE: the integration - the body must
+    hand back a uint8 yuv420p buffer and the pack needs a copy-instead-of-convert branch; that also removes the
+    cat() intermediate, so RVE_PAYLOAD_GUARD=1 must stay on or the 12.6 dB race returns. Then the in-app A/B and
+    the 494-frame pair (this is different-arithmetic: judge it on the picture, not on byte-identity).
+    docs/wsp/verified/int8-tail-csc.txt, records int8-tail-csc.jsonl (N001-N003), logs/tail-csc/probe.json.
   priority: P1
   gpu: true
   cost: 1d
