@@ -3972,7 +3972,7 @@ tasks:
 - id: rve-body-native-width-2026-11-20
   title: 'Native widths: 24 / 32 / 48-channel Compact bodies (10 files)'
   type: experiment
-  status: in_progress
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -4007,6 +4007,23 @@ tasks:
     as-is - it is refused with that reason, and running it would need C padded to 32 with zero channels
     (+33% work per hop for that model). That leaves 8 of the 10 files reachable without padding: five
     Archivist denoisers at 48 channels and three RGB-max-Denoise at 32.
+  resolution: >-
+    DONE 2026-11-20, all ten files. The width is NOT free: `tl.arange` needs a power of two, so a 48-channel body
+    does not compile at all ("arange's range must be a power of 2") - 48 satisfies the int8 dot's multiple-of-16
+    rule but not Triton's arange. The body now pads to the next power of two (48 -> 64, 24 -> 32) with zero
+    weights and neutral scales, and a power-of-two width pays nothing. Measured (WX001-WX020,
+    docs/wsp/verified/int8-native-width.txt): 32 native, 3 models, share 0.0000%, body 11.80-11.81 ms; 24 -> 32,
+    2 models, share 0.0000%, body 6.22-6.30 ms; 48 -> 64, 5 models, share 0.0000-0.0004%, body 27.14-27.32 ms.
+    THE 48 ROW IS THE ANSWER TO "is 48 cheaper than 64": no - the hop runs at 64 channels whatever the model has,
+    so the 44% of arithmetic a 48-channel model does not need is paid anyway. Making 48 pay for 48 needs three
+    16-wide mma tiles, which Triton cannot express: that is a CUDA kernel, and it is a width-GENERALITY question,
+    not an optimisation (the same kernel measured flat on every optimisation lever).
+    The re-tuning this row was written for turned out to be a no-op: BLOCK_M 128 / warps 4, the 64-tuned default,
+    is also the best of nine combinations at a padded 48 (27.25 ms; 256x2 is 75.31, so a default picked at
+    another width could have landed badly - worth having measured).
+    NOT covered: the shares are three-frame smoke tests, none of these ten has a 494-frame pair, and the RATIO is
+    not measured - a cheaper model has a cheaper fp16 comparator, which is what kept the eight-hop model's ratio
+    at 1.6965 while its frame fell 12.7 ms.
   note: >-
     Tier 2 of the rescue ranking: the working sibling exists and the difference is a CONSTANT (the channel
     count), which is why this is a day rather than a project - but the per-width tile tuning and the memory of

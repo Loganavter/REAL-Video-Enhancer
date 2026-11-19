@@ -16,10 +16,10 @@ Of **55 distinct model files** in the collection:
 
 | verdict | count | meaning |
 |---|---|---|
-| **FULL** | 16 | every opt-in applies: int8 hops, int8 tail, shuffle fold, the tail writing the pipe payload |
-| BODY+TAIL | 5 | int8 hops and int8 tail; 1x upsamplers, so no shuffle fold and the pack converts colour |
+| **FULL** | 17 | every opt-in applies: int8 hops, int8 tail, shuffle fold, the tail writing the pipe payload |
+| BODY+TAIL | 14 | int8 hops and int8 tail; 1x upsamplers, so no shuffle fold and the pack converts colour |
 | BODY | 1 | int8 hops only - the tail is wider than the kernel's 16-channel pad (4x models carry 48) |
-| **NO** | 33 | RRDBNet / SPAN / OmniSR / RealPLKSR / DAT families, 24-channel compacts, and two files that are not models at all |
+| **NO** | 23 | RRDBNet / SPAN / OmniSR / RealPLKSR / DAT families, 24-channel compacts, and two files that are not models at all |
 
 ## Measured, per model
 
@@ -52,6 +52,11 @@ Of **55 distinct model files** in the collection:
 | BODY+TAIL | `1x-Epsilon-one-compact(3).pth` | SRVGGNetCompact | x1 | 1.5394% | 0.0979% | 27.97 |
 | BODY | `realesr-animevideov3(1).pth` | SRVGGNetCompact | x4 | 0.1410% | 0.0288% | 38.04 |
 
+10 models are structurally compatible but are NOT in this sweep - they became reachable
+after it ran, when the hop-count rule and the width padding landed. The 48/32/24-channel families are
+measured separately on `docs/wsp/verified/int8-native-width.txt` (share and body time, with the padding
+cost stated); the rest need their own run. Listed so the table cannot be read as covering them: `2x-DigitalFlim-SuperUltraCompact.pth`, `1x-HurrDeblur-SuperUltraCompact(1).pth`, `1x-RGB-max-Denoise-lite.pth`, `1x-RGB-max-Denoise.pth`, `1x-WB-Denoise.pth`, `Archivist_AntiLines.pth`, `Archivist_Medium.pth`, `Archivist_RGB.pth`, `Archivist_Rough.pth`, `Archivist_Soft.pth`.
+
 ## What this says
 
 **Model choice does not buy speed.** The 16 FULL models land at 14.42-28.20 ms for the body - a 50.3% spread that is drift: they are the
@@ -68,7 +73,7 @@ render pair before anyone trusted it.
 a statement about how well each model's activations fit a per-tensor int8 grid, not about which model
 upscales better - the fp16 picture is the model, and int8 only decides how much of it survives.
 
-**1x models work but lose the two colour opt-ins.** 5 denoise/restore models run
+**1x models work but lose the two colour opt-ins.** 14 denoise/restore models run
 int8 hops and the int8 tail; their upsampler is not a 2x `PixelShuffle`, so the shuffle fold and the
 payload path do not apply and the pack keeps converting colour. The mechanism would generalise (the fold
 is exact for any r), but the kernel's `scale == 2` condition is what the shipped code checks - a

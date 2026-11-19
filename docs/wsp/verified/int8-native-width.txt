@@ -1,0 +1,93 @@
+# Native widths: 32 is free, 48 costs what 64 costs, and 24 is cheap because it is shallow
+
+Measured 2026-11-20 (local), records `int8-width.jsonl` (WX001-WX020, generated below), probe `scripts/int8_width_probe.py`,
+raw `logs/int8-width/probe.json`. Ten models from the collection that the pipeline refused before, at their own
+widths: five Archivist denoisers (48 channels), three RGB-max-Denoise (32), two SuperUltraCompact (24).
+
+## The finding that shaped this: the width is not free
+
+```
+tl.arange(0, 48)  ->  "arange's range must be a power of 2"
+tl.dot (int8)     ->  K must be a multiple of 16
+```
+
+48 satisfies the second (3x16) and not the first, so a 48-channel body does not compile at all in Triton - the
+first run died with exactly that message. The body now pads to the next power of two (48 -> 64, 24 -> 32) with
+zero weights and neutral scales: the padding channels carry 0 through every hop and the tail reads only the first
+`cout`. A power-of-two width pays nothing.
+
+## Measured
+
+| width | models | share (worst of 3 frames) | body, ms | what the padding costs |
+|---|---|---|---|---|
+| **32**, native | 3x RGB-max-Denoise | 0.0000% | **11.80 / 11.81 / 11.80** | nothing |
+| **24 -> 32**, padded | 2x SuperUltraCompact | 0.0000% | **6.22 / 6.30** | the model is also shallow: 8 inner convs |
+| **48 -> 64**, padded | 5x Archivist | 0.0000-0.0004% | **27.14-27.32** | 1.33x work: it costs exactly what a 64-channel body costs |
+
+The 48 row is the honest answer to "is 48 cheaper than 64": **no**. The hop runs at 64 channels whatever the model
+has, so the 44% of arithmetic a 48-channel model does not need is paid anyway. Getting 48 to pay for 48 needs
+three 16-wide mma tiles, which Triton cannot express - that is a CUDA kernel, and it is a width-generality
+question, not an optimisation (the same kernel measured flat on every optimisation lever, `int8-hop-tapreuse.txt`).
+
+The 24 row shows the other half of the scaling: at the same padded width (32), eight inner convs cost about half
+of sixteen (6.2 against 11.8 ms), so depth and width scale roughly independently.
+
+## The tile was not mis-tuned
+
+`BLOCK_M=128, warps=4` is the shipped default, tuned at 64 channels. At a padded 48 it is also the best of the
+nine combinations tried:
+
+```
+BLOCK_M  64 warps 2  29.76   BLOCK_M 128 warps 2  28.17   BLOCK_M 256 warps 2  75.31
+BLOCK_M  64 warps 4  38.61   BLOCK_M 128 warps 4  27.25   BLOCK_M 256 warps 4  28.46
+BLOCK_M  64 warps 8  41.84   BLOCK_M 128 warps 8  39.39   BLOCK_M 256 warps 8  29.97
+```
+
+So the re-tuning this row was written for turns out to be a no-op - worth having measured rather than assumed,
+because 256x2 is 2.8x slower and a default picked at another width could have landed there.
+
+## What this does not say
+
+- **The shares are three-frame smoke tests.** None of these ten models has a 494-frame pair, and the 1% start-up
+  gate is not the 0.1% picture bar. The ranking inside this page is trustworthy; the verdicts are not.
+- **The ratio is not measured, and it is the number that matters for the lane.** A cheaper model has a cheaper
+  fp16 comparator too - measured on the eight-hop model, the frame fell 12.7 ms while the ratio moved 1.6648 ->
+  1.6965. For a 48-channel denoiser at 27.2 ms of body the ratio is likely *worse* than the production model's
+  1.665, because its engine is faster while its body is not.
+- **These ten are not the product.** Five are 1x denoisers, two are 2x "SuperUltraCompact" restore models. The
+  value of the page is coverage - the pipeline no longer refuses them - not throughput.
+- **Padding needs the two int8 boundaries** (fused head, int8 tail): the two fp16 passes are not padded, and the
+  body refuses a padded width without them instead of writing a buffer of the wrong width.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/int8_width_probe.py \
+    --models "Archivist_AntiLines.pth,1x-RGB-max-Denoise.pth,2x-DigitalFlim-SuperUltraCompact.pth" --sweep \
+    --out-file docs/wsp/verified/logs/int8-width/probe.json
+PYTHONPATH=scripts python3 scripts/int8_width_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-native-width.txt \
+       --records docs/wsp/verified/records/int8-width.jsonl --bars docs/claims-bars.json
+
+@claim WX001 0.0001 % "frames [7eb8308abf7110ab] n=3" measured
+@claim WX002 27.14 ms "rounds [2d517e9b92fb16ca] n=3" measured
+@claim WX003 0.0 % "frames [6377e196d85fe864] n=3" measured
+@claim WX004 27.26 ms "rounds [9e3d89882a8a3627] n=3" measured
+@claim WX005 0.0 % "frames [71698107e5caf0c6] n=3" measured
+@claim WX006 27.32 ms "rounds [684d94c873d24833] n=3" measured
+@claim WX007 0.00039 % "frames [f5edc5c807d44ba9] n=3" measured
+@claim WX008 27.28 ms "rounds [23470c076f216c95] n=3" measured
+@claim WX009 0.0 % "frames [2e74ba7aa5e31a02] n=3" measured
+@claim WX010 27.28 ms "rounds [324ae2ba96b5ce9d] n=3" measured
+@claim WX011 0.0 % "frames [68872927939e9b14] n=3" measured
+@claim WX012 11.8 ms "rounds [a6bef80b29280d19] n=3" measured
+@claim WX013 0.0 % "frames [5e020e916ed8bd93] n=3" measured
+@claim WX014 11.81 ms "rounds [a31c4f3574b1f880] n=3" measured
+@claim WX015 0.0 % "frames [776b4d86460d0520] n=3" measured
+@claim WX016 11.8 ms "rounds [59ea777e824c8405] n=3" measured
+@claim WX017 0.0 % "frames [d7ba92dca14d52ee] n=3" measured
+@claim WX018 6.22 ms "rounds [62312251d1a8660f] n=3" measured
+@claim WX019 0.0 % "frames [2ca878dbbb46369e] n=3" measured
+@claim WX020 6.3 ms "rounds [8413d0353d2628d6] n=3" measured
