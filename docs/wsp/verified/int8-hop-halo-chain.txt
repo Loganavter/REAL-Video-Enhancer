@@ -1,0 +1,94 @@
+# The inline halo is adopted: -0.99 ms/frame (-2.9%) and bit-identical on 494 frames
+
+Measured 2026-11-19 (local), BD Violet 494 frames, null sink, reuse off, arms alternating in one session,
+3 rounds; then a lossless render pair. Records: `int8-hop-halo.jsonl`; raw: `logs/hop-halo-chain/probe.json`,
+`logs/hop-halo/ab/`, `logs/hop-halo/pair.json`.
+
+The single-hop probe (`int8-hop-tiles.txt`) said a zero-halo buffer with an unmasked kernel is 2.3% faster
+(1.590 against 1.552 ms, codes identical) but that building the halo with a strided copy costs 1.591 ms - 25x
+the gain. The repair, written down and now measured: **no copy exists at all**. Every hop writes into the NEXT
+hop's padded buffer at a (+1, +1) offset, so the halo is a property of the store address; only the border needs
+zeroing, once per frame.
+
+## The chain, isolated
+
+| arm | ms for 16 hops |
+|---|---|
+| plain buffers, masked kernel | **26.485** |
+| zero-halo buffers, unmasked kernel, store offset | **25.795** |
+
+-0.690 ms of sixteen hops (`R001`), plus **0.080 ms** (`H003`) for the border zeroing of three buffers, i.e.
+**-0.61 ms net** - a subtraction the reader can check, not a record, because the harness recomputes only
+two-input deltas. Codes identical (0 of 132.7 M).
+
+## In the app
+
+| round | plain | halo |
+|---|---|---|
+| 1 | 34.56 | 33.53 |
+| 2 | 34.46 | 33.49 |
+| 3 | 34.50 | 33.51 |
+| **median** | **34.48** | **33.50** |
+
+**-0.99 ms per frame (-2.9%)**, and every halo round beats every plain round. The in-app figure is *larger* than
+the isolated -0.61, which is worth stating rather than smoothing: the chain probe times sixteen launches back to
+back, while the app interleaves the tail and the frame work, and the masked version pays its bounds arithmetic
+in the one place that is not overlapped.
+
+## The picture: identical, and that was checkable
+
+```
+494 frames, block 64
+worst share 0.00000%, frames above 0.1%: 0
+worst block mean 0.00, peak 0
+IDENTITY: every frame is bit-identical between the two files
+```
+
+Before that, two frames compared tensor-to-tensor: **0 differing pixels**, and against the model both arms read
+0.01084% / 0.01461% - the same numbers. A halo changes which address a tap reads, not the value it finds.
+
+## Adopted
+
+`RVE_HOP_HALO` defaults to **1** since 2026-11-19; `=0` restores the plain layout. Guards: the first hop reads
+the quantiser's plain buffer (`READ_PADDED=0`), hops 1-14 pad-to-pad, the last hop writes a plain buffer
+(`WRITE_PADDED=0`) because the tail kernel indexes `pix*C` linearly and cannot read a padded interior - so the
+chain needs no conversion pass anywhere.
+
+**Cost, stated because it is real: +382 MB of buffers** (three padded ones against two plain), measured as
+585 MB -> 967 MB steady after a frame.
+
+## Not covered
+
+- One card, one clip. The halo's benefit depends on how many taps are predicated off, which is a property of the
+  material's edges (the fraction of lanes sitting on the frame border).
+- The write-offset does not survive a shrunken last hop for other models: a tail with more than 16 output
+  channels already declines the int8 tail, and this path inherits the same boundary.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_halo_chain_probe.py --rounds 3 --iters 15 \
+    --out-file docs/wsp/verified/logs/hop-halo-chain/probe.json
+ARMS="halo0 halo1" ARM_ENV_HALO0="RVE_HOP_HALO=0" ARM_ENV_HALO1="RVE_HOP_HALO=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+ARMS="halo0 halo1" ARM_ENV_HALO0="RVE_HOP_HALO=0" ARM_ENV_HALO1="RVE_HOP_HALO=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/hop-halo scripts/wall_ab.sh
+PYTHONPATH=scripts python3 scripts/gate_sweep.py <halo0.mkv> <halo1.mkv> --out pair.json \
+  --emit pair-records.jsonl --reference-kind config ... --id-prefix HL
+PYTHONPATH=scripts python3 scripts/hop_halo_chain_records.py --pair <pair-records.jsonl>
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-halo-chain.txt \
+       --records docs/wsp/verified/records/int8-hop-halo.jsonl --bars docs/claims-bars.json
+
+@claim H001 26.485 ms "frames [10cff28ea287d300] n=1" measured
+@claim H002 25.795 ms "frames [10cff28ea287d300] n=1" measured
+@claim H003 0.08 ms "frames [10cff28ea287d300] n=1" measured
+@claim H004 34.48 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim H005 33.5 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim HL001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim HL002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim HL003 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim HL004 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim R001 0.69 ms "frames [10cff28ea287d300] n=1" derived
+@claim R002 -0.98 ms "frames [c171112dd7b0ab2c] n=1" derived

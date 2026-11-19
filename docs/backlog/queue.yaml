@@ -3482,3 +3482,29 @@ tasks:
     halo arithmetic is the part that was never done, and the corrected price (~2.3 ms/frame at T=64) is why this
     is P3 and not P1: it attacks the one quantity that survived every other lever, the per-launch constant, but
     it needs the same CUDA kernel that the smem row would need and would have to earn the same 2 ms.
+
+- id: rve-hop-halo-inline-2026-11-20
+  title: 'Inline zero halo: every hop writes the next hop''s padded interior, so no copy exists'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 2h
+  tags:
+  - int8
+  - hops
+  - layout
+  base_branch: perf/inference
+  resolution: >-
+    ADOPTED 2026-11-19. The single-hop probe had already shown the mask-free form is 2.3% faster (1.590 -> 1.552
+    ms) while a strided halo build costs 1.591 ms - 25x the gain - so the repair was to make the build disappear:
+    every hop stores into the NEXT hop's padded buffer at a (+1,+1) offset, only the border is zeroed, once per
+    frame. Chain, isolated: 26.485 -> 25.795 ms for sixteen hops (-0.690) plus 0.080 ms of border zeroing =
+    -0.61 net. In the app, 3 interleaved rounds: 34.48 -> 33.50 ms/frame (-0.98, -2.9%), every halo round beating
+    every plain round, and the 494-frame ffv1 pair reads IDENTITY - bit-identical, so this is a layout change and
+    nothing else. The first hop reads the quantiser's plain buffer and the LAST hop writes a plain buffer
+    (the tail indexes pix*C linearly and cannot read a padded interior), so no conversion pass exists anywhere.
+    Shipped as the default (RVE_HOP_HALO=1). Cost: +382 MB of buffers (585 -> 967 MB steady). docs/wsp/verified/
+    int8-hop-halo-chain.txt, records int8-hop-halo.jsonl (H001-H006, R001, HL001-HL004), logs/hop-halo-chain/,
+    logs/hop-halo/.

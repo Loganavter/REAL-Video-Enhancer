@@ -23,10 +23,61 @@ try:                       # round-half-to-EVEN, which is what torch.round does
 except Exception:          # pragma: no cover - older triton
     _rint = None
 
-__all__ = ["body_prologue_kernel", "head_int8_kernel", "tail_int8_kernel", "tail_int8_shuffle_kernel",
+__all__ = ["body_prologue_kernel", "hop_padded_kernel", "head_int8_kernel", "tail_int8_kernel",
+           "tail_int8_shuffle_kernel",
            "quantise_nchw_to_nhwc", "quantise_nchw_to_nhwc_prelu",
            "quantise_nhwc", "quantise_nhwc_prelu",
            "dequantise_nhwc_to_nchw", "dequantise_nhwc"]
+
+
+@triton.jit
+def hop_padded_kernel(x_ptr, w_ptr, m_next_ptr, shift, w_scale_ptr, bias_ptr, slope_ptr, out_scale_ptr,
+                      y_ptr, H, W, BLOCK_M: tl.constexpr, C: tl.constexpr, READ_PADDED: tl.constexpr,
+                      WRITE_PADDED: tl.constexpr = 1):
+    """The hop against a zero-haloed buffer: no bounds mask, and the store lands in the next interior.
+
+    Measured (docs/wsp/verified/int8-hop-tiles.txt, int8-hop-halo-chain.txt): the mask-free form is 2.3% faster
+    with identical codes, and the halo costs nothing when every hop writes into the next hop's padded buffer at a
+    (+1, +1) offset - the border is zeroed once per frame (~0.08 ms) instead of a 134 MB copy per hop.
+
+    READ_PADDED=0 is used for the FIRST hop, whose input is the quantiser's plain (H, W, C) buffer: the read is
+    masked there and the store is already padded, so no extra pass exists anywhere in the chain.
+    """
+    pid = tl.program_id(0)
+    rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    h = rows // W
+    w = rows % W
+    lanes = tl.arange(0, C)
+    acc = tl.zeros((BLOCK_M, C), dtype=tl.int32)
+    for tap in tl.range(0, 9, num_stages=1):
+        dy = tap // 3 - 1
+        dx = tap % 3 - 1
+        if READ_PADDED:
+            src = ((h + 1 + dy) * (W + 2) + (w + 1 + dx))[:, None] * C + lanes[None, :]
+            a = tl.load(x_ptr + src)
+        else:
+            yy = h + dy
+            xx = w + dx
+            inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
+            src = (yy * W + xx)[:, None] * C + lanes[None, :]
+            a = tl.load(x_ptr + src, mask=inside[:, None], other=0)
+        b = tl.load(w_ptr + tap * C * C + lanes[:, None] * C + lanes[None, :])
+        acc += tl.dot(a, b, out_dtype=tl.int32)
+    v = acc.to(tl.float32) * tl.load(w_scale_ptr + lanes)[None, :] + tl.load(bias_ptr + lanes)[None, :]
+    slope = tl.load(slope_ptr + lanes)[None, :]
+    v = tl.where(v >= 0, v, v * slope)
+    osc = tl.load(out_scale_ptr + lanes)[None, :]
+    q = tl.floor(v / osc + 0.5)
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0).to(tl.int32)
+    q = ((q * tl.load(m_next_ptr + lanes)[None, :]) + (1 << (shift - 1))) >> shift
+    q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+    if WRITE_PADDED:
+        dst = ((h + 1) * (W + 2) + (w + 1))[:, None] * C + lanes[None, :]
+    else:
+        # the LAST hop writes a plain (H, W, C) buffer: the tail kernel indexes pix*C linearly, so it cannot
+        # read a padded interior, and copying the interior out would cost more than the halo saves
+        dst = rows[:, None] * C + lanes[None, :]
+    tl.store(y_ptr + dst, q.to(tl.int8))
 
 
 @triton.jit
