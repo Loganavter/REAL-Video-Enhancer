@@ -674,6 +674,14 @@ class UpscalePytorch:
                     "probe's spread sample (a single-frame calibration is 20x worse on composition)")
                 return None
             _frames = self.int8Frames
+            if not getattr(self, "_calib_shape_logged", False):
+                self._calib_shape_logged = True
+                _f0 = _frames[0] if _frames else None
+                log("int8 calibration frames: %d x shape %s dtype %s device %s | render frame shape %s dtype %s "
+                    "device %s", len(_frames), tuple(_f0.shape) if _f0 is not None else None,
+                    getattr(_f0, "dtype", None), getattr(_f0, "device", None),
+                    tuple(frame.shape) if frame is not None else None,
+                    getattr(frame, "dtype", None), getattr(frame, "device", None))
             body.calibrate(_frames)
             # THE GRID PICK (RVE_INT8_GRID_K=auto): choose K on a slice of the calibration frames and keep the
             # certificate on another slice, because picking on the frames you certify on makes the gate pass by
