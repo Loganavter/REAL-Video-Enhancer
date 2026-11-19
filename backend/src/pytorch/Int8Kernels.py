@@ -24,7 +24,7 @@ except Exception:          # pragma: no cover - older triton
     _rint = None
 
 __all__ = ["body_prologue_kernel", "hop_padded_kernel", "head_int8_kernel", "tail_int8_kernel",
-           "tail_int8_shuffle_kernel",
+           "tail_int8_shuffle_kernel", "tail_int8_yuv_kernel",
            "quantise_nchw_to_nhwc", "quantise_nchw_to_nhwc_prelu",
            "quantise_nhwc", "quantise_nhwc_prelu",
            "dequantise_nhwc_to_nchw", "dequantise_nhwc"]
@@ -253,6 +253,72 @@ def tail_int8_shuffle_kernel(x_ptr, w_ptr, sigma_ptr, bias_ptr, lr_ptr, y_ptr, H
     out_pos = ((h[:, None] * SCALE + sy[None, :]) * (W * SCALE) + (w[:, None] * SCALE + sx[None, :])) * 3 \
         + chan[None, :]
     tl.store(y_ptr + out_pos, val, mask=lm)
+
+
+@triton.jit
+def tail_int8_yuv_kernel(x_ptr, w_ptr, sigma_ptr, bias_ptr, lr_ptr, y_ptr, H, W, BLOCK_M: tl.constexpr,
+                         CIN: tl.constexpr, COUT: tl.constexpr, COUT_PAD: tl.constexpr,
+                         SCALE: tl.constexpr):
+    """Tail conv + shuffle + residual + colour conversion, writing packed yuv420p directly.
+
+    PixelShuffle(2) turns the 12 tail channels into a 2x2 output block per input pixel, and 4:2:0 chroma averages
+    over exactly that block - so the four Y and the single U and V of a position are all produced from one input
+    pixel, with no cross-lane work. Y, Cb and Cr are each LINEAR in (R, G, B), which is why each is a weighted sum
+    over the channel axis of the reshaped tile. Weights, with BT.709 and limited range:
+
+        Y  =  0.2126 R + 0.7152 G + 0.0722 B          -> Yq = round(219 Y + 16),    clamp 16..235
+        Cb = (B - Y) * 0.5/(1-0.0722) = -0.11459 R - 0.38547 G + 0.50000 B
+        Cr = (R - Y) * 0.5/(1-0.2126) =  0.50000 R - 0.45419 G - 0.04585 B
+        Uq = round(224 mean(Cb) + 128), Vq likewise,  clamp 16..240
+
+    Output: 6 bytes per input pixel - four Y in the 2H x 2W plane, then U and V in two H x W planes.
+
+    The arithmetic order differs from the shipped path (fp16 arithmetic, rounding before the chroma average), so
+    this is a DIFFERENT-ARITHMETIC change: the offline gate measured max 1 level over the whole payload.
+    """
+    pid = tl.program_id(0)
+    rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    h = rows // W
+    w = rows % W
+    li = tl.arange(0, CIN)
+    lo = tl.arange(0, COUT_PAD)
+    acc = tl.zeros((BLOCK_M, COUT_PAD), dtype=tl.int32)
+    for tap in tl.range(0, 9, num_stages=1):
+        dy = tap // 3 - 1
+        dx = tap % 3 - 1
+        yy = h + dy
+        xx = w + dx
+        inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
+        a = tl.load(x_ptr + ((yy * W + xx)[:, None] * CIN + li[None, :]), mask=inside[:, None], other=0)
+        b = tl.load(w_ptr + tap * CIN * COUT_PAD + li[:, None] * COUT_PAD + lo[None, :])
+        acc += tl.dot(a, b, out_dtype=tl.int32)
+    v = acc.to(tl.float32) * tl.load(sigma_ptr + lo)[None, :] + tl.load(bias_ptr + lo)[None, :]
+    v3 = tl.reshape(v, (BLOCK_M, 4, SCALE * SCALE))     # [channel][subpixel], torch's pixel_shuffle order
+    ch = tl.arange(0, 4)
+    wy = tl.where(ch == 0, 0.2126, tl.where(ch == 1, 0.7152, tl.where(ch == 2, 0.0722, 0.0)))
+    wu = tl.where(ch == 0, -0.11459, tl.where(ch == 1, -0.38547, tl.where(ch == 2, 0.50000, 0.0)))
+    wv = tl.where(ch == 0, 0.50000, tl.where(ch == 1, -0.45419, tl.where(ch == 2, -0.04585, 0.0)))
+    y4 = tl.sum(v3 * wy[None, :, None], 1)              # (BLOCK_M, 4)
+    u4 = tl.sum(v3 * wu[None, :, None], 1)
+    w4 = tl.sum(v3 * wv[None, :, None], 1)
+    # the residual adds the SAME LR pixel to all four subpixels: one value per position, per output channel
+    lr_r = tl.load(lr_ptr + rows)
+    lr_g = tl.load(lr_ptr + (H * W) + rows)
+    lr_b = tl.load(lr_ptr + 2 * (H * W) + rows)
+    y_res = lr_r * 0.2126 + lr_g * 0.7152 + lr_b * 0.0722
+    u_res = lr_r * -0.11459 + lr_g * -0.38547 + lr_b * 0.5
+    v_res = lr_r * 0.5 + lr_g * -0.45419 + lr_b * -0.04585
+    yq = tl.minimum(tl.maximum(tl.floor((y4 + y_res[:, None]) * 219.0 + 16.0 + 0.5), 16.0), 235.0)
+    uq = tl.minimum(tl.maximum(tl.floor((tl.sum(u4, 1) / 4.0 + u_res) * 224.0 + 128.0 + 0.5), 16.0), 240.0)
+    vq = tl.minimum(tl.maximum(tl.floor((tl.sum(w4, 1) / 4.0 + v_res) * 224.0 + 128.0 + 0.5), 16.0), 240.0)
+    sub = tl.arange(0, SCALE * SCALE)
+    sy = sub // SCALE
+    sx = sub % SCALE
+    y_idx = (h[:, None] * SCALE + sy[None, :]) * (W * SCALE) + (w[:, None] * SCALE + sx[None, :])
+    tl.store(y_ptr + y_idx, yq.to(tl.uint8))
+    n = H * W
+    tl.store(y_ptr + 4 * n + rows, uq.to(tl.uint8))
+    tl.store(y_ptr + 5 * n + rows, vq.to(tl.uint8))
 
 
 @triton.jit
