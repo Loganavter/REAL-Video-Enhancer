@@ -4389,7 +4389,7 @@ tasks:
 - id: rve-certificate-picture-2026-11-20
   title: "The certificate was withdrawn to save 33 s and it moved the picture 0.45% - re-measure and decide"
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -4420,6 +4420,15 @@ tasks:
   note: >-
     Found by the 2026-11-20 audit for measured-but-not-applied work. This is the largest such item: 0.45% of pixels
     above the bar between what was measured and what ships, with 33 s of start-up as the reason for the gap.
+  resolution: >-
+    DONE 2026-11-20, mechanism identified and the worry answered. Four arms in one session, 494 frames each, ffv1,
+    against the shipped certificate-off path: certificate ON 0.00057% worst share (frame 23, peak 21); 2 GB
+    allocated and released 0.00000% with peak 0 (BIT-IDENTICAL); fp16 engine warmed on 6 frames 0.00057% with the
+    same frame and the same peak. So the mechanism is the engine WARM-UP, not the quantised twin's allocation, and
+    the 0.45% of 2026-11-19 does not reproduce on the current tree - it reads 0.00057% now, 0 frames above the bar
+    either way, with the tail-CSC payload and the crop calibration having landed in between (this row does not
+    attribute the difference between the two numbers). No action: the shipped pixels are 0.00057% from the
+    certified ones. docs/wsp/verified/int8-startup-split2.txt, logs/cert-picture/.
 
 - id: rve-ink-lift-2026-11-20
   title: "The rendered file lifts line art by ~5 levels against the model, and it is not the quantiser"
@@ -4549,7 +4558,7 @@ tasks:
 - id: rve-draq-online-range-2026-11-20
   title: "Per-frame activation range (DRAQ) instead of the 16-frame calibration"
   type: experiment
-  status: todo
+  status: dropped
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -4579,7 +4588,10 @@ tasks:
   note: >-
     The risk is exactly what the paper does not measure for video SR: a range that moves per frame moves the
     picture per frame. Our harness already measures that - this row is a render pair, not a new instrument.
-    FINDING 2026-11-20, before any code: DRAQ's mechanism does not map onto this body. Their scale multiplies the
+    DROPPED 2026-11-20, superseded and inapplicable. Superseded: the block it was meant to remove is gone -
+    crop calibration took the probe from 12.635 to 0.563 s and the start-up from 33.15 to 9.79 s, which is the
+    same 20 seconds DRAQ would have chased, without touching the grid at all. Inapplicable: DRAQ's mechanism does
+    not map onto this body. Their scale multiplies the
     activations at runtime; ours is folded into the int8 WEIGHTS at build time (`weight * s_grid` in `_build`), so
     a per-frame range needs a per-frame rebuild (0.44 s x 494 frames). The only shape that survives is calibrating
     from the first N frames of the sequential stream instead of a spread decode, and that is strictly worse than
