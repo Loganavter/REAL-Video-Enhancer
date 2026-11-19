@@ -107,3 +107,53 @@ def test_the_probe_reads_width_depth_and_scale_from_the_weights(feat, inner, sca
     from src.utils.Int8Probe import compact_shape
 
     assert compact_shape(_state(feat, inner, scale)) == (feat, inner, scale)
+
+
+# ======================================================================================
+# padding a non-power-of-two width
+#
+# `tl.arange` needs a power of two and the int8 dot needs K a multiple of 16, so 48 is padded to 64 and 24 to 32
+# with zero weights and neutral scales. Two bugs lived in that seam and both are pinned here, on CPU: the int8
+# tail multiplied its weight by the last hop's per-channel scale, which is cpad long after padding, and the fused
+# head wrote a feat-wide row into a cpad-wide matrix. Neither fails in a test that only constructs the body.
+# ======================================================================================
+
+
+def _built_body(n_inner: int, feat: int, tail: int = 3, scale: int = 1):
+    """A body built on CPU with synthetic grids - enough to exercise every padding site."""
+    body = Int8Body(_Body(n_inner, feat=feat, tail=tail, scale=scale))
+    ones = torch.ones(feat)
+    body._grids = (ones, [torch.ones(feat) for _ in range(n_inner)])
+    body._launches = None
+    body._build()
+    return body
+
+
+@pytest.mark.parametrize("feat,cpad", [(48, 64), (24, 32), (32, 32), (64, 64)])
+def test_the_padded_widths_reach_every_kernel_site(feat, cpad):
+    body = _built_body(16, feat)
+    assert body.cpad == cpad
+    w = body._launches[0]["w"]
+    assert w.shape == (9, cpad, cpad), "the hop's taps must be cpad x cpad"
+    assert float(w[:, feat:, :].abs().sum()) == 0.0, "padding rows must be zero"
+    assert float(w[:, :, feat:].abs().sum()) == 0.0, "padding columns must be zero"
+    for key, fill in (("vec", 1.0), ("os", 1.0), ("slope", 1.0), ("bias", 0.0)):
+        v = body._launches[0][key]
+        assert v.numel() == cpad, f"{key} must be cpad long"
+        if cpad != feat:
+            assert float(v[feat:].sum()) == fill * (cpad - feat), f"{key} padding must be neutral"
+    assert body._head_w32.shape == (32, cpad), "the fused head's matrix is (K=32, cpad)"
+    assert float(body._head_w32[:, feat:].abs().sum()) == 0.0
+    assert body._tail_taps.shape == (9, cpad, 16), "the int8 tail reads cpad channels and pads cout to 16"
+    assert float(body._tail_taps[:, feat:, :].abs().sum()) == 0.0
+
+
+def test_a_padded_width_needs_the_two_int8_boundaries():
+    """The fp16 head-quantise and tail-dequant passes are not padded, so a padded width requires the fused head
+    and the int8 tail - and says so rather than writing a feat-wide buffer the hops will read as cpad."""
+    class _Wide(_Body):
+        def __init__(self):
+            super().__init__(16, feat=48, tail=48, scale=2)   # a tail wider than 16 channels: no int8 tail
+
+    with pytest.raises(ValueError, match="needs the int8 tail"):
+        Int8Body(_Wide())
