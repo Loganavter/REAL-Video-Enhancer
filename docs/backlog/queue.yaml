@@ -3562,3 +3562,29 @@ tasks:
     Filed on the owner's question "did we ever look at this from a different order" - and the honest answer for
     Winograd is: the lane had only ever tested cuDNN's Winograd, never the arithmetic, and the arithmetic now
     says the win exists but sits behind the same instrument as everything else that failed.
+
+- id: rve-hop-traverse-order-2026-11-20
+  title: 'Walk the tiles in reverse on alternate hops: does the previous hop''s tail stay in L2?'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P3
+  gpu: true
+  cost: 20m
+  tags:
+  - int8
+  - hops
+  - l2
+  base_branch: perf/inference
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-20, in twenty minutes, from an outside reader's list - the one item in it this
+    corpus had never tested and that is expressible in one line. The idea: a hop writes 132 MB but L2 is 32 MB,
+    so hop k+1's tile 0 finds data written 132 MB ago and long evicted; walking the tiles in REVERSE would read
+    first what hop k wrote LAST. Ceiling from the counters: a quarter of the 132.84 MB DRAM read becoming an L2
+    hit is ~0.11 ms/hop, ~1.8 ms over sixteen. Measured on the 16-hop chain, identical codes in all three arms:
+    forward 26.551 ms, alternate (reverse on odd hops) 26.577 (-0.10%), reverse-all 26.446 (+0.40%). The
+    discriminating comparison is `alternate` against BOTH others - it loses to forward and to reverse-all, which
+    is exactly what "no L2 adjacency benefit" looks like. The reason is in the counters: the hop is at 54% of the
+    DRAM roof, so a third of a hop's reads becoming hits buys little, and the write-back of 132 MB evicts the
+    previous launch's tail before it can be reused. Records int8-hop-traverse.jsonl (V001-V003),
+    logs/hop-traverse/probe.json.
