@@ -3,28 +3,28 @@
 **Generated** by `scripts/frame_budget.py` - do not edit. Every number is parsed from the render
 log named below or resolved by id from `docs/wsp/verified/records/`.
 
-Source run: `docs/wsp/verified/logs/wall-defaults/null/bd_csm_same_int8_r3_null.log` (539 frames, null sink, reuse off).
+Source run: `docs/wsp/verified/logs/wall-final/bd_violet20s_int8_r3_null.log` (494 frames, null sink, reuse off).
 
 ## The body, from the app's own phase counter
 
 | line | ms | share of body |
 |---|---|---|
-| head | 0.70 | 2% |
+| head | 0.60 | 2% |
 | quantise | 0.00 | 0% |
-| hops | 25.40 | 89% |
-| tail | 2.60 | 9% |
-| **BODY TOTAL** | **28.60** | 100% |
+| hops | 24.30 | 94% |
+| tail | 1.00 | 4% |
+| **BODY TOTAL** | **25.90** | 100% |
 
-Tail split on the same run: dequant 0.00, conv 0.90, shuffle 0.75, residual 0.90, sum 2.56 ms.
+Tail split on the same run: dequant 0.00, conv 1.01, shuffle 0.00, residual 0.00, sum 1.02 ms.
 
 ## The frame
 
 | what | ms |
 |---|---|
-| body (above) | 28.60 |
-| pack + queue | 3.42 |
-| **render loop** | **35.17** |
-| everything else (reader, wrapper, writer wait) | +3.15 |
+| body (above) | 25.90 |
+| pack + queue | 4.36 |
+| **render loop** | **33.58** |
+| everything else (reader, wrapper, writer wait) | +3.32 |
 
 ## What is in this frame because it was measured and adopted
 
@@ -50,6 +50,7 @@ Tail split on the same run: dequant 0.00, conv 0.90, shuffle 0.75, residual 0.90
 
 ## The ratio this produces
 
-See `docs/wsp/int8-wall-defaults.txt`: 1.399x and 1.481x on a null sink, 1.511x and 1.506x
-under `hevc_nvenc`, against `bar_int8_wall` = 1.2x.
+Measured last in `logs/wall-final` (Violet, null sink, 3 rounds, the shipped default):
+`int8-wall-final.jsonl` W009 = **1.552x** against `bar_int8_wall` = 1.2x. Older, pre-halo:
+`int8-wall-defaults.txt` 1.399x / 1.481x null and 1.511x / 1.506x under `hevc_nvenc`.
 
