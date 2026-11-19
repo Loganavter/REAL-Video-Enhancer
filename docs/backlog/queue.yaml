@@ -2855,8 +2855,20 @@ tasks:
 - id: rve-hop-persistent-cta-2026-11-20
   title: 'The hop at 25.7 ms: one grid-shape idea left, a persistent CTAs that loops over tiles'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-20, and this was the last schedule idea. Persistent grid at 34 CTAs (one per SM):
+    3.709 ms against 1.703 for the shipped 16 200-CTA grid - 2.2x SLOWER; at 68 CTAs 2.251, still 1.3x slower.
+    All three arms produce 0 differing codes of 132.7 M. The mechanism is plain: each CTA loops over ~476
+    tiles sequentially and 34 resident CTAs give the card no second wave, so the per-tile dependent chain is
+    never hidden - while 16 200 CTAs are exactly what a latency-bound kernel wants, and the launch overhead
+    the row hoped to remove was never the cost (it is ONE launch). Together with int8-hop-loads (vectorised
+    loads +0.9%, weight hoist -54%) and int8-sub8-codes (6-bit codes 2.71% of pixels), the hop has been
+    attacked from three sides and 25.7 ms of sixteen hops is its floor on this card: 51% of the arithmetic
+    roof and 54% of the traffic roof at once is what this shape costs here. The frame's remaining headroom is
+    outside the hop. docs/wsp/verified/int8-hop-persistent.txt, records int8-hop-persistent.jsonl
+    (N001-N003, R001-R002), logs/hop-persistent/probe.json.
   priority: P2
   gpu: true
   cost: 4h
