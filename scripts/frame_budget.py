@@ -22,6 +22,7 @@ TAILSPLIT = re.compile(r"int8 tail: dequant ([\d.-]+)\s+conv ([\d.]+)\s+shuffle 
 LOOP = re.compile(r"render loop: [\d.]+ s for (\d+) frames \(([\d.]+) ms/frame\)")
 TAILOUT = re.compile(r"int8 tail output: (\S+ \S+) \(RVE_TAIL_YUV=(\S+) -> tail_yuv=(\S+), "
                      r"yuv8_output=(\S+), pipe=(\S+)\)")
+GRID = re.compile(r"int8 grid: ([^\n]+?) \(RVE_INT8_GRID_K=([^,]+), RVE_INT8_PER_CHANNEL=(\S+)\)")
 PACK = re.compile(r"pack\+queue ([\d.]+)")
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -114,6 +115,7 @@ def main(argv=None) -> int:
     loop = LOOP.findall(text)
     pack = PACK.findall(text)
     tailout = TAILOUT.findall(text)
+    grid = GRID.findall(text)
     if not ph or not loop:
         raise SystemExit(f"{log}: no phase or loop line")
     head, quant, hops, tail, body_sum, body_tot = (float(x) for x in ph[-1])
@@ -161,6 +163,10 @@ def main(argv=None) -> int:
     _payload_line = "int8 tail writes the payload" in text
     A("| build | fused head kernel, int8 tail kernel, tail shuffle+residual inside that tail kernel, zero-halo "
       "hop buffers, and the tail writing the yuv420p payload itself |")
+    if grid:
+        _g = grid[-1]
+        A(f"| int8 grid, as the run resolved it | **{_g[0]}** - `s[c] = max(s_in[c], s_t/K)`, K=2 by default "
+          f"(RVE_INT8_GRID_K={_g[1]}, RVE_INT8_PER_CHANNEL={_g[2]}) |")
     if _to:
         A(f"| tail output, as the run resolved it | **{_to[0]}** - RVE_TAIL_YUV={_to[1]} -> tail_yuv={_to[2]}, "
           f"yuv8_output={_to[3]}, pipe={_to[4]} (the gate refuses on HDR / 10-bit / non-bt709, so the flag "

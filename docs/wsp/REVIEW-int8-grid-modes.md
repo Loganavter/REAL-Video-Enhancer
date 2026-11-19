@@ -119,6 +119,10 @@ The 3-frame gate is a smoke test. For the production model the ladder was render
   shipped per-tensor  vs  K=2      worst share 0.00625%   frames over the 0.1% bar: 0
 ```
 
+**K=2 is the shipped default since 2026-11-20** (`207f9cbf`), with the two old modes still reachable
+(`RVE_INT8_GRID_K=0`, `RVE_INT8_PER_CHANNEL=1`) and the resolution logged at build time. What is *not* adopted
+is a per-model optimum: eight models prefer K=3/4 by 2.5-7x, which needs a start-up pick rather than a constant.
+
 The triangle is consistent: the two int8 configurations differ from each other (0.00625%) by more than either
 differs from the engine, which is what happens when the engine sits between them.
 

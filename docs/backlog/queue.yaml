@@ -4091,6 +4091,14 @@ tasks:
     0.00125% with 0 frames over the 0.1% bar (GK records), and K=2 vs the shipped per-tensor reads 0.00625%
     with 0 over the bar. NEXT: the same ladder on all 21 models (running), then a per-model K with the pair as
     acceptance, and the epilogue term (K=1 vs shipped) recorded as the third measured term.
+  adopted: >-
+    K=2 IS THE SHIPPED DEFAULT since 2026-11-20 (207f9cbf): on 22 models an intermediate K beat both previous
+    modes on 17 (the other 5 read 0.0000% at every K), and the 494-frame pair against the fp16 engine reads
+    0.00125% at K=2 against 0.00353% for per-tensor, 0 frames over the bar in both. The knobs stay separable:
+    RVE_INT8_GRID_K unset -> K=2, =0 -> the old per-tensor path, RVE_INT8_PER_CHANNEL=1 -> pure per-channel, and
+    the build logs which one it resolved. NOT adopted: a per-model optimum - eight models prefer K=3/4 by
+    2.5-7x, which is the start-up pick, and rve-grid-k-predict asks whether that pick can be known without the
+    sweep.
   acceptance: >-
     (a) All 21 compatible models in BOTH grid modes, with the calibration grid's dynamic range (max/median of the
     per-channel maxima) recorded next to each - the predictor has to be a number, not a hunch. (b) The rule: if
