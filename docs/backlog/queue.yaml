@@ -2952,8 +2952,22 @@ tasks:
 - id: rve-bar-int8-peak-decision-2026-11-20
   title: 'bar_int8_peak = 20 against a measured 29-55: a DECISION, not a measurement, and it is open'
   type: decision
-  status: todo
+  status: done
   owner: '@owner'
+  resolution: >-
+    RESOLVED BY MEASUREMENT 2026-11-20, then a one-line decision: bar_int8_peak STAYS at 20 and the shipped
+    default MEETS it. The premise of the pending note was wrong about what ships - the 29-55 range is the int8
+    kernel FAMILY as measured 2026-11-17 (the epilogue and three-accumulator variants), not the adopted
+    configuration. Measured on the shipped default (fused head + int8 tail) against the model on seven spread
+    frames: peak 13.1-16.9 levels, share 0.0031-0.0146%, and ZERO pixels above 20 in 7 x 8.3 M. The errors are
+    slivers on ink contours - the largest connected run of >8-level pixels is 19 px, the typical frame's 4-12,
+    in 200-770 separate runs - so "specks on lines", not patches. Crops: logs/peak-look/*.png (reference |
+    default | difference x8 | >8 mask), which also shows why gain panels mislead: at x8 a 1-2 level rounding
+    difference hazes the whole crop. So no threshold had to be invented, no "out of spec on the peak axis"
+    label is needed, and the 29-55 range stays a true statement about configurations that are not shipped.
+    docs/wsp/verified/peak-look.txt, records peak-look.jsonl (P001-P004), logs/peak-look/. NOT covered: the
+    pre-encode tensor rather than the delivered stream (the colour pipe moves 0.21% on its own - that is why
+    render pairs are the acceptance instrument), one clip, one model, one card.
   priority: P1
   gpu: false
   cost: 30m
