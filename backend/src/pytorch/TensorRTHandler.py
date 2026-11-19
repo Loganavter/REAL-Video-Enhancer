@@ -272,17 +272,28 @@ class TorchTensorRTHandler:
         )
         TorchUtils.clear_cache()
 
+    # ONE LOAD PER ENGINE PER PROCESS (measured 2026-11-20): the probe loads the engine as its reference and
+    # the render path loads the same file again 3 s later, so the start-up paid 0.11 s twice for a 32 MB plan.
+    # The cache is keyed by absolute path and holds the module itself - a ScriptModule is stateless at inference,
+    # so sharing it is safe; `_trt_engines` is the module's own partitioning list and is read-only here.
+    _engine_cache: dict[str, "torch.jit.ScriptModule"] = {}
+
     def load_engine(self, trt_engine_name: str) -> torch.jit.ScriptModule:
         """Loads a TensorRT engine from the specified path."""
-        
+
         trt_engine_name += self.trt_path_appendix
         trt_engine_path = os.path.join(self.model_parent_path, trt_engine_name)
+        _cached = TorchTensorRTHandler._engine_cache.get(trt_engine_path)
+        if _cached is not None:
+            log(f"TensorRT engine already loaded in this process: {os.path.basename(trt_engine_path)}")
+            return _cached
         if self.raw_trt_enabled() and os.path.exists(trt_engine_path + ".plan"):
             from .RawTRTEngine import RawTRTEngine
             print(f"Loading raw TensorRT plan from {trt_engine_path}.plan.", file=sys.stderr)
             return RawTRTEngine(trt_engine_path + ".plan")
         print(f"Loading TensorRT engine from {trt_engine_path}.", file=sys.stderr)
         loaded = torch.jit.load(trt_engine_path).eval()
+        TorchTensorRTHandler._engine_cache[trt_engine_path] = loaded
         engines = getattr(loaded, "_trt_engines", None)
         if engines is not None:
             log(f"TensorRT partitioning (loaded): {len(engines)} sub-engine(s)")
