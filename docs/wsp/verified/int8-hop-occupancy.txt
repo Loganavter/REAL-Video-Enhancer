@@ -1,0 +1,97 @@
+# What the hop's 1.55 ms is made of: one round trip, an epilogue at 7%, and no occupancy to be bought
+
+Measured 2026-11-19 (local), RTX 4060 Ti, one hop of the int8 body on its own codes (frame 169), three
+interleaved rounds, medians of rounds 2+. Together with `int8-hop-roof.txt` (component removal) and
+`int8-hop-ncu.txt` (profiler counters) this closes the question the plan opened: *what is the hop bound by?*
+Records: `int8-hop-occupancy.jsonl`; raw: `logs/hop-occupancy/probe.json`, `logs/hop-epilogue/probe.json`.
+
+## The account, in four numbers
+
+| what | ms | source |
+|---|---|---|
+| the whole hop | **1.55-1.57** | `hop-roof`, `hop-epilogue` |
+| the int8 write (132.7 MB) | 0.365 | store-only 0.485 minus the epilogue 0.12 |
+| the epilogue (dequant, PReLU, floor, requant, clamp) | **0.112-0.120 (7.1-7.6%)** | this file: bare store 1.458 against shipped 1.570 |
+| the nine gathers + dots | 1.07 | `hop-roof`: full 1.551 - store-only 0.485 |
+
+And inside the gathers, the shape of the cost is the finding:
+
+| taps | ms | marginal |
+|---|---|---|
+| 1 | 1.073 | **the first tap costs 0.59 ms** |
+| 3 | 1.072 | +0.00 for two more |
+| 9 | 1.551 | +0.48 for six more (0.08 each) |
+
+**The first tap costs seven times the second.** That is not arithmetic and not bandwidth: it is the latency of
+the first gather's round trip, and with the accumulator holding BLOCK_M x 64 int32 in registers the SM can only
+keep ~4 warps per scheduler resident to hide it.
+
+## The profiler says the same thing from the other side
+
+`int8-hop-ncu.txt`: Active Warps Per Scheduler **3.96 of 12**, No Eligible **56.21%**, Issued Warp Per Scheduler
+0.44, SM Busy 52.7%, and ncu's own verdict "Tensor is the highest-utilized pipeline (52.7%) ... should not be a
+bottleneck", "LSU highest by instructions (73.9%)", "frequent, low-latency instructions".
+
+## And the occupancy cannot be bought - measured, not assumed
+
+Nine launch configurations of the SAME kernel, same codes (0 differences):
+
+| BLOCK_M / warps | ms | vs shipped |
+|---|---|---|
+| **128 / 4 (shipped)** | **1.566** | - |
+| 128 / 8 | 2.415 | **-54%** |
+| 64 / 2 | 1.670 | -6.7% |
+| 64 / 4 | 2.416 | -54% |
+| 64 / 8 | 2.510 | -60% |
+| 32 / 2 | 2.562 | -64% |
+| 32 / 4 | 2.825 | -80% |
+| 256 / 4 | 1.764 | -12.6% |
+| 256 / 8 | 1.787 | -14.1% |
+
+Every direction that would raise occupancy - a smaller block, more warps - loses more in the 64-wide MMA than it
+gains in warps: at BLOCK_M 32 the M tile is a quarter of the one the tensor pipe wants. **The shipped point is
+the optimum of the space Triton exposes on this card**, and the trade is real in both directions.
+
+## So what is the hop, honestly
+
+1.55 ms = 0.37 write (at 95% of the DRAM roof) + 0.12 epilogue + 1.07 of gathers and dots **of which 0.59 is one
+round trip that the SM has no warps to hide**. The remaining 26% that ncu's SM Busy leaves does not belong to a
+knob: it belongs to the occupancy-vs-MMA trade, and every configurable point of that trade has now been tried.
+
+That is a mechanism, not a floor, and it is falsifiable in exactly one remaining way: a kernel that stages the
+three-row window through shared memory so the first gather is not a round trip - which is what the Triton
+pipelining attempt tried and made worse (2.497 / 2.635 ms, recorded in `Int8Kernels.py`). Unless someone finds a
+staging scheme Triton can express, 25.7 ms of hops is what this shape costs on this card.
+
+## Not covered
+
+- One card, one hop, one frame's codes; the sweep varies launch parameters only.
+- Shared-memory staging is NOT re-attempted here: the recorded pipeline attempts are the evidence against it.
+- The 0.365 ms write figure is a subtraction (store-only minus an epilogue measured on a different arm), not a
+  direct measurement of the store alone.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_occupancy_probe.py --rounds 3 --iters 20 \
+    --out-file docs/wsp/verified/logs/hop-occupancy/probe.json
+flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_epilogue_probe.py \
+    --out-file docs/wsp/verified/logs/hop-epilogue/probe.json
+PYTHONPATH=scripts python3 scripts/hop_occupancy_records.py
+```
+
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-occupancy.txt \
+       --records docs/wsp/verified/records/int8-hop-occupancy.jsonl --bars docs/claims-bars.json
+
+@claim O001 1.566 ms "frames [10cff28ea287d300] n=1" measured
+@claim O002 2.415 ms "frames [10cff28ea287d300] n=1" measured
+@claim O003 1.67 ms "frames [10cff28ea287d300] n=1" measured
+@claim O004 2.416 ms "frames [10cff28ea287d300] n=1" measured
+@claim O005 2.51 ms "frames [10cff28ea287d300] n=1" measured
+@claim O006 2.562 ms "frames [10cff28ea287d300] n=1" measured
+@claim O007 2.825 ms "frames [10cff28ea287d300] n=1" measured
+@claim O008 1.764 ms "frames [10cff28ea287d300] n=1" measured
+@claim O009 1.787 ms "frames [10cff28ea287d300] n=1" measured
+@claim O010 1.458 ms "frames [10cff28ea287d300] n=1" measured
+@claim O011 1.479 ms "frames [10cff28ea287d300] n=1" measured
+@claim O012 1.57 ms "frames [10cff28ea287d300] n=1" measured

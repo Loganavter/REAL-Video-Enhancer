@@ -1,204 +1,99 @@
-"""Is the hop's epilogue ALU-limited? One hop and the full sixteen-hop chain, two epilogues.
+"""How much of the hop is the EPILOGUE, and how much is one tap's latency?
 
-The shipped epilogue computes `v = acc*w_scale + bias`, applies PReLU, then `q = floor(v/out_scale + 0.5)`
-- a per-element fp32 DIVIDE over 132 M elements, in the one kernel all sixteen hops run. PReLU is
-homogeneous of degree one, so a positive rescale commutes with it: with `k = w_scale/out_scale` and
-`c = bias/out_scale` the epilogue becomes one FMA, the PReLU, one add and a floor.
+Same kernel, three epilogues, all at the shipped BLOCK_M 128 / 4 warps:
+  bare store      q = acc.to(int8)                       - no dequant, no PReLU, no requant
+  dequant only    v = acc*w_scale + bias, cast
+  shipped         the full epilogue (dequant, PReLU, floor, requant, clamp)
 
-Arms (row `rve-epilogue-divide-2026-11-19`, researcher's C5):
-  fold=0   the shipped epilogue, divide per element
-  fold=1   the folded epilogue, one divide per channel per CTA
+Together with `hop_roof_probe.py` (1 tap 1.073, 3 taps 1.072, 9 taps 1.551, store-only 0.485) this separates
+three costs that were previously one number: the write, the epilogue, and the FIRST tap's round trip.
 
-Measured on real codes: the frame is decoded from the clip through the app's own yuv420p10_to_tensor, the
-head runs, and the quantise pass produces the hop-1 input exactly as the app does. Weights, grids, scales
-and the launch parameters are the body's own (`Int8Body._build`).
-
-Also reported: how many int8 codes the two epilogues disagree on, and the maximum difference - the rewrite
-is exact in real arithmetic but not bit-identical in fp32, so this is a different-arithmetic change and
-the code diff is the first half of its picture evidence (the second half is a render pair).
-
-Usage: python scripts/hop_epilogue_probe.py [--clip /tmp/opencode/bd_violet20s.mkv] [--rounds 3]
-                                            [--iters 20] [--out-file x.json]
+Usage: python scripts/hop_epilogue_probe.py [--out-file x.json]
 """
-from __future__ import annotations
+import os, sys, statistics
+import torch, triton
+import triton.language as tl
+sys.path.insert(0, os.path.join(os.getcwd(), "backend")); sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
+from cut_channels_naive import load
+from src.pytorch.Int8Body import Int8Body, QB, SHIFT
+from src.pytorch.Int8Kernels import quantise_nchw_to_nhwc_prelu
+from src.pytorch.TorchUtils import TorchUtils
+from tail_int8_emulation import CALIB, H, W, decode_yuv10
 
-import argparse
-import json
-import os
-import statistics
-import subprocess
-import sys
-import time
-
-import numpy as np
-import torch
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO, "backend"))
-sys.path.insert(0, os.path.join(REPO, "scripts"))
-
-from cut_channels_naive import load  # noqa: E402
-from src.pytorch.Int8Body import Int8Body, SHIFT, QB  # noqa: E402
-from src.pytorch.Int8Kernels import (body_prologue_kernel, quantise_nchw_to_nhwc_prelu,  # noqa: E402
-                                     quantise_nhwc_prelu)
-from src.pytorch.TorchUtils import TorchUtils  # noqa: E402
-
-APP = "/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2"
-FFMPEG = f"{APP}/bin/ffmpeg"
-MODEL = f"{APP}/custom_models/2x-Futsuu-Anime(1).pth"
-CALIB = (20, 60, 100, 140, 180, 220, 260, 300)
-
-
-def decode_yuv10(clip: str, frame: int, width: int, height: int) -> bytes:
-    """One frame of the clip as the app's input pipe carries it: packed yuv420p10le."""
-    out = subprocess.run([FFMPEG, "-loglevel", "error", "-i", clip, "-vf", f"select=eq(n\\,{frame})",
-                          "-frames:v", "1", "-pix_fmt", "yuv420p10le", "-f", "rawvideo", "-"],
-                         capture_output=True, check=True).stdout
-    want = width * height * 3
-    if len(out) < want:
-        raise SystemExit(f"frame {frame}: {len(out)} bytes, wanted {want}")
-    return out[:want]
-
-
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--clip", default="/tmp/opencode/bd_violet20s.mkv")
-    ap.add_argument("--frame", type=int, default=169)
-    ap.add_argument("--width", type=int, default=1920)
-    ap.add_argument("--height", type=int, default=1080)
-    ap.add_argument("--rounds", type=int, default=3)
-    ap.add_argument("--iters", type=int, default=20)
-    ap.add_argument("--out-file", default="")
-    args = ap.parse_args(argv)
-
-    dev = torch.device("cuda", 0)
-    tu = TorchUtils(width=args.width, height=args.height, device_type="cuda", hdr_mode=True, gpu_id=0,
-                    high_bitdepth=True)
-    stream = torch.cuda.Stream(device=dev)
-
-    def frame_tensor(idx: int) -> torch.Tensor:
-        return tu.yuv420p10_to_tensor(decode_yuv10(args.clip, idx, args.width, args.height), stream,
-                                      dev, torch.float16)
-
-    model, scale, _ = load(MODEL)
-    model = model.eval().cuda().half()
-    body = Int8Body(model)
-    with torch.no_grad():
-        body.calibrate([frame_tensor(i) for i in CALIB])
-        body._build()
-    print(f"body: {len(body.inner)} hops, feat {body.feat}, block_m {body.block_m}, warps {body.warps}")
-
-    h, w = args.height, args.width
-    n_pix = h * w
-    x = frame_tensor(args.frame)
-    with torch.no_grad():
-        head = body.head_conv(x.clamp(0.0, 1.0))
-    src = torch.empty((1, h, w, body.feat), device=dev, dtype=torch.int8)
-    qgrid = ((n_pix + QB - 1) // QB,)
-    if head.is_contiguous(memory_format=torch.channels_last):
-        quantise_nhwc_prelu[qgrid](head, body._s_t1, body._slope_half, src, n_pix, BLOCK=QB,
-                                   C=body.feat, num_warps=4)
+@triton.jit
+def hop(x_ptr, w_ptr, m_next_ptr, shift, w_scale_ptr, bias_ptr, slope_ptr, out_scale_ptr, y_ptr,
+        H: tl.constexpr, W: tl.constexpr, BLOCK_M: tl.constexpr, C: tl.constexpr, EPI: tl.constexpr):
+    pid = tl.program_id(0)
+    rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    h = rows // W
+    w = rows % W
+    lanes = tl.arange(0, C)
+    acc = tl.zeros((BLOCK_M, C), dtype=tl.int32)
+    for tap in tl.range(0, 9, num_stages=1):
+        dy = tap // 3 - 1
+        dx = tap % 3 - 1
+        yy = h + dy
+        xx = w + dx
+        inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
+        a = tl.load(x_ptr + ((yy * W + xx)[:, None] * C + lanes[None, :]), mask=inside[:, None], other=0)
+        b = tl.load(w_ptr + tap * C * C + lanes[:, None] * C + lanes[None, :])
+        acc += tl.dot(a, b, out_dtype=tl.int32)
+    if EPI == 0:
+        q = acc.to(tl.int8)                       # bare store: no dequant, no PReLU, no requant
+    elif EPI == 1:
+        v = acc.to(tl.float32) * tl.load(w_scale_ptr + lanes)[None, :] + tl.load(bias_ptr + lanes)[None, :]
+        q = (v.to(tl.int8))                        # dequant only
     else:
-        quantise_nchw_to_nhwc_prelu[qgrid](head, body._s_t1, body._slope_half, src, n_pix, BLOCK=QB,
-                                          C=body.feat, num_warps=4)
+        v = acc.to(tl.float32) * tl.load(w_scale_ptr + lanes)[None, :] + tl.load(bias_ptr + lanes)[None, :]
+        slope = tl.load(slope_ptr + lanes)[None, :]
+        v = tl.where(v >= 0, v, v * slope)
+        osc = tl.load(out_scale_ptr + lanes)[None, :]
+        q = tl.floor(v / osc + 0.5)
+        q = tl.minimum(tl.maximum(q, -127.0), 127.0).to(tl.int32)
+        q = ((q * tl.load(m_next_ptr + lanes)[None, :]) + (1 << (shift - 1))) >> shift
+        q = tl.minimum(tl.maximum(q, -127.0), 127.0)
+        q = q.to(tl.int8)                          # the shipped epilogue
+    tl.store(y_ptr + rows[:, None] * C + lanes[None, :], q)
+
+import argparse, json, time
+_ap = argparse.ArgumentParser(); _ap.add_argument("--out-file", default=""); _args = _ap.parse_args()
+
+dev = torch.device("cuda", 0)
+tu = TorchUtils(width=W, height=H, device_type="cuda", hdr_mode=True, gpu_id=0, high_bitdepth=True)
+st = torch.cuda.Stream(device=dev)
+def frame(i): return tu.yuv420p10_to_tensor(decode_yuv10(i), st, dev, torch.float16)
+model, _, _ = load("/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth")
+model = model.eval().cuda().half()
+b = Int8Body(model); b.calibrate([frame(i) for i in CALIB]); b._build()
+x = frame(169); head = b.head_conv(x.clamp(0.0, 1.0))
+n = H * W; qg = ((n + QB - 1) // QB,)
+src = torch.empty((1, H, W, 64), device=dev, dtype=torch.int8)
+quantise_nchw_to_nhwc_prelu[qg](head, b._s_t1, b._slope_half, src, n, BLOCK=QB, C=64, num_warps=4)
+dst = torch.empty_like(src); torch.cuda.synchronize()
+L = b._launches[0]; bm = 128
+grid = ((n + bm - 1) // bm,)
+def run(epi): hop[grid](src, L["w"], L["mn"], SHIFT, L["vec"], L["bias"], L["slope"], L["os"], dst, H, W,
+                        BLOCK_M=bm, C=64, EPI=epi, num_warps=4)
+def t(fn):
+    for _ in range(3): fn()
     torch.cuda.synchronize()
-
-    grid = ((n_pix + body.block_m - 1) // body.block_m,)
-    scratch = torch.empty_like(src)
-    launch = body._launches[0]
-
-    def one_hop(fold: int, dst):
-        body_prologue_kernel[grid](src, launch["w"], launch["mn"], SHIFT, launch["vec"],
-                                   launch["bias"], launch["slope"], launch["os"], dst, h, w,
-                                   BLOCK_M=body.block_m, C=body.feat, num_warps=body.warps, FOLD=fold)
-
-    def chain(fold: int):
-        """The sixteen hops as the body runs them, never writing into the input buffer.
-
-        Two scratch buffers and no copy back into `src`: an even hop count would otherwise land the
-        result in `src` and the next arm would read its own output as input (that mistake made the first
-        run of this probe report 41.8% differing codes and max 254).
-        """
-        bufs = (torch.empty_like(src), torch.empty_like(src))
-        cur = src
-        for i, L in enumerate(body._launches):
-            dst = bufs[i % 2]
-            body_prologue_kernel[grid](cur, L["w"], L["mn"], SHIFT, L["vec"], L["bias"], L["slope"],
-                                       L["os"], dst, h, w, BLOCK_M=body.block_m, C=body.feat,
-                                       num_warps=body.warps, FOLD=fold)
-            cur = dst
-        return cur
-
-    def timeit(fn) -> float:
-        for _ in range(3):
-            fn()
-        torch.cuda.synchronize()
-        e0, e1 = torch.cuda.Event(True), torch.cuda.Event(True)
-        e0.record()
-        for _ in range(args.iters):
-            fn()
-        e1.record()
-        torch.cuda.synchronize()
-        return e0.elapsed_time(e1) / args.iters
-
-    arms = {
-        "hop": {"0": lambda: one_hop(0, scratch), "1": lambda: one_hop(1, scratch)},
-        "chain": {"0": lambda: chain(0), "1": lambda: chain(1)},
-    }
-    names = arms
-    draws = {k: {"0": [], "1": []} for k in names}
-    print(f"{'round':>5} {'hop fold0':>11} {'hop fold1':>11} {'chain fold0':>12} {'chain fold1':>12}"
-          "   (ms)")
-    for r in range(1, args.rounds + 1):
-        row = []
-        for kind, by_fold in arms.items():
-            for fold in ("0", "1"):
-                ms = timeit(by_fold[fold])
-                draws[kind][fold].append(ms)
-                row.append(ms)
-        print(f"{r:>5} {row[0]:11.3f} {row[1]:11.3f} {row[2]:12.3f} {row[3]:12.3f}")
-
-    tail = slice(1, None) if args.rounds > 2 else slice(None)
-    med = {k: {f: statistics.median(draws[k][f][tail]) for f in ("0", "1")} for k in names}
-    print("\nmedians of rounds 2+:")
-    for kind in names:
-        d = med[kind]["1"] - med[kind]["0"]
-        rel = 100.0 * d / med[kind]["0"]
-        print(f"  {kind:>5}: fold0 {med[kind]['0']:7.3f} ms   fold1 {med[kind]['1']:7.3f} ms   "
-              f"delta {d:+7.3f} ({rel:+.1f}%)")
-    print(f"  sixteen hops are what the frame pays: {med['chain']['1'] - med['chain']['0']:+.3f} ms "
-          f"per frame")
-
-    # ---- the codes, on the same input
-    out0 = torch.empty_like(src)
-    out1 = torch.empty_like(src)
-    one_hop(0, out0)
-    one_hop(1, out1)
-    torch.cuda.synchronize()
-    diff = (out0.to(torch.int16) - out1.to(torch.int16)).abs()
-    n_diff = int((diff > 0).sum())
-    print(f"\ncodes: {n_diff} of {diff.numel()} differ ({100.0 * n_diff / diff.numel():.5f}%), "
-          f"max |diff| {int(diff.max())}")
-    chain0, chain1 = chain(0).clone(), chain(1).clone()
-    cdiff = (chain0.to(torch.int16) - chain1.to(torch.int16)).abs()
-    print(f"after sixteen hops: {int((cdiff > 0).sum())} of {cdiff.numel()} codes differ "
-          f"({100.0 * int((cdiff > 0).sum()) / cdiff.numel():.5f}%), max |diff| {int(cdiff.max())}")
-
-    if args.out_file:
-        os.makedirs(os.path.dirname(args.out_file), exist_ok=True)
-        with open(args.out_file, "w") as fh:
-            json.dump({"take": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                       "clip": os.path.basename(args.clip), "frame": args.frame,
-                       "width": args.width, "height": args.height, "rounds": args.rounds,
-                       "iters": args.iters, "draws": draws, "median": med,
-                       "codes": {"hop_diff": n_diff, "hop_total": diff.numel(),
-                                 "hop_max": int(diff.max()),
-                                 "chain_diff": int((cdiff > 0).sum()),
-                                 "chain_total": cdiff.numel(), "chain_max": int(cdiff.max())}},
-                      fh, indent=1)
-        print(f"# -> {args.out_file}", file=sys.stderr)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    e0, e1 = torch.cuda.Event(True), torch.cuda.Event(True)
+    e0.record()
+    for _ in range(20): fn()
+    e1.record(); torch.cuda.synchronize()
+    return e0.elapsed_time(e1) / 20
+arms = {"bare store": lambda: run(0), "dequant only": lambda: run(1), "shipped epilogue": lambda: run(2)}
+res = {k: [] for k in arms}
+for r in range(3):
+    for k, fn in arms.items(): res[k].append(t(fn))
+print(f"{'arm':>18} {'median r2+':>11}   draws")
+for k, v in res.items():
+    print(f"{k:>18} {statistics.median(v[1:]):11.3f}   {[round(x,3) for x in v]}")
+base = statistics.median(res["bare store"][1:]); full = statistics.median(res["shipped epilogue"][1:])
+print(f"\nthe epilogue costs {full - base:+.3f} ms of {full:.3f} ({100*(full-base)/full:.1f}%)")
+if _args.out_file:
+    os.makedirs(os.path.dirname(_args.out_file), exist_ok=True)
+    json.dump({"take": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "clip": "bd_violet20s.mkv",
+               "frame": 169, "draws": res, "median": {k: statistics.median(v[1:]) for k, v in res.items()},
+               "epilogue_ms": full - base}, open(_args.out_file, "w"), indent=1)
+    print(f"# -> {_args.out_file}", file=sys.stderr)
