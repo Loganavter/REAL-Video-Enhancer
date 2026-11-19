@@ -638,6 +638,13 @@ class UpscalePytorch:
                     # matrix - the body must keep returning RGB.
                     body.out_yuv = bool(getattr(body, "tail_yuv", False) and self.yuv8_output
                                         and self.pipe_pixel_format == "yuv420p")
+                    # Log the DECISION, not the flag. With RVE_TAIL_YUV=1 by default, a gate that refuses
+                    # silently makes an A/B on 10-bit (or non-bt709) material read two identical arms - and
+                    # the honest conclusion from that is "the optimisation does nothing", which is wrong.
+                    log("int8 tail output: %s (RVE_TAIL_YUV=%s -> tail_yuv=%s, yuv8_output=%s, pipe=%s)",
+                        "yuv420p payload" if body.out_yuv else "fp16 RGB tensor",
+                        os.environ.get("RVE_TAIL_YUV", "1"), getattr(body, "tail_yuv", None),
+                        self.yuv8_output, self.pipe_pixel_format)
                     log("int8: built (supports=%s)", Int8Body.supports(model))
                 except Exception as error:  # noqa: BLE001
                     log("int8: build failed (%s)", error)

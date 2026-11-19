@@ -20,6 +20,8 @@ PHASES = re.compile(r"int8 phases: head ([\d.]+)\s+quantise ([\d.]+)\s+hops ([\d
 TAILSPLIT = re.compile(r"int8 tail: dequant ([\d.-]+)\s+conv ([\d.]+)\s+shuffle ([\d.]+)"
                        r"\s+residual ([\d.]+)\s+SUM ([\d.]+)")
 LOOP = re.compile(r"render loop: [\d.]+ s for (\d+) frames \(([\d.]+) ms/frame\)")
+TAILOUT = re.compile(r"int8 tail output: (\S+ \S+) \(RVE_TAIL_YUV=(\S+) -> tail_yuv=(\S+), "
+                     r"yuv8_output=(\S+), pipe=(\S+)\)")
 PACK = re.compile(r"pack\+queue ([\d.]+)")
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,7 +51,8 @@ REJECTED = [
      "T004", "int8-hop-tiles.jsonl"),
     ("output channels split across CTAs", "halve the accumulator to double resident warps",
      "shipped hop 1.591 ms", "X002", "int8-hop-csplit.jsonl"),
-    ("M x 2 batching", "amortise the 0.59 ms per-launch constant over two frames",
+    ("M x 2 batching", "amortise the per-launch constant - WHICH DOES NOT EXIST: a whole 256x256 hop is "
+     "0.0572 ms, so any per-launch fee is <= 0.011 ms. Flat is the expected result, not a clue",
      "batch 1 of the same kernel 1.769 ms/frame", "Y002", "int8-hop-batch.jsonl"),
     ("pack ring (pinned slots)", "the 12.44 MB payload copy is synchronous", "ring off 34.42 ms loop",
      "K002", "int8-pack-ring.jsonl"),
@@ -110,6 +113,7 @@ def main(argv=None) -> int:
     ts = TAILSPLIT.findall(text)
     loop = LOOP.findall(text)
     pack = PACK.findall(text)
+    tailout = TAILOUT.findall(text)
     if not ph or not loop:
         raise SystemExit(f"{log}: no phase or loop line")
     head, quant, hops, tail, body_sum, body_tot = (float(x) for x in ph[-1])
@@ -148,13 +152,26 @@ def main(argv=None) -> int:
     A("| card | NVIDIA GeForce RTX 4060 Ti, 34 SMs, **176 dense int8 TOPS** and **288 GB/s** (the two roofs "
       "every number below is measured against) |")
     A("| ridge | 176 TOPS / 288 GB/s = **611 FLOP/byte** - and the hop sits at 610, i.e. exactly on it |")
-    A(f"| clip | `{os.path.basename(log).split('_int8')[0]}` - BD Violet, {n_frames} frames, 1920x1080 in, "
-      f"4K out |")
+    _clip = re.sub(r"_(fp16|int8|[a-z0-9]+)_r\d+_(null|nvenc|ffv1)\.log$", "", os.path.basename(log))
+    A(f"| clip | `{_clip}`, {n_frames} frames, 1920x1080 in, 4K out |")
     A("| model | `2x-Futsuu-Anime(1).pth`, SRVGGNetCompact 2x, 64 body channels, 18 convolutions |")
     A("| precision | fp16 engine vs the int8 body: 8-bit codes between the 16 body hops, fp16 head and tail "
       "weights where noted |")
-    A("| build | all five opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that "
-      "tail kernel, zero-halo hop buffers, and the tail writing the yuv420p payload itself |")
+    _to = tailout[-1] if tailout else None
+    _payload_line = "int8 tail writes the payload" in text
+    A("| build | fused head kernel, int8 tail kernel, tail shuffle+residual inside that tail kernel, zero-halo "
+      "hop buffers, and the tail writing the yuv420p payload itself |")
+    if _to:
+        A(f"| tail output, as the run resolved it | **{_to[0]}** - RVE_TAIL_YUV={_to[1]} -> tail_yuv={_to[2]}, "
+          f"yuv8_output={_to[3]}, pipe={_to[4]} (the gate refuses on HDR / 10-bit / non-bt709, so the flag "
+          f"alone is not what the run did) |")
+    elif _payload_line:
+        A("| tail output, as the run resolved it | **yuv420p payload** - the run printed `int8 tail writes the "
+          "payload`; it predates the explicit gate line, so this is read from the payload line rather than "
+          "from the flag |")
+    else:
+        A("| tail output, as the run resolved it | *not resolved: no `int8 tail output` and no payload line in "
+          "this log, so the flag is not evidence of the path* |")
     A("| the bar | `bar_int8_wall` = **1.2x** wall clock against the fp16 engine; the picture bar is the share "
       "of pixels more than 8 levels off on the worst frame of a spread sample, 0.1% |")
     A("")
@@ -187,6 +204,22 @@ def main(argv=None) -> int:
           f"sum {s:.2f} ms. The zeroes are the second adoption: the dequant pass was folded into the tail's "
           f"weights and the shuffle+residual into its epilogue.")
         A("")
+    # the tail's own floor: the last hop's codes (64 B per LR pixel) + the residual LR frame (6 B) + the
+    # payload (6 B when the tail packs yuv420p, 24 B when it writes fp16 RGB). At 288 GB/s. The LR geometry
+    # is read from the reader's own command line in the log, not typed.
+    _lr = re.search(r"-s (\d+)x(\d+)", text)
+    lr_px = int(_lr.group(1)) * int(_lr.group(2)) if _lr else 1920 * 1080
+    tail_in = lr_px * (64 + 6) / 1e6
+    A("### The tail did not get faster, and its floor says why")
+    A("")
+    A(f"Its floor is the traffic it cannot avoid: {tail_in:.2f} MB of codes and residual to read, plus the")
+    A(f"output. Writing yuv420p moved that floor from {(tail_in + 24 * lr_px / 1e6) / 288.0 * 1000:.3f} ms to")
+    A(f"{(tail_in + 6 * lr_px / 1e6) / 288.0 * 1000:.3f} ms - a 0.13 ms shift - and the measured phase read 1.00 ms")
+    A("both before and after. So the tail was never bounded by its write; it is bounded upstream (the code read,")
+    A("the convolution and the epilogue), and the whole saving of the yuv payload appeared in the pack instead.")
+    A("A floor is not a promise: a member that is not the binding one can be removed for free in time and only")
+    A("for certain on paper.")
+    A("")
     per_hop = hops / 16.0
     A("## The hop against its two roofs - why every single lever came out flat")
     A("")
@@ -220,6 +253,11 @@ def main(argv=None) -> int:
     A(f"| everything else | {loop_ms - body_tot - pack_ms:+.2f} | reader, the wrapper around the model call, "
       f"and the writer's back-pressure. The input path inside it is measured at 1.38 ms, of which 0.07 was "
       f"removable |")
+    A("")
+    A("The phase lines account for -2.31 ms of the tail-CSC row and the loop for -2.16, and the 0.15 ms between")
+    A("them lands here, in `everything else`: the payload branch in `Frame`, the Y-plane reads for the preview")
+    A("and the gate's luma, and the guard's event. Small, and named rather than absorbed - an unattributed")
+    A("0.15 ms is exactly the size of finding that turns out to be a second copy somewhere.")
     A("")
     A("## What is in this frame because it was measured and adopted")
     A("")
@@ -289,8 +327,11 @@ def main(argv=None) -> int:
     A("")
     A("## What this file is NOT")
     A("")
-    A("- **Null sink.** No encoder is in the loop; under `hevc_nvenc` the same comparison read 1.51x, and the")
-    A("  loop itself is ~10 ms higher on that class of frame. The product runs with an encoder.")
+    A("- **The encoder is in the ratio, not only in the stand-in.** The product's number above is quoted from")
+    A("  `hevc_nvenc` (JC013). On this clip the encoder is almost entirely overlapped - both arms sit within")
+    A("  0.2 ms of their null-sink numbers - so the ~10 ms penalty that earlier reports warned about is")
+    A("  CONTENT-dependent, not a constant: a claim made from one clip's null-sink loop is a claim about that")
+    A("  clip, and the more mobile the frame, the more the encoder can cost.")
     A("- **One clip, one model, one card.** The gains were replayed on three clips (1920x1080 8-bit, native")
     A("  1440x1080 10-bit, and a same-shot cut) and hold within 20% of their size; other cards are untested and")
     A("  the lane has external evidence that int8's advantage is a property of the card.")
