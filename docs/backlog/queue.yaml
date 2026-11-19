@@ -3372,3 +3372,28 @@ tasks:
     Filed and closed in one step because it was a 1 h falsifier of an idea that followed directly from the
     profiler, not a portfolio item. The record carries the full account of the six knob families so the next
     reader does not re-run any of them.
+
+- id: rve-hop-batch-m-2026-11-20
+  title: 'Amortise the per-launch constant over two frames: does M x 2 batching move the hop?'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1h
+  tags:
+  - int8
+  - hops
+  - kernel
+  base_branch: perf/inference
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-19: +0.3% per frame (1.769 -> 1.763 ms) and the batched arms do not even reproduce
+    the shipped codes (34.8 M of 265 M differ at batch 2, 70 M of 398 M at batch 3). The mechanism that kills it
+    is visible in the batch-1 arm itself: the batched formulation's own index arithmetic (b = rows // (H*W),
+    h = (rows // W) % H, one extra mask term) costs 14% per row - 1.769 against the shipped kernel's 1.55 -
+    because the constant is paid per LAUNCH while that arithmetic is paid per ROW, and batching multiplies rows.
+    So the amortisation cannot ever return more than it costs. WITH THIS, seven families of knobs have been
+    measured on the hop - launch shape (9 arms), tap staging (3), cache policy (5), CTA tile shape (4), buffer
+    layout (2), output-channel split (4), frame batching (3): thirty configurations, the shipped kernel wins
+    every family. docs/wsp/verified/int8-hop-batch.txt, records int8-hop-batch.jsonl (Y001-Y003),
+    logs/hop-batch/probe.json.
