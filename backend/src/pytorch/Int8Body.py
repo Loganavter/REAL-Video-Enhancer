@@ -138,8 +138,16 @@ class Int8Body:
         _pc_env = os.environ.get("RVE_INT8_PER_CHANNEL") == "1"
         _k_env = os.environ.get("RVE_INT8_GRID_K")
         self.grid_auto = str(_k_env or "").lower() in ("auto", "pick")
-        self.grid_k = float(_k_env) if (_k_env not in (None, "") and not self.grid_auto) else (
-            0.0 if _pc_env else 2.0)
+        # A LIST is a per-hop K (row rve-grid-k-learned, stage b): "2,3,2,..." gives each hop its own floor, which
+        # is the offline falsifier for PAMS's learned per-layer scale - if a per-hop choice cannot beat the best
+        # single K on the same frames, a learned one will not either, and the training loop never gets written.
+        self.grid_k_list = None
+        if _k_env and "," in str(_k_env):
+            self.grid_k_list = [float(v) for v in str(_k_env).split(",")]
+            self.grid_k = self.grid_k_list[0]
+        else:
+            self.grid_k = float(_k_env) if (_k_env not in (None, "") and not self.grid_auto) else (
+                0.0 if _pc_env else 2.0)
         self.per_tensor = (not _pc_env) and self.grid_k <= 0
         # The epilogue's per-element divide can be folded into the incoming rescale: `a = w_scale/out_scale`
         # and `b = bias/out_scale` computed once per channel. Kept behind a knob until it has been timed and
@@ -438,7 +446,9 @@ class Int8Body:
             if self.per_tensor:
                 s_grids.append(s_in.max().expand_as(s_in) * margin)
             elif self.grid_k > 0:
-                s_grids.append(torch.maximum(s_in, torch.full_like(s_in, s_t / self.grid_k)))
+                _k = (self.grid_k_list[idx - 1] if self.grid_k_list and idx - 1 < len(self.grid_k_list)
+                      else self.grid_k)
+                s_grids.append(torch.maximum(s_in, torch.full_like(s_in, s_t / _k)))
             else:
                 s_grids.append(s_in * margin)
             s_in = outs[idx - 1]

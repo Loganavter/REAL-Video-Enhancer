@@ -4723,7 +4723,7 @@ tasks:
 - id: rve-grid-k-learned-2026-11-20
   title: 'Make the grid clamp a LEARNED per-layer parameter (PAMS), instead of a swept constant'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -4753,6 +4753,15 @@ tasks:
     per-layer choice buys nothing, a learned one will not either, and the row closes there. (c) Only then: a
     training loop that learns the scale (fine-tune the scale only, weights frozen), and a 494-frame pair against
     the current best fixed K.
+  resolution: >-
+    DONE 2026-11-20 at stage (b), CLOSED WITHOUT WRITING THE TRAINING LOOP. RVE_INT8_GRID_K now accepts a per-hop
+    list; the greedy per-hop search on the ladder's two ends: Futsuu 0.000106% (K=2) -> 0.000027% per-hop (3.96x),
+    realesr-animevideov3 0.003283% (K=3) -> 0.001415% (2.32x). So the per-layer idea is REAL - different hops do
+    want different floors - and the prize is three orders below the 0.1% bar on the clean model and 70x below on
+    the worst one. Stage (c) would chase the same 2-4x on the same negligible quantity at the cost of a training
+    loop, a versioned artefact and a start-up that depends on convergence instead of a 3 s sweep. The per-hop list
+    stays as a probe, off by default. docs/wsp/verified/int8-grid-k-perlayer.txt,
+    logs/grid-perlayer-*.json, scripts/grid_k_perlayer_{probe,records}.py.
   note: >-
     Found by the prior-art search of 2026-11-20 (docs/wsp/PRIOR-ART-2026-11-20.md). Filed rather than started
     because it needs a training loop this lane does not have, and because stage (b) - a per-layer K with no
