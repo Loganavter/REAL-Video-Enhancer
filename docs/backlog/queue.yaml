@@ -4688,7 +4688,7 @@ tasks:
 - id: rve-price-curvature-predictor-2026-11-20
   title: "A curvature-priced predictor for K, the class the price paper says is correct"
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -4719,6 +4719,17 @@ tasks:
     This is the only predictor class in the literature that is not the one we already refuted, and the ladder is a
     ready-made test set. If it fails too, the honest statement becomes stronger: not "we could not predict K" but
     "the correct-priced predictor does not predict K either".
+  resolution: >-
+    DONE 2026-11-20, REFUTED - and the statement is now the stronger one. Built the priced score the paper
+    describes (sum_l mse_l(K) * c_l, with c_l from a finite-difference sensitivity of the final output to a 5%
+    perturbation of each layer) and scored it on three models. It is MONOTONE IN K on all three - price 1.0e-5 ->
+    5.7e-6 -> 4.5e-6 (realesr), 9.3e-6 -> 5.4e-6 -> 4.2e-6 (Ani4K), 9.2e-6 -> 5.1e-6 -> 3.9e-6 (Futsuu) - so it
+    always predicts K=4, and it agrees with the ladder 1/3, by luck on the one model whose optimum is K=4. On
+    Futsuu it picks K=4 where the ladder says K=2 (0.00353% against 0.00047%); on realesr K=4 where the ladder says
+    K=3 (0.04456% against 0.00709%). Mechanism: the price is a forward-KL/L2 drift and our acceptance is the SHARE
+    of pixels above 8 levels - a finer grid lowers every layer's L2 error while scattering more small errors across
+    pixels, and the count gets worse as the L2 gets better. So the class the literature calls correct prices an
+    objective we do not decide on. docs/wsp/verified/int8-price-predictor.txt, logs/price-*.json.
 
 - id: rve-grid-k-learned-2026-11-20
   title: 'Make the grid clamp a LEARNED per-layer parameter (PAMS), instead of a swept constant'
