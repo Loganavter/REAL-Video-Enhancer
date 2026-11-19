@@ -66,12 +66,22 @@ into the conv epilogue, the attention into one read-modify-write, the concat int
 elementwise traffic from about seven passes to two or three, i.e. **~90-100 ms in eager**.
 
 **But that is not the engine's number, and the earlier "10-12 ms" estimate on this page was derived from the wrong
-base.** The engine is 4.1x faster than eager (302 -> 73.36 ms), and TensorRT's main job is exactly this fusion, so
-most of those 140 ms are already banked. What is left in the engine is bounded by its non-conv share, which is
-**not measured**: `trtexec` is not installed on this host, and the torch_tensorrt engine does not load standalone
-in a minimal harness. The measurement that would settle it is a per-kernel profile of the engine (ncu with
-`--print-summary per-kernel` over one frame of the app run). Until then the honest statement is: the fusion prize
-is large in eager, largely taken by the engine, and single-digit milliseconds in the engine - not 10-12.
+base.** Measured now, with `trtexec --dumpProfile` on a TensorRT 10.12 build of the same model (the app's own
+`.engine` is a TorchScript archive, not a bare plan, so it cannot be loaded by trtexec; the build here is from ONNX
+at the same shape and precision):
+
+```
+per-frame 67.2 ms (the app's engine: 73.36 - the difference is its tiling/full build, so the SHARES are the result)
+  conv + FUSED elementwise   51.56 ms  76.7%      layer names read "Conv + PWN(Sigmoid, Mul)" / "Conv + PWN(Add, ...)"
+  conv alone                  9.93 ms  14.8%      the input and the concat convolutions
+  copies / reformat           5.23 ms   7.8%      two layout copies (2.06 + 2.03) plus two small reformats
+  upsampler shuffle           0.45 ms   0.7%
+```
+
+**TensorRT has already fused every elementwise op into a conv epilogue** - that is what the layer names say - so the
+fusion prize in the engine is **the 5.2 ms of layout copies (7.8%), not 10-12 ms**. A hand pipeline could remove
+those by keeping one layout end to end, which is what a custom kernel would buy: about 5 ms of 67, i.e. the same
+order as the int8 prize on the convs would have been after the 19 boundaries.
 
 ## What is optimizable in SPAN, and what is not (estimates on the measured shares)
 
@@ -82,7 +92,7 @@ built. They are here so the next person does not have to re-derive the map.
 
 | lever | what it touches | mechanism | estimated gain |
 |---|---|---|---|
-| **fuse the attention block** | `mul` 6.2% + `sigmoid` 4.2% + `sub` 4.3% | `sigmoid(mean_c(x)) * x` is a reduction plus two elementwise passes over the same activation; one kernel can read `x` once, compute the channel mean on the fly and write `x*sigma`. Pure elementwise, no new arithmetic | in eager ~45 ms of the 140; in the engine, unmeasured and small |
+| **fuse the attention block** | `mul` + `sigmoid` + `sub` | `sigmoid(mean_c(x)) * x` is a reduction plus two elementwise passes over the same activation | **already done by TensorRT** - the engine's layer names are `Conv + PWN(Sigmoid, Mul)`. Worth ~45 ms in eager, 0 in the engine |
 | **fold the four-way concat** | part of the 32.2% | `cat` of four branches into a 1x1: either read the four buffers directly in the consuming conv (no copy), or split that conv into four and sum - four dots, no 2 MB copy per frame per block | with the attention, together ~10-12 ms |
 | **fold pixel shuffle into the writing conv** | the tail | a permutation, exactly what the Compact lane already folds into its tail kernel | small, ~1-2 ms |
 | **fuse activations into the conv epilogue** | the convs' tails | standard; TensorRT already does some of it | small |
