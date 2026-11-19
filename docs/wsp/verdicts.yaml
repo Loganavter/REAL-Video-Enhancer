@@ -592,9 +592,38 @@
     withdrawn from the evidence chain and the probe keeps only its calibration job
     (int8-certification-withdrawn). The arithmetic of the 0.082 -> 0.688 difference was not re-measured.
 
-- id: reuse-gate-shelved
+- id: reuse-gate-reopened
   lane: reuse
   status: current
+  scope: >-
+    investigation only, reopened by explicit owner order on 2026-11-19; the PRODUCT decision in
+    reuse-gate-shelved stands unchanged (frame skipping ships off by default)
+  date: 2026-11-19
+  statement: >-
+    The owner reopened frame reuse for investigation, naming the failure the closed lane never had a theory
+    for: the gate only behaves on binary/flat-fill content, on digital noise it stops reusing, and when it
+    does reuse the result looks wrong (frozen grain). Two things are therefore the entry point, not more
+    gate sweeps: (a) a decision statistic that separates noise from motion - the three candidates are a
+    motion-compensated residual under an estimated noise model (MCTF: motion-adaptive and multi-hypothesis
+    temporal filtering, Guo et al. ICIP'06; BM3D/VBM3D), which turns "refuse on noise" into "reuse when the
+    compensated residual is consistent with the noise floor"; and (b) a criterion for the artifact the
+    acceptance statistic cannot see - the 0.1% share of pixels >8 levels does not measure a frozen texture,
+    which is why the channel-max cell passed the share and was rejected by eye. The reference practice for
+    (b) is film-grain separation and re-synthesis (AV1 FG / ITU-T H Suppl.21 2025; deep FG removal and
+    synthesis, IEEE TIP 2023): process the clean plate, synthesize fresh grain per frame. Until (a) and (b)
+    exist, no picture number from this lane is admissible, because the instrument cannot see the failure the
+    owner rejected.
+  evidence: docs/wsp/verified/gate-bd.txt
+  open_question: >-
+    (1) Does a motion-compensated residual statistic rank the 17 damaged frames of gate-bd better than the
+    block-mean statistic that decided them? (2) What is the temporal-texture criterion, and on which
+    population is it calibrated? (3) Does grain re-synthesis make reuse visually admissible on noisy
+    material at the same acceptance share - or does it only move the failure?
+
+- id: reuse-gate-shelved
+  lane: reuse
+  status: superseded
+  superseded_by: reuse-gate-reopened
   scope: product roadmap decision, 2026-11-18
   date: 2026-11-18
   statement: >-

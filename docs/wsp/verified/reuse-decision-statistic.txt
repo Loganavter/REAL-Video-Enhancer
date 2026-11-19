@@ -1,0 +1,85 @@
+# Reuse reopened, first measurement: a motion-compensated residual ranks the damaged reuses better than the block mean
+
+Measured 2026-11-19 (local) after the owner reopened the lane (`reuse-gate-reopened`), on the RTX 4060 Ti,
+the app's own renderer (`backend/rve-backend.py`, ffv1 sink, 2x Futsuu, 1920x1080 -> 3840x2160). Records:
+`records/reuse-decision-statistic.jsonl`; instrument: `scripts/reuse_stats.py`, damage from
+`scripts/gate_sweep.py`.
+
+## Why this population and not the old one
+
+The failure the lane was closed on was measured on `bd_csm_same.mkv` (539 frames, 17 frames above the bar).
+That file is **not reproducible**: `sources.yaml` records it as `cut: {mode: not_proved}` - no packet
+subsequence proof - and it lived in `/tmp`. So the labelled population had to be rebuilt on a cut whose
+provenance holds.
+
+A scan of eight 8 s `-c copy` cuts of the same BDRemux (Chainsaw Man ep.01) found three where the auto gate
+engages: 1040 s (noise floor 0.87, 69% reuse), 340 s (0.93), 900 s (1.00). The other five refuse
+(floors 3.9-51.5), including the 19:40 action segment (22.6). Rendered gated against ungated at 1040 s:
+
+| cut | frames | worst share | frames above 0.1% |
+|---|---|---|---|
+| 900 s | 220 | 0.00623% | 0 |
+| 340 s | 202 | 0.00181% | 0 |
+| **1040 s** | **205** | **0.44121% (f122)** | **37** |
+
+So the reopened lane starts from a *provable* failure: at 1040 s the gate reuses 130 of 205 frames (63.4%,
+depth histogram {1: 68, 2: 62}) and **37 of those 130 reuses are past the acceptance bar** - 28% of its own
+decisions. The bad frames are not scattered: the first is frame 110 and all 37 sit in the last ~95 frames,
+i.e. the segment changes character and the statistic does not follow.
+
+## Which per-frame statistic ranks those 37 frames?
+
+Every candidate is computed on the same pairs, against the same t-1 reference, joined to the per-frame damage
+from the gated-vs-ungated pair; AUC over the **130 reused frames only** (37 positives, 93 negatives), because
+a rendered frame has no reuse damage by construction and would only dilute the test.
+
+| statistic | AUC | median, damaged | median, clean |
+|---|---|---|---|
+| `block_maxabs` - the shipped gate: max over 32 px blocks of mean(|cur - prev|) | **0.844** | 3.36 | 1.13 |
+| `block_signed` - the retired |mean( cur) - mean(prev)| | 0.723 | 2.28 | 0.60 |
+| `mctf_p99` - DIS flow, warp, p99 of the residual | 0.855 | 5.31 | 2.00 |
+| `mctf_mean` - the same residual, mean | **0.906** | 0.73 | 0.54 |
+| `mctf_share` - residual above 3 x MAD-sigma, share | **0.384** | 5.24 | 11.15 |
+
+Two results, one positive and one negative:
+
+- **Motion compensation helps, modestly**: the mean of the motion-compensated residual ranks the damaged
+  reuses at AUC 0.906 against the shipped statistic's 0.844, and the retired signed block mean is worst of
+  the three block variants (0.723). The direction the owner described - the decision should be made under
+  motion, not on raw intensity - is supported.
+- **Normalising by the noise floor makes it worse than chance** (0.384): on flat regions the residual and its
+  MAD-sigma are both tiny, so a small motion produces a large share. The "share above 3 sigma" form of the
+  MCTF statistic is a trap and must not be shipped as the noise-aware variant.
+
+## What this does and does not establish
+
+- Establishes: on a provable cut, a motion-compensated residual is a measurably better *ranker* of bad reuses
+  than the block mean (0.906 against 0.844, 130 reused frames, 37 positives), and the noise-normalised share
+  is not.
+- Does NOT establish: a threshold. A hold-out split is impossible on this clip - all 37 positives fall in the
+  second temporal half (0 of 65 positives in the first), so a threshold calibrated here is a fit. The segment
+  character change is itself the finding: the failure is a property of a stretch of frames, not of the clip.
+- Does NOT establish: the temporal-texture criterion. The 0.1% share cannot see a frozen grain, which is why
+  the channel-max cell passed the share and was rejected by eye; nothing here addresses that half.
+- Scope: one episode, one cut, one model, fp16 engine, t-1 reference where the gate serves a chain of up to 2.
+
+@claim RU001 0.844 AUC "reused frames [b7010cf3b0acf799] n=130" measured
+@claim RU002 0.723 AUC "reused frames [b7010cf3b0acf799] n=130" measured
+@claim RU003 0.855 AUC "reused frames [b7010cf3b0acf799] n=130" measured
+@claim RU004 0.906 AUC "reused frames [b7010cf3b0acf799] n=130" measured
+@claim RU005 0.384 AUC "reused frames [b7010cf3b0acf799] n=130" measured
+
+## Reproduce
+
+```bash
+# a provable cut (stream copy, packet subsequence is what sources.yaml records)
+ffmpeg -v error -ss 1040 -t 8 -i "<BDRemux>" -c copy cut.mkv
+# the gate's own decision, with the per-frame log
+RVE_DEBUG_DEPTH=1 python3 backend/rve-backend.py ... --input cut.mkv --output null --temporal_reuse
+# the pair, lossless, and the damage table
+python3 backend/rve-backend.py ... --input cut.mkv --output on.mkv  --temporal_reuse
+python3 backend/rve-backend.py ... --input cut.mkv --output off.mkv
+python3 scripts/gate_sweep.py on.mkv off.mkv --out damage.json --reference-kind config
+# the candidate statistics and their ranking
+python3 scripts/reuse_stats.py --clip cut.mkv --damage damage.json --emit stats.json
+```

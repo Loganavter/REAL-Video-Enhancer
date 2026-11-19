@@ -4862,3 +4862,47 @@ tasks:
     The layer count is not the predictor (95 layers beat 78; 98 lose to 25) - the predictor is how many passes
     leave int8, i.e. the PWN/myelin census, not the layer total. That correction belongs next to the "fusion
     map" wording wherever it is quoted. Do not ship the rewrite in the fp16 path: it costs 18% there.
+
+- id: rve-reuse-gate-reopened-2026-11-19
+  title: 'Reuse reopened by owner: a decision statistic that separates noise from motion, and a criterion for frozen grain'
+  type: experiment
+  status: in_progress
+  owner: '@supervisor'
+  priority: P1
+  gpu: partial
+  cost: 3d
+  tags:
+  - reuse
+  - gate
+  - motion
+  - grain
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/gate-bd.txt
+  - docs/wsp/verified/reuse-decision-statistic.txt
+  - docs/wsp/verdicts.yaml
+  owns_files:
+  - docs/wsp/verified/reuse-decision-statistic.txt
+  - scripts/reuse_stats.py
+  progress: >-
+    MEASURED 2026-11-19, first pass. The population the lane was closed on (bd_csm_same.mkv, 539 frames, 17
+    damaged) is NOT reproducible - sources.yaml records it as cut: {mode: not_proved} and the file lived in
+    /tmp - so a provable one was rebuilt: eight 8 s -c copy cuts of the same BDRemux, three of which the auto
+    gate engages (1040 s floor 0.87, 340 s 0.93, 900 s 1.00); the other five refuse. The 1040 s cut is the
+    failure: 205 frames, gate reuses 130 (63.4%, depths {1: 68, 2: 62}) and 37 of those reuses are past the
+    0.1% bar (worst 0.44121%, frame 122), all 37 in the last ~95 frames. Ranking those 37 against the 93 clean
+    reuses, on the same pairs and the same t-1 reference: block_maxabs (the shipped statistic) AUC 0.844,
+    block_signed (retired) 0.723, mctf_p99 0.855, mctf_mean 0.906, mctf_share (residual above 3 x MAD-sigma)
+    0.384. So motion compensation helps modestly and the noise-normalised share is worse than chance. No
+    threshold: all positives fall in the second temporal half, so a calibration here would be a fit.
+  acceptance: >-
+    (a) DONE for the ranking test (see progress). (b) A threshold on a held-out *clip*, not a held-out half:
+    this one has no positives in its first half. (c) The temporal-texture criterion - the 0.1% share cannot see
+    frozen grain, which is why the channel-max cell passed the share and was rejected by eye. (d) Only then a
+    product question, with the default staying OFF.
+  note: >-
+    Owner order 2026-11-19 reopens the investigation that reuse-gate-shelved and rve-reuse-gate-forbidden
+    2026-11-18 closed; the product decision (frame skipping off by default) is untouched. Literature entry
+    points: MCTF / motion-adaptive temporal filtering (Guo et al. ICIP'06; BM3D/VBM3D) for the decision;
+    film-grain separation and re-synthesis (AV1 FG; ITU-T H Suppl.21 2025; deep FG removal and synthesis,
+    IEEE TIP 2023) for the artifact.
