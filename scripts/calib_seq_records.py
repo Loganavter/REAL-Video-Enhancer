@@ -31,6 +31,21 @@ def main(argv=None) -> int:
                    run="scripts/wall_ab.sh + scripts/gate_sweep.py", artifact=os.path.join(a.dir, "pair.json"),
                    extra={"artifact_sha256": sha(os.path.join(a.dir, "pair.json")),
                           "peak": pair["worst_peak"], "frames_above_bar": pair["frames_above_bar"]}))
+    # the end-to-end start-up with both changes on (crops + sequential), same instrument as the split page
+    import re
+    log = "docs/wsp/verified/logs/startup-timed-seq.log"
+    total = None
+    for line in open(log):
+        m = re.search(r"startup: first frame enqueued ([\d.]+) s", line)
+        if m:
+            total = float(m.group(1))
+    if total is not None:
+        st.emit(Record(value=total, unit="s", population=Population.of(
+            "process starts", ("bd_violet20s#crops+sequential",), "one cold backend process, both changes on"),
+            instrument="the app's own stdout, seconds since process start", config="2x-Futsuu-Anime(1).pth, 1920x1080, crops + sequential, CACHE MISS",
+            session=st.session, statistic="single", tier="measured", id="SQ004",
+            run="/tmp/opencode/timed_run.py", artifact=log,
+            extra={"artifact_sha256": sha(log)}))
     st.dump(a.out)
     print(st.claims_text().strip())
     print(f"# -> {a.out}", file=sys.stderr)
