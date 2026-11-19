@@ -4055,6 +4055,13 @@ tasks:
     weaker and cheaper rule: measure both grids, keep the better one, choosing on frames disjoint from the
     ones the start-up gate certifies on (otherwise the gate passes by construction). NEXT: implement that
     pick-better step, and run the 494-frame pair for the two models whose verdict flips (Ani4K, Epsilon).
+    MECHANISM 2026-11-20, measured on six models (three rescued, three damaged): the mode improves the input
+    quantisation error by 2.7-3.9x on EVERY model and costs 1.20-1.40x on the weight error on EVERY model, yet
+    the picture outcome flips sign and does not track either term (Futsuu 3.2x/1.40x worse, Garfield 3.7x/1.28x
+    20x better). Clipping is refuted as the driver: 0.00000-0.00001% of activations exceed the grid in either
+    mode on held-out frames. The open mechanism is written up for an outside reader in
+    docs/wsp/REVIEW-int8-grid-modes.md, with the next discriminator named (per-INPUT-channel weight error, where
+    folding s_in can crush a low-range channel to one or two integer levels - invisible in the aggregate L2).
   acceptance: >-
     (a) All 21 compatible models in BOTH grid modes, with the calibration grid's dynamic range (max/median of the
     per-channel maxima) recorded next to each - the predictor has to be a number, not a hunch. (b) The rule: if
@@ -4069,4 +4076,41 @@ tasks:
     next reader sees "Garfield quantises badly" and bins the model, when the mechanism says the GRID was the
     problem. Also: per-channel costs a multiply in the epilogue (measured 27.10 -> 27.86 ms body on one draw),
     so it is a trade to be decided per model, not a free win to be made default.
+
+- id: rve-int8-calibration-cache-2026-11-20
+  title: 'Cache the calibration grids per (model, clip): 6.5 s of start-up, ~5 of it recomputed every run'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P3
+  gpu: false
+  cost: 1h
+  tags:
+  - int8
+  - startup
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/utils/Int8Probe.py
+  - backend/src/pytorch/Int8Body.py
+  owns_files:
+  - docs/wsp/verified/int8-calibration-cache.txt
+  refutes: >-
+    The int8 start-up cost is the price of the speed, so it cannot be reduced. Measured, it is 6.5 s and it is
+    almost entirely REPEATED work: the fp16 arm reaches its first frame at 26.58/26.61/26.60 s, the int8 arm at
+    33.08/33.09/33.08 s in the same session. Of the 6.5 s, an isolated breakdown (8 calibration frames) puts
+    3.27 s in decoding and uploading the spread frames, 2.07 s in running the EAGER fp16 model over them for the
+    per-channel maxima, 0.02 s in the weight quantisation and 0.49 s in the certify pass. The grids themselves
+    are 24 vectors of 64 floats - they depend on (model, clip), not on the render.
+  acceptance: >-
+    (a) A cache keyed by (model file hash, clip file hash, frame indices, margin) storing the grids and the
+    per-layer maxima, with the key and the hit/miss printed in the render log - a cache that cannot be audited
+    is a stale-number source. (b) A hit must produce a byte-identical body: same launches, same picture on a
+    494-frame pair as the uncached run, because the whole point is that nothing but time changes.
+    (c) The start-up delta re-measured in the app: the int8 arm's "first frame enqueued" against the fp16 arm's
+    in the same session, hit versus miss.
+  note: >-
+    Asked on 2026-11-20 after "isn't there a minute of waiting before int8 starts?". The answer measured is
+    6.5 s, not a minute, and the breakdown says where it goes. The alternative - fewer calibration frames - is
+    already measured as a bad trade: single-frame grids read 0.566% where spread calibration reads 0.050%, 11x
+    worse. Caching keeps the spread calibration and drops the repetition.
 
