@@ -3128,3 +3128,92 @@ tasks:
     error - a stand-in that changes the work instead of the thing under test. ncu is now installed (2026.4.0,
     from the CUDA apt repo, no root) and adds one more arm worth taking: Compute Workload Analysis, which names
     the saturated pipe.
+
+- id: rve-hop-dram-bytes-2026-11-20
+  title: 'The 265 MB/hop and the 14.7 ms traffic floor are a CONSTRUCTION - measure the DRAM counters'
+  type: measurement
+  status: done
+  owner: '@supervisor'
+  resolution: >-
+    MEASURED 2026-11-19, and the construction survives: dram__bytes_read 132.84 MB + dram__bytes_write 117.63 MB
+    = 250.6 MB against the 265 MB constructed, i.e. 5.5% high, not wrong. At 288 GB/s that is 0.87 ms/hop and
+    13.9 ms for sixteen (the corpus should quote these, not 0.92/14.7). The number nobody had modelled is the L2
+    one: lts__t_sectors 47.72 M = 1528 MB through L2, 6.1x the DRAM traffic at a 91.25% hit rate, i.e. 955 GB/s
+    of L2 bandwidth. That is the nine taps - the compulsory 132.84 MB is read once from DRAM and ~6 times from
+    L2 - and it explains why every single-lever change came out flat: DRAM sits at 54% of its roof, L2 at 44-50%
+    and the SM at 74%, all within 25 points. It also gives rve-hop-smem-staging a target: staging the three-row
+    window once per CTA would cut L2 traffic from ~6x to ~3x of DRAM (~750 MB), which is the first named
+    mechanism that touches the LOWEST of the three roofs without adding arithmetic.
+    docs/wsp/verified/int8-hop-dram.txt, records int8-hop-dram.jsonl (D001-D006), logs/hop-dram/report.txt.
+    Not covered: one launch, one frame; the write counter reads 15 MB below the constructed output because that
+    much was still in L2 at kernel end (write-back timing, not missing writes).
+  priority: P2
+  gpu: true
+  cost: 1h
+  tags:
+  - int8
+  - hops
+  - instrument
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-hop-roof.txt
+  - docs/wsp/verified/int8-hop-loads.txt
+  - docs/wsp/verified/int8-hop-ncu.txt
+  owns_files:
+  - docs/wsp/verified/int8-hop-dram.txt
+  refutes: >-
+    The hop's traffic floor is 0.92 ms (265 MB at 288 GB/s) and sixteen hops therefore cannot go below 14.7 ms.
+    Both numbers are CONSTRUCTIONS - 2.0736 Mpx x 64 B read plus the same written - not counter readings, and the
+    ledger has already retracted one argument of exactly this shape ("9.37 GiB is an upper bound, a third never
+    leaves L2"). ncu is now installed and reports throughput percentages but not bytes. Collect
+    dram__bytes_read.sum and dram__bytes_write.sum for one launch: if DRAM traffic is materially below 265 MB
+    (the L2 hit rate is 91.3%, so it may well be), the traffic floor is wrong in the same direction as the SM
+    roof was - 74% measured against a "52%" estimate - and the hop's remaining headroom is smaller than the
+    decomposition suggests.
+  acceptance: >-
+    One hop launch under ncu, three counters (dram__bytes_read.sum, dram__bytes_write.sum, lts__t_sectors.sum),
+    converted to MB and compared against the 265 MB construction and against the 132.7 MB write alone. Report the
+    ratio both ways: DRAM bytes per pixel and the implied floor at 288 GB/s. No timing claim - the timing stays
+    with the CUDA events; this settles the TRAFFIC number the other records quote.
+  note: >-
+    Filed from the other agent's critique, point 2, which is right on the substance: the corpus quotes a floor
+    derived from a sum of tensors. One counter run either confirms it or retires it, and the tooling is on disk
+    now (~/.local/nsight/2026.4.0/ncu).
+
+- id: rve-hop-smem-staging-2026-11-20
+  title: 'The first gather is one round trip the SM cannot hide - stage the three-row window instead'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 4h
+  tags:
+  - int8
+  - hops
+  - kernel
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Kernels.py
+  - docs/wsp/verified/int8-hop-occupancy.txt
+  - docs/wsp/verified/int8-hop-ncu.txt
+  owns_files:
+  - docs/wsp/verified/int8-hop-smem.txt
+  refutes: >-
+    The hop has no lever left at all. What is measured (int8-hop-occupancy.txt): one tap costs 0.59 ms, three cost
+    the same, nine cost 1.55 - the FIRST gather's round trip dominates and the SM has only 3.96 of 12 warps per
+    scheduler to hide it (ncu), while every launch parameter that would add warps loses more in the 64-wide MMA
+    (nine configurations, the shipped one best). The one formulation nobody has tried in Triton is to load the
+    three-row window ONCE per CTA as a (3, BLOCK_M, C) tile and form the nine taps by shifting inside it, so the
+    per-tap gathers become register/smem reads. If that does not cut the 1-tap arm's 0.59 ms constant by a third,
+    the round trip is structural and the hop closes for good on this card.
+  acceptance: >-
+    One hop, arms in one process, CUDA events, >=3 rounds: today, and the staged variant at the taps it can
+    express. Report ms, TOPS and the 1-tap arm specifically (the constant lives there). Codes must match today
+    exactly - a staging scheme changes no arithmetic - and a mismatch of more than 0 differing codes means the
+    shift indexing is wrong, not that the picture moved. Then, only on a >=10% win: the 16-hop chain in the app,
+    the phase line beside the loop, and the full-clip picture.
+  note: >-
+    This is the same family as the pipelining attempts recorded as negative inside Int8Kernels.py
+    (num_stages 2-3: 2.497/2.635 ms), so the prior is unfavourable and the row is written to fail fast: the 1-tap
+    arm alone decides it, in one measurement, before any integration work.
