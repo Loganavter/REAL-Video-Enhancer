@@ -23,7 +23,7 @@ try:                       # round-half-to-EVEN, which is what torch.round does
 except Exception:          # pragma: no cover - older triton
     _rint = None
 
-__all__ = ["body_prologue_kernel", "head_int8_kernel", "tail_int8_kernel",
+__all__ = ["body_prologue_kernel", "head_int8_kernel", "tail_int8_kernel", "tail_int8_shuffle_kernel",
            "quantise_nchw_to_nhwc", "quantise_nchw_to_nhwc_prelu",
            "quantise_nhwc", "quantise_nhwc_prelu",
            "dequantise_nhwc_to_nchw", "dequantise_nhwc"]
@@ -152,6 +152,56 @@ def body_prologue_kernel(x_ptr, w_ptr, m_next_ptr, shift, w_scale_ptr, bias_ptr,
     q = ((q * tl.load(m_next_ptr + lanes)[None, :]) + (1 << (shift - 1))) >> shift
     q = tl.minimum(tl.maximum(q, -127.0), 127.0)
     tl.store(y_ptr + rows[:, None] * C + lanes[None, :], q.to(tl.int8))
+
+
+@triton.jit
+def tail_int8_shuffle_kernel(x_ptr, w_ptr, sigma_ptr, bias_ptr, lr_ptr, y_ptr, H, W, BLOCK_M: tl.constexpr,
+                             CIN: tl.constexpr, COUT: tl.constexpr, COUT_PAD: tl.constexpr,
+                             SCALE: tl.constexpr):
+    """The tail, the pixel shuffle and the residual in one kernel - the body's last three steps.
+
+    The shipped path computes the 64 -> 12 tail convolution, then `nn.PixelShuffle(2)` rearranges those 12
+    channels into 3 at twice the size, then the residual adds the nearest-upsampled input. All three are
+    element-wise on the same 12 values: pixel_shuffle is a PERMUTATION, and the residual adds the SAME LR
+    pixel to all four subpixels. So folding them here is not an approximation - it computes the same
+    additions in the same order and the render is expected to be byte-identical.
+
+    Lane k of the 16-wide epilogue is input channel `c = k // (SCALE*SCALE)`, subpixel `i = (k % 4) // 2`,
+    `j = k % 2`, which is torch's own `channel = c*r^2 + i*r + j`. Each input pixel writes 4 subpixels of 3
+    contiguous channels into two output rows, so neighbouring pixels still write contiguous runs.
+    """
+    pid = tl.program_id(0)
+    rows = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    h = rows // W
+    w = rows % W
+    li = tl.arange(0, CIN)
+    lo = tl.arange(0, COUT_PAD)
+    acc = tl.zeros((BLOCK_M, COUT_PAD), dtype=tl.int32)
+    for tap in tl.range(0, 9, num_stages=1):
+        dy = tap // 3 - 1
+        dx = tap % 3 - 1
+        yy = h + dy
+        xx = w + dx
+        inside = (yy >= 0) & (yy < H) & (xx >= 0) & (xx < W)
+        src = (yy * W + xx)[:, None] * CIN + li[None, :]
+        a = tl.load(x_ptr + src, mask=inside[:, None], other=0)
+        b = tl.load(w_ptr + tap * CIN * COUT_PAD + li[:, None] * COUT_PAD + lo[None, :])
+        acc += tl.dot(a, b, out_dtype=tl.int32)
+    v = acc.to(tl.float32) * tl.load(sigma_ptr + lo)[None, :] + tl.load(bias_ptr + lo)[None, :]
+    chan = lo // (SCALE * SCALE)
+    sub = lo % (SCALE * SCALE)
+    sy = sub // SCALE
+    sx = sub % SCALE
+    lm = lo[None, :] < COUT
+    # the LR pixel this output pixel's nearest upsample lands on: (h, w), plane `chan`
+    lr = tl.load(lr_ptr + chan[None, :] * (H * W) + rows[:, None], mask=lm, other=0.0)
+    # Round the conv result to fp16 BEFORE the residual, exactly as the shipped path does (it stores fp16 and
+    # then adds an fp16 residual). Adding in fp32 and rounding once would be a different arithmetic - one
+    # rounding instead of two - and would show up as 1-ulp differences on a handful of pixels.
+    val = v.to(tl.float16) + lr
+    out_pos = ((h[:, None] * SCALE + sy[None, :]) * (W * SCALE) + (w[:, None] * SCALE + sx[None, :])) * 3 \
+        + chan[None, :]
+    tl.store(y_ptr + out_pos, val, mask=lm)
 
 
 @triton.jit
