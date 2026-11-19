@@ -4778,3 +4778,85 @@ tasks:
     because it needs a training loop this lane does not have, and because stage (b) - a per-layer K with no
     training - is the cheap falsifier that decides whether the expensive half is worth it.
 
+
+- id: rve-prelu-form-int8-2026-11-20
+  title: 'A per-channel PReLU written as a*x + (1-a)*relu(x) keeps the int8 boundary: 1.34x engine, and it costs 18% on fp16'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 4h
+  tags:
+  - int8
+  - fusion
+  - graph-form
+  - prelu
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/trt-int8-calibrated.txt
+  - docs/wsp/verified/engine-int8.txt
+  - backend/src/pytorch/Int8Body.py
+  - backend/src/pytorch/UpscalePytorch.py
+  owns_files:
+  - docs/wsp/verified/prelu-form-int8.txt
+  - docs/wsp/verified/records/prelu-form-int8.jsonl
+  refutes: >-
+    The lane's int8 verdict rests on "a per-channel PReLU cannot join an int8 epilogue, so every hop pays a
+    full-precision pass" (trt-int8-calibrated, engine-int8). PReLU is positive-homogeneous, so the dequantise
+    commutes through it and the boundary is a graph-form question, not an arithmetic one. Writing the same
+    function as a*x + (1-a)*relu(x) - 17 PReLUs, constants of the slope's own [64,1,1] shape, no new weight
+    tensors - takes the int8 engine from 45.22 to 33.71 ms on the same calibration and the same frames
+    (1.341x), while the PWN passes fall 19 -> 4. If it does not reproduce in the app's build path, or the
+    picture pair is worse than the shipped cell, the row closes as an engine-level artefact.
+  progress: >-
+    MEASURED 2026-11-19/20 in isolation, 2x-Futsuu-Anime(1).pth -> ONNX opset 17, static 1x3x1080x1920,
+    TensorRT 10.12.0.36, builder level 5, implicit int8, IInt8MinMaxCalibrator over the lane's own 8 frames.
+    Graph: int8 as-is 78 layers / 19 PWN / 21 reformat; int8 rewrite 95 layers / 4 PWN / 36 reformat; no arm
+    fuses the activation into the convolution epilogue, so the mechanism is "the boundary stops leaving int8",
+    not "the epilogue absorbed it". Speed (one process, engines cached, interleaved, 4 rounds x 20 iterations,
+    medians of rounds 2+): fp16 53.65, int8 as-is 45.22, int8 rewrite 33.71 ms -> 1.192x and 1.599x over fp16,
+    1.341x rewrite-over-baseline. Picture on 16 held-out frames (8 per BD cut, timestamps 1/4/6/9/11/14/16/19 s,
+    disjoint from the calibration timestamps and from the first-pass eval frames), reference = the fp16 engine
+    from the unmodified ONNX, worst-frame channel-max share >8 levels: as-is 0.04602% (peak 18, max peak 22,
+    0/16 frames over the bar), rewrite 0.03060% (peak 19, max peak 20, 0/16), medians 0.0063% vs 0.00356%.
+    Calibrator control: entropy fails on both arms (3.03037% and 2.99672% worst, 13/16 frames over the bar,
+    peaks 86/85) - the calibrator decides that, not the form. fp16 control: rewritten fp16 vs original fp16 is
+    0.00000% / peak 1 (the algebra is the same function), but rewritten fp16 is 63.40 against 53.65 ms (0.846x)
+    because it destroys the 20 myelin Conv+PReLU fusions - so the form must be chosen per precision.
+    A/A: fp16 against itself 0.00000% / peak 0. Recorded trap: the first variant was x+(a-1)*relu(x), which is
+    NOT PReLU; it built fine and looked faster, and the fp16 control read 100.00000% / peak 126-227, which is
+    what identified it as algebra rather than quantisation.
+    Explicit Q/DQ re-run with the same form (the one closed verdict that could be a form artefact): base
+    67.4-69.2 ms reproduces engine-int8.txt's 64.3-70.4, and the rewrite reads 141.6-145.5 (0.47x) with the
+    picture in the same class on both eval frames (csm 0.000%/peak 7.4-7.7; violet 1.93% vs 1.99%, both over
+    the bar, peak ~107). So E9' STANDS and is not an artefact of the PRelu being left as an op. Trap recorded
+    with it: scripts/build_plan.py --parse sets only BuilderFlag.FP16, so a Q/DQ graph built through it runs
+    the quantise/dequantise nodes in fp16 (133 ms); build_int8qdq.py is the same builder plus BuilderFlag.INT8.
+    SECOND MODEL 2026-11-20, same instrument, 2x_Ani4K_Compact_35000 at 1x3x1080x1920: the speed mechanism
+    reproduces (int8 41.29 -> 31.57 ms, 1.308x against 1.341x on Futsuu; PWN 18 -> 3; layers 74 -> 91 - the
+    same inversion of layer count and time), and the algebra stays exact on this model (rewritten fp16 vs
+    original 0.00000%, peak 1). It does NOT reproduce two things and neither may be generalised from Futsuu:
+    the picture direction (worst frame 0.03180% -> 0.06647%, median 0.00562% -> 0.01348%, peak 29 -> 32, still
+    0/16 frames over the bar) and the fp16 penalty (here fp16 keeps all 19 myelin blocks and is time-neutral,
+    50.78 against 50.68-51.48, where Futsuu lost 18%). So the claim is the speed and the mechanism; "equal or
+    better picture" stays a per-model observation.
+    Artifacts (scratch, not committed): /tmp/opencode/prelu-exp/{rewrite_prelu.py,run_engines.py,check_a.py,
+    check_fp16_a.py,accept.py,RESULT.md}, engines under {base,a,base_ent,a_ent,base_ent,a_fp16}/.
+  acceptance: >-
+    (a) The same rewrite applied where the app builds its engine, with a BD render pair against the shipped
+    cell - the engine numbers here are whole-frame and the app builds tiled, so the product number is unquoted
+    until one pair exists (gate_sweep, --reference-kind config). (b) DONE for one second model (Ani4K, see progress); still owed for a different tail scale
+    (4x realesr-animevideov3's 48-channel tail, or a 1x denoiser) and for a model where the rewrite changes
+    the picture in the same direction as on Futsuu. (c) DONE, and it CLOSES: the explicit Q/DQ arm re-run
+    with this form reads 141.6-145.5 ms against 67.4-69.2 for the baseline (0.47x, i.e. 2.1x slower) with the
+    picture in the same class on both eval frames, so E9' stands and is not an artefact of the PRelu being an
+    op. (d) DONE at 4K geometry: 1x3x2160x3840, fp16 205.3-206.1 ms, int8 165.93 -> 124.65 ms (1.331x, against
+    1.341x at 1080p; 1.650x over fp16), layers 74/18 PWN -> 91/3, 0/16 frames over the bar (0.00012% -> 0.00030%).
+    CAVEAT on that row: the 4K input is the 1080p BD frames upscaled 2x with lanczos because the library has no
+    native 4K cut, so it tests geometry and fusion, not the 4K picture. Still owed: the app render pair at 4K,
+    where the app builds tiled engines and the body is not wired in.
+  note: >-
+    The layer count is not the predictor (95 layers beat 78; 98 lose to 25) - the predictor is how many passes
+    leave int8, i.e. the PWN/myelin census, not the layer total. That correction belongs next to the "fusion
+    map" wording wherever it is quoted. Do not ship the rewrite in the fp16 path: it costs 18% there.
