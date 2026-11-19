@@ -3397,3 +3397,38 @@ tasks:
     layout (2), output-channel split (4), frame batching (3): thirty configurations, the shipped kernel wins
     every family. docs/wsp/verified/int8-hop-batch.txt, records int8-hop-batch.jsonl (Y001-Y003),
     logs/hop-batch/probe.json.
+
+- id: rve-cuda-smem-hop-2026-11-20
+  title: 'Switch the hop to a CUDA kernel with shared-memory staging - TESTED FIRST, and not recommended'
+  type: experiment
+  status: dropped
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: '6-10 sessions'
+  tags:
+  - int8
+  - hops
+  - cuda
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-hop-occupancy.txt
+  - docs/wsp/verified/int8-hop-prefetch.txt
+  owns_files:
+  - docs/wsp/verified/int8-hop-prefetch.txt
+  resolution: >-
+    DROPPED 2026-11-19 after testing the theory in its two cheap forms, both NEGATIVE. The plan was: the first
+    tap costs 0.59 ms because its round trip has no warps to hide behind, so stage the three-row window in shared
+    memory in a hand-written CUDA kernel (Im2win's recipe), prize ~9 ms/frame. (1) Reordering the loads to overlap
+    them, inside Triton: unrolled -50.9%, nine loads issued before the nine dots -101.1% (1.546 -> 2.332 / 3.108
+    ms, identical codes) - nine 128x64 int8 tiles are 72 KB of registers per CTA and collapse occupancy. (2) A
+    40-line CUDA microbenchmark of the same address pattern without MMA, compiled with the host's nvcc: nine
+    dependent gathers 6.445 ms against a shared-memory window 6.725 (BM 64) and 8.107 (BM 128), identical sums -
+    staging is SLOWER. (3) The number that explains both: L2 hit rate 91.25% (int8-hop-dram.txt), so the taps
+    round-trip to L2, not DRAM, and there is far less latency to hide than the theory assumed. The 0.59 ms is
+    therefore more plausibly pipeline fill/drain per launch over 16200 CTAs at 4 warps - which no amount of
+    staging addresses. A last check is still available (smem+MMA hand-tuned), but two of its three premises are
+    now measured negative, so it is dropped rather than funded. NOT DONE, deliberately: no CUDA kernel was written
+    for the real shape, and Windows packaging was explicitly out of scope (the owner's call). Records:
+    int8-hop-prefetch.jsonl (P001-P006), docs/wsp/verified/int8-hop-prefetch.txt,
+    logs/hop-prefetch/, logs/hop-smem-theory/ (smem_bench.cu + smem_drive.py, both runnable).
