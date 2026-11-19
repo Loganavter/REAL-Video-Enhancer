@@ -16,7 +16,7 @@ what its floor is, so a reader who was never in this lane can challenge any of i
 | build | all four opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that tail kernel, zero-halo hop buffers |
 | the bar | `bar_int8_wall` = **1.2x** wall clock against the fp16 engine; the picture bar is the share of pixels more than 8 levels off on the worst frame of a spread sample, 0.1% |
 
-| commit | `9b21a4c1` - the tree these numbers were taken on |
+| commit | `cd8eb2fa` - the tree these numbers were taken on |
 
 The pipeline, in the order a frame is paid for: **decode** (ffmpeg, outside the loop) -> **reader** (yuv420p10 -> a tensor) -> **head** (3 -> 64 channels) -> **sixteen hops** (the body) -> **tail** (64 -> 12 channels, pixel shuffle to 3 at 2x) -> **residual** (add the upsampled input) -> **pack** (4K payload to the host) -> **writer** (ffmpeg stdin). The render loop below is the wall clock of that chain; the body is what the model costs, measured by the app's own events.
 
@@ -31,6 +31,19 @@ The pipeline, in the order a frame is paid for: **decode** (ffmpeg, outside the 
 | **BODY TOTAL** | **25.90** | 100% | measured with the app's own CUDA events, window by window |
 
 Tail split on the same run: dequant 0.00, conv 1.01, shuffle 0.00, residual 0.00, sum 1.02 ms. The zeroes are the second adoption: the dequant pass was folded into the tail's weights and the shuffle+residual into its epilogue.
+
+## The hop against its two roofs - why every single lever came out flat
+
+| quantity | value |
+|---|---|
+| one hop, measured | 1.519 ms |
+| its compute floor (152.9 GFLOP at 176 TOPS) | 0.869 ms = **57% of the roof** |
+| its DRAM floor (250.6 MB at 288 GB/s, counter-measured) | 0.870 ms = **57% of the roof** |
+| the two floors agree | that is what 'on the ridge' means: 610 FLOP/byte against a ridge of 611 |
+| ncu's own reading | Compute (SM) 74%, DRAM 56%, LSU the busiest pipe (73.9% by instruction count), L2 6.1x the DRAM traffic |
+
+The 74% and the 57% are not a contradiction: ncu measures **pipe saturation** (including the load/store unit), the 57% measures **arithmetic against the int8 roof**. Both say the same thing - the kernel presses on compute and on memory at the same time, in equal measure - and that is why a change that improves only one of the two reads as flat noise. Thirty configurations in seven families were tried on this line; every
+one lost (the table three sections down).
 
 ## The frame
 
@@ -65,6 +78,17 @@ An outsider reading this list is the intended use: every entry is a lever someon
 | output channels split across CTAs | halve the accumulator to double resident warps | **2.632 ms** | shipped hop 1.591 ms | `docs/wsp/verified/int8-hop-csplit.txt` : X002 |
 | M x 2 batching | amortise the 0.59 ms per-launch constant over two frames | **1.764 ms** | batch 1 of the same kernel 1.769 ms/frame | `docs/wsp/verified/int8-hop-batch.txt` : Y002 |
 | pack ring (pinned slots) | the 12.44 MB payload copy is synchronous | **34.36 ms** | ring off 34.42 ms loop | `docs/wsp/verified/int8-pack-ring.txt` : K002 |
+| reverse tile order on alternate hops | the previous hop's tail is still in L2 (32 MB of 132) | **26.577 ms** | forward 26.551 ms over 16 hops | `docs/wsp/verified/int8-hop-traverse.txt` : V002 |
+
+## What is still open, and what it costs
+
+| idea | expected | what it needs | state |
+|---|---|---|---|
+| fuse two hops per launch (cascade) | **+3.1 ms/frame** at T=32: 1.064x of work for one saved launch constant of 0.59 ms, eight pairs | a CUDA kernel; the intermediate is 34^2 x 64 B = 74 KB, which fits 100 KB of shared memory | `rve-hop-fuse2-cascade`, P2, unmeasured |
+| shared-memory staging of the 3-row window | the 0.59 ms first-tap constant, if it is a round trip | the same CUDA kernel; measured negative in its two cheap forms (reordered loads -101%, a CUDA microbenchmark -26%) | closed, `int8-hop-prefetch.txt` |
+| a PCIe 4.0 slot | ~1.2 ms off `pack`, since the link is gen 3 x8 today | hardware | not software |
+| skipping duplicate frames / static regions | large on anime, and the owner's call forbids it | - | closed by policy, `rve-reuse-gate-forbidden` |
+| cut the model (fewer channels or hops) | 2.9-4.5 ms per hop removed | 14-37% per-layer residual, 1.58% of pixels over the picture bar | closed by measurement |
 
 ## The ratio this produces
 
