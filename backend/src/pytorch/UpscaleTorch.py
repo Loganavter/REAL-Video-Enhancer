@@ -695,8 +695,9 @@ class UpscalePytorch:
             if getattr(body, "grid_auto", False) and len(_frames) >= 8:
                 try:
                     _k, _scores = body.pick_grid_k(hold)
-                    log("int8 grid PICKED K=%g (scores %s; guard x2 over K=2, chosen on %d frames, "
+                    log("int8 grid PICKED K=%g%s (scores %s; guard x2 over K=2, chosen on %d frames, "
                         "certificate on another slice; build %.2f s, score %.2f s)", _k,
+                        " (K=2 already clean, sweep skipped)" if getattr(body, "_pick_skipped", False) else "",
                         {f"K={k:g}": round(v, 4) for k, v in sorted(_scores.items())}, len(hold),
                         *getattr(body, "_pick_timing", (0.0, 0.0)))
                 except Exception as error:  # noqa: BLE001 - never let the pick cost a render

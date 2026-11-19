@@ -848,6 +848,17 @@ class Int8Body:
 
     # ---- picking the grid clamp at start-up ------------------------------------------------------------
     @staticmethod
+    def skip_sweep(score_default: float, skip_below: float = 0.002) -> bool:
+        """Is the default already clean enough that the sweep cannot change the decision?
+
+        The ladder's largest gain is 7.1x, so a default reading `skip_below` would land at `7.1 x skip_below` in
+        the best case - and 0.002% x 7.1 is 0.014%, seven times inside the 0.1% bar. The threshold is argued from
+        that maximum gain rather than from a 3-frame-to-494-frame multiplier, because no such multiplier exists
+        between the two references (the smoke test compares against the model, the pair against the engine).
+        """
+        return score_default <= skip_below
+
+    @staticmethod
     def choose_grid_k(scores: dict, default: float = 2.0, guard: float = 2.0) -> float:
         """Which K to keep, given each candidate's gross-error share on HELD-OUT frames.
 
@@ -866,14 +877,23 @@ class Int8Body:
                 return default                      # not a clear enough win to be worth the change
         return best
 
-    def pick_grid_k(self, holdout, candidates=(1.0, 2.0, 3.0, 4.0), guard: float = 2.0,
-                    default: float = 2.0):
+    def pick_grid_k(self, holdout, candidates=(2.0, 3.0), guard: float = 2.0,
+                    default: float = 2.0, skip_below: float = 0.002):
         """Build at each candidate K, score the app's own gate on `holdout`, keep the winner under the guard.
 
         `holdout` must be frames the certificate will NOT use: choosing on the frames you certify on makes the
-        gate pass by construction. Cost is one build (~0.3 s) and one forward per candidate, with the fp16
-        references computed once - about 3 s on the production model, which is why it is opt-in
-        (`RVE_INT8_GRID_K=auto`) until it has been measured in the app.
+        gate pass by construction.
+
+        Two decisions from the ladder, both measured rather than assumed:
+
+        * the candidate set is {K=2, K=3}, not {1,2,3,4}. K=1 was never the winner on any of the 22 models, and
+          K=3 captures the outcome wherever K=4 does except Garfield, where dropping K=4 costs 0.0029 -> 0.0157 -
+          still six times inside the bar. Two candidates on six frames costs the same as four on three, and a
+          label built on six frames is closer to the 494-frame statistic than one built on three.
+        * `skip_below`: when K=2's own share is already this small, the sweep cannot matter. The largest gain the
+          ladder ever delivered is 7.1x, so 0.002% x 7.1 is 0.014% - still seven times inside the 0.1% bar. The
+          threshold is deliberately argued from the ladder's own maximum gain, not from a 3-frame-to-494-frame
+          multiplier, because no such multiplier exists between the two references.
         """
         import time as _t
 
@@ -907,6 +927,15 @@ class Int8Body:
             # The check is also the only thing standing between a broken reference and a silent wrong choice.
             scores = {float(default): score(default)}
             self._pick_probe = None
+            if self.skip_sweep(scores[float(default)], skip_below):
+                # already comfortably clean: the sweep cannot change the decision
+                self._pick_timing = (round(t_build, 2), round(t_score, 2))
+                self._pick_skipped = True
+                self.grid_k, self.per_tensor = float(default), False
+                self._launches = None
+                self._build()
+                return float(default), scores
+            self._pick_skipped = False
             _sh, _ok = self.certify(holdout[0])
             if scores[float(default)] > 10.0 * max(_sh, 1e-6) and scores[float(default)] > 1.0:
                 raise RuntimeError(
