@@ -329,6 +329,28 @@ class Frame:
             
         return self._tensor.clone() # this helps so the frame wont be overwritten? have to test later.
 
+    def _is_raw_payload(self) -> bool:
+        """True when the tensor IS the pipe payload rather than an RGB image.
+
+        The int8 body's tail can write the packed yuv420p payload itself (`RVE_TAIL_YUV`, the row
+        rve-tail-csc-yuv-2026-11-20 path): then the frame holds one flat uint8 buffer of
+        `w*h + 2*(h//2)*(w//2)` bytes and the pack must COPY it, not run the colour conversion. A
+        one-dimensional uint8 tensor cannot be anything else here - an image is (1, 3, H, W), fp16 or
+        16-bit.
+        """
+        tensor = self._tensor
+        if tensor is None or _torch is None or not isinstance(tensor, _torch.Tensor):
+            return False
+        return tensor.dim() == 1 and tensor.dtype == _torch.uint8
+
+    def _raw_payload_bytes(self):
+        """One DMA to the host, no conversion and no per-frame host copy.
+
+        Exactly the object `tensor_to_yuv420p` returned (a flat uint8 array the writer pipes), minus
+        the YCbCr arithmetic that now lives in the tail kernel.
+        """
+        return self._tensor.reshape(-1).cpu().numpy()
+
     def get_frame_bytes(self, clear_cache: bool = False) -> Any:
         """The frame as pipe-ready bytes.
 
@@ -339,7 +361,12 @@ class Frame:
         if self._bytes is None:
             if self._tensor is not None:
                 if self._uses_pooled_output():
+                    # the ring owns the copy; `_convert_payload` copies when the tensor already IS the
+                    # pipe payload (RVE_TAIL_YUV) and converts otherwise
                     self._bytes = self._fill_pooled_payload()
+                elif self._is_raw_payload():
+                    # no ring: one DMA, no conversion - the tail already wrote these bytes
+                    self._bytes = self._raw_payload_bytes()
                 elif getattr(self, "yuv10_output", False):
                     # 10-bit SDR: pack YUV420p10 on the GPU so the pipe stays 3 bytes/px
                     self._bytes = _torch_utils.tensor_to_yuv420p10(
@@ -379,6 +406,9 @@ class Frame:
     def _pooled_numel(self) -> int:
         """Element count the conversion is going to produce (from the tensor, not the
         frame header: an upscaled frame's width/height can lag the tensor it holds)."""
+        if self._is_raw_payload():
+            # the payload is already packed: its own length is the slot size
+            return int(self._tensor.numel())
         if self._tensor is not None:
             height, width = int(self._tensor.shape[-2]), int(self._tensor.shape[-1])
         else:
@@ -447,12 +477,40 @@ class Frame:
         return False
 
     def _convert_payload(self, dest) -> None:
-        if getattr(self, "yuv10_output", False):
+        if self._is_raw_payload():
+            # a copy, not a conversion: the tail kernel already produced these bytes. It stays inside
+            # the same guard (the caller records `_payload_event` after this returns), which is what
+            # keeps the writer from reading a slot whose DMA has not landed.
+            if hasattr(dest, "copy_"):      # a torch host buffer - the production, pinned case
+                dest.reshape(-1).copy_(self._tensor.reshape(-1), non_blocking=True)
+            else:                            # a plain host array on a build without torch
+                dest[...] = self._tensor.reshape(-1).cpu().numpy()
+        elif getattr(self, "yuv10_output", False):
             _torch_utils.tensor_to_yuv420p10(self._tensor, dest=dest)
         elif getattr(self, "yuv8_output", False):
             _torch_utils.tensor_to_yuv420p(self._tensor, dest=dest)
         else:
             _torch_utils.tensor_to_frame(self._tensor, dest=dest)
+
+    def raw_payload_preview(self) -> bytes:
+        """RGB uint8 preview of a packed yuv420p payload (HWC bytes, the preview channel's format).
+
+        The render loop builds its preview from the RGB tensor, which a payload frame does not have.
+        BT.709 limited-range matrix, nearest-neighbour chroma: this is a preview, not a measurement.
+        """
+        flat = self._tensor.reshape(-1).float()
+        h, w = int(self.height), int(self.width)
+        n = h * w
+        c = (h // 2) * (w // 2)
+        y = flat[:n].view(h, w) - 16.0
+        u = (flat[n:n + c].view(h // 2, w // 2) - 128.0).repeat_interleave(2, 0).repeat_interleave(2, 1)
+        v = (flat[n + c:n + 2 * c].view(h // 2, w // 2) - 128.0).repeat_interleave(2, 0).repeat_interleave(2, 1)
+        u, v = u[:h, :w], v[:h, :w]
+        r = 1.164 * y + 1.793 * v
+        g = 1.164 * y - 0.213 * u - 0.533 * v
+        b = 1.164 * y + 2.112 * u
+        rgb = _torch.stack((r, g, b), dim=-1).clamp_(0.0, 255.0).to(_torch.uint8)
+        return rgb.cpu().numpy().tobytes()
 
     def release_payload(self) -> None:
         """Give a pooled output slot back to the pool. Idempotent; no-op when not pooled.

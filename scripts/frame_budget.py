@@ -31,6 +31,7 @@ ADOPTED = [
     ("tail as a 17th int8 hop", "C002", "C001", "int8-tail-hop.jsonl"),
     ("tail shuffle + residual folded in", "Q006", "Q005", "int8-tail-shuffle.jsonl"),
     ("zero-halo hop buffers (mask-free)", "H005", "H004", "int8-hop-halo.jsonl"),
+    ("tail writes the yuv420p payload itself", "JC003", "JC002", "int8-tail-csc.jsonl"),
 ]
 # (lever, what it was supposed to buy, against what, record id, file)
 REJECTED = [
@@ -152,8 +153,8 @@ def main(argv=None) -> int:
     A("| model | `2x-Futsuu-Anime(1).pth`, SRVGGNetCompact 2x, 64 body channels, 18 convolutions |")
     A("| precision | fp16 engine vs the int8 body: 8-bit codes between the 16 body hops, fp16 head and tail "
       "weights where noted |")
-    A("| build | all four opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that "
-      "tail kernel, zero-halo hop buffers |")
+    A("| build | all five opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that "
+      "tail kernel, zero-halo hop buffers, and the tail writing the yuv420p payload itself |")
     A("| the bar | `bar_int8_wall` = **1.2x** wall clock against the fp16 engine; the picture bar is the share "
       "of pixels more than 8 levels off on the worst frame of a spread sample, 0.1% |")
     A("")
@@ -243,17 +244,14 @@ def main(argv=None) -> int:
     A("")
     A("| idea | expected | what it needs | state |")
     A("|---|---|---|---|")
-    A("| fuse two hops per launch (cascade) | **+3.1 ms/frame** at T=32: 1.064x of work against ~250 MB of DRAM "
-      "per fused boundary removed (the launch-constant argument is dead) | a CUDA kernel; the intermediate is "
-      "34^2 x 64 B = 74 KB, which fits 100 KB of shared memory | `rve-hop-fuse2-cascade`, P2, unmeasured |")
-    A("| shared-memory staging of the 3-row window | the 0.59 ms first-tap cost, if it is a round trip (it is "
-      "NOT a per-launch constant: the same kernel at 256x256 takes 0.057 ms, so the implied launch term is "
-      "0.011 ms - `int8-hop-constant.txt`) | the "
-      "same CUDA kernel; measured negative in its two cheap forms (reordered loads -101%, a CUDA microbenchmark "
-      "-26%) | closed, `int8-hop-prefetch.txt` |")
-    A("| **overlap the IO with the body** (three streams, double buffer) | **up to 7.68 ms** - read, body, pack "
-      "and write are strictly sequential today | software only, no new kernel | `rve-frame-pipeline-overlap`, P1, "
-      "unmeasured |")
+    A("| the hop: taps, staging, cascade, tiles, schedules | -5.3 ms at the very best, and only by removing the "
+      "FIRST tap's exposed latency | **closed by mechanism**: staging ADDS LSU instructions (9 -> 11.26 at a 2-D "
+      "tile, 9 -> 15.09 for a band) on the busiest pipe, `tl.gather` prices the register route at 13.5x, a "
+      "register-local dp4a roofs at 44.2 TOPS against the 103.4 already reached, and the per-launch constant "
+      "does not exist (a whole 256x256 hop is 0.057 ms) | `int8-hop-tapreuse.txt`, `int8-hop-constant.txt` |")
+    A("| overlap the IO with the body (streams) | the pack was expected to be a copy that could hide | **-0.01 "
+      "ms**: it is YCbCr arithmetic, and the tail-CSC adoption removed that arithmetic instead | "
+      "`frame-pipeline.txt` |")
     A("| a PCIe 4.0 slot | ~1.2 ms off `pack`, since the link is gen 3 x8 today | hardware | not software |")
     A("| skipping duplicate frames / static regions | large on anime, and the owner's call forbids it | - | "
       "closed by policy, `rve-reuse-gate-forbidden` |")
@@ -266,8 +264,10 @@ def main(argv=None) -> int:
     A("")
     A("| a millisecond saved in | int8 becomes | fp16 becomes | ratio |")
     A("|---|---|---|---|")
-    A("| the int8 body only (a kernel) | 32.58 | 52.12 | **1.600** |")
-    A("| a stage BOTH arms pay (pack, reader, writer) | 32.58 | 51.12 | 1.569 |")
+    _i = float(recs[("int8-tail-csc", "JC003")]["value"])
+    _f = float(recs[("int8-tail-csc", "JC001")]["value"])
+    A(f"| the int8 body only (a kernel) | {_i - 1:.2f} | {_f:.2f} | **{_f / (_i - 1):.3f}** |")
+    A(f"| a stage BOTH arms pay (pack, reader, writer) | {_i - 1:.2f} | {_f - 1:.2f} | {(_f - 1) / (_i - 1):.3f} |")
     A("")
     A("So a body-side millisecond is worth ~2.8x a shared one against this bar, and the largest wall-clock win in")
     A("the budget can be the smallest ratio win. That is why `rve-hop-fuse2-cascade` (body) and the pack (shared)")
@@ -275,9 +275,17 @@ def main(argv=None) -> int:
     A("")
     A("## The ratio this produces")
     A("")
-    A("Measured last in `logs/wall-final` (Violet, null sink, 3 rounds, the shipped default):")
-    A("`int8-wall-final.jsonl` W009 = **1.552x** against `bar_int8_wall` = 1.2x. Older, pre-halo:")
-    A("`int8-wall-defaults.txt` 1.399x / 1.481x null and 1.511x / 1.506x under `hevc_nvenc`.")
+    A(f"Three arms in one session, 3 interleaved rounds, shipped default (`int8-tail-csc.jsonl`): the fp16 "
+      f"engine at {val('int8-tail-csc', 'JC001')}, the int8 body at {val('int8-tail-csc', 'JC003')}, so "
+      f"**{val('int8-tail-csc', 'JC004')}** against `bar_int8_wall` = 1.2x. The same session WITHOUT the "
+      f"tail-CSC row read {val('int8-tail-csc', 'JC005')}, i.e. the row is worth "
+      f"{val('int8-tail-csc', 'JC006')} on the int8 arm.")
+    A("")
+    if ("int8-tail-csc", "JC013") in recs:
+        A(f"With `hevc_nvenc` in the loop - the product's own condition - the same two arms read "
+          f"{val('int8-tail-csc', 'JC011')} and {val('int8-tail-csc', 'JC012')}, so the product's ratio is "
+          f"**{val('int8-tail-csc', 'JC013')}**. On this clip the encoder is almost entirely overlapped: the "
+          f"loop sits within 0.2 ms of the null sink in both arms.")
     A("")
     A("## What this file is NOT")
     A("")
