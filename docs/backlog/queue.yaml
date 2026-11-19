@@ -3910,3 +3910,152 @@ tasks:
     exact mistake this repo keeps retracting. Also recorded: the fp16 column in the records is EAGER PyTorch
     (~204 ms) and not the app's TensorRT engine (52.39), so those ratios compare models, not the product.
 
+- id: rve-hop-count-general-2026-11-20
+  title: 'The hop count is data: nine-hop and seventeen-hop bodies, no new kernel'
+  type: experiment
+  status: in_progress
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 2h
+  tags:
+  - int8
+  - coverage
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/MODEL-FIT.md
+  owns_files:
+  - backend/tests/test_int8_body_shape.py
+  refutes: >-
+    The body needs sixteen hops. It needs N hops: the launch loop, the halo buffers and the requant chain are
+    already driven by len(self._launches), and the only thing that assumed sixteen was one constructor check.
+    A model of the SAME architecture with a different depth therefore needs no kernel work - and a shallower
+    body is not merely compatible, it is proportionally less work per frame.
+  acceptance: >-
+    (a) The rule as a pure test, no CUDA: any count >= 2 at the tuned width constructs, one hop is refused with
+    a reason (the zero-halo scheme needs the last hop to write the plain buffer the tail reads), a native width
+    is a constructor argument, and supports() agrees with the constructor. (b) The case: 2x-sudo-UltraCompact
+    (64 channels, NINE inner convs) - gross-error share against its own fp16 on three held-out frames, and the
+    body's time against the sixteen-hop body in one process. (c) A 494-frame pair if the share is near the bar.
+  resolution: >-
+    (a) DONE, 2026-11-20: backend/tests/test_int8_body_shape.py (6 cases) passes; the constructor and
+    supports() now read the model's count (>= 2 inner convs) and its width, and refuse with the reason.
+    The inventory flips 2x-sudo-UltraCompact from NO to FULL as a result - same architecture, nine hops.
+    (b) PENDING: the measurement on the nine-hop body (share + time) is queued behind the per-channel sweep
+    that is running on the same card; the expected shape is hops ~9/16 of 24.5 ms, i.e. a body near 15 ms and a
+    frame near 20, but that is an expectation, not a number, and this row is not done until it is measured.
+  note: >-
+    Filed 2026-11-20 as tier 1 of the "which model is cheapest to rescue" ranking: the working sibling is the
+    production model (same 64-channel Compact), and the difference is a COUNT, not an operation. That is the
+    ladder's cheapest class of change. It also matters for the product rather than only for coverage: a
+    shallower body does proportionally less work, so this is the one rescue on the list that could make the
+    frame faster rather than merely admit another model.
+
+- id: rve-body-native-width-2026-11-20
+  title: 'Native widths: 24 / 32 / 48-channel Compact bodies (10 files)'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - coverage
+  - width
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/MODEL-FIT.md
+  owns_files:
+  - docs/wsp/verified/int8-native-width.txt
+  refutes: >-
+    Widths other than 64 are closed. That verdict (E30a) measured CUTTING a trained 64-channel model to 32/48
+    and found 14-37% per-layer residual - a model that cannot express its teacher. A model TRAINED at 48 is a
+    different object: there is no teacher residual to inherit, and `feat` is already a constructor argument that
+    every kernel takes as a `C` constexpr. What is unknown is the quantiser's behaviour and the tile tuning at
+    that width, which is a measurement, not a ceiling.
+  acceptance: >-
+    Stage (a): one width, fully - the five Archivist denoisers (48 channels, 17 convs, 1x) - body built at
+    feat=48, gross-error share against its own fp16 on three held-out frames, body time against the 64-channel
+    body, and BLOCK_M / warps swept (the shipped 128/4 was tuned at 64 and need not be right at 48). Stage (b):
+    the same for 32 (three RGB-max-Denoise files) and 24 (two SuperUltraCompact files, nine hops). Stage (c): a
+    494-frame pair for any width whose share is within 3x of the 0.1% bar.
+  note: >-
+    Tier 2 of the rescue ranking: the working sibling exists and the difference is a CONSTANT (the channel
+    count), which is why this is a day rather than a project - but the per-width tile tuning and the memory of
+    the halo buffers are real costs, and each width needs its own picture gate. 10 files ride on it.
+
+- id: rve-span-int8-2026-11-20
+  title: 'SPAN family: what int8 would take (five files) - LATER'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P3
+  gpu: true
+  cost: 3d
+  tags:
+  - int8
+  - coverage
+  - span
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  owns_files:
+  - docs/wsp/verified/span-int8-scope.txt
+  refutes: >-
+    SPAN is a different family and therefore out of reach at any price. It is out of reach CHEAPLY: spandrel
+    hands it over already deploy-folded, so `Conv3XC`'s 3x1 / 1x3 / 1x1 triple is a single 3x3 by the time the
+    model loads. What remains in the way is three things, all named: the 1x1 expanders (48->96 or 64->128), the
+    four-way concat fusion, and the parameter-free attention (an elementwise sigmoid multiply, not a conv).
+  acceptance: >-
+    Stage (a), scope only, no kernel: for one SPAN model (2x_ModernSpanimationV1), measure the share of frame
+    time inside 3x3 convs versus 1x1 / attention / concat, by instrumenting the fp16 model. That number decides
+    whether an int8 path over the 3x3s is worth anything at all: if the 3x3s are a minority of the time, the
+    many quantise/dequantise boundaries it would need cost more than they save, and the row closes as
+    not-worth-it. Stage (b), only if (a) says otherwise: int8 on the 3x3s with fp16 elsewhere, share + time.
+  note: >-
+    Owner's instruction 2026-11-20: tier 3 goes in the queue as "later", not now. Filed with the stage (a)
+    instrument named, because the cheap falsifier here is a measurement of where SPAN's time goes, not a kernel.
+
+- id: rve-perchannel-grid-rule-2026-11-20
+  title: 'Per-channel int8 grids as a RULE keyed on the calibration spread, not a per-model flag'
+  type: experiment
+  status: in_progress
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 6h
+  tags:
+  - int8
+  - quantisation
+  - models
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Body.py
+  - docs/MODEL-FIT.md
+  owns_files:
+  - docs/wsp/verified/int8-grid-rule.txt
+  refutes: >-
+    Per-tensor is the right grid for this lane. It is the right grid for the model it was measured on: on BD
+    Violet per-channel was neutral against the picture and marginally worse against the fp16 reference, which is
+    why it stayed an opt-in A/B. But the grid is a property of the ACTIVATIONS, and a model whose channel maxima
+    span an order of magnitude loses most of its resolution in a single per-tensor box: measured on
+    2x_GarfieldJr_net_g, per-tensor reads 0.8763% against the fp16 model and per-channel 0.0436% - 20x, and from
+    above the picture bar to well below it.
+  acceptance: >-
+    (a) All 21 compatible models in BOTH grid modes, with the calibration grid's dynamic range (max/median of the
+    per-channel maxima) recorded next to each - the predictor has to be a number, not a hunch. (b) The rule: if
+    the spread separates the models that improve from the models that degrade, it goes into the code as a
+    decision on the measured grid (with its threshold in the log line and in FRAME-BUDGET); if it does not
+    separate them, the row closes with "per-channel is a per-model choice" and the flag stays. (c) A 494-frame
+    pair for whichever model would be adopted under the rule - 2x_Ani4K_Compact (0.3021% per-tensor) and
+    1x-Epsilon (1.5394%, refused by the start-up gate) are the two cases that decide it.
+  note: >-
+    Tier 0 of the rescue ranking: no code - the flag already exists and rescues the worst offender for free. The
+    reason it is worth a row rather than a note is that a flag nobody knows to set is not a capability: the
+    next reader sees "Garfield quantises badly" and bins the model, when the mechanism says the GRID was the
+    problem. Also: per-channel costs a multiply in the epilogue (measured 27.10 -> 27.86 ms body on one draw),
+    so it is a trade to be decided per model, not a free win to be made default.
+

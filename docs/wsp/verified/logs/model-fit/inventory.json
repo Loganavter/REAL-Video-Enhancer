@@ -20,7 +20,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "13b85e0d3109",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "2x-AniScale.pth",
@@ -41,7 +41,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "8036d8e4da1c",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/2x-AniScale.pth",
     "Models/bluray/2x-AniScale.pth"
@@ -66,7 +66,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "8bdaed281341",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/All/2x-Bubble-AnimeScale-Compact-v1.pth",
     "Models/Video models/2x-Bubble-AnimeScale-Compact-v1.pth"
@@ -91,7 +91,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "5ed232c71599",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/bluray/2x-Futsuu-Anime(1).pth",
     "Models/new/2x-Futsuu-Anime(1).pth"
@@ -116,11 +116,32 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "92af3344f412",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/2x-LD-Anime-Compact.pth",
     "Models/bluray/2x-LD-Anime-Compact.pth"
    ]
+  },
+  {
+   "file": "2x-sudo-UltraCompact(1).pth",
+   "dir": "/home/jorj/\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0438/Upscaling/Models/All",
+   "size_mb": 1.17,
+   "arch": "SRVGGNetCompact",
+   "scale": 2,
+   "channels": "3->3",
+   "body_convs": 9,
+   "tail_out": 12,
+   "up": "PixelShuffle",
+   "residual": true,
+   "int8_body": true,
+   "head_fused": true,
+   "tail_int8": true,
+   "shuffle": true,
+   "tail_csc": true,
+   "verdict": "FULL",
+   "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
+   "sha256_12": "e53987f0312d",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "2x.StarSample.V1.0(2).pth",
@@ -141,7 +162,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "106ef781b08e",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "2x_Ani4K_Compact_35000.pth",
@@ -162,7 +183,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "75072688da67",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/2x_Ani4K_Compact_35000.pth",
     "Models/bluray/2x_Ani4K_Compact_35000.pth"
@@ -187,7 +208,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "48e6958a348c",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "2x_GarfieldJr_net_g_51000.pth",
@@ -208,7 +229,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "989d0da27dd8",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/2x_GarfieldJr_net_g_51000.pth"
    ]
@@ -232,7 +253,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "0d431d6e33a2",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "2xHFA2k_compact_multijpg(1).pth",
@@ -253,7 +274,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "19cf4ab7da0f",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/new/2xHFA2k_compact_multijpg.pth"
    ]
@@ -277,7 +298,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "ecf20987032e",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "2xHFA2kAVCCompact(1).pth",
@@ -298,7 +319,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "ceaf8d6b5db4",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "2xken-v1-evA-01.pth",
@@ -319,7 +340,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "b674ec71672d",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/2xken-v1-evA-01.pth"
    ]
@@ -343,7 +364,7 @@
    "verdict": "FULL",
    "why": "int8 hops + int8 tail + shuffle fold + the tail writing the pipe payload",
    "sha256_12": "b9890a16ed0c",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/WoEiCS_2x(1).pth"
    ]
@@ -367,7 +388,7 @@
    "verdict": "BODY+TAIL",
    "why": "int8 hops and int8 tail, but the upsampler is PixelShuffle x3 channels, so the shuffle fold does not apply and the pack converts colour",
    "sha256_12": "f8b2b98c4e5d",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "1x-BleedOut-Compact.pth",
@@ -388,7 +409,7 @@
    "verdict": "BODY+TAIL",
    "why": "int8 hops and int8 tail, but the upsampler is PixelShuffle x3 channels, so the shuffle fold does not apply and the pack converts colour",
    "sha256_12": "86a9c0bbeb13",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/1x-BleedOut-Compact.pth"
    ]
@@ -412,7 +433,7 @@
    "verdict": "BODY+TAIL",
    "why": "int8 hops and int8 tail, but the upsampler is PixelShuffle x3 channels, so the shuffle fold does not apply and the pack converts colour",
    "sha256_12": "f4876edc5f12",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "1x-Dotzilla-Compact.pth",
@@ -433,7 +454,7 @@
    "verdict": "BODY+TAIL",
    "why": "int8 hops and int8 tail, but the upsampler is PixelShuffle x3 channels, so the shuffle fold does not apply and the pack converts colour",
    "sha256_12": "197d59563f63",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/1x-Dotzilla-Compact.pth"
    ]
@@ -457,7 +478,7 @@
    "verdict": "BODY+TAIL",
    "why": "int8 hops and int8 tail, but the upsampler is PixelShuffle x3 channels, so the shuffle fold does not apply and the pack converts colour",
    "sha256_12": "1326bd9e45a1",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "realesr-animevideov3(1).pth",
@@ -478,7 +499,7 @@
    "verdict": "BODY",
    "why": "int8 hops only: the tail has 48 output channels (the int8 tail kernel pads to 16), so the tail runs in fp16 and the pack converts",
    "sha256_12": "b8a837681107",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/realesr-animevideov3(1).pth"
    ]
@@ -502,7 +523,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "912ff494e454",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>",
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>",
    "also": [
     "Models/Video models/1x-BroadcastToStudioLite.pth"
    ]
@@ -526,7 +547,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "fdaabae1249b",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>",
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>",
    "also": [
     "Models/Video models/1x-Focus_Moderate.pth"
    ]
@@ -550,7 +571,7 @@
    "verdict": "NO",
    "why": "body is [24] channel(s) over 9 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "d91fa17c4392",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/All/1x-HurrDeblur-SuperUltraCompact.pth",
     "Models/Video models/1x-HurrDeblur-SuperUltraCompact.pth"
@@ -575,7 +596,7 @@
    "verdict": "NO",
    "why": "body is [32] channel(s) over 17 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "d1a213de33a3",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "1x-RGB-max-Denoise.pth",
@@ -596,7 +617,7 @@
    "verdict": "NO",
    "why": "body is [32] channel(s) over 17 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "599fc3e28391",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "1x-WB-Denoise.pth",
@@ -617,7 +638,7 @@
    "verdict": "NO",
    "why": "body is [32] channel(s) over 17 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "0b55ffff4193",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "1x_span_anime_pretrain(1).pth",
@@ -638,7 +659,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a SPAN, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "b9d33d62e4cf",
-   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f725eb97980>",
+   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f5ea2d9b530>",
    "also": [
     "Models/Video models/1x_span_anime_pretrain(1).pth"
    ]
@@ -662,7 +683,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "d5722d738002",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>",
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>",
    "also": [
     "Models/Video models/2x-AnimeSharpV3.pth",
     "Models/bluray/2x-AnimeSharpV3.pth"
@@ -687,7 +708,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "1cd831c35f1a",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>",
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>",
    "also": [
     "Models/Video models/2x-CGIMaster-v1.pth"
    ]
@@ -711,7 +732,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "a5d0f6043e8d",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>"
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>"
   },
   {
    "file": "2x-DigitalFlim-SuperUltraCompact.pth",
@@ -732,7 +753,7 @@
    "verdict": "NO",
    "why": "body is [24] channel(s) over 9 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "c34cae569319",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>",
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>",
    "also": [
     "Models/Video models/2x-DigitalFlim-SuperUltraCompact.pth"
    ]
@@ -756,7 +777,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "3b08cbf2e9ad",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>"
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>"
   },
   {
    "file": "2x-NMKD-YandereNeo.pth",
@@ -777,7 +798,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "a305101b33f8",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>"
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>"
   },
   {
    "file": "2x-sudo-RealESRGAN(1).pth",
@@ -798,31 +819,10 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "ded8cd65642b",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>",
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>",
    "also": [
     "Models/Video models/2x-sudo-RealESRGAN(1).pth"
    ]
-  },
-  {
-   "file": "2x-sudo-UltraCompact(1).pth",
-   "dir": "/home/jorj/\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0438/Upscaling/Models/All",
-   "size_mb": 1.17,
-   "arch": "SRVGGNetCompact",
-   "scale": 2,
-   "channels": "3->3",
-   "body_convs": 9,
-   "tail_out": 12,
-   "up": "PixelShuffle",
-   "residual": true,
-   "int8_body": false,
-   "head_fused": false,
-   "tail_int8": false,
-   "shuffle": false,
-   "tail_csc": false,
-   "verdict": "NO",
-   "why": "body is [64] channel(s) over 9 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
-   "sha256_12": "e53987f0312d",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
   },
   {
    "file": "2x-UniScale-CartoonRestore-lite.pth",
@@ -843,7 +843,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "3533d7e303b7",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>"
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>"
   },
   {
    "file": "2x_Garfieldjr_span48(1).pth",
@@ -864,7 +864,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a SPAN, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "46ce2e9fb69a",
-   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f725eb97980>",
+   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f5ea2d9b530>",
    "also": [
     "Models/All/2x_Garfieldjr_span48.pth",
     "Models/Video models/2x_Garfieldjr_span48(1).pth",
@@ -890,7 +890,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a SPAN, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "bc6ca08ab1ee",
-   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f725eb97980>",
+   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f5ea2d9b530>",
    "also": [
     "Models/Video models/2x_ModernSpanimationV1.pth",
     "Models/bluray/2x_ModernSpanimationV1.pth"
@@ -915,7 +915,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RealPLKSR, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "6b8cae931ae1",
-   "arch_family": "<spandrel.architectures.PLKSR.PLKSRArch object at 0x7f725ebc8470>",
+   "arch_family": "<spandrel.architectures.PLKSR.PLKSRArch object at 0x7f5ea2dc8050>",
    "also": [
     "Models/Video models/2x_Pooh_RPLKSR_Candidate_1_387k.pth"
    ]
@@ -939,7 +939,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "39197141848e",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>"
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>"
   },
   {
    "file": "2x_span_anime_pretrain.pth",
@@ -960,7 +960,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a SPAN, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "902bfb598c39",
-   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f725eb97980>"
+   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f5ea2d9b530>"
   },
   {
    "file": "2xHFA2kAVCOmniSR.pth",
@@ -981,7 +981,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a OmniSR, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "8cf209b73e3b",
-   "arch_family": "<spandrel.architectures.OmniSR.OmniSRArch object at 0x7f725eb96d50>"
+   "arch_family": "<spandrel.architectures.OmniSR.OmniSRArch object at 0x7f5ea2d9a900>"
   },
   {
    "file": "2xHFA2kOmniSR.pth",
@@ -1002,7 +1002,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a OmniSR, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "b88b0bb2a64c",
-   "arch_family": "<spandrel.architectures.OmniSR.OmniSRArch object at 0x7f725eb96d50>"
+   "arch_family": "<spandrel.architectures.OmniSR.OmniSRArch object at 0x7f5ea2d9a900>"
   },
   {
    "file": "2xHFA2kShallowESRGAN(1).pth",
@@ -1023,7 +1023,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a RRDBNet, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "f21f87d559e2",
-   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f725ebc82f0>"
+   "arch_family": "<spandrel.architectures.ESRGAN.ESRGANArch object at 0x7f5ea2d9be90>"
   },
   {
    "file": "2xLiveActionV1_SPAN_490000(1).pth",
@@ -1044,7 +1044,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a SPAN, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "8b166c75831e",
-   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f725eb97980>"
+   "arch_family": "<spandrel.architectures.SPAN.SPANArch object at 0x7f5ea2d9b530>"
   },
   {
    "file": "4xLSDIRDAT.pth",
@@ -1065,7 +1065,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a DAT, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "d76391730a91",
-   "arch_family": "<spandrel.architectures.DAT.DATArch object at 0x7f725eb97590>"
+   "arch_family": "<spandrel.architectures.DAT.DATArch object at 0x7f5ea2d9b170>"
   },
   {
    "file": "4xReal_SSDIR_DAT_GAN.pth",
@@ -1086,7 +1086,7 @@
    "verdict": "NO",
    "why": "no `body` sequence - this is a DAT, not a Compact/SRVGG body, so the int8 kernel has nothing to replace",
    "sha256_12": "bc29669d28ed",
-   "arch_family": "<spandrel.architectures.DAT.DATArch object at 0x7f725eb97590>"
+   "arch_family": "<spandrel.architectures.DAT.DATArch object at 0x7f5ea2d9b170>"
   },
   {
    "file": "Archivist_AntiLines.pth",
@@ -1107,7 +1107,7 @@
    "verdict": "NO",
    "why": "body is [48] channel(s) over 17 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "87140c5284bd",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "Archivist_Medium.pth",
@@ -1128,7 +1128,7 @@
    "verdict": "NO",
    "why": "body is [48] channel(s) over 17 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "b94d1fac8873",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "Archivist_RGB.pth",
@@ -1149,7 +1149,7 @@
    "verdict": "NO",
    "why": "body is [48] channel(s) over 17 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "24b2d721cc04",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "Archivist_Rough.pth",
@@ -1170,7 +1170,7 @@
    "verdict": "NO",
    "why": "body is [48] channel(s) over 17 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "82363da3d451",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "Archivist_Soft.pth",
@@ -1191,7 +1191,7 @@
    "verdict": "NO",
    "why": "body is [48] channel(s) over 17 inner convs; the kernel needs exactly 16 inner convs at 64 channels (the count is a tl.constexpr)",
    "sha256_12": "d02616fa3986",
-   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f725eb96900>"
+   "arch_family": "<spandrel.architectures.Compact.CompactArch object at 0x7f5ea2d9a4b0>"
   },
   {
    "file": "coloredlogs.pth",
@@ -1235,9 +1235,9 @@
   }
  ],
  "counts": {
-  "FULL": 15,
+  "FULL": 16,
   "BODY+TAIL": 5,
   "BODY": 1,
-  "NO": 34
+  "NO": 33
  }
 }
