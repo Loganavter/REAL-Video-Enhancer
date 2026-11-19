@@ -44,6 +44,35 @@ And the ceiling arithmetic is unforgiving: even if int8 made **every** 3x3 convo
 go 73.36 -> 49.3 ms, i.e. 20.3 fps - still 1.57x slower than the int8 lane and only just level with the production
 model's fp16 engine.
 
+## Where the non-conv time actually goes (measured, eager)
+
+The legacy `torch.autograd.profiler` works in this build where kineto does not (`self_device_time_total` reads 0
+there even for a matmul). Five forwards of the same model, 1080p, fp16, per-op self device time:
+
+```
+cudnn_convolution  161.04 ms  53.3%
+add_                43.56 ms  14.4%     residual adds
+silu_               25.21 ms   8.3%
+add                 18.91 ms   6.3%
+mul                 18.82 ms   6.2%     the attention multiply
+sub                 12.92 ms   4.3%
+sigmoid             12.67 ms   4.2%     the attention gate
+cat                  8.27 ms   2.7%     the four-way fusion
+```
+
+So in the unfused graph the elementwise work plus the concat is **140 ms, 46% of the frame**, and every one of those
+ops is a full pass over a 265 MB activation (1080x1920x64 fp16). Fusing them into their producers - `silu`/`add`
+into the conv epilogue, the attention into one read-modify-write, the concat into the consumer - would take the
+elementwise traffic from about seven passes to two or three, i.e. **~90-100 ms in eager**.
+
+**But that is not the engine's number, and the earlier "10-12 ms" estimate on this page was derived from the wrong
+base.** The engine is 4.1x faster than eager (302 -> 73.36 ms), and TensorRT's main job is exactly this fusion, so
+most of those 140 ms are already banked. What is left in the engine is bounded by its non-conv share, which is
+**not measured**: `trtexec` is not installed on this host, and the torch_tensorrt engine does not load standalone
+in a minimal harness. The measurement that would settle it is a per-kernel profile of the engine (ncu with
+`--print-summary per-kernel` over one frame of the app run). Until then the honest statement is: the fusion prize
+is large in eager, largely taken by the engine, and single-digit milliseconds in the engine - not 10-12.
+
 ## What is optimizable in SPAN, and what is not (estimates on the measured shares)
 
 The shares above are measured; the gains below are arithmetic on them, i.e. **estimates**, and none of them was
@@ -53,7 +82,7 @@ built. They are here so the next person does not have to re-derive the map.
 
 | lever | what it touches | mechanism | estimated gain |
 |---|---|---|---|
-| **fuse the attention block** | part of the 32.2% | `sigmoid(mean_c(x)) * x` is a reduction plus two elementwise passes over the same activation; one kernel can read `x` once, compute the channel mean on the fly and write `x*sigma`. Pure elementwise, no new arithmetic, and it is the easiest kernel in the family | 32.2% is 23.6 ms; halving that part is ~12 ms |
+| **fuse the attention block** | `mul` 6.2% + `sigmoid` 4.2% + `sub` 4.3% | `sigmoid(mean_c(x)) * x` is a reduction plus two elementwise passes over the same activation; one kernel can read `x` once, compute the channel mean on the fly and write `x*sigma`. Pure elementwise, no new arithmetic | in eager ~45 ms of the 140; in the engine, unmeasured and small |
 | **fold the four-way concat** | part of the 32.2% | `cat` of four branches into a 1x1: either read the four buffers directly in the consuming conv (no copy), or split that conv into four and sum - four dots, no 2 MB copy per frame per block | with the attention, together ~10-12 ms |
 | **fold pixel shuffle into the writing conv** | the tail | a permutation, exactly what the Compact lane already folds into its tail kernel | small, ~1-2 ms |
 | **fuse activations into the conv epilogue** | the convs' tails | standard; TensorRT already does some of it | small |
