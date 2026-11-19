@@ -44,6 +44,44 @@ And the ceiling arithmetic is unforgiving: even if int8 made **every** 3x3 convo
 go 73.36 -> 49.3 ms, i.e. 20.3 fps - still 1.57x slower than the int8 lane and only just level with the production
 model's fp16 engine.
 
+## What is optimizable in SPAN, and what is not (estimates on the measured shares)
+
+The shares above are measured; the gains below are arithmetic on them, i.e. **estimates**, and none of them was
+built. They are here so the next person does not have to re-derive the map.
+
+### Optimizable, cheapest first
+
+| lever | what it touches | mechanism | estimated gain |
+|---|---|---|---|
+| **fuse the attention block** | part of the 32.2% | `sigmoid(mean_c(x)) * x` is a reduction plus two elementwise passes over the same activation; one kernel can read `x` once, compute the channel mean on the fly and write `x*sigma`. Pure elementwise, no new arithmetic, and it is the easiest kernel in the family | 32.2% is 23.6 ms; halving that part is ~12 ms |
+| **fold the four-way concat** | part of the 32.2% | `cat` of four branches into a 1x1: either read the four buffers directly in the consuming conv (no copy), or split that conv into four and sum - four dots, no 2 MB copy per frame per block | with the attention, together ~10-12 ms |
+| **fold pixel shuffle into the writing conv** | the tail | a permutation, exactly what the Compact lane already folds into its tail kernel | small, ~1-2 ms |
+| **fuse activations into the conv epilogue** | the convs' tails | standard; TensorRT already does some of it | small |
+| **int8 on the 3x3 convs** | 65.5% | the lane's own lever, but per BLOCK: 19 quantise/dequantise boundaries, widths 48/96 (pad to 64/128), attention left in fp16 | 65.5% is 48 ms; a 2x conv path gives ~24 ms off, i.e. 73.36 -> ~49 ms |
+| **model-side: prune/distil to fewer channels or blocks** | everything | a retraining project, not an optimisation | unbounded, and out of this lane |
+
+### Not optimizable, structurally
+
+- **The convolution arithmetic itself.** 3x3 dense at 48-96 channels is at the card's ridge; there is no free 2x
+  in it. The only levers are int8 (2x, with 19 boundaries) or fewer FLOPs (a model change).
+- **The 19 boundaries.** Any per-block int8 pays them; removing them means a megakernel across blocks, which this
+  lane measured as a loss for the Compact hops and which is worse here because the blocks are heterogeneous.
+- **The widths.** 48 and 96 are not powers of two, so int8 pads them (measured on the Compact family: a padded 48
+  costs exactly what 64 costs). In fp16 the widths are fine - the problem is the next row.
+- **The model's own inefficiency at these widths on this card.** SPAN is 1.40x slower than the production model at
+  fp16 on the same clip (73.36 against 52.39 ms), *before* any optimisation. Small channel counts do not fill the
+  tensor cores at 1080p, which is the same reason the Compact family needed 64 channels to be fast. That is a
+  property of the model on this hardware, not of the code.
+- **Batch-1 latency.** Video is one frame at a time; the per-launch cost of 19 blocks is small but not removable.
+
+### Bottom line
+
+A realistic SPAN optimisation programme - attention and concat fused, shuffle and activations folded - plausibly
+lands around 60 ms (16-17 fps), i.e. roughly level with the production model's **fp16** engine. Adding int8 on the
+convs might reach ~40-45 ms (22-25 fps) for a family-specific kernel set with 19 boundaries. Neither reaches the
+int8 lane's 31.47 ms (31.8 fps), which is why the row stays closed: the work is larger and the destination is
+behind the starting point of the lane.
+
 ## Verdict
 
 **Closed as not worth a kernel.** The prize (65.5%) is smaller than the Compact lane's (78%) and the work is a
