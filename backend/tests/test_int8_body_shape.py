@@ -238,6 +238,9 @@ def test_the_cache_round_trips_and_skips_the_measurement(tmp_path, monkeypatch):
     second.calibrate(frames)
     assert not calls, "the hit still ran the model"
     assert torch.allclose(first._grids[0], second._grids[0]), "the cached grids must be the measured ones"
+    # the cache stores CPU tensors; a grid left on the wrong device fails only at the first kernel launch, which
+    # is how this was found (certify raised a device mismatch on the first cached run)
+    assert second._grids[0].device == first._grids[0].device, "the hit must land on the body's device"
 
 
 def test_a_different_clip_misses(tmp_path, monkeypatch):
