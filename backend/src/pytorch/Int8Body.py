@@ -282,35 +282,63 @@ class Int8Body:
         # Measured the same day: the change is picture-neutral (the two variants differ by 0.01541% of
         # pixels with zero frames over the bar between them) and marginally worse against the fp16
         # reference (1.03% vs 0.91%), so the SHIPPED path stays per-tensor; this is the opt-in A/B knob.
-        per_tensor = _os.environ.get("RVE_INT8_PER_CHANNEL") != "1"
+        # A grid clamp implies the folding path (that is where it is expressible), so RVE_INT8_GRID_K alone is
+        # enough to switch modes - one knob, not two that must agree.
+        grid_k = float(_os.environ.get("RVE_INT8_GRID_K", "0") or 0)
+        per_tensor = _os.environ.get("RVE_INT8_PER_CHANNEL") != "1" and grid_k <= 0
+        # GRID CLAMP (K): `s[c] = max(s_in[c], s_t/K)`. K=1 is the per-tensor grid reached through the
+        # per-channel code path (no epilogue multiply), K=inf is per-channel, and intermediate K bounds how
+        # far one channel's grid can fall below the layer maximum - so no channel can be crushed by more than
+        # K. The fold stays EXACT for any positive s[c]: codes x/s[c], weights w*s[c], and s[c] cancels in
+        # the accumulation, so this axis costs nothing in arithmetic and needs no epilogue change.
         # Grid margin. The ink/rim probe (docs/wsp/verified/int8-scales-bd.txt) showed int8 lifting the
         # line by ~+5 levels while the rim stays - the signature the simulation produces only when the
         # quantiser CLIPS. The kernel does not clip on purpose, but its per-tensor grid comes from 24
         # calibration frames, so activations outside that range clamp at +-127. A margin widens the grid
         # and costs resolution; it is the cheapest way to test whether clipping is the mechanism.
         margin = float(_os.environ.get("RVE_INT8_GRID_MARGIN", "1.0"))
-        self._s_t1 = (s_act.max().expand_as(s_act) if per_tensor else s_act).contiguous()
+        # THE GRID EACH LAYER READS, computed once: the codes a hop writes must be on the NEXT hop's grid,
+        # not on its own output scale. In the per-tensor mode those two differ by design (the epilogue's
+        # multiplier converts a per-channel s_out into the scalar max), which is exactly why `m` exists; in
+        # the per-channel mode they coincide, which is why `m` is the identity there. The clamp mode has to
+        # be consistent with the second: its epilogue divides by the next layer's clamped grid.
+        s_grids, s_in = [], s_act
+        for idx, conv in enumerate(self.inner, start=1):
+            s_t = float(s_in.max()) * margin
+            if per_tensor:
+                s_grids.append(s_in.max().expand_as(s_in) * margin)
+            elif grid_k > 0:
+                s_grids.append(torch.maximum(s_in, torch.full_like(s_in, s_t / grid_k)))
+            else:
+                s_grids.append(s_in * margin)
+            s_in = outs[idx - 1]
+        self._s_t1 = s_grids[0].contiguous()
+
         identity = torch.full((self.feat,), 1 << SHIFT, device=s_act.device, dtype=torch.int32)
         launches, s_in = [], s_act
         for idx, conv in enumerate(self.inner, start=1):
             s_out = outs[idx - 1]
             s_t = float(s_in.max()) * margin
+            s_grid = s_grids[idx - 1]
             # per-channel grids: the input scale is inside the weights, so the epilogue's requant is the
             # identity - and that is not cosmetic, a non-identity m here would apply max(s_in) twice.
             m_int = (torch.round(s_in / s_t * (1 << SHIFT)).to(torch.int32)
                      if per_tensor else identity.clone()).contiguous()
             weight = conv.weight.detach().float()
             if not per_tensor:
-                weight = weight * (s_in * margin).view(1, -1, 1, 1)
+                weight = weight * s_grid.view(1, -1, 1, 1)
             w_sc = weight.abs().amax(dim=(1, 2, 3)) / 127.0
             w_q = torch.round(weight / w_sc.view(-1, 1, 1, 1)).clamp(-127, 127).to(torch.int8)
             tap = torch.stack([w_q[:, :, i, j].t() for i in range(3) for j in range(3)]).contiguous()
+            # the scale the epilogue divides by: the next layer's grid in the folding modes, s_out in
+            # per-tensor (where `m` does the conversion)
+            os_next = s_grids[idx] if (not per_tensor and idx < len(self.inner)) else s_out
             launches.append(dict(
                 w=tap, m=m_int,
                 vec=(w_sc if not per_tensor else w_sc * s_t).contiguous(),
                 bias=conv.bias.detach().float().contiguous(),
                 slope=self.inner_prelus[idx - 1].weight.detach().float().contiguous(),
-                os=s_out.contiguous()))
+                os=os_next.contiguous()))
             s_in = s_out
         # each hop's epilogue requants into the NEXT hop's per-tensor grid, so hop k gets hop k+1's
         # multiplier and the last hop gets the identity (it stays on its per-channel grid, as before)

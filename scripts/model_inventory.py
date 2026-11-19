@@ -61,7 +61,7 @@ def inspect(path: str) -> dict:
                       f"kernel has nothing to replace")
         return row
     convs = [m for m in body if isinstance(m, torch.nn.Conv2d)]
-    row["body_convs"] = len(convs) - 1                        # the tail is the last one
+    row["body_convs"] = len(convs) - 2                        # inner convs only: the last one is the tail
     row["tail_out"] = int(convs[-1].out_channels) if convs else None
     up = getattr(model, "upsampler", None)
     row["up"] = type(up).__name__ if up is not None else None
@@ -71,8 +71,10 @@ def inspect(path: str) -> dict:
     row["int8_body"] = bool(ok)
     if not ok:
         feats = {int(c.out_channels) for c in convs[:-1]} or {0}
-        row["why"] = (f"body is {sorted(feats)} channel(s) over {len(convs) - 1} inner convs; the kernel needs "
-                      f"exactly 16 inner convs at 64 channels (the count is a tl.constexpr)")
+        w = sorted(feats)
+        row["why"] = (f"body is {w[0] if len(w) == 1 else w} channel(s) over {len(convs) - 2} inner convs; "
+                      f"the kernel's width is a constexpr fixed at 64, and its tile/launch tuning is measured "
+                      f"at that width (the hop COUNT is data since rve-hop-count-general, the WIDTH is not)")
         return row
 
     head = list(body)[0]
