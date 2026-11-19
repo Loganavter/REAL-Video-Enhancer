@@ -70,3 +70,40 @@ Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-
 @claim U001 1.478 ms "frames [10cff28ea287d300] n=1" measured
 @claim U002 19.895 ms "frames [10cff28ea287d300] n=1" measured
 @claim U003 11.928 ms "frames [10cff28ea287d300] n=1" measured
+
+## The mechanism, measured: staging moves the wrong counter
+
+An outside reader supplied the explanation this family needed, and the counters confirm it. The hop's instruction
+mix, measured with ncu on the shipped kernel (one launch, frame 169):
+
+```
+sm__inst_executed.sum             230 752 800 inst
+sm__inst_executed_pipe_lsu.sum     52 358 400 inst   = 22.7% of all instructions
+gpu__time_duration.sum                    1.52 ms
+```
+
+**Shared-memory staging does not reduce the instructions that hit the LSU - it increases them.** A staged variant
+pays a global load, an smem store and an smem load where today pays one global load (which is L1/L2-resident
+anyway, at a 91% L2 hit rate):
+
+| variant | global loads | smem stores | smem loads | LSU instructions |
+|---|---|---|---|---|
+| today | 9 per output pixel | 0 | 0 | **9** |
+| 2-D tile T=32 (1.13x reads) | 1.13 | 1.13 | 9 | 11.26 (**+25%**) |
+| 3-row band, BM 128 (3.05x reads) | 3.05 | 3.05 | 9 | 15.09 (**+68%**) |
+
+LSU is already the busiest pipe (73.9% of its issue slots). Staging buys a reduction in L2 *traffic* - which is
+healthy at 128% of the logical volume - and pays for it in the one resource that is saturating. That single
+sentence predicts, without any theory, the three measurements already on this page: the register-gather route
+13.5x slower, the pipelined taps -12/-20%, the CUDA microbenchmark of cooperative staging -26%.
+
+The register route fails for a different and equally structural reason: in an mma layout, adjacent spatial
+positions live in different lanes, so intra-register reuse is *inter-lane*, and `tl.gather` prices that at 13.5x.
+A register-local alternative (per-thread spatial blocks, dp4a) has a roof of 34 SM x 64 INT32 x 8 ops x 2.54 GHz =
+**44.2 TOPS**, against the 103.4 the mma kernel already reaches - i.e. the non-tensor-core escape is 2.3x worse
+than what we have.
+
+So the family is closed **by mechanism**: the only levers that reduce reads pay in the saturated resource, and the
+only lever that avoids that costs more arithmetic than it saves. What the -10.4 ms ceiling actually required was
+removing the FIRST tap's exposed latency (0.590 ms, 37% of the hop) - a latency-hiding problem, which staging does
+not touch, because the first data still has to arrive.

@@ -3487,7 +3487,14 @@ tasks:
     weights -54%. What remains is a CUDA kernel, whose prior is unfavourable (a microbenchmark of the same
     staging measured -26%) and whose ceiling is the largest in the queue (-10.4 ms). That is now a DECISION, not
     an open experiment. docs/wsp/verified/int8-hop-tapreuse.txt, records int8-hop-tapreuse.jsonl (U001-U003),
-    logs/hop-tapreuse/probe.json.
+    logs/hop-tapreuse/probe.json. FINAL CLOSURE BY MECHANISM 2026-11-20, with the counters: sm__inst_executed_pipe_lsu
+    = 52.36 M of 230.75 M total (22.7%), and staging does not reduce LSU instructions - it adds them (a global
+    load becomes a global load + smem store + smem load: 9 -> 11.26 at a 2-D T=32 tile, 9 -> 15.09 for a 3-row
+    band). LSU is already the busiest pipe at 73.9%, so every staging variant moves the saturated resource the
+    wrong way while buying L2 traffic that is healthy (128% of logical). The register route is worse still: mma
+    layouts make spatial neighbours inter-lane (tl.gather 13.5x), and a register-local dp4a counter-proposal has
+    a roof of 44.2 TOPS against the 103.4 the kernel already reaches. And the -10.4 ms ceiling needed the FIRST
+    tap's exposed latency (0.590 ms, 37% of the hop) removed, which is latency hiding, not read reduction.
   note: >-
     Filed originally as "fuse two hops per launch" (the megakernel family) and re-priced twice: first at ~4 ms
     with a halo formula that used the input extent as the work extent, then at ~2.3 ms, then to ~0 when the
@@ -3680,3 +3687,50 @@ tasks:
     Filed from the outside reader's list, which is right that this is the largest structural win left that needs
     no CUDA: 7.68 ms of a 33.58 ms frame is not body. It is also the item where "the ring was flat" is genuinely
     not the same experiment, and the distinction is worth a row because it was filed as a negative without it.
+
+- id: rve-tail-csc-yuv-2026-11-20
+  title: 'Let the tail write the final yuv420p payload: PixelShuffle makes 4:2:0 chroma register-local'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1d
+  tags:
+  - int8
+  - tail
+  - colour
+  - pack
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/pytorch/Int8Kernels.py
+  - backend/src/pytorch/TorchUtils.py
+  - docs/wsp/verified/frame-pipeline.txt
+  - docs/FRAME-BUDGET.md
+  owns_files:
+  - docs/wsp/verified/int8-tail-csc.txt
+  refutes: >-
+    The colour conversion is where it has to be. The tail already produces, per input pixel, the 12 channels that
+    PixelShuffle(2) turns into a 2x2 output block - i.e. exactly the block that 4:2:0 chroma averages over - so
+    4Y + 1U + 1V = 6 bytes per input pixel (12.44 MB per frame) can be written straight into planar offsets of one
+    contiguous buffer, with no cross-lane work and no second pass. Today the tail writes 49.77 MB of fp16 RGB and
+    the pack then reads all of it back on the GPU to compute YCbCr over 8.3 Mpx (4.36 ms, of which only 1.9 is
+    the 12.44 MB transfer). If a fused CSC in the tail epilogue does not take the frame below 32 ms, the pass is
+    already at its floor and the row closes with that.
+  acceptance: >-
+    Staged. (a) Offline, no kernel: apply the tail's 12-channel output through both orders in torch - CSC then
+    RoundHalfToEven then fp16 store against CSC in fp32 registers then quantise - on the four held-out frames, and
+    report the share and peak against the CURRENT path; a shift of more than one level anywhere means the
+    rounding order moved and the picture gate decides, not a tolerance. (b) The kernel: tail writes yuv420p
+    directly; byte-identity is NOT expected (the arithmetic order changes), so judge on the 494-frame pair with
+    reference-kind config. (c) The frame: interleaved A/B, >=3 rounds, the tail phase line and pack line beside
+    the loop - the expected split is tail -0.13 (37 MB less write) and pack 4.36 -> ~2.0 (a pure copy).
+  note: >-
+    Filed 2026-11-20 from an outside reader who noticed that the pack's 4.36 ms is NOT a copy (frame-pipeline.txt
+    measured the stream pipeline at -0.01) but GPU-side YCbCr over 8.3 Mpx, and that PixelShuffle's channel
+    ordering makes the chroma average register-local. It is a BODY-side change on the int8 arm only, so by the
+    ratio rule in FRAME-BUDGET it is worth ~2.8x its wall-clock value against the bar.
+    SAFETY COUPLING, written down because it bites later: writing the payload directly removes the `cat()`
+    intermediate, and that intermediate is the only reason the current payload copy is effectively synchronous
+    (frame-pipeline.txt section 2). Anyone taking this must keep RVE_PAYLOAD_GUARD=1 on, or they reintroduce the
+    12.6 dB race that once had the pooled path disabled.
