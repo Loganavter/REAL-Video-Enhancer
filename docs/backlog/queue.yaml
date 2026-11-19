@@ -3693,6 +3693,10 @@ tasks:
   type: experiment
   status: in_progress
   owner: '@supervisor'
+  next_step_first: >-
+    Read docs/wsp/HANDOFF-2026-11-19.md first - it carries the state, the closed families and the invariants, and
+    it exists because the session is about to be compacted. The five integration steps for this row are numbered
+    there under "The one thing in flight".
   progress: >-
     KERNEL AND GATE DONE 2026-11-19, integration open. tail_int8_yuv_kernel writes packed yuv420p from the tail's
     own epilogue: Y, Cb and Cr are each linear in (R,G,B) so each is a weighted sum over the channel axis of the
