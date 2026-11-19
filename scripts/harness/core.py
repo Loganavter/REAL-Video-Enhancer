@@ -37,6 +37,8 @@ UNITS: dict[str, str] = {
     "MiB": "bytes", "GiB": "bytes", "B": "bytes", "MB": "bytes", "GB": "bytes", "KB": "bytes",
     "count": "count", "frames": "count", "ch": "count", "regs": "count",
     "min": "time",                       # minutes; the corpus also uses "min" as a statistic name
+    "AUC": "ranking",                    # an AUROC value in [0,1]; its own family so it can never be
+                                         # divided by a share or a time (reuse-decision-statistic.txt)
 }
 
 STATISTICS = ("single", "mean", "median", "min", "max", "worst_of", "p90", "p99", "p99.9", "sum")
