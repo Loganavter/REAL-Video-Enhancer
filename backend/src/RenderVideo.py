@@ -481,11 +481,15 @@ class Render:
         # Pooled pinned output payload: the writer gets a view on a pinned host buffer instead
         # of a fresh per-frame .tobytes() copy. A pooled payload is single-use, so it cannot
         # coexist with temporal reuse (which re-emits the remembered Frame).
-        # Pooled pinned output is NOT enabled: wired as the worker specified, a full render
-        # comes out 12.6 dB against the reference (slots are rewritten before ffmpeg has the
-        # bytes) and it was slower (4.83 s vs 4.21 s). Kept for reference; see the DONE.md of
-        # the copy-elim cell for the intended protocol.
-        self.pooled_output = False
+        # Pooled pinned output. DISABLED by default. The earlier attempt was wired as the worker
+        # specified and came out 12.6 dB against the reference, because slots were rewritten before
+        # ffmpeg had the bytes; the pool now carries a semaphore permit per slot and the writer
+        # releases after `stdin.write()` returns, so the protocol the old attempt lacked is in place
+        # (utils.Frame.PinnedSlotPool, FFmpegBuffers.release_payload). RVE_PACK_RING=1 opts in for the
+        # A/B that decides whether it stays: the pack line and the loop are measured beside the
+        # byte-identity of the render, because a payload ring that moves the picture is worse than
+        # the copy it removes.
+        self.pooled_output = str(os.environ.get("RVE_PACK_RING", "0")).lower() in ("1", "true", "yes")
         self._hr_grid_prev = None
         # the gate stores only its LR reference; the HR frame we may re-emit lives here
         self._lastRenderedFrame = None

@@ -386,6 +386,12 @@ class Frame:
         pool = _torch_utils.pinned_slots(
             self.pool_slots, numel, _output_buffer_dtype(self.high_bitdepth)
         )
+        if not getattr(self, "_pool_logged", False):
+            self._pool_logged = True
+            import logging as _lg
+            _lg.getLogger("RVE").warning(
+                "pack: PINNED RING in use - %d slots x %s bytes per frame (no per-frame tobytes)",
+                pool.count, getattr(pool, "num_bytes", "?"))
         slot, view = pool.acquire()
         try:
             dest = pool.buffer(slot)
