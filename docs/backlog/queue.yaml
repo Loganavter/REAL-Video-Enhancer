@@ -3339,3 +3339,36 @@ tasks:
     Low priority on purpose: it cannot improve the frame by itself. It can only tell the next person whether the
     remaining ~26% that ncu leaves is reachable by dataflow or not, and that is the difference between funding a
     CUDA kernel and closing the lane.
+
+- id: rve-hop-csplit-2026-11-20
+  title: 'Split the 64 output channels across CTAs: halve the accumulator, double the warps'
+  type: experiment
+  status: done
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 1h
+  tags:
+  - int8
+  - hops
+  - kernel
+  base_branch: perf/inference
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-19, and it was the LAST occupancy lever Triton can express. Rationale: the measured
+    bottleneck is occupancy (3.96 of 12 warps, 56% no eligible) and the accumulator BLOCK_M x 64 int32 is what
+    caps resident CTAs, so splitting the output channels halves it at the cost of re-reading the input - which
+    the roofs said was affordable (L2 44-50%, DRAM 54%, SM 74%). Measured, identical codes in every arm: 2x32 ch
+    per CTA 2.632 ms (-65.4%), 2x32 with 2 warps 2.058 (-29.3%), 4x16 4.387 (-175.7%) against the shipped
+    1.591. The trade does not work in either direction: a 32-wide N tile halves what the tensor pipe does per
+    instruction, and the doubled reads land on the same L2. WITH THIS THE HOP IS DONE IN TRITON: six families
+    of knobs, 27 configurations, none better than what ships (launch shape 9 arms, tap staging 3, cache policy
+    5, tile shape 4, halo 2, channel split 4). What remains is outside the language: a CUDA kernel with
+    explicit shared-memory staging (Im2win, arXiv:2306.14316) with an arithmetic prize of ~9 ms/frame
+    (hops 25.7 -> ~16, frame 34.5 -> ~26, ~2.0x against fp16), or DSMEM clusters (CREDIT, arXiv:2609.01864,
+    1.32-1.47x, beats Triton baselines). The only item left INSIDE Triton is the inline halo (+0.6 ms/frame),
+    described in int8-hop-tiles.txt and not yet filed as its own row.
+    docs/wsp/verified/int8-hop-csplit.txt, records int8-hop-csplit.jsonl (X001-X004), logs/hop-csplit/.
+  note: >-
+    Filed and closed in one step because it was a 1 h falsifier of an idea that followed directly from the
+    profiler, not a portfolio item. The record carries the full account of the six knob families so the next
+    reader does not re-run any of them.
