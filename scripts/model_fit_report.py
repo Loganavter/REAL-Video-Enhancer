@@ -92,11 +92,15 @@ def main(argv=None) -> int:
         pc_cell = f"{p['share']:.4f}%" if p else "-"
         A(f"| {r['verdict']} | `{r['file']}` | {i.get('arch', '?')} | x{r['scale']} | "
           f"{r['share']:.4f}% | {pc_cell} | {r['int8_ms']:.2f} |")
-    unmeasured = [f for f, r in rows_inv.items() if r["verdict"] == "FULL" and f not in fit and f not in pc]
+    unmeasured = [f for f, r in rows_inv.items()
+                  if r["verdict"] in ("FULL", "BODY+TAIL", "BODY") and f not in fit and f not in pc]
     if unmeasured:
         A("")
-        A("Structurally FULL but **not yet measured** (the inventory was regenerated after the sweep, when the")
-        A("hop-count rule stopped refusing them): " + ", ".join(f"`{f}`" for f in unmeasured) + ".")
+        A(f"{len(unmeasured)} models are structurally compatible but are NOT in this sweep - they became reachable")
+        A("after it ran, when the hop-count rule and the width padding landed. The 48/32/24-channel families are")
+        A("measured separately on `docs/wsp/verified/int8-native-width.txt` (share and body time, with the padding")
+        A("cost stated); the rest need their own run. Listed so the table cannot be read as covering them: "
+          + ", ".join(f"`{f}`" for f in unmeasured) + ".")
     if err_rows:
         A("")
         A("Refused at probe time (the inventory said they fit, the build or the gate said otherwise):")
