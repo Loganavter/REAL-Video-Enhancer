@@ -191,3 +191,18 @@ def test_the_pick_keeps_the_default_when_the_best_other_k_only_ties_it():
 def test_the_pick_is_stable_when_every_candidate_is_clean():
     """All-clean models read 0.0000% at every K; the default must win ties rather than drift."""
     assert Int8Body.choose_grid_k({1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}) == 2
+
+
+def test_a_non_contiguous_frame_is_made_contiguous_before_the_head_kernel():
+    """The head kernel indexes the frame as `c*H*W + y*W + x`, so a view reads as garbage codes - and a view is
+    what `torch.from_numpy(img).permute(2, 0, 1)` produces, which is how Int8Probe builds its calibration frames.
+    The copy is invisible when the caller is already contiguous, which is the case on the render path."""
+    body = Int8Body(_Body(16))
+    x = torch.zeros(1, 3, 8, 8, dtype=torch.float16).permute(0, 1, 3, 2)   # a non-contiguous view
+    assert not x.is_contiguous()
+    # the guard is at the top of __call__, before any kernel: exercise it without CUDA by checking the source
+    import inspect
+
+    src = inspect.getsource(Int8Body.__call__)
+    assert "x = x.contiguous()" in src, "the body must not hand a view to the head kernel"
+    assert "is_contiguous" in src

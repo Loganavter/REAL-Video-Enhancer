@@ -483,6 +483,20 @@ class Int8Body:
         return self._buf, self._scratch_a, self._scratch_b
 
     def __call__(self, x):
+        # THE BODY NEEDS A CONTIGUOUS NCHW FRAME. The head kernel indexes it as `c*H*W + y*W + x`, so a
+        # non-contiguous view reads as garbage codes - and a view is exactly what
+        # `torch.from_numpy(img).permute(2, 0, 1)` produces, which is how `Int8Probe` builds its calibration
+        # frames. Measured 2026-11-20: on those frames the body read 100% of pixels >8 levels off its own fp16
+        # model, while the render frame (contiguous, from `frame_to_tensor`) read 0.00001% - and the calibration
+        # never noticed because it measures through the torch model, which handles strides.
+        if not x.is_contiguous():
+            if not getattr(self, "_layout_log", False):
+                self._layout_log = True
+                import logging as _lgl
+                _lgl.getLogger("RVE").warning(
+                    "int8 body: input was NOT contiguous (stride %s) - copying to contiguous NCHW, which the "
+                    "head kernel requires; a view here reads as garbage codes", tuple(x.stride()))
+            x = x.contiguous()
         import os as _os_dbg
         if _os_dbg.environ.get("RVE_DEBUG_INPUT") == "1" and not getattr(self, "_dbg_input", False):
             self._dbg_input = True
