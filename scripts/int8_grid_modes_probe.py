@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.join(APP, "backend", "src", "pytorch"))
 sys.path.insert(0, os.path.join(REPO, "backend"))
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 
-from cut_channels_naive import load  # noqa: E402
+from model_loader import load_compact  # noqa: E402
 from src.pytorch.Int8Body import Int8Body  # noqa: E402
 from src.pytorch.TorchUtils import TorchUtils  # noqa: E402
 from tail_int8_emulation import CALIB, H, W, decode_yuv10  # noqa: E402
@@ -119,8 +119,8 @@ def main(argv=None) -> int:
     rows = []
     for name in [m.strip() for m in args.models.split(",") if m.strip()]:
         path = find(name)
-        model, _, _ = load(path)
-        model = model.eval().cuda().half()
+        model, _scale = load_compact(path)
+        model = model.cuda().half()
         row = {"file": name}
         for mode, pc in (("per_tensor", False), ("per_channel", True)):
             # the mode is read from the environment when the body builds; set it here so both builds happen

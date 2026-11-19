@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.join(APP, "backend", "src", "pytorch"))
 sys.path.insert(0, os.path.join(REPO, "backend"))
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 
-from cut_channels_naive import load  # noqa: E402
+from model_loader import load_compact  # noqa: E402  any Compact, not only the 16x64 production shape
 from src.pytorch.Int8Body import FIRST_FRAME_SANITY, Int8Body  # noqa: E402
 from src.pytorch.TorchUtils import TorchUtils  # noqa: E402
 from tail_int8_emulation import CALIB, H, W, decode_yuv10  # noqa: E402
@@ -78,8 +78,8 @@ def main(argv=None) -> int:
         path = os.path.join(row["dir"], row["file"])
         out = {"file": row["file"], "verdict": row["verdict"], "scale": row["scale"], "ok": False}
         try:
-            model, _, _ = load(path)
-            model = model.eval().cuda().half()
+            model, _scale = load_compact(path)
+            model = model.cuda().half()
             body = Int8Body(model)
             body.out_yuv = False                 # this probe measures the body, not the payload path
             body.calibrate(calib)

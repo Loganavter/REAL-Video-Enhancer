@@ -3,26 +3,39 @@
 A write-up for an outside reader. Everything below is either a number from a record/probe named in place, or
 explicitly marked as an unmeasured hypothesis. Nothing here is a claim about picture quality.
 
-## 1. What the setting is
+## 1. What the setting is (exact, from `Int8Body._build` and `hop_padded_kernel`)
 
-The body runs sixteen 3×3 convolutions at 64 channels in int8, with a Triton kernel. Between layers the
-activations are re-quantised to 8-bit codes; the grid that maps a float activation to a code is a per-layer
-choice, and it is the only knob in this document.
+The body runs sixteen 3×3 convolutions at 64 channels in int8. A hop reads codes `q_k`, accumulates
+`acc = Σ q_k · w_q` in int32, and its epilogue is:
 
-Two modes exist in the code (`backend/src/pytorch/Int8Body.py`, `_build`):
+```
+v   = acc · vec + bias                 # vec = per-output-channel dequant scale
+v   = v if v >= 0 else v · slope       # PReLU, in float
+q   = round(v / os)                    # quantise onto the NEXT layer's grid, `os` per channel
+q   = clamp(q, -127, 127)
+q   = (q · m + 2^19) >> 20             # `m` per channel, then clamp again
+```
 
-**per-tensor** (shipped default). One scalar grid per layer: `s_t = max_c s_in[c]`, where `s_in[c]` is the
-per-channel activation maximum measured during calibration. Input codes are `x / s_t`. Because the per-channel
-scale is *not* folded into the weights, the epilogue restores it: the int32 accumulator is multiplied by
-`m[c] = round(s_in[c] / s_t * 2^20)` and shifted back, then dequantised by `w_sc * s_t`.
+`os` is the per-channel scale of the next layer's grid and `m` converts a per-channel code into that grid;
+**`m` is indexed by this layer's OUTPUT channel** (which is the next layer's input channel), not by its input —
+an earlier version of this note had it the other way round, and the reader who caught it was right that the
+description did not close.
 
-**per-channel** (`RVE_INT8_PER_CHANNEL=1`). The scale is folded into the weights: `w' = w * s_in[c]`, so each
-input channel's codes use its own full ±127 range. The epilogue's multiplier is the identity (no multiply, no
-shift), and the dequantisation is `w_sc` alone.
+**per-tensor (shipped).** One scalar grid per layer: `s_t = max_c s_in[c]`, codes `x / s_t`, weights
+quantised raw. The epilogue's `os` is the per-channel `s_out`, and `m[c] = round(s_out[c] / s_t_next · 2^20)`
+does the conversion to the next layer's scalar grid. So the epilogue performs **two** roundings (one at
+`round(v/os)`, one after the shift), and the second one scales codes *down* by `s_out/s_t_next ≤ 1`, which
+costs resolution precisely in the channels whose range is far below the layer maximum.
 
-So the mode trades **input code resolution** (per-channel should be better: 64 tight boxes instead of one wide
-one) against **weight quantisation** (per-channel quantises the *folded* weights, whose dynamic range across
-inputs is wider).
+**per-channel.** `s[c] = s_in[c]` is folded into the weights (`w' = w · s[c]`), codes are `x / s[c]`, the fold
+cancels exactly in the accumulation, `os` is the next layer's `s_out` (which is its own grid) and `m` is the
+identity — one rounding instead of two, and no down-scaling of codes.
+
+**The axis, not the dichotomy.** `s[c] = max(s_in[c], s_t / K)` interpolates between them: `K = 1` is the
+per-tensor grid reached through the folding path, `K → ∞` is per-channel, and intermediate `K` bounds how far
+any one channel's grid can fall below the layer maximum. The fold is exact for **any** positive `s[c]`, so this
+axis costs no arithmetic and needs no epilogue change — which is why the rest of this note is a ladder over `K`
+rather than a choice between two modes.
 
 ## 2. What was measured
 
