@@ -4021,6 +4021,10 @@ tasks:
     The re-tuning this row was written for turned out to be a no-op: BLOCK_M 128 / warps 4, the 64-tuned default,
     is also the best of nine combinations at a padded 48 (27.25 ms; 256x2 is 75.31, so a default picked at
     another width could have landed badly - worth having measured).
+    DEMAND, measured outside this repo by the owner: a survey of a ~500-model corpus found NINE models with 48
+    channels, and this collection holds five (all 1x denoisers). That closes the "write a CUDA kernel with three
+    16-wide tiles to make 48 pay for 48" option by POPULATION, not by difficulty - the padding path already runs
+    them at 64-channel speed and nobody waits for the 25% back. Recorded so the next reader does not reopen it.
     NOT covered: the shares are three-frame smoke tests, none of these ten has a 494-frame pair, and the RATIO is
     not measured - a cheaper model has a cheaper fp16 comparator, which is what kept the eight-hop model's ratio
     at 1.6965 while its frame fell 12.7 ms.

@@ -24,6 +24,11 @@ zero weights and neutral scales: the padding channels carry 0 through every hop 
 | **24 -> 32**, padded | 2x SuperUltraCompact | 0.0000% | **6.22 / 6.30** | the model is also shallow: 8 inner convs |
 | **48 -> 64**, padded | 5x Archivist | 0.0000-0.0004% | **27.14-27.32** | 1.33x work: it costs exactly what a 64-channel body costs |
 
+**And the demand is not there for a 48-channel kernel.** The owner's survey of a ~500-model corpus found nine
+with 48 channels; this collection holds five, all 1x denoisers. So the CUDA-with-three-16-wide-tiles route is
+closed by population rather than by difficulty - the padding path already runs them at 64-channel speed, and
+nobody is waiting for the 25% it would give back.
+
 The 48 row is the honest answer to "is 48 cheaper than 64": **no**. The hop runs at 64 channels whatever the model
 has, so the 44% of arithmetic a 48-channel model does not need is paid anyway. Getting 48 to pay for 48 needs
 three 16-wide mma tiles, which Triton cannot express - that is a CUDA kernel, and it is a width-generality
