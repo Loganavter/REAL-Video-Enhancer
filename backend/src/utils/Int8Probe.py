@@ -245,9 +245,12 @@ def _calibrate(model, frames):
                 outputs[key] = pair if prev is None else (torch.minimum(prev[0], pair[0]),
                                                           torch.maximum(prev[1], pair[1]))
             handles.append(module.register_forward_hook(post_hook))
+    import os as _os
+    from ..pytorch.Int8Body import calib_crops as _crops
+    _crop_n = int(_os.environ.get("RVE_INT8_CALIB_CROPS", "0"))
     with torch.no_grad():
         for frame in frames:
-            model(frame)
+            model(_crops(frame, _crop_n))
     for handle in handles:
         handle.remove()
     return inputs, outputs

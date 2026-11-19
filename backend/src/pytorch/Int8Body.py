@@ -60,6 +60,29 @@ WARPS = 4
 QB = 256      # the conversions are register-bound: 1024 measured 2.3 ms against 1.57 at 256
 
 
+def calib_crops(x, count: int = 4, size: int = 256):
+    """Deterministic crops of one frame, batched, for calibration.
+
+    The grids are per-channel MAXIMA, so the question a crop calibration asks is whether a maximum over 32x fewer
+    pixels under-covers the range. Measured on 2026-11-18 (`int8-calibration-crops.txt`): 96 crops of 256x256
+    calibrate in 0.45 s against 7.09 s for 24 full frames - 15.7x - and the worst held-out share got BETTER
+    (0.01881% against 0.02256%). The crops sit at the four quadrant centres, which is deterministic, so two runs
+    of the same clip produce the same grids and the calibration cache key stays honest.
+
+    `count=0` returns the frame untouched, i.e. the shipped path before this was wired.
+    """
+    if count <= 0:
+        return x
+    h, w = x.shape[-2], x.shape[-1]
+    size = min(size, h, w)
+    ys = [max(0, (h - size) // 4), (h - size) // 2, h - size]
+    xs = [max(0, (w - size) // 4), (w - size) // 2, w - size]
+    picks = [(ys[i], xs[j]) for i in range(2) for j in range(2)][:count]
+    if len(picks) < count:                       # small frames: tile the same crops
+        picks = (picks * count)[:count]
+    return torch.cat([x[..., y:y + size, xx:xx + size] for y, xx in picks], dim=0)
+
+
 class Int8Body:
     """Head (fp16) -> sixteen int8 hops (Triton) -> tail (fp16)."""
 
@@ -216,7 +239,7 @@ class Int8Body:
 
     # ---- calibration cache -------------------------------------------------------------------------------
     @staticmethod
-    def _cache_key(frames, margin: float) -> str:
+    def _cache_key(frames, margin: float, crops: int = 0) -> str:
         """A key that is stable for the same model and the same frames, and cheap to compute.
 
         Hashing the frames themselves would mean reading 300 MB of tensors; a coarse per-frame fingerprint (a
@@ -232,7 +255,7 @@ class Int8Body:
             small = x[:, :, ::16, ::16]
             hist = torch.histc(small.clamp(0.0, 1.0), bins=32, min=0.0, max=1.0)
             h.update(hist.cpu().numpy().tobytes())
-        return h.hexdigest()[:16] + f"-{margin:g}"
+        return h.hexdigest()[:16] + f"-{margin:g}" + (f"-c{crops}" if crops else "")
 
     def _model_digest(self) -> str:
         import hashlib
@@ -265,7 +288,10 @@ class Int8Body:
         # for 24). A hit removes all of it. The key is a fingerprint of the frames plus the model's digest, so a
         # different clip or a different model misses by construction; RVE_INT8_CALIB_CACHE=0 disables it.
         _margin = float(os.environ.get("RVE_INT8_GRID_MARGIN", "1.0"))
-        _path = self._cache_path(self._cache_key(frames, _margin))
+        # crops are a DIFFERENT population of samples, so they must be a different cache entry: the same frames
+        # and the same margin with crops on and off are two calibrations, not one.
+        _crop_n = int(os.environ.get("RVE_INT8_CALIB_CROPS", "0"))
+        _path = self._cache_path(self._cache_key(frames, _margin, _crop_n))
         if _path and os.path.exists(_path):
             try:
                 blob = torch.load(_path, map_location="cpu", weights_only=True)
@@ -286,7 +312,7 @@ class Int8Body:
                 _lgc.getLogger("RVE").warning("int8 calibration: cache unreadable (%s); measuring", error)
         s_act, outs = None, None
         for f in frames:
-            s2, o2 = self._measure(f)
+            s2, o2 = self._measure(calib_crops(f, _crop_n))
             if s_act is None:
                 s_act, outs = s2, o2
             else:
