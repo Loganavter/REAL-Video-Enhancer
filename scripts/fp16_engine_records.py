@@ -76,8 +76,9 @@ def main(argv=None) -> int:
     model = "2x-Futsuu-Anime(1).pth, ONNX opset 17, static 1x3x1080x1920"
     s3, s5 = "s-2026-11-19T13:49:23+03:00", "s-2026-11-19T13:52:03+03:00"
 
-    def pop(rows, label: str) -> Population:
-        return Population.of("layers", tuple(n for _, n in rows), label)
+    def pop(rows, label: str, tag: str) -> Population:
+        # the build tag is part of the item: two builds of the same model share every layer NAME
+        return Population.of("layers", tuple(f"{tag}/{n}" for _, n in rows), label)
 
     st = Store(session=s5)
 
@@ -85,7 +86,8 @@ def main(argv=None) -> int:
              artifact: str, digest: str, statistic: str = "mean", n: int = 20, note: str = "",
              extra: dict | None = None, tier: str = "measured", formula: str = "",
              inputs: tuple = ()) -> None:
-        st.emit(Record(value=round(value, 3), unit=unit, population=pop(rows, label),
+        tag = "opt5" if "level 5" in config else "opt3"
+        st.emit(Record(value=round(value, 3), unit=unit, population=pop(rows, label, tag),
                        instrument=instrument, config=config, session=session, statistic=statistic,
                        tier=tier, id=rid, formula=formula, inputs=inputs, run="trtexec --dumpProfile",
                        artifact=artifact, note=note,
