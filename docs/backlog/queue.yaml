@@ -4237,6 +4237,15 @@ tasks:
     over the 22 models, and the predictor must name the best K (or a K within 1.5x of it) for at least 18 of
     them - below that the sweep stays. (c) If it passes, it is a build-time rule with its own log line and its
     threshold in FRAME-BUDGET; if it fails, the row closes with the negative result and the sweep is the answer.
+  resolution_beta: >-
+    SECOND ATTEMPT, the outside reader's better formulation, also measured 2026-11-20: predict argmin_K inside
+    one model from `input_err(K) + beta*weight_err(K)`, both computed as exact functions of K from the
+    calibration activations and the weights (no forward per candidate). Result: 4 of 22 at every beta from 1.0 to
+    6.0 (logs/grid-k-beta/rows.json, scripts/grid_k_beta_probe.py). What it DID establish is why the optimum is
+    interior: input_err falls monotonically with K (median 2.88x from K=1 to K=4) while weight_err has an
+    interior MINIMUM - 0.021 at K=1, 0.009 at K=4, 0.029 at per-channel - because folding the per-channel scale
+    into the weights first balances the columns and only past that point crushes the small ones. The sum still
+    does not rank the argmin, because the predicted quantity is a thresholded pixel count, not a norm.
   resolution: >-
     DONE 2026-11-20, NEGATIVE RESULT - the answer is "no, not from the weights". Four weight-only statistics were
     computed per model (no forward pass): the coefficient of variation and the max/median of the per-output-channel

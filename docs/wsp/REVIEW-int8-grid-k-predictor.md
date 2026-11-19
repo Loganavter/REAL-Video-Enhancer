@@ -65,16 +65,42 @@ magnitude; it is set by how each network **amplifies** a per-layer perturbation 
 (pixels more than 8 levels off on the worst frame). A summary of the weights cannot see the amplifier, and a
 summary of the calibration activations cannot either.
 
-## 6. What would capture amplification, and what it costs
+## 6. Attempt 3 - the arithmetic argmin with a calibrated beta. Partly right, still 4 of 22.
 
-- **Per-layer ablation** - quantise one layer, leave the rest fp16, read the gate: 16 x 6 x 3 forwards per model,
-  i.e. *more expensive than the sweep it would replace*, and valid only for the model it ran on.
-- **A learned rule** over weight statistics: needs a population far larger than 22, and the guard means the label
-  is "beats K=2 by 2x", which is noisy at the boundary (Epsilon at 1.44x could cross it on a larger sample).
-- **A proxy for the amplifier** - e.g. the response of the final layer to a perturbation of the size the
-  quantiser actually introduces. This is the one idea that would be cheap (one extra forward) and it is
-  **unmeasured**; it is also close to just running the sweep, so it needs a reason to be cheaper before it is
-  worth building.
+A reader proposed the better formulation: do not predict the mover/stayer label (which is about *transfer between
+models*), predict `argmin_K` inside one model, from arithmetic rather than from a forward per candidate:
+
+```
+input_err(K)  = ||a - round(a/s[c](K)) * s[c](K)|| / ||a||          over all layers, all calibration frames
+weight_err(K) = ||w' - dequant(q(w'))|| / ||w'||,  w' = w * s[c](K)
+predict       = argmin_K [ input_err(K) + beta * weight_err(K) ]
+```
+
+Both terms are exact functions of K from the calibration activations and the weights, so the cost is the fp16
+pass that produces the activations - which calibration does anyway. Measured on all 22 models
+(`logs/grid-k-beta/rows.json`), sweeping beta:
+
+```
+beta 1.0 -> 6.0 :  4/22 agreement with the ladder's argmin, at every beta
+```
+
+**What the attempt did establish, and it is worth having.** The two terms have *different shapes*:
+
+- `input_err(K)` falls monotonically with K (median 2.88x from K=1 to K=4) - wider K means finer per-channel grids;
+- `weight_err(K)` has an **interior minimum**: 0.021 at K=1, 0.009 at K=4, and 0.029 at per-channel. Folding the
+  per-channel scale into the weights first *balances* the columns (a channel with large activations gets its
+  weights scaled up, which compresses the row's dynamic range), and only past that point does the clamp stop
+  protecting the small channels and the error rises again.
+
+That interior minimum in the weight term is the reason the picture's optimum K is interior - it is not a
+mysterious property of the network. But the *sum* still does not rank the argmin, at any beta, because the
+quantity being predicted is a thresholded count of pixels rather than a norm: the same error energy lands in
+different numbers of pixels depending on where in the range it sits, and that mapping differs per model.
+
+**Why the two-point fallback does not rescue it.** Fitting `A * input + B * weight` from two scored candidates
+uses two equations for two unknowns - exact at those two points, and the prediction for the other two is
+unconstrained with only four K values. That is the sweep with extra steps: two scored candidates *are* half the
+sweep, and what it would buy is the other half.
 
 ## 7. The cheap win that does exist: two candidates, not four
 
