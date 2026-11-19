@@ -256,3 +256,14 @@ def test_the_cache_can_be_switched_off(tmp_path, monkeypatch):
     monkeypatch.setenv("RVE_INT8_CALIB_CACHE", "0")
     Int8Body(_Body(16)).calibrate(_tiny_frames())
     assert not list(tmp_path.glob("*.pt")), "RVE_INT8_CALIB_CACHE=0 must not write anything"
+
+
+def test_a_clean_default_skips_the_sweep():
+    """When K=2's own share is already tiny the sweep cannot change the decision: the ladder's largest gain is
+    7.1x, so 0.002% x 7.1 is still seven times inside the 0.1% bar. The threshold is argued from that maximum
+    gain, not from a 3-frame-to-494-frame multiplier - no such multiplier exists between the two references."""
+    assert Int8Body.skip_sweep(0.0002), "Futsuu's K=2 is 0.0002%: nothing to win"
+    assert Int8Body.skip_sweep(0.0000), "an already-clean model must not be swept"
+    assert not Int8Body.skip_sweep(0.0504), "realesr's K=2 is 0.0504%: the sweep is what finds K=3"
+    assert not Int8Body.skip_sweep(0.0166), "Ani4K's K=2 is 0.0166%: same"
+    assert not Int8Body.skip_sweep(0.0030), "Garfield sits just above the line and does get swept"
