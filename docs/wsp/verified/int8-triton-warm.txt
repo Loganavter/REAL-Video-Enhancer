@@ -25,9 +25,21 @@ was never in the record. `scripts/warm_triton.py` moves it to the install:
 | first (compiles 19 kernels into the cache) | **2.73 s** |
 | second, same cache | **0.49 s** |
 
-The cache is 2.1 MB in `~/.triton`. The script compiles for the shapes the app's envelope actually sees
-(1920x1080 and 1440x1080 - each shape compiles its own kernels), and it calibrates on one random frame because the
-compiler only needs the geometry, not the grids.
+The cache is 2.1 MB in `~/.triton`, and **one shape is enough** - measured, not assumed. The kernels specialise on
+the channel count, the tile height and the warp count, not on the frame geometry:
+
+| shape | same cache | time |
+|---|---|---|
+| 1920x1080, empty | - | **2.58 s** (compiles) |
+| 1440x1080 | after 1080p | **0.48 s** (reuses everything) |
+| 2560x1440 | after 1080p | **1.84 s** (some new kernels) |
+
+So the default is the single shape the lane renders; a 1440x1080 render pays nothing and a larger one pays only the
+difference on its first use. Warming "for the shape the user actually runs" cannot be done at install time - the
+installer does not know it - and would not help anyway: the compile happens on first use inside that process, so
+moving it earlier only moves the wait.
+
+The script calibrates on one random frame because the compiler needs the geometry, not the grids.
 
 ## What this leaves
 
@@ -40,7 +52,7 @@ either cheap, risky to touch, or already argued.
 
 ```bash
 TRITON_CACHE_DIR=$(mktemp -d) python3 /tmp/opencode/timed_run.py     # 8.64 s, cold
-python3 scripts/warm_triton.py --model "<model>.pth"                 # 2.73 s, once per machine
+python3 scripts/warm_triton.py --model "<model>.pth"                 # 2.59 s, once per machine
 python3 /tmp/opencode/timed_run.py                                   # 6.34 s, warm
 PYTHONPATH=scripts python3 scripts/triton_warm_records.py
 PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-triton-warm.txt \
