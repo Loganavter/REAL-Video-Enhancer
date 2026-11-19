@@ -4895,6 +4895,14 @@ tasks:
     block_signed (retired) 0.723, mctf_p99 0.855, mctf_mean 0.906, mctf_share (residual above 3 x MAD-sigma)
     0.384. So motion compensation helps modestly and the noise-normalised share is worse than chance. No
     threshold: all positives fall in the second temporal half, so a calibration here would be a fit.
+    CORRECTED 2026-11-19 after an outside review: the t-1 reference was our own approximation, and against the
+    reference the gate actually served (depth from the log) the shipped statistic reads 0.991 on 1040 s and
+    0.988 on 960 s - so the ranker is not the problem and the "non-stationary" claim is withdrawn;
+    mctf_mean still collapses (0.972 -> 0.488), and the flow mechanism explains why (damaged reuses at 960 s
+    sit at mean |u| 2.26 against 0.48 clean; at 1040 s 0.057 against 0.266). Also refuted on data: adding a
+    flow term (product / max / OR / AND, thresholds calibrated on one clip) never beat the block branch, and
+    the review's reference-free rho1 of the HF residual does not separate here (fresh 0.918-0.931 against
+    frozen 1.000) because the render's HF energy is static line detail, not grain.
   acceptance: >-
     (a) DONE for the ranking test (see progress). (b) A threshold on a held-out *clip*, not a held-out half:
     this one has no positives in its first half. (c) The temporal-texture criterion - the 0.1% share cannot see

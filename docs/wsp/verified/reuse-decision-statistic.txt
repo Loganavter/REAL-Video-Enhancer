@@ -95,6 +95,40 @@ which is a stronger claim than either statistic makes.
 
 
 
+
+## Correction, 2026-11-19 (late): the offline statistics used t-1, not the chain reference
+
+Every AUC above was computed against `t-1`, while the gate serves the last KEPT frame, up to two back. An
+outside review named that as an approximation that breaks portability, and it was right: recomputed against the
+reference the gate actually served (`RVE_DEBUG_DEPTH` gives the depth of every reuse), the numbers change.
+
+| statistic | clip | AUC vs t-1 | **AUC vs the served reference (t-k)** |
+|---|---|---|---|
+| `block_maxabs` (shipped) | 1040 s | 0.844 | **0.991** |
+| `block_maxabs` (shipped) | 960 s (held out) | 0.994 | **0.988** |
+| `mctf_mean` | 1040 s | 0.906 | 0.972 |
+| `mctf_mean` | 960 s (held out) | 0.489 | **0.488** |
+
+Two things follow, and the first one withdraws a claim made earlier in this file:
+
+1. **"The failure class is non-stationary" was substantially an artefact of our own approximation.** Against the
+   served reference the shipped statistic ranks the damaged reuses at 0.99 on BOTH clips (0.991 and 0.988), so
+   there is no ranking non-stationarity to explain. The 0.844/0.994 spread was t-1 against t-k.
+2. **The motion-compensated refutation survives the correction**: `mctf_mean` is 0.972 on 1040 s and 0.488 on
+   960 s with the correct reference, i.e. it still collapses on the held-out clip. The mechanism is measurable
+   and is the review's: on 960 s the seven damaged reuses sit at a mean flow magnitude of 2.26 against 0.48 on
+   the clean ones (coherent motion, which warping removes), while on 1040 s the damaged reuses are at 0.057
+   against 0.266 (local redraw at almost no global motion). A warp-blind statistic is blind exactly where the
+   skip is blind.
+
+So the state after the correction is narrower and more useful: the shipped statistic is a good RANKER (0.99),
+what is missing is (a) a certification rule that turns a ranker into a threshold - it currently lets 37 of 130
+reuses through - and (b) any criterion at all for the frozen texture, which 82 of those 130 pass.
+
+@claim RU012 0.991 AUC "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU013 0.988 AUC "reused frames [af066356217e17b1] n=124" measured
+@claim RU014 0.488 AUC "reused frames [af066356217e17b1] n=124" measured
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so
