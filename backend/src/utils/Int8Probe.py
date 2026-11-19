@@ -206,6 +206,25 @@ def _quantise_weights(state):
     return out, scales
 
 
+def compact_shape(state) -> tuple[int, int, int]:
+    """(width, inner convs, scale) from a Compact state dict - not from the production model's shape.
+
+    This used to be `state[...].endswith("34.weight")` plus `num_feat=64, num_conv=16`, i.e. the shape of the one
+    model the lane was built on. On any other Compact the lookup raised `list index out of range`, the probe
+    reported "unavailable", the body never received calibration frames, and the render silently ran the fp16
+    engine - so an A/B on an eight-hop model compared the engine with itself and read a byte-identical pair.
+    That is how it was found (2026-11-20, 2x-sudo-UltraCompact, logs/ultra-pair): the pair's IDENTITY control,
+    not the share.
+    """
+    convs = [k for k in state if k.endswith(".weight") and getattr(state[k], "ndim", 0) == 4]
+    convs.sort(key=lambda s: int(s.split(".")[1]))
+    if len(convs) < 3:
+        raise ValueError(f"not a Compact body: {len(convs)} convolutions")
+    feat = int(state[convs[0]].shape[0])
+    tail_out = int(state[convs[-1]].shape[0])
+    return feat, len(convs) - 2, int(round((tail_out / 3) ** 0.5))
+
+
 def _calibrate(model, frames):
     """Per-tensor input ranges per conv, per-channel output ranges per PReLU, on the quantised model."""
     qstate, _ = _quantise_weights(model.state_dict())
@@ -283,9 +302,8 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
 
         state = torch.load(model_path, map_location="cpu", weights_only=True)
         state = state.get("params", state)
-        tail = [k for k in state if k.endswith("34.weight")][0]
-        scale = int(round((state[tail].shape[0] / 3) ** 0.5))
-        model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=16, upscale=scale)
+        feat, inner, scale = compact_shape(state)
+        model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=feat, num_conv=inner, upscale=scale)
         model.load_state_dict(state)
         model = model.eval().cuda().half()
 
