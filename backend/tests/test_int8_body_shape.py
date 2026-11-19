@@ -259,11 +259,15 @@ def test_the_cache_can_be_switched_off(tmp_path, monkeypatch):
 
 
 def test_a_clean_default_skips_the_sweep():
-    """When K=2's own share is already tiny the sweep cannot change the decision: the ladder's largest gain is
-    7.1x, so 0.002% x 7.1 is still seven times inside the 0.1% bar. The threshold is argued from that maximum
-    gain, not from a 3-frame-to-494-frame multiplier - no such multiplier exists between the two references."""
+    """When K=2's own share is already small the sweep cannot change the decision: the ladder's largest gain is
+    7.1x, so 0.01% x 7.1 = 0.071% - inside the 0.1% bar, which is the point. Below it the switch only improves a
+    number that is already orders inside; above it the sweep can buy real margin AT the bar. The threshold was
+    0.002% until 2026-11-20, when the whole ladder was read: 14 of 22 models sit at or below 0.002% and 5 more
+    between 0.003% and 0.017%, so 0.002% paid for the sweep on models that gain 3-4x on a quantity 6-30x inside
+    the bar. It also has to absorb the 3x gap between the pick's six-frame score and the ladder's three-frame one
+    (realesr: 0.0165% against 0.0504%), which is why it is not simply the ladder's near-bar number."""
     assert Int8Body.skip_sweep(0.0002), "Futsuu's K=2 is 0.0002%: nothing to win"
     assert Int8Body.skip_sweep(0.0000), "an already-clean model must not be swept"
+    assert Int8Body.skip_sweep(0.0030), "Garfield gains at most 1.05x: not worth a build"
     assert not Int8Body.skip_sweep(0.0504), "realesr's K=2 is 0.0504%: the sweep is what finds K=3"
     assert not Int8Body.skip_sweep(0.0166), "Ani4K's K=2 is 0.0166%: same"
-    assert not Int8Body.skip_sweep(0.0030), "Garfield sits just above the line and does get swept"

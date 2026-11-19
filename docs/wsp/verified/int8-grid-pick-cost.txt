@@ -1,0 +1,61 @@
+# The K sweep: 1.4 s of start-up, and it only pays for three models out of twenty-two
+
+Measured 2026-11-20 on the current tree (crops + hybrid decode). Records `int8-grid-pick-cost.jsonl`
+(KP001-KP002), raw `logs/startup-timed-{hybrid,pick}.log`.
+
+The question was whether the start-up pick is worth its price. Two things had to be fixed before the price could
+be quoted honestly, and one of them was a real defect.
+
+## The defect: the winner was rebuilt
+
+`pick_grid_k` scored the default, then every other candidate, then rebuilt the winner - including when the winner
+was the build that was already in place. On the skip path it rebuilt K=2 **immediately after scoring K=2**. That
+was 1.2 s of a 2.4 s sweep, paid on every model whose K=2 is clean, which is most of them.
+
+Fixed: the build in place is tracked, and a rebuild happens only when the winner is not the body that is already
+built. `skip_below` also moved from 0.002% to 0.01% - not from taste, but because the pick scores six frames the
+certificate does not use and that population reads 3x lower than the ladder's on realesr (0.0165% against
+0.0504%). A threshold at the ladder's own number would skip the model the sweep exists for.
+
+## The price, end to end
+
+| configuration | start-up to the first frame |
+|---|---|
+| fixed K=2 (the shipped default) | **6.05 s** |
+| `RVE_INT8_GRID_K=auto`, K=2 clean, sweep skipped | **7.49 s** |
+
+So asking for the pick costs **1.4 s** even when it does not sweep - the score is six fp16 forwards plus six body
+forwards, and that is the floor.
+
+## What the sweep buys, over the whole ladder
+
+| group | models | sweep's effect |
+|---|---|---|
+| K=2 at or below 0.002% | 14 of 22 | nothing |
+| 0.003-0.017% | 5 | 3-4x better, still 6-30x inside the bar |
+| near the bar (0.045-0.096%) | 3 | LUDVAE gains 1%, realesr 7x, Epsilon 0.096% -> 0.067% |
+
+Only the last row can matter, and only Epsilon's is a margin at the bar rather than comfort: 0.096% is 4% from a
+0.1% bar, and the sweep moves it to 0.067%.
+
+## Decision
+
+**The pick stays off by default.** 1.4 s of start-up on every render, for a quantity that is inside the bar on all
+22 compatible models, is not a trade the default should make. What changed is that it is now cheap to ask for
+(`RVE_INT8_GRID_K=auto`), it no longer wastes a build, and it skips after one score on the models that do not need
+it.
+
+If a model is known to sit near the bar (Epsilon), the knob is the answer for that model - not a default for all.
+
+## Reproduce
+
+```bash
+python3 /tmp/opencode/timed_run.py                                  # fixed K=2
+RVE_INT8_GRID_K=auto python3 /tmp/opencode/timed_run.py             # the pick
+PYTHONPATH=scripts python3 scripts/grid_pick_records.py
+PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-grid-pick-cost.txt \
+    --records docs/wsp/verified/records/int8-grid-pick-cost.jsonl --bars docs/claims-bars.json
+```
+
+@claim KP001 6.05 s "process starts [4172bcbdc6e619b2] n=2" measured
+@claim KP002 7.49 s "process starts [4172bcbdc6e619b2] n=2" measured

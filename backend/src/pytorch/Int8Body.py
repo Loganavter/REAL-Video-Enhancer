@@ -137,6 +137,11 @@ class Int8Body:
         # pick score every candidate identically: `_build` reset K from the env on each call).
         _pc_env = os.environ.get("RVE_INT8_PER_CHANNEL") == "1"
         _k_env = os.environ.get("RVE_INT8_GRID_K")
+        # STILL OFF BY DEFAULT (measured 2026-11-20): `=auto` costs 1.4 s of start-up end to end and 16 of the
+        # ladder's 22 models gain nothing from it - K=2 is inside the 0.1% bar on all of them, and the sweep only
+        # buys margin for the three near it. What changed is the price when it IS asked for: the winner is no
+        # longer rebuilt (that was 1.2 s of a 2.4 s sweep) and skip_below is 0.01, so the models that skip do it
+        # after one score. `=2` pins a fixed K, `=0` is the old per-tensor path, a list is per-hop.
         self.grid_auto = str(_k_env or "").lower() in ("auto", "pick")
         # A LIST is a per-hop K (row rve-grid-k-learned, stage b): "2,3,2,..." gives each hop its own floor, which
         # is the offline falsifier for PAMS's learned per-layer scale - if a per-hop choice cannot beat the best
@@ -907,13 +912,16 @@ class Int8Body:
 
     # ---- picking the grid clamp at start-up ------------------------------------------------------------
     @staticmethod
-    def skip_sweep(score_default: float, skip_below: float = 0.002) -> bool:
+    def skip_sweep(score_default: float, skip_below: float = 0.01) -> bool:
         """Is the default already clean enough that the sweep cannot change the decision?
 
-        The ladder's largest gain is 7.1x, so a default reading `skip_below` would land at `7.1 x skip_below` in
-        the best case - and 0.002% x 7.1 is 0.014%, seven times inside the 0.1% bar. The threshold is argued from
-        that maximum gain rather than from a 3-frame-to-494-frame multiplier, because no such multiplier exists
-        between the two references (the smoke test compares against the model, the pair against the engine).
+        The ladder's largest gain is 7.1x, so a default reading `skip_below` lands at `7.1 x skip_below` in the
+        best case - 0.01% x 7.1 = 0.071%, still inside the 0.1% bar but only just, which is the point: above this
+        the sweep can buy real margin AT the bar, below it the switch only improves a number that is already
+        orders inside. The threshold is argued from the maximum gain, not from a 3-frame-to-494-frame multiplier,
+        because no such multiplier exists between the two references (the smoke test compares against the model,
+        the pair against the engine); the 0.002 -> 0.01 move on 2026-11-20 also accounts for the 3x gap between
+        the pick's six-frame score and the ladder's three-frame one (realesr: 0.0165% against 0.0504%).
         """
         return score_default <= skip_below
 
@@ -937,7 +945,7 @@ class Int8Body:
         return best
 
     def pick_grid_k(self, holdout, candidates=(2.0, 3.0), guard: float = 2.0,
-                    default: float = 2.0, skip_below: float = 0.002):
+                    default: float = 2.0, skip_below: float = 0.01):
         """Build at each candidate K, score the app's own gate on `holdout`, keep the winner under the guard.
 
         `holdout` must be frames the certificate will NOT use: choosing on the frames you certify on makes the
@@ -949,10 +957,14 @@ class Int8Body:
           K=3 captures the outcome wherever K=4 does except Garfield, where dropping K=4 costs 0.0029 -> 0.0157 -
           still six times inside the bar. Two candidates on six frames costs the same as four on three, and a
           label built on six frames is closer to the 494-frame statistic than one built on three.
-        * `skip_below`: when K=2's own share is already this small, the sweep cannot matter. The largest gain the
-          ladder ever delivered is 7.1x, so 0.002% x 7.1 is 0.014% - still seven times inside the 0.1% bar. The
-          threshold is deliberately argued from the ladder's own maximum gain, not from a 3-frame-to-494-frame
-          multiplier, because no such multiplier exists between the two references.
+        * `skip_below`: when K=2's own share is already this small, the sweep cannot matter. Raised from 0.002% to
+          0.002% to 0.01% on 2026-11-20 by reading the whole ladder rather than one row: 14 of 22 models are at or
+          below 0.002%, 5 sit between 0.003% and 0.017% and gain 3-4x from another K on a quantity that is still
+          6-30x inside the bar, and 3 are near the bar (LUDVAE 0.04478%, realesr 0.05038%, Epsilon 0.09616%).
+          0.01 is set from the POPULATION DIFFERENCE, not from the ladder alone: the pick scores six frames the
+          certificate does not use, and on realesr that score reads 0.0165% against the ladder's 0.0504% - a 3x
+          gap between two honest populations. A threshold at the ladder's own number would therefore skip the
+          model the sweep exists for; 0.01 keeps it in (0.0165 > 0.01) and still skips Futsuu (0.0006%).
         """
         import time as _t
 
@@ -963,6 +975,8 @@ class Int8Body:
             with torch.no_grad():
                 refs = [self.model(f.clamp(0.0, 1.0)).float() for f in holdout]
 
+            _built = {"k": None}
+
             def score(k: float) -> float:
                 """Build at K and read the app's own gate on the holdout frames."""
                 nonlocal t_build, t_score
@@ -970,6 +984,7 @@ class Int8Body:
                 self._launches = None
                 _b = _t.perf_counter()
                 self._build()
+                _built["k"] = float(k)
                 t_build += _t.perf_counter() - _b
                 worst = 0.0
                 _s = _t.perf_counter()
@@ -991,8 +1006,8 @@ class Int8Body:
                 self._pick_timing = (round(t_build, 2), round(t_score, 2))
                 self._pick_skipped = True
                 self.grid_k, self.per_tensor = float(default), False
-                self._launches = None
-                self._build()
+                # NO REBUILD: `score(default)` above already built this body at K=default. Measured 2026-11-20:
+                # the redundant build was 1.2 s of a 2.4 s sweep, paid on every model whose K=2 is clean.
                 return float(default), scores
             self._pick_skipped = False
             _sh, _ok = self.certify(holdout[0])
@@ -1008,8 +1023,9 @@ class Int8Body:
             self._pick_timing = (round(t_build, 2), round(t_score, 2))
             best = self.choose_grid_k(scores, default=default, guard=guard)
             self.grid_k, self.per_tensor = best, False
-            self._launches = None
-            self._build()
+            if _built["k"] != float(best):
+                self._launches = None
+                self._build()
             return best, scores
         finally:
             self.out_yuv = was_yuv
