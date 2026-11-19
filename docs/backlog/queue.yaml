@@ -3913,7 +3913,7 @@ tasks:
 - id: rve-hop-count-general-2026-11-20
   title: 'The hop count is data: nine-hop and seventeen-hop bodies, no new kernel'
   type: experiment
-  status: in_progress
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -3956,6 +3956,12 @@ tasks:
     against itself and are deleted rather than kept. Fixed with compact_shape() in the probe (width, depth and
     scale from the weights; 4 cases pinned) and both pairs re-run with the engagement asserted from the log
     before any share is read.
+  resolution_pair: >-
+    DONE 2026-11-20. Null-sink A/B, three interleaved rounds, medians of rounds 2-3 (AB001-AB003): fp16 engine
+    31.86 ms, int8 K=2 18.78 ms, ratio 1.6965x - the frame is 12.7 ms shorter than the sixteen-hop one (31.47)
+    while the ratio is barely better (1.6648), which is the caveat this row was filed with: a shallower body
+    makes BOTH arms cheaper. Picture, 494 frames, reference the fp16 engine's own render (SU001-SU004): worst
+    share 0.01461% (frame 67), 0 frames over the 0.1% bar, worst block mean 3.23, peak 41.
   note: >-
     Filed 2026-11-20 as tier 1 of the "which model is cheapest to rescue" ranking: the working sibling is the
     production model (same 64-channel Compact), and the difference is a COUNT, not an operation. That is the
