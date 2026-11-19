@@ -1,0 +1,82 @@
+# Winograd in our own kernel: 2.13x fewer operations, and the hop already sits on the ridge
+
+Arithmetic only, 2026-11-19. No GPU job. Every number below is computed from the records named, and the
+computation is in the `Reproduce` block so it can be re-run.
+Record: `int8-hop-winograd.txt` (analysis row, no measured claims).
+
+Why this exists: the lane closed Winograd on **E26**, which measured *cuDNN's* Winograd tactic on one 3x3 64->64
+convolution and found it slower. That answers a question about cuDNN's tactic set. It does not answer whether the
+arithmetic helps, and the lane never asked that - so this is a hole in the portfolio that a question from outside
+found, not a measurement that was repeated.
+
+## What F(2x2, 3x3) actually changes
+
+| | GMAC per hop | vs direct |
+|---|---|---|
+| direct 3x3 (today) | **76.4** | - |
+| Winograd, multiplies only | **34.0** | **2.25x fewer** |
+| Winograd, with the transform adds counted | 35.8 G ops | **2.13x fewer** |
+
+The transform is not free but it is small: 32 adds per tile per input channel (B^T) and 24 per tile per output
+channel (A^T), against 16 x 64 pointwise multiplies per tile.
+
+## Why that does not translate into a win - the ridge
+
+| quantity | value |
+|---|---|
+| hop arithmetic intensity (152.9 GFLOP / 250.6 MB measured) | **610 FLOP/byte** |
+| this card's ridge (176 TOPS / 288 GB/s) | **611 FLOP/byte** |
+
+**The hop sits on the ridge to within one part in 611.** That is not a coincidence of units: it is the same fact
+ncu reported as "Compute and Memory are well-balanced" with SM at 74% and DRAM at 54%, and the same fact that
+made every single-lever change come out flat. The consequence for Winograd is mechanical: at the ridge a
+compute-for-bandwidth trade is neutral at 1:1, so it wins only if it is better than 1:1.
+
+## And Winograd's bandwidth term, in both forms
+
+| form | traffic per hop | arithmetic |
+|---|---|---|
+| unfused (transform, store, GEMM x 16, transform back) | **1327 MB** | 2.13x less |
+| fused (transform inside the CTA, no intermediate) | 265 MB | 2.13x less |
+
+The intermediate is 531 MB per hop - 16 transform positions x 519k tiles x 64 channels - so the unfused form
+trades **5x the traffic for 2.1x less arithmetic** and is strictly worse at the ridge.
+
+The fused form is the only one that could win: same traffic, 2.13x fewer operations. It needs the 4x4 tile
+transforms held per CTA: 16 positions x 16 tiles x 64 channels x 2 bytes = **32 KB at T=16**, plus the
+accumulators. That is shared memory - the wall `int8-hop-prefetch.txt` hit twice in one afternoon (reordered loads
+-101%, a CUDA microbenchmark of smem staging -26%).
+
+## So the honest answer to "is Winograd a different order of solution"
+
+No - not in this instrument. It is the arithmetic of a win with an instrument cost that this lane has already
+measured as prohibitive in its cheap forms. It becomes interesting **only** as a passenger on a CUDA kernel
+funded for another reason: a fused-2 cascade at T=64 needs the same per-CTA staging infrastructure, and Winograd
+would ride along on it for free.
+
+What would change this answer: an int8 Winograd that is pointwise in the *same* memory (i.e. a transform that does
+not expand the intermediate), or a card whose ridge is far from 611 FLOP/byte. Neither exists here.
+
+## Not covered
+
+- No kernel was written, so "the fused form would win 2.13x in operations" is arithmetic, not a measurement - and
+  at 74% SM utilisation a 2.13x cut in operations does not promise 2.13x in time.
+- The int8 numerics of the transform are NOT analysed here: B^T with {1,0,-1} keeps int8 exact into int16, but
+  the weight transform G uses halves, so a production Winograd would be int16 or fp16 in the transform stage.
+  That is a picture-risk question and this file does not touch it.
+- One card, one shape (64 -> 64, 3x3, 2.07 Mpx).
+
+## Reproduce
+
+```bash
+python3 - <<'EOF'
+px, C = 2.0736e6, 64
+direct = px * 9 * C * C
+tiles = px / 4
+wino = tiles * 16 * C * C
+adds = tiles * C * 32 + tiles * C * 24
+print(direct/1e9, wino/1e9, direct/wino, direct/(wino+adds))
+print(152.9e9 / 250.6e6, 176/0.288)      # 610 vs 611 FLOP/B
+print(16 * tiles * C / 1e6)              # 531 MB of intermediate
+EOF
+```

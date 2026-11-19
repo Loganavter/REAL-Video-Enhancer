@@ -3508,3 +3508,50 @@ tasks:
     Shipped as the default (RVE_HOP_HALO=1). Cost: +382 MB of buffers (585 -> 967 MB steady). docs/wsp/verified/
     int8-hop-halo-chain.txt, records int8-hop-halo.jsonl (H001-H006, R001, HL001-HL004), logs/hop-halo-chain/,
     logs/hop-halo/.
+
+- id: rve-hop-winograd-own-kernel-2026-11-20
+  title: 'Winograd F(2,3) in OUR kernel: 2.13x fewer ops - and the hop sits exactly on the roofline ridge'
+  type: analysis
+  status: done
+  owner: '@supervisor'
+  priority: P3
+  gpu: false
+  cost: 1h
+  tags:
+  - int8
+  - hops
+  - winograd
+  - analysis
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/int8-hop-occupancy.txt
+  - docs/wsp/verified/int8-hop-dram.txt
+  - docs/RESEARCH-LEDGER.md
+  owns_files:
+  - docs/wsp/verified/int8-hop-winograd.txt
+  refutation: >-
+    Winograd was closed by E26 on a cuDNN measurement ("forcing cuDNN's Winograd on one 3x3 64->64 conv is not
+    faster"), which answers a question about cuDNN's tactic, not about the arithmetic. In OUR kernel F(2x2,3x3)
+    cuts the multiplies 2.25x (76.4 GMAC -> 34.0 GMAC) and, with the transform adds counted, the total op count
+    2.13x. Measured against the hop's own numbers the trade is: 610 FLOP/byte of arithmetic intensity against a
+    card ridge of 611 FLOP/B, i.e. the hop sits EXACTLY at the ridge - so a compute-for-bandwidth trade wins only
+    if it is better than 1:1. Winograd's transformed intermediate is 531 MB per hop (16 positions x 519k tiles x
+    64 ch), which unfused turns a 265 MB hop into a 1327 MB hop - 5x the traffic for 2.1x less arithmetic, i.e.
+    strictly worse. Fused (transform inside the CTA, no intermediate) the traffic stays 265 MB and the arithmetic
+    drops 2.13x - which would be a real win, and needs the 4x4 tile transforms held per CTA: 16 positions x T
+    tiles x 64 ch x 2 B, i.e. 32 KB at T=16 - shared memory again, i.e. the same instrument wall that
+    int8-hop-prefetch.txt measured twice negative.
+  resolution: >-
+    CLOSED BY ARITHMETIC 2026-11-19, no GPU job. Two forms, both answered: UNFUSED is strictly worse (1327 MB of
+    traffic against 265 for 2.13x less arithmetic, and the hop is at the ridge so the traffic term dominates);
+    FUSED is the only form that could win (265 MB, 2.13x fewer ops) and it needs 32 KB of per-CTA transform state
+    at T=16 - shared memory, which is the wall the smem staging row already hit twice (reordered loads -101%,
+    CUDA microbenchmark -26%). So Winograd is not a different order of solution in this instrument: it is the
+    same wall with more arithmetic on the far side. Worth re-opening only if a CUDA kernel is funded for another
+    reason (a fused-2 cascade at T=64 would need the same infrastructure), in which case Winograd rides along.
+    The numbers: 76.4 -> 34.0 GMAC (2.25x), 35.8 G ops with adds (2.13x), 610 vs 611 FLOP/B ridge,
+    intermediate 531 MB/hop. docs/wsp/verified/int8-hop-winograd.txt.
+  note: >-
+    Filed on the owner's question "did we ever look at this from a different order" - and the honest answer for
+    Winograd is: the lane had only ever tested cuDNN's Winograd, never the arithmetic, and the arithmetic now
+    says the win exists but sits behind the same instrument as everything else that failed.
