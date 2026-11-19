@@ -16,7 +16,7 @@ what its floor is, so a reader who was never in this lane can challenge any of i
 | build | all four opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that tail kernel, zero-halo hop buffers |
 | the bar | `bar_int8_wall` = **1.2x** wall clock against the fp16 engine; the picture bar is the share of pixels more than 8 levels off on the worst frame of a spread sample, 0.1% |
 
-| commit | `2738616d` - the tree these numbers were taken on |
+| commit | `9b814a0d` - the tree these numbers were taken on |
 
 The pipeline, in the order a frame is paid for: **decode** (ffmpeg, outside the loop) -> **reader** (yuv420p10 -> a tensor) -> **head** (3 -> 64 channels) -> **sixteen hops** (the body) -> **tail** (64 -> 12 channels, pixel shuffle to 3 at 2x) -> **residual** (add the upsampled input) -> **pack** (4K payload to the host) -> **writer** (ffmpeg stdin). The render loop below is the wall clock of that chain; the body is what the model costs, measured by the app's own events.
 
@@ -90,6 +90,19 @@ An outsider reading this list is the intended use: every entry is a lever someon
 | a PCIe 4.0 slot | ~1.2 ms off `pack`, since the link is gen 3 x8 today | hardware | not software |
 | skipping duplicate frames / static regions | large on anime, and the owner's call forbids it | - | closed by policy, `rve-reuse-gate-forbidden` |
 | cut the model (fewer channels or hops) | 2.9-4.5 ms per hop removed | 14-37% per-layer residual, 1.58% of pixels over the picture bar | closed by measurement |
+
+## Which side of the ratio a millisecond lands on
+
+The bar is a RATIO, `fp16 / int8`, so a millisecond saved is not worth the same everywhere:
+
+| a millisecond saved in | int8 becomes | fp16 becomes | ratio |
+|---|---|---|---|
+| the int8 body only (a kernel) | 32.58 | 52.12 | **1.600** |
+| a stage BOTH arms pay (pack, reader, writer) | 32.58 | 51.12 | 1.569 |
+
+So a body-side millisecond is worth ~2.8x a shared one against this bar, and the largest wall-clock win in
+the budget can be the smallest ratio win. That is why `rve-hop-fuse2-cascade` (body) and the pack (shared)
+must not be reported as if their milliseconds were interchangeable.
 
 ## The ratio this produces
 

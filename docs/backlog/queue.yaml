@@ -3434,61 +3434,55 @@ tasks:
     logs/hop-prefetch/, logs/hop-smem-theory/ (smem_bench.cu + smem_drive.py, both runnable).
 
 - id: rve-hop-fuse2-cascade-2026-11-20
-  title: 'Fuse two hops per launch: the halo costs 27%, the launch constant is 0.59 ms - nobody priced both'
+  title: 'Reuse the 3x3 taps inside the CTA: 9 reads per pixel become 1.13 - the only lever that hits LSU'
   type: experiment
   status: todo
   owner: '@supervisor'
-  priority: P2
+  priority: P1
   gpu: true
-  cost: 4h
+  cost: '1-2 sessions (Triton first, CUDA only if Triton cannot express the staging)'
   tags:
   - int8
   - hops
-  - cascade
-  - kernel
+  - smem
+  - lsu
   base_branch: perf/inference
   relates_to:
   - docs/wsp/verified/int8-hop-occupancy.txt
+  - docs/wsp/verified/int8-hop-constant.txt
   - docs/wsp/verified/int8-hop-dram.txt
-  - docs/wsp/verified/int8-hop-ncu.txt
   owns_files:
-  - docs/wsp/verified/int8-hop-fuse2.txt
+  - docs/wsp/verified/int8-hop-tapreuse.txt
   refutes: >-
-    The megakernel/fused-layer family was dropped on 2026-11-19 with the argument "the measured hop is already at
-    or above the isolated rate, so there is no boundary overhead to remove". That is a CORRELATION, not a
-    measurement, and the counters taken on 2026-11-19 contradict it: each hop moves 250.6 MB through DRAM
-    (132.8 read + 117.6 write, int8-hop-dram.txt), half of which IS the boundary with the previous hop, and LSU
-    is the highest-utilised pipe by instruction count (73.9%, int8-hop-ncu.txt). What nobody has priced is the
-    pair: a fused launch of F hops saves F-1 launches, and a launch costs 0.59 ms of constant (one tap costs
-    0.59, three cost 1.072, nine cost 1.551 - int8-hop-occupancy.txt), while the halo you pay for fusing is
-    (T+2F)^2/T^2. The honest arithmetic took THREE passes to get right: the extra work is the WORK of the extra
-    output pixels, not the extent of the input halo - a fused pair computes (T+2)^2 pixels for the first layer
-    and T^2 for the second, so the ratio is (((T+2)^2 + T^2)/(2T^2) - 1) x 2 x 1.55 ms against 0.59 ms of saved
-    constant: T=16 = 1.266x (+0.14 net), T=24 = 1.174x, T=32 = **1.064x -> +0.39 ms per pair -> +3.1 ms over
-    eight pairs**, T=64 = 1.032x -> +0.49 per pair -> +3.9 ms. (The first two passes used (T+4)^2 as the first
-    layer's WORK and therefore overstated the halo; the corrected figure comes from a second reader of this same
-    document and is the one to trust.) F=4 at T=32 is 1.20x for three saved launches, i.e. +2.1 ms - WORSE than
-    F=2, because the halo grows quadratically while the saved constant does not. The binding constraint is the
-    intermediate: T=32 needs 34^2 x 64 B = 74 KB (fits the 100 KB shared memory, one CTA per SM), T=64 needs
-    278 KB (does not fit). So the best point that can exist is F=2 at T=32 for ~3.1 ms, and it needs CUDA + 74 KB
-    of shared memory - the same instrument as the smem row. If an F=2 kernel does not beat two single-hop
-    launches on the same codes, the family is dead and this row closes it with a measurement instead of an
-    argument.
+    REWRITTEN 2026-11-20 after three rounds of arithmetic, because the first two framings priced the wrong thing.
+    The launch-constant argument is DEAD (int8-hop-constant.txt: the same kernel at 256x256 takes 0.0572 ms, so no
+    per-launch fee can exist, and graphs are bounded at 17 x 0.0572 = 0.97 ms). The pure-traffic argument is also
+    weak, because DRAM runs at 56% and both roofs sit at 57% - removing intermediate traffic does not remove time
+    when DRAM does not bind. What remains, and what nobody has tried, is the LOGICAL read volume: the hop reads
+    each pixel NINE times, 9 x 132.71 MB = 1194 MB per hop, and the measured L2 traffic is 1528.7 MB, i.e. 128% of
+    that - coalescing is fine and the layout (NHWC, 64 B = 2 sectors) is fine. LSU is the highest-utilised pipe at
+    73.9% by instruction count, so it is the one lever aimed at the actual limiter rather than at one of two
+    equally under-filled roofs. Staging a rolling 3-row band and reusing the taps inside the CTA takes the reads
+    from 9 per pixel to (T+2)^2/T^2 = 1.13 at T=32, a 7.97x cut. If the hop then approaches its compute roof,
+    sixteen hops go 24.30 -> 13.90 ms, i.e. -10.4 ms/frame, which is larger than every other item in this queue
+    combined. If staging does not move it, LSU was not the limiter and the hop is closed for good.
   acceptance: >-
-    One CTA computes a T x T tile for TWO consecutive hops: the intermediate never leaves the CTA's registers or
-    shared memory, and the halo is (T+2)^2 input pixels per tile. Arms in one process, CUDA events, >=3 rounds:
-    two separate launches (today) against one fused launch, at T = 16, 32 and 64, and against the 0.59 ms
-    constant arithmetic above. Codes MUST be identical on the same input codes (0 of 132.7 M) - fusing changes
-    the schedule, not the arithmetic - and if they are not, the halo indexing is wrong and the row stops there.
-    Report ms per hop-pair, and the measured DRAM bytes of the fused arm (ncu) so the boundary saving is a
-    counter and not a claim.
+    Staged, cheapest first. (a) Triton: a kernel that loads the three-row band once per CTA tile and forms the
+    nine taps from it, at T = 16/32/64; codes MUST be identical (0 of 132.7 M - a tap-reuse scheme changes no
+    arithmetic) and the smem budget for a rolling band is 3 x (T+2) x 64 B = 13.1 KB at T=32, NOT the 153 KB of
+    full pair tiles, so occupancy must be reported beside the time. (b) ncu on the winning arm: L2 sectors and
+    LSU utilisation, so "the read volume fell 8x" is a counter and not a claim. (c) only on a >=10% win: the
+    16-hop chain in the app, the phase line, and the full-clip picture.
   note: >-
-    Filed from the owner's question "did we ever frame this differently, or look at the chain as a cascade" -
-    and the answer was yes, once, on 2026-11-19, with an argument the same day's profiling can now test. The
-    halo arithmetic is the part that was never done, and the corrected price (~3.1 ms/frame at T=32, F=2) is why
-    this sits at P2: it attacks the one quantity that survived every other lever, the per-launch constant, and it
-    is the only idea whose expected value is above its instrument cost - but it still needs the CUDA kernel that
-    the smem row wanted.
+    Filed originally as "fuse two hops per launch" (the megakernel family) and re-priced twice: first at ~4 ms
+    with a halo formula that used the input extent as the work extent, then at ~2.3 ms, then to ~0 when the
+    constant turned out not to exist. The version worth funding is not fusion at all - it is TAP REUSE, which is
+    what the literature's staging recipes actually buy and what our own 30-configuration sweep never tried
+    (it varied BLOCK_M, warps, cache policy, tile shape, channel split and batching - all schedule knobs around
+    the same nine gathers). The risk is real and on record: a CUDA microbenchmark of a cooperative 3-row load
+    measured SLOWER than nine gathers (int8-hop-prefetch.txt, -26%), so the staging has to be justified by the
+    LSU counters, not by the byte count.
+
 
 - id: rve-hop-halo-inline-2026-11-20
   title: 'Inline zero halo: every hop writes the next hop''s padded interior, so no copy exists'
