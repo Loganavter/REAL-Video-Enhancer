@@ -32,7 +32,7 @@ quantisation boundary per hop and a single `C` constexpr. SPAN is the opposite s
 ## In the app, through the TensorRT engine
 
 The scope probe above is eager PyTorch, so its *shares* are the result and its 302 ms is not. The same model,
-same clip, through the app's own engine (`logs/span-app/`, record SP001):
+same clip, through the app's own engine (`logs/span-app/`, record AB001 in `span-app.jsonl`):
 
 ```
 2x_ModernSpanimationV1, bd_violet20s, null sink, 494 frames:  73.36 ms/frame  =  13.6 fps
@@ -59,9 +59,19 @@ gets its 78% from a single kernel. If SPAN ever becomes the target model, the fi
   model through a TensorRT engine, where the same structure holds but every number is smaller.
 - No int8 was attempted here, by design: this is the scope measurement that decides whether to attempt it.
 
+Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/span-int8-scope.txt \
+       --records docs/wsp/verified/records/span-app.jsonl --bars docs/claims-bars.json
+
+@claim AB001 73.36 ms "rounds [e915d1039b6e8d82] n=1" measured
+
 ## Reproduce
 
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/span_scope_probe.py \
     --out-file docs/wsp/verified/logs/span-scope/probe.json
+# the app-level number, same clip, through the engine
+ARMS="fp16" MODEL=<path>/2x_ModernSpanimationV1.pth CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=null \
+  LOGDIR=docs/wsp/verified/logs/span-app scripts/wall_ab.sh
+PYTHONPATH=scripts python3 scripts/ab_records.py --clip bd_violet20s --logdir docs/wsp/verified/logs/span-app \
+  --arms fp16 --sink null --first-round 1 --rounds 1 --out docs/wsp/verified/records/span-app.jsonl
 ```
