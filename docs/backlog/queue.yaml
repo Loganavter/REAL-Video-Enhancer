@@ -2764,8 +2764,22 @@ tasks:
 - id: rve-pack-async-ring-2026-11-20
   title: 'The deliverable pack is synchronous and on the critical path - 3.59 ms whose floor is 2.44'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    CLOSED NEGATIVE 2026-11-19, and the premise was half wrong: the pinned ring ALREADY EXISTS in the tree
+    (utils.Frame.PinnedSlotPool, semaphore per slot, release after stdin.write()) and was disabled after an
+    earlier attempt read 12.6 dB. RVE_PACK_RING=1 turns it on; the instrumentation confirms 4 slots x 12 441 600
+    bytes, no per-frame tobytes. It buys nothing: loop 34.42 -> 34.36 ms (-0.06), pack+queue 4.36 -> 4.32
+    (-0.04), both inside their own draw spread - so the 4.3 ms is NOT the copy, which is the row's own
+    alternative hypothesis and its exit condition ("><1.0 ms means back-pressure"). The 12.6 dB bug IS gone:
+    the 494-frame ffv1 pair reads IDENTITY, so the protocol now holds and still buys nothing - worth recording
+    so nobody re-derives the disabled-comment. Not adopted (0.06 ms does not pay for a second payload path
+    that is incompatible with temporal reuse); the knob and its one-line warning stay. The 4.32 splits into a
+    12.44 MB transfer at 2.9 GB/s effective plus the writer's slot consumption, and this file does NOT
+    separate them. NOT measured: the NVENC arm, which is the one configuration where a slow writer could
+    make the ring matter. Docs: docs/wsp/verified/int8-pack-ring.txt, records int8-pack-ring.jsonl
+    (K001-K005, R001-R002, PK001-PK004), logs/pack-ring/.
   priority: P1
   gpu: true
   cost: 4h
