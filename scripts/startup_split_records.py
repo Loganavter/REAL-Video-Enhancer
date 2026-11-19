@@ -28,6 +28,8 @@ def main(argv=None) -> int:
     ap.add_argument("--log", default="/tmp/opencode/startup_timed.log")
     ap.add_argument("--out", default="docs/wsp/verified/records/startup-split.jsonl")
     ap.add_argument("--clip", default="bd_violet20s.mkv")
+    ap.add_argument("--prefix", default="ST")
+    ap.add_argument("--config", default=("calibration CACHE MISS (16 frames measured), full frames"))
     a = ap.parse_args(argv)
 
     rows = []
@@ -63,12 +65,12 @@ def main(argv=None) -> int:
     st = Store(session="s-2026-11-19T15:10:00+03:00")
     instr = "the app's own stdout, each line stamped with seconds since process start"
     cfg = (f"{a.clip}, 1920x1080, backend tensorrt, int8_fit int8, no temporal reuse, null sink, "
-           f"opt-5 tiling-full engine, calibration CACHE MISS (16 frames measured)")
+           f"opt-5 tiling-full engine, {a.config}")
     for rid, name, value in (
-        ("ST001", "start-up to the first enqueued frame", total),
-        ("ST002", "interpreter + CLI + ffprobe + CUDA init (process start -> model load)", t_head),
-        ("ST003", "engine deserialize + the int8 probe's 16 calibration frames", t_probe - t_engine),
-        ("ST004", "Triton JIT + 24 calibration frames + first body call", t_body - t_frames),
+        (f"{a.prefix}001", "start-up to the first enqueued frame", total),
+        (f"{a.prefix}002", "interpreter + CLI + ffprobe + CUDA init (process start -> model load)", t_head),
+        (f"{a.prefix}003", "engine deserialize + the int8 probe's 16 calibration frames", t_probe - t_engine),
+        (f"{a.prefix}004", "Triton JIT + 24 calibration frames + first body call", t_body - t_frames),
     ):
         st.emit(Record(value=round(value, 3), unit="s", population=pop, instrument=instr, config=cfg,
                        session=st.session, statistic="single", tier="measured", id=rid,
