@@ -191,8 +191,10 @@ def main(argv=None) -> int:
     A(f"| body (above) | {body_tot:.2f} | **13.9 ms** for the hops alone at the 176 TOPS roof (152.9 GFLOP per "
       f"hop x 16); DRAM floor **13.9 ms** (250.6 MB per hop x 16 at 288 GB/s) - the two agree, which is the "
       f"ridge again |")
-    A(f"| pack + queue | {pack_ms:.2f} | **2.44 ms**: the 4K yuv payload is 12.44 MB and the measured PCIe link "
-      f"runs 5.1-6.0 GB/s |")
+    A(f"| pack + queue | {pack_ms:.2f} | **1.9-2.4 ms**: the 4K yuv payload is 12.44 MB and the link is "
+      f"**PCIe gen 3 x8** - measured under load at 6.55 GB/s round-trip, 25 of 25 samples, against 7.88 GB/s "
+      f"theoretical. The card is a PCIe 4.0 part but the slot negotiates gen 3, so this floor is a property of "
+      f"the motherboard |")
     A(f"| **render loop** | **{loop_ms:.2f}** | what the user waits for; `null` sink, so no encoder |")
     A(f"| everything else | {loop_ms - body_tot - pack_ms:+.2f} | reader, the wrapper around the model call, "
       f"and the writer's back-pressure. The input path inside it is measured at 1.38 ms, of which 0.07 was "

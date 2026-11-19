@@ -3438,7 +3438,7 @@ tasks:
   type: experiment
   status: todo
   owner: '@supervisor'
-  priority: P3
+  priority: P2
   gpu: true
   cost: 4h
   tags:
@@ -3461,13 +3461,19 @@ tasks:
     is the highest-utilised pipe by instruction count (73.9%, int8-hop-ncu.txt). What nobody has priced is the
     pair: a fused launch of F hops saves F-1 launches, and a launch costs 0.59 ms of constant (one tap costs
     0.59, three cost 1.072, nine cost 1.551 - int8-hop-occupancy.txt), while the halo you pay for fusing is
-    (T+2F)^2/T^2, and the honest arithmetic - CORRECTED after a first pass that overstated it 2x - is: per fused
-    pair, extra work = (((T+4)^2 + (T+2)^2)/(2T^2) - 1) x 2 x 1.55 ms against 0.59 ms of saved constant, i.e.
-    T=16 gives -0.69 ms (the halo eats it), T=32 gives -0.02 (a wash), T=64 gives +0.29, and 8 pairs over the
-    frame give ~+2.3 ms. F=4 at T=64 reads 1.06x of work for 12 saved launches, so the family improves with
-    depth - but the intermediate a 64x64 tile needs (262 KB of int8) does not fit a register/vector tile either,
-    which is the same instrument wall as the smem row. If an F=2 kernel does not beat two single-hop launches on
-    the same codes, the family is dead and this row closes it with a measurement instead of an argument.
+    (T+2F)^2/T^2. The honest arithmetic took THREE passes to get right: the extra work is the WORK of the extra
+    output pixels, not the extent of the input halo - a fused pair computes (T+2)^2 pixels for the first layer
+    and T^2 for the second, so the ratio is (((T+2)^2 + T^2)/(2T^2) - 1) x 2 x 1.55 ms against 0.59 ms of saved
+    constant: T=16 = 1.266x (+0.14 net), T=24 = 1.174x, T=32 = **1.064x -> +0.39 ms per pair -> +3.1 ms over
+    eight pairs**, T=64 = 1.032x -> +0.49 per pair -> +3.9 ms. (The first two passes used (T+4)^2 as the first
+    layer's WORK and therefore overstated the halo; the corrected figure comes from a second reader of this same
+    document and is the one to trust.) F=4 at T=32 is 1.20x for three saved launches, i.e. +2.1 ms - WORSE than
+    F=2, because the halo grows quadratically while the saved constant does not. The binding constraint is the
+    intermediate: T=32 needs 34^2 x 64 B = 74 KB (fits the 100 KB shared memory, one CTA per SM), T=64 needs
+    278 KB (does not fit). So the best point that can exist is F=2 at T=32 for ~3.1 ms, and it needs CUDA + 74 KB
+    of shared memory - the same instrument as the smem row. If an F=2 kernel does not beat two single-hop
+    launches on the same codes, the family is dead and this row closes it with a measurement instead of an
+    argument.
   acceptance: >-
     One CTA computes a T x T tile for TWO consecutive hops: the intermediate never leaves the CTA's registers or
     shared memory, and the halo is (T+2)^2 input pixels per tile. Arms in one process, CUDA events, >=3 rounds:
@@ -3479,9 +3485,10 @@ tasks:
   note: >-
     Filed from the owner's question "did we ever frame this differently, or look at the chain as a cascade" -
     and the answer was yes, once, on 2026-11-19, with an argument the same day's profiling can now test. The
-    halo arithmetic is the part that was never done, and the corrected price (~2.3 ms/frame at T=64) is why this
-    is P3 and not P1: it attacks the one quantity that survived every other lever, the per-launch constant, but
-    it needs the same CUDA kernel that the smem row would need and would have to earn the same 2 ms.
+    halo arithmetic is the part that was never done, and the corrected price (~3.1 ms/frame at T=32, F=2) is why
+    this sits at P2: it attacks the one quantity that survived every other lever, the per-launch constant, and it
+    is the only idea whose expected value is above its instrument cost - but it still needs the CUDA kernel that
+    the smem row wanted.
 
 - id: rve-hop-halo-inline-2026-11-20
   title: 'Inline zero halo: every hop writes the next hop''s padded interior, so no copy exists'

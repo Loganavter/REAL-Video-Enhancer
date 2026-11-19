@@ -16,7 +16,7 @@ what its floor is, so a reader who was never in this lane can challenge any of i
 | build | all four opt-ins ON: fused head kernel, int8 tail kernel, tail shuffle+residual inside that tail kernel, zero-halo hop buffers |
 | the bar | `bar_int8_wall` = **1.2x** wall clock against the fp16 engine; the picture bar is the share of pixels more than 8 levels off on the worst frame of a spread sample, 0.1% |
 
-| commit | `0980d51b` - the tree these numbers were taken on |
+| commit | `9b21a4c1` - the tree these numbers were taken on |
 
 The pipeline, in the order a frame is paid for: **decode** (ffmpeg, outside the loop) -> **reader** (yuv420p10 -> a tensor) -> **head** (3 -> 64 channels) -> **sixteen hops** (the body) -> **tail** (64 -> 12 channels, pixel shuffle to 3 at 2x) -> **residual** (add the upsampled input) -> **pack** (4K payload to the host) -> **writer** (ffmpeg stdin). The render loop below is the wall clock of that chain; the body is what the model costs, measured by the app's own events.
 
@@ -37,7 +37,7 @@ Tail split on the same run: dequant 0.00, conv 1.01, shuffle 0.00, residual 0.00
 | what | ms | floor, and where the floor comes from |
 |---|---|---|
 | body (above) | 25.90 | **13.9 ms** for the hops alone at the 176 TOPS roof (152.9 GFLOP per hop x 16); DRAM floor **13.9 ms** (250.6 MB per hop x 16 at 288 GB/s) - the two agree, which is the ridge again |
-| pack + queue | 4.36 | **2.44 ms**: the 4K yuv payload is 12.44 MB and the measured PCIe link runs 5.1-6.0 GB/s |
+| pack + queue | 4.36 | **1.9-2.4 ms**: the 4K yuv payload is 12.44 MB and the link is **PCIe gen 3 x8** - measured under load at 6.55 GB/s round-trip, 25 of 25 samples, against 7.88 GB/s theoretical. The card is a PCIe 4.0 part but the slot negotiates gen 3, so this floor is a property of the motherboard |
 | **render loop** | **33.58** | what the user waits for; `null` sink, so no encoder |
 | everything else | +3.32 | reader, the wrapper around the model call, and the writer's back-pressure. The input path inside it is measured at 1.38 ms, of which 0.07 was removable |
 
