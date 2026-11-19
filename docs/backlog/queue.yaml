@@ -3075,8 +3075,23 @@ tasks:
 - id: rve-hop-index-arithmetic-2026-11-20
   title: 'The hop pays 0.59 ms per launch that no tap touches - and W is divided at runtime'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
+  resolution: >-
+    CLOSED 2026-11-19 BY MECHANISM, and my hypothesis was refuted twice on the way to it, both times by
+    measurement. (1) The tap-independent 0.59 ms is NOT index arithmetic and NOT the epilogue: the epilogue costs
+    0.112-0.120 ms (7.1% - bare store 1.458 against shipped 1.570, docs/wsp/verified/int8-hop-occupancy.txt). It
+    is the LATENCY OF THE FIRST GATHER'S ROUND TRIP: one tap costs 0.59 ms, three cost the same 1.072, nine cost
+    1.551 - because with the accumulator holding BLOCK_M x 64 int32 the SM keeps only 3.96 of 12 warps per
+    scheduler resident (ncu) and 56.21% of cycles have no eligible warp. (2) That occupancy cannot be bought:
+    nine launch configurations of the same kernel with identical codes (0 differences) and the SHIPPED
+    BLOCK_M 128 / 4 warps is the best of them - 128/8 is 54% slower, 64/4 54%, 32/4 80%, 256/4 12.6% - because
+    every direction that adds warps shrinks the 64-wide MMA tile. So the named cause is measured, the response
+    to it is measured, and the one remaining idea (shared-memory staging of the three-row window) is exactly
+    what the recorded Triton pipelining attempts already made worse (2.497/2.635 ms, noted in Int8Kernels.py).
+    docs/wsp/verified/int8-hop-occupancy.txt, records int8-hop-occupancy.jsonl (O001-O012),
+    logs/hop-occupancy/, logs/hop-epilogue/. INVALID ARMS from the first attempt, named not dropped: no-store
+    (dead-code elimination, 0.018 ms) and a runtime-W stand-in that read one element past the weight buffer.
   priority: P1
   gpu: true
   cost: 3h
