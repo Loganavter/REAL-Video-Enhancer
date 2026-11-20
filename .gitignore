@@ -17,3 +17,8 @@ docs/wsp/ledger.db
 /models
 /mainwindow.py
 /resources_rc.py
+
+# runtime artifacts the app writes next to itself
+/log.txt
+/settings.txt
+/temp/
