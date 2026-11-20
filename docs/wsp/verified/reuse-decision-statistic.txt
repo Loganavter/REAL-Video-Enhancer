@@ -459,6 +459,27 @@ gate half is on the current one.
 @claim RU049 26.01 ms "frames [d59930c7b499a58b] n=201" measured
 @claim RU050 51.45 ms "frames [d59930c7b499a58b] n=201" measured
 
+### The product path: the correction is in the renderer, and it reproduces the lab
+
+The owner turned the gate on by default on 2026-11-20, so the correction is no longer a script: it runs inside the
+render loop (`backend/src/utils/TemporalCorrection.py`, seeded after every model frame, applied on every reuse,
+recursive on the previous EMITTED frame). Verified by rendering the held-out cut through the product path:
+
+| | lab (`reuse_split --recursive`) | product path |
+|---|---|---|
+| frames over the bar | 3 of 124 (21, 22, 56) | **3 of 124 (21, 22, 56)** |
+| worst share | 0.2001% | **0.1977%** |
+| median difference, all reuses | - | **0.002 pp** (max 0.04 pp) |
+
+Every frame that was NOT reused is bit-identical to the ungated render (max difference 0), so the correction cannot
+touch a frame the model drew. The cost inside the loop is 40.26 ms/frame against 39.77 for the same gate emitting
+verbatim - 0.49 ms per frame, or 0.79 ms per reused frame, under the 2.428 ms the standalone cost script reports.
+And the default is safe where it must be: on the dense-motion cut the tuner refuses (noise floor 31.16), and the
+default run costs the same as `--no_temporal_reuse` (51.26 against 51.10 ms/frame).
+
+@claim RU051 0.1977 % "reused frames [10125c2ba8f21587] n=124" measured
+@claim RU052 40.26 ms "frames [d59930c7b499a58b] n=201" measured
+
 ## Reproduce
 
 ```bash

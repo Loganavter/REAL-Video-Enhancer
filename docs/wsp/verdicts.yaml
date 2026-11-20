@@ -624,7 +624,7 @@
 - id: reuse-gate-shelved
   lane: reuse
   status: superseded
-  superseded_by: reuse-gate-reopened
+  superseded_by: reuse-ships-on-with-correction
   scope: product roadmap decision, 2026-11-18
   date: 2026-11-18
   statement: >-
@@ -813,3 +813,24 @@
     refuses that material outright (noise floor 31.16 against the 1.5 limit, 0 of 204 frames). The residual is
     imperceptible where the gate reuses; where it is not, the gate does not reuse. The 0.1% pixel bar stays as a
     conservative screen, not as the shipping criterion.'
+
+- id: reuse-ships-on-with-correction
+  lane: reuse
+  status: current
+  superseded_by: ''
+  scope: PRODUCT decision, 2026-11-20, owner order ("turn it on by default, with the corrections")
+  date: 2026-11-20
+  statement: 'The temporal reuse gate is ON by default and a reused frame is emitted with the frequency-split
+    recursive correction. The owner judged the measured residual imperceptible (reuse-residual-imperceptible) and
+    ordered the default flipped; the correction moved from the measurement scripts into the render loop
+    (backend/src/utils/TemporalCorrection.py) and reproduces the lab: 3 of 124 frames over the 0.1% bar on the
+    held-out cut, worst 0.1977% against the lab 0.2001%, median difference 0.002 pp over the reuses, and every frame
+    that was not reused is bit-identical to the ungated render. Cost inside the loop 0.49 ms/frame (0.79 ms per
+    reused frame); the gate is worth 1.98x on the render loop with the product encoder, 1.87x with the correction.'
+  evidence: docs/wsp/verified/reuse-decision-statistic.txt
+  note: 'Bounds: the auto tuner still refuses material it cannot certify - on dense moving line art the noise floor
+    reads 31.16 against the 1.5 limit and reuse is OFF, which is the measured class where the correction is visibly
+    broken (8/8 reuses, 171-189 levels, docs/wsp/verified/reuse-motion-content.txt) - so the default is safe
+    because the gate declines, not because the correction would hold there. --no_temporal_reuse opts out;
+    --no_temporal_reuse_correction keeps the gate emitting verbatim (measurement only). This supersedes the scope
+    of reuse-gate-shelved (gate off by default) while its measurements stay as history.'

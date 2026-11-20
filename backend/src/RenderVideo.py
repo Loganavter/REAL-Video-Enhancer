@@ -153,6 +153,10 @@ class Render:
         # reuse collapsed to 1.1% (vs 46.8% with the veto off).
         temporal_reuse_pixel_veto: float | None = 0.0,
         temporal_reuse_auto: bool = True,
+        # the correction the reused frame gets. Without it the gate re-emits the reference's
+        # picture verbatim, which loses everything that changed (measured 37/130 over the bar);
+        # with it the frequency-split residual takes that to 0/130 on the calibration cut.
+        temporal_reuse_correction: bool = True,
         quality_preset: str = "best",
     ):
         self.inputFile = inputFile
@@ -425,6 +429,9 @@ class Render:
         
 
         self.temporalReuse = None
+        # created together with the gate, below; None means a reused frame is emitted verbatim
+        self.temporalCorrection = None
+        self.temporalReuseCorrection = bool(temporal_reuse_correction)
         # always present: the render loop asks about it on every frame, including runs with
         # --no_temporal_reuse where no gate is created (missing it crashed the render thread).
         # This has to come BEFORE the gate block, which assigns the real tuner - placing it
@@ -443,6 +450,11 @@ class Render:
                 statistic=temporal_reuse_statistic,
                 max_block_mean=temporal_reuse_max_block_mean,
             )
+            if self.temporalReuseCorrection:
+                from .utils.TemporalCorrection import ReferenceFrameCorrector
+                self.temporalCorrection = ReferenceFrameCorrector()
+                log("Reference-frame reuse: the correction is ON (frequency split, recursive base, "
+                    "alpha 1.35 on flat static blocks)")
             log(f"Reference-frame reuse enabled (threshold {temporal_reuse_threshold}/255, "
                 f"statistic {temporal_reuse_statistic}, "
                 f"max chain {temporal_reuse_max_chain}, pixel veto {temporal_reuse_pixel_veto})")
@@ -716,12 +728,40 @@ class Render:
                 log(self.autoTuner.stats())
                 self.temporalReuse = None
                 self.autoTuner = None
+                self.temporalCorrection = None
                 return
             self.temporalReuse.threshold = self.autoTuner.chosen
             self.temporalReuse.pixel_veto = self.autoTuner.veto
             if self.autoTuner.chosen_chain:
                 self.temporalReuse.max_chain = int(self.autoTuner.chosen_chain)
             log(self.autoTuner.stats())
+
+    def _reuse_frame(self, lr_tensor):
+        """The frame a reuse emits: the last rendered frame plus the correction for what changed.
+
+        Falls back to the verbatim reference - exactly the old behaviour - whenever the corrector has no pair to
+        work from (first frame, seek, a shape change) or raises. A correction must never be able to break a render.
+        """
+        cached = self._lastRenderedFrame
+        if self.temporalCorrection is None or lr_tensor is None:
+            return cached
+        try:
+            corrected = self.temporalCorrection.correct(lr_tensor)
+        except Exception as exc:
+            log(f"reuse correction failed ({exc}); reuses emit verbatim for the rest of this render")
+            self.temporalCorrection = None
+            return cached
+        if corrected is None:
+            return cached
+        from .utils.Frame import Frame
+        frame = Frame(cached.backend, cached.width, cached.height, device=cached.device,
+                      gpu_id=cached.gpu_id, hdr_mode=cached.hdr_mode, dtype=cached.dtype,
+                      high_bitdepth=cached.high_bitdepth)
+        frame.yuv10_output = cached.yuv10_output
+        frame.yuv8_output = cached.yuv8_output
+        # same stream as the correction's ops, so the ordering is preserved without a device barrier
+        frame.set_frame_tensor(corrected, sync=False)
+        return frame
 
     def render(self):
         frames_rendered = 0
@@ -812,8 +852,10 @@ class Render:
                         self.temporalReuse.is_duplicate(frame_tensor)
                     self._profile["gate"] += (_perf_counter() - _t_gate) * 1000.0
                     if reuse and self._lastRenderedFrame is not None:
-                        # re-emit the last rendered frame (the gate only decides *whether*)
-                        frame = self._lastRenderedFrame
+                        # The gate only decides *whether*. What is emitted is the last rendered
+                        # frame plus the correction for what changed since - verbatim when the
+                        # corrector has no pair to work from (first frame, seek, shape change).
+                        frame = self._reuse_frame(frame_tensor)
                     else:
                         _t_up = _perf_counter()
                         frame = self.upscaleOption(
@@ -824,6 +866,17 @@ class Render:
                             continue
                         self._profile["up_wall"] += (_perf_counter() - _t_up) * 1000.0
                         self._lastRenderedFrame = frame
+                        if self.temporalCorrection is not None and frame_tensor is not None:
+                            try:
+                                # the model output is the pair a later reuse starts from; the
+                                # tensor it holds is not copied, the corrector only reads it
+                                seed_hr = getattr(frame, "_tensor", None)
+                                if seed_hr is None:
+                                    seed_hr = frame.get_frame_tensor()
+                                self.temporalCorrection.seed(seed_hr, frame_tensor)
+                            except Exception as _corr_exc:      # never let the correction break a render
+                                log(f"reuse correction: seeding failed ({_corr_exc}); reuses emit verbatim")
+                                self.temporalCorrection = None
                         if self.autoTuner is not None and not self.autoTuner.ready:
                             self._calibrate_gate(frame)
                 

@@ -182,6 +182,7 @@ class HandleApplication:
             tile_reuse_size=self.args.tile_reuse_size,
             tile_reuse_threshold=self.args.tile_reuse_threshold,
             temporal_reuse=bool(self.args.temporal_reuse and not self.args.no_temporal_reuse),
+            temporal_reuse_correction=not getattr(self.args, "no_temporal_reuse_correction", False),
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_statistic=self.args.temporal_reuse_statistic,
             temporal_reuse_max_block_mean=self.args.temporal_reuse_max_block_mean,
@@ -495,17 +496,27 @@ class HandleApplication:
         )
         parser.add_argument(
             "--temporal_reuse",
-            help="Opt IN to reusing the previous upscaled frame when the current frame is "
-                 "structurally unchanged (skip only, never invents pixels). OFF by default since "
-                 "2026-11-18: on a 1080p source the gate's noise floor is almost always above its "
-                 "1.5 refusal limit, and at low contrast a small delta may be real motion rather "
-                 "than noise. Keep it for measurement, not for shipping.",
+            help="Reuse the cached upscale when the frame is structurally unchanged, corrected by "
+                 "the frequency-split residual so the picture still follows the source. ON by "
+                 "default since 2026-11-20 (owner decision): 0/130 frames over the 0.1%% bar on the "
+                 "calibration cut, 1.87x on the render loop, and the auto gate refuses material it "
+                 "cannot certify (it refused dense moving line art outright). --no_temporal_reuse "
+                 "opts out; --no_temporal_reuse_correction keeps the gate but emits the reference "
+                 "verbatim, which is the pre-2026-11-20 behaviour and is not recommended.",
+            action="store_true",
+            default=True,
+        )
+        parser.add_argument(
+            "--no_temporal_reuse",
+            help="Turn the reuse gate off: every frame runs the model.",
             action="store_true",
             default=False,
         )
         parser.add_argument(
-            "--no_temporal_reuse",
-            help="Deprecated no-op: temporal reuse is OFF by default now (2026-11-18).",
+            "--no_temporal_reuse_correction",
+            help="Keep the gate but emit the cached frame verbatim (no correction). Measurement "
+                 "only: verbatim reuse is what loses the changed part of the frame (37/130 over "
+                 "the bar on the calibration cut).",
             action="store_true",
             default=False,
         )
