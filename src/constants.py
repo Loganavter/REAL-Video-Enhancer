@@ -26,9 +26,27 @@ IS_FLATPAK = "FLATPAK_ID" in os.environ and not IS_STEAM
 HOME_PATH = os.path.expanduser("~")
 
 IS_COMPILED_OR_FROZEN = hasattr(sys, "frozen")
-USE_LOCAL_BACKEND =  os.path.exists(
-    os.path.join(os.getcwd(), "backend")
-) 
+
+# The backend is looked up next to the launcher first, and only then next to the shell's cwd. The old rule was
+# cwd-only, so `python3 /path/to/REAL-Video-Enhancer.py` from any other directory fell through to the installed
+# copy in ~/.local/share and silently ran a different backend than the one in the tree (found 2026-11-20: the
+# repository's updated backend was ignored, and with it the reuse correction).
+APP_DIR = (
+    os.path.dirname(os.path.abspath(sys.executable)) if IS_COMPILED_OR_FROZEN
+    else os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv and sys.argv[0] else os.getcwd()
+)
+
+
+def _find_backend(root: str):
+    """A directory is a backend when it carries the entry point, not merely when it is called `backend`."""
+    candidate = os.path.join(root, "backend")
+    if os.path.isfile(os.path.join(candidate, "rve-backend.py")):
+        return candidate
+    return None
+
+
+_LOCAL_BACKEND = _find_backend(APP_DIR) or _find_backend(os.getcwd())
+USE_LOCAL_BACKEND = _LOCAL_BACKEND is not None
 
 if not USE_LOCAL_BACKEND:
     
@@ -41,7 +59,7 @@ if not USE_LOCAL_BACKEND:
             HOME_PATH, ".local", "share", "REAL-Video-Enhancer"
         )
 else:
-    CWD = os.getcwd()
+    CWD = os.path.dirname(_LOCAL_BACKEND)
     
 if IS_FLATPAK:
     CWD = (

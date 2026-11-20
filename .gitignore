@@ -9,3 +9,11 @@ __pycache__/
 
 # the evidence index is derived - rebuild with `python -m harness.cli db build`
 docs/wsp/ledger.db
+
+# dev runtime links (local only, never committed)
+/python
+/bin
+/custom_models
+/models
+/mainwindow.py
+/resources_rc.py
