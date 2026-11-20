@@ -59,7 +59,24 @@ Registration was refused on 0 of 71 comparisons on the calm window.
 | of that, dust dots (components <= 64 px) | median 0.766%, worst 2.076% |
 | frames unchanged | 39 of 80 (not reused) |
 
-So at the scale the decision is taken at, the reused frames are inside the acceptance bar with a 3x margin, and the
+### The same run on a fast-motion window (t=280), because that is where a coarse statistic could go wrong
+
+`cut280.mkv` (3 s, the same build, the same command): the tuner chose **chain 1** on its own - the depth
+certification collapsed, exactly as the chain is supposed to - and reused **29/83 = 34.9%** at depth 1 (28) and 2 (1):
+
+| | |
+|---|---|
+| coarse scale, all 83 frames | **worst 0.000%**, 0 of 83 frames over 0.1% |
+| pixel scale | worst 2.475%, median 0.000%, 19 of 83 frames over 0.1%, of it dust up to 1.021% |
+| apparent shift against ungated | median 0.000 px, max 0.171 px, 0 of 83 frames over 0.3 px |
+
+So the coarse statistic does not blanket-accept motion: on moving content the gate still reuses a third of the
+frames, but only one frame at a time, and the acceptance holds at both scales. The earlier pair-level simulation
+predicted 31.9% at threshold 4 on this window (`reuse_structural_probe.py --start 280`), which is the same number
+seen from the other side.
+
+So at the scale the decision is taken at, the reused frames are inside the acceptance bar with a 3x margin on the
+calm window and with no frame above the bar at all on the fast one, and the
 pixel-scale number that fails the old bar is 90% dust-dot area plus the scan's registration - the two things the
 owner said need not be preserved ("после денойза зерна нет, есть точки то есть то нет, и кадр подрагивает из-за
 скана"). That decision is what moves the certifier to the coarse scale; the pixel number is reported, never used
@@ -161,8 +178,9 @@ command above rather than from a committed file. The tables carry their populati
 
 ## What this does NOT cover
 
-* **One clip, one model, one scale.** 078 Pink Plasma, calm window only (t=120-123.4 s), 2x Futsuu Anime at 1080p.
-  The fast-motion refusal is measured on the LR simulation (5.6% at threshold 2), not on a render.
+* **One clip, one model, one scale.** 078 Pink Plasma, two 3-second windows (calm t=120-123.4 s, fast t=280-283 s),
+  2x Futsuu Anime at 1080p. Both windows are measured as render pairs; nothing here covers other titles, other
+  models, 4x scale, or a whole episode (a per-clip tuner on a 25-minute film sees far more content than 80 frames).
 * **Dust is counted by area**, not by visibility: a dot's area and count, not whether a viewer notices it. The
   owner's decision that dust need not be preserved is what makes the coarse bar legitimate here; it is not a
   measurement of how the result looks.
