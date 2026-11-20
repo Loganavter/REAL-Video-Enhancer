@@ -594,7 +594,8 @@
 
 - id: reuse-gate-reopened
   lane: reuse
-  status: current
+  status: superseded
+  superseded_by: reuse-correction-limit
   scope: >-
     investigation only, reopened by explicit owner order on 2026-11-19; the PRODUCT decision in
     reuse-gate-shelved stands unchanged (frame skipping ships off by default)
@@ -754,3 +755,27 @@
     single-frame calibration, so those numbers describe a configuration that no longer exists - they need
     re-taking (rve-int8-picture-remeasure-2026-11-19). The model-referenced numbers (body vs model
     0.004-0.019%) came from scripts/ and calibrate explicitly, so they stand.
+
+- id: reuse-correction-limit
+  lane: reuse
+  status: current
+  scope: investigation outcome of the reopened reuse lane, 2026-11-20; the PRODUCT decision stands - the gate
+    ships off by default
+  date: 2026-11-20
+  statement: 'The correction this lane now has is measured, and so is its limit. Frequency split + recursive
+    correction (low-pass at gain 1, high-pass at 1.35 on flat static blocks, per channel) reads 0/130 over the
+    0.1% bar at texture 1.001 on the calibration clip and 3/124 at 1.021 on the held-out one, at 2.428 ms per
+    frame - shippable cost, and safe on the population the gate engages on held cels. The three remaining are
+    not a ranker failure and not a geometry failure: they are the frame''s moving detail, which a 1080p residual
+    cannot move at 4K. The codec''s own motion field is measured against the exact frames that fail and does not
+    reduce the residual at any reference (medians -8.1% at the reuse depth, -13.45% at the codec''s own anchor),
+    and a DIS flow from the frame the gate actually holds fails on the same frames (4/124), so the geometry axis
+    is closed. The failures sit in a border band where two consecutive freshly rendered frames already differ
+    by more than the bar allows. No cheap statistic separates them (worst LR delta 17-62 levels on the failures
+    against 54 on passing frames), so predicting them would mean predicting the network''s 4K output from the
+    1080p frame.'
+  evidence: docs/wsp/verified/reuse-mv-reference.txt
+  note: 'What this does NOT change: reuse-gate-shelved''s product decision (the gate is off by default), and the
+    acceptance statistic (the 0.1% share is still the criterion; the border band is a real part of the picture,
+    not an artefact). What it adds: the remaining failure class has a measured cause and no measured fix, so
+    future work on it starts from this record rather than from the flow/motion-vector hypothesis.'

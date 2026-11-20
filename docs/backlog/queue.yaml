@@ -4866,7 +4866,7 @@ tasks:
 - id: rve-reuse-gate-reopened-2026-11-19
   title: 'Reuse reopened by owner: a decision statistic that separates noise from motion, and a criterion for frozen grain'
   type: experiment
-  status: in_progress
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: partial
@@ -4982,7 +4982,7 @@ tasks:
 - id: rve-reuse-codec-mv-2026-11-20
   title: 'Warp the cached SR by the codec''s own motion vectors: the only geometry the measured failure class still needs'
   type: experiment
-  status: blocked
+  status: dropped
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -5026,8 +5026,9 @@ tasks:
     four display-order frames, which puts it at distance 2 or 3 on this stream (never 1). With that reference the
     codec field explains the change where there is motion (9.6% residual reduction at the median and 94% of P frames
     improving on the action clip at 9.51 px; -1.2% and 44% on the calm clip at 5.09 px). The follow-up row is
-    rve-reuse-mv-reference-2026-11-20, which uses the field as a per-frame geometry gate; this row stays blocked
-    because its acceptance was written against the raw t-1 field.
+    rve-reuse-mv-reference-2026-11-20, which uses the field as a per-frame geometry gate; this row is dropped
+    because its acceptance was written against the raw t-1 field, and the follow-up measured the gated version and
+    closed the axis (docs/wsp/verified/reuse-mv-reference.txt).
   acceptance: >-
     (a) MV extraction that provably matches the decoded frames: `-flags2 +export_mvs` side data (or pyav), one
     script that prints, for a given frame pair, the MV field and the residual it implies, and a check that
@@ -5051,7 +5052,7 @@ tasks:
 - id: rve-reuse-mv-reference-2026-11-20
   title: 'Resolve the coded reference per frame by residual search, then use the codec field as a per-frame geometry gate'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -5093,3 +5094,17 @@ tasks:
     were taken with it. Two ways this can still fail: bi-predicted B frames carry two vectors per block and the
     side data tags them by the same index, and occlusions have a vector with no matching source content - both need
     to be counted before the gate is trusted.
+  resolution: >-
+    FALSIFIER MET 2026-11-20: the geometry axis is closed. The reference search is built into
+    `scripts/reuse_mv_gate.py` and it works - the field's best display distance is 2 (the previous P anchor), where
+    it buys 2.9% of residual over 72 P frames against -16.1% at distance 1, which is what RU035 misread. But on the
+    four reuse frames that sit over the bar, the field reduces the residual in the border band on only one, and in
+    that band it is negative at the codec's own reference too (medians -8.1% at the reuse depth, -13.45% at
+    distance 2). The failures are a moving border band (three of four frames read 0.0000% of pixels over the bar in
+    the interior) where two consecutive FRESH renders already differ on 14.32% of the band, i.e. 0.33% of the frame
+    before any reuse exists - 3.3x the bar - so the correction's 0.19% is an improvement of the band and not a
+    pass. Two independent geometry routes fail on the same frames: the codec field, and a DIS flow from the frame
+    the gate actually holds (4/124, frame 56 worse). Bilinear residual upsampling and an edge gain were measured and
+    are worse. Product state unchanged: split + recursive, 0/130 + texture 1.001 on the calibration clip,
+    3/124 + 1.021 on the held-out one, 2.428 ms/frame, gate off by default.
+  evidence: docs/wsp/verified/reuse-mv-reference.txt
