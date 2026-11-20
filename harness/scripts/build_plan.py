@@ -71,7 +71,10 @@ def main() -> int:
     onnx_path = args.onnx or (args.plan + ".onnx")
     with torch.no_grad():
         dyn = ({"input": {2: "h", 3: "w"}, "output": {2: "oh", 3: "ow"}} if args.dynamic else None)
-        torch.onnx.export(model, dummy, onnx_path, opset_version=17,
+        # dynamo=False: the torch.export-based exporter needs `onnxscript`, which the runtime does not ship -
+        # without this flag the export dies on ModuleNotFoundError before a plan is ever built. The recorded
+        # engines in this lane were all exported through the legacy TorchScript path.
+        torch.onnx.export(model, dummy, onnx_path, opset_version=17, dynamo=False,
                           input_names=["input"], output_names=["output"], dynamic_axes=dyn)
     print(f"onnx -> {onnx_path} (input 1x3x{args.height}x{args.width})")
 

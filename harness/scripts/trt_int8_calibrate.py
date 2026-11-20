@@ -108,6 +108,7 @@ def build(onnx: str, out: str, *, int8: str | None, frames: list[str], h: int, w
     dt = time.time() - t0
     if serialized is None:
         raise SystemExit(f"build failed for {out}")
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)   # --out is a directory nobody had created yet
     with open(out, "wb") as f:
         f.write(bytes(serialized))
     return {"engine": out, "build_s": round(dt, 3), "bytes": os.path.getsize(out),

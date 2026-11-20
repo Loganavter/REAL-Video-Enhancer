@@ -117,6 +117,43 @@ app-level picture moves the same way as the engine-level one, far inside the bar
    build took 468 s against 450 s here and ran while other work was on the card, which is the documented way
    a builder picks worse tactics (`avg_timing_iterations` measures under whatever load is present).
 
+## Third model, different tail scale: the mechanism does NOT reproduce, and the census says why
+
+Asked by the row's second owed item: does the form help on a different tail? `realesr-animevideov3` is a 4x
+Compact with a **48-channel** final convolution (Futsuu and Ani4K are 2x with 3 * 4 = 12). Same instrument, same
+builder, same 8-frame min-max calibration, at the geometry this model is actually used at: **480x270 -> 1920x1080**.
+(The 1080p geometry was abandoned on purpose: 4x on 1080p is 8K, nobody renders that, and the build spent 8 minutes
+autotuning tactics over a 7680x4320 output before being killed.)
+
+| arm | layers | myelin-fused | separate PReLU passes | ms | worst frame (16 held-out) |
+|---|---|---|---|---|---|
+| fp16, PReLU as-is (reference) | - | - | - | **3.14** | 0 (A/A vs itself) |
+| int8, PReLU as-is | 79 | **0** | 51 | **2.30** | **1.4783%** (peak 24, 16/16 over the bar) |
+| fp16, rewritten | - | - | - | **3.04** | **0.00000%** (peak 1 - algebra exact) |
+| int8, rewritten | 96 | **0** | 0 | **2.21** | **0.67298%** (peak 22, 15/16 over the bar) |
+
+@claim PF016 2.30 ms "frames [2a86a3b1656bfbaa] n=16" measured
+@claim PF017 2.21 ms "frames [2a86a3b1656bfbaa] n=16" measured
+@claim PF018 3.14 ms "frames [2a86a3b1656bfbaa] n=16" measured
+@claim PF019 3.04 ms "frames [2a86a3b1656bfbaa] n=16" measured
+@claim PF020 1.4783 % "frames [2a86a3b1656bfbaa] n=16" measured
+@claim PF021 0.67298 % "frames [2a86a3b1656bfbaa] n=16" measured
+@claim PF022 0.0 % "frames [2a86a3b1656bfbaa] n=16" measured
+
+So the rewrite is **1.041x** here against 1.341x (Futsuu) and 1.308x (Ani4K), and the census explains it: on this
+geometry myelin fused **nothing** in either arm, so there is no Conv+PReLU block whose boundary could stay in int8 -
+the rewrite only replaces 17 PReLU ops with 34 Mul + 17 Add + 17 Relu and adds layer count (79 -> 96). The row's own
+note is the correct predictor and it is confirmed from the other side: what pays is the number of passes that leave
+int8, not the form and not the layer count.
+
+Two things this model adds that must not be generalised the other way either:
+* the picture **improves** with the rewrite here (1.4783% -> 0.67298%), where on Ani4K it got worse - so "equal or
+  better picture" is per-model in both directions;
+* **int8 is not shippable on this model at all** (1.48% worst, 16/16 frames over the 0.1% bar, before any form
+  change), and the rewrite does not rescue it (15/16 still over). The lane's int8 verdict for a 4x 48-channel tail
+  is therefore "not this form's business", not "1.04x slower than fp16".
+* the fp16 cost of the form is **neutral** here (3.04 against 3.14), as on Ani4K, and only Futsuu pays 18%.
+
 ## What this changes in the record
 
 - The int8 boundary tax on this activation is **removable by graph expression on the implicit-int8 path**;
@@ -126,6 +163,9 @@ app-level picture moves the same way as the engine-level one, far inside the bar
   2.1x worse under explicit Q/DQ. `E9'` stands: the Q/DQ route is not fixed by this form.
 - Not checked: a native-4K picture (the 4K row's population is 1080p upscaled with lanczos), NVENC, and a
   second card.
+- The third model is measured at 480x270 -> 1920x1080, not at 1080p, and its census (0 myelin-fused in BOTH arms)
+  is the reason its speed number does not transfer. Its int8 picture (1.48%) is far outside the bar, so nothing here
+  says what an int8 4x engine would look like with a different calibrator.
 
 @claim PF001 45.22 ms "frames [6e0a5548b0cef84f] n=1" measured
 @claim PF002 33.71 ms "frames [6e0a5548b0cef84f] n=1" measured
