@@ -7,12 +7,22 @@ calibration cut). The measured fix is algebraic, not geometric:
     r      = LR_t - LR_{t-1}
     r_lf   = box5(r)                       the tone / displacement part, added at gain 1
     r_hf   = r - r_lf                      the grain part, added at gain alpha on flat static blocks
-    out    = out_{t-1} + nearest2x(r_lf + alpha_g * r_hf)
+    out    = out_{t-1} + nearest_s(r_lf + alpha_g * r_hf)
 
 Recursive (`out_{t-1}` is the previous EMITTED frame, not the cached model output) so a chain of reuses does not
 jump k frames back. Measured in `docs/wsp/verified/reuse-decision-statistic.txt`: per channel, alpha 1.35 with the
 mask, 0/130 over the bar at texture 1.001 on the calibration clip and 3/124 at 1.021 on the held-out one, for
 2.428 ms per reused frame on this GPU (`harness/scripts/reuse_correction_cost.py`).
+
+The scale `s` is read from the seeded pair, not assumed. 2x was the measured configuration, but 4x is the common
+model scale, and a corrector that only accepted `hr == 2*lr` refused exactly the configuration most users run: the
+gate would reuse a frame and emit the cached picture verbatim, which is the damage this file exists to remove.
+Nothing in the frequency split depends on the scale until the residual is upsampled, so only that step uses `s`;
+`s == 2` must stay bit-identical to the numbers above.
+
+Not covered: non-integer scales (1.5x) and anamorphic pairs whose horizontal and vertical factors differ are
+refused, so those renders keep the verbatim fallback. The algebra at 3x/4x is pinned by the unit tests only; no
+render has been measured at those scales.
 
 Two alternatives are measured and refused, so they are not implemented here. Warping the cached frame by a motion
 field: the codec's own vectors reference a picture that is not the one the gate holds, and a DIS flow from the held
@@ -62,7 +72,11 @@ class ReferenceFrameCorrector:
     # -- correction ----------------------------------------------------------------------
     @torch.inference_mode()
     def correct(self, lr_tensor: torch.Tensor) -> torch.Tensor | None:
-        """Return the corrected frame, or None when no correction can be made (caller emits verbatim)."""
+        """Return the corrected frame, or None when no correction can be made (caller emits verbatim).
+
+        The upscale factor comes from the pair's shapes, so 2x, 3x and 4x models all get the correction; a
+        non-integer or anamorphic pair cannot be corrected by a single nearest upsample and is refused.
+        """
         if self._lr is None or self._hr is None:
             self.refused += 1
             return None
@@ -70,7 +84,15 @@ class ReferenceFrameCorrector:
             # resolution change, a seek, or a different input path: the pair is not comparable
             self.refused += 1
             return None
-        if tuple(self._hr.shape[-2:]) != (2 * lr_tensor.shape[-2], 2 * lr_tensor.shape[-1]):
+        h, w = lr_tensor.shape[-2], lr_tensor.shape[-1]
+        if h <= 0 or w <= 0:
+            self.refused += 1
+            return None
+        s_h = self._hr.shape[-2] // h
+        s_w = self._hr.shape[-1] // w
+        # same factor on both axes (an anamorphic pair needs two different upsamplers, not this one),
+        # integer (the floor division must reproduce the shape exactly), and at least 2x
+        if s_h != s_w or s_h < 2 or self._hr.shape[-2] != s_h * h or self._hr.shape[-1] != s_w * w:
             self.refused += 1
             return None
         r = lr_tensor - self._lr
@@ -83,7 +105,7 @@ class ReferenceFrameCorrector:
                 grey.diff(dim=3, prepend=grey[:, :, :, :1]).abs())
         keep = ((loc < self.mask_tau) & (grad < self.mask_grad)).to(r.dtype)
         corr = lf + (1.0 + keep * (self.alpha - 1.0)) * hf
-        up = F.interpolate(corr, scale_factor=2, mode="nearest")
+        up = F.interpolate(corr, scale_factor=s_h, mode="nearest")
         out = (self._hr + up).clamp_(0.0, 1.0)
         self._hr = out
         self._lr = lr_tensor
