@@ -333,6 +333,13 @@ class UpdateGUIThread(QThread):
             except Exception as e:
                 log(f"Error in UpdateGUIThread: {e}")
 
+            # This loop is also the panel's refresh clock: the log box, FPS/ETA and the
+            # status label are painted by the same slot that shows a preview frame, so
+            # with no preview target (no shared block, or preview disabled) the whole
+            # panel used to freeze while the render ran. A null image is a tick, not a
+            # frame - the slot skips the pixmap branch and repaints the text.
+            self.latestPreviewPixmap.emit(QtGui.QImage())
+
             time.sleep(self.PREVIEW_POLL_SECONDS)
 
     @staticmethod

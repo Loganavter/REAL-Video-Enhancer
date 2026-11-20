@@ -549,19 +549,21 @@ class Render:
         stager = self._previewStager
         if stager is None or not self.informationHandler.previewWanted():
             return False
+        # Everything is inside the guard: a preview that raises must cost nothing but the
+        # preview. It used to escape from here and tear down the render (the shm block can
+        # disappear under a running job when its owner exits).
         published = False
-        ready = stager.take()
-        if ready is not None:
-            payload, fmt, high_bitdepth = ready
-            published = bool(self.informationHandler.publishPreview(
-                payload, self.previewWidth, self.previewHeight,
-                fmt=fmt, high_bitdepth=high_bitdepth,
-            ))
         try:
+            ready = stager.take()
+            if ready is not None:
+                payload, fmt, high_bitdepth = ready
+                published = bool(self.informationHandler.publishPreview(
+                    payload, self.previewWidth, self.previewHeight,
+                    fmt=fmt, high_bitdepth=high_bitdepth,
+                ))
             if not stager.busy():
                 stager.submit(frame, high_bitdepth=bool(getattr(frame, "hdr_mode", False)))
         except Exception as exc:
-            # a broken preview must never cost a render: drop the frame, keep the last one
             log(f"preview: dropping this frame ({exc})")
         return published
 

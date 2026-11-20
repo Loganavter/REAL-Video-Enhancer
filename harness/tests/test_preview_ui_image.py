@@ -81,3 +81,45 @@ def test_a_neutral_yuv_payload_decodes_to_neutral_grey():
     # BT.709 limited: 1.164*(128-16) = 130.4. Anything near 0 is the reader treating YUV as RGB.
     assert 126 <= r <= 134 and 126 <= g <= 134 and 126 <= b <= 134, got["yuv_px"]
     assert max(r, g, b) - min(r, g, b) <= 2, "neutral in must be neutral out"
+
+
+_TICK_CHILD = r"""
+import json, os, sys, types
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+root = sys.argv[1]
+sys.path.insert(0, root)
+try:
+    from PySide6 import QtCore, QtGui, QtWidgets
+except ImportError:
+    print("NOQT"); raise SystemExit(0)
+cpuinfo = types.ModuleType("cpuinfo"); cpuinfo.get_cpu_info = lambda: {}; sys.modules["cpuinfo"] = cpuinfo
+from src.ui.QTcustom import UpdateGUIThread as T
+
+app = QtWidgets.QApplication([])
+reader = T(None, "/never_created_block")   # no block: the no-preview case
+seen = []
+reader.latestPreviewPixmap.connect(lambda img: seen.append(img.isNull()))
+reader.start()
+
+def done():
+    reader.stop(); reader.wait(1000)
+    print(json.dumps({"ticks": len(seen), "all_null": all(seen)}))
+    app.quit()
+
+QtCore.QTimer.singleShot(600, done)
+app.exec()
+"""
+
+
+def test_the_reader_ticks_without_a_preview_block():
+    """The panel's log box, FPS/ETA and status are painted by the preview slot. With no
+    preview target the slot was never called, so a render ran with a frozen panel - the
+    "logs do not work without preview" report. The reader now emits a null image per tick."""
+    proc = subprocess.run([sys.executable, "-c", _TICK_CHILD, ROOT],
+                          capture_output=True, text=True, timeout=120)
+    if "NOQT" in proc.stdout:
+        pytest.skip("PySide6 is not installed for this interpreter")
+    assert proc.returncode == 0, proc.stderr[-1500:]
+    got = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert got["ticks"] >= 3, f"expected ~6 ticks in 600 ms at 10 Hz, got {got['ticks']}"
+    assert got["all_null"], "a tick carries no picture - the slot must skip the pixmap branch"
