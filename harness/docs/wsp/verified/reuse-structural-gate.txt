@@ -61,6 +61,20 @@ owner said need not be preserved ("после денойза зерна нет, 
 скана"). That decision is what moves the certifier to the coarse scale; the pixel number is reported, never used
 as a bar for this statistic.
 
+### The geometry alone, as the row asked to see it: the apparent shift of a gated render
+
+Item (b) of the row: "measuring the apparent shift of a gated render against an ungated one: it must read ~0 at the
+coarse scale". `reuse_structural_probe.py --shift-pair` registers every frame of the pair on the coarse luma:
+
+| render | median (\|dx\|, \|dy\|) | max | frames over 0.3 px |
+|---|---|---|---|
+| coarse statistic, warp ON | **(0.001, 0.001) px** | 0.128 px | **0 of 80** |
+| coarse statistic, `--no_temporal_reuse_warp` | (0.007, 0.001) px | **0.476 px** | **7 of 80** |
+
+So without the warp the drawing sits up to half an upscaled pixel away on a reused frame - small on a still, but it
+is a jump between a reused and a fresh frame, which is what the row refused to accept. Registration is a
+where-the-picture-is number and says nothing about photometric damage; the pair table above covers that.
+
 ### Cost (`harness/scripts/reuse_coarse_cost.py`, 1440x1080, medians of 30 rounds after 5 warm-ups)
 
 | | |
@@ -123,7 +137,9 @@ cd backend && $PY rve-backend.py --input /tmp/cut120.mkv --output /tmp/off.mkv -
 
 # 3. the acceptance table at both scales, and the shipped instrument for comparison
 $PY harness/scripts/reuse_structural_probe.py --render-pair /tmp/on.mkv /tmp/off.mkv
+$PY harness/scripts/reuse_structural_probe.py --shift-pair /tmp/on.mkv /tmp/off.mkv
 $PY harness/scripts/gate_sweep.py /tmp/on.mkv /tmp/off.mkv --out /tmp/damage.json --reference-kind config
+# and the same render with --no_temporal_reuse_warp, for the geometry A/B (51/80 reused either way)
 
 # 4. the cost
 $PY harness/scripts/reuse_coarse_cost.py

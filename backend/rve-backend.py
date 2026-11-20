@@ -202,6 +202,7 @@ class HandleApplication:
             temporal_reuse_max_block_mean=self.args.temporal_reuse_max_block_mean,
             int8_fit=self.args.int8_fit,
             temporal_reuse_max_chain=self.args.temporal_reuse_max_chain,
+            temporal_reuse_warp=not getattr(self.args, "no_temporal_reuse_warp", False),
             temporal_reuse_pixel_veto=self.args.temporal_reuse_pixel_veto,
             temporal_reuse_auto=not self.args.no_temporal_reuse_auto,
             quality_preset=self.args.quality_preset,
@@ -586,6 +587,15 @@ class HandleApplication:
                  "reuse-structural-gate.txt). It also moves the reused frame by the estimate.",
             choices=("mean_abs", "channel_max_share", "coarse"),
             default="mean_abs",
+        )
+        parser.add_argument(
+            "--no_temporal_reuse_warp",
+            help="Keep the reused frame's geometry as it is: do not move the cached picture by the gate's "
+                 "translation estimate before the residual correction. The A/B for that step alone - without "
+                 "it a reuse leaves the drawing where the previous frame put it, which is the scan's wobble "
+                 "(0.1-0.5 px here).",
+            action="store_true",
+            default=False,
         )
         parser.add_argument(
             "--temporal_reuse_max_block_mean",

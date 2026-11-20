@@ -1028,6 +1028,9 @@ class Render:
                 "temporal_reuse_threshold": getattr(self, "temporalReuseThreshold", None),
                 "temporal_reuse_max_chain": getattr(self, "temporalReuseMaxChain", None),
                 "temporal_reuse_statistic": getattr(self, "temporalReuseStatistic", None),
+                "temporal_reuse_warp": bool(getattr(self, "temporalReuseWarp", False)),
+                # the configured value is not what ran: the tuner overwrites the gate's threshold
+                "temporal_reuse_threshold_effective": getattr(gate, "threshold", None) if gate else None,
                 "int8_fit": getattr(self, "int8FitPreset", None),
             },
             "phases_ms_per_frame": phases,
@@ -1036,6 +1039,7 @@ class Render:
                 "reuse_pct": round(100.0 * gate.reused / gate.processed, 2) if gate.processed else None,
                 "depth_histogram": dict(sorted(gate.depth_counts.items())),
                 "vetoes": gate.vetoes, "scene_cuts": gate.scene_cuts,
+                "registration_refusals": getattr(gate, "registration_refusals", None),
             },
             "autotuner": None if auto is None else {
                 "chosen_threshold": getattr(auto, "chosen", None),
