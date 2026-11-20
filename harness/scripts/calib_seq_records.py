@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 
@@ -31,7 +33,7 @@ def main(argv=None) -> int:
                    instrument="channel-max |delta| over 64px blocks (gate_sweep --reference-kind config)",
                    config="sequential first-48-frame calibration against the spread decode, crops on both",
                    session=st.session, statistic="worst_of", tier="measured", id="SQ003",
-                   run="scripts/wall_ab.sh + harness/scripts/gate_sweep.py", artifact=os.path.join(a.dir, "pair.json"),
+                   run="harness/scripts/wall_ab.sh + harness/harness/scripts/gate_sweep.py", artifact=os.path.join(a.dir, "pair.json"),
                    extra={"artifact_sha256": sha(os.path.join(a.dir, "pair.json")),
                           "peak": pair["worst_peak"], "frames_above_bar": pair["frames_above_bar"]}))
     # the end-to-end start-up with both changes on (crops + sequential), same instrument as the split page

@@ -25,9 +25,11 @@ import torch
 import torch.nn.functional as TF
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from cut_channels_naive import load, statistic  # noqa: E402
 
 
@@ -220,9 +222,11 @@ def main() -> int:
     if args.emit:
         import json as _json
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness.core import Population, Record
         pop = Population.of("frames", [f"{args.clip_name}#frame{args.frame_index}"],
                             f"{args.clip_name}, int8 simulation against the fp16 reference")
@@ -232,7 +236,7 @@ def main() -> int:
                             + (f", clip p{args.clip}" if args.clip else "")
                             + ", calibration on 8 disjoint frames",
                      session="s-2026-11-18T09:00:00Z", statistic="worst_of", tier="measured",
-                     run="harness/scripts/int8_accuracy_sim.py", id=args.rec_id)
+                     run="harness/harness/scripts/int8_accuracy_sim.py", id=args.rec_id)
         rec.validate()
         with open(args.emit, "a") as fh:
             fh.write(_json.dumps(rec.to_dict()) + "\n")

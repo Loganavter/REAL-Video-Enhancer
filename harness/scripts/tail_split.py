@@ -4,7 +4,7 @@ Why: `int8-window.txt` splits the tail as 2.1 / 3.6 / 2.4 ms, measured on a diff
 output size, and the row that proposed fusing the tail's passes rested on that split. The split is now
 printed per run by the body itself (`int8 tail: ...`), so the row can be judged on the shipped path.
 
-Usage: python harness/scripts/tail_split.py --logs /tmp/opencode/tail --out docs/wsp/verified/records/int8-tail-split.jsonl
+Usage: python harness/harness/scripts/tail_split.py --logs /tmp/opencode/tail --out docs/wsp/verified/records/int8-tail-split.jsonl
 """
 from __future__ import annotations
 
@@ -16,9 +16,11 @@ import re
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from emit_render_records import read  # noqa: E402
 from harness.core import Population, Record, Store  # noqa: E402
@@ -72,7 +74,7 @@ def main(argv=None) -> int:
             store.emit(rec)
             out.append(rec)
 
-    outpath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), args.out)
+    outpath = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), args.out)
     with open(outpath, "w") as fh:
         for rec in out:
             fh.write(json.dumps(rec.to_dict()) + "\n")

@@ -5,7 +5,7 @@ the gate prints how many frames it reused, and the loop prints ms/frame. Reading
 hand is how a number loses its population, so this parser is the only path from a log to a claim.
 
 Usage:
-  python harness/scripts/emit_render_records.py LOG [LOG ...] --clip bd_violet20s.mkv \
+  python harness/harness/scripts/emit_render_records.py LOG [LOG ...] --clip bd_violet20s.mkv \
       --artifact docs/wsp/verified/logs/bd/vio_luma.log --config "fp16, auto luma gate" \
       --out docs/wsp/verified/records/gate-bd.jsonl --id-prefix B
 """
@@ -19,9 +19,11 @@ import re
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record  # noqa: E402
 

@@ -18,7 +18,7 @@ Scoring: the SAME held-out full frames for every arm, against the model's own fp
 >8 levels and peak - the project's own statistic, so the arms are comparable to the record.
 
 Usage:
-  python harness/scripts/calibration_coverage.py --clip /tmp/opencode/bd_violet20s.mkv \
+  python harness/harness/scripts/calibration_coverage.py --clip /tmp/opencode/bd_violet20s.mkv \
       --model "<install>/custom_models/2x-Futsuu-Anime(1).pth" --out docs/wsp/verified/records/int8-calibration-crops.jsonl
 """
 from __future__ import annotations
@@ -31,15 +31,17 @@ import sys
 import time
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 import torch  # noqa: E402
 
 from harness.core import Population, Record, Store  # noqa: E402
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "backend"))
 from src.pytorch.Int8Body import Int8Body  # noqa: E402
 import src.utils.Int8Probe as _probe  # noqa: E402
 
@@ -158,11 +160,11 @@ def main(argv=None) -> int:
         print(f"{name:7} calibrate {seconds:6.2f} s   worst share {max(shares):8.5f}%   peak {max(peaks):3.0f}")
 
     # how far the ranges moved, per channel, per layer: the mechanism behind any difference
-    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), args.log), "w") as fh:
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), args.log), "w") as fh:
         fh.write("\n".join(log_lines) + "\n")
 
-    out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), args.out)
-    digest = hashlib.sha256(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    out = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), args.out)
+    digest = hashlib.sha256(open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                                               args.log), "rb").read()).hexdigest()
     store = Store(session=session)
     pop = Population.of("clips", [os.path.basename(args.clip)],
@@ -175,7 +177,7 @@ def main(argv=None) -> int:
             instrument="the body's certify() share, worst of the held-out frames, against the model",
             config=f"calibration arm {name}: {len(frames) if name == 'full' else len(crops)} samples",
             session=session, statistic="worst_of", tier="measured",
-            run=f"harness/scripts/calibration_coverage.py --arm {name}", artifact=args.log,
+            run=f"harness/harness/scripts/calibration_coverage.py --arm {name}", artifact=args.log,
             extra={"artifact_sha256": digest, "of": "share", "arm": name}))
         ids[name] = rec.id
         rec2 = store.emit(Record(
@@ -183,7 +185,7 @@ def main(argv=None) -> int:
             instrument="wall clock around Int8Body.calibrate, one GPU job, synchronised",
             config=f"calibration arm {name}: {len(frames) if name == 'full' else len(crops)} samples",
             session=session, statistic="single", tier="measured",
-            run=f"harness/scripts/calibration_coverage.py --arm {name}", artifact=args.log,
+            run=f"harness/harness/scripts/calibration_coverage.py --arm {name}", artifact=args.log,
             extra={"artifact_sha256": digest, "of": "frame_time", "arm": name}))
         ids[name + "-cost"] = rec2.id
         print(rec.claims_line())

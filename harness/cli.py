@@ -2,7 +2,7 @@
 
     python -m harness.cli check docs/claims-x.txt --records /tmp/records.jsonl [--bars bars.json]
 
-Difference from ``scripts/claim_check.py``: that auditor compares *typed labels* in a text file, so
+Difference from ``harness/scripts/claim_check.py``: that auditor compares *typed labels* in a text file, so
 a derived number is free text and its arithmetic is read only for ``@ratio``. Here every ``@claim``
 must match a record field for field (value, unit, population item-set hash), every ``@ratio`` is
 rebuilt through ``Store.ratio`` (instrument, config, session, statistic, item set), every derived

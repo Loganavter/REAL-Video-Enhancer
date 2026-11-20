@@ -11,8 +11,8 @@ another session. Ratios are only meaningful inside one session; the ledger says 
 prints every repeat for that reason.
 
 Usage:
-  python3 harness/scripts/bench_plan.py <plan> [--width 1920] [--height 1080] [--iters 25] [--repeat 3]
-  python3 harness/scripts/bench_plan.py <plan> --dump-layers     # layer/reformat counts, no timing
+  python3 harness/harness/scripts/bench_plan.py <plan> [--width 1920] [--height 1080] [--iters 25] [--repeat 3]
+  python3 harness/harness/scripts/bench_plan.py <plan> --dump-layers     # layer/reformat counts, no timing
 """
 from __future__ import annotations
 
@@ -128,9 +128,11 @@ def main() -> int:
     if args.emit:
         import statistics
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         store = Store()
         insp = engine.create_engine_inspector()

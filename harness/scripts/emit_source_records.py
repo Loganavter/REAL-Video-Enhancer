@@ -4,7 +4,7 @@ Reads docs/wsp/sources.yaml, probes each clip that is reachable, and writes one 
 the bit rate and the packet count, plus the stream-copy proof when the manifest carries it. Prints the
 `@claim` lines the prose file quotes.
 
-Usage: python harness/scripts/emit_source_records.py docs/wsp/sources.yaml --clip-root /tmp/opencode \
+Usage: python harness/harness/scripts/emit_source_records.py docs/wsp/sources.yaml --clip-root /tmp/opencode \
            --out docs/wsp/verified/records/sources-bd.jsonl --artifact docs/wsp/verified/logs/sources-bd.log
 """
 from __future__ import annotations
@@ -16,9 +16,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 import yaml  # noqa: E402
 

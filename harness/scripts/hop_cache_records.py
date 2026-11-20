@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
@@ -22,7 +24,7 @@ def main(argv=None) -> int:
                        instrument="torch.cuda.Event, 3 interleaved rounds, medians of rounds 2+",
                        config=f"int8 hop, BLOCK_M 128, 4 warps, cache policy = {arm}",
                        session=st.session, statistic="median", tier="measured", id=f"C{i:03d}",
-                       run="scripts/hop_cache_probe.py", artifact=a.probe,
+                       run="harness/scripts/hop_cache_probe.py", artifact=a.probe,
                        extra={"artifact_sha256": dig, "arm": arm,
                               "gbps": round(250.6 / ms, 1)}))
     st.dump(a.out)

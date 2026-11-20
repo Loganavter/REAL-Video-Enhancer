@@ -11,7 +11,7 @@ the population label and in ``run``, while ``config``/``instrument``/``session``
 equal, which is what ``Store._relation`` demands of a ratio.
 
 Usage:
-  python harness/scripts/wall_ab_records.py --logs docs/wsp/verified/logs/wall-ab \
+  python harness/harness/scripts/wall_ab_records.py --logs docs/wsp/verified/logs/wall-ab \
       --out docs/wsp/verified/records/int8-wall-ab.jsonl
 """
 from __future__ import annotations
@@ -24,9 +24,11 @@ import re
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from emit_render_records import facts, read  # noqa: E402  one parser for the loop line
 from harness.core import Population, Record, Store  # noqa: E402

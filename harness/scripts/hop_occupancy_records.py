@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
@@ -27,7 +29,7 @@ def main(argv=None) -> int:
         st.emit(Record(value=round(ms, 3), unit="ms", population=pop,
                        instrument="torch.cuda.Event, 3 interleaved rounds, medians of rounds 2+",
                        config=f"{cfg}, BLOCK_M {bm}, {wp} warps", session=st.session, statistic="median",
-                       tier="measured", id=f"O{i:03d}", run="scripts/hop_occupancy_probe.py",
+                       tier="measured", id=f"O{i:03d}", run="harness/scripts/hop_occupancy_probe.py",
                        artifact=a.sweep, extra={"artifact_sha256": d1, "arm": arm,
                                                 "block_m": int(bm), "warps": int(wp)}))
     st.delta("O001", "O001", note="placeholder") if False else None
@@ -38,7 +40,7 @@ def main(argv=None) -> int:
                        instrument="torch.cuda.Event, 3 interleaved rounds, medians of rounds 2+",
                        config=f"{cfg}, BLOCK_M 128, 4 warps, epilogue = {arm}", session=st.session,
                        statistic="median", tier="measured", id=f"O{j:03d}",
-                       run="scripts/hop_epilogue_probe.py", artifact=a.epi,
+                       run="harness/scripts/hop_epilogue_probe.py", artifact=a.epi,
                        extra={"artifact_sha256": d2, "arm": arm, "of": "epilogue"}))
     st.dump(a.out)
     print(st.claims_text().strip())

@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 
@@ -23,12 +25,12 @@ def main(argv=None) -> int:
         st.emit(Record(value=float(d[key]["ink_mean_signed"]), unit="levels", population=pop,
                        instrument=instr + (" (decoded_vs_roundtrip: against the pipe round-trip)" if "roundtrip" in key and key.startswith("decoded") else ""),
                        config=cfg, session=st.session, statistic="mean", tier="measured", id=f"IK{i:03d}",
-                       run="scripts/ink_lift_probe.py", artifact=a.json,
+                       run="harness/scripts/ink_lift_probe.py", artifact=a.json,
                        extra={"artifact_sha256": dig, "stage": key}))
     st.emit(Record(value=float(d["decoded_file"]["share_gt8_pct"]), unit="%", population=pop,
                    instrument="share of pixels above 8 levels, decoded file against the model",
                    config=cfg, session=st.session, statistic="single", tier="measured", id="IK005",
-                   run="scripts/ink_lift_probe.py", artifact=a.json, extra={"artifact_sha256": dig}))
+                   run="harness/scripts/ink_lift_probe.py", artifact=a.json, extra={"artifact_sha256": dig}))
     st.dump(a.out)
     print(st.claims_text().strip())
     print(f"# -> {a.out}", file=sys.stderr)

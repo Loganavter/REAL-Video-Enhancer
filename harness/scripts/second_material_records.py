@@ -1,6 +1,6 @@
 """Records for the second-material replay: each adopted change reverted, per clip, never pooled.
 
-Usage: python harness/scripts/second_material_records.py [--root docs/wsp/verified/logs/second-material]
+Usage: python harness/harness/scripts/second_material_records.py [--root docs/wsp/verified/logs/second-material]
                                                  [--out docs/wsp/verified/records/int8-defaults-material.jsonl]
 """
 from __future__ import annotations
@@ -13,9 +13,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -82,7 +84,7 @@ def main(argv=None) -> int:
                                                  label=f"{pop.label}, arm {arm}"),
                            instrument="the render loop line, ms/frame", config=cfg, session=session,
                            statistic="median", tier="measured", id=rid,
-                           run=f"rve-backend.py via scripts/wall_ab.sh, logs {path}", artifact=art,
+                           run=f"rve-backend.py via harness/scripts/wall_ab.sh, logs {path}", artifact=art,
                            extra={"artifact_sha256": sha256(art), "of": "frame_time",
                                   "change": change, "per_round": arms[arm], "clip": clip}))
             ids[arm] = rid_out

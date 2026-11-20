@@ -18,7 +18,7 @@ recorded C=64/48/32 builds (50.2-56.5 / 42.4 / 40.6-41.4 ms).
 
 Usage (one GPU job at a time):
   flock -n /var/tmp/opencode/gpu.lock ~/.cache/opencode/venvs/trt310/bin/python \
-      harness/scripts/probe_prelu_forms.py --channels 32 --emit /tmp/opencode/b3-records.jsonl
+      harness/harness/scripts/probe_prelu_forms.py --channels 32 --emit /tmp/opencode/b3-records.jsonl
 
   --channels 64        the control width, where fusion already works
   --forms prelu,affine,leaky
@@ -273,9 +273,11 @@ def main() -> int:
 
     if args.emit:
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         import tensorrt as trt
         store = Store()

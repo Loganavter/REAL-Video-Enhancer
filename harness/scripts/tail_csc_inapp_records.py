@@ -11,7 +11,7 @@ conversion inside one arm. This reader takes the numbers that decide the row, in
   (the chroma rounding order moves), reference-kind config.
 
 Usage:
-  python harness/scripts/tail_csc_inapp_records.py \
+  python harness/harness/scripts/tail_csc_inapp_records.py \
       --logs docs/wsp/verified/logs/tail-csc-ratio \
       --pair docs/wsp/verified/logs/tail-csc-pair/pair.json \
       --out docs/wsp/verified/records/int8-tail-csc-inapp.jsonl
@@ -27,9 +27,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -109,7 +111,7 @@ def main(argv=None) -> int:
         rec = Record(value=round(statistics.median(data[arm]["ms"][r] for r in kept), 2), unit="ms",
                      population=pop, instrument=instr, config=config, session=session,
                      statistic="median", tier="measured", id=f"JC{len(out) + 1:03d}",
-                     run="rve-backend.py, logs from scripts/wall_ab.sh", artifact=data[arm]["path"],
+                     run="rve-backend.py, logs from harness/scripts/wall_ab.sh", artifact=data[arm]["path"],
                      extra={"of": "frame_time", "arm": arm,
                             "artifact_sha256": hashlib.sha256(
                                 open(data[arm]["path"], "rb").read()).hexdigest()})
@@ -141,7 +143,7 @@ def main(argv=None) -> int:
                                      "profile summary for pack+queue"),
                          config=config, session=session, statistic="median", tier="measured",
                          id=f"JC{len(out) + 1:03d}",
-                         run="rve-backend.py, logs from scripts/wall_ab.sh", artifact=data[arm]["path"],
+                         run="rve-backend.py, logs from harness/scripts/wall_ab.sh", artifact=data[arm]["path"],
                          extra={"of": "frame_time", "phase": phase, "arm": arm,
                                 "artifact_sha256": hashlib.sha256(
                                     open(data[arm]["path"], "rb").read()).hexdigest()})
@@ -172,7 +174,7 @@ def main(argv=None) -> int:
                 rec = Record(value=round(statistics.median(nv[arm]["ms"][r] for r in nvkept), 2),
                              unit="ms", population=nvpop, instrument=nvinstr, config=nvconfig,
                              session=nvsession, statistic="median", tier="measured",
-                             id=f"JC{len(out) + 1:03d}", run="rve-backend.py, logs from scripts/wall_ab.sh",
+                             id=f"JC{len(out) + 1:03d}", run="rve-backend.py, logs from harness/scripts/wall_ab.sh",
                              artifact=nv[arm]["path"],
                              extra={"of": "frame_time", "arm": arm,
                                     "artifact_sha256": hashlib.sha256(

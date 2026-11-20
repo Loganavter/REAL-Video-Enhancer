@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
@@ -22,7 +24,7 @@ def main(argv=None) -> int:
                        instrument="torch.cuda.Event, 3 draws of 20 launches, median",
                        config=f"int8 hop 64->64 3x3, BLOCK_M 128, 4 warps, {r['H']}x{r['W']}",
                        session=st.session, statistic="median", tier="measured", id=f"S{i:03d}",
-                       run="scripts/hop_constant_probe.py", artifact=a.probe,
+                       run="harness/scripts/hop_constant_probe.py", artifact=a.probe,
                        extra={"artifact_sha256": dig, "tops": r["tops"], "ms_per_mpx": r["ms_per_mpx"]}))
     st.emit(Record(value=pr["implied_constant_ms"], unit="ms",
                    population=Population.of("frames", ("256x256#int8-codes", "3840x2160#int8-codes"),
@@ -30,7 +32,7 @@ def main(argv=None) -> int:
                    instrument="derived from the two ends of the scaling sweep",
                    config="int8 hop, 0.07 Mpx against 8.29 Mpx", session=st.session, statistic="single",
                    tier="measured", id=f"S{len(pr['rows'])+1:03d}",
-                   run="scripts/hop_constant_probe.py", artifact=a.probe,
+                   run="harness/scripts/hop_constant_probe.py", artifact=a.probe,
                    extra={"artifact_sha256": dig, "of": "launch_constant"}))
     st.dump(a.out)
     print(st.claims_text().strip())

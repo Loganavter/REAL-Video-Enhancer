@@ -4,7 +4,7 @@ The ladder is the evidence for the lever this row turned into - `s[c] = max(s_in
 is a ladder and not a choice between the two shipped modes. Every K costs the same arithmetic (the fold cancels),
 so the population is frames and the only quantity is the gross-error share.
 
-Usage: python harness/scripts/int8_grid_k_records.py [--ladder ...] [--out ...] [--table]
+Usage: python harness/harness/scripts/int8_grid_k_records.py [--ladder ...] [--out ...] [--table]
 """
 from __future__ import annotations
 
@@ -15,9 +15,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -45,7 +47,7 @@ def main(argv=None) -> int:
                                     "against the model's own fp16 forward",
                          config=f"{row['file']}, grid {mode} (s[c] = max(s_in[c], s_t/K))",
                          session=store.session, statistic="worst_of", tier="measured",
-                         id=f"GK{len(out) + 1:03d}", run="scripts/int8_grid_k_probe.py",
+                         id=f"GK{len(out) + 1:03d}", run="harness/scripts/int8_grid_k_probe.py",
                          artifact=args.ladder,
                          extra={"artifact_sha256": dig, "of": "gross_error_share", "grid": mode,
                                                       "scale": row.get("scale")})

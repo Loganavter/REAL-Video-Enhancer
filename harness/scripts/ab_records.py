@@ -8,7 +8,7 @@ The arm is the variable under test, so it lives in `run` and `extra`, never in `
 ratio whose configurations differ, and putting the arm there would make the ratio unrepresentable.
 
 Usage:
-  python harness/scripts/ab_records.py --clip bd_violet20s --logdir docs/wsp/verified/logs/ultra-null2 \
+  python harness/harness/scripts/ab_records.py --clip bd_violet20s --logdir docs/wsp/verified/logs/ultra-null2 \
       --arms fp16,k2 --sink null --model "2x-sudo-UltraCompact" --out records/int8-ultra.jsonl
 """
 from __future__ import annotations
@@ -21,9 +21,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -81,7 +83,7 @@ def main(argv=None) -> int:
             continue
         rec = Record(value=round(statistics.median(ms[r] for r in kept), 2), unit="ms", population=pop,
                      instrument=instr, config=cfg, session=session, statistic="median", tier="measured",
-                     run=f"rve-backend.py, arm {arm}, logs from scripts/wall_ab.sh", artifact=path,
+                     run=f"rve-backend.py, arm {arm}, logs from harness/scripts/wall_ab.sh", artifact=path,
                      extra={"of": "frame_time", "arm": arm,
                             "artifact_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()})
         rec.id = f"AB{len(out) + 1:03d}"

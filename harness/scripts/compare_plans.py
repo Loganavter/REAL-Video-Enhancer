@@ -8,7 +8,7 @@ channel is more than 8 levels off, plus the peak and PSNR.
 The frame is named by its sha256, so the number belongs to a population instead of to a sentence.
 
 Usage:
-  python3 harness/scripts/compare_plans.py <ref.plan> <cand.plan> <frame.raw> --width W --height H [--emit FILE]
+  python3 harness/harness/scripts/compare_plans.py <ref.plan> <cand.plan> <frame.raw> --width W --height H [--emit FILE]
 """
 from __future__ import annotations
 
@@ -82,9 +82,11 @@ def main() -> int:
 
     if args.emit:
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         store = Store()
         pop = Population.of("pixels of one frame", [sha[:16]],

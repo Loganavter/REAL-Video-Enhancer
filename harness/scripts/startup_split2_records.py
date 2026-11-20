@@ -8,9 +8,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 
@@ -40,7 +42,7 @@ def main(argv=None) -> int:
         st.emit(Record(value=float(value), unit="s", population=pop,
                        instrument="host wall clock around each phase, torch.cuda.synchronize between",
                        config=cfg, session=st.session, statistic="single", tier="measured",
-                       id=f"BB{n:03d}", run="scripts/body_build_split.py", artifact=art,
+                       id=f"BB{n:03d}", run="harness/scripts/body_build_split.py", artifact=art,
                        extra={"artifact_sha256": sha(art), "phase": note}))
         n += 1
 
@@ -53,7 +55,7 @@ def main(argv=None) -> int:
         st.emit(Record(value=float(j["worst_share"]), unit="%", population=frames,
                        instrument="channel-max |delta| in RGB over 64px blocks (gate_sweep --reference-kind config)",
                        config=label, session=st.session, statistic="worst_of", tier="measured",
-                       id=f"CP{n:03d}", run="scripts/wall_ab.sh + harness/scripts/gate_sweep.py",
+                       id=f"CP{n:03d}", run="harness/scripts/wall_ab.sh + harness/harness/scripts/gate_sweep.py",
                        artifact=os.path.join(a.certdir, f"{arm}.json"),
                        extra={"artifact_sha256": sha(os.path.join(a.certdir, f"{arm}.json")),
                               "arm": arm, "peak": j["worst_peak"], "frames_above_bar": j["frames_above_bar"]}))

@@ -6,7 +6,7 @@ three stages the line did not print (pack+queue, the wrapper around the body, re
 what the instrument actually says now, plus the one number that shows whether the instrument can be summed
 at all: the profile's frame total divided against the render loop's wall clock.
 
-Usage: python harness/scripts/frame_accounting.py --logs /tmp/opencode/acct2 --out docs/wsp/verified/records/int8-frame-accounting.jsonl
+Usage: python harness/harness/scripts/frame_accounting.py --logs /tmp/opencode/acct2 --out docs/wsp/verified/records/int8-frame-accounting.jsonl
 """
 from __future__ import annotations
 
@@ -18,9 +18,11 @@ import re
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from emit_render_records import read  # noqa: E402
 from harness.core import Population, Record, Store  # noqa: E402

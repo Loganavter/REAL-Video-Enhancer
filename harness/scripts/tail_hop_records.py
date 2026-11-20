@@ -3,7 +3,7 @@
 Two files, two instruments, one row. The picture half is the corpus's own emulation recipe on four held-out
 frames; the timing half is one Triton kernel against the shipped two-step tail on the same codes.
 
-Usage: python harness/scripts/tail_hop_records.py [--emul .../emulation.json] [--kernel .../kernel.json]
+Usage: python harness/harness/scripts/tail_hop_records.py [--emul .../emulation.json] [--kernel .../kernel.json]
                                           [--out docs/wsp/verified/records/int8-tail-hop.jsonl]
 """
 from __future__ import annotations
@@ -17,9 +17,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -61,20 +63,20 @@ def main(argv=None) -> int:
                        config=f"folded-scale int8 tail, weights per-output-channel int8, outputs "
                               f"padded 12->16, frame {r['frame']}",
                        session=esess, statistic="single", tier="measured", id=f"A{i:03d}",
-                       run="scripts/tail_int8_emulation.py", artifact=args.emul,
+                       run="harness/scripts/tail_int8_emulation.py", artifact=args.emul,
                        extra={"artifact_sha256": edig, "of": "share", "frame": r["frame"],
                               "peak": r["int8_peak"], "mean_abs_levels": round(r["int8_mean"], 3)}))
     st.emit(Record(value=round(em["worst_share"], 5), unit="%", population=pop,
                    instrument="the body's arithmetic in torch, integer accumulation exact in float32",
                    config="folded-scale int8 tail, weights per-output-channel int8, outputs padded 12->16",
                    session=esess, statistic="worst_of", tier="measured", id="A005",
-                   run="scripts/tail_int8_emulation.py", artifact=args.emul,
+                   run="harness/scripts/tail_int8_emulation.py", artifact=args.emul,
                    extra={"artifact_sha256": edig, "of": "share", "bar": "bar_int8_share"}))
     st.emit(Record(value=float(em["worst_peak"]), unit="levels", population=pop,
                    instrument="the body's arithmetic in torch, channel-max |delta| in RGB levels",
                    config="folded-scale int8 tail, weights per-output-channel int8, outputs padded 12->16",
                    session=esess, statistic="max", tier="measured", id="A006",
-                   run="scripts/tail_int8_emulation.py", artifact=args.emul,
+                   run="harness/scripts/tail_int8_emulation.py", artifact=args.emul,
                    extra={"artifact_sha256": edig, "of": "peak", "bar": "bar_int8_peak",
                           "note": "the DELTA between the two configurations, not the int8 path's "
                                   "deviation from the model"}))
@@ -82,7 +84,7 @@ def main(argv=None) -> int:
                    instrument="the same emulation with NO weight quantisation - the algebra alone",
                    config="folded-scale tail, weights kept in float32 (fold only, no int8 weights)",
                    session=esess, statistic="worst_of", tier="measured", id="A007",
-                   run="scripts/tail_int8_emulation.py", artifact=args.emul,
+                   run="harness/scripts/tail_int8_emulation.py", artifact=args.emul,
                    extra={"artifact_sha256": edig, "of": "share",
                           "note": "isolates the fold's algebra from the weight quantisation"}))
 
@@ -101,7 +103,7 @@ def main(argv=None) -> int:
                        population=Population(kind=kpop.kind, items=kpop.items,
                                              label=f"{kpop.label}, arm {arm}: {label}"),
                        instrument=kinst, config=kcfg, session=ksess, statistic="median",
-                       tier="measured", id=rid, run="scripts/tail_hop_probe.py", artifact=args.kernel,
+                       tier="measured", id=rid, run="harness/scripts/tail_hop_probe.py", artifact=args.kernel,
                        extra={"artifact_sha256": kdig, "arm": arm, "of": "tail_time"}))
     st.delta("B004", "B001", note="the candidate's saving on the tail, one frame")
 

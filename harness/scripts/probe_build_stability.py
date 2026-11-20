@@ -10,8 +10,8 @@ and the tile, and never read `__myl_` alone - two plans with 19 fused layers wer
 
 Usage (one GPU job at a time):
   F=~/.cache/opencode/venvs/trt310/bin/python
-  $F scripts/make_width_probe.py /tmp/opencode/p32.onnx --width-ch 32
-  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/probe_build_stability.py /tmp/opencode/p32.onnx \
+  $F harness/scripts/make_width_probe.py /tmp/opencode/p32.onnx --width-ch 32
+  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/probe_build_stability.py /tmp/opencode/p32.onnx \
       --trials 3 --emit /tmp/opencode/stability.jsonl
 """
 from __future__ import annotations
@@ -24,9 +24,11 @@ import sys
 import torch
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from probe_prelu_forms import build, graph, load_engine, time_plan   # noqa: E402
 
 

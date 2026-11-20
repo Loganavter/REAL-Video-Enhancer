@@ -19,7 +19,7 @@ frames in the time of one). Interleaved rounds.
 
 Usage (one GPU job at a time):
   flock -n /var/tmp/opencode/gpu.lock ~/.cache/opencode/venvs/trt310/bin/python \
-      harness/scripts/probe_strips.py --plan /tmp/opencode/compact2x_1080p_fp16.plan
+      harness/harness/scripts/probe_strips.py --plan /tmp/opencode/compact2x_1080p_fp16.plan
 """
 from __future__ import annotations
 
@@ -171,9 +171,11 @@ def main() -> int:
 
     if args.emit:
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         import tensorrt as trt
         store = Store()

@@ -2,8 +2,8 @@
 
 Inputs, all committed under `docs/wsp/verified/logs/trt-int8/`:
   prof_fp16.log, prof_int8_entropy.log, prof_int8_minmax.log   `trtexec --loadEngine --dumpProfile`
-  trt-int8-accuracy.json                                        `scripts/trt_int8_accuracy.py`
-  trt-int8-manifest.json                                        `scripts/trt_int8_calibrate.py` (frames by sha256)
+  trt-int8-accuracy.json                                        `harness/scripts/trt_int8_accuracy.py`
+  trt-int8-manifest.json                                        `harness/scripts/trt_int8_calibrate.py` (frames by sha256)
 
 The two engines have different layer sets by construction (25 fused vs 60 split), so the fp16/int8 quotient is a
 CROSS-POPULATION ratio and the harness marks it `assumed` - the arithmetic is checked, the population claim is
@@ -19,9 +19,11 @@ import re
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 ROW = re.compile(r"\[I\]\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+(.+)$")
@@ -146,7 +148,7 @@ def main(argv=None) -> int:
         for arm, rid in order.items():
             st.emit(Record(value=float(pr["median_ms"][arm]), unit="ms", population=pop, instrument=instr,
                            config=cfg, session=st.session, statistic="median", tier="measured", id=rid,
-                           run="scripts/trt_vs_body_probe.py", artifact=a.probe,
+                           run="harness/scripts/trt_vs_body_probe.py", artifact=a.probe,
                            extra={"artifact_sha256": dprobe, "arm": arm,
                                   "rounds": pr["rounds"][arm]}))
         rb = st.ratio("TV002", "TV003", note="TRT int8 / Triton body: how much faster the body is")
@@ -166,7 +168,7 @@ def main(argv=None) -> int:
                                           ("psnr_db", "dB", "single")):
                     st.emit(Record(value=float(row[field]), unit=unit, population=p_pop, instrument=instr,
                                    config=cfg, session=st.session, statistic=stat, tier="measured",
-                                   id=f"TV{n:03d}", run="scripts/trt_vs_body_probe.py", artifact=a.probe,
+                                   id=f"TV{n:03d}", run="harness/scripts/trt_vs_body_probe.py", artifact=a.probe,
                                    extra={"artifact_sha256": dprobe, "arm": arm, "of": field}))
                     n += 1
 

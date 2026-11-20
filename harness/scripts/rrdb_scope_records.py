@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, glob, hashlib, os, sys, torch
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 MODELS = ["2x-sudo-RealESRGAN(1).pth", "2x_Pooh_RPLKSR_Candidate_1_387k.pth",
@@ -31,7 +33,7 @@ def main(argv=None) -> int:
                        instrument="sum over the checkpoint's conv shapes of Cin*Cout*kh*kw*2*H*W",
                        config=f"{name}, {len(convs)} convolutions, 1920x1080 in", session=st.session,
                        statistic="single", tier="measured", id=f"RB{n:03d}",
-                       run="harness/scripts/rrdb_scope_records.py", artifact=p,
+                       run="harness/harness/scripts/rrdb_scope_records.py", artifact=p,
                        extra={"artifact_sha256": sha(p), "convs": len(convs)}))
         n += 1
     # the build that was killed: a LOWER BOUND on the engine build, and the reason the row closes
