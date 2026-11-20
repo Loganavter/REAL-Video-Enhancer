@@ -8,7 +8,7 @@
 # a value - it carries a LIFETIME, and a stale verdict outranks a fresh measurement whenever the
 # reader goes top-down.
 #
-# The rule this file enforces (mechanically, in scripts/harness/verdicts.py):
+# The rule this file enforces (mechanically, in harness/verdicts.py):
 #   * `scope` is mandatory. "per-channel PReLU cannot join an int8 epilogue" is true of TRT and false
 #     of our own Triton kernel, and without `scope` it is one statement that travels anywhere.
 #   * a verdict with status `superseded` or `refuted` MUST name its replacement, and that replacement

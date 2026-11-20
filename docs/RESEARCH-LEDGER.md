@@ -1869,7 +1869,7 @@ The second result explains the fusion break at C=32 better than "the width is to
 family changes, and both families that win at narrow widths - `scudnn_winograd` here,
 `sm80_xmma_..._indexed_wo_smem_...` in the full model - take no epilogue, so myelin leaves the PReLU
 outside. Whatever restores the epilogue at C=32 has to beat those kernels while staying in a family
-that fuses, which is exactly what `scripts/force_tactic.py` scans by forcing one tactic index at a time
+that fuses, which is exactly what `harness/scripts/force_tactic.py` scans by forcing one tactic index at a time
 and reading the resulting layer names.
 
 ## The counters are unblocked, and the int8 kernel is not at any limit (2026-11-15)

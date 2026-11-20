@@ -22,7 +22,7 @@ So neither existing mechanism is the second condition the share needs. A channel
 would be, and it does not exist: adding it is a code change whose cost is unmeasured because there is
 nothing to measure yet.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/blockmax-and-veto-cost.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/blockmax-and-veto-cost.txt \
        --records docs/wsp/verified/records/blockmax-and-veto-cost.jsonl --bars docs/claims-bars.json
 
 @claim R001 66.3 % "frames [5aa8615233f267ff] n=249" measured

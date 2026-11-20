@@ -3,7 +3,7 @@
 Generated 2026-11-16, **verbatim**, by:
 
 ```
-PYTHONPATH=scripts python3 -m harness.migrate "docs/claims-*.txt"
+PYTHONPATH=. python3 -m harness.migrate "docs/claims-*.txt"
 ```
 
 Everything below the line is the tool's output, unedited. It is not a summary: the gate fails while

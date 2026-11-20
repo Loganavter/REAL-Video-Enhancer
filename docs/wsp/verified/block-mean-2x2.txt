@@ -26,7 +26,7 @@ What would make the flip safe is the one mechanism that bounds a concentrated ar
 a per-pixel veto in the channel-max variable. `max_block_mean` is inert (a 32 px mean of a few bright
 pixels) and the luma veto cannot see a red-only change.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/block-mean-2x2.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/block-mean-2x2.txt \
        --records docs/wsp/verified/records/block-mean-2x2.jsonl --bars docs/claims-bars.json
 
 @claim R001 11.0 levels "frames [718310b673d2e8ba] n=481" measured

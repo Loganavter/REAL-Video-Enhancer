@@ -90,7 +90,7 @@ warning and served by cuDNN. Nothing here changes the body's own coverage bounda
   the model (that one is 15-17 on the two frames above).
 - Timing is null sink, reuse off; the NVENC arm is not measured here.
 - Suite: `pytest backend/tests` reads 409 passed, 1 failed - the failure is `ModuleNotFoundError: yaml` in
-  `scripts/harness/db.py` under the app's portable interpreter, which has no PyYAML; no file of this change
+  `harness/db.py` under the app's portable interpreter, which has no PyYAML; no file of this change
   is on that import path.
 
 ## Reproduce
@@ -104,12 +104,12 @@ ARMS="tailf16 tailint8" ARM_ENV_TAILF16="RVE_TAIL_INT8=0" ARM_ENV_TAILINT8="RVE_
   CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
 ARMS="tailf16 tailint8" ARM_ENV_TAILF16="RVE_TAIL_INT8=0" ARM_ENV_TAILINT8="RVE_TAIL_INT8=1" \
   CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/tail-hop scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <f16.mkv> <int8.mkv> --out pair.json \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <f16.mkv> <int8.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix TF
-PYTHONPATH=scripts python3 scripts/tail_hop_records.py --pair <pair-records.jsonl>
+PYTHONPATH=. python3 harness/scripts/tail_hop_records.py --pair <pair-records.jsonl>
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tail-hop.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tail-hop.txt \
        --records docs/wsp/verified/records/int8-tail-hop.jsonl --bars docs/claims-bars.json
 
 @claim A001 0.00113 % "frames [d607a3811478aeb4] n=4" measured

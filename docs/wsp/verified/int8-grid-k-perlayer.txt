@@ -49,8 +49,8 @@ path keeps the single-K sweep with its K=2-clean skip.
 ```bash
 RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/grid_k_perlayer_probe.py \
     --model "<model>.pth" --out-file /tmp/opencode/grid-perlayer.json
-PYTHONPATH=scripts python3 scripts/grid_k_perlayer_records.py
-PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-grid-k-perlayer.txt \
+PYTHONPATH=. python3 harness/scripts/grid_k_perlayer_records.py
+PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-grid-k-perlayer.txt \
     --records docs/wsp/verified/records/int8-grid-k-perlayer.jsonl --bars docs/claims-bars.json
 ```
 

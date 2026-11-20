@@ -71,10 +71,10 @@ ar x ncu.deb && tar -xf data.tar.xz && cp -a opt/nvidia/nsight-compute/2026.4.0 
 flock -n /var/tmp/opencode/gpu.lock ~/.local/nsight/2026.4.0/ncu \
   --target-processes all -k regex:body_prologue_kernel --launch-skip 20 --launch-count 1 \
   --section SpeedOfLight --section MemoryWorkloadAnalysis <install-python> <body-target.py>
-PYTHONPATH=scripts python3 scripts/hop_ncu_records.py
+PYTHONPATH=. python3 harness/scripts/hop_ncu_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-ncu.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-ncu.txt \
        --records docs/wsp/verified/records/int8-hop-ncu.jsonl --bars docs/claims-bars.json
 
 @claim N001 1.6 ms "frames [10cff28ea287d300] n=1" measured

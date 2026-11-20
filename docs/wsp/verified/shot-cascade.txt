@@ -1,6 +1,6 @@
 # A cheap model on a whole shot: refused, by two orders of magnitude
 
-Measured 2026-11-17 with `scripts/probe_shot_cascade.py`: the expensive model is the reference, the
+Measured 2026-11-17 with `harness/scripts/probe_shot_cascade.py`: the expensive model is the reference, the
 cheap one is the candidate, and the statistic is the project's usual one on the 4K output.
 
 | frame | cheap (SPAN) against expensive (Futsuu): share above 8 levels | peak |
@@ -19,7 +19,7 @@ built on a premise the picture rejects on the first frame.
 
 Not checked: the other 74 models (four are on this host), the shot boundary, and the wall clock.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/shot-cascade.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/shot-cascade.txt \
        --records docs/wsp/verified/records/shot-cascade.jsonl --bars docs/claims-bars.json
 
 @claim R001 76.5169 % "frames [bf76f141c714826b] n=4" measured

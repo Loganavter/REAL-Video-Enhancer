@@ -65,11 +65,11 @@ everything, so it decides nothing, and it is filed separately
 ## Reproduce
 
 ```bash
-PYTHONPATH=scripts <install-python> scripts/probe_cost.py --rounds 2      # runs the probes
-PYTHONPATH=scripts <install-python> scripts/probe_cost.py --from-log      # records from the same log
+PYTHONPATH=. <install-python> harness/scripts/probe_cost.py --rounds 2      # runs the probes
+PYTHONPATH=. <install-python> harness/scripts/probe_cost.py --from-log      # records from the same log
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-probe-cost-2026-11-19.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-probe-cost-2026-11-19.txt \
        --records docs/wsp/verified/records/int8-probe-cost.jsonl --bars docs/claims-bars.json
 
 @claim R001 29.301 s "rounds [faac3b9d4314494a] n=2" measured

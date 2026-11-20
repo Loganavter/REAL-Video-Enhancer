@@ -30,7 +30,7 @@ The prize is nevertheless real and bounded: if the hooks cost their isolated 2.2
 be 24 x (0.158 + 0.075) = 5.6 s instead of 21.1 s, i.e. **-15.5 s on the probe's 45 s**. No fix has
 been shown to recover it, and this file does not claim one.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/hook-cost.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/hook-cost.txt \
        --records docs/wsp/verified/records/hook-cost.jsonl --bars docs/claims-bars.json
 
 @claim R001 879.7 ms "frames [dca1e064948711e3] n=1" measured

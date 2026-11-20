@@ -70,10 +70,10 @@ because 256x2 is 2.8x slower and a default picked at another width could have la
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/int8_width_probe.py \
     --models "Archivist_AntiLines.pth,1x-RGB-max-Denoise.pth,2x-DigitalFlim-SuperUltraCompact.pth" --sweep \
     --out-file docs/wsp/verified/logs/int8-width/probe.json
-PYTHONPATH=scripts python3 scripts/int8_width_records.py
+PYTHONPATH=. python3 harness/scripts/int8_width_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-native-width.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-native-width.txt \
        --records docs/wsp/verified/records/int8-width.jsonl --bars docs/claims-bars.json
 
 @claim WX001 0.0001 % "frames [7eb8308abf7110ab] n=3" measured

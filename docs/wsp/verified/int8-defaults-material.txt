@@ -77,10 +77,10 @@ for clip in native1440_20s.mkv bd_csm_same.mkv; do
   ARMS="tail0 tail1" ARM_ENV_TAIL0="RVE_TAIL_INT8=0" ARM_ENV_TAIL1="RVE_TAIL_INT8=1" \
     CLIPS="$clip" ROUNDS=3 SINK=null LOGDIR="$d-tail" scripts/wall_ab.sh
 done
-PYTHONPATH=scripts python3 scripts/second_material_records.py
+PYTHONPATH=. python3 harness/scripts/second_material_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-defaults-material.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-defaults-material.txt \
        --records docs/wsp/verified/records/int8-defaults-material.jsonl --bars docs/claims-bars.json
 
 @claim M001 44.02 ms "rounds [db68815bdff23028] n=2" measured

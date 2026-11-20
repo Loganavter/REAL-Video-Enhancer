@@ -46,7 +46,7 @@ free. And there is nothing left for it to catch there: over the channel-max gate
 above the bar. Its value is structural (it bounds the per-block delta, which the share does not), and its
 benefit is unmeasured: on the calm cut at matched chain the worst is 0.02932%, well under the bar.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-mirror-and-blockmax.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/probe-mirror-and-blockmax.txt \
        --records docs/wsp/verified/records/probe-mirror-and-blockmax.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.095 % "pairs [1b7dc617dd2d1f7b] n=8" measured

@@ -46,8 +46,8 @@ the body and the pack are faithful in the opposite direction, and the 4-6 level 
 ```bash
 ffmpeg -ss 5 -i <render>.mkv -frames:v 1 -pix_fmt rgb24 -f rawvideo /tmp/opencode/decoded_frame5.rgb
 RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/ink_lift_probe.py --decoded /tmp/opencode/decoded_frame5.rgb
-PYTHONPATH=scripts python3 scripts/ink_lift_records.py
-PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-ink-lift.txt \
+PYTHONPATH=. python3 harness/scripts/ink_lift_records.py
+PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-ink-lift.txt \
     --records docs/wsp/verified/records/int8-ink-lift.jsonl --bars docs/claims-bars.json
 ```
 

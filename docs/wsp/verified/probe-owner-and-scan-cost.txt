@@ -36,7 +36,7 @@ passes on Chainsaw (0.001 against 0.08876) - which is exactly the **under**-read
 accept. `control <= sweep` catches over-reads only; the dangerous direction is invisible to it, and only
 the adversarial path closes it.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-owner-and-scan-cost.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/probe-owner-and-scan-cost.txt \
        --records docs/wsp/verified/records/probe-owner-and-scan-cost.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.08876 % "frames [f4c006a5e0f90144] n=1" measured

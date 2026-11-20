@@ -1,6 +1,6 @@
 # The cone against the cylinder (E36 phase 1)
 
-Measured 2026-11-17 by `scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
+Measured 2026-11-17 by `harness/scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
 region dilated by `17-L` px; the cylinder gives every layer 18. The 1-D control the ledger already
 recorded (2 px band, cylinder 16*38*L against cone 304*L) must print 2.00x and does, so the convention
 is the one the earlier number used.
@@ -12,7 +12,7 @@ the useful statement is "0.08-0.27 ms instead of a 56.8 ms frame", not the ratio
 Not checked: whether a region-level certificate can exist at all - the gate's veto is frame-level and
 the seams are the artifact class that killed tile reuse at 0.287%.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/cone-budget.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/cone-budget.txt \
        --records docs/wsp/verified/records/cone-budget.jsonl --bars docs/claims-bars.json
 
 @claim R001 18.0 count "body layers [643761b71960b77b] n=16" assumed

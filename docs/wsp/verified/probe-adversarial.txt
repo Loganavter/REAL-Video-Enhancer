@@ -38,7 +38,7 @@ the adversarial scan confirms 0.168%.
   own term cannot be 86% on a pair it certified. Every pair is now re-measured from the decoded pixels
   and dropped if its share exceeds the gate's threshold.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-adversarial.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/probe-adversarial.txt \
        --records docs/wsp/verified/records/probe-adversarial.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.11 % "pairs [14d7fad13e263e2d] n=13" measured

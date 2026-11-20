@@ -80,7 +80,7 @@ skipped when the head is fused, because there is no separate pass left to time.
 - Timing is null sink, reuse off; the NVENC arm is not measured here, and the ffv1 renders read ~58.6 ms/frame
   in both arms because the encoder, not the model, owns that loop.
 - Suite: `pytest backend/tests` reads 409 passed, 1 failed - `ModuleNotFoundError: yaml` in
-  `scripts/harness/db.py` under the app's portable interpreter. No file of this change is on that path.
+  `harness/db.py` under the app's portable interpreter. No file of this change is on that path.
 
 ## Reproduce
 
@@ -91,12 +91,12 @@ ARMS="plain fused" ARM_ENV_PLAIN="RVE_HEAD_FUSED=0" ARM_ENV_FUSED="RVE_HEAD_FUSE
   CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
 ARMS="plain fused" ARM_ENV_PLAIN="RVE_HEAD_FUSED=0" ARM_ENV_FUSED="RVE_HEAD_FUSED=1" \
   CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/head-fusion scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <plain.mkv> <fused.mkv> --out pair.json \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <plain.mkv> <fused.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix HF
-PYTHONPATH=scripts python3 scripts/head_fusion_records.py
+PYTHONPATH=. python3 harness/scripts/head_fusion_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-head-fusion.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-head-fusion.txt \
        --records docs/wsp/verified/records/int8-head-fusion.jsonl --bars docs/claims-bars.json
 
 @claim H001 5.658 ms "frames [f166947c421bd81e] n=1" measured

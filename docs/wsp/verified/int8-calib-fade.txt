@@ -57,9 +57,9 @@ ffmpeg -i <film> -t 25 -c:v libx264 -crf 12 -pix_fmt yuv420p inter25s.mkv     # 
 ARMS="spread seq hybrid" ARM_ENV_SPREAD="RVE_INT8_CALIB_SEQUENTIAL=0" \
     ARM_ENV_SEQ="RVE_INT8_CALIB_SEQUENTIAL=1 RVE_INT8_CALIB_SPREAD=0" \
     ARM_ENV_HYBRID="RVE_INT8_CALIB_SEQUENTIAL=1" SINK=ffv1 ROUNDS=1 CLIPS="inter25s.mkv" scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <arm>.mkv <spread>.mkv --reference-kind config --out pair.json
-PYTHONPATH=scripts python3 scripts/calib_fade_records.py
-PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-calib-fade.txt \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <arm>.mkv <spread>.mkv --reference-kind config --out pair.json
+PYTHONPATH=. python3 harness/scripts/calib_fade_records.py
+PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-calib-fade.txt \
     --records docs/wsp/verified/records/int8-calib-fade.jsonl --bars docs/claims-bars.json
 ```
 

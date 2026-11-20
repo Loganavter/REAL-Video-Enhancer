@@ -10,7 +10,7 @@
 # NOTE on the time: 3.37 ms/hop is the PROLOGUE-requant variant that this branch carries. The report
 # records 1.753 ms/hop for the epilogue variant, and that code is not in this tree.
 #
-# Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-pipeline-ve.txt \
+# Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-pipeline-ve.txt \
 #        --records docs/wsp/verified/records/int8-pipeline-ve.jsonl
 
 @claim R001 0.00644 % "pixels of one frame [128edc8bd3880682] n=1" measured

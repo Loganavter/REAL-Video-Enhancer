@@ -113,7 +113,7 @@ app-level picture moves the same way as the engine-level one, far inside the bar
    `EXPLICIT_BATCH`, opt 5 and 8 timing iterations, differing only in the INT8 flag, read **73.48 / 69.80**
    (flag on) and **69.76 / 71.72** (flag off), 83 and 82 layers, and the flag-off plan's picture against the
    fp16 engine is the same 0.000% / peak 7.43. So int8 on a Q/DQ graph comes from the Q/DQ nodes, as
-   `scripts/probe_int8_tactics.py` says. The 133 ms plan is an outlier whose cause is not established - the
+   `harness/scripts/probe_int8_tactics.py` says. The 133 ms plan is an outlier whose cause is not established - the
    build took 468 s against 450 s here and ran while other work was on the card, which is the documented way
    a builder picks worse tactics (`avg_timing_iterations` measures under whatever load is present).
 

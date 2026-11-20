@@ -65,10 +65,10 @@ loads and made that arm do less work (0.485 ms). A wrong-stand-in arm is the sam
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_roof_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-roof/probe.json
-PYTHONPATH=scripts python3 scripts/hop_roof_records.py
+PYTHONPATH=. python3 harness/scripts/hop_roof_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-roof.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-roof.txt \
        --records docs/wsp/verified/records/int8-hop-roof.jsonl --bars docs/claims-bars.json
 
 @claim R001 1.551 ms "frames [10cff28ea287d300] n=1" measured

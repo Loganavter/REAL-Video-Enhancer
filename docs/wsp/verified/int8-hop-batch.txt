@@ -50,10 +50,10 @@ unmeasured - the same reasoning that predicted a win for 2-D tiles produced -3%.
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_batch_probe.py --rounds 3 \
     --out-file docs/wsp/verified/logs/hop-batch/probe.json
-PYTHONPATH=scripts python3 scripts/hop_batch_records.py
+PYTHONPATH=. python3 harness/scripts/hop_batch_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-batch.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-batch.txt \
        --records docs/wsp/verified/records/int8-hop-batch.jsonl --bars docs/claims-bars.json
 
 @claim Y001 1.769 ms "frames [c8f0df94633fad7e] n=1" measured

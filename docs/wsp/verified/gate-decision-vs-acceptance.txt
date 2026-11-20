@@ -51,7 +51,7 @@ own note measures that difference on the moving fist: 0.004% against 0.460% at t
 70.2% reuse. So "switch to the other statistic" is not the fix - the better of the two is already
 shipping, and it still cannot certify a per-pixel count.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-decision-vs-acceptance.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/gate-decision-vs-acceptance.txt \
        --records docs/wsp/verified/records/gate-decision-vs-acceptance.jsonl --bars docs/claims-bars.json
 
 @claim R001 3.294 levels "frames [d3dc230812aad7da] n=1" measured

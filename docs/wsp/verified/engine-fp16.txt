@@ -15,7 +15,7 @@
 # the same phenomenon ('the spread is the host - clock state, no pinning available') and this
 # is why only same-session ratios are quoted anywhere in this project.
 #
-# Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/engine-fp16.txt \
+# Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/engine-fp16.txt \
 #        --records docs/wsp/verified/records/engine-fp16.jsonl
 
 @claim R001 56.26 ms "plan repeats [202f9e052701404e] n=3" measured

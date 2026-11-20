@@ -54,8 +54,8 @@ either cheap, risky to touch, or already argued.
 TRITON_CACHE_DIR=$(mktemp -d) python3 /tmp/opencode/timed_run.py     # 8.64 s, cold
 python3 scripts/warm_triton.py --model "<model>.pth"                 # 2.59 s, once per machine
 python3 /tmp/opencode/timed_run.py                                   # 6.34 s, warm
-PYTHONPATH=scripts python3 scripts/triton_warm_records.py
-PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-triton-warm.txt \
+PYTHONPATH=. python3 harness/scripts/triton_warm_records.py
+PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-triton-warm.txt \
     --records docs/wsp/verified/records/int8-triton-warm.jsonl --bars docs/claims-bars.json
 ```
 

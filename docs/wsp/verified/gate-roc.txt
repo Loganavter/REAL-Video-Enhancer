@@ -81,7 +81,7 @@ frame: peak 4 levels, 0.00000% of pixels above 8, **not bit-identical**. The mag
 and does not move any recorded number, but the reference is not what it is labelled, and the fix is to
 compute `ref` before `_calibrate`.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-roc.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/gate-roc.txt \
        --records docs/wsp/verified/records/gate-roc.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.989 x "frames [da91caad7866b640] n=100" measured

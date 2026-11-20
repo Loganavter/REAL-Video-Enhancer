@@ -89,7 +89,7 @@ into a valid conv2d weight, while `permute(2, 0, 1)` gives [cout, tap, cin] and 
 *wrong* weight of the same element count. Three permutation mistakes in one investigation (twice in a
 reference, once in a probe), all of them producing plausible numbers rather than errors.
 
-**Tools:** `scripts/int8_block_probe.py` (`reference()`, `--check-size`), `scripts/launch_cubin.py`.
+**Tools:** `harness/scripts/int8_block_probe.py` (`reference()`, `--check-size`), `scripts/launch_cubin.py`.
 
 ## Stage 1 - build the pipeline eagerly, bit-exact (one day)
 
@@ -116,7 +116,7 @@ diverges, and which side is right is then unknown.
 **Kills it:** build/simulation disagree by more than 2x on the share. Stop and find out, do not optimise.
 
 **Tools:** `int8_accuracy_sim.py` is the reference implementation to reproduce; `TensorRTHandler.py` is where
-the three-segment dispatch goes. `scripts/int8_pipeline.py` is the build.
+the three-segment dispatch goes. `harness/scripts/int8_pipeline.py` is the build.
 
 **State (2026-11-16): the pipeline runs end to end and its gate FAILS.** Sixteen kernel launches with real
 handoffs, head and tail in torch: `>8 100.000%, peak 236, median 113 levels` against a bar of 0.1%. Two
@@ -460,7 +460,7 @@ magnitude at layer 1 with the same input and the same weights. Instrumenting the
 
 Every one of the 18 body convs carries a bias, and the bias is not a rounding detail: its mean absolute value is
 2.1-4.3 while the activations are ~0.5, so **dropping it is a different network**, not a quantisation choice.
-`grep -n bias scripts/int8_pipeline.py scripts/int8_prologue_kernel.py` returned **nothing** before this pass -
+`grep -n bias harness/scripts/int8_pipeline.py scripts/int8_prologue_kernel.py` returned **nothing** before this pass -
 the whole int8 lane was measuring an unbiased model.
 
 Carrying the bias in the epilogue (after dequantisation, before PReLU - one extra per-channel load and add, the
@@ -1549,7 +1549,7 @@ It is not, yet:
 | 512x512 | 1.22709% |
 | 1920x1080 | **3.53381%** |
 
-against `scripts/int8_pipeline.py` reading **0.00000%** on the same 1920x1080 frame. So the app-side body differs
+against `harness/scripts/int8_pipeline.py` reading **0.00000%** on the same 1920x1080 frame. So the app-side body differs
 from the validated pipeline in something the pipeline gets right, and the difference grows with resolution - the
 same signature the pipeline had before the rounding-shift fix, which means the body is reproducing older
 behaviour, not new behaviour.

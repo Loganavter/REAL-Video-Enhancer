@@ -1,6 +1,6 @@
 # The int8 body's per-convolution rate (E33, first pass)
 
-Measured 2026-11-17 with `scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
+Measured 2026-11-17 with `harness/scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
 (`c2x_int8_fp16heads.plan`), same session, 20 executions x 3 rounds, `trt.IProfiler` for the per-layer
 times.
 
@@ -13,7 +13,7 @@ Not answered by this file: whether any tiling level or tactic source raises it -
 configuration, and each configuration now needs >=3 builds (the C=32 build is bimodal, see
 `prelu-forms.txt`).
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tactics.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tactics.txt \
        --records docs/wsp/verified/records/int8-tactics.jsonl --bars docs/claims-bars.json
 
 @claim R001 67.67 ms "plan repeats [826cec6405e36217] n=3" measured

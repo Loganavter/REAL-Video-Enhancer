@@ -26,7 +26,7 @@ Decode is not the cost. Calibration and the forwards are, so a 32-triple sample 
 the probe and moves the break-even from 16.2 to about 30 min of video. The place to buy it back is
 calibration, where the hooks cost 722 ms a frame - see `hook-cost.txt` for what that is and is not.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-cost.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/probe-cost.txt \
        --records docs/wsp/verified/records/probe-cost.jsonl --bars docs/claims-bars.json
 
 @claim R001 2.88 s "frames [576171bffa6ddde3] n=16" measured

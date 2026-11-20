@@ -89,12 +89,12 @@ ARMS="shuf0 shuf1" ARM_ENV_SHUF0="RVE_TAIL_SHUFFLE=0" ARM_ENV_SHUF1="RVE_TAIL_SH
   CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
 ARMS="shuf0 shuf1" ARM_ENV_SHUF0="RVE_TAIL_SHUFFLE=0" ARM_ENV_SHUF1="RVE_TAIL_SHUFFLE=1" \
   CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/tail-shuffle scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <shuf0.mkv> <shuf1.mkv> --out pair.json \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <shuf0.mkv> <shuf1.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix SJ
-PYTHONPATH=scripts python3 scripts/tail_shuffle_records.py
+PYTHONPATH=. python3 harness/scripts/tail_shuffle_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tail-epilogue.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tail-epilogue.txt \
        --records docs/wsp/verified/records/int8-tail-shuffle.jsonl --bars docs/claims-bars.json
 
 @claim Q001 2.704 ms "frames [10cff28ea287d300] n=1" measured

@@ -88,10 +88,10 @@ range from `int8-wall-ab.txt` (1.088-1.141) shows what session drift does to a s
 ```bash
 ARMS="nchw nhwc" ARM_ENV_NCHW="RVE_TAIL_NHWC=0" ARM_ENV_NHWC="RVE_TAIL_NHWC=1" \
   CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=null LOGDIR=<dir> scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/tail_split.py --logs docs/wsp/verified/logs/tail-layout-ab
+PYTHONPATH=. python3 harness/scripts/tail_split.py --logs docs/wsp/verified/logs/tail-layout-ab
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tail-layout.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tail-layout.txt \
        --records docs/wsp/verified/records/int8-tail-layout.jsonl --bars docs/claims-bars.json
 
 The claims below are the rows the tables quote - Chainsaw rounds 2 (`T007`, `T025`) and the convs

@@ -5,7 +5,7 @@
 # re-encodes of a 37.8 Mbps BDRemux - 9.4x - and every content number in the int8/gate lane inherited
 # that label. The fields below are read by `ffprobe`, so the label is checkable:
 #
-#   PYTHONPATH=scripts python3 -m harness.cli source-check docs/wsp/sources.yaml \
+#   PYTHONPATH=. python3 -m harness.cli source-check docs/wsp/sources.yaml \
 #       --records "docs/wsp/verified/records/*.jsonl"
 #
 # A `contaminated: true` clip propagates to every record whose population items name it. Records are

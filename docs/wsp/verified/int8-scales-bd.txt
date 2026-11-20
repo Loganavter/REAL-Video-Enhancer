@@ -5,7 +5,7 @@ Frames: 1080p RGB dumps at 20, 29, 44, 60, 100, 140, 180, 220, 260, 274, 300. Ca
 frames 20/60/100/140/180/220/260/300, test on 29, 44 and 274 - **disjoint sets**, which is what makes the
 result a prediction rather than a fit.
 
-Instrument: `scripts/int8_accuracy_sim.py` (the sim that produced every recorded int8 accuracy number),
+Instrument: `harness/scripts/int8_accuracy_sim.py` (the sim that produced every recorded int8 accuracy number),
 extended with `--act-scale {tensor,channel}` and `--clip PCT`; defaults unchanged, so the recorded recipe
 is what runs when nobody asks.
 
@@ -319,7 +319,7 @@ does, and every scale lever is measurably worthless. What is withdrawn: that int
 
 ## Records
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-scales-bd.txt
      --records docs/wsp/verified/records/int8-scales-bd.jsonl --bars docs/claims-bars.json
 @claim I01 0.06510416860692203 % "frames [91a382dda00d38be] n=1" measured
 @claim I02 0.0016155478078871965 % "frames [91a382dda00d38be] n=1" measured

@@ -100,13 +100,13 @@ flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_epilogue_probe.
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/epilogue_control.py
 ARMS="nofold fold" ARM_ENV_NOFOLD="RVE_INT8_EPILOGUE_FOLD=0" ARM_ENV_FOLD="RVE_INT8_EPILOGUE_FOLD=1" \
   CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <nofold.mkv> <fold.mkv> --out pair.json \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <nofold.mkv> <fold.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv \
   --label "..." --config "..." --instrument "..." --session "..." --run "..." --artifact "..." --id-prefix EF
-PYTHONPATH=scripts python3 scripts/epilogue_records.py --pair <pair-records.jsonl>
+PYTHONPATH=. python3 harness/scripts/epilogue_records.py --pair <pair-records.jsonl>
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-epilogue-fold.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-epilogue-fold.txt \
        --records docs/wsp/verified/records/int8-epilogue-fold.jsonl --bars docs/claims-bars.json
 
 @claim E001 1.832 ms "frames [f9d56b854240b0bd] n=1" measured

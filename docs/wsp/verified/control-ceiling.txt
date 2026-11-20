@@ -25,7 +25,7 @@ probe to replay the render's decisions, which it cannot do without the render.
 
 Usage, and the exact output, are in `logs/control-ceiling.log`.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/control-ceiling.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/control-ceiling.txt \
        --records docs/wsp/verified/records/control-ceiling.jsonl --bars docs/claims-bars.json
 
 @claim R001 1.0 count "frames [718310b673d2e8ba] n=481" measured

@@ -59,7 +59,7 @@ flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/head_conv_probe.py 
     --out-file docs/wsp/verified/logs/head-conv/probe.json
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-head-conv.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-head-conv.txt \
        --records docs/wsp/verified/records/int8-head-conv.jsonl --bars docs/claims-bars.json
 
 @claim H001 3.788 ms "clips [9a9523005b3baba1] n=1" measured

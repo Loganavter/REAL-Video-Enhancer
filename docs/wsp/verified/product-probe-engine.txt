@@ -26,7 +26,7 @@ What is still opt-in: the adversarial selection. The product runs the spread pat
 reads 0.001% with no depth-2 pair at all, against 0.109% with the adversarial top-13 - at the cost of a
 full-clip scan.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/product-probe-engine.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/product-probe-engine.txt \
        --records docs/wsp/verified/records/product-probe-engine.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.001 % "pairs [b6df32dbcbef5fe3] n=4" measured

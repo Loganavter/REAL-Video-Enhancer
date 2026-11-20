@@ -39,7 +39,7 @@ stays inside the bar; no rejected frame hides a failure.
 `max_block_mean` in the gate), because it is `max of block means`, not `max within block` - which is
 exactly why it never fired at 4 or 8 levels.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-owner-split-and-band.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/probe-owner-split-and-band.txt \
        --records docs/wsp/verified/records/probe-owner-split-and-band.jsonl --bars docs/claims-bars.json
 
 @claim R001 24.0 levels "frames [2c290a810bd19168] n=1" measured

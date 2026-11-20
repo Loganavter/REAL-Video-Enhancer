@@ -55,10 +55,10 @@ arm; the gate is off, so the gate's own `get_frame_tensor` cost (2.80 ms in the 
 
 ```bash
 CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=1 SINK=null scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/frame_accounting.py --logs docs/wsp/verified/logs/frame-accounting
+PYTHONPATH=. python3 harness/scripts/frame_accounting.py --logs docs/wsp/verified/logs/frame-accounting
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-frame-accounting.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-frame-accounting.txt \
        --records docs/wsp/verified/records/int8-frame-accounting.jsonl --bars docs/claims-bars.json
 
 @claim A001 58.81 ms "clips [f7652c55c84085cc] n=1" measured

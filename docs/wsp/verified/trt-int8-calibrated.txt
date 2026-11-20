@@ -127,8 +127,8 @@ python3 scripts/trt_int8_accuracy.py --fp16 /tmp/opencode/futsuu_fp16.trt \
 RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/trt_vs_body_probe.py \
     --fp16 /tmp/opencode/futsuu_fp16.trt --int8 /tmp/opencode/futsuu_int8_entropy.trt \
     --calib /tmp/opencode/calib-frames --frames /tmp/opencode/eval-frames --rounds 4 --iters 10
-PYTHONPATH=scripts python3 scripts/trt_int8_records.py
-PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/trt-int8-calibrated.txt \
+PYTHONPATH=. python3 harness/scripts/trt_int8_records.py
+PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/trt-int8-calibrated.txt \
     --records docs/wsp/verified/records/trt-int8-calibrated.jsonl --bars docs/claims-bars.json
 ```
 @claim TI001 46.8535 ms "layers [a43a488db5aab724] n=25" measured

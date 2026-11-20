@@ -81,7 +81,7 @@ Each `frames` value samples different times, so these are three populations, not
   only reuses past frames.
 - The fp16 reference is the torch fp16 model, not the TensorRT plan the app falls back to.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-d2-control.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-d2-control.txt \
        --records docs/wsp/verified/records/int8-d2-control.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.21773725748062134 % "pairs [de83663eda830288] n=2" measured

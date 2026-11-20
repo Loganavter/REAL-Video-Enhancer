@@ -8,7 +8,7 @@ the reason**. The second ending is what this file takes, plus three items actual
 ## State of the gate, measured today
 
 ```
-PYTHONPATH=scripts python3 -m harness.migrate "docs/claims-*.txt"
+PYTHONPATH=. python3 -m harness.migrate "docs/claims-*.txt"
  213 claim lines (205 names), 16 bars, 80 names cited
  withdrawn by the source file: 19      protected: 0
  CONFLICTED within one run:      0      unverifiable (no tuple): 194

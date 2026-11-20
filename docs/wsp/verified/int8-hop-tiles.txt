@@ -82,10 +82,10 @@ flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_halo_probe.py -
     --out-file docs/wsp/verified/logs/hop-halo/probe.json
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_tile2d_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-tile2d/probe.json
-PYTHONPATH=scripts python3 scripts/hop_tiles_records.py
+PYTHONPATH=. python3 harness/scripts/hop_tiles_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-tiles.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-tiles.txt \
        --records docs/wsp/verified/records/int8-hop-tiles.jsonl --bars docs/claims-bars.json
 
 @claim T001 1.59 ms "frames [10cff28ea287d300] n=1" measured

@@ -68,10 +68,10 @@ count and staging (pipelining negative), cache policy (flat), codes (6-bit dead 
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_cache_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-cache/probe.json
-PYTHONPATH=scripts python3 scripts/hop_cache_records.py
+PYTHONPATH=. python3 harness/scripts/hop_cache_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-smem.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-smem.txt \
        --records docs/wsp/verified/records/int8-hop-cache.jsonl --bars docs/claims-bars.json
 
 @claim C001 1.58 ms "frames [10cff28ea287d300] n=1" measured

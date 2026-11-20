@@ -72,10 +72,10 @@ shipped (the older epilogue/three-accumulator variants the ledger measured). So:
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/peak_look.py \
     --out-file docs/wsp/verified/logs/peak-look/frames.json
-PYTHONPATH=scripts python3 scripts/peak_look_records.py
+PYTHONPATH=. python3 harness/scripts/peak_look_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/peak-look.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/peak-look.txt \
        --records docs/wsp/verified/records/peak-look.jsonl --bars docs/claims-bars.json
 
 @claim P001 16.9 levels "frames [43a8b61206e43ed6] n=7" measured

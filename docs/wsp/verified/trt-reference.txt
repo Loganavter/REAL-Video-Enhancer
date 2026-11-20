@@ -28,7 +28,7 @@ by 84%. The full fp16 sweeps are 0.07546% and 0.07345%, so the control is still 
 clips - the residual gap is the pair set (the probe re-decides which frames the gate reuses), not the
 reference, and `scripts/check_control_ceiling.py` still reports the violation.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/trt-reference.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/trt-reference.txt \
        --records docs/wsp/verified/records/trt-reference.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.109 % "pairs [14d7fad13e263e2d] n=13" measured

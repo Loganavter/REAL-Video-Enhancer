@@ -30,7 +30,7 @@ One process note worth keeping: `/tmp` is a 20 GiB tmpfs and the renders filled 
 `--no_temporal_reuse` render at 338 of 487 frames. Counting frames before the sweep caught it; a sweep
 that trusted the file would have reported 0.00000% over a partial clip. Count frames before any sweep.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-action-scenes.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/gate-action-scenes.txt \
        --records docs/wsp/verified/records/gate-action-scenes.jsonl --bars docs/claims-bars.json
 
 @claim R001 22.58 levels "frames [7a3b61d6737107f3] n=503" measured

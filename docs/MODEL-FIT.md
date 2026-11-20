@@ -125,6 +125,6 @@ the grid was the problem.
 # what happened when the body was built on it
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/model_fit_probe.py \
     --out-file docs/wsp/verified/logs/model-fit/all.json
-PYTHONPATH=scripts python3 scripts/model_fit_records.py
-PYTHONPATH=scripts python3 scripts/model_fit_report.py
+PYTHONPATH=. python3 harness/scripts/model_fit_records.py
+PYTHONPATH=. python3 scripts/model_fit_report.py
 ```

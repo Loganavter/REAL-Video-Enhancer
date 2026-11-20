@@ -56,10 +56,10 @@ hop.
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_schedule_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-schedule/probe.json
-PYTHONPATH=scripts python3 scripts/hop_schedule_records.py
+PYTHONPATH=. python3 harness/scripts/hop_schedule_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-loads.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-loads.txt \
        --records docs/wsp/verified/records/int8-hop-loads.jsonl --bars docs/claims-bars.json
 
 @claim L001 1.756 ms "frames [10cff28ea287d300] n=1" measured

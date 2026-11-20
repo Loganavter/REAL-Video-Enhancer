@@ -4,7 +4,7 @@ Written 2026-11-18 after the owner looked at the frames. The lane's prose called
 `/tmp/opencode/{violet,csm}20s.mkv` "the BD remaster"; they are **4.038 and 3.982 Mbps** h264
 re-encodes of a **37.8 / 37.2 Mbps** BDRemux - 9.4x - and every content number measured from
 2026-11-15 to 2026-11-18 inherited the label. This file is the input's own record, and the check that
-makes the label mechanical: `PYTHONPATH=scripts python3 -m harness.cli source-check docs/wsp/sources.yaml`.
+makes the label mechanical: `PYTHONPATH=. python3 -m harness.cli source-check docs/wsp/sources.yaml`.
 
 ## What the files are
 
@@ -90,12 +90,12 @@ colour matrix equals the file's; whether a frame index from another cut names th
 | `-c copy` proof, Violet | offset 14375, 494 packets matched | packet-size subsequence |
 | `-c copy` proof, CSM | offset 28273, 502 packets matched | packet-size subsequence |
 
-Run: `PYTHONPATH=scripts python3 -m harness.cli source-check docs/wsp/sources.yaml --clip-root /tmp/opencode`
+Run: `PYTHONPATH=. python3 -m harness.cli source-check docs/wsp/sources.yaml --clip-root /tmp/opencode`
 (then `--prove` to re-run the packet proofs, minutes per clip because the sources are 6.7-7.1 GB).
 
 ## Records
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/sources-bd.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/sources-bd.txt \
        --records docs/wsp/verified/records/sources-bd.jsonl --bars docs/claims-bars.json
 
 @claim S001 37.715338 Mbps "clips [3a0964f03208b6f8] n=1" measured

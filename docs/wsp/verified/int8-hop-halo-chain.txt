@@ -73,12 +73,12 @@ ARMS="halo0 halo1" ARM_ENV_HALO0="RVE_HOP_HALO=0" ARM_ENV_HALO1="RVE_HOP_HALO=1"
   CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
 ARMS="halo0 halo1" ARM_ENV_HALO0="RVE_HOP_HALO=0" ARM_ENV_HALO1="RVE_HOP_HALO=1" \
   CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/hop-halo scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <halo0.mkv> <halo1.mkv> --out pair.json \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <halo0.mkv> <halo1.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config ... --id-prefix HL
-PYTHONPATH=scripts python3 scripts/hop_halo_chain_records.py --pair <pair-records.jsonl>
+PYTHONPATH=. python3 harness/scripts/hop_halo_chain_records.py --pair <pair-records.jsonl>
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-halo-chain.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-halo-chain.txt \
        --records docs/wsp/verified/records/int8-hop-halo.jsonl --bars docs/claims-bars.json
 
 @claim H001 26.485 ms "frames [10cff28ea287d300] n=1" measured

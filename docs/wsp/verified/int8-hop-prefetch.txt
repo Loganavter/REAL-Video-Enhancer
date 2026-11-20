@@ -74,10 +74,10 @@ flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_prefetch_probe.
     --out-file docs/wsp/verified/logs/hop-prefetch/probe.json
 /opt/cuda/bin/nvcc -O3 -arch=sm_89 -shared -Xcompiler -fPIC -o smem_bench.so smem_bench.cu
 <install-python> smem_drive.py          # both files are in logs/hop-smem-theory/
-PYTHONPATH=scripts python3 scripts/hop_prefetch_records.py
+PYTHONPATH=. python3 harness/scripts/hop_prefetch_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-prefetch.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-prefetch.txt \
        --records docs/wsp/verified/records/int8-hop-prefetch.jsonl --bars docs/claims-bars.json
 
 @claim P001 1.546 ms "frames [10cff28ea287d300] n=1" measured

@@ -1,6 +1,6 @@
 # The int8 window at 1920x1080, ungated: 37.5 ms = 26.6 fps, and the picture that does not hold
 
-Measured 2026-11-17 with `scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
+Measured 2026-11-17 with `harness/scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
 instrument `bench_plan.py` uses), 8 executions per configuration, one process.
 
 ## The number the objective asked for
@@ -98,7 +98,7 @@ decision). The share passes; the peak does not, and every configuration measured
 and 55. A full release-grade sample is also larger than four frames - the bar's minimum is two and this
 is four, but the 13-19 frame spread sample the protocol describes is not measured here.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-window.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-window.txt \
        --records docs/wsp/verified/records/int8-window.jsonl --bars docs/claims-bars.json
 
 @claim R001 47.81 ms "frames [72217853e9867e3f] n=8" measured

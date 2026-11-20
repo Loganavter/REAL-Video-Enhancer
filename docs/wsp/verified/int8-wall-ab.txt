@@ -66,7 +66,7 @@ Median of the four ratios: **1.126x**; span **1.088-1.141x**.
 - **Why 1.13x here and 1.41x in `int8-window.txt`** is NOT answered by this file, and the record should
   not pretend otherwise. Three things differ between the two, and separating them needs a paired run per
   variable: the instrument (CUDA events around the chain against the product's wall clock), the model
-  (the window row is `scripts/int8_pipeline.py` on compact-2x; the product runs `2x-Futsuu-Anime`, whose
+  (the window row is `harness/scripts/int8_pipeline.py` on compact-2x; the product runs `2x-Futsuu-Anime`, whose
   head alone reads 4.65-5.2 ms today against the 1.6-2.6 ms the window row records for head+quantise -
   different head, so not a contradiction, and not comparable either), and the non-body share of the frame
   (17% of the 49.6-50.6 ms frame is outside the body here). The only claim this file makes is the
@@ -106,10 +106,10 @@ just not attributed when the gate is off. Not a newly discovered cost: a naming 
 ```bash
 CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=null  scripts/wall_ab.sh
 CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=nvenc scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/wall_ab_records.py     # logs -> records
+PYTHONPATH=. python3 harness/scripts/wall_ab_records.py     # logs -> records
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-wall-ab.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-wall-ab.txt \
        --records docs/wsp/verified/records/int8-wall-ab.jsonl --bars docs/claims-bars.json
 
 Logs: `docs/wsp/verified/logs/wall-ab/` (24 files; each carries its own load_avg and clock state).

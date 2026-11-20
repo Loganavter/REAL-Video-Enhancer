@@ -87,7 +87,7 @@ predicted against 88 measured at 3.0). Every absolute threshold quoted from the 
 slightly different variable than the product's, which is why the channel-max threshold above must be
 re-derived on the app's own numbers before it ships.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-channel-max.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/gate-channel-max.txt \
        --records docs/wsp/verified/records/gate-channel-max.jsonl --bars docs/claims-bars.json
 
 @claim R001 1.0 x "frames [da91caad7866b640] n=100" measured

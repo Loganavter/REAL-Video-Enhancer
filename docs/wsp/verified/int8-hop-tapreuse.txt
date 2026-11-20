@@ -61,10 +61,10 @@ boundary of the instrument, and it took one session to establish rather than the
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_tapreuse_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-tapreuse/probe.json
-PYTHONPATH=scripts python3 scripts/hop_tapreuse_records.py
+PYTHONPATH=. python3 harness/scripts/hop_tapreuse_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-tapreuse.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-tapreuse.txt \
        --records docs/wsp/verified/records/int8-hop-tapreuse.jsonl --bars docs/claims-bars.json
 
 @claim U001 1.478 ms "frames [10cff28ea287d300] n=1" measured

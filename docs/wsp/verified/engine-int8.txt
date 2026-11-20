@@ -46,7 +46,7 @@ architecture") stands and is now reproduced with its own numbers. The *accuracy*
 **not reproducible from the record**: same recipe, same TRT, same card, and the picture differs by
 10-16 dB depending on knobs nobody wrote down.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/engine-int8.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/engine-int8.txt \
        --records docs/wsp/verified/records/engine-int8.jsonl
 
 @claim R001 70.85 ms "plan repeats [202f9e052701404e] n=3" measured

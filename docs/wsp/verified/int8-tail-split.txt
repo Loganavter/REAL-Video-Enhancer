@@ -51,10 +51,10 @@ row would have funded the wrong kernel.
 ```bash
 CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=1 SINK=null scripts/wall_ab.sh
 grep -a "int8 tail:" docs/wsp/verified/logs/tail/*int8*.log
-PYTHONPATH=scripts python3 scripts/tail_split.py --logs docs/wsp/verified/logs/tail
+PYTHONPATH=. python3 harness/scripts/tail_split.py --logs docs/wsp/verified/logs/tail
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tail-split.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tail-split.txt \
        --records docs/wsp/verified/records/int8-tail-split.jsonl --bars docs/claims-bars.json
 
 @claim T001 10.36 ms "clips [f7652c55c84085cc] n=1" measured

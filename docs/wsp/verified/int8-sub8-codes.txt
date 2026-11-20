@@ -50,10 +50,10 @@ so the hop's remaining headroom is in the schedule only, down to the ~0.92 ms/ho
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/sub8_codes_probe.py \
     --out-file docs/wsp/verified/logs/sub8/probe.json
-PYTHONPATH=scripts python3 scripts/sub8_records.py
+PYTHONPATH=. python3 harness/scripts/sub8_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-sub8-codes.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-sub8-codes.txt \
        --records docs/wsp/verified/records/int8-sub8-codes.jsonl --bars docs/claims-bars.json
 
 @claim S001 2.38485 % "frames [d607a3811478aeb4] n=4" measured

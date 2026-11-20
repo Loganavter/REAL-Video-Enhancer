@@ -193,8 +193,8 @@ def main(argv=None) -> int:
     A("# what happened when the body was built on it")
     A("flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/model_fit_probe.py \\")
     A("    --out-file docs/wsp/verified/logs/model-fit/all.json")
-    A("PYTHONPATH=scripts python3 scripts/model_fit_records.py")
-    A("PYTHONPATH=scripts python3 scripts/model_fit_report.py")
+    A("PYTHONPATH=. python3 harness/scripts/model_fit_records.py")
+    A("PYTHONPATH=. python3 scripts/model_fit_report.py")
     A("```")
 
     open(os.path.join(REPO, args.out), "w").write("\n".join(L) + "\n")

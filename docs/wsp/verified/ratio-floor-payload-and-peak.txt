@@ -35,7 +35,7 @@ owner decision, accepted debt 29-55). The artifact that started this lane was 0.
 near 100, rejected by eye at VMAF min 93.65. The product does not refuse on the peak, so a title at
 0.09% share and peak 128 would be certified and rendered.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/ratio-floor-payload-and-peak.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/ratio-floor-payload-and-peak.txt \
        --records docs/wsp/verified/records/ratio-floor-payload-and-peak.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.0215 pp "frames [b537e1db8a6b23ad] n=67" measured

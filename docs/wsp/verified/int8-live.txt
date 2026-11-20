@@ -60,7 +60,7 @@ code keeps a chain and certifies depth 3-4 on these clips. And where deeper is b
 Not measured: the wall with int8 under the gate on a real title (both titles decline it), and the 13-19
 frame accuracy sample.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-live.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-live.txt \
        --records docs/wsp/verified/records/int8-live.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.003 % "frames [d85c9dd235341520] n=24" measured

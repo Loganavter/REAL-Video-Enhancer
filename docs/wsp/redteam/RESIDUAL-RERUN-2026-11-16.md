@@ -1,14 +1,14 @@
 # Re-run of the 22 red-team repros against the patched harness
 
 Cell: `/home/jorj/.cache/opencode/clones/rve-rt-residual/REAL-Video-Enhancer`
-Harness: `scripts/harness/` (core, gates, run, cli, migrate, astcheck)
+Harness: `harness/` (core, gates, run, cli, migrate, astcheck)
 
 ## How this was run
 
 Each script was executed as
 
 ```
-PYTHONPATH=scripts PYTHONDONTWRITEBYTECODE=1 python3 .agent/inputs/repro_<n>_<name>.py
+PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 python3 .agent/inputs/repro_<n>_<name>.py
 ```
 
 from the clone root. The repros hard-code `sys.path.insert(0, "/home/jorj/Загрузки/projects/REAL-Video-Enhancer/scripts")`,

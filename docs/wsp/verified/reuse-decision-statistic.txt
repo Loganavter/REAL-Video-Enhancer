@@ -3,7 +3,7 @@
 Measured 2026-11-19 (local) after the owner reopened the lane (`reuse-gate-reopened`), on the RTX 4060 Ti,
 the app's own renderer (`backend/rve-backend.py`, ffv1 sink, 2x Futsuu, 1920x1080 -> 3840x2160). Records:
 `records/reuse-decision-statistic.jsonl`; instrument: `scripts/reuse_stats.py`, damage from
-`scripts/gate_sweep.py`.
+`harness/scripts/gate_sweep.py`.
 
 ## Why this population and not the old one
 
@@ -490,7 +490,7 @@ RVE_DEBUG_DEPTH=1 python3 backend/rve-backend.py ... --input cut.mkv --output nu
 # the pair, lossless, and the damage table
 python3 backend/rve-backend.py ... --input cut.mkv --output on.mkv  --temporal_reuse
 python3 backend/rve-backend.py ... --input cut.mkv --output off.mkv
-python3 scripts/gate_sweep.py on.mkv off.mkv --out damage.json --reference-kind config
+python3 harness/scripts/gate_sweep.py on.mkv off.mkv --out damage.json --reference-kind config
 # the candidate statistics and their ranking
 python3 scripts/reuse_stats.py --clip cut.mkv --damage damage.json --emit stats.json
 # the temporal-texture criterion (frozen grain), joined to the gate's own per-frame decisions

@@ -48,7 +48,7 @@ band that actually decides - LR share between 0.04% and 0.10% - the ratio is **1
 worst frame, 475, sits at an LR share of **0.07108%**, i.e. 1.6% above the 0.07% threshold: tightening
 the threshold would block it, so 0.0755% is not a floor of the statistic.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-and-violet-sweeps.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-and-violet-sweeps.txt \
        --records docs/wsp/verified/records/int8-and-violet-sweeps.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.08876 % "frames [718310b673d2e8ba] n=481" measured

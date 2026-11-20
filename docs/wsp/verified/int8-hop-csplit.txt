@@ -67,10 +67,10 @@ number of warps are one quantity, and it is already at its optimum.
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_csplit_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-csplit/probe.json
-PYTHONPATH=scripts python3 scripts/hop_csplit_records.py
+PYTHONPATH=. python3 harness/scripts/hop_csplit_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-csplit.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-csplit.txt \
        --records docs/wsp/verified/records/int8-hop-csplit.jsonl --bars docs/claims-bars.json
 
 @claim X001 1.591 ms "frames [10cff28ea287d300] n=1" measured

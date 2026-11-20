@@ -51,10 +51,10 @@ That means the frame's remaining headroom is entirely outside the hop: the deliv
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_persistent_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-persistent/probe.json
-PYTHONPATH=scripts python3 scripts/hop_persistent_records.py
+PYTHONPATH=. python3 harness/scripts/hop_persistent_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-persistent.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-persistent.txt \
        --records docs/wsp/verified/records/int8-hop-persistent.jsonl --bars docs/claims-bars.json
 
 @claim N001 1.703 ms "frames [10cff28ea287d300] n=1" measured

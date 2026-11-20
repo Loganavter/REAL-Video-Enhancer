@@ -100,12 +100,12 @@ ARMS="ring0 ring1" ARM_ENV_RING0="RVE_PACK_RING=0" ARM_ENV_RING1="RVE_PACK_RING=
   CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
 ARMS="ring0 ring1" ARM_ENV_RING0="RVE_PACK_RING=0" ARM_ENV_RING1="RVE_PACK_RING=1" \
   CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/pack-ring scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <ring0.mkv> <ring1.mkv> --out pair.json \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <ring0.mkv> <ring1.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix PK
-PYTHONPATH=scripts python3 scripts/pack_ring_records.py
+PYTHONPATH=. python3 harness/scripts/pack_ring_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-pack-ring.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-pack-ring.txt \
        --records docs/wsp/verified/records/int8-pack-ring.jsonl --bars docs/claims-bars.json
 
 @claim K001 34.42 ms "rounds [95af4551238ca2b0] n=2" measured

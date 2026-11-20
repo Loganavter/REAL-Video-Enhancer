@@ -6,7 +6,7 @@ Research cell, read-only. Base commit `03acc346` (clean tree). Read: all 31 rows
 
 Mechanical checks used below (all reproducible in the cell, no GPU, no network):
 
-- `PYTHONPATH=scripts python3 -m harness.cli below-report docs/claims-*.txt --bars docs/claims-bars.json`
+- `PYTHONPATH=. python3 -m harness.cli below-report docs/claims-*.txt --bars docs/claims-bars.json`
   → `29 @below assertions: 24 under the bar, 2 OVER, 2 against a literal, 1 unknown`.
 - `pytest --collect-only` on the harness pair → 63 tests at HEAD, **62 at `1f908c45`** (the commit
   that closed `rve-harness-redteam-residual`; one test was added afterwards).

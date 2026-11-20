@@ -109,7 +109,7 @@ It also removes the 265 MB fp16 write that the quantise pass exists to consume.
 
 **Falsifier.** The reserve row's own first step, arithmetic first, no GPU: what grid do three input channels
 need, and what does quantising the head's 27 weights do to the four held-out frames
-(`scripts/int8_accuracy_sim.py` / the emulation) - **1-2 h**. Only then one kernel, **1 h**.
+(`harness/scripts/int8_accuracy_sim.py` / the emulation) - **1-2 h**. Only then one kernel, **1 h**.
 
 **Evidence check.** `grep -rn "int8 head" docs/PLAN-int8-envelope-2026-11-19.md` - it is a reserve row whose
 open question is "whether an int8 head is even expressible here". `rve-head-conv-2026-11-19` is filed and
@@ -197,7 +197,7 @@ between layers; standard int8 epilogue practice.
 
 **Where it lands.** **All sixteen** hops in the shipped body run this one kernel (`Int8Body.py:385-395`
 loops `body_prologue_kernel` over the sixteen weight sets) - the "6 of 16 on the three-accumulator kernel"
-split belongs to `scripts/int8_pipeline.py`, a different object (`int8-window-measured`), and must not be
+split belongs to `harness/scripts/int8_pipeline.py`, a different object (`int8-window-measured`), and must not be
 quoted here. If the divide is 5-10% of a hop it is 1.3-2.7 ms of the frame.
 
 **Falsifier.** **30-60 min**, one hop, two arms, timed and code-diffed on a real frame. The rewrite is exact

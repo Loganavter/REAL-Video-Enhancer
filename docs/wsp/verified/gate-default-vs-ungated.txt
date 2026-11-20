@@ -45,7 +45,7 @@ the first time on the product's own output rather than on a proxy.
 - **"Gated vs ungated" is a picture difference, not a visibility judgement.** The 18 frames are the ones
   to look at; whether they are noticeable is not decided here.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-default-vs-ungated.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/gate-default-vs-ungated.txt \
        --records docs/wsp/verified/records/gate-default-vs-ungated.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.49372 % "frames [7219ce9813d28df0] n=481" measured

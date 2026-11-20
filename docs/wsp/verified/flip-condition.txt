@@ -30,7 +30,7 @@ and the luma veto cannot see it.
 The calm-cut trade is unchanged and stays on record: Chainsaw 8 s goes 0.00274% -> 0.02932% (margin 36x
 -> 3.4x), both under the bar.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/flip-condition.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/flip-condition.txt \
        --records docs/wsp/verified/records/flip-condition.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.07345 % "frames [3e7bd4c273e44ee9] n=480" measured

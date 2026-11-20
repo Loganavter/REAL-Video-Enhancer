@@ -70,10 +70,10 @@ refused gate under a default-on flag would otherwise make a 10-bit A/B read two 
 ```bash
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/tenbit_pipe_probe.py --frames 5 \
     --out-file docs/wsp/verified/logs/tenbit-pipe/probe.json
-PYTHONPATH=scripts python3 scripts/tenbit_pipe_records.py
+PYTHONPATH=. python3 harness/scripts/tenbit_pipe_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/tenbit-pipe.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/tenbit-pipe.txt \
        --records docs/wsp/verified/records/tenbit-pipe.jsonl --bars docs/claims-bars.json
 
 @claim TB001 1.0 levels "codes [4f1be0a446d28941] n=877" measured

@@ -41,7 +41,7 @@ against **5.39 ms** (3.34) for the shipped luma gate on the same clip in the lan
 statistic is not more expensive than the old one, which contradicts the assumption that a full
 three-channel diff must cost more than a pooled luma.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/violet-int8-forced.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/violet-int8-forced.txt \
        --records docs/wsp/verified/records/violet-int8-forced.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.56613 % "frames [3e7bd4c273e44ee9] n=480" measured

@@ -78,11 +78,11 @@ the current product figure.
 ```bash
 ARMS="fp16 int8" CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=null \
   LOGDIR=docs/wsp/verified/logs/wall-defaults/null scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/wall_ab_records.py --logs docs/wsp/verified/logs/wall-defaults/null \
+PYTHONPATH=. python3 harness/scripts/wall_ab_records.py --logs docs/wsp/verified/logs/wall-defaults/null \
   --out docs/wsp/verified/records/int8-wall-defaults.jsonl
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-wall-defaults.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-wall-defaults.txt \
        --records docs/wsp/verified/records/int8-wall-defaults.jsonl --bars docs/claims-bars.json
 
 @claim W006 52.17 ms "rounds [03467af95ad930d9] n=2" measured

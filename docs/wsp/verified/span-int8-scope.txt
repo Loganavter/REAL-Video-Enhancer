@@ -136,7 +136,7 @@ gets its 78% from a single kernel. If SPAN ever becomes the target model, the fi
   model through a TensorRT engine, where the same structure holds but every number is smaller.
 - No int8 was attempted here, by design: this is the scope measurement that decides whether to attempt it.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/span-int8-scope.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/span-int8-scope.txt \
        --records docs/wsp/verified/records/span-app.jsonl --bars docs/claims-bars.json
 
 @claim AB001 73.36 ms "rounds [e915d1039b6e8d82] n=1" measured
@@ -149,6 +149,6 @@ flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/span_scope_probe.py
 # the app-level number, same clip, through the engine
 ARMS="fp16" MODEL=<path>/2x_ModernSpanimationV1.pth CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=null \
   LOGDIR=docs/wsp/verified/logs/span-app scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/ab_records.py --clip bd_violet20s --logdir docs/wsp/verified/logs/span-app \
+PYTHONPATH=. python3 harness/scripts/ab_records.py --clip bd_violet20s --logdir docs/wsp/verified/logs/span-app \
   --arms fp16 --sink null --first-round 1 --rounds 1 --out docs/wsp/verified/records/span-app.jsonl
 ```

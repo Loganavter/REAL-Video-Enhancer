@@ -15,11 +15,11 @@ OUT="${4:-/tmp/opencode/int8-acc}"
 mkdir -p "$OUT"
 
 echo "== int8 chain (emits certification + chain time)"
-"$PY" scripts/int8_pipeline.py "$FRAME" --width "$W" --height "$H" --iters 10 --dump "$OUT/int8.raw" --emit "$OUT/pipeline.jsonl"
+"$PY" harness/scripts/int8_pipeline.py "$FRAME" --width "$W" --height "$H" --iters 10 --dump "$OUT/int8.raw" --emit "$OUT/pipeline.jsonl"
 
 echo "== fp16 reference of the same frame"
-"$PY" scripts/measure_residual.py "$FRAME" "$W" "$H" "$MODEL" "" "$OUT/ref.raw" | tail -2
+"$PY" harness/scripts/measure_residual.py "$FRAME" "$W" "$H" "$MODEL" "" "$OUT/ref.raw" | tail -2
 
 echo "== the picture, one against the other"
-"$PY" scripts/compare_raw.py "$OUT/ref.raw" "$OUT/int8.raw" --width "$W" --height "$H" --scale 2 --emit "$OUT/accuracy.jsonl"
+"$PY" harness/scripts/compare_raw.py "$OUT/ref.raw" "$OUT/int8.raw" --width "$W" --height "$H" --scale 2 --emit "$OUT/accuracy.jsonl"
 echo "records: $OUT/pipeline.jsonl{,.time} $OUT/accuracy.jsonl"

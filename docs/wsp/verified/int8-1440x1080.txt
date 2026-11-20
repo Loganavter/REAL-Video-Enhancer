@@ -39,7 +39,7 @@ whole-frame path.
 
 ## Accuracy against the model (the reference the record requires)
 
-`scripts/calibration_coverage.py --width 1440 --height 1080`, 24 calibration frames, four held-out test
+`harness/scripts/calibration_coverage.py --width 1440 --height 1080`, 24 calibration frames, four held-out test
 frames (29, 44, 274, 400 - none in either calibration arm), body against the model's own fp16 output:
 
 | calibration | cost | worst share | peak |
@@ -85,13 +85,13 @@ mistaken for a population.
 
 ```bash
 <ffmpeg> -i /tmp/opencode/bd_violet20s.mkv -vf scale=1440:1080 -c:v libx264 -crf 12 -an /tmp/opencode/violet1440.mkv
-flock -n /var/tmp/opencode/gpu.lock env PYTHONPATH=scripts <install-python> scripts/calibration_coverage.py \
+flock -n /var/tmp/opencode/gpu.lock env PYTHONPATH=. <install-python> harness/scripts/calibration_coverage.py \
     --clip /tmp/opencode/violet1440.mkv --width 1440 --height 1080 --calib 24 \
     --model "<install>/custom_models/2x-Futsuu-Anime(1).pth"
 CLIPS=violet1440.mkv ROUNDS=1 SINK=null LOGDIR=<dir> scripts/wall_ab.sh
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-1440x1080.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-1440x1080.txt \
        --records "docs/wsp/verified/records/int8-1440x1080*.jsonl" --bars docs/claims-bars.json
 
 @claim R001 0.01186 % "clips [642494e6c1438e31] n=1" measured

@@ -30,7 +30,7 @@ What this leaves: the pairs that carry the damage are inside the certificate, so
 gate's own variable can remove them. The lever is the statistic (the difference is a clipped highlight
 whose error lives in one saturated channel) or a certificate taken on the rendered output.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/probe-threshold-invariance.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/probe-threshold-invariance.txt \
        --records docs/wsp/verified/records/probe-threshold-invariance.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.21773725748062134 % "pairs [de83663eda830288] n=2" measured

@@ -592,7 +592,7 @@ architecture") stands and is now reproduced with its own numbers. The *accuracy*
 **not reproducible from the record**: same recipe, same TRT, same card, and the picture differs by
 10-16 dB depending on knobs nobody wrote down.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/engine-int8.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/engine-int8.txt \
        --records docs/wsp/verified/records/engine-int8.jsonl
 
 @claim R001 70.85 ms "plan repeats [202f9e052701404e] n=3" measured
@@ -2465,7 +2465,7 @@ The second result explains the fusion break at C=32 better than "the width is to
 family changes, and both families that win at narrow widths - `scudnn_winograd` here,
 `sm80_xmma_..._indexed_wo_smem_...` in the full model - take no epilogue, so myelin leaves the PReLU
 outside. Whatever restores the epilogue at C=32 has to beat those kernels while staying in a family
-that fuses, which is exactly what `scripts/force_tactic.py` scans by forcing one tactic index at a time
+that fuses, which is exactly what `harness/scripts/force_tactic.py` scans by forcing one tactic index at a time
 and reading the resulting layer names.
 
 ##### The counters are unblocked, and the int8 kernel is not at any limit (2026-11-15)
@@ -3035,7 +3035,7 @@ Entry point for "what is true now": `python -m harness.cli db current`.
 
 #### Three activation forms at C=32, and the C=64 control (B3)
 
-Measured 2026-11-17, one session, interleaved rounds, `scripts/probe_prelu_forms.py`, 1920x1080 fp16
+Measured 2026-11-17, one session, interleaved rounds, `harness/scripts/probe_prelu_forms.py`, 1920x1080 fp16
 opt 5 avg_timing_iters 8 workspace 8 GiB, 16-block body, synthesized random weights (tactics depend on
 shapes, not values - the same trick E30a used).
 
@@ -3055,11 +3055,11 @@ layers, one tactic, three rounds within 0.11 ms of each other. The same-session 
 would be a cross-session quotient.
 
 The C=32 build is **bimodal**: three rebuilds of one ONNX gave 39.23 / 39.29 / 20.95 ms with 0/0/18
-fused layers (ledger B3 section; reproducible with `scripts/probe_build_stability.py --trials 3`). The
+fused layers (ledger B3 section; reproducible with `harness/scripts/probe_build_stability.py --trials 3`). The
 19-fused census does not discriminate - the conv tactic tile does, and the fast draw is the one with
 `..._tilesize256x32x32_stage1_...`.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/prelu-forms.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/prelu-forms.txt \
        --records docs/wsp/verified/records/prelu-forms.jsonl --bars docs/claims-bars.json
 
 @claim R001 23.51 ms "bench rounds [ccf46a14a09fc984] n=3" measured
@@ -3840,7 +3840,7 @@ $PY scripts/claim_check.py docs/claims-int8-stage4.txt
 
 #### The int8 body's per-convolution rate (E33, first pass)
 
-Measured 2026-11-17 with `scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
+Measured 2026-11-17 with `harness/scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
 (`c2x_int8_fp16heads.plan`), same session, 20 executions x 3 rounds, `trt.IProfiler` for the per-layer
 times.
 
@@ -3853,7 +3853,7 @@ Not answered by this file: whether any tiling level or tactic source raises it -
 configuration, and each configuration now needs >=3 builds (the C=32 build is bimodal, see
 `prelu-forms.txt`).
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tactics.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tactics.txt \
        --records docs/wsp/verified/records/int8-tactics.jsonl --bars docs/claims-bars.json
 
 @claim R001 67.67 ms "plan repeats [826cec6405e36217] n=3" measured
@@ -3867,14 +3867,14 @@ Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tact
 #
 #### Ledger (line 1019): '1.91 ms and 80 TOPS, measured, not projected', with no instrument named
 #### (the inventory flagged it as the load-bearing number of the int8 section and the weakest
-#### provenance in the range). Re-run: scripts/int8_block_probe.py, three separate invocations,
+#### provenance in the range). Re-run: harness/scripts/int8_block_probe.py, three separate invocations,
 #### torch.cuda.Event over 20 iterations, one GPU job at a time.
 ####   runs: 1.840 / 1.779 / 1.841 ms  -> 83.1 / 86.0 / 83.0 TOPS
 ####   correctness: max |diff| vs the int32 reference = 0, share of differing outputs 0.00%
 #### The recorded 1.91-1.93 ms is 3-7% slower than today's session, which is the drift this machine
 #### shows between sessions; the shape of the claim survives.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-block.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-block.txt \
        --records docs/wsp/verified/records/int8-block.jsonl --bars docs/claims-bars.json
 
 @claim R001 1.84 ms "int8 block launch [ea432364037f4b16] n=3" measured
@@ -4186,7 +4186,7 @@ Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-bloc
 
 #### Two streams do not overlap on this card (task C, strips)
 
-Measured 2026-11-17 with `scripts/probe_strips.py`: one plan deserialized into independent engines with
+Measured 2026-11-17 with `harness/scripts/probe_strips.py`: one plan deserialized into independent engines with
 independent contexts, one CUDA stream each. The reported value is `concurrent / serial` per-frame time,
 so **1.00 means no overlap** (the pair takes twice as long as one frame) and 0.50 would be perfect
 overlap.
@@ -4203,7 +4203,7 @@ freed on return (dangling addresses, a 50 ms plan "ran" in 0.07 ms), and CUDA ev
 the stream context timed the host. The current instrument is wall clock around one synchronize; it
 reads ~6% above `bench_plan.py`'s events on the same plan, which is enqueue overhead.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/streams.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/streams.txt \
        --records docs/wsp/verified/records/streams.jsonl --bars docs/claims-bars.json
 
 @claim R001 1.001 x "rounds [a4c54229b5a868cd] n=3" measured
@@ -4215,7 +4215,7 @@ Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/streams.t
 
 #### The L2 pyramid's arithmetic (E29 phase 1)
 
-Measured 2026-11-17 by `scripts/pyramid_budget.py`, CPU only, no GPU job. Reproduces the queue's own
+Measured 2026-11-17 by `harness/scripts/pyramid_budget.py`, CPU only, no GPU job. Reproduces the queue's own
 decomposition (8.49 GB logical traffic, 19.7 ms DRAM at 1/3 absorption, 33.1 ms fp16 compute floor,
 56.8 ms measured) and adds the size the queue also asked about, 4K.
 
@@ -4227,7 +4227,7 @@ at BOTH sizes the fp16 compute floor (33.1 / 132.2 ms) sits above the unabsorbed
 The 1/3 absorption is an assumption carried from one kernel's ncu sector-hit rate; the records below
 declare it as an assumption instead of folding it into the ceiling.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/pyramid-budget.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/pyramid-budget.txt \
        --records docs/wsp/verified/records/pyramid-budget.jsonl --bars docs/claims-bars.json
 
 @claim R001 7.5 MB "boundaries [6a025f8cf13027c9] n=16" assumed
@@ -4245,7 +4245,7 @@ Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/pyramid-b
 
 #### The cone against the cylinder (E36 phase 1)
 
-Measured 2026-11-17 by `scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
+Measured 2026-11-17 by `harness/scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
 region dilated by `17-L` px; the cylinder gives every layer 18. The 1-D control the ledger already
 recorded (2 px band, cylinder 16*38*L against cone 304*L) must print 2.00x and does, so the convention
 is the one the earlier number used.
@@ -4257,7 +4257,7 @@ the useful statement is "0.08-0.27 ms instead of a 56.8 ms frame", not the ratio
 Not checked: whether a region-level certificate can exist at all - the gate's veto is frame-level and
 the seams are the artifact class that killed tile reuse at 0.287%.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/cone-budget.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/cone-budget.txt \
        --records docs/wsp/verified/records/cone-budget.jsonl --bars docs/claims-bars.json
 
 @claim R001 18.0 count "body layers [643761b71960b77b] n=16" assumed
@@ -4284,7 +4284,7 @@ Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/cone-budg
 
 #### The int8 window at 1920x1080, ungated: 37.5 ms = 26.6 fps, and the picture that does not hold
 
-Measured 2026-11-17 with `scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
+Measured 2026-11-17 with `harness/scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
 instrument `bench_plan.py` uses), 8 executions per configuration, one process.
 
 ##### The number the objective asked for
@@ -4382,7 +4382,7 @@ decision). The share passes; the peak does not, and every configuration measured
 and 55. A full release-grade sample is also larger than four frames - the bar's minimum is two and this
 is four, but the 13-19 frame spread sample the protocol describes is not measured here.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-window.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-window.txt \
        --records docs/wsp/verified/records/int8-window.jsonl --bars docs/claims-bars.json
 
 @claim R001 47.81 ms "frames [72217853e9867e3f] n=8" measured
@@ -4457,7 +4457,7 @@ code keeps a chain and certifies depth 3-4 on these clips. And where deeper is b
 Not measured: the wall with int8 under the gate on a real title (both titles decline it), and the 13-19
 frame accuracy sample.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-live.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-live.txt \
        --records docs/wsp/verified/records/int8-live.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.003 % "frames [d85c9dd235341520] n=24" measured

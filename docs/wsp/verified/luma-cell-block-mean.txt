@@ -28,7 +28,7 @@ against an external anchor.
 The "7.57 rejected fist" figure is the owner's and is **not present anywhere in the repo**; it is
 quoted as context, not as a checked anchor. The record has been corrected to say so.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/luma-cell-block-mean.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/luma-cell-block-mean.txt \
        --records docs/wsp/verified/records/luma-cell-block-mean.jsonl --bars docs/claims-bars.json
 
 @claim R001 3.78 levels "frames [3e7bd4c273e44ee9] n=480" measured

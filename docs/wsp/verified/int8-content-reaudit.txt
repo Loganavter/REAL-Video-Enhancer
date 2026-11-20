@@ -55,7 +55,7 @@ move a loop time.
 ## Reproduce
 
 ```bash
-PYTHONPATH=scripts python3 - <<'PY'
+PYTHONPATH=. python3 - <<'PY'
 import json, glob
 for p in sorted(glob.glob('docs/wsp/verified/records/*.jsonl')):
     for line in open(p):

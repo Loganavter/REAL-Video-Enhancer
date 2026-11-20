@@ -44,7 +44,7 @@ two differ by **0.0116%** of pixels above 8 levels, peak 15.1 - an order of magn
 not the cause of the 4.8% gap between the probe's control and the full sweep. That gap is the pair set:
 the probe re-decides the gate on its own frames instead of replaying the render's decisions.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/wall-fixed-cost.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/wall-fixed-cost.txt \
        --records docs/wsp/verified/records/wall-fixed-cost.jsonl --bars docs/claims-bars.json
 
 @claim R001 45.02 ms "frames [718310b673d2e8ba] n=481" measured

@@ -46,7 +46,7 @@ Two things this does not fix:
   reuse), so its verdict rests on depth 1 alone. A depth-2 certificate needs more triples; the cost of
   that is in `probe-cost.txt`.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-channel-max-product.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/gate-channel-max-product.txt \
        --records docs/wsp/verified/records/gate-channel-max-product.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.07546 % "frames [718310b673d2e8ba] n=481" measured

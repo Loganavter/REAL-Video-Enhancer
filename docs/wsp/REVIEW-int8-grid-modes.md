@@ -237,8 +237,8 @@ RVE_INT8_PER_CHANNEL=0 <install-python> scripts/model_fit_probe.py \
     --out-file docs/wsp/verified/logs/model-fit/all.json
 RVE_INT8_PER_CHANNEL=1 <install-python> scripts/model_fit_probe.py \
     --out-file docs/wsp/verified/logs/model-fit/all-perchannel.json
-PYTHONPATH=scripts python3 scripts/model_fit_records.py
-PYTHONPATH=scripts python3 scripts/model_fit_report.py
+PYTHONPATH=. python3 harness/scripts/model_fit_records.py
+PYTHONPATH=. python3 scripts/model_fit_report.py
 
 # the two first-order terms, per layer, both modes, one process
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/int8_grid_modes_probe.py \
@@ -252,5 +252,5 @@ flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/int8_grid_k_probe.p
 # the 494-frame pair: fp16 engine, shipped per-tensor, and K=2
 ARMS="fp16 base k2" ARM_ENV_K2="RVE_INT8_GRID_K=2" CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 \
   LOGDIR=docs/wsp/verified/logs/grid-k-pair RENDERS=/home/jorj/2Tb/grid-k scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <fp16.mkv> <k2.mkv> --reference-kind engine-render ...
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <fp16.mkv> <k2.mkv> --reference-kind engine-render ...
 ```

@@ -39,7 +39,7 @@ The earlier reading of 0.56613% and its 372 frames is withdrawn, together with t
 from it ("the body damages Violet badly"). What survives is: int8 on Violet reads 0.127% with three
 composition frames over the bar, and the probe's refusal is correct.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/violet-calibration-fix.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/violet-calibration-fix.txt \
        --records docs/wsp/verified/records/violet-calibration-fix.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.12727 % "frames [3e7bd4c273e44ee9] n=480" measured

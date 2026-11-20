@@ -204,7 +204,7 @@ At most **three** cells at once, and never two with overlapping `owns_files`:
   which of our ops (`PReLU`, `PixelShuffle`, residual add) it can express.
   Owns `REPORT.md` only. Every claim carries a command or a `file:line`.
 - **lane-probes** (code): `scripts/probe_winograd.py` and
-  `scripts/pyramid_budget.py`. Both are written and reviewed before the
+  `harness/scripts/pyramid_budget.py`. Both are written and reviewed before the
   supervisor runs them; the probe must print the algorithm name it got, not just
   a time, or it reproduces the mistake E26 exists to correct.
 - **lane-plugin** (code): `backend/src/pytorch/int8_plugin/` plus a CPU test of

@@ -56,8 +56,8 @@ which is what keeps its cost at ~0 on the models that do not need it.
 
 ```bash
 RVE_TAIL_YUV=0 python3 scripts/price_predictor_probe.py --model "<model>.pth" --out-file price.json
-PYTHONPATH=scripts python3 scripts/price_predictor_records.py
-PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-price-predictor.txt \
+PYTHONPATH=. python3 harness/scripts/price_predictor_records.py
+PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-price-predictor.txt \
     --records docs/wsp/verified/records/int8-price-predictor.jsonl --bars docs/claims-bars.json
 ```
 

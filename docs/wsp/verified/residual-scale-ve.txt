@@ -7,7 +7,7 @@
 # 1440x1080 WEB-DL upscaled with lanczos (1.16 / 4.83 / 14.35 / 44.67) was larger on every percentile.
 # Same model, same code: the population decides the number by 2-4x.
 #
-# Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/residual-scale-ve.txt \
+# Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/residual-scale-ve.txt \
 #        --records docs/wsp/verified/records/residual-scale-ve.jsonl
 
 @claim R001 0.5618074536323547 levels "pixels of one 1080p frame [f288c822fd0be803] n=1" measured

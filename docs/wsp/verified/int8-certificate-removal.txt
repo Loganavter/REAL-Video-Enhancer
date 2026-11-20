@@ -55,11 +55,11 @@ CLIPS=bd_violet20s.mkv ROUNDS=2 SINK=ffv1 RENDERS=<dir> scripts/wall_ab.sh
 RVE_INT8_CERTIFY=1 <the same rve-backend.py invocation>
 # and the pre-change tree
 git worktree add <dir> 462bf94f && (render from its backend/)
-PYTHONPATH=scripts python3 scripts/gate_sweep.py NEW OLD --out stats.json \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py NEW OLD --out stats.json \
     --reference-kind config --config "..."
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-certificate-removal.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-certificate-removal.txt \
        --records docs/wsp/verified/records/int8-certificate-removal.jsonl --bars docs/claims-bars.json
 
 @claim A001 0.0 % "frames [13137e4e7dd10e98] n=494" measured

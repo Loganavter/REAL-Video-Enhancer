@@ -77,10 +77,10 @@ flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_occupancy_probe
     --out-file docs/wsp/verified/logs/hop-occupancy/probe.json
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_epilogue_probe.py \
     --out-file docs/wsp/verified/logs/hop-epilogue/probe.json
-PYTHONPATH=scripts python3 scripts/hop_occupancy_records.py
+PYTHONPATH=. python3 harness/scripts/hop_occupancy_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-occupancy.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-occupancy.txt \
        --records docs/wsp/verified/records/int8-hop-occupancy.jsonl --bars docs/claims-bars.json
 
 @claim O001 1.566 ms "frames [10cff28ea287d300] n=1" measured

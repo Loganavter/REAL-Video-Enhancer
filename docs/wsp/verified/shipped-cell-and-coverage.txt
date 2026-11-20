@@ -41,7 +41,7 @@ The probe's 4 depth-1 pairs against the render's 83 reuses: **4.8%**, and **0 of
 serves at depth 2 or deeper. Per-frame agreement is not computable yet - the probe does not emit the
 frame indices of its pairs.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/shipped-cell-and-coverage.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/shipped-cell-and-coverage.txt \
        --records docs/wsp/verified/records/shipped-cell-and-coverage.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.22 % "pairs [5df97bfb443a7f05] n=8" measured

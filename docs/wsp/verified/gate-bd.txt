@@ -109,8 +109,8 @@ is a property of the clip as much as of the quantiser.
 
 ## Records
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/gate-bd.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/gate-bd.txt \
        --records docs/wsp/verified/records/gate-bd.jsonl --bars docs/claims-bars.json
 
-@claims below are emitted by scripts/gate_sweep.py --from-json and scripts/emit_render_records.py from
+@claims below are emitted by harness/scripts/gate_sweep.py --from-json and harness/scripts/emit_render_records.py from
 the artefacts in `docs/wsp/verified/logs/bd/`; nothing here is hand-copied.

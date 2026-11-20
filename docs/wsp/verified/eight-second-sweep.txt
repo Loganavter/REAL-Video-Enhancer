@@ -25,7 +25,7 @@ calm cut and fails on an action sequence, and no sample size inside the calm cut
 This closes the "99x portability failure" reading for good: the shipping numbers were not measured badly,
 they were measured on different content.
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/eight-second-sweep.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/eight-second-sweep.txt \
        --records docs/wsp/verified/records/eight-second-sweep.jsonl --bars docs/claims-bars.json
 
 @claim R001 0.00274 % "frames [5aa8615233f267ff] n=249" measured

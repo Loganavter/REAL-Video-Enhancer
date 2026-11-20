@@ -140,7 +140,7 @@ the guard became a default rather than a knob that happens to be on.
 # isolated: the kernel against the old conversion, with the conversion inside each arm
 flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/tail_csc_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/tail-csc/probe.json
-PYTHONPATH=scripts python3 scripts/tail_csc_records.py
+PYTHONPATH=. python3 harness/scripts/tail_csc_records.py
 
 # in the app: three arms, one session, interleaved
 ARMS="fp16 conv yuv" ARM_ENV_CONV="RVE_TAIL_YUV=0" ARM_ENV_YUV="RVE_TAIL_YUV=1" \
@@ -151,16 +151,16 @@ ARMS="fp16 conv yuv" ARM_ENV_CONV="RVE_TAIL_YUV=0" ARM_ENV_YUV="RVE_TAIL_YUV=1" 
 ARMS="conv yuv" ARM_ENV_CONV="RVE_TAIL_YUV=0" ARM_ENV_YUV="RVE_TAIL_YUV=1" \
   CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 LOGDIR=docs/wsp/verified/logs/tail-csc-pair \
   RENDERS=/home/jorj/2Tb/tail-csc scripts/wall_ab.sh
-PYTHONPATH=scripts python3 scripts/gate_sweep.py <conv.mkv> <yuv.mkv> \
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <conv.mkv> <yuv.mkv> \
     --out docs/wsp/verified/logs/tail-csc-pair/pair.json --reference-kind config \
     --clip-name bd_violet20s.mkv --id-prefix TC \
     --artifact docs/wsp/verified/logs/tail-csc-pair/pair.json \
     --emit docs/wsp/verified/logs/tail-csc-pair/pair-records.jsonl \
-    --run "scripts/gate_sweep.py over two ffv1 renders" --session s-tail-csc-2026-11-19
-PYTHONPATH=scripts python3 scripts/tail_csc_inapp_records.py
+    --run "harness/scripts/gate_sweep.py over two ffv1 renders" --session s-tail-csc-2026-11-19
+PYTHONPATH=. python3 harness/scripts/tail_csc_inapp_records.py
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-tail-csc.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tail-csc.txt \
        --records docs/wsp/verified/records/int8-tail-csc.jsonl --bars docs/claims-bars.json
 
 @claim N001 5.123 ms "frames [10cff28ea287d300] n=1" measured

@@ -58,7 +58,7 @@ Three things follow.
 lts__t_sector_hit_rate.pct,dram__bytes.sum.per_second,gpu__time_duration.sum <install-python> <target.py>
 ```
 
-Run: PYTHONPATH=scripts python3 -m harness.cli check docs/wsp/verified/int8-hop-dram.txt \
+Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-dram.txt \
        --records docs/wsp/verified/records/int8-hop-dram.jsonl --bars docs/claims-bars.json
 
 @claim D001 132.84 MB "frames [10cff28ea287d300] n=1" measured
