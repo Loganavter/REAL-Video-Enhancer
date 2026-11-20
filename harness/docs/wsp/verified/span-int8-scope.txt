@@ -1,0 +1,154 @@
+# SPAN scope: 65.5% of the frame is in 3x3 convolutions, and that is not enough to justify a kernel
+
+Measured 2026-11-20 (local), probe `harness/scripts/span_scope_probe.py`, raw `logs/span-scope/probe.json`,
+model `2x_ModernSpanimationV1.pth` (SPAN, x2, 3.94M parameters, 102 convolutions).
+
+The row asked one question before any int8 work on this family: if only the 3x3 convolutions could be quantised,
+would there be anything left to win? Answer, measured rather than argued.
+
+## Where the 302 ms go (1080p in, 2160p out, eager fp16)
+
+| category | ms | share | count |
+|---|---|---|---|
+| **3x3 convolutions** | 197.85 | **65.5%** | 105 |
+| 1x1 convolutions (the expanders) | 7.00 | 2.3% | 5 |
+| everything else: attention multiply, concat, pixel shuffle, activations | 97.28 | 32.2% | - |
+
+So the ceiling for an int8 path over the 3x3 convs is **65.5% of the frame**, and a third of the frame is
+elementwise/concat work that int8 would not touch at all.
+
+## Why that ceiling is worse than it looks, next to the family the lane already runs
+
+The Compact lane's hop is 78% of the frame in **one uniform kernel**: sixteen identical 64-channel 3x3 convs, one
+quantisation boundary per hop and a single `C` constexpr. SPAN is the opposite shape:
+
+- **105 convolutions at two widths** (48/96 in the span48 variants, 64/128 here). 48 is not a power of two, so it
+  pads to 64 - the width work this lane already measured as "48 costs what 64 costs" (`int8-native-width.txt`);
+- **~19 block boundaries**, each of which would need a quantise/dequantise pair, against one per hop in the
+  Compact lane. At the boundary cost this lane has measured, 38 passes are not free;
+- **32.2% of the frame is not convolution at all** - the parameter-free attention is an elementwise sigmoid
+  multiply, and the four-way concat fusion is a copy. Neither is a `tl.dot`.
+
+## In the app, through the TensorRT engine
+
+The scope probe above is eager PyTorch, so its *shares* are the result and its 302 ms is not. The same model,
+same clip, through the app's own engine (`logs/span-app/`, record AB001 in `span-app.jsonl`):
+
+```
+2x_ModernSpanimationV1, bd_violet20s, null sink, 494 frames:  73.36 ms/frame  =  13.6 fps
+  for comparison: Futsuu fp16 engine 52.39 ms (19.1 fps)   int8 K=2 31.47 ms (31.8 fps)
+```
+
+So SPAN is 1.40x slower than the production model on its own fp16 engine, and 2.33x slower than the int8 lane.
+And the ceiling arithmetic is unforgiving: even if int8 made **every** 3x3 convolution 2x faster, the frame would
+go 73.36 -> 49.3 ms, i.e. 20.3 fps - still 1.57x slower than the int8 lane and only just level with the production
+model's fp16 engine.
+
+## Where the non-conv time actually goes (measured, eager)
+
+The legacy `torch.autograd.profiler` works in this build where kineto does not (`self_device_time_total` reads 0
+there even for a matmul). Five forwards of the same model, 1080p, fp16, per-op self device time:
+
+```
+cudnn_convolution  161.04 ms  53.3%
+add_                43.56 ms  14.4%     residual adds
+silu_               25.21 ms   8.3%
+add                 18.91 ms   6.3%
+mul                 18.82 ms   6.2%     the attention multiply
+sub                 12.92 ms   4.3%
+sigmoid             12.67 ms   4.2%     the attention gate
+cat                  8.27 ms   2.7%     the four-way fusion
+```
+
+So in the unfused graph the elementwise work plus the concat is **140 ms, 46% of the frame**, and every one of those
+ops is a full pass over a 265 MB activation (1080x1920x64 fp16). Fusing them into their producers - `silu`/`add`
+into the conv epilogue, the attention into one read-modify-write, the concat into the consumer - would take the
+elementwise traffic from about seven passes to two or three, i.e. **~90-100 ms in eager**.
+
+**But that is not the engine's number, and the earlier "10-12 ms" estimate on this page was derived from the wrong
+base.** Measured now, with `trtexec --dumpProfile` on a TensorRT 10.12 build of the same model (the app's own
+`.engine` is a TorchScript archive, not a bare plan, so it cannot be loaded by trtexec; the build here is from ONNX
+at the same shape and precision):
+
+```
+per-frame 67.2 ms (the app's engine: 73.36 - the difference is its tiling/full build, so the SHARES are the result)
+  conv + FUSED elementwise   51.56 ms  76.7%      layer names read "Conv + PWN(Sigmoid, Mul)" / "Conv + PWN(Add, ...)"
+  conv alone                  9.93 ms  14.8%      the input and the concat convolutions
+  copies / reformat           5.23 ms   7.8%      two layout copies (2.06 + 2.03) plus two small reformats
+  upsampler shuffle           0.45 ms   0.7%
+```
+
+**TensorRT has already fused every elementwise op into a conv epilogue** - that is what the layer names say - so the
+fusion prize in the engine is **the 5.2 ms of layout copies (7.8%), not 10-12 ms**. A hand pipeline could remove
+those by keeping one layout end to end, which is what a custom kernel would buy: about 5 ms of 67, i.e. the same
+order as the int8 prize on the convs would have been after the 19 boundaries.
+
+## What is optimizable in SPAN, and what is not (estimates on the measured shares)
+
+The shares above are measured; the gains below are arithmetic on them, i.e. **estimates**, and none of them was
+built. They are here so the next person does not have to re-derive the map.
+
+### Optimizable, cheapest first
+
+| lever | what it touches | mechanism | estimated gain |
+|---|---|---|---|
+| **fuse the attention block** | `mul` + `sigmoid` + `sub` | `sigmoid(mean_c(x)) * x` is a reduction plus two elementwise passes over the same activation | **already done by TensorRT** - the engine's layer names are `Conv + PWN(Sigmoid, Mul)`. Worth ~45 ms in eager, 0 in the engine |
+| **fold the four-way concat** | part of the 32.2% | `cat` of four branches into a 1x1: either read the four buffers directly in the consuming conv (no copy), or split that conv into four and sum - four dots, no 2 MB copy per frame per block | with the attention, together ~10-12 ms |
+| **fold pixel shuffle into the writing conv** | the tail | a permutation, exactly what the Compact lane already folds into its tail kernel | small, ~1-2 ms |
+| **fuse activations into the conv epilogue** | the convs' tails | standard; TensorRT already does some of it | small |
+| **int8 on the 3x3 convs** | 65.5% | the lane's own lever, but per BLOCK: 19 quantise/dequantise boundaries, widths 48/96 (pad to 64/128), attention left in fp16 | 65.5% is 48 ms; a 2x conv path gives ~24 ms off, i.e. 73.36 -> ~49 ms |
+| **model-side: prune/distil to fewer channels or blocks** | everything | a retraining project, not an optimisation | unbounded, and out of this lane |
+
+### Not optimizable, structurally
+
+- **The convolution arithmetic itself.** 3x3 dense at 48-96 channels is at the card's ridge; there is no free 2x
+  in it. The only levers are int8 (2x, with 19 boundaries) or fewer FLOPs (a model change).
+- **The 19 boundaries.** Any per-block int8 pays them; removing them means a megakernel across blocks, which this
+  lane measured as a loss for the Compact hops and which is worse here because the blocks are heterogeneous.
+- **The widths.** 48 and 96 are not powers of two, so int8 pads them (measured on the Compact family: a padded 48
+  costs exactly what 64 costs). In fp16 the widths are fine - the problem is the next row.
+- **The model's own inefficiency at these widths on this card.** SPAN is 1.40x slower than the production model at
+  fp16 on the same clip (73.36 against 52.39 ms), *before* any optimisation. Small channel counts do not fill the
+  tensor cores at 1080p, which is the same reason the Compact family needed 64 channels to be fast. That is a
+  property of the model on this hardware, not of the code.
+- **Batch-1 latency.** Video is one frame at a time; the per-launch cost of 19 blocks is small but not removable.
+
+### Bottom line
+
+A realistic SPAN optimisation programme - attention and concat fused, shuffle and activations folded - plausibly
+lands around 60 ms (16-17 fps), i.e. roughly level with the production model's **fp16** engine. Adding int8 on the
+convs might reach ~40-45 ms (22-25 fps) for a family-specific kernel set with 19 boundaries. Neither reaches the
+int8 lane's 31.47 ms (31.8 fps), which is why the row stays closed: the work is larger and the destination is
+behind the starting point of the lane.
+
+## Verdict
+
+**Closed as not worth a kernel.** The prize (65.5%) is smaller than the Compact lane's (78%) and the work is a
+family-specific kernel set with 19 boundaries, two widths and a mixed fp16 remainder - against a lane that already
+gets its 78% from a single kernel. If SPAN ever becomes the target model, the first lever is not int8: it is the
+32.2% that is elementwise and concat, which is a graph problem, not a quantisation one.
+
+## What this does not say
+
+- One model, one card, eager fp16 at 1080p. A different SPAN variant (span48, 48 channels) would move the conv
+  share slightly, not the structure.
+- The 302 ms is eager PyTorch, so the *shares* are what is quoted, not the absolute time: the app would run this
+  model through a TensorRT engine, where the same structure holds but every number is smaller.
+- No int8 was attempted here, by design: this is the scope measurement that decides whether to attempt it.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/span-int8-scope.txt \
+       --records harness/docs/wsp/verified/records/span-app.jsonl --bars harness/docs/claims-bars.json
+
+@claim AB001 73.36 ms "rounds [e915d1039b6e8d82] n=1" measured
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/span_scope_probe.py \
+    --out-file harness/docs/wsp/verified/logs/span-scope/probe.json
+# the app-level number, same clip, through the engine
+ARMS="fp16" MODEL=<path>/2x_ModernSpanimationV1.pth CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=null \
+  LOGDIR=harness/docs/wsp/verified/logs/span-app harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/scripts/ab_records.py --clip bd_violet20s --logdir harness/docs/wsp/verified/logs/span-app \
+  --arms fp16 --sink null --first-round 1 --rounds 1 --out harness/docs/wsp/verified/records/span-app.jsonl
+```

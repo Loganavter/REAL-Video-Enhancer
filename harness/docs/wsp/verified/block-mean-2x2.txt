@@ -1,0 +1,34 @@
+# The block-mean 2x2: the flip is better on Chainsaw and worse on Violet
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 3 record(s) in this file (R001, R002, R003) name
+> `csm20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+| clip | gate | worst share | worst block mean (64x64) |
+|---|---|---|---|
+| Chainsaw 20 s | luma 4.0 (default) | 0.49372% (f164) | **11.00** (f164) |
+| Chainsaw 20 s | channel-max 0.07% | 0.07546% (f475) | **4.83** (f475) |
+| Violet 20 s | luma 4.0 (default) | 0.07345% (f227) | **3.78** (f20) |
+| Violet 20 s | channel-max 0.07% | 0.07345% (f227) | **37.27** (f330) |
+
+On Chainsaw the flip is better on **both** axes - the share falls 6.5x and the block mean 2.3x. On
+Violet the share is identical and the block mean rises 10x.
+
+So the trade is real and two-sided, and the default is not a safe baseline: on Chainsaw it carries both
+the 18 share violations and a block mean of 11.00, above the 7.57 the owner's eye rejected (a figure
+that is not in this repo - context, not a checked anchor).
+
+What would make the flip safe is the one mechanism that bounds a concentrated area without diluting it:
+a per-pixel veto in the channel-max variable. `max_block_mean` is inert (a 32 px mean of a few bright
+pixels) and the luma veto cannot see a red-only change.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/block-mean-2x2.txt \
+       --records harness/docs/wsp/verified/records/block-mean-2x2.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 11.0 levels "frames [718310b673d2e8ba] n=481" measured
+@claim R002 4.83 levels "frames [718310b673d2e8ba] n=481" measured
+@claim R003 20.8 % "frames [718310b673d2e8ba] n=481" measured

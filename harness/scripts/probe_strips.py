@@ -19,7 +19,7 @@ frames in the time of one). Interleaved rounds.
 
 Usage (one GPU job at a time):
   flock -n /var/tmp/opencode/gpu.lock ~/.cache/opencode/venvs/trt310/bin/python \
-      harness/harness/scripts/probe_strips.py --plan /tmp/opencode/compact2x_1080p_fp16.plan
+      harness/scripts/probe_strips.py --plan /tmp/opencode/compact2x_1080p_fp16.plan
 """
 from __future__ import annotations
 

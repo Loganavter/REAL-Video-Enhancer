@@ -20,8 +20,8 @@ def total(path):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="docs/wsp/verified/logs")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-triton-warm.jsonl")
+    ap.add_argument("--dir", default="harness/docs/wsp/verified/logs")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-triton-warm.jsonl")
     a = ap.parse_args(argv)
     def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
     st = Store(session="s-2026-11-19T17:20:00+03:00")

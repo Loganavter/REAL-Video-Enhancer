@@ -1,0 +1,29 @@
+# The Triton int8 body chain, measured against fp16 on a real project frame
+#
+# Violet Evergarden ep01, 1920x1080, 16 real kernel launches, per-tensor input grids and per-channel
+# output grids (int8_pipeline.py), against the fp16 model's own output on the same frame:
+#   share above 8 levels 0.006%   peak 11.95 levels   mean 0.42   PSNR 53.15 dB
+# The pipeline's internal check on the same run reads 0.00644% / peak 12 / median 0.64 levels, and
+# REPORT-int8-lane-2026-11-16.md records 0.00832% certification in the app - same order.
+#
+# For scale: the ledger's TRT explicit-Q/DQ build claimed 0.000% / peak 4 / 54.1 dB on an unnamed
+# population; this Triton chain reads 0.006% / peak 12 / 53.15 dB on a named one. The plugin route's
+# picture is within a level of the TRT claim, and 6-10 dB better than this session's TRT Q/DQ rebuilds
+# (harness/docs/wsp/verified/engine-int8.txt: 44.4 / 47.7 / 38.0 dB for three configurations).
+#
+# Body chain time on this run: 54.75 ms for 16 launches = 3.42 ms/hop. NOTE: the report records the
+# requant-in-epilogue variant at 1.753 ms/hop = 28.0 ms, and that variant is NOT in this branch's
+# int8_pipeline.py - the tree here still uses the prologue requant.
+#
+# REPRODUCE, one command (the chain, the fp16 reference and the diff, each emitting records):
+#   flock -n /var/tmp/opencode/gpu.lock harness/scripts/measure_int8_acc.sh \
+#       /tmp/opencode/rm_frames/ve60.raw 1920 1080 /tmp/opencode/int8-acc
+# Re-run 2026-11-17 through that script: 0.006% / peak 11.89 / PSNR 53.24 dB, chain 55.41 ms
+# (3.46 ms/hop) - the same numbers, from the repository rather than from a /tmp scratch script.
+#
+# Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-body-ve.txt \
+#        --records harness/docs/wsp/verified/records/int8-body-ve.jsonl
+
+@claim R001 0.0062 % "pixels of one frame [312f135fefbf8d1f] n=1" measured
+@claim R002 11.95 levels "pixels of one frame [312f135fefbf8d1f] n=1" measured
+@claim R003 53.15 dB "pixels of one frame [312f135fefbf8d1f] n=1" measured

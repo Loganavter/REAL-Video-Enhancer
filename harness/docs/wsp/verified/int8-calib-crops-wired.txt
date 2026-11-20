@@ -1,0 +1,85 @@
+# Crop calibration, wired: start-up 33.15 -> 9.79 s, and the 494-frame pair agrees
+
+Measured 2026-11-20, BD Violet 1920x1080, `2x-Futsuu-Anime(1)`. Records `int8-calib-crops.jsonl` (CC001-CC006)
+plus the start-up split `startup-split-crops.jsonl` (SC001-SC004), raw `logs/calib-crops/`,
+`logs/startup-timed-crops.log`. Knob `RVE_INT8_CALIB_CROPS` (default 4 since this row; `=0` restores full frames).
+
+This is `int8-calibration-crops.txt` (2026-11-18) being **wired**, not re-measured: that page found crops 15.7x
+cheaper and the picture not worse, and the code was never written - `Int8Body` and `Int8Probe` had no crop path at
+all, so the app kept decoding sixteen frames and running the fp16 model over every full 1080p frame.
+
+## Cost, same model and frames
+
+| path | full frames | 4 crops/frame | ratio |
+|---|---|---|---|
+| `Int8Probe._calibrate`, 16 frames | **12.635 s** | **0.563 s** | 22.4x |
+| `Int8Body.calibrate`, 8 frames | **2.095 s** | **0.287 s** | 7.3x |
+
+## Start-up, end to end, same instrument (timestamped stdout, one cold process each)
+
+| block | full frames | crops |
+|---|---|---|
+| interpreter + CLI + ffprobe + CUDA init | 2.39 s | 2.38 s |
+| engine deserialize + probe calibration | **23.89 s** | **5.84 s** |
+| Triton JIT + body calibration + first call | 6.56 s | 1.28 s |
+| **first frame enqueued** | **33.15 s** | **9.79 s** |
+
+23.4 s of start-up, from one sample-population change. The block that dominated the profile
+(`startup-split.txt`) is the one that moved.
+
+## The picture: three held-out frames, then the pair
+
+Against the fp16 model on frames in neither calibration arm:
+
+| frame | full frames | crops |
+|---|---|---|
+| csm t=10 | 0.00000% | 0.00000% |
+| violet t=15 | 0.000161% | **0.000117%** |
+| violet t=5 | 0.000382% | **0.000201%** |
+
+And the acceptance the lane uses for a configuration change - a lossless ffv1 pair of all 494 frames,
+`gate_sweep --reference-kind config`:
+
+```
+494 frames, block 64
+worst share 0.00005% (frame 276), frames above 0.1%: 0
+worst block mean 1.65 (frame 425), peak 11
+```
+
+Worst share is **0.00005%**, four orders below the 0.1% bar, and no frame is above it. The peak of 11 is above the
+8-level threshold the statistic counts at, which is why the share is not zero - a handful of pixels on one frame
+move by up to 11 codes. That is the same order as the peak the 2026-11-18 page reported (19 against 26).
+
+## Decision
+
+**Default on** (`RVE_INT8_CALIB_CROPS=4`), in both calibration paths. `=0` restores the old population, and the
+crop count is part of the calibration-cache key, so a cache entry can never be read across the two populations.
+
+What this does not claim: that crops are *equivalent* to full frames in general - the pair is one clip, and the
+2026-11-18 page already said one draw is enough to stop treating full frames as necessary, not enough to call the
+arms identical. What it does claim is that on this clip the difference is 0.00005% worst-frame against a 0.1% bar,
+and that the start-up halves.
+
+## Reproduce
+
+```bash
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 harness/scripts/calib_crops_probe.py \
+    --calib /tmp/opencode/calib-frames --frames /tmp/opencode/eval3 --crops 0,4
+ARMS="full crops" ARM_ENV_FULL="RVE_INT8_CALIB_CROPS=0" ARM_ENV_CROPS="RVE_INT8_CALIB_CROPS=4" \
+    SINK=ffv1 ROUNDS=1 CLIPS="bd_violet20s.mkv" harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <crops.mkv> <full.mkv> --reference-kind config --out pair.json
+PYTHONPATH=. python3 harness/scripts/calib_crops_records.py
+PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-calib-crops-wired.txt \
+    --records harness/docs/wsp/verified/records/int8-calib-crops.jsonl --bars harness/docs/claims-bars.json
+```
+
+@claim CC001 2.095 s "runs [2d3aad881e3d8f9f] n=2" measured
+@claim CC002 0.287 s "runs [2d3aad881e3d8f9f] n=2" measured
+@claim CC003 12.635 s "runs [2d3aad881e3d8f9f] n=2" measured
+@claim CC004 0.563 s "runs [2d3aad881e3d8f9f] n=2" measured
+@claim CC005 4.822530864197531e-05 % "frames [13137e4e7dd10e98] n=494" measured
+@claim CC006 11.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim SC001 9.79 s "process starts [591d71597e4cd439] n=1" measured
+@claim SC002 2.38 s "process starts [591d71597e4cd439] n=1" measured
+@claim SC003 5.84 s "process starts [591d71597e4cd439] n=1" measured
+@claim SC004 1.28 s "process starts [591d71597e4cd439] n=1" measured

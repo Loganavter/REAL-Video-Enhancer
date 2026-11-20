@@ -11,9 +11,9 @@ Two controls it prints on every run, because both have been the cause of a withd
     model, no check that the reference itself is right).
 
 Usage:
-  python harness/harness/scripts/gate_sweep.py GATED UNGATED --out stats.json [--block 64] [--emit records.jsonl]
+  python harness/scripts/gate_sweep.py GATED UNGATED --out stats.json [--block 64] [--emit records.jsonl]
          [--clip-name bd_violet20s.mkv] [--label "..."] [--config "..."] [--instrument "..."]
-         [--session s-...] [--artifact docs/wsp/verified/logs/x.log] [--ffmpeg PATH]
+         [--session s-...] [--artifact harness/docs/wsp/verified/logs/x.log] [--ffmpeg PATH]
 """
 
 from __future__ import annotations

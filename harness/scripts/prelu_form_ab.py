@@ -1,6 +1,6 @@
 """Acceptance + interleaved timing for a set of TensorRT plans, one instrument, one session.
 
-This is the instrument behind docs/wsp/verified/prelu-form-int8.txt: the picture statistic is the lane's own
+This is the instrument behind harness/docs/wsp/verified/prelu-form-int8.txt: the picture statistic is the lane's own
 (share of pixels more than 8 levels off in any channel, worst channel, worst frame of a spread sample, bar
 0.1%), the reference is the fp16 engine of the unmodified ONNX, and the timing alternates the arms inside one
 session so the drift is common to both.

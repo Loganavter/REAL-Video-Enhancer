@@ -9,7 +9,7 @@ that, because markdown has no notion of a record's lifetime and no way to refuse
 So: everything stays a file (records `*.jsonl`, claims `*.txt`, verdicts `*.yaml`, all in git and all
 diffable), and this module builds a queryable index over them:
 
-    python -m harness.cli db build            # (re)build docs/wsp/ledger.db from the files
+    python -m harness.cli db build            # (re)build harness/docs/wsp/ledger.db from the files
     python -m harness.cli db current          # what is true now, grouped by lane
     python -m harness.cli db lane int8        # one lane: verdict, evidence, records
     python -m harness.cli db lineage <vid>    # what replaced what, in order
@@ -37,6 +37,8 @@ import sqlite3
 import sys
 from dataclasses import dataclass
 
+from . import paths
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS record (
   rid TEXT, source TEXT, value REAL, unit TEXT, statistic TEXT, tier TEXT,
@@ -63,9 +65,9 @@ CLAIM = re.compile(r'@claim\s+(\S+)\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?
                    r'(?:\s+(measured|derived|assumed))?')
 SESSION = re.compile(r'@session=(\S+)')
 
-DEFAULT_RECORDS = "docs/wsp/verified/records/*.jsonl"
-DEFAULT_CLAIMS = "docs/claims-*.txt"
-DEFAULT_VERDICTS = "docs/wsp/verdicts.yaml"
+DEFAULT_RECORDS = paths.doc("wsp/verified/records/*.jsonl")
+DEFAULT_CLAIMS = paths.doc("claims-*.txt")
+DEFAULT_VERDICTS = paths.doc("wsp/verdicts.yaml")
 
 
 def load_verdicts(path: str) -> list[dict]:
@@ -77,7 +79,7 @@ def load_verdicts(path: str) -> list[dict]:
     return data
 
 
-def build(db_path: str = "docs/wsp/ledger.db", records: str = DEFAULT_RECORDS,
+def build(db_path: str = paths.doc("wsp/ledger.db"), records: str = DEFAULT_RECORDS,
           claims: str = DEFAULT_CLAIMS, verdicts: str = DEFAULT_VERDICTS,
           extra_records: tuple[str, ...] = ()) -> dict:
     """Rebuild the index from the files. Idempotent: the DB is dropped and recreated."""
@@ -134,7 +136,7 @@ def build(db_path: str = "docs/wsp/ledger.db", records: str = DEFAULT_RECORDS,
     return counts
 
 
-def connect(db_path: str = "docs/wsp/ledger.db") -> sqlite3.Connection:
+def connect(db_path: str = paths.doc("wsp/ledger.db")) -> sqlite3.Connection:
     if not os.path.exists(db_path):
         raise SystemExit(f"{db_path}: no index yet - run `python -m harness.cli db build`")
     con = sqlite3.connect(db_path)
@@ -190,7 +192,7 @@ def orphans(con) -> list[sqlite3.Row]:
 
 def stale(con) -> list[sqlite3.Row]:
     return [r for r in con.execute("SELECT vid, evidence FROM verdict WHERE evidence != ''")
-            if not os.path.exists(r["evidence"])]
+            if not os.path.exists(paths.resolve(r["evidence"]))]
 
 
 def summary(con) -> dict:
@@ -213,7 +215,7 @@ def render_current_state(con) -> str:
         "",
         f"Index: {s['records']} records, {s['claims']} claims, {s['verdicts']} verdicts "
         f"({s['current']} current, {s['superseded']} superseded, {s['refuted']} refuted). "
-        f"The files are truth (`docs/wsp/verdicts.yaml`, `docs/wsp/verified/records/*.jsonl`); this "
+        f"The files are truth (`harness/docs/wsp/verdicts.yaml`, `harness/docs/wsp/verified/records/*.jsonl`); this "
         f"section is a view. Everything below it is history and may be superseded - follow "
         f"`superseded_by` in the verdict registry, never the position in this file.",
         "",
@@ -281,12 +283,12 @@ def export_markdown(con, embed_evidence: bool = True, embed_logs: bool = False) 
     """
     s = summary(con)
     out = ["# RVE evidence index - export", "",
-           f"Generated from `docs/wsp/ledger.db` ({s['records']} records, {s['claims']} claims, "
+           f"Generated from `harness/docs/wsp/ledger.db` ({s['records']} records, {s['claims']} claims, "
            f"{s['verdicts']} verdicts: {s['current']} current, {s['superseded']} superseded, "
            f"{s['refuted']} refuted).",
            "",
-           "This is a snapshot. The source of truth is the files - `docs/wsp/verdicts.yaml`, "
-           "`docs/wsp/verified/records/*.jsonl`, `docs/claims-*.txt` - and the index is rebuilt from "
+           "This is a snapshot. The source of truth is the files - `harness/docs/wsp/verdicts.yaml`, "
+           "`harness/docs/wsp/verified/records/*.jsonl`, `harness/docs/claims-*.txt` - and the index is rebuilt from "
            "them with `python -m harness.cli db build`. A verdict marked *superseded* is kept only so "
            "that the replacement can be followed; do not cite one.", ""]
     out += ["## Current state, by lane", ""]
@@ -337,7 +339,7 @@ def export_markdown(con, embed_evidence: bool = True, embed_logs: bool = False) 
                        f"{r['tier']} | {pop} |")
         out.append("")
     out += ["## Claims", "",
-            "The legacy corpus (`docs/claims-*.txt`): names, values and the session that measured "
+            "The legacy corpus (`harness/docs/claims-*.txt`): names, values and the session that measured "
             "them. These are the lines the migrate gate reports on, not record-backed claims.", "",
             "| name | value | unit | session | source:line |", "|---|---|---|---|---|"]
     for r in con.execute("SELECT * FROM claim ORDER BY name, session"):
@@ -366,10 +368,11 @@ def export_markdown(con, embed_evidence: bool = True, embed_logs: bool = False) 
                 "the prose above them is what the checks cannot verify.", ""]
         missing = []
         for path in ordered:
-            if not os.path.exists(path):
+            real = paths.resolve(path)
+            if not os.path.exists(real):
                 missing.append(path)
                 continue
-            with open(path, errors="replace") as fh:
+            with open(real, errors="replace") as fh:
                 body = fh.read().rstrip()
             # demote the embedded file's own headings by one level, so only this document's sections
             # appear at `##` in a reader's outline
@@ -399,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("query", choices=("build", "current", "lane", "lineage", "orphans", "stale",
                                       "summary", "current-block", "write-block", "export-md"))
     ap.add_argument("arg", nargs="?")
-    ap.add_argument("--db", default="docs/wsp/ledger.db")
+    ap.add_argument("--db", default=paths.doc("wsp/ledger.db"))
     ap.add_argument("--no-evidence", action="store_true",
                     help="export-md: keep evidence as paths instead of embedding the files")
     ap.add_argument("--with-logs", action="store_true",
@@ -418,14 +421,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.query == "current-block":
         print(render_current_state(con))
     elif args.query == "export-md":
-        target = args.arg or "docs/wsp/ledger-export.md"
+        target = args.arg or paths.doc("wsp/ledger-export.md")
         text = export_markdown(con, embed_evidence=not args.no_evidence,
                                embed_logs=args.with_logs)
         with open(target, "w") as fh:
             fh.write(text)
         print(f"{target}: {len(text.splitlines())} lines, {os.path.getsize(target)} bytes")
     elif args.query == "write-block":
-        target = args.arg or "docs/RESEARCH-LEDGER.md"
+        target = args.arg or paths.doc("RESEARCH-LEDGER.md")
         changed = splice(target, render_current_state(con))
         print(f"{target}: {'written' if changed else 'unchanged'}")
     elif args.query == "summary":

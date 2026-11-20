@@ -1,8 +1,8 @@
 """Records for the pack-ring falsifier: the loop, the pack line, and the payload identity.
 
-Usage: python harness/harness/scripts/pack_ring_records.py [--logs docs/wsp/verified/logs/pack-ring/ab]
-                                           [--pair docs/wsp/verified/records/int8-pack-ring-pair.jsonl]
-                                           [--out docs/wsp/verified/records/int8-pack-ring.jsonl]
+Usage: python harness/scripts/pack_ring_records.py [--logs harness/docs/wsp/verified/logs/pack-ring/ab]
+                                           [--pair harness/docs/wsp/verified/records/int8-pack-ring-pair.jsonl]
+                                           [--out harness/docs/wsp/verified/records/int8-pack-ring.jsonl]
 """
 from __future__ import annotations
 
@@ -33,12 +33,12 @@ def sha256(p: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/pack-ring/ab")
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/pack-ring/ab")
     ap.add_argument("--sink", default="null", help="null | nvenc - the sink decides what the loop contains")
     ap.add_argument("--id-base", type=int, default=0,
                     help="offset added to the record numbers, so two sinks can share one file")
-    ap.add_argument("--pair", default="docs/wsp/verified/records/int8-pack-ring-pair.jsonl")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-pack-ring.jsonl")
+    ap.add_argument("--pair", default="harness/docs/wsp/verified/records/int8-pack-ring-pair.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-pack-ring.jsonl")
     args = ap.parse_args(argv)
 
     loops: dict[str, list[float]] = {}

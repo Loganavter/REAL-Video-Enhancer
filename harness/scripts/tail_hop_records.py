@@ -3,8 +3,8 @@
 Two files, two instruments, one row. The picture half is the corpus's own emulation recipe on four held-out
 frames; the timing half is one Triton kernel against the shipped two-step tail on the same codes.
 
-Usage: python harness/harness/scripts/tail_hop_records.py [--emul .../emulation.json] [--kernel .../kernel.json]
-                                          [--out docs/wsp/verified/records/int8-tail-hop.jsonl]
+Usage: python harness/scripts/tail_hop_records.py [--emul .../emulation.json] [--kernel .../kernel.json]
+                                          [--out harness/docs/wsp/verified/records/int8-tail-hop.jsonl]
 """
 from __future__ import annotations
 
@@ -37,10 +37,10 @@ def sha256(path: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--emul", default="docs/wsp/verified/logs/tail-hop/emulation.json")
-    ap.add_argument("--kernel", default="docs/wsp/verified/logs/tail-hop/kernel.json")
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/tail-hop/ab")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-tail-hop.jsonl")
+    ap.add_argument("--emul", default="harness/docs/wsp/verified/logs/tail-hop/emulation.json")
+    ap.add_argument("--kernel", default="harness/docs/wsp/verified/logs/tail-hop/kernel.json")
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/tail-hop/ab")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-tail-hop.jsonl")
     ap.add_argument("--pair", default="")
     args = ap.parse_args(argv)
 

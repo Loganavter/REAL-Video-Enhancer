@@ -569,7 +569,7 @@ class HandleApplication:
             "--int8_fit",
             help="unset (default): follow --quality_preset - best runs the fp16 engine, fast runs the "
                  "int8 body. auto: ask the probe. int8/fp16: force it. The forced values are what the "
-                 "measurement runs in docs/wsp use.",
+                 "measurement runs in harness/docs/wsp use.",
             choices=("auto", "int8", "fp16"),
             default=None,
         )

@@ -2,7 +2,7 @@
 
 Why this exists: on 2026-11-17 the audit found three places in this repo asserting things about the
 host that were no longer true - MODEL.md said `ncu` was blocked in three passages (the counters had
-been readable since 2026-11-15), docs/wsp/README.md said no TensorRT runtime existed (10.12.0.36 had
+been readable since 2026-11-15), harness/docs/wsp/README.md said no TensorRT runtime existed (10.12.0.36 had
 been installed that afternoon), and DELEGATION.md told workers to use a bundled interpreter that does
 not exist. Each was a number's worth of damage: a crew that follows a stale environment note burns its
 budget on `ModuleNotFoundError` and blames the code.
@@ -103,7 +103,7 @@ def stale(fact: dict[str, str], path: str, text: str) -> list[tuple[int, str, st
 
 def check(root: str = ".", paths: list[str] | None = None) -> tuple[list[tuple[str, int, str, str]], dict]:
     fact = facts()
-    files = paths or sorted(glob.glob(os.path.join(root, "docs", "**", "*.md"), recursive=True))
+    files = paths or sorted(glob.glob(os.path.join(root, "harness", "docs", "**", "*.md"), recursive=True))
     out = []
     for f in files:
         if os.path.basename(f).startswith("AUDIT-"):

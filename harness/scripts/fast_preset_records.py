@@ -5,8 +5,8 @@ A second card is impossible here (one GPU in this machine); a second model famil
 body carries the answer: `realesr-animevideov3` is a 64-channel Compact with a 4x tail, which the int8 body
 serves.
 
-Usage: python harness/harness/scripts/fast_preset_records.py [--logs docs/wsp/verified/logs/fast-preset/animevideov3]
-                                             [--out docs/wsp/verified/records/fast-preset.jsonl]
+Usage: python harness/scripts/fast_preset_records.py [--logs harness/docs/wsp/verified/logs/fast-preset/animevideov3]
+                                             [--out harness/docs/wsp/verified/records/fast-preset.jsonl]
 """
 from __future__ import annotations
 
@@ -39,8 +39,8 @@ def sha256(path: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/fast-preset/animevideov3")
-    ap.add_argument("--out", default="docs/wsp/verified/records/fast-preset.jsonl")
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/fast-preset/animevideov3")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/fast-preset.jsonl")
     args = ap.parse_args(argv)
 
     loops: dict[str, list[float]] = {}

@@ -4,7 +4,7 @@ The gate's failure, in the owner's words: it only behaves on flat/binary content
 and when it does reuse the result looks wrong. The lane's own diagnosis is that the decision statistic
 (block mean of the absolute difference on the LR frame) cannot separate noise from motion. This tool tests
 that directly on the population that already failed: it computes several candidate statistics per frame pair
-and ranks them against the per-frame damage measured by ``harness/harness/scripts/gate_sweep.py`` on the same clip.
+and ranks them against the per-frame damage measured by ``harness/scripts/gate_sweep.py`` on the same clip.
 
 Candidates (all on the same pair, same t-1 reference, same frame count):
 

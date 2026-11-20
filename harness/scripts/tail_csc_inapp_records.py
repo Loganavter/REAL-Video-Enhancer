@@ -11,10 +11,10 @@ conversion inside one arm. This reader takes the numbers that decide the row, in
   (the chroma rounding order moves), reference-kind config.
 
 Usage:
-  python harness/harness/scripts/tail_csc_inapp_records.py \
-      --logs docs/wsp/verified/logs/tail-csc-ratio \
-      --pair docs/wsp/verified/logs/tail-csc-pair/pair.json \
-      --out docs/wsp/verified/records/int8-tail-csc-inapp.jsonl
+  python harness/scripts/tail_csc_inapp_records.py \
+      --logs harness/docs/wsp/verified/logs/tail-csc-ratio \
+      --pair harness/docs/wsp/verified/logs/tail-csc-pair/pair.json \
+      --out harness/docs/wsp/verified/records/int8-tail-csc-inapp.jsonl
 """
 from __future__ import annotations
 
@@ -70,14 +70,14 @@ def read_arm(logdir: str, arm: str, rounds: list[int], sink: str = "null") -> di
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/tail-csc-ratio")
-    ap.add_argument("--pair", default="docs/wsp/verified/logs/tail-csc-pair/pair.json")
-    ap.add_argument("--pair-records", default="docs/wsp/verified/logs/tail-csc-pair/pair-records.jsonl")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-tail-csc.jsonl",
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/tail-csc-ratio")
+    ap.add_argument("--pair", default="harness/docs/wsp/verified/logs/tail-csc-pair/pair.json")
+    ap.add_argument("--pair-records", default="harness/docs/wsp/verified/logs/tail-csc-pair/pair-records.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-tail-csc.jsonl",
                     help="ONE file per row: the isolated N-records are carried over, the pair's "
                          "TC-records appended, so a single --records validates the whole doc")
     ap.add_argument("--first-round", type=int, default=2)
-    ap.add_argument("--nvenc-logs", default="docs/wsp/verified/logs/tail-csc-nvenc",
+    ap.add_argument("--nvenc-logs", default="harness/docs/wsp/verified/logs/tail-csc-nvenc",
                     help="the same two arms with hevc_nvenc in the loop: the product's own number")
     args = ap.parse_args(argv)
 

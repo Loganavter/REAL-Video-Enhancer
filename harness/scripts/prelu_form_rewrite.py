@@ -1,7 +1,7 @@
 """Rewrite PReLU into forms TensorRT's fusion catalog recognises, keeping the function identical.
 
 Why: the int8 path closes on the boundary - "a per-channel PReLU cannot join an int8 epilogue, so every hop
-pays a full-precision pass" (docs/wsp/verified/trt-int8-calibrated.txt). PReLU is positive-homogeneous, so
+pays a full-precision pass" (harness/docs/wsp/verified/trt-int8-calibrated.txt). PReLU is positive-homogeneous, so
 the dequantise commutes through it, and whether the *builder* keeps int8 across the boundary is a graph-form
 question. This rewrite is the cheap way to ask: no new weight tensors, no kernel, no plugin.
 

@@ -1,0 +1,113 @@
+# The product ratio on today's default: 1.40x on Violet, 1.48x on Chainsaw
+
+Measured 2026-11-20 (local), RTX 4060 Ti, the SHIPPED int8 default (fused head kernel + 16 int8 hops + int8
+tail kernel), fp16 TensorRT engine against it, interleaved arms inside one session, null sink, reuse off,
+3 rounds per clip, both BD cuts.
+Records: `int8-wall-defaults.jsonl`; logs: `logs/wall-defaults/null/`.
+
+This is the debt row `rve-bar-int8-wall-retake-2026-11-20`: the recorded `bar_int8_wall` claim still cites the
+frame the int8 path had **before** 2026-11-20, i.e. 47.96 ms and ~1.2x. Two changes were adopted since (the
+head as one kernel, -5.27 ms; the tail as a 17th int8 hop, -3.16 ms), so the number that gets quoted described
+a build that no longer exists. Nothing here edits the bar: the bar is a threshold, this is the measurement.
+
+## The numbers
+
+| clip | arm | r1 | r2 | r3 | median r2+ |
+|---|---|---|---|---|---|
+| bd_violet20s (494) | fp16 engine | 56.96 | 58.71 | 53.27 | **55.99** |
+| bd_violet20s (494) | int8 default | 40.46 | 41.02 | 39.00 | **40.01** |
+| bd_csm_same (539) | fp16 engine | *timeout* | 52.16 | 52.18 | **52.17** |
+| bd_csm_same (539) | int8 default | 35.37 | 35.27 | 35.17 | **35.22** |
+
+**Ratios: 1.399x (Violet) and 1.481x (Chainsaw)**, against `bar_int8_wall` = 1.2x. Per-round ratios on Violet
+are 1.431 and 1.366, so the median is not carrying a lucky draw.
+
+The phase counter on the same runs (Chainsaw, median of rounds 2+): head **0.70**, quantise **0.00**, hops
+**25.35**, tail **2.60**, body **28.55** - i.e. the frame is now 25.4 of 28.6 body, and the two boundary
+kernels together are 3.3 ms.
+
+## Under the encoder - the arm this row asked for
+
+Same session shape, `SINK=nvenc` (hevc_nvenc at 4K), 3 rounds per clip:
+
+| clip | arm | r1 | r2 | r3 | median r2+ |
+|---|---|---|---|---|---|
+| bd_violet20s | fp16 engine | 51.87 | 52.12 | 52.19 | **52.16** |
+| bd_violet20s | int8 default | 34.46 | 34.49 | 34.56 | **34.53** |
+| bd_csm_same | fp16 engine | 52.19 | 52.18 | 52.22 | **52.20** |
+| bd_csm_same | int8 default | 34.65 | 34.66 | 34.64 | **34.65** |
+
+**Ratios: 1.511x (Violet) and 1.506x (Chainsaw)** - HIGHER than the null-sink pair (1.399 / 1.481), because the
+encoder is a fixed cost that both arms pay and the int8 arm has less left to overlap with it. The per-round
+ratios are 1.511 and 1.510 on Violet, so again no lucky draw.
+
+This is the configuration the product actually runs, and it is the one that clears the bar: **1.51x against
+1.2x**. The phase counter on the same runs (Violet, median of rounds 2+): head **0.6**, quantise **0.0**, hops
+**25.5**, tail **1.0**, body **27.15** - the tail now reads 1.0 ms because the shuffle fold adopted the same
+day removed most of it.
+
+## What is not clean about it
+
+- **`bd_csm_same_fp16_r1` has no loop line in the null-sink run**: it was killed by the script's own 1800 s
+  timeout at frame 281 of 539, after ~27 minutes at "FPS: 0". The arm's rounds 2 and 3 are 52.16 and 52.18 ms -
+  reproducible to 0.02 ms - so the median stands, but the first draw of that arm is missing for a reason that
+  is NOT explained here: either the engine rebuilt a plan for this clip or the machine stalled. In the NVENC
+  run of the same clip all three rounds read 52.19/52.18/52.22, which makes a persistent engine problem
+  unlikely and a machine stall the more probable reading - still not proven.
+- The Violet fp16 arm shows a real spread across rounds in the null-sink run (53.27-58.71, 10%) and almost
+  none under the encoder (51.87-52.19, 0.6%), which is what a shared fixed cost does to a ratio.
+- The NVENC renders were written to `/home/jorj/2Tb/wall-defaults-nvenc/` and are NOT part of any picture
+  record: this file measures time, and the picture of the shipped default is measured in three other records.
+
+## What this changes in the record
+
+`bar_int8_wall` = 1.2x is now cleared by **0.31x under the encoder on both clips** (1.511 / 1.506) and by
+0.20-0.28x on a null sink, in the shipped configuration, in one session. Any earlier "1.2x" or "1.088-1.141x" statement in the corpus describes a
+different build (the wall-ab row of 2026-11-19 predates both adoptions) and should be read as history, not as
+the current product figure.
+
+## Not covered
+
+- One card, two clips of one label family, null sink, reuse off.
+- The 1440x1080 native cut (its own row, `rve-int8-defaults-second-material`), measured on a null sink.
+- The peak/share picture of these particular runs: that is measured separately (`int8-head-fusion.txt`,
+  `int8-tail-hop.txt`, `peak-look.txt`), each with its own reference declaration.
+
+## Reproduce
+
+```bash
+ARMS="fp16 int8" CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=null \
+  LOGDIR=harness/docs/wsp/verified/logs/wall-defaults/null harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/scripts/wall_ab_records.py --logs harness/docs/wsp/verified/logs/wall-defaults/null \
+  --out harness/docs/wsp/verified/records/int8-wall-defaults.jsonl
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-wall-defaults.txt \
+       --records harness/docs/wsp/verified/records/int8-wall-defaults.jsonl --bars harness/docs/claims-bars.json
+
+@claim W006 52.17 ms "rounds [03467af95ad930d9] n=2" measured
+@claim W007 35.22 ms "rounds [03467af95ad930d9] n=2" measured
+@claim W008 1.481261 x "rounds [03467af95ad930d9] n=2" derived
+@claim W022 55.99 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W023 40.01 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W024 1.3994 x "rounds [f6f0b2fae971ea4a] n=2" derived
+@claim W027 0.7 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W028 0.0 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W029 31.35 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W030 2.5 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W031 34.55 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W107 52.2 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W108 34.65 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W109 1.506494 x "rounds [25b85e3aa4a10fa5] n=2" derived
+@claim W112 0.6 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W113 0.0 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W114 26.15 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W115 1.0 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W116 27.85 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W123 52.16 ms "rounds [36302566b4afd210] n=2" measured
+@claim W124 34.53 ms "rounds [36302566b4afd210] n=2" measured
+@claim W125 1.510571 x "rounds [36302566b4afd210] n=2" derived
+@claim W128 0.6 ms "rounds [36302566b4afd210] n=2" measured
+@claim W129 0.0 ms "rounds [36302566b4afd210] n=2" measured
+@claim W130 25.5 ms "rounds [36302566b4afd210] n=2" measured
+@claim W131 1.0 ms "rounds [36302566b4afd210] n=2" measured

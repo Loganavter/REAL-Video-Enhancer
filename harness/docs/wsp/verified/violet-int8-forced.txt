@@ -1,0 +1,50 @@
+# Violet with int8 forced: 0.566%, 372 frames above the bar - the probe was right to refuse
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 4 record(s) in this file (R001, R002, R003, R004) name
+> `violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+Measured 2026-11-18 by forcing the body past the probe (`--int8_fit int8`, added for measurement only)
+on the same clip, same channel-max gate at 0.07%, same 70.8% reuse.
+
+| | fp16 + channel-max | int8 + channel-max |
+|---|---|---|
+| worst frame | 0.07345% (227) | **0.56613%** (280) |
+| frames above 0.1% | 0 | **372 of 480** |
+
+So the refusal on Violet is not a sampling artifact: the body damages that material badly, and the
+probe's 0.108% was, if anything, an understatement.
+
+## The probe under-reports on both clips
+
+| clip | probe says | the render says |
+|---|---|---|
+| Chainsaw | 0.000% (d1, no depth-2 pair) | 0.08876% |
+| Violet | 0.108% (d1) | **0.56613%** |
+
+On Chainsaw the direction was right and the verdict matches; on Violet the direction was right and the
+margin was wrong by 5x. The probe is systematically optimistic against the render - the class-2 failure
+this lane retracted once already - so its numbers should be read as a screen, not as a certificate.
+
+## The wall, and the cost of the new statistic
+
+Same clip, same gate, same reuse, both written lossless: int8 70.33 ms/frame against fp16 108.76, i.e.
+**1.55x**, consistent with the 1.49-1.505x the lane measured under the encoder. These walls include
+ffv1 encoding and are not the shipped wall (the shipped Violet run reads 35.12 ms through libx264).
+
+The gate's own entry cost: **4.42 ms** per frame with channel-max (2.49 of it the tensor conversion),
+against **5.39 ms** (3.34) for the shipped luma gate on the same clip in the lane's own log. The new
+statistic is not more expensive than the old one, which contradicts the assumption that a full
+three-channel diff must cost more than a pooled luma.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/violet-int8-forced.txt \
+       --records harness/docs/wsp/verified/records/violet-int8-forced.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 0.56613 % "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R002 372.0 frames "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R003 1.55 x "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R004 4.42 ms "frames [3e7bd4c273e44ee9] n=480" measured

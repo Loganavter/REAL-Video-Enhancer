@@ -1,0 +1,26 @@
+# The fp16 engine at 1920x1080, rebuilt from the checkpoint and timed three times.
+#
+# Ledger anchors for this path: 50.3 ms 'built from ONNX instead of torch-tensorrt' (MODEL.md 2),
+# 51.37 'measured, tiling full', 55.54 in the int8 comparison session, 57.37 'isolated'.
+# Rebuilt 2026-11-17 here: compact 2x from its own checkpoint keys -> ONNX (static 1080p) ->
+# TensorRT 10.12.0.36, fp16, opt level 5, avg_timing_iterations 8, 25 layers with 20 __myl_
+# fused blocks and 2 reformats - the same graph shape the ledger reports.
+#
+# Three sessions, CUDA events around 25 executions, one GPU job at a time:
+#   s1 (no --emit, quoted): 50.24 / 50.71 / 51.17  -> median 50.71
+#   s2:                     54.47 / 56.26 / 56.45  -> median 56.26
+#   s3:                     55.95 / 55.08 / 54.79  -> median 55.08
+#   s4:                     56.30 / 56.34 / 56.30  -> median 56.30
+# The 10% jump between the first and the rest is the host, not the engine: the ledger records
+# the same phenomenon ('the spread is the host - clock state, no pinning available') and this
+# is why only same-session ratios are quoted anywhere in this project.
+#
+# Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/engine-fp16.txt \
+#        --records harness/docs/wsp/verified/records/engine-fp16.jsonl
+
+@claim R001 56.26 ms "plan repeats [202f9e052701404e] n=3" measured
+@claim R002 56.45 ms "plan repeats [202f9e052701404e] n=3" measured
+@claim R003 55.08 ms "plan repeats [202f9e052701404e] n=3" measured
+@claim R004 55.95 ms "plan repeats [202f9e052701404e] n=3" measured
+@claim R005 56.3 ms "plan repeats [202f9e052701404e] n=3" measured
+@claim R006 56.34 ms "plan repeats [202f9e052701404e] n=3" measured

@@ -1,8 +1,8 @@
 """Records for the tail's epilogue fold: the isolated pair, the app A/B, and the identity on 494 frames.
 
-Usage: python harness/harness/scripts/tail_shuffle_records.py [--probe .../probe.json] [--logs .../ab]
+Usage: python harness/scripts/tail_shuffle_records.py [--probe .../probe.json] [--logs .../ab]
                                               [--pair .../pair-records.jsonl]
-                                              [--out docs/wsp/verified/records/int8-tail-shuffle.jsonl]
+                                              [--out harness/docs/wsp/verified/records/int8-tail-shuffle.jsonl]
 """
 from __future__ import annotations
 
@@ -33,10 +33,10 @@ def sha256(p: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/tail-shuffle/probe.json")
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/tail-shuffle/ab")
-    ap.add_argument("--pair", default="docs/wsp/verified/records/int8-tail-shuffle-pair.jsonl")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-tail-shuffle.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/tail-shuffle/probe.json")
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/tail-shuffle/ab")
+    ap.add_argument("--pair", default="harness/docs/wsp/verified/records/int8-tail-shuffle-pair.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-tail-shuffle.jsonl")
     args = ap.parse_args(argv)
 
     pr = json.load(open(args.probe))

@@ -1,0 +1,100 @@
+# Both adopted changes hold on other material: head -4.4 to -5.6 ms, tail -3.1 to -3.5 ms
+
+Measured 2026-11-20 (local), RTX 4060 Ti, three clips, each change reverted in its own interleaved A/B, null
+sink, reuse off, 3 rounds per clip, medians of rounds 2-3. Per clip, never pooled: the clips are different
+populations and the row was filed because both adoptions were measured on **one** clip.
+Records: `int8-defaults-material.jsonl`; logs: `logs/second-material/*-{head,tail}/`.
+
+Row `rve-int8-defaults-second-material-2026-11-20`. The two changes adopted earlier the same day
+(`int8-head-fusion.txt`: -5.27 ms on Violet; `int8-tail-hop.txt`: -3.16 ms on Violet) were measured on BD
+Violet only. This is the replay on two other clips, one of which is new material made for the purpose.
+
+## The material
+
+| clip | frames | what it is |
+|---|---|---|
+| `bd_violet20s.mkv` | 494 | BD Violet, 1920x1080, 8-bit h264, the clip both adoptions were measured on |
+| `bd_csm_same.mkv` | 539 | Chainsaw Man same-shot cut, 1920x1080, 8-bit h264 |
+| `native1440_20s.mkv` | 495 | **native** 1440x1080 10-bit hevc, SAR 1:1 (a real 4:3 picture), cut 2026-11-19 from `Untitled78.mov` at 36.036 s |
+| `violet1440.mkv` | 494 | 1440x1080 but ANANAMORPHIC: a 4:3 squeeze of the BD cut, i.e. a 16:9 picture in 1440 columns - same pixel count, different shape |
+
+## The head as one fused kernel
+
+| clip | cuDNN head + quantise | fused | delta |
+|---|---|---|---|
+| BD Violet | (45.87-era baseline) | - | **-5.27** |
+| Chainsaw | 44.02 | 38.38 | **-5.64** |
+| native 1440x1080 | 33.46 | 29.04 | **-4.42** |
+| violet1440 (anamorphic) | 33.05 | 28.20 | -4.85 |
+
+**-4.4 to -5.6 ms on three clips of two resolutions and two bit depths**, i.e. 13-15% of the frame each time.
+The gain is a property of the path (one kernel instead of conv + PReLU + quantise), as the isolated probe
+said it would be, and it does not depend on the clip's content.
+
+## The tail as one int8 kernel with the shuffle folded in
+
+| clip | dequant + cuDNN tail + shuffle | int8 tail + fold | delta |
+|---|---|---|---|
+| BD Violet | (45.87-era baseline) | - | **-3.16** |
+| Chainsaw | 38.02 | 34.56 | **-3.46** |
+| native 1440x1080 | 31.87 | 28.79 | **-3.08** |
+
+**-3.1 to -3.5 ms on three clips.** Note what the arm reverted here is the WHOLE tail change (the int8
+convolution, the removed dequant pass, and the shuffle fold adopted later the same day), because
+`RVE_TAIL_INT8=0` also disables the fold's precondition - so this is the end-to-end tail gain, not one of its
+parts.
+
+## One draw worth naming
+
+`bd_csm_same_tail0_r1` reads **42.98** against 38.02 for rounds 2-3 of the same arm - a 13% outlier in the
+first round only, which is exactly what the "rounds 2-3" rule exists for. It is recorded in the draws, not
+smoothed: every number above is the median of two draws, and the two agree to 0.01-0.02 ms in every arm.
+
+## What this closes
+
+The row's own refutation was "the gains are properties of the path and hold on other material". They do, on
+two resolutions, two bit depths, two titles and a 4:3 frame. What changes is only their size, by ~20%
+between clips (the head is -4.4 on 1440 and -5.6 on Chainsaw), which is the kind of spread that makes a
+pooled number wrong and a per-clip number right.
+
+## Not covered
+
+- The picture on these clips is NOT re-measured here: the acceptance pairs for both changes are on BD Violet
+  (`int8-head-fusion.txt`, `int8-tail-epilogue.txt`). A 4:3 10-bit clip has its own colour path and its own
+  record (`int8-1440x1080.txt`), and mixing them would be the population error this row exists to avoid.
+- One card, null sink, gate off.
+- `violet1440.mkv` is anamorphic - it exercises the same 1440x1080 pixel count and therefore the same GPU
+  work, but its picture is a horizontally squeezed 16:9 frame. It is kept in the table as a second draw on
+  the same geometry, not as a second kind of material.
+
+## Reproduce
+
+```bash
+for clip in native1440_20s.mkv bd_csm_same.mkv; do
+  d=harness/docs/wsp/verified/logs/second-material/${clip%.mkv}
+  ARMS="head0 head1" ARM_ENV_HEAD0="RVE_HEAD_FUSED=0" ARM_ENV_HEAD1="RVE_HEAD_FUSED=1" \
+    CLIPS="$clip" ROUNDS=3 SINK=null LOGDIR="$d-head" harness/scripts/wall_ab.sh
+  ARMS="tail0 tail1" ARM_ENV_TAIL0="RVE_TAIL_INT8=0" ARM_ENV_TAIL1="RVE_TAIL_INT8=1" \
+    CLIPS="$clip" ROUNDS=3 SINK=null LOGDIR="$d-tail" harness/scripts/wall_ab.sh
+done
+PYTHONPATH=. python3 harness/scripts/second_material_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-defaults-material.txt \
+       --records harness/docs/wsp/verified/records/int8-defaults-material.jsonl --bars harness/docs/claims-bars.json
+
+@claim M001 44.02 ms "rounds [db68815bdff23028] n=2" measured
+@claim M002 38.38 ms "rounds [db68815bdff23028] n=2" measured
+@claim M004 38.02 ms "rounds [db68815bdff23028] n=2" measured
+@claim M005 34.56 ms "rounds [db68815bdff23028] n=2" measured
+@claim M007 33.46 ms "rounds [f9edb8b8e81c9cba] n=2" measured
+@claim M008 29.04 ms "rounds [f9edb8b8e81c9cba] n=2" measured
+@claim M010 31.87 ms "rounds [f9edb8b8e81c9cba] n=2" measured
+@claim M011 28.79 ms "rounds [f9edb8b8e81c9cba] n=2" measured
+@claim M013 33.05 ms "rounds [220b58244f1fb3d5] n=2" measured
+@claim M014 28.2 ms "rounds [220b58244f1fb3d5] n=2" measured
+@claim R001 -5.64 ms "rounds [db68815bdff23028] n=2" derived
+@claim R002 -3.46 ms "rounds [db68815bdff23028] n=2" derived
+@claim R003 -4.42 ms "rounds [f9edb8b8e81c9cba] n=2" derived
+@claim R004 -3.08 ms "rounds [f9edb8b8e81c9cba] n=2" derived
+@claim R005 -4.85 ms "rounds [220b58244f1fb3d5] n=2" derived

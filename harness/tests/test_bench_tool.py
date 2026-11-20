@@ -114,7 +114,7 @@ def test_accepts_the_documented_flags():
 
 
 def test_measurement_defaults_match_the_documented_protocol():
-    """docs/MODEL.md §8: 25 timed calls after 6 warmup, opt 5, 8 timing iters."""
+    """harness/docs/MODEL.md §8: 25 timed calls after 6 warmup, opt 5, 8 timing iters."""
     args = bench.parse_args(["--model", "out/model.ts"])
     assert (args.iters, args.warm) == (25, 6)
     assert (args.opt_level, args.timing_iters) == (5, 8)
@@ -164,7 +164,7 @@ def test_help_mentions_every_flag():
 
 
 # --------------------------------------------------------------------------------------
-# FLOP derivation (docs/MODEL.md §1)
+# FLOP derivation (harness/docs/MODEL.md §1)
 # --------------------------------------------------------------------------------------
 def test_derive_tflops_reproduces_the_documented_table():
     assert bench.derive_tflops(1920, 1080, 2) == pytest.approx(2.48, abs=0.01)
@@ -189,7 +189,7 @@ def test_derive_tflops_rejects_nonsense():
 
 
 def test_tflops_per_second_matches_the_measured_row():
-    """51.37 ms at 2.48 TFLOP is the 48.3 TFLOP/s row of docs/MODEL.md §2."""
+    """51.37 ms at 2.48 TFLOP is the 48.3 TFLOP/s row of harness/docs/MODEL.md §2."""
     tflops = bench.derive_tflops(1920, 1080, 2)
     assert bench.tflops_per_second(tflops, 51.37) == pytest.approx(48.3, abs=0.1)
     with pytest.raises(bench.BenchError):
@@ -231,7 +231,7 @@ def test_summary_reports_the_ratio_to_the_previous_measurement():
         _row(1, 51.37),
         _row(2, 55.99, previous=51.37, label="+nvenc 3840x2160 hevc_nvenc"),
     ])
-    # 55.99 / 51.37 = 1.090x, the NVENC contention row of docs/MODEL.md §2
+    # 55.99 / 51.37 = 1.090x, the NVENC contention row of harness/docs/MODEL.md §2
     assert "1.090x vs #1" in text
     assert "+nvenc" in text
 
@@ -260,7 +260,7 @@ def test_json_summary_round_trips():
 
 
 # --------------------------------------------------------------------------------------
-# tactic dump parsing (docs/MODEL.md §5)
+# tactic dump parsing (harness/docs/MODEL.md §5)
 # --------------------------------------------------------------------------------------
 def test_tactic_table_groups_the_sm75_kernels():
     payload = json.dumps({"Layers": [

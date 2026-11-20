@@ -1,6 +1,6 @@
 """Records for the Beacon closed-form scale against the swept grid clamp K.
 
-Two inputs, both committed under `docs/wsp/verified/logs/beacon/`:
+Two inputs, both committed under `harness/docs/wsp/verified/logs/beacon/`:
   beacon.json            per policy, per held-out frame: share of pixels >8 levels, max, mean
   beacon-clipping.json   per hop: saturation share at |code| = 127 and the grid ratio (K=2 / fitted)
 """
@@ -23,8 +23,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="docs/wsp/verified/logs/beacon")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-beacon-scale.jsonl")
+    ap.add_argument("--dir", default="harness/docs/wsp/verified/logs/beacon")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-beacon-scale.jsonl")
     a = ap.parse_args(argv)
 
     def path(name: str) -> str:

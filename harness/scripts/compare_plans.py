@@ -8,7 +8,7 @@ channel is more than 8 levels off, plus the peak and PSNR.
 The frame is named by its sha256, so the number belongs to a population instead of to a sentence.
 
 Usage:
-  python3 harness/harness/scripts/compare_plans.py <ref.plan> <cand.plan> <frame.raw> --width W --height H [--emit FILE]
+  python3 harness/scripts/compare_plans.py <ref.plan> <cand.plan> <frame.raw> --width W --height H [--emit FILE]
 """
 from __future__ import annotations
 

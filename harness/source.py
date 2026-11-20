@@ -21,8 +21,8 @@ Nothing here decides whether a population is the one a DECISION needs. It decide
 what the label says it is, which is the cheaper question and the one that was wrong.
 
 Usage:
-  python -m harness.cli source-check docs/wsp/sources.yaml
-  python -m harness.cli source-check docs/wsp/sources.yaml --records docs/wsp/verified/records
+  python -m harness.cli source-check harness/docs/wsp/sources.yaml
+  python -m harness.cli source-check harness/docs/wsp/sources.yaml --records harness/docs/wsp/verified/records
 """
 from __future__ import annotations
 

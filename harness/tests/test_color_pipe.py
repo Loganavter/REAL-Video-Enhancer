@@ -1,6 +1,6 @@
 """Colour-pipe contracts: the pipe format's tags and the output depth.
 
-Both cases come from measurements recorded in docs/RESEARCH-LEDGER.md C3/C4: a comparison that
+Both cases come from measurements recorded in harness/docs/RESEARCH-LEDGER.md C3/C4: a comparison that
 crossed an unstated colour conversion cost 5 dB (C3), and the P010 pipe lost 31 dB because it
 fell through to the RGB branch and got a full-range reinterpretation (C4). The first test pins
 that branch, the second pins the depth the encoder is fed.

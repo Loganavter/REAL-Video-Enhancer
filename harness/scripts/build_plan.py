@@ -6,7 +6,7 @@ tiling none"), so a number taken here is comparable to a recorded one instead of
 instrument.
 
 The model is rebuilt from the checkpoint's own keys (`body.N.weight`), which is the same rule
-`harness/harness/scripts/measure_residual.py` uses: no spandrel, no safetensors, no assumptions about layer order.
+`harness/scripts/measure_residual.py` uses: no spandrel, no safetensors, no assumptions about layer order.
 
 Usage:
   python3 harness/scripts/build_plan.py <model.pth> <out.plan> [--width 1920] [--height 1080]

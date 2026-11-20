@@ -12,8 +12,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="docs/wsp/verified/logs/calib-fade")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-calib-fade.jsonl")
+    ap.add_argument("--dir", default="harness/docs/wsp/verified/logs/calib-fade")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-calib-fade.jsonl")
     a = ap.parse_args(argv)
     def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
     st = Store(session="s-2026-11-19T16:00:00+03:00")
@@ -25,25 +25,25 @@ def main(argv=None) -> int:
         st.emit(Record(value=float(j["worst_share"]), unit="%", population=pop,
                        instrument="channel-max |delta| over 64px blocks (gate_sweep --reference-kind config)",
                        config=label, session=st.session, statistic="worst_of", tier="measured",
-                       id=f"FD{n:03d}", run="harness/scripts/wall_ab.sh + harness/harness/scripts/gate_sweep.py",
+                       id=f"FD{n:03d}", run="harness/scripts/wall_ab.sh + harness/scripts/gate_sweep.py",
                        artifact=os.path.join(a.dir, fname),
                        extra={"artifact_sha256": sha(os.path.join(a.dir, fname)),
                               "frames_above_bar": j["frames_above_bar"], "peak": j["worst_peak"]}))
         n += 1
     # the failure the row exists for: pure sequential on the same black-head cut
-    log = "docs/wsp/verified/logs/calib-fade/inter25s_seq_r1_ffv1.log"
+    log = "harness/docs/wsp/verified/logs/calib-fade/inter25s_seq_r1_ffv1.log"
     pop = Population.of("frames", tuple(f"inter25s#seq#{i}" for i in range(266)), "Interstellar cut, pure sequential")
     j = json.load(open(os.path.join(a.dir, "fade-seq.json")))["summary"]
     st.emit(Record(value=float(j["worst_share"]), unit="%", population=pop,
                    instrument="channel-max |delta| over 64px blocks (gate_sweep --reference-kind config)",
                    config="pure sequential first-48-frame calibration against the spread decode, clip opens on black",
                    session=st.session, statistic="worst_of", tier="measured", id=f"FD{n:03d}",
-                   run="harness/scripts/wall_ab.sh + harness/harness/scripts/gate_sweep.py",
+                   run="harness/scripts/wall_ab.sh + harness/scripts/gate_sweep.py",
                    artifact=os.path.join(a.dir, "fade-seq.json"),
                    extra={"artifact_sha256": sha(os.path.join(a.dir, "fade-seq.json")),
                           "frames_above_bar": j["frames_above_bar"], "peak": j["worst_peak"]}))
     n += 1
-    log = "docs/wsp/verified/logs/startup-timed-hybrid.log"
+    log = "harness/docs/wsp/verified/logs/startup-timed-hybrid.log"
     total = None
     for line in open(log):
         m = re.search(r"startup: first frame enqueued ([\d.]+) s", line)

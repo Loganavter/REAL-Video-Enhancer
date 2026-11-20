@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """PSNR between two videos, with the colour format stated and the worst frames named.
 
-Why this exists: every quality number in ``docs/`` was produced by a hand-typed
+Why this exists: every quality number in ``harness/docs/`` was produced by a hand-typed
 ``ffmpeg ... -lavfi psnr`` piped through a one-liner that parsed ``psnr_avg``, and a second
 one-liner that sorted the frames to find the worst. Two ways that goes wrong silently:
 
 * the two inputs are converted to *different* pixel formats (or one of them not at all), so
   the comparison crosses a colour conversion nobody wrote down - the failure mode behind
-  C3 in ``docs/RESEARCH-LEDGER.md``, where a missing matrix cost 5 dB and nobody saw it;
+  C3 in ``harness/docs/RESEARCH-LEDGER.md``, where a missing matrix cost 5 dB and nobody saw it;
 * the two inputs do not have the same number of frames. ``psnr`` pairs frames in decode
   order, stops at the shorter one and prints an average over whatever it paired, which is
   not a number about either file. Here that is an error and an exit code, never a warning.
@@ -179,14 +179,14 @@ def summarize(frames: Iterable[FrameStats], worst_n: int = DEFAULT_WORST) -> Sum
     """Mean, median, worst and the ``worst_n`` worst frames (ties: lowest index first).
 
     Two aggregates, because they answer different questions and one of them is the number in
-    ``docs/``:
+    ``harness/docs/``:
 
     * ``mean`` averages the per-frame dB over the *finite* ones, so one bad frame moves it.
       A frame byte identical to the reference scores ``inf``: it is counted in ``identical``
       instead of being averaged in, which is why the naive average of a gated render reads
       ``inf`` (measured: 502 frames, 73% reused, 18 of them identical).
     * ``mean_over_mse`` is the PSNR of the mean MSE. That is what ffmpeg's own ``average:``
-      line reports and the figure quoted in ``docs/MODEL.md``; on the same pair it read
+      line reports and the figure quoted in ``harness/docs/MODEL.md``; on the same pair it read
       52.731 against 52.810 for the per-frame average, so they are close but not the same.
     """
     records = list(frames)
@@ -378,7 +378,7 @@ def format_report(report: Report, fail_under: float | None = None) -> str:
         f"mean      : {summary.mean:.2f} dB (per-frame, over "
         f"{summary.frames - summary.identical} finite frames)",
         f"average   : {summary.mean_over_mse:.2f} dB (PSNR of the mean MSE = ffmpeg's own "
-        f"\"average\", the figure docs/ quotes)",
+        f"\"average\", the figure harness/docs/ quotes)",
         f"median    : {summary.median:.2f} dB",
     ]
     if summary.identical:

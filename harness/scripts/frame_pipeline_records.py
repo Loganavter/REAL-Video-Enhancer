@@ -35,16 +35,16 @@ def read_arm(logdir: str, tag: str, arms: tuple[str, str]):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="docs/wsp/verified/records/frame-pipeline.jsonl")
-    ap.add_argument("--pair", default="docs/wsp/verified/records/payload-guard-pair.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/frame-pipeline.jsonl")
+    ap.add_argument("--pair", default="harness/docs/wsp/verified/records/payload-guard-pair.jsonl")
     a = ap.parse_args(argv)
     st = Store()
     i = 0
     clip = "bd_violet20s.mkv"
     for logdir, tag, arms, what in (
-            ("docs/wsp/verified/logs/frame-pipeline/ab", "pipe", ("pipe0", "pipe1"),
+            ("harness/docs/wsp/verified/logs/frame-pipeline/ab", "pipe", ("pipe0", "pipe1"),
              "the payload copy moved to its own CUDA stream (RVE_PIPE)"),
-            ("docs/wsp/verified/logs/frame-pipeline/guard-ab", "guard", ("guard0", "guard1"),
+            ("harness/docs/wsp/verified/logs/frame-pipeline/guard-ab", "guard", ("guard0", "guard1"),
              "an event guard before the writer reads the pinned slot (RVE_PAYLOAD_GUARD)")):
         loops, packs, session = read_arm(logdir, tag, arms)
         if len(loops) != 2:

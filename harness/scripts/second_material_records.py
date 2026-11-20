@@ -1,7 +1,7 @@
 """Records for the second-material replay: each adopted change reverted, per clip, never pooled.
 
-Usage: python harness/harness/scripts/second_material_records.py [--root docs/wsp/verified/logs/second-material]
-                                                 [--out docs/wsp/verified/records/int8-defaults-material.jsonl]
+Usage: python harness/scripts/second_material_records.py [--root harness/docs/wsp/verified/logs/second-material]
+                                                 [--out harness/docs/wsp/verified/records/int8-defaults-material.jsonl]
 """
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ def sha256(p: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default="docs/wsp/verified/logs/second-material")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-defaults-material.jsonl")
+    ap.add_argument("--root", default="harness/docs/wsp/verified/logs/second-material")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-defaults-material.jsonl")
     args = ap.parse_args(argv)
 
     st = Store()

@@ -77,7 +77,7 @@ class TorchTensorRTHandler:
 
         Level 5 is not a taste: the default level 3 leaves every PReLU as its own pass, which measured
         78.33 ms per frame against 47.50 at level 5 on the same ONNX and the same card
-        (docs/wsp/verified/fp16-engine-layers.txt). Every caller passes this value today, so this default
+        (harness/docs/wsp/verified/fp16-engine-layers.txt). Every caller passes this value today, so this default
         is a fallback - but a fallback that silently costs a third of the frame is the wrong one.
 
 

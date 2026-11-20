@@ -1,7 +1,7 @@
 """Records for the peak look: what the shipped default's worst pixel actually is.
 
-Usage: python harness/harness/scripts/peak_look_records.py [--frames docs/wsp/verified/logs/peak-look/frames.json]
-                                           [--out docs/wsp/verified/records/peak-look.jsonl]
+Usage: python harness/scripts/peak_look_records.py [--frames harness/docs/wsp/verified/logs/peak-look/frames.json]
+                                           [--out harness/docs/wsp/verified/records/peak-look.jsonl]
 """
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--frames", default="docs/wsp/verified/logs/peak-look/frames.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/peak-look.jsonl")
+    ap.add_argument("--frames", default="harness/docs/wsp/verified/logs/peak-look/frames.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/peak-look.jsonl")
     args = ap.parse_args(argv)
 
     d = json.load(open(args.frames))

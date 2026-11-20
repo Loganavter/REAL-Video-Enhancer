@@ -14,7 +14,7 @@ neighbourhood of that pixel looks like:
 Frames are the spread sample of the corpus: 8 calibration frames are excluded, the held-out set is scored.
 
 Usage: python harness/scripts/peak_look.py [--frames 29,44,100,169,274,400,460] [--half 48] [--gain 8]
-                                   [--out-dir docs/wsp/verified/logs/peak-look]
+                                   [--out-dir harness/docs/wsp/verified/logs/peak-look]
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def main(argv=None) -> int:
     ap.add_argument("--frames", default="29,44,100,169,274,400,460")
     ap.add_argument("--half", type=int, default=48, help="half-size of the crop, in output pixels")
     ap.add_argument("--gain", type=int, default=8, help="amplification of the difference panel")
-    ap.add_argument("--out-dir", default="docs/wsp/verified/logs/peak-look")
+    ap.add_argument("--out-dir", default="harness/docs/wsp/verified/logs/peak-look")
     ap.add_argument("--out-file", default="")
     args = ap.parse_args(argv)
 
