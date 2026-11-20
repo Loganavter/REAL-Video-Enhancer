@@ -307,6 +307,16 @@ class SettingsTab:
         applyQualityPresetTooltip(getattr(self.parent, "qualityPresetComboBox", None),
                                   getattr(self.parent, "qualityPresetInfoLabel", None))
         hide_int8_preset_if_unsupported(self.parent, self.settings)
+        if getattr(self.parent, "frameReuse", None) is not None:
+            self.parent.frameReuse.setChecked(
+                self.settings.settings.get("temporal_reuse", "True") == "True")
+            self.parent.frameReuse.setToolTip(
+                "Skip re-upscaling frames that barely changed and reuse the previous result, corrected for "
+                "whatever did change - about 1.9x faster on held animation. The gate still refuses frames it "
+                "cannot certify, so this only decides whether it is allowed to try.")
+            self.parent.frameReuse.stateChanged.connect(
+                lambda: self.settings.writeSetting(
+                    "temporal_reuse", "True" if self.parent.frameReuse.isChecked() else "False"))
         self.parent.qualityPresetComboBox.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "quality_preset",
@@ -498,6 +508,9 @@ class Settings:
             "pytorch_backend": "CUDA",
             "auto_hdr_mode": "True",
             "quality_preset": "best",
+            # reuse of unchanged frames: on by default since 2026-11-20 (the gate refuses material it
+            # cannot certify, so the default is safe; this switch is for people who want it off entirely)
+            "temporal_reuse": "True",
         }
         self.allowedSettings = {
             "precision": ("auto", "float32", "float16"),
@@ -544,6 +557,7 @@ class Settings:
             "pytorch_backend": "ANY",
             "auto_hdr_mode": ("True", "False"),
             "quality_preset": ("best", "fast"),
+            "temporal_reuse": ("True", "False"),
         }
         self.settings = self.defaultSettings.copy()
         if not os.path.isfile(self.settingsFile):

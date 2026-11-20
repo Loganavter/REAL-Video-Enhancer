@@ -633,6 +633,11 @@ class ProcessTab:
             f"{quality_preset}",
         ]
 
+        # the backend defaults to reuse ON; the switch is therefore an opt-out, and it is passed explicitly so
+        # an old settings.txt cannot silently mean something else than what the checkbox shows
+        if self.settings.settings.get("temporal_reuse", "True") == "False":
+            command += ["--no_temporal_reuse"]
+
         if self.settings.settings["preview_enabled"] == "True":
             command += [
                 "--preview_shared_memory_id",
