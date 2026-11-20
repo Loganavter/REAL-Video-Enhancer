@@ -5269,3 +5269,41 @@ tasks:
     day (certify_on="acceptance"), so any change here must keep that certifier honest. Two things this row does
     NOT cover and must not be read as covering: the dust-removal's own temporal stability (a pipeline question),
     and films whose motion is real (the coarse statistic still refuses a fast-motion window: 8.7% of pairs).
+
+- id: rve-start-end-time-ignored-2026-11-21
+  title: '--start_time / --end_time are accepted and never applied: a segment render renders the whole file'
+  type: code
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: false
+  cost: 2h
+  tags:
+  - cli
+  - reader
+  - segments
+  base_branch: perf/inference
+  relates_to:
+  - backend/src/FFmpegBuffers.py
+  - backend/src/RenderVideo.py
+  owns_files:
+  - backend/src/FFmpegBuffers.py
+  - backend/src/RenderVideo.py
+  refutes: >-
+    "A short test render of a long film is one flag away" is false. Measured 2026-11-21: `--start_time 0 --end_time 8`
+    on the 25-minute episode rendered and reported **9238 frames (385 s)**, not the 192 the flag asks for.
+    `start_time`/`end_time` reach `FFmpegRead` (stored at FFmpegBuffers.py:51-52) and are never built into its ffmpeg
+    command - the class contains no `-ss`/`-t` at all - so the reader streams to EOF. The only consumers are
+    `OpenCVInfo` (probing) and the writer's audio `atrim`.
+  acceptance: >-
+    (a) The video read is bounded by the pair (`-ss start` before the input and `-t end-start`, or an equivalent
+    frame count), with the frame index the renderer reports unchanged. (b) The run report's `frames` equals
+    round((end-start) * fps) - 192 for 0-8 s at 24 fps on the reported episode. (c) `--start_time` alone still
+    renders to the end and `--end_time` alone starts at 0, both covered by a test that pushes a short clip through
+    the reader and counts frames. (d) Not covered: seek accuracy on a long-GOP source (the `-c copy` cut used for
+    these measurements is keyframe-aligned).
+  note: >-
+    Found while measuring the coarse statistic: a "3 second" test render of the episode silently ran 385 s, so every
+    ad-hoc segment measurement in this repo has been paying for minutes of GPU - and any per-clip number taken that
+    way describes a longer population than it claims. Nothing else depends on the flags: the tuner, the gate and the
+    acceptance statistics are all per-frame.

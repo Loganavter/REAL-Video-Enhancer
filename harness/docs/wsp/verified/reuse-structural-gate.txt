@@ -96,6 +96,48 @@ So without the warp the drawing sits up to half an upscaled pixel away on a reus
 is a jump between a reused and a fresh frame, which is what the row refused to accept. Registration is a
 where-the-picture-is number and says nothing about photometric damage; the pair table above covers that.
 
+### The calibration was choosing the threshold on the black opening
+
+Reported from a real GUI run of the whole episode: reuse looked like it did nothing. It was engaging (the same file,
+same flags, from frame 0: **3936/9238 = 42.6%**), but the threshold had been chosen on the **first 16 frames of the
+film, which are black**:
+
+    noise floor 0.01, would reuse 100% of the 16 calibration frames, threshold 4.0/255
+
+A frame whose delta is below the narrowest candidate is reused by every candidate, so it cannot tell them apart -
+and it was filling the whole window. The tuner now skips those frames (`min_informative`, the coarse path only: the
+`mean_abs` noise-floor guard was calibrated on the unfiltered sample) and settles on 16 frames that carry a decision,
+with bounded patience (`4 * calibration_window`) so a clip with no informative frame still settles instead of
+leaving reuse off for the whole render.
+
+On the same opening (first 25 s of the film, GUI flags, 2x, 1080p):
+
+| | before | after |
+|---|---|---|
+| calibration | 16 frames, all black | **16 informative of 44 frames** |
+| noise floor | 0.01 | **3.59** |
+| would reuse on the calibration sample | 100% (meaningless) | 25% |
+| **reuse on the run** | threshold chosen on black | **361/601 = 60.1%**, depths 1-4 |
+
+A live counter was added at the same time (`reuse: 37.1% of 251 frames (93 reused), depth up to 4, ...` every 250
+frames): the summary line only prints when a render finishes, so a cancelled encode used to say nothing at all,
+which reads exactly like "reuse does not work".
+
+### Threshold: 4 is the clamp, and 8 was measured
+
+The clamp `(2, 4)` is inherited from `mean_abs`, where a 32 px block mean could hide a moving object. Measured on
+the same material with the clamp lifted (`--no_temporal_reuse_auto --temporal_reuse_threshold 8`, 10 s at t=31,
+against the ungated render):
+
+| threshold | reuse | coarse damage (worst) | apparent shift (max) | frames over 0.3 px |
+|---|---|---|---|---|
+| 4 (clamped) | 37.8% (3 s window) | 0.030% | 0.128 px | 0 / 98 |
+| 8 | **47.7%** | 0.014% | **0.730 px** | 6 / 266 |
+
+So 8 buys ten points of reuse and keeps the coarse damage inside the bar, but the drawing sits up to 0.73 px away on
+six frames - the estimate is a translation and those pairs include real motion, not just the scan's wobble. That is a
+picture trade, not a code decision: the clamp stays at 4, and 8 is available explicitly.
+
 ### Cost (`harness/scripts/reuse_coarse_cost.py`, 1440x1080, medians of 30 rounds after 5 warm-ups)
 
 | | |

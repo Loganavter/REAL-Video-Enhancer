@@ -515,6 +515,12 @@ class Render:
                     # scale, and refuse material the acceptance certifier bounds at the same scale the
                     # decision is taken at. The guard stays for mean_abs, where it was calibrated.
                     noise_floor_refuse=(None if str(temporal_reuse_statistic) == "coarse" else 1.5),
+                    # The coarse statistic decides on the drawing, so a frame that did not change at all says
+                    # nothing about which threshold is right - and a film that opens on black used to spend its
+                    # whole calibration there. 2.0 is the narrowest candidate: anything below it is reused whatever
+                    # the tuner picks. The `mean_abs` path keeps the old, unfiltered sample: its noise-floor guard
+                    # was calibrated on it.
+                    min_informative=(2.0 if str(temporal_reuse_statistic) == "coarse" else None),
                 )
                 if str(temporal_reuse_statistic) == "coarse":
                     log("auto gate: the noise-floor guard is off for the coarse statistic (its premise is "
