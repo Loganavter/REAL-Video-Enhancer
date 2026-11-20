@@ -340,6 +340,46 @@ measurement harness is three decodes, two DIS flows and float32 numpy at 4K, non
 @claim RU031 0.4916 % "reused frames [55a222f0b8bdd68b] n=130" measured
 @claim RU032 2.428 ms "iterations [42e8edb589b2aeba] n=50" measured
 
+
+### Are the six warp failures broken by the skip, or by the warp? By the warp.
+
+The six frames the composed correction fails (187, 190, 193, 196, 199, 202 - the last six reuses of the clip) read
+under the split-only correction:
+
+| frame | composed (warp) | pure warp | split-only | texture, split-only |
+|---|---|---|---|---|
+| 187 | 0.4916% | 0.3440% | **0.0825%** | 1.012 |
+| 190 | 0.4538% | 0.2994% | **0.0917%** | 1.094 |
+| 193 | 0.4586% | 0.3100% | **0.0888%** | 1.137 |
+| 196 | 0.4299% | 0.2787% | **0.0805%** | 1.136 |
+| 199 | 0.4479% | 0.2950% | **0.0873%** | 1.178 |
+| 202 | 0.4304% | 0.2796% | **0.0860%** | 1.172 |
+
+All six are inside the bar without the warp. So the failure is not the skip and not the content: it is the warp -
+a flow that is confident and wrong on that stretch. A geometry term has to earn its place frame by frame, and on
+this clip it does not.
+
+### The held-out clip's four, and recursion
+
+There the failures are real and have a different profile: frames 18, 21, 22 are reuses at depth 2-3 in the
+opening segment (their correction jumps three or four frames back, texture ratio 21-25 - the correction itself is
+enormous), and frame 56 is a depth-1 case. Applying the correction **recursively** (previous emitted frame plus
+the consecutive-frame residual, the order a codec decodes in) instead of jumping back to the cached reference:
+
+| clip | correction | frames over 0.1% | worst share | texture |
+|---|---|---|---|---|
+| 1040 s | split, jump-k | 0 / 130 | 0.09166% | 1.001 |
+| 1040 s | split, recursive | 0 / 130 | 0.09166% | 0.997 |
+| 960 s, held out | split, jump-k | 4 / 124 | 0.19207% | 1.020 |
+| 960 s, held out | split, recursive | **3 / 124** | 0.20010% | 1.021 |
+
+Recursion removes one of the four and costs nothing on the calibration clip. What is left is concentrated at
+depth > 1 - a correction that spans three or four frames is where the residual stops being small - which is the
+next thing to attack, and the codec's own motion vectors are the natural way to do it.
+
+@claim RU033 3 count "reused frames [af066356217e17b1] n=124" measured
+@claim RU034 0.997 x "reused frames [55a222f0b8bdd68b] n=130" measured
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so

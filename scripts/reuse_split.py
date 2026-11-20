@@ -84,6 +84,10 @@ def main() -> int:
     ap.add_argument("--mask-tau", type=float, default=0.0,
                     help="apply the alpha gain only where the local |residual| is under this many levels; 0 = "
                          "everywhere (which doubles line-art high frequency and breaks the share)")
+    ap.add_argument("--recursive", action="store_true",
+                    help="apply the correction to the PREVIOUS EMITTED frame with the consecutive-frame residual "
+                         "(LR_t - LR_{t-1}), as a codec decodes in order, instead of jumping k frames back to the "
+                         "cached reference; the correction then stays small at depth > 1")
     ap.add_argument("--mask-grad", type=float, default=999.0,
                     help="and where the local gradient is under this many levels, i.e. flat areas")
     ap.add_argument("--output", default="")
@@ -115,7 +119,12 @@ def main() -> int:
         hist.append(f_lr)
         k = depth.get(i)
         if k:
-            ref = hist[max(0, len(hist) - 1 - k)]
+            if a.recursive and prev_out is not None:
+                ref = hist[-2] if len(hist) >= 2 else f_lr
+                base = prev_out
+            else:
+                ref = hist[max(0, len(hist) - 1 - k)]
+                base = f_g
             r = f_lr - ref
             lf = box(r, a.blur)
             hf = r - lf
@@ -128,7 +137,7 @@ def main() -> int:
                 gain[~keep] = 1.0
             corr = lf + (gain[..., None] if hf.ndim == 3 else gain) * hf
             up = np.repeat(np.repeat(corr, 2, axis=0), 2, axis=1)          # nearest, as the pipeline does
-            out = np.clip(f_g + up, 0, 255)
+            out = np.clip(base + up, 0, 255)
         else:
             out = f_g
         if enc is not None:
