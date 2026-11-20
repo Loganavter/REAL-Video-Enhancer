@@ -1,58 +1,59 @@
 # Draft — issue to TNTwise/REAL-Video-Enhancer (NOT SENT)
 
-Title: **Frame reuse (`skip_render_if`) and a few pipeline fixes — offered against the `refactor` line**
+Title: **An evidence harness, a frame-reuse implementation of `skip_render_if`, and a few pipeline fixes**
 
 ---
 
-Hi. We run a fork of RVE and spent about a week on it with a small fleet of AI agents, mostly on measurement rather
-than features: an evidence harness where every number is a record carrying its population, instrument, config, the
-commit it was taken on and the card. Two questions: is any of this interesting to you, and if it is, which shape do
-you want it in?
+Hi. We run a fork of RVE and spent about a week on it with a small fleet of AI agents. The part we think is worth
+your time is not a feature — it is that none of our numbers are "trust me".
 
-Short version of what we have:
+**The harness (this is the piece we would most like to give back).** Every number we produce is a *record*: the
+value, the unit, the population it was computed on (as an item set with a hash, not a label), the instrument, the
+config, the session, and since today the commit, the GPU and the library versions it was taken on. A prose claim
+cites a record id and cannot restate the value; a check fails if it does not match. On top of that: bars with an
+explicit statistic, A/A before A/B (a refusal is only valid against a base that proved deterministic), three-state
+probes (measured / refused / broken - never "errored equals fine"), a ledger over records and verdicts, and a dated
+journal.
 
-**Frame reuse.** If a frame has not changed since the last one we rendered, don't run the model again — but don't
-emit the stale picture either; add back what changed, split by frequency: the low-frequency part of `LR_t - LR_ref`
-at gain 1, the high-frequency part at 1.35 on flat static blocks, per channel, applied recursively on the previous
-emitted frame. Measured on two Blu-ray cuts at 1080p→4K:
+Why it might matter to you specifically: you carry 32 open issues of the "it is slow" / "it broke on my card" kind,
+and a refactor makes all of them unreproducible at once. With the harness "it got slower" becomes a record with a
+commit and a card, and a fix that is not a fix fails mechanically instead of by review. It is ~3.2k lines, standard
+library plus `pyyaml`, with ~6k lines of its own tests, and it touches nothing in the renderer - so it can land or be
+ignored independently of everything below. Our own record corpus stays with us; the machinery is what we would send.
 
-- calm cut: 63% of frames reused, **0 of 130** above the 0.1%-of-pixels bar, texture 1.001;
-- action cut, held out: **1 of 124** with a cheap veto (skip the reuse when more than ~0.2% of pixels changed by
-  more than 8 levels), 3 of 124 without it;
-- about **1.9x** on the render loop where the content allows it, and 2.4 ms per corrected frame at 2x;
-- it refuses on its own where it cannot be trusted: the auto gate refuses dense moving line art outright (8 of 8
-  reuses would be visibly doubled, so it does not reuse there).
+**Frame reuse — your `TOOD.md` sentence.** The one asking for a `Frame` attribute `skip_render_if` that filters and
+interpolation can consult. We built that as a gate and measured it: if a frame barely changed, do not run the model
+again, and do not emit the stale picture either - add back what changed, split by frequency (low-pass at gain 1,
+high-pass at 1.35 on flat static blocks, per channel, applied recursively on the previous emitted frame). On two
+Blu-ray cuts at 1080p→4K: 63% of frames reused on the calm cut with **0 of 130** frames above the 0.1%-of-pixels bar;
+**1 of 124** on a held-out action cut with a cheap veto (skip the reuse when more than ~0.2% of pixels changed by
+more than 8 levels); about **1.9x** on the render loop where the content allows it, 2.4 ms per corrected frame. It
+refuses on its own where it cannot be trusted - dense moving line art is refused outright rather than rendered
+wrong. We would rather re-express it as your attribute than drop a gate object into the render loop.
 
-**This is your `TOOD.md` sentence.** The one that asks for a Frame attribute `skip_render_if` that filters and
-interpolation can use. We would rather implement it that way, as an attribute the pipeline consults, than drop our
-gate object into the render loop — say the word and the first PR is that attribute plus the correction, small and
-self-contained, against `refactor`.
+**Pipeline fixes that are not about reuse**, and that any user on the stock TensorRT engine feels: pack `yuv420p` on
+the GPU instead of `rgb24` (−2.3 ms/frame, picture-neutral); pooled pinned host payloads, removing a second
+full-frame host copy per frame (~10 ms at 4320p); 10-bit surviving the reader and the packer; the engine no longer
+loaded twice at startup (−2.3 s); frame accounting that adds up (it overshot the loop by 30% before).
 
-**Pipeline fixes that are not about reuse** and that any user on the stock TensorRT engine feels:
+**Separately, an int8 body** (Triton kernels, head and tail in fp16, Compact models): 1.65x end to end against the
+stock fp16 engine, measured interleaved on two clips, 0 of 205 and 0 of 201 frames above the bar on the pipeline's
+own output. It is a second inference path rather than a patch, so it is offered only if you want it; it needs a card
+with int8 tensor cores.
 
-- 8-bit pipe: pack `yuv420p` on the GPU instead of `rgb24` — **−2.3 ms/frame**, picture-neutral;
-- pooled pinned host payloads — removes a second full-frame host copy per frame (worth ~10 ms at 4320p);
-- 10-bit survives the reader and the packer;
-- the engine was being loaded twice at startup — **−2.3 s**;
-- frame accounting: the profile now adds up (it overshot the loop by 30% before).
+What we are **not** claiming: everything was measured on one card (4060 Ti, sm_89), so nothing here speaks to another
+GPU, and every timing in our notes names the session it came from.
 
-**And, separately, an int8 body** (Triton kernels, head/tail in fp16, Compact models): **1.65x end-to-end** against
-the stock fp16 engine, measured interleaved on two clips, with the picture 0/205 and 0/201 frames above the bar on
-the pipeline's own output. This one is a second inference path rather than a patch, so it is offered only if you want
-it — and it needs a card with int8 tensor cores (Turing and later).
-
-What we are **not** claiming: everything above was measured on one card (4060 Ti, sm_89); nothing speaks to another
-GPU, and any timing in our notes says which session it came from.
-
-If none of this fits where you are taking the refactor, that is a completely fine answer — we will keep it in the
-fork and stop taking your time. If it does, tell us which piece to bring first and in which shape, and we will open
-the PR against `refactor` with the conventions it uses now (`backend/src/io/`, PEP 8 module names).
+If none of this fits where the refactor is going, that is a fine answer - we will keep it in the fork. If it does,
+tell us which piece to bring first and in which shape (`backend/src/io/`, PEP 8 module names, whatever else you are
+converging on), and we will open it against `refactor`.
 
 ---
 
 ## Notes for us before sending
 
-- The issue must **not** promise a PR review timeline; the line is frozen by the maintainer's own notice.
-- Link the numbers to our evidence only if asked; do not dump the harness in the issue.
-- Check: does the repo have issues enabled for non-collaborators? (It does — 32 open, some from strangers.)
-- Ask for the shape, not for permission to work. One question, not four.
+- Order matters: the harness first, because it is the piece that does not compete with their plans; reuse second,
+  because it is their own TODO; int8 last, because it is the risky one.
+- Say plainly that our record corpus is not part of the offer - only the machinery. Otherwise it reads as dumping.
+- Do not promise review timelines; the line is frozen by the maintainer's own notice.
+- One question at the end, not four. If they answer "not now", that is the end of it.
