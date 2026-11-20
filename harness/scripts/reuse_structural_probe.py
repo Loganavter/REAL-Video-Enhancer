@@ -319,6 +319,40 @@ def render_pair(gated, ungated, width, height, sigma_hr, level=8.0, max_frames=0
     print("  ungated render is right. Dust is counted by area only, not by how visible a dot is.")
 
 
+def apparent_shift(gated, ungated, width, height, level=0.3):
+    """How far a gated render's picture sits from the ungated one, per frame, in pixels.
+
+    This is item (b) of the row, measured the way it asks: if a reuse emits the cached picture without moving it,
+    the two renders differ by a translation - the scan's wobble accumulated on the reused frames. With the warp the
+    apparent shift must read ~0. It is a *registration* number, so it says nothing about photometric damage; the
+    pair table (:func:`render_pair`) covers that.
+    """
+    rows = []
+    pairs = zip(_frame_iter(gated, width, height, 10 ** 9, 0), _frame_iter(ungated, width, height, 10 ** 9, 0))
+    for index, (ga, gb) in enumerate(pairs):
+        a = lowpass(ga.astype(np.float32).mean(2))
+        b = lowpass(gb.astype(np.float32).mean(2))
+        dx, dy, response, trusted = register(a, b, scale=4)
+        rows.append((index, dx, dy, response, trusted))
+    if not rows:
+        raise SystemExit("no frames decoded from the pair")
+    shifts = np.array([[r[1], r[2]] for r in rows])
+    magnitude = np.hypot(shifts[:, 0], shifts[:, 1])
+    over = int((magnitude > level).sum())
+    print(f"apparent shift over {len(rows)} frames at {width}x{height} (registration, coarse luma):")
+    print(f"  median (|dx|, |dy|) = ({np.median(np.abs(shifts[:, 0])):.3f}, "
+          f"{np.median(np.abs(shifts[:, 1])):.3f}) px, max {magnitude.max():.3f} px")
+    print(f"  frames shifted more than {level:g} px: {over} of {len(rows)}")
+    untrusted = sum(1 for r in rows if not r[4])
+    if untrusted:
+        print(f"  {untrusted} comparisons had no correlation peak and are counted as 0 shift")
+    worst = np.argsort(magnitude)[-5:][::-1]
+    for index in worst[:4]:
+        print(f"    frame {rows[index][0]:>3}: ({shifts[index, 0]:+.2f}, {shifts[index, 1]:+.2f}) px")
+    print("  uncovered: translation only (no rotation/scale), and a photometrically damaged frame can still")
+    print("  register to 0 - this number is about WHERE the picture is, not about what it contains.")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -334,6 +368,8 @@ def main():
     ap.add_argument("--sigma", type=float, default=SIGMA, help="coarse scale, in LR pixels")
     ap.add_argument("--render-pair", nargs=2, metavar=("GATED", "UNGATED"),
                     help="two renders of the same clip: the acceptance table at both scales")
+    ap.add_argument("--shift-pair", nargs=2, metavar=("GATED", "UNGATED"),
+                    help="two renders: the apparent translation between them (item (b) of the row)")
     ap.add_argument("--sigma-hr", type=float, default=6.0,
                     help="coarse scale in HR pixels for --render-pair (3 LR px at a 2x model)")
     ap.add_argument("--no-controls", action="store_true")
@@ -341,6 +377,9 @@ def main():
     # positional, because that is how the docstring and every recorded invocation call it
     ap.add_argument("clip", nargs="?", help="single clip: report the reuse ceiling of both statistics")
     args = ap.parse_args()
+    if args.shift_pair:
+        apparent_shift(args.shift_pair[0], args.shift_pair[1], args.width * 2, args.height * 2)
+        return 0
     if args.render_pair:
         render_pair(args.render_pair[0], args.render_pair[1], args.width * 2, args.height * 2,
                     args.sigma_hr)
