@@ -77,6 +77,56 @@ downsampled to 480p - there is no film grain to freeze. That is exactly our axis
    Sources: <https://arxiv.org/abs/2208.02814>, <https://openreview.net/forum?id=j511LaqEeP>,
    <https://arxiv.org/html/2602.04364v1>
 
+
+## 2b. The practice line, found on the second sweep: anime Blu-ray, not synthetic
+
+The first sweep covered VSR systems; this one went after practitioners. Two documents change the picture:
+
+**EISAI (Chen & Zwicker, ECCV 2022)** - the closest published precedent, and it is on real material: a frame
+removal step for 2D animation interpolation, features are a **linear regression over the mean AND the maximum L2
+LAB colour difference** between consecutive frames, trained on a small hand-labelled set, removing **49.17 % of
+8.24 M Blu-ray anime frames**. Their coefficients ship with the code. That is the "practice, not synthetic" paper
+this lane was looking for, and it is a two-feature linear model - the baseline any decision statistic here has to
+beat. Source: <https://www.ecva.net/papers/eccv_2022/papers_ECCV/papers/136770275.pdf>
+
+**"Duplicate Frame Detection for 2D Anime" (nullcel, 2025 design study + measurement campaign)** - written for
+exactly our consumer ("AI upscaling and frame-interpolation pipelines"), and its findings converge with ours
+independently:
+
+- **The task is two-axis, not binary**: `same_cel` (is this the same drawing - drives interpolation) versus
+  `pixel_reusable` (can the *upscaled* output be reused, and where - drives skip-upscale). A static cel with snow
+  moving is `same_cel = true` and `pixel_reusable = false`. That is our structure/texture split, arrived at from the
+  other direction.
+- **No scalar threshold separates the binding cases**: the hardest true duplicate (static cel, only particles
+  moving) and the weakest true motion (a 0.2 px/frame pan) are separated by **1.18x** on block statistics, and the
+  pan produces *less* block residual than the snow. "There is no magnitude threshold, on any scalar, that separates
+  them."
+- **Per-region, never per-frame**: every efficient-inference method it surveys (Deep Feature Flow, Clockwork
+  Convnets, Skip-Convolutions, SkipVSR, MIA-VSR) makes the reuse decision per region.
+- **Grain, stated plainly** (their 5.18): "Real film grain and sensor noise are temporally independent... For other
+  codecs the `denoise -> detect/upscale -> re-grain` pipeline removes grain from the decision *and* fixes
+  frozen-grain on reuse." With the two caveats we hit ourselves: temporal denoisers are motion-compensated
+  (circular), spatial ones attack line art and banding.
+- **No benchmark exists**: the four major anime video datasets (ATD-12K, Sakuga-42M, AVC/AnimeSR, RAL) each
+  *delete* near-duplicates during construction, so the decision boundary is exactly what the data removes. That is
+  the same wall we hit when the labelled clip turned out to be `cut: {mode: not_proved}`.
+- Also free, and useful: AV1 signals a repeated frame with `show_existing_frame` and reproduces it bit-exactly
+  *including film grain*, and decoding an AV1 source with grain synthesis disabled yields a grain-free master for
+  nothing.
+  Source: <https://github.com/NevermindNilas/nullcel/blob/main/anime-duplicate-frame-detection.md>
+
+Community tooling confirms the practice: TheAnimeScripter ships `--dedup` (flownets) and `--smooth_dedup` for
+frames held on twos/threes, Framegen detects on-twos frames on the GPU, and the Topaz forum has a thread on
+removing duplicates *before* enhancing.
+
+**What this does to the claim.** The architecture we were converging on (separate the plate, reuse on the plate,
+re-grain on every frame) is already the community's recommendation, and the two-axis split is already named. What
+is still ours is the *quantification*: the measured trade-off curve between the structural share and the texture
+ratio on the same 130 reuses (0 / 130 with texture 0.388 at unit gain, 6 / 130 with 0.838 warped, 37 / 130 with
+0.000 verbatim), the audit-certification arithmetic (388 audits for a 0.77 % rate), and the fact that the
+published correction's texture gain comes from remapping the noise. None of the three documents has a number for
+"how much texture is left" as a function of the correction.
+
 ## 3. The three experiments this ordering suggests
 
 1. **The published correction, done as published**: warp the cached SR by the scaled motion vector, add the
