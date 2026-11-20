@@ -2294,6 +2294,16 @@ background-color:#343b47
                                        </item>
                                       </widget>
                                      </item>
+                                     <item>
+                                      <widget class="QCheckBox" name="frameReuse">
+                                       <property name="text">
+                                        <string>Reuse unchanged frames</string>
+                                       </property>
+                                       <property name="checked">
+                                        <bool>true</bool>
+                                       </property>
+                                      </widget>
+                                     </item>
                                     </layout>
                                    </widget>
                                   </item>
