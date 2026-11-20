@@ -80,3 +80,17 @@ def test_a_finished_thumbnail_frees_the_slot_for_the_next_frame():
     assert stager.submit(payload_frame(200))
     payload, _fmt, _flags = drain(stager)
     assert np.frombuffer(payload, np.uint8).min() == 200
+
+
+def test_a_thumbnail_much_smaller_than_the_frame_keeps_the_output_offsets():
+    """Regression: the output offsets were the *source* Y plane's, so every 4K frame wrote
+    past the buffer and the int8 preview silently produced nothing. 8x6 could not catch it
+    (source size == thumbnail size); this uses a frame 4x wider than the thumbnail."""
+    frame = payload_frame(128, width=64, height=48)
+    stager = PreviewStager(16, 12)
+    assert stager.submit(frame)
+    payload, fmt, _flags = drain(stager)
+    assert fmt == FMT_YUV420
+    assert len(payload) == 16 * 12 + 2 * 8 * 6, "Y at 16x12, chroma at 8x6"
+    levels = np.frombuffer(payload, np.uint8)
+    assert levels.min() == 128 and levels.max() == 128
