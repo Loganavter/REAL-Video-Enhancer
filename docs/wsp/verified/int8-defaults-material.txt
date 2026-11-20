@@ -73,11 +73,11 @@ pooled number wrong and a per-clip number right.
 for clip in native1440_20s.mkv bd_csm_same.mkv; do
   d=docs/wsp/verified/logs/second-material/${clip%.mkv}
   ARMS="head0 head1" ARM_ENV_HEAD0="RVE_HEAD_FUSED=0" ARM_ENV_HEAD1="RVE_HEAD_FUSED=1" \
-    CLIPS="$clip" ROUNDS=3 SINK=null LOGDIR="$d-head" scripts/wall_ab.sh
+    CLIPS="$clip" ROUNDS=3 SINK=null LOGDIR="$d-head" harness/scripts/wall_ab.sh
   ARMS="tail0 tail1" ARM_ENV_TAIL0="RVE_TAIL_INT8=0" ARM_ENV_TAIL1="RVE_TAIL_INT8=1" \
-    CLIPS="$clip" ROUNDS=3 SINK=null LOGDIR="$d-tail" scripts/wall_ab.sh
+    CLIPS="$clip" ROUNDS=3 SINK=null LOGDIR="$d-tail" harness/scripts/wall_ab.sh
 done
-PYTHONPATH=. python3 harness/scripts/second_material_records.py
+PYTHONPATH=. python3 harness/harness/scripts/second_material_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-defaults-material.txt \

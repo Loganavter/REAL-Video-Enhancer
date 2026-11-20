@@ -7,14 +7,16 @@ pays: a fresh interpreter, a fresh CUDA context, a fresh model load. Rounds alte
 neighbour's load lands on both modes.
 
 Usage:
-  python harness/scripts/probe_cost.py --rounds 2 --out docs/wsp/verified/records/int8-probe-cost.jsonl
+  python harness/harness/scripts/probe_cost.py --rounds 2 --out docs/wsp/verified/records/int8-probe-cost.jsonl
 """
 
 from __future__ import annotations
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 import argparse
 import hashlib
@@ -25,7 +27,7 @@ import subprocess
 import sys
 import time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from harness.core import Population, Record, Store  # noqa: E402
@@ -128,7 +130,7 @@ def main(argv=None) -> int:
             instrument="wall clock around Int8Probe.probe in a fresh process, flock on the GPU",
             config=f"Int8Probe.probe at {args.width}x{args.height}, one process per run",
             session=session, statistic="max", tier="measured",
-            run=f"harness/scripts/probe_cost.py --mode {name}", artifact=args.log,
+            run=f"harness/harness/scripts/probe_cost.py --mode {name}", artifact=args.log,
             extra={"artifact_sha256": digest, "of": "frame_time", "mode": name}))
     ids["delta"] = store.delta(ids["certify"].id, ids["calibration"].id,
                                instrument="difference of two measured modes, same rounds, same session",

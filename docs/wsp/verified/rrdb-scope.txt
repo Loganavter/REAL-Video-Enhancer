@@ -41,7 +41,7 @@ lane whose bar is 40 ms per frame.
 ## Reproduce
 
 ```bash
-python3 harness/scripts/rrdb_scope_records.py          # TFLOP per checkpoint, from its own conv shapes
+python3 harness/harness/scripts/rrdb_scope_records.py          # TFLOP per checkpoint, from its own conv shapes
 trtexec --onnx=<model>.onnx --fp16 --builderOptimizationLevel=5    # and time the build
 ```
 

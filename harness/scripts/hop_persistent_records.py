@@ -1,6 +1,6 @@
 """Records for the persistent-CTA falsifier: three arms, the codes, and the achieved TOPS.
 
-Usage: python harness/scripts/hop_persistent_records.py [--probe docs/wsp/verified/logs/hop-persistent/probe.json]
+Usage: python harness/harness/scripts/hop_persistent_records.py [--probe docs/wsp/verified/logs/hop-persistent/probe.json]
                                                 [--out docs/wsp/verified/records/int8-hop-persistent.jsonl]
 """
 from __future__ import annotations
@@ -12,9 +12,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -41,7 +43,7 @@ def main(argv=None) -> int:
                        population=Population(kind=pop.kind, items=pop.items,
                                              label=f"{pop.label}, arm {arm}: {labels[arm]}"),
                        instrument=inst, config=cfg, session=sess, statistic="median", tier="measured",
-                       id=rid, run="scripts/hop_persistent_probe.py", artifact=args.probe,
+                       id=rid, run="harness/scripts/hop_persistent_probe.py", artifact=args.probe,
                        extra={"artifact_sha256": dig, "arm": arm, "of": "hop_time",
                               "tops": round(pr["tops"][arm], 1), "gbps": round(pr["gbps"][arm], 1)}))
     st.delta("N002", "N001", note="persistent grid at SM count against the shipped grid")

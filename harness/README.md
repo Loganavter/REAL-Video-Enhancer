@@ -2,8 +2,7 @@
 
 Evidence machinery for this repo: every number that leaves a measurement is a **record** (value, unit, population
 item-set, instrument, config, session, statistic), prose cites a record's id instead of restating the value, and a
-verdict citing an `assumed` record fails mechanically. The package used to live in `scripts/harness/`; it is at the
-root now, and the instruments that write records live in `harness/scripts/`.
+verdict citing an `assumed` record fails mechanically.
 
 ```
 harness/
@@ -16,10 +15,21 @@ harness/
     astcheck.py   dead stores / use-before-assignment in the instruments
     source.py     the clip manifest check (a `contaminated` clip taints every record that names it)
     verdicts.py   the verdict registry loader
-    scripts/      the instruments that emit records: 71 files that import the harness
+    scripts/      187 instruments: probes, sweeps, benches and the record emitters
 ```
 
-Run it from the repository root:
+## Why `scripts/` is nearly empty
+
+`scripts/` is upstream's. At the commit this fork's evidence work started from (`8541c46c`, 2026-09-01) it held
+exactly two files - `printchangelog.py` and `test_version_speed.py` - and those two are still there, untouched.
+Everything else in it was written here between 2026-11-15 and 2026-11-20: 187 instruments, one per measurement the
+queue asked for. The only other survivor is `autopush.sh`, and it stays because `packaging/systemd/rve-autopush.*`
+points at `scripts/autopush.sh` by absolute path.
+
+So the rule is not "a file that imports the harness belongs in it" - it is **ours or upstream's**. Our measurement
+code lives in `harness/scripts/`; `scripts/` keeps the two upstream utilities and the systemd hook.
+
+## Running
 
 ```bash
 python3 -m harness.cli scope
@@ -28,10 +38,15 @@ python3 -m harness.cli db build && python3 -m harness.cli db write-block docs/RE
 python3 harness/scripts/gate_sweep.py --help
 ```
 
-`scripts/` still holds the 114 probes that do not import the harness: one-off instruments, benches and the
-rendering utilities. A file that imports the harness belongs here; a file that does not is a probe.
+Each instrument carries a self-contained bootstrap derived from `__file__` that puts the repo root **and** the
+instrument's own directory on `sys.path`, so it runs by path from anywhere and may import its siblings
+(`price_predictor_probe` imports `cut_channels_naive`, and 88 such edges exist). That replaced five different
+conventions the files had accumulated - `sys.path.insert(0, "scripts")`, `os.path.join(REPO, "scripts")`, two
+hardcoded absolute paths, the script-dir form, and a repo-root constant computed with two `dirname`s that became
+wrong the moment the file moved down a level.
 
-Each moved instrument carries a self-contained path bootstrap (`_HARNESS_ROOT` from `__file__`), so it can be run
-by path from anywhere - that replaced five different conventions (`sys.path.insert(0, "scripts")`,
-`os.path.join(REPO, "scripts")`, two hardcoded absolute paths and the script-dir form), which is why the move was
-mechanical rather than free.
+Instruments that need torch run with the app's interpreter, not the system one:
+
+```bash
+/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/python/bin/python3 harness/scripts/<probe>.py
+```

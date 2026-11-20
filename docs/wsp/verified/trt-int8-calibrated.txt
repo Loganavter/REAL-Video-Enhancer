@@ -72,7 +72,7 @@ The shadows are where a symmetric range spends the fewest codes, and sixteen bou
 ## The same-instrument run: one process, three arms, one reference
 
 `trtexec` cannot time the body (it loads plans; the body is Triton kernels), so the profile above is not a fair
-pair for it. `scripts/trt_vs_body_probe.py` runs all three arms in ONE process on ONE input frame, interleaved,
+pair for it. `harness/scripts/trt_vs_body_probe.py` runs all three arms in ONE process on ONE input frame, interleaved,
 each bracketed by the same CUDA events, median of rounds 2+:
 
 | arm | ms |
@@ -118,16 +118,16 @@ and the shipped pair remains the 494-frame one (0.00125%).
 ## Reproduce
 
 ```bash
-python3 scripts/trt_int8_calibrate.py --onnx /tmp/opencode/futsuu.onnx --frames /tmp/opencode/calib-frames \
+python3 harness/scripts/trt_int8_calibrate.py --onnx /tmp/opencode/futsuu.onnx --frames /tmp/opencode/calib-frames \
     --out /tmp/opencode --opt 5            # fp16, int8-entropy, int8-minmax + the manifest
 ~/.local/bin/trtexec --loadEngine=/tmp/opencode/futsuu_int8_entropy.trt --dumpProfile --iterations=20 --avgRuns=20
-python3 scripts/trt_int8_accuracy.py --fp16 /tmp/opencode/futsuu_fp16.trt \
+python3 harness/scripts/trt_int8_accuracy.py --fp16 /tmp/opencode/futsuu_fp16.trt \
     --int8 /tmp/opencode/futsuu_int8_entropy.trt --int8 /tmp/opencode/futsuu_int8_minmax.trt \
     --frames /tmp/opencode/eval-frames --height 1080 --width 1920
-RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/trt_vs_body_probe.py \
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 harness/scripts/trt_vs_body_probe.py \
     --fp16 /tmp/opencode/futsuu_fp16.trt --int8 /tmp/opencode/futsuu_int8_entropy.trt \
     --calib /tmp/opencode/calib-frames --frames /tmp/opencode/eval-frames --rounds 4 --iters 10
-PYTHONPATH=. python3 harness/scripts/trt_int8_records.py
+PYTHONPATH=. python3 harness/harness/scripts/trt_int8_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/trt-int8-calibrated.txt \
     --records docs/wsp/verified/records/trt-int8-calibrated.jsonl --bars docs/claims-bars.json
 ```

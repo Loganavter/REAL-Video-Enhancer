@@ -1,4 +1,4 @@
-# Stage 1 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage1.txt
+# Stage 1 claims, 2026-11-16. Run: harness/scripts/claim_check.py docs/claims-int8-stage1.txt
 # Both implementations are measured against the SAME reference: model(x) computed BEFORE calibrate()
 # mutates the weights, which is what int8_accuracy_sim.main() does.
 

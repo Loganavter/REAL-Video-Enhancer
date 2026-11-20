@@ -49,9 +49,9 @@ That means the frame's remaining headroom is entirely outside the hop: the deliv
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_persistent_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_persistent_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-persistent/probe.json
-PYTHONPATH=. python3 harness/scripts/hop_persistent_records.py
+PYTHONPATH=. python3 harness/harness/scripts/hop_persistent_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-persistent.txt \

@@ -1,5 +1,5 @@
 # Claims from this investigation, including three that were published and later withdrawn.
-# Run: scripts/claim_check.py docs/claims-example.txt
+# Run: harness/scripts/claim_check.py docs/claims-example.txt
 
 @claim reuse_chainsaw        66.4   %     "Chainsaw, gate on, per-title counts"  @session=example
 @claim breakeven_rendered    47.8   %     "Chainsaw, break-even RENDERED share"  @session=example

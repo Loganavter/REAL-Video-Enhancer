@@ -2,7 +2,7 @@
 
 Measured 2026-11-19/20 (local), RTX 4060 Ti 16 GB, TensorRT **10.12.0.36** (the app's own version), builder
 level 5, implicit int8 with `IInt8MinMaxCalibrator` over the lane's own eight calibration frames (the ones
-`trt-int8-calibrated.txt` uses), and explicit Q/DQ built by `scripts/make_qdq.py` (`--activation qint8`).
+`trt-int8-calibrated.txt` uses), and explicit Q/DQ built by `harness/scripts/make_qdq.py` (`--activation qint8`).
 Records: `records/prelu-form.jsonl`; scratch artifacts (engines, ONNX, scripts): `/tmp/opencode/prelu-exp/`.
 
 ## The question
@@ -107,13 +107,13 @@ app-level picture moves the same way as the engine-level one, far inside the bar
 1. The first variant was `x + (a-1)*relu(x)`, which is **not** PRelu (for `x < 0` it returns `x`, not
    `a*x`). It built without complaint and looked 25% faster; the fp16 control read **100.00000%** of pixels
    off with peak 126-227, which is what identified the error as algebra rather than quantisation.
-2. `scripts/build_plan.py --parse` sets only `BuilderFlag.FP16`, and a Q/DQ plan built through it read
+2. `harness/scripts/build_plan.py --parse` sets only `BuilderFlag.FP16`, and a Q/DQ plan built through it read
    133-135 ms against 68 ms for the same graph built with `BuilderFlag.INT8`. **The flag is not the cause**,
    and this was measured rather than assumed: two builds of the identical `qdq_base.onnx` with
    `EXPLICIT_BATCH`, opt 5 and 8 timing iterations, differing only in the INT8 flag, read **73.48 / 69.80**
    (flag on) and **69.76 / 71.72** (flag off), 83 and 82 layers, and the flag-off plan's picture against the
    fp16 engine is the same 0.000% / peak 7.43. So int8 on a Q/DQ graph comes from the Q/DQ nodes, as
-   `harness/scripts/probe_int8_tactics.py` says. The 133 ms plan is an outlier whose cause is not established - the
+   `harness/harness/scripts/probe_int8_tactics.py` says. The 133 ms plan is an outlier whose cause is not established - the
    build took 468 s against 450 s here and ran while other work was on the card, which is the documented way
    a builder picks worse tactics (`avg_timing_iterations` measures under whatever load is present).
 
@@ -149,12 +149,12 @@ app-level picture moves the same way as the engine-level one, far inside the bar
 # the rewrite (both directions, algebra exact): PRelu -> a*x + (1-a)*relu(x)
 python3 rewrite_prelu.py futsuu.onnx out/            # out/futsuu_mul_relu.onnx
 # engines: fp16 + implicit int8 min-max, same 8 frames, same builder
-python3 scripts/trt_int8_calibrate.py --onnx out/futsuu_mul_relu.onnx \
+python3 harness/scripts/trt_int8_calibrate.py --onnx out/futsuu_mul_relu.onnx \
     --frames <8 rgb frames> --out out/a --arms fp16,int8-minmax
 # picture: 16 held-out frames against the fp16 engine of the unmodified ONNX
 python3 compare_and_time.py ref=<fp16.plan> base_i8=<as-is.plan> a_i8=<rewrite.plan>
 # Q/DQ: the same form over a Q/DQ graph, with INT8 enabled (build_plan.py sets only FP16)
-python3 scripts/make_qdq.py <model.pth> futsuu.onnx out/qdq.onnx --frames <dir> --activation qint8
+python3 harness/scripts/make_qdq.py <model.pth> futsuu.onnx out/qdq.onnx --frames <dir> --activation qint8
 python3 build_int8qdq.py out/qdq.onnx out/qdq.plan
 ```
 

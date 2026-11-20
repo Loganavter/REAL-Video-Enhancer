@@ -78,11 +78,11 @@ writes four strided runs, and the memory system charges for that more than the w
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_halo_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_halo_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-halo/probe.json
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_tile2d_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_tile2d_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-tile2d/probe.json
-PYTHONPATH=. python3 harness/scripts/hop_tiles_records.py
+PYTHONPATH=. python3 harness/harness/scripts/hop_tiles_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-tiles.txt \

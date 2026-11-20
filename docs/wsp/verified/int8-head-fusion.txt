@@ -85,15 +85,15 @@ skipped when the head is fused, because there is no separate pass left to time.
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/head_fusion_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/head_fusion_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/head-fusion/probe.json
 ARMS="plain fused" ARM_ENV_PLAIN="RVE_HEAD_FUSED=0" ARM_ENV_FUSED="RVE_HEAD_FUSED=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null harness/scripts/wall_ab.sh
 ARMS="plain fused" ARM_ENV_PLAIN="RVE_HEAD_FUSED=0" ARM_ENV_FUSED="RVE_HEAD_FUSED=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/head-fusion scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py <plain.mkv> <fused.mkv> --out pair.json \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/head-fusion harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py <plain.mkv> <fused.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix HF
-PYTHONPATH=. python3 harness/scripts/head_fusion_records.py
+PYTHONPATH=. python3 harness/harness/scripts/head_fusion_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-head-fusion.txt \

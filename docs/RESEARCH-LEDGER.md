@@ -999,7 +999,7 @@ proportionality suggests: the shipped tactic is `tilesize128x64x32`, so an N til
 by 48 channels and K = 432 is 14 steps of 32 against 18. The expectation is nearer **1.29x than
 1.78x**, and C=32 is the width that fills both 64 and 32 exactly (MAC x0.25, K = 288 = 9 steps). All
 of it is a time question, and it is measurable without asking anyone about the picture - which is what
-`scripts/probe_channel_width.py` does.
+`harness/scripts/probe_channel_width.py` does.
 
 ## E30a: a channel cut is worth 1.23x, not 1.78x - measured
 
@@ -1869,7 +1869,7 @@ The second result explains the fusion break at C=32 better than "the width is to
 family changes, and both families that win at narrow widths - `scudnn_winograd` here,
 `sm80_xmma_..._indexed_wo_smem_...` in the full model - take no epilogue, so myelin leaves the PReLU
 outside. Whatever restores the epilogue at C=32 has to beat those kernels while staying in a family
-that fuses, which is exactly what `harness/scripts/force_tactic.py` scans by forcing one tactic index at a time
+that fuses, which is exactly what `harness/harness/scripts/force_tactic.py` scans by forcing one tactic index at a time
 and reading the resulting layer names.
 
 ## The counters are unblocked, and the int8 kernel is not at any limit (2026-11-15)
@@ -2104,7 +2104,7 @@ kernel or a separate branch - which is a kernel change, not a modelling one.
 
 ## The direct launcher runs, and fails its own bit-exact check (2026-11-15)
 
-`scripts/launch_cubin.py` loads the capped cubin with `cuModuleLoadData`, launches 32 x 128 threads with
+`harness/scripts/launch_cubin.py` loads the capped cubin with `cuModuleLoadData`, launches 32 x 128 threads with
 `sharedMemBytes` from the metadata, and compares against the shift-plus-`_int_mm` reference. Two things were
 needed to get that far, both of the "silent contract" class:
 
@@ -2241,7 +2241,7 @@ not the next step.
 
 ## The int8 fit probe (2026-11-15)
 
-`scripts/probe_int8_fit.py` answers the only product question left: does int8 fit *this* video? It takes N
+`harness/scripts/probe_int8_fit.py` answers the only product question left: does int8 fit *this* video? It takes N
 adjacent pairs spread over the clip, calibrates on a disjoint half, applies the gate's own statistic so
 only pairs it would actually reuse enter the composition, and returns one verdict.
 

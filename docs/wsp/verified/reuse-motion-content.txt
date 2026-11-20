@@ -82,7 +82,7 @@ RVE_DEBUG_DEPTH=1 python3 backend/rve-backend.py ... --input motion8s.mkv --outp
 python3 backend/rve-backend.py ... --input motion8s.mkv --output on.mkv  --temporal_reuse \
     --no_temporal_reuse_auto --temporal_reuse_threshold 20
 python3 backend/rve-backend.py ... --input motion8s.mkv --output off.mkv
-python3 scripts/reuse_split.py --gated on.mkv --ungated off.mkv --lr motion8s.mkv \
+python3 harness/scripts/reuse_split.py --gated on.mkv --ungated off.mkv --lr motion8s.mkv \
     --depth-log gate.log --alpha 1.35 --recursive --emit split.json
 ```
 

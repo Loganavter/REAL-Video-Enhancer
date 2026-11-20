@@ -9,7 +9,7 @@
 > label is still the wrong file.
 
 Measured with the product's own probe (`backend/src/utils/Int8Probe.py`) through
-`scripts/probe_int8_app.py`, one GPU job at a time, bundled interpreter torch 2.9.0+cu130.
+`harness/scripts/probe_int8_app.py`, one GPU job at a time, bundled interpreter torch 2.9.0+cu130.
 
 The probe now prints, on the SAME pairs and at the SAME separation it reads the composition on, the fp16
 reference against fp16. Only the renderer changes, so the gap between the two lines is the quantiser's

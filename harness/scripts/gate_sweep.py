@@ -11,16 +11,18 @@ Two controls it prints on every run, because both have been the cause of a withd
     model, no check that the reference itself is right).
 
 Usage:
-  python harness/scripts/gate_sweep.py GATED UNGATED --out stats.json [--block 64] [--emit records.jsonl]
+  python harness/harness/scripts/gate_sweep.py GATED UNGATED --out stats.json [--block 64] [--emit records.jsonl]
          [--clip-name bd_violet20s.mkv] [--label "..."] [--config "..."] [--instrument "..."]
          [--session s-...] [--artifact docs/wsp/verified/logs/x.log] [--ffmpeg PATH]
 """
 
 from __future__ import annotations
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 import argparse
 import hashlib
@@ -37,7 +39,7 @@ BAR = 8.0  # levels; the acceptance bar's own threshold
 # against an FP16 ENGINE RENDER was used once as if it measured the quantiser: the engine deviates from the
 # model by 0.055-0.087% and the colour pipe alone moves 0.21% of pixels past the 8-level bar on delivered
 # 4:2:0 material (int8-scales-bd.txt), while the quantiser's own error against the MODEL is 0.004-0.019%.
-# So the tool asks, the records carry the answer, and `scripts/check_reference_declarations.py` keeps the
+# So the tool asks, the records carry the answer, and `harness/scripts/check_reference_declarations.py` keeps the
 # undeclared ones visible instead of silently forgiven.
 REFERENCE_NOTES = {
     "model": "reference is the MODEL's own fp16 output (torch): the only reference that measures a "

@@ -65,8 +65,8 @@ everything, so it decides nothing, and it is filed separately
 ## Reproduce
 
 ```bash
-PYTHONPATH=. <install-python> harness/scripts/probe_cost.py --rounds 2      # runs the probes
-PYTHONPATH=. <install-python> harness/scripts/probe_cost.py --from-log      # records from the same log
+PYTHONPATH=. <install-python> harness/harness/scripts/probe_cost.py --rounds 2      # runs the probes
+PYTHONPATH=. <install-python> harness/harness/scripts/probe_cost.py --from-log      # records from the same log
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-probe-cost-2026-11-19.txt \

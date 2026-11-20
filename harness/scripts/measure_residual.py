@@ -19,9 +19,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 
 class Compact(nn.Module):

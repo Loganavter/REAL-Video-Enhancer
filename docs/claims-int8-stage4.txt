@@ -1,4 +1,4 @@
-# Stage 4 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage4.txt
+# Stage 4 claims, 2026-11-16. Run: harness/scripts/claim_check.py docs/claims-int8-stage4.txt
 # The probe reads adjacent pairs from a clip, calibrates on a disjoint half, and reports two statistics
 # separately because they answer different questions.
 

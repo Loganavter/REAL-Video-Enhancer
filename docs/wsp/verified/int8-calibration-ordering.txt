@@ -82,7 +82,7 @@ single-frame-calibrated body, which is the correct side of that trade.
 RVE_INT8_CERTIFY=1 <rve-backend.py ... --int8_fit int8 --output a.mkv ffv1>
 <same without the env> ...
 grep -an "int8 probe:\|int8: built\|calibration frames" arm*.log
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py a.mkv b.mkv --out s.json --reference-kind config
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py a.mkv b.mkv --out s.json --reference-kind config
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-calibration-ordering.txt \

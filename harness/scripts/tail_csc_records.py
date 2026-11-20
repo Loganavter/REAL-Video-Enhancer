@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
@@ -22,12 +24,12 @@ def main(argv=None) -> int:
                        instrument="torch.cuda.Event, 3 interleaved rounds, medians of rounds 2+",
                        config=f"tail 64->12 + shuffle + residual + yuv420p, {arm}", session=st.session,
                        statistic="median", tier="measured", id=f"N{i:03d}",
-                       run="scripts/tail_csc_probe.py", artifact=a.probe,
+                       run="harness/scripts/tail_csc_probe.py", artifact=a.probe,
                        extra={"artifact_sha256": dig, "arm": arm}))
     st.emit(Record(value=float(pr["max_code_diff"]), unit="levels", population=pop,
                    instrument="byte-wise |delta| between the two payloads, 12 441 600 bytes",
                    config="fused tail CSC against the shipped fp16-RGB + pack conversion", session=st.session,
-                   statistic="max", tier="measured", id="N003", run="scripts/tail_csc_probe.py",
+                   statistic="max", tier="measured", id="N003", run="harness/scripts/tail_csc_probe.py",
                    artifact=a.probe,
                    extra={"artifact_sha256": dig, "of": "payload_delta",
                           "share_gt1_pct": pr["share_gt1_pct"]}))

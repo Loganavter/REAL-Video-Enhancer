@@ -1,6 +1,6 @@
 # Native widths: 32 is free, 48 costs what 64 costs, and 24 is cheap because it is shallow
 
-Measured 2026-11-20 (local), records `int8-width.jsonl` (WX001-WX020, generated below), probe `scripts/int8_width_probe.py`,
+Measured 2026-11-20 (local), records `int8-width.jsonl` (WX001-WX020, generated below), probe `harness/scripts/int8_width_probe.py`,
 raw `logs/int8-width/probe.json`. Ten models from the collection that the pipeline refused before, at their own
 widths: five Archivist denoisers (48 channels), three RGB-max-Denoise (32), two SuperUltraCompact (24).
 
@@ -67,10 +67,10 @@ because 256x2 is 2.8x slower and a default picked at another width could have la
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/int8_width_probe.py \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/int8_width_probe.py \
     --models "Archivist_AntiLines.pth,1x-RGB-max-Denoise.pth,2x-DigitalFlim-SuperUltraCompact.pth" --sweep \
     --out-file docs/wsp/verified/logs/int8-width/probe.json
-PYTHONPATH=. python3 harness/scripts/int8_width_records.py
+PYTHONPATH=. python3 harness/harness/scripts/int8_width_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-native-width.txt \

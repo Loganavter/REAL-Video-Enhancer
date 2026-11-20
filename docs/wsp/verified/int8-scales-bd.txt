@@ -5,7 +5,7 @@ Frames: 1080p RGB dumps at 20, 29, 44, 60, 100, 140, 180, 220, 260, 274, 300. Ca
 frames 20/60/100/140/180/220/260/300, test on 29, 44 and 274 - **disjoint sets**, which is what makes the
 result a prediction rather than a fit.
 
-Instrument: `harness/scripts/int8_accuracy_sim.py` (the sim that produced every recorded int8 accuracy number),
+Instrument: `harness/harness/scripts/int8_accuracy_sim.py` (the sim that produced every recorded int8 accuracy number),
 extended with `--act-scale {tensor,channel}` and `--clip PCT`; defaults unchanged, so the recorded recipe
 is what runs when nobody asks.
 
@@ -131,7 +131,7 @@ in real time on the card that renders it, so it is a record, not a viewing instr
 The owner's report was "fp16 reproduces the halo, int8 does not, and the tints are unclear". Both halves are
 measurable, and they came out as: colour is fine, the STROKE is what changes.
 
-Method (`scripts/tint_attribution.py`): take the model's own fp16 output, find the pixels on the top 2% of
+Method (`harness/scripts/tint_attribution.py`): take the model's own fp16 output, find the pixels on the top 2% of
 its laplacian - the line art - and split them into the ink core (laplacian < 0, the dark line) and the outer
 rim (laplacian > 0, the lighter side next to it). Then read each render's mean luma on those two sets,
 because a halo is a signed effect and an absolute difference cannot see it.
@@ -192,7 +192,7 @@ a second, independent guard besides the probe, and it is what made the margin-x1
 
 ## The correction that matters: against the MODEL the body is fine, and the pipe is the floor
 
-The emulation of the kernel's own quantiser in torch (`scripts/int8_kernel_emulation.py`) reproduces the body
+The emulation of the kernel's own quantiser in torch (`harness/scripts/int8_kernel_emulation.py`) reproduces the body
 **bit-exactly** (share 0.00000%, peak 0.0 on every frame tested), which is what makes the comparison below
 trustworthy rather than another cross-instrument guess. With the reference set to the model's own fp16 output
 (torch, RGB, no colour pipe on either side):
@@ -204,7 +204,7 @@ trustworthy rather than another cross-instrument guess. With the reference set t
 
 The engine column is not the engine's fault: pushing BOTH sides through the same 4:2:0 round trip drops it
 to 0.087% (frame 29) and 0.055% (169), and **the pipe alone** - the model against itself through the same
-round trip - reads **0.21053%** and **0.12868%** (`scripts/engine_vs_model_control.py`).
+round trip - reads **0.21053%** and **0.12868%** (`harness/scripts/engine_vs_model_control.py`).
 
 Three consequences, in order of how much they change the record:
 

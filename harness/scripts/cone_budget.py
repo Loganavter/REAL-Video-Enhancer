@@ -17,8 +17,8 @@ sixteen launches cost more than their work - the arithmetic is a ceiling on the 
 overhead is a floor on the cost. Both are printed.
 
 Usage:
-  python3 harness/scripts/cone_budget.py                       # 1080p
-  python3 harness/scripts/cone_budget.py --width 1920 --height 1080 --emit /tmp/opencode/e36.jsonl
+  python3 harness/harness/scripts/cone_budget.py                       # 1080p
+  python3 harness/harness/scripts/cone_budget.py --width 1920 --height 1080 --emit /tmp/opencode/e36.jsonl
 """
 from __future__ import annotations
 
@@ -100,9 +100,11 @@ def main() -> int:
 
     if args.emit:
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         store = Store()
         # The two constants the arithmetic rests on. They are the model's own geometry (MODEL.md §1),

@@ -5,7 +5,7 @@ A second card is impossible here (one GPU in this machine); a second model famil
 body carries the answer: `realesr-animevideov3` is a 64-channel Compact with a 4x tail, which the int8 body
 serves.
 
-Usage: python harness/scripts/fast_preset_records.py [--logs docs/wsp/verified/logs/fast-preset/animevideov3]
+Usage: python harness/harness/scripts/fast_preset_records.py [--logs docs/wsp/verified/logs/fast-preset/animevideov3]
                                              [--out docs/wsp/verified/records/fast-preset.jsonl]
 """
 from __future__ import annotations
@@ -19,9 +19,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -74,7 +76,7 @@ def main(argv=None) -> int:
         st.emit(Record(value=round(statistics.median(loops[arm]), 2), unit="ms", population=pop,
                        instrument=inst, config=cfg, session=session, statistic="median",
                        tier="measured", id=rid,
-                       run=f"rve-backend.py via scripts/wall_ab.sh MODEL=<second family>, logs {args.logs}",
+                       run=f"rve-backend.py via harness/scripts/wall_ab.sh MODEL=<second family>, logs {args.logs}",
                        artifact=art,
                        extra={"artifact_sha256": sha256(art), "of": "frame_time",
                               "per_round": loops[arm], "model": model}))
@@ -86,7 +88,7 @@ def main(argv=None) -> int:
                        instrument="the body's own first-frame check: pixels >8 levels against the fp16 "
                                   "MODEL, one frame",
                        config=cfg, session=session, statistic="max", tier="measured", id="F003",
-                       run=f"rve-backend.py via scripts/wall_ab.sh, logs {args.logs}",
+                       run=f"rve-backend.py via harness/scripts/wall_ab.sh, logs {args.logs}",
                        artifact=f"{args.logs}/bd_violet20s_int8_r1_null.log",
                        extra={"artifact_sha256": sha256(f"{args.logs}/bd_violet20s_int8_r1_null.log"),
                               "of": "share", "note": "a gross-error gate on one frame, NOT an "

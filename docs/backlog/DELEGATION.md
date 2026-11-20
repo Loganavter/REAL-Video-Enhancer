@@ -77,14 +77,14 @@ How it was built, in the order that works (each step failed first otherwise):
 Use it as `~/.cache/opencode/venvs/trt310/bin/python`, always under `flock -n /var/tmp/opencode/gpu.lock`.
 It was built in `/tmp` first and moved here on 2026-11-17: `/tmp` is tmpfs, so 11 GB of it was RAM, and a
 reboot would have taken the interpreter with it. The two stream runners that need it are
-`scripts/measure_int8_acc.sh` and `scripts/build_plan.py`.
+`harness/scripts/measure_int8_acc.sh` and `harness/scripts/build_plan.py`.
 
 **Never calibrate a quantisation model on the CPU at frame resolution (measured 2026-11-17).**
 onnxruntime's `quantize_static` runs the model once per calibration frame on the CPU: 8 frames x
 2.5 TFLOP of 3x3 convolutions at 1920x1080 on 16 threads, plus its arena. It took the desktop down to
 the point where the window manager stuttered ("almost killed mutter") and the run had to be killed.
 The same ranges come from forward hooks in torch on the GPU in about half a second per frame - that
-is what `scripts/make_qdq.py` does, and it is also the only way to keep the one-GPU-job rule honest.
+is what `harness/scripts/make_qdq.py` does, and it is also the only way to keep the one-GPU-job rule honest.
 
 **TensorRT: how it is obtained here (measured 2026-11-17, after a 6-hour hang).** The app itself
 pins the source of truth: `src/DownloadDeps.py` installs `tensorrt==10.12.0.36` with
@@ -203,8 +203,8 @@ At most **three** cells at once, and never two with overlapping `owns_files`:
   it enumerates the alternative); does Welder build on this host at all, and
   which of our ops (`PReLU`, `PixelShuffle`, residual add) it can express.
   Owns `REPORT.md` only. Every claim carries a command or a `file:line`.
-- **lane-probes** (code): `scripts/probe_winograd.py` and
-  `harness/scripts/pyramid_budget.py`. Both are written and reviewed before the
+- **lane-probes** (code): `harness/scripts/probe_winograd.py` and
+  `harness/harness/scripts/pyramid_budget.py`. Both are written and reviewed before the
   supervisor runs them; the probe must print the algorithm name it got, not just
   a time, or it reproduces the mistake E26 exists to correct.
 - **lane-plugin** (code): `backend/src/pytorch/int8_plugin/` plus a CPU test of
@@ -246,7 +246,7 @@ refuses a superseded one (`verdicts --cite <id>`). Do not assemble a conclusion 
 own measurements had replaced. If a lane has no verdict for the question, that is the finding: record
 one, with its `scope`.
 
-## Waiting: `scripts/wait_for.py`, not `sleep`
+## Waiting: `harness/scripts/wait_for.py`, not `sleep`
 
 A supervisor turn that ends in `sleep 300` spends a whole model turn on nothing, and one that repeats
 `ls` every minute spends the same turn with less patience. The harness notifies on a **background
@@ -254,10 +254,10 @@ command's completion**, so the right shape is: state the condition once, launch 
 background command, and let the notification carry the verdict.
 
 ```
-scripts/wait_for.py --file /tmp/opencode/b3/c32_leaky.plan --log /tmp/opencode/b3.log --tail 15
-scripts/wait_for.py --pid-gone "$(cat /tmp/opencode/<id>.pid)" --timeout 3600
-scripts/wait_for.py --log-match "/tmp/opencode/render.log::^DONE " --timeout 7200
-scripts/wait_for.py --gpu-free --timeout 5          # is the card free right now?
+harness/scripts/wait_for.py --file /tmp/opencode/b3/c32_leaky.plan --log /tmp/opencode/b3.log --tail 15
+harness/scripts/wait_for.py --pid-gone "$(cat /tmp/opencode/<id>.pid)" --timeout 3600
+harness/scripts/wait_for.py --log-match "/tmp/opencode/render.log::^DONE " --timeout 7200
+harness/scripts/wait_for.py --gpu-free --timeout 5          # is the card free right now?
 ```
 
 Conditions (all by default, `--any` for any): `--file` exists, `--gone` absent, `--pid` alive,

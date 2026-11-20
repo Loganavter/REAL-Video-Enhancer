@@ -2,7 +2,7 @@
 
 Measured 2026-11-20 on `2x-Futsuu-Anime(1).pth`, 1920x1080, calibrated on 8 frames, measured on 3 held-out frames
 from the same two bluray cuts. Records `int8-beacon-scale.jsonl` (BK001-BK014), raw
-`logs/beacon/beacon.json`, `logs/beacon/beacon-clipping.json`, probe `scripts/beacon_scale_probe.py`.
+`logs/beacon/beacon.json`, `logs/beacon/beacon-clipping.json`, probe `harness/scripts/beacon_scale_probe.py`.
 
 The question came out of the prior-art pass (`PRIOR-ART-STARTUP-2026-11-20.md`): Beacon (arXiv:2508.20293) says the
 scale does not have to be searched - pick the integer codes on an unscaled grid, then take the least-squares
@@ -63,9 +63,9 @@ control. The sweep stays, at its 3 s, with the K=2-clean skip.
 ## Reproduce
 
 ```bash
-RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/beacon_scale_probe.py \
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 harness/scripts/beacon_scale_probe.py \
     --calib /tmp/opencode/calib-frames --frames /tmp/opencode/eval3 --out-file /tmp/opencode/beacon.json
-PYTHONPATH=. python3 harness/scripts/beacon_scale_records.py
+PYTHONPATH=. python3 harness/harness/scripts/beacon_scale_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-beacon-scale.txt \
     --records docs/wsp/verified/records/int8-beacon-scale.jsonl --bars docs/claims-bars.json
 ```

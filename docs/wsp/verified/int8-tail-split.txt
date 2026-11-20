@@ -49,9 +49,9 @@ row would have funded the wrong kernel.
 ## Reproduce
 
 ```bash
-CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=1 SINK=null scripts/wall_ab.sh
+CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=1 SINK=null harness/scripts/wall_ab.sh
 grep -a "int8 tail:" docs/wsp/verified/logs/tail/*int8*.log
-PYTHONPATH=. python3 harness/scripts/tail_split.py --logs docs/wsp/verified/logs/tail
+PYTHONPATH=. python3 harness/harness/scripts/tail_split.py --logs docs/wsp/verified/logs/tail
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tail-split.txt \

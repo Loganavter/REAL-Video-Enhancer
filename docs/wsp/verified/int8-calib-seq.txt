@@ -58,9 +58,9 @@ fade-in risk named and filed rather than assumed away.
 
 ```bash
 ARMS="spread seq" ARM_ENV_SPREAD="RVE_INT8_CALIB_SEQUENTIAL=0" ARM_ENV_SEQ="RVE_INT8_CALIB_SEQUENTIAL=1" \
-    SINK=ffv1 ROUNDS=1 CLIPS="bd_violet20s.mkv" scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py <seq.mkv> <spread.mkv> --reference-kind config --out pair.json
-PYTHONPATH=. python3 harness/scripts/calib_seq_records.py
+    SINK=ffv1 ROUNDS=1 CLIPS="bd_violet20s.mkv" harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py <seq.mkv> <spread.mkv> --reference-kind config --out pair.json
+PYTHONPATH=. python3 harness/harness/scripts/calib_seq_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-calib-seq.txt \
     --records docs/wsp/verified/records/int8-calib-seq.jsonl --bars docs/claims-bars.json
 ```

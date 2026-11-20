@@ -79,7 +79,7 @@ shuffle is a write-side index map, the residual is a nearest upsample read of th
 another 1.7-2.6 ms of headroom.
 
 **Falsifier.** Staged, cheapest first: (a) emulate the folded-scale int8 tail against today's fp16 tail on
-the four held-out BD frames with `scripts/int8_kernel_emulation.py` (the bit-exact emulation the corpus
+the four held-out BD frames with `harness/scripts/int8_kernel_emulation.py` (the bit-exact emulation the corpus
 already trusts) - **1-2 h, no GPU**; if the share or the peak moves past its margin, stop. (b) one Triton
 conv 576->16 at 1080p with zero-padded outputs, timed against 2.35 ms - **1 h**.
 
@@ -109,7 +109,7 @@ It also removes the 265 MB fp16 write that the quantise pass exists to consume.
 
 **Falsifier.** The reserve row's own first step, arithmetic first, no GPU: what grid do three input channels
 need, and what does quantising the head's 27 weights do to the four held-out frames
-(`harness/scripts/int8_accuracy_sim.py` / the emulation) - **1-2 h**. Only then one kernel, **1 h**.
+(`harness/harness/scripts/int8_accuracy_sim.py` / the emulation) - **1-2 h**. Only then one kernel, **1 h**.
 
 **Evidence check.** `grep -rn "int8 head" docs/PLAN-int8-envelope-2026-11-19.md` - it is a reserve row whose
 open question is "whether an int8 head is even expressible here". `rve-head-conv-2026-11-19` is filed and
@@ -197,7 +197,7 @@ between layers; standard int8 epilogue practice.
 
 **Where it lands.** **All sixteen** hops in the shipped body run this one kernel (`Int8Body.py:385-395`
 loops `body_prologue_kernel` over the sixteen weight sets) - the "6 of 16 on the three-accumulator kernel"
-split belongs to `harness/scripts/int8_pipeline.py`, a different object (`int8-window-measured`), and must not be
+split belongs to `harness/harness/scripts/int8_pipeline.py`, a different object (`int8-window-measured`), and must not be
 quoted here. If the divide is 5-10% of a hop it is 1.3-2.7 ms of the frame.
 
 **Falsifier.** **30-60 min**, one hop, two arms, timed and code-diffed on a real frame. The rewrite is exact
@@ -249,12 +249,12 @@ memory-bound and latency-bound regimes. Source: TSM2X, arXiv:2002.03258 (GPU tal
 **Where it lands.** 2.33-2.40 ms for 28.7 GFLOP = **12.2 TFLOPS** (derived), against ~44 fp16 CUDA-core and
 ~176 tensor TFLOPS. It is the fallback if C1's picture fails, because it changes no quantisation.
 
-**Falsifier.** **2 h**: extend the existing `scripts/tail_conv_probe.py` (which already sweeps C_out
+**Falsifier.** **2 h**: extend the existing `harness/scripts/tail_conv_probe.py` (which already sweeps C_out
 12/16/32/64 x layouts) with the transposed arm - a conv on a permuted input, or an unfolded matmul - and
 time against 2.35. A different algorithm means the picture test, not byte-identity.
 
 **Evidence check.** **FILED, partly**: `rve-tail-conv-utilization-2026-11-19` includes the 12->16 padding
-arm but not the transpose, and `scripts/tail_conv_probe.py` confirms that in its own docstring. Not refuted.
+arm but not the transpose, and `harness/scripts/tail_conv_probe.py` confirms that in its own docstring. Not refuted.
 
 **Ceiling.** ESTIMATE 2.35 -> 1.0-1.5 ms; save 0.9-1.4.
 

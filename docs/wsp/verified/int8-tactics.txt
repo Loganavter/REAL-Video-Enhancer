@@ -1,6 +1,6 @@
 # The int8 body's per-convolution rate (E33, first pass)
 
-Measured 2026-11-17 with `harness/scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
+Measured 2026-11-17 with `harness/harness/scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
 (`c2x_int8_fp16heads.plan`), same session, 20 executions x 3 rounds, `trt.IProfiler` for the per-layer
 times.
 

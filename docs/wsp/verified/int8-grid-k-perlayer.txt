@@ -2,7 +2,7 @@
 
 Measured 2026-11-20, crops calibration, three held-out frames, `Int8Body` with `RVE_INT8_GRID_K` as a per-hop list
 (new: `"2,3,2,..."`). Records `int8-grid-k-perlayer.jsonl` (PK001-PK004), raw
-`logs/grid-perlayer-{futsuu,realesr}.json`, probe `scripts/grid_k_perlayer_probe.py`.
+`logs/grid-perlayer-{futsuu,realesr}.json`, probe `harness/scripts/grid_k_perlayer_probe.py`.
 
 This is stage (b) of `rve-grid-k-learned-2026-11-20` - PAMS's falsifier, done without training. PAMS says a
 **learned** per-layer truncated scale beats a fixed one. If the per-layer choice made by *search* on the same frames
@@ -47,9 +47,9 @@ path keeps the single-K sweep with its K=2-clean skip.
 ## Reproduce
 
 ```bash
-RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/grid_k_perlayer_probe.py \
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 harness/scripts/grid_k_perlayer_probe.py \
     --model "<model>.pth" --out-file /tmp/opencode/grid-perlayer.json
-PYTHONPATH=. python3 harness/scripts/grid_k_perlayer_records.py
+PYTHONPATH=. python3 harness/harness/scripts/grid_k_perlayer_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-grid-k-perlayer.txt \
     --records docs/wsp/verified/records/int8-grid-k-perlayer.jsonl --bars docs/claims-bars.json
 ```

@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, re, statistics, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 LOOP = re.compile(r"render loop: [\d.]+ s for (\d+) frames \(([\d.]+) ms/frame\)")
@@ -32,7 +34,7 @@ def main(argv=None) -> int:
                        instrument="torch.cuda.Event around the whole 16-launch chain, 3 interleaved rounds",
                        config="int8 body, 16 hops, buffer layout is the arm", session=st.session,
                        statistic="median",
-                       tier="measured", id=f"H{i:03d}", run="scripts/hop_halo_chain_probe.py",
+                       tier="measured", id=f"H{i:03d}", run="harness/scripts/hop_halo_chain_probe.py",
                        artifact=a.probe, extra={"artifact_sha256": dig, "arm": arm,
                                                 "codes_differ": pr["codes_differ"]}))
     i += 1
@@ -40,7 +42,7 @@ def main(argv=None) -> int:
                    instrument="torch.cuda.Event, 20 border zeroings of three padded buffers",
                    config="three (h+2, w+2, C) buffers, border zeroing", session=st.session,
                    statistic="median", tier="measured", id=f"H{i:03d}",
-                   run="scripts/hop_halo_chain_probe.py", artifact=a.probe,
+                   run="harness/scripts/hop_halo_chain_probe.py", artifact=a.probe,
                    extra={"artifact_sha256": dig, "of": "border_zero"}))
     # the chain gain as a verifiable delta (H001 - H002); the NET of it against the border zeroing (H003) is
     # stated in the doc, because the harness recomputes only two-input subtraction and inventing a third input

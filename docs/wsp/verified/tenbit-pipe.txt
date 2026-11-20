@@ -1,7 +1,7 @@
 # Ten bits survive the reader and the packer - measured code by code, not asserted
 
 Measured 2026-11-20 (local), records `tenbit-pipe.jsonl` (TB001-TB009), probe
-`scripts/tenbit_pipe_probe.py`, raw `logs/tenbit-pipe/probe.json`, clip `native1440_20s.mkv` (1440x1080 HEVC
+`harness/scripts/tenbit_pipe_probe.py`, raw `logs/tenbit-pipe/probe.json`, clip `native1440_20s.mkv` (1440x1080 HEVC
 10-bit, `color_range=tv`, bt709 - the same file registered in `docs/wsp/sources.yaml`).
 
 Why this page exists: an 8-bit collapse inside a 10-bit container produces a legal file of a legal size and a
@@ -68,9 +68,9 @@ refused gate under a default-on flag would otherwise make a 10-bit A/B read two 
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/tenbit_pipe_probe.py --frames 5 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/tenbit_pipe_probe.py --frames 5 \
     --out-file docs/wsp/verified/logs/tenbit-pipe/probe.json
-PYTHONPATH=. python3 harness/scripts/tenbit_pipe_records.py
+PYTHONPATH=. python3 harness/harness/scripts/tenbit_pipe_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/tenbit-pipe.txt \

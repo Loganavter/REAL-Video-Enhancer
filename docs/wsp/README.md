@@ -152,7 +152,7 @@ They PASS `harness.cli check` with full coverage - the first non-vacuous green i
 | `int8-body-ve.txt` | the Triton int8 chain against fp16 on the same real frame | 0.006% above 8, peak 11.95, **PSNR 53.15 dB** - within a level of the ledger's TRT claim (peak 4, 54.1 dB) and 6-10 dB better than this session's TRT Q/DQ rebuilds |
 | `engine-int8.txt` | the int8 Q/DQ build (E9'): graph shape, time, and the picture | mechanism and time reproduce (19-22 reformats, 84 layers, 64-70 ms against the recorded 68.11); the PICTURE does not - 0.010% / 0.291% / 4.389% above 8 levels and 38-48 dB against a recorded 0.000% / peak 4 / 54.1 dB, with three orders of magnitude between configurations of the same recipe |
 
-The int8 probe emits its own records now (`harness/scripts/int8_block_probe.py --emit`), so this is not a
+The int8 probe emits its own records now (`harness/harness/scripts/int8_block_probe.py --emit`), so this is not a
 hand-copied number: the probe, the record and the claim are the same object.
 
 **The engine lane follows now (2026-11-17).** TensorRT **10.12.0.36** - the ledger's own version - is
@@ -177,12 +177,12 @@ the 8-level bar on delivered 4:2:0 material - three to fifty times the quantiser
 against an engine render therefore cannot answer "how wrong is int8"; it can answer "what does the user see
 between these two renders", which is a different, legitimate question.
 
-It is a gate, not a paragraph: `harness/scripts/gate_sweep.py` **refuses to run** without
+It is a gate, not a paragraph: `harness/harness/scripts/gate_sweep.py` **refuses to run** without
 `--reference-kind {model|engine-render|config}`, prints the declaration in its header, and writes
 `extra.reference_kind` + `reference_note` into every record it emits.
-`scripts/check_reference_declarations.py` lists any render-pair record in the corpus that does not carry one
+`harness/scripts/check_reference_declarations.py` lists any render-pair record in the corpus that does not carry one
 (exit 1), and `backend/tests/test_reference_declarations.py` pins both halves on CPU.
 
 ```
-PYTHONPATH=. python3 scripts/check_reference_declarations.py     # the debt list
+PYTHONPATH=. python3 harness/scripts/check_reference_declarations.py     # the debt list
 ```

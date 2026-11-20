@@ -89,7 +89,7 @@ into a valid conv2d weight, while `permute(2, 0, 1)` gives [cout, tap, cin] and 
 *wrong* weight of the same element count. Three permutation mistakes in one investigation (twice in a
 reference, once in a probe), all of them producing plausible numbers rather than errors.
 
-**Tools:** `harness/scripts/int8_block_probe.py` (`reference()`, `--check-size`), `scripts/launch_cubin.py`.
+**Tools:** `harness/harness/scripts/int8_block_probe.py` (`reference()`, `--check-size`), `harness/scripts/launch_cubin.py`.
 
 ## Stage 1 - build the pipeline eagerly, bit-exact (one day)
 
@@ -116,7 +116,7 @@ diverges, and which side is right is then unknown.
 **Kills it:** build/simulation disagree by more than 2x on the share. Stop and find out, do not optimise.
 
 **Tools:** `int8_accuracy_sim.py` is the reference implementation to reproduce; `TensorRTHandler.py` is where
-the three-segment dispatch goes. `harness/scripts/int8_pipeline.py` is the build.
+the three-segment dispatch goes. `harness/harness/scripts/int8_pipeline.py` is the build.
 
 **State (2026-11-16): the pipeline runs end to end and its gate FAILS.** Sixteen kernel launches with real
 handoffs, head and tail in torch: `>8 100.000%, peak 236, median 113 levels` against a bar of 0.1%. Two
@@ -218,7 +218,7 @@ The plan's earlier claim that "no chainable int8 body can meet the gate" was wro
 reason this file keeps recording: it compared the pipeline against the simulation without isolating which of
 the two variables differed. The gate stands.
 
-**Built, and it does not close the gap.** `scripts/int8_prologue_kernel.py` requants per-channel ->
+**Built, and it does not close the gap.** `harness/scripts/int8_prologue_kernel.py` requants per-channel ->
 per-tensor on load with an integer multiplier and shift, leaving the accumulator int32:
 
     ptxas: Used 176 registers, 0 bytes spill, smem 12288    <- no hot spill, so the variant is viable
@@ -460,7 +460,7 @@ magnitude at layer 1 with the same input and the same weights. Instrumenting the
 
 Every one of the 18 body convs carries a bias, and the bias is not a rounding detail: its mean absolute value is
 2.1-4.3 while the activations are ~0.5, so **dropping it is a different network**, not a quantisation choice.
-`grep -n bias harness/scripts/int8_pipeline.py scripts/int8_prologue_kernel.py` returned **nothing** before this pass -
+`grep -n bias harness/harness/scripts/int8_pipeline.py harness/scripts/int8_prologue_kernel.py` returned **nothing** before this pass -
 the whole int8 lane was measuring an unbiased model.
 
 Carrying the bias in the epilogue (after dequantisation, before PReLU - one extra per-channel load and add, the
@@ -895,7 +895,7 @@ Accuracy unchanged by any of it: int8 vs the engine picture `>8 0.00004%, peak 8
 
 **State (2026-11-16, second measurement): the gate is taken and it FAILS by 2.00 ms.**
 
-`scripts/int8_app_gate.py` loads the **cached fp16 TensorRT engine the app itself loads**
+`harness/scripts/int8_app_gate.py` loads the **cached fp16 TensorRT engine the app itself loads**
 (`torch.jit.load` on `2x-Futsuu-Anime(1).pth_fp16_..._1920x1080.engine`), keeps both cached in one process,
 encodes h264 with NVENC concurrently through a real ffmpeg loop, runs three interleaved rounds with the order
 alternating, and logs clocks before and after each condition:
@@ -927,7 +927,7 @@ head and tail (5.5 + 14.9 ms, which both sides pay) puts the **body-only ratio a
 already clears the gate and the fp16 boundary work is what dilutes it. That is stage 6's sentence, now measured
 rather than suspected.
 
-**State (2026-11-16, first measurement): the segments exist and the boundaries are 3x their budget.** `scripts/int8_timing.py` builds every launch argument before the clock, then measures
+**State (2026-11-16, first measurement): the segments exist and the boundaries are 3x their budget.** `harness/scripts/int8_timing.py` builds every launch argument before the clock, then measures
 six segments plus the fp16 baseline in the same process, in three interleaved rounds, with clocks in the log
 (`2805 MHz / 8751 MHz / 49 C / 65.89 W` before, `2775 / 8751 / 57 / 143.05 W` after). Medians at 1920x1080:
 
@@ -973,7 +973,7 @@ Three conditions, each with its own precedent:
 **Gate:** engine >= 1.4x. Below 1.3x the boundaries or NVENC ate the prize.
 **Kills it:** engine <= 1.15x - the lane does not pay for integration.
 
-**Tools:** `scripts/probe_int8_fit.py` supplies the frames and the calibration; timing uses the app, not the
+**Tools:** `harness/scripts/probe_int8_fit.py` supplies the frames and the calibration; timing uses the app, not the
 probe, because only the app has the encoder alongside.
 
 ## Stage 3 - the graph (half a day)
@@ -1014,7 +1014,7 @@ The single-hop isolation that found the bug is worth keeping as a habit: a one-h
 stream compared against eager was bit-exact while the sixteen-hop version was not, which located the fault in the
 orchestration rather than in the capture mechanism.
 
-**State (2026-11-16, first graph measurement): the stopwatch says 1.00x, so the graph is not a lever for this body.** `scripts/int8_graph.py` warms five launches
+**State (2026-11-16, first graph measurement): the stopwatch says 1.00x, so the graph is not a lever for this body.** `harness/scripts/int8_graph.py` warms five launches
 (the first enqueue does lazy initialisation), captures the 16 hops plus the fused dequantise, replays, and then
 times. At 1920x1080:
 
@@ -1311,7 +1311,7 @@ the int8 body is **not wired into the render path yet**, so the fp16 engine runs
 
 **State (2026-11-16): the probe runs, it discriminates, and it had been reading mangled frames.**
 
-`scripts/probe_int8_fit.py` assumes 1920x1080 input, but these clips are **3840x2160**: it took the first
+`harness/scripts/probe_int8_fit.py` assumes 1920x1080 input, but these clips are **3840x2160**: it took the first
 `w*h*3` bytes of a 4K frame and reinterpreted them as 1080p. That is not a short frame, it is a scrambled one, and
 it read **4.0-4.2% engine error on every title** - 500x the same clip's real number. First run of the fixed reader
 on one frame of `a5_chainsaw`: simulation **0.00858%**, build **0.00616%**. One missing `-vf scale=W:H` would have
@@ -1404,8 +1404,8 @@ Claims: `docs/claims-int8-stage5.txt` fails on exactly the 4x shortfall, which i
 **Gate:** a list of covered models with their grid, and fp16 fallback for the rest. Without it "it works" means
 "it works on one clip".
 
-**Tools:** `scripts/rebuild_width.py` and `force_tactic.py` already build synthesized variants per width;
-`scripts/residual_scale.py` and `cut_channels_naive.py` show how to instantiate the architecture.
+**Tools:** `harness/scripts/rebuild_width.py` and `force_tactic.py` already build synthesized variants per width;
+`harness/scripts/residual_scale.py` and `cut_channels_naive.py` show how to instantiate the architecture.
 
 ## Stage 6 - own head and tail, only after stage 2
 
@@ -1549,7 +1549,7 @@ It is not, yet:
 | 512x512 | 1.22709% |
 | 1920x1080 | **3.53381%** |
 
-against `harness/scripts/int8_pipeline.py` reading **0.00000%** on the same 1920x1080 frame. So the app-side body differs
+against `harness/harness/scripts/int8_pipeline.py` reading **0.00000%** on the same 1920x1080 frame. So the app-side body differs
 from the validated pipeline in something the pipeline gets right, and the difference grows with resolution - the
 same signature the pipeline had before the rounding-shift fix, which means the body is reproducing older
 behaviour, not new behaviour.
@@ -1672,7 +1672,7 @@ top of an unvalidated launcher means six suspects when the comparison fails inst
 All five are caught by the bit-exact comparison; checking the PTX and the code before running is cheaper than
 debugging the difference afterwards.
 
-## Before a number enters the ledger: `scripts/claim_check.py`
+## Before a number enters the ledger: `harness/scripts/claim_check.py`
 
 Nine conclusions in this investigation were wrong the same way - a number computed on one population, scale
 or column and applied to another. That class is mechanical, so it is now checked mechanically. Claims go into

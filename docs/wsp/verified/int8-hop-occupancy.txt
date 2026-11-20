@@ -73,11 +73,11 @@ staging scheme Triton can express, 25.7 ms of hops is what this shape costs on t
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_occupancy_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_occupancy_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-occupancy/probe.json
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_epilogue_probe.py \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_epilogue_probe.py \
     --out-file docs/wsp/verified/logs/hop-epilogue/probe.json
-PYTHONPATH=. python3 harness/scripts/hop_occupancy_records.py
+PYTHONPATH=. python3 harness/harness/scripts/hop_occupancy_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-occupancy.txt \

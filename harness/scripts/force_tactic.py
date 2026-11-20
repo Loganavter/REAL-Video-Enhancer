@@ -16,9 +16,9 @@ Two graph sizes, on purpose:
 
 Usage (one GPU job at a time):
   F=~/.cache/opencode/venvs/trt310/bin/python
-  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/force_tactic.py --channels 32 --graph block --scan
-  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/force_tactic.py --channels 32 --graph body --body 4 --scan
-  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/force_tactic.py --channels 32 --graph body --body 16 --index 7
+  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/force_tactic.py --channels 32 --graph block --scan
+  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/force_tactic.py --channels 32 --graph body --body 4 --scan
+  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/force_tactic.py --channels 32 --graph body --body 16 --index 7
 """
 from __future__ import annotations
 
@@ -247,9 +247,11 @@ def main() -> int:
 
     if args.emit:
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         import tensorrt as trt
         store = Store()

@@ -2,7 +2,7 @@
 
 Measured 2026-11-19 (local), one hop of the int8 body on its own codes (frame 169), three interleaved rounds,
 medians of rounds 2+. Records: `int8-hop-tapreuse.jsonl`; raw: `logs/hop-tapreuse/probe.json`; kernel:
-`scripts/hop_tapreuse_probe.py`.
+`harness/scripts/hop_tapreuse_probe.py`.
 
 The premise was the strongest one left in the queue (`rve-hop-fuse2-cascade`, re-filed as tap reuse): the hop
 reads every pixel **nine times** - 9 x 132.71 MB = 1194 MB of logical reads - and L2 sees 1528.7 MB, i.e. 128% of
@@ -59,9 +59,9 @@ boundary of the instrument, and it took one session to establish rather than the
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_tapreuse_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_tapreuse_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-tapreuse/probe.json
-PYTHONPATH=. python3 harness/scripts/hop_tapreuse_records.py
+PYTHONPATH=. python3 harness/harness/scripts/hop_tapreuse_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-tapreuse.txt \

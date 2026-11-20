@@ -1,6 +1,6 @@
 """Records for the pack-ring falsifier: the loop, the pack line, and the payload identity.
 
-Usage: python harness/scripts/pack_ring_records.py [--logs docs/wsp/verified/logs/pack-ring/ab]
+Usage: python harness/harness/scripts/pack_ring_records.py [--logs docs/wsp/verified/logs/pack-ring/ab]
                                            [--pair docs/wsp/verified/records/int8-pack-ring-pair.jsonl]
                                            [--out docs/wsp/verified/records/int8-pack-ring.jsonl]
 """
@@ -14,9 +14,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 

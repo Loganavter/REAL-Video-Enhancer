@@ -26,7 +26,7 @@ engine is reachable and exact; the earlier "plumbing" note was wrong.
 On Chainsaw the reference barely matters; on Violet it moves the composition by 29% and the own defect
 by 84%. The full fp16 sweeps are 0.07546% and 0.07345%, so the control is still ~6% above them on both
 clips - the residual gap is the pair set (the probe re-decides which frames the gate reuses), not the
-reference, and `scripts/check_control_ceiling.py` still reports the violation.
+reference, and `harness/scripts/check_control_ceiling.py` still reports the violation.
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/trt-reference.txt \
        --records docs/wsp/verified/records/trt-reference.jsonl --bars docs/claims-bars.json

@@ -4,7 +4,7 @@ Four measured records (one per arm) plus three deltas. The arm is the variable: 
 population label and in `run`, while config/instrument/session/statistic are held equal - the same
 convention `wall_ab_records.py` uses, and what `Store._relation` demands of a delta.
 
-Usage: python harness/scripts/input_path_records.py --probe docs/wsp/verified/logs/input-path/probe.json \
+Usage: python harness/harness/scripts/input_path_records.py --probe docs/wsp/verified/logs/input-path/probe.json \
            --out docs/wsp/verified/records/input-path.jsonl
 """
 from __future__ import annotations
@@ -16,9 +16,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -59,7 +61,7 @@ def main(argv=None) -> int:
             value=round(probe["median"][arm]["event"], 3), unit="ms",
             population=Population.of("frames", pop_items, f"{w}x{h} yuv420p10le payload, arm {arm}"),
             instrument=instrument, config=config, session=session, statistic="median",
-            tier="measured", id=rid, run="scripts/input_path_probe.py", artifact=args.probe,
+            tier="measured", id=rid, run="harness/scripts/input_path_probe.py", artifact=args.probe,
             extra={"artifact_sha256": digest, "arm": arm, "arm_meaning": label,
                    "rounds": probe["rounds"], "iters": probe["iters"],
                    "statistic_note": "median of rounds 2+, event time",

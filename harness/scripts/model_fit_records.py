@@ -17,9 +17,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -50,7 +52,7 @@ def main(argv=None) -> int:
         share = Record(value=row["share"], unit="%", population=popf, instrument=instr,
                        config=f"{name}, {row['verdict']}, calibrated on the same spread frames",
                        session=store.session, statistic="worst_of", tier="measured",
-                       run="scripts/model_fit_probe.py", artifact=args.probe,
+                       run="harness/scripts/model_fit_probe.py", artifact=args.probe,
                        extra={"artifact_sha256": dig, "of": "gross_error_share",
                               "shares": row.get("shares")})
         share.id = f"MF{len(out) + 1:03d}"
@@ -66,7 +68,7 @@ def main(argv=None) -> int:
             rec = Record(value=row[key], unit="ms", population=popr, instrument=tinstr,
                          config=f"{name}, {row['verdict']}, 1080p frame {pr['frame']}",
                          session=store.session, statistic="median", tier="measured",
-                         run="scripts/model_fit_probe.py", artifact=args.probe,
+                         run="harness/scripts/model_fit_probe.py", artifact=args.probe,
                          extra={"artifact_sha256": dig, "of": "body_time", "arm": arm})
             rec.id = f"MF{len(out) + 1:03d}"
             store.emit(rec)
@@ -93,7 +95,7 @@ def main(argv=None) -> int:
             rec = Record(value=row["share"], unit="%", population=popf, instrument=instr,
                          config=f"{row['file']}, {row['verdict']}, RVE_INT8_PER_CHANNEL=1",
                          session=store.session, statistic="worst_of", tier="measured",
-                         run="scripts/model_fit_probe.py", artifact=args.probe_pc,
+                         run="harness/scripts/model_fit_probe.py", artifact=args.probe_pc,
                          extra={"artifact_sha256": pcdig, "of": "gross_error_share",
                                 "grid": "per_channel", "grid_spread": row.get("grid_spread")})
             rec.id = f"MG{len(out) + 1:03d}"

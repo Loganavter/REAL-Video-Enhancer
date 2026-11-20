@@ -3,7 +3,7 @@
 The population is frames for the share and rounds for the time, as everywhere else; the config carries the width
 and the tile, because the tile was tuned at 64 and a native width is only trusted after it has been re-tuned.
 
-Usage: python harness/scripts/int8_width_records.py [--probe ...] [--out ...]
+Usage: python harness/harness/scripts/int8_width_records.py [--probe ...] [--out ...]
 """
 from __future__ import annotations
 
@@ -14,9 +14,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -44,7 +46,7 @@ def main(argv=None) -> int:
                      config=f"{row['file']}, native width {row['feat']}, {row['inner']} inner convs, "
                             f"x{row['scale']}, grid clamp K=2, BLOCK_M 128 / warps 4",
                      session=store.session, statistic="worst_of", tier="measured",
-                     id=f"WX{len(out) + 1:03d}", run="scripts/int8_width_probe.py", artifact=args.probe,
+                     id=f"WX{len(out) + 1:03d}", run="harness/scripts/int8_width_probe.py", artifact=args.probe,
                      extra={"artifact_sha256": dig, "of": "gross_error_share", "feat": row["feat"]})
         store.emit(rec)
         out.append(rec)
@@ -55,7 +57,7 @@ def main(argv=None) -> int:
                      instrument="torch.cuda.Event around the body, one synchronise per call",
                      config=f"{row['file']}, native width {row['feat']}, grid clamp K=2",
                      session=store.session, statistic="median", tier="measured",
-                     id=f"WX{len(out) + 1:03d}", run="scripts/int8_width_probe.py", artifact=args.probe,
+                     id=f"WX{len(out) + 1:03d}", run="harness/scripts/int8_width_probe.py", artifact=args.probe,
                      extra={"artifact_sha256": dig, "of": "body_time", "feat": row["feat"]})
         store.emit(rec)
         out.append(rec)

@@ -18,7 +18,7 @@ a path that runs on every render.
 | Triton cache **warm** (every render after that) | **6.34 s** |
 
 2.30 s, paid once per machine and never visible in a benchmark run on a development box - which is exactly why it
-was never in the record. `scripts/warm_triton.py` moves it to the install:
+was never in the record. `harness/scripts/warm_triton.py` moves it to the install:
 
 | run | time |
 |---|---|
@@ -52,9 +52,9 @@ either cheap, risky to touch, or already argued.
 
 ```bash
 TRITON_CACHE_DIR=$(mktemp -d) python3 /tmp/opencode/timed_run.py     # 8.64 s, cold
-python3 scripts/warm_triton.py --model "<model>.pth"                 # 2.59 s, once per machine
+python3 harness/scripts/warm_triton.py --model "<model>.pth"                 # 2.59 s, once per machine
 python3 /tmp/opencode/timed_run.py                                   # 6.34 s, warm
-PYTHONPATH=. python3 harness/scripts/triton_warm_records.py
+PYTHONPATH=. python3 harness/harness/scripts/triton_warm_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-triton-warm.txt \
     --records docs/wsp/verified/records/int8-triton-warm.jsonl --bars docs/claims-bars.json
 ```

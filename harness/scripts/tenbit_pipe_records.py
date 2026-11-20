@@ -8,7 +8,7 @@ Two instruments, two populations, deliberately not merged:
   the reader's own RGB conversion and its clamping at saturated pixels. The share of clipped pixels is
   emitted next to it, because that is the part of the residual that is not depth.
 
-Usage: python harness/scripts/tenbit_pipe_records.py [--probe ...] [--out ...]
+Usage: python harness/harness/scripts/tenbit_pipe_records.py [--probe ...] [--out ...]
 """
 from __future__ import annotations
 
@@ -19,9 +19,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -58,7 +60,7 @@ def main(argv=None) -> int:
     def emit(value, unit, pop, instrument, config, statistic, rid, extra=None) -> None:
         store.emit(Record(value=value, unit=unit, population=pop, instrument=instrument, config=config,
                           session=store.session, statistic=statistic, tier="measured", id=rid,
-                          run="scripts/tenbit_pipe_probe.py", artifact=args.probe,
+                          run="harness/scripts/tenbit_pipe_probe.py", artifact=args.probe,
                           extra={"artifact_sha256": dig, "of": "yuv420p10le_roundtrip", **(extra or {})}))
 
     emit(float(y["max_delta"]), "levels", pop_y,

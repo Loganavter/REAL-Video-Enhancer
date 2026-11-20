@@ -1,7 +1,7 @@
 # The curvature-priced predictor picks K=4 for every model, and agrees with the ladder once in three
 
 Measured 2026-11-20, three models, three held-out frames, crops calibration. Records
-`int8-price-predictor.jsonl` (PR001-PR010), raw `logs/price-*.json`, probe `scripts/price_predictor_probe.py`.
+`int8-price-predictor.jsonl` (PR001-PR010), raw `logs/price-*.json`, probe `harness/scripts/price_predictor_probe.py`.
 
 `Predicting Quantization Price` (arXiv:2609.28270) says the correct pre-deployment score is the candidate's
 layer-output error covariance weighted by the reference model's **downstream curvature**, and that reconstruction
@@ -55,8 +55,8 @@ which is what keeps its cost at ~0 on the models that do not need it.
 ## Reproduce
 
 ```bash
-RVE_TAIL_YUV=0 python3 scripts/price_predictor_probe.py --model "<model>.pth" --out-file price.json
-PYTHONPATH=. python3 harness/scripts/price_predictor_records.py
+RVE_TAIL_YUV=0 python3 harness/scripts/price_predictor_probe.py --model "<model>.pth" --out-file price.json
+PYTHONPATH=. python3 harness/harness/scripts/price_predictor_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-price-predictor.txt \
     --records docs/wsp/verified/records/int8-price-predictor.jsonl --bars docs/claims-bars.json
 ```

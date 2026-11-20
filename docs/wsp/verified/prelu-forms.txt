@@ -1,6 +1,6 @@
 # Three activation forms at C=32, and the C=64 control (B3)
 
-Measured 2026-11-17, one session, interleaved rounds, `harness/scripts/probe_prelu_forms.py`, 1920x1080 fp16
+Measured 2026-11-17, one session, interleaved rounds, `harness/harness/scripts/probe_prelu_forms.py`, 1920x1080 fp16
 opt 5 avg_timing_iters 8 workspace 8 GiB, 16-block body, synthesized random weights (tactics depend on
 shapes, not values - the same trick E30a used).
 
@@ -20,7 +20,7 @@ layers, one tactic, three rounds within 0.11 ms of each other. The same-session 
 would be a cross-session quotient.
 
 The C=32 build is **bimodal**: three rebuilds of one ONNX gave 39.23 / 39.29 / 20.95 ms with 0/0/18
-fused layers (ledger B3 section; reproducible with `harness/scripts/probe_build_stability.py --trials 3`). The
+fused layers (ledger B3 section; reproducible with `harness/harness/scripts/probe_build_stability.py --trials 3`). The
 19-fused census does not discriminate - the conv tactic tile does, and the fast draw is the one with
 `..._tilesize256x32x32_stage1_...`.
 

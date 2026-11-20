@@ -63,8 +63,8 @@ comparison (model vs int8 body vs fp16 engine) plus an interleaved wall A/B, and
 ```bash
 MODEL="/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/realesr-animevideov3(1).pth" \
   ARMS="fp16 int8" CLIPS="bd_violet20s.mkv" ROUNDS=2 SINK=null \
-  LOGDIR=docs/wsp/verified/logs/fast-preset/animevideov3 scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/fast_preset_records.py
+  LOGDIR=docs/wsp/verified/logs/fast-preset/animevideov3 harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/fast_preset_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/fast-preset-second-family.txt \

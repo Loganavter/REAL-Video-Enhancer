@@ -1,6 +1,6 @@
 # Two streams do not overlap on this card (task C, strips)
 
-Measured 2026-11-17 with `harness/scripts/probe_strips.py`: one plan deserialized into independent engines with
+Measured 2026-11-17 with `harness/harness/scripts/probe_strips.py`: one plan deserialized into independent engines with
 independent contexts, one CUDA stream each. The reported value is `concurrent / serial` per-frame time,
 so **1.00 means no overlap** (the pair takes twice as long as one frame) and 0.50 would be perfect
 overlap.

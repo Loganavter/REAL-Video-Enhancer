@@ -55,7 +55,7 @@ The head conv's arithmetic is small and its output is large, which makes the pas
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/head_conv_probe.py \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/head_conv_probe.py \
     --out-file docs/wsp/verified/logs/head-conv/probe.json
 ```
 

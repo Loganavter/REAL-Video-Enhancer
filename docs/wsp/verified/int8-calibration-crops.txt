@@ -49,7 +49,7 @@ to call the two arms equivalent (see below).
 
 ```bash
 flock -n /var/tmp/opencode/gpu.lock env PYTHONPATH=. <install-python> \
-    harness/scripts/calibration_coverage.py \
+    harness/harness/scripts/calibration_coverage.py \
     --model "<install>/custom_models/2x-Futsuu-Anime(1).pth"
 ```
 
@@ -63,7 +63,7 @@ Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-calibratio
 
 ## Correction 2026-11-19: the sample was clustered, and the numbers are re-taken
 
-The arms above were reported as "24 spread frames", but `harness/scripts/calibration_coverage.py` carried a hardcoded
+The arms above were reported as "24 spread frames", but `harness/harness/scripts/calibration_coverage.py` carried a hardcoded
 `total = 48`, so every calibration frame came from the **first two seconds** of a 494-frame clip - a clustered
 sample wearing a spread label. Found while pointing the script at a 6-minute source; the script now asks
 `ffprobe` for the frame count and clamps to what it decoded.

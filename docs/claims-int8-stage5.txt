@@ -1,4 +1,4 @@
-# Stage 5 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage5.txt
+# Stage 5 claims, 2026-11-16. Run: harness/scripts/claim_check.py docs/claims-int8-stage5.txt
 # The built pipeline assumes 18 convs, 64 channels and a compact architecture. Two of four cached
 # model x shape pairs fit that; the sweep names where it stops.
 

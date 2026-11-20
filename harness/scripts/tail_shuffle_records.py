@@ -1,6 +1,6 @@
 """Records for the tail's epilogue fold: the isolated pair, the app A/B, and the identity on 494 frames.
 
-Usage: python harness/scripts/tail_shuffle_records.py [--probe .../probe.json] [--logs .../ab]
+Usage: python harness/harness/scripts/tail_shuffle_records.py [--probe .../probe.json] [--logs .../ab]
                                               [--pair .../pair-records.jsonl]
                                               [--out docs/wsp/verified/records/int8-tail-shuffle.jsonl]
 """
@@ -15,9 +15,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -53,14 +55,14 @@ def main(argv=None) -> int:
                        population=Population(kind=pop.kind, items=pop.items,
                                              label=f"{pop.label}, arm {arm}: {label}"),
                        instrument=inst, config=cfg, session=psess, statistic="median", tier="measured",
-                       id=rid, run="scripts/tail_shuffle_probe.py", artifact=args.probe,
+                       id=rid, run="harness/scripts/tail_shuffle_probe.py", artifact=args.probe,
                        extra={"artifact_sha256": pdig, "arm": arm, "of": "tail_time"}))
     st.delta("Q003", "Q001", note="the fold's saving on the tail, one frame")
     st.emit(Record(value=float(pr["identity"]["differing"]), unit="count", population=pop,
                    instrument="element-wise equality between the folded kernel's output and the "
                               "three-step path's output, same codes, same frame",
                    config=cfg, session=psess, statistic="single", tier="measured", id="Q004",
-                   run="scripts/tail_shuffle_probe.py", artifact=args.probe,
+                   run="harness/scripts/tail_shuffle_probe.py", artifact=args.probe,
                    extra={"artifact_sha256": pdig, "of": "identity",
                           "total_values": pr["identity"]["total"],
                           "note": "0 means the fold computes the same two additions on the same 12 "

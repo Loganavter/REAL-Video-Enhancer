@@ -12,7 +12,7 @@ the app's own phase log. All of those were single draws taken while other work r
 
 ## Protocol
 
-- `scripts/wall_ab.sh`: arms alternate **inside** each round (r1 fp16→int8, r2 int8→fp16, r3 fp16→int8),
+- `harness/scripts/wall_ab.sh`: arms alternate **inside** each round (r1 fp16→int8, r2 int8→fp16, r3 fp16→int8),
   so a warm-up or a neighbour's load lands on both arms; `--no_temporal_reuse` and nothing else in
   common; `--int8_fit fp16|int8` is the only difference between arms.
 - Statistics: **median of rounds 2-3**, round 1 dropped (the first draw after engine load is warmup).
@@ -66,7 +66,7 @@ Median of the four ratios: **1.126x**; span **1.088-1.141x**.
 - **Why 1.13x here and 1.41x in `int8-window.txt`** is NOT answered by this file, and the record should
   not pretend otherwise. Three things differ between the two, and separating them needs a paired run per
   variable: the instrument (CUDA events around the chain against the product's wall clock), the model
-  (the window row is `harness/scripts/int8_pipeline.py` on compact-2x; the product runs `2x-Futsuu-Anime`, whose
+  (the window row is `harness/harness/scripts/int8_pipeline.py` on compact-2x; the product runs `2x-Futsuu-Anime`, whose
   head alone reads 4.65-5.2 ms today against the 1.6-2.6 ms the window row records for head+quantise -
   different head, so not a contradiction, and not comparable either), and the non-body share of the frame
   (17% of the 49.6-50.6 ms frame is outside the body here). The only claim this file makes is the
@@ -104,9 +104,9 @@ just not attributed when the gate is off. Not a newly discovered cost: a naming 
 ## Reproduce
 
 ```bash
-CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=null  scripts/wall_ab.sh
-CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=nvenc scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/wall_ab_records.py     # logs -> records
+CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=null  harness/scripts/wall_ab.sh
+CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=nvenc harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/wall_ab_records.py     # logs -> records
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-wall-ab.txt \

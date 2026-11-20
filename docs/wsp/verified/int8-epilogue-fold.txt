@@ -80,7 +80,7 @@ it accumulates.
 So `RVE_INT8_EPILOGUE_FOLD` defaults to 0 and the shipped path is bit-identical to the kernel at HEAD.
 `fold=1` is one environment variable away, and the adopt path is written down here rather than implied.
 
-**The knob is neutral when off - verified, not assumed.** `scripts/epilogue_control.py` loads the HEAD source
+**The knob is neutral when off - verified, not assumed.** `harness/scripts/epilogue_control.py` loads the HEAD source
 as a separate module and compares codes hop by hop: `FOLD=0` gives **0 differing codes** on hop 1 and **0 over
 all sixteen hops, worst per-hop max 0**. A compile-time branch that is supposed to vanish must be shown to.
 
@@ -95,15 +95,15 @@ all sixteen hops, worst per-hop max 0**. A compile-time branch that is supposed 
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_epilogue_probe.py --rounds 8 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_epilogue_probe.py --rounds 8 --iters 20 \
     --out-file docs/wsp/verified/logs/epilogue-fold/probe-r8.json
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/epilogue_control.py
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/epilogue_control.py
 ARMS="nofold fold" ARM_ENV_NOFOLD="RVE_INT8_EPILOGUE_FOLD=0" ARM_ENV_FOLD="RVE_INT8_EPILOGUE_FOLD=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py <nofold.mkv> <fold.mkv> --out pair.json \
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py <nofold.mkv> <fold.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv \
   --label "..." --config "..." --instrument "..." --session "..." --run "..." --artifact "..." --id-prefix EF
-PYTHONPATH=. python3 harness/scripts/epilogue_records.py --pair <pair-records.jsonl>
+PYTHONPATH=. python3 harness/harness/scripts/epilogue_records.py --pair <pair-records.jsonl>
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-epilogue-fold.txt \

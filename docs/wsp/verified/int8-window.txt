@@ -1,6 +1,6 @@
 # The int8 window at 1920x1080, ungated: 37.5 ms = 26.6 fps, and the picture that does not hold
 
-Measured 2026-11-17 with `harness/scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
+Measured 2026-11-17 with `harness/harness/scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
 instrument `bench_plan.py` uses), 8 executions per configuration, one process.
 
 ## The number the objective asked for

@@ -83,15 +83,15 @@ Cumulative on the shipped default, all measured in interleaved A/Bs this session
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/tail_shuffle_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/tail_shuffle_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/tail-shuffle/probe.json
 ARMS="shuf0 shuf1" ARM_ENV_SHUF0="RVE_TAIL_SHUFFLE=0" ARM_ENV_SHUF1="RVE_TAIL_SHUFFLE=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null harness/scripts/wall_ab.sh
 ARMS="shuf0 shuf1" ARM_ENV_SHUF0="RVE_TAIL_SHUFFLE=0" ARM_ENV_SHUF1="RVE_TAIL_SHUFFLE=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/tail-shuffle scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py <shuf0.mkv> <shuf1.mkv> --out pair.json \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/tail-shuffle harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py <shuf0.mkv> <shuf1.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix SJ
-PYTHONPATH=. python3 harness/scripts/tail_shuffle_records.py
+PYTHONPATH=. python3 harness/harness/scripts/tail_shuffle_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tail-epilogue.txt \

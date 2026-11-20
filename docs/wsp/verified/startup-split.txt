@@ -45,7 +45,7 @@ call, i.e. Triton compiling its kernels), on top of 2.4 s of interpreter and ffp
 
 ```bash
 python3 /tmp/opencode/timed_run.py > /tmp/opencode/startup_timed.log     # the same command wall_ab runs, stamped
-PYTHONPATH=. python3 harness/scripts/startup_split_records.py --log /tmp/opencode/startup_timed.log
+PYTHONPATH=. python3 harness/harness/scripts/startup_split_records.py --log /tmp/opencode/startup_timed.log
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/startup-split.txt \
     --records docs/wsp/verified/records/startup-split.jsonl --bars docs/claims-bars.json
 ```

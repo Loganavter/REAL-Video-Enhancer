@@ -109,4 +109,4 @@ for the price of an afternoon.
    "PSD + subjective viewing" as the ITU supplement suggests?
 
 Numbers cited here live in `docs/wsp/verified/reuse-decision-statistic.txt` (records RU001-RU014) and
-`gate-bd.txt`; the instruments are `scripts/reuse_stats.py`, `scripts/reuse_texture.py`, `scripts/reuse_rho1.py`.
+`gate-bd.txt`; the instruments are `harness/scripts/reuse_stats.py`, `harness/scripts/reuse_texture.py`, `harness/scripts/reuse_rho1.py`.

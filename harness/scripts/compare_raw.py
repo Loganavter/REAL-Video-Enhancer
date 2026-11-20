@@ -6,7 +6,7 @@ the design is unmeasured, not good"), and it needs no TensorRT at all - just two
 definition the project uses everywhere: the share of pixels whose WORST channel is more than 8 levels
 off, the peak, and PSNR.
 
-Usage: python3 harness/scripts/compare_raw.py ref.raw cand.raw --width 1920 --height 1080 [--scale 2] [--emit F]
+Usage: python3 harness/harness/scripts/compare_raw.py ref.raw cand.raw --width 1920 --height 1080 [--scale 2] [--emit F]
 """
 from __future__ import annotations
 
@@ -50,9 +50,11 @@ def main() -> int:
 
     if args.emit:
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         store = Store()
         pop = Population.of("pixels of one frame", [sha],

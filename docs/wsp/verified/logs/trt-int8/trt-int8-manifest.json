@@ -46,5 +46,5 @@
    "calibration_cache": "/tmp/opencode/calib-minmax.cache"
   }
  ],
- "note": "built by scripts/trt_int8_calibrate.py; the fp16 and int8-entropy arms were recovered from build-run-1.log after the min-max run overwrote the manifest - the script now merges"
+ "note": "built by harness/scripts/trt_int8_calibrate.py; the fp16 and int8-entropy arms were recovered from build-run-1.log after the min-max run overwrote the manifest - the script now merges"
 }

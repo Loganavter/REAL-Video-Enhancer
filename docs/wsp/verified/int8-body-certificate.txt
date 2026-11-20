@@ -76,7 +76,7 @@ int8 body first-frame sanity: 0.00007% of pixels >8 levels against the fp16 mode
 ## Reproduce
 
 ```bash
-CLIPS=bd_violet20s.mkv ROUNDS=1 SINK=null LOGDIR=/tmp/x scripts/wall_ab.sh
+CLIPS=bd_violet20s.mkv ROUNDS=1 SINK=null LOGDIR=/tmp/x harness/scripts/wall_ab.sh
 grep -a "first-frame sanity" /tmp/x/*int8*.log
 cd backend && PYTHONPATH=../scripts QT_QPA_PLATFORM=offscreen <install-python> -m pytest tests/test_int8_probe_modes.py -q
 ```

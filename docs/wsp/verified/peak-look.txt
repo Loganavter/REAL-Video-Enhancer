@@ -70,9 +70,9 @@ shipped (the older epilogue/three-accumulator variants the ledger measured). So:
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/peak_look.py \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/peak_look.py \
     --out-file docs/wsp/verified/logs/peak-look/frames.json
-PYTHONPATH=. python3 harness/scripts/peak_look_records.py
+PYTHONPATH=. python3 harness/harness/scripts/peak_look_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/peak-look.txt \

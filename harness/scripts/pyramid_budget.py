@@ -15,8 +15,8 @@ memory system (L2 hit rate under this access pattern), and it needs ncu counters
 Phase 1's job is to say whether the arithmetic is worth a phase 2 at all.
 
 Usage:
-  python3 harness/scripts/pyramid_budget.py                    # 1080p and 4K
-  python3 harness/scripts/pyramid_budget.py --width 1920 --height 1080 --emit /tmp/opencode/e29.jsonl
+  python3 harness/harness/scripts/pyramid_budget.py                    # 1080p and 4K
+  python3 harness/harness/scripts/pyramid_budget.py --width 1920 --height 1080 --emit /tmp/opencode/e29.jsonl
 """
 from __future__ import annotations
 
@@ -123,9 +123,11 @@ def main() -> int:
 
     if args.emit:
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         store = Store()
         # The verifier recomputes only `a/b` and `a-b`, and says so rather than passing an

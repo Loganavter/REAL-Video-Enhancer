@@ -1,6 +1,6 @@
 # The frame budget, as it stands
 
-**Generated** by `scripts/frame_budget.py` - do not edit. Every number is parsed from the render log
+**Generated** by `harness/scripts/frame_budget.py` - do not edit. Every number is parsed from the render log
 named below or resolved by id from `docs/wsp/verified/records/`. The prose says what each line IS and
 what its floor is, so a reader who was never in this lane can challenge any of it.
 
@@ -145,6 +145,6 @@ With `hevc_nvenc` in the loop - the product's own condition - the same two arms 
 ## Regenerate
 
 ```bash
-python scripts/frame_budget.py --logs docs/wsp/verified/logs/wall-final --arm int8
+python harness/scripts/frame_budget.py --logs docs/wsp/verified/logs/wall-final --arm int8
 ```
 

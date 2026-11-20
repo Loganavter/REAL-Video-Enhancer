@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, re, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 
@@ -23,7 +25,7 @@ def main(argv=None) -> int:
         st.emit(Record(value=float(j["worst_share"]), unit="%", population=pop,
                        instrument="channel-max |delta| over 64px blocks (gate_sweep --reference-kind config)",
                        config=label, session=st.session, statistic="worst_of", tier="measured",
-                       id=f"FD{n:03d}", run="scripts/wall_ab.sh + harness/scripts/gate_sweep.py",
+                       id=f"FD{n:03d}", run="harness/scripts/wall_ab.sh + harness/harness/scripts/gate_sweep.py",
                        artifact=os.path.join(a.dir, fname),
                        extra={"artifact_sha256": sha(os.path.join(a.dir, fname)),
                               "frames_above_bar": j["frames_above_bar"], "peak": j["worst_peak"]}))
@@ -36,7 +38,7 @@ def main(argv=None) -> int:
                    instrument="channel-max |delta| over 64px blocks (gate_sweep --reference-kind config)",
                    config="pure sequential first-48-frame calibration against the spread decode, clip opens on black",
                    session=st.session, statistic="worst_of", tier="measured", id=f"FD{n:03d}",
-                   run="scripts/wall_ab.sh + harness/scripts/gate_sweep.py",
+                   run="harness/scripts/wall_ab.sh + harness/harness/scripts/gate_sweep.py",
                    artifact=os.path.join(a.dir, "fade-seq.json"),
                    extra={"artifact_sha256": sha(os.path.join(a.dir, "fade-seq.json")),
                           "frames_above_bar": j["frames_above_bar"], "peak": j["worst_peak"]}))

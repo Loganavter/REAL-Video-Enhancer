@@ -64,9 +64,9 @@ spend that guarantee on.
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock .venv/bin/python scripts/input_path_probe.py --rounds 10 --iters 50 \
+flock -n /var/tmp/opencode/gpu.lock .venv/bin/python harness/scripts/input_path_probe.py --rounds 10 --iters 50 \
     --out-file docs/wsp/verified/logs/input-path/probe.json
-PYTHONPATH=. .venv/bin/python harness/scripts/input_path_records.py
+PYTHONPATH=. .venv/bin/python harness/harness/scripts/input_path_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/input-path.txt \

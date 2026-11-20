@@ -97,12 +97,12 @@ one-line instrumented warning names the pool when it is live.
 
 ```bash
 ARMS="ring0 ring1" ARM_ENV_RING0="RVE_PACK_RING=0" ARM_ENV_RING1="RVE_PACK_RING=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null harness/scripts/wall_ab.sh
 ARMS="ring0 ring1" ARM_ENV_RING0="RVE_PACK_RING=0" ARM_ENV_RING1="RVE_PACK_RING=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/pack-ring scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py <ring0.mkv> <ring1.mkv> --out pair.json \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/pack-ring harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py <ring0.mkv> <ring1.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix PK
-PYTHONPATH=. python3 harness/scripts/pack_ring_records.py
+PYTHONPATH=. python3 harness/harness/scripts/pack_ring_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-pack-ring.txt \

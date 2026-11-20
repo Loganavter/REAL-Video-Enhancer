@@ -1,6 +1,6 @@
 # Can the best grid clamp K be predicted from the weights? No - five statistics, none separates
 
-Measured 2026-11-20 (local), probe `scripts/grid_k_predict_probe.py`, raw `logs/grid-k-predict/rows.json`,
+Measured 2026-11-20 (local), probe `harness/scripts/grid_k_predict_probe.py`, raw `logs/grid-k-predict/rows.json`,
 targets from `logs/grid-k/ladder.jsonl` (22 models, six K values each).
 
 ## The question, and why it is worth a page
@@ -71,5 +71,5 @@ rule over weight statistics generalises - with 22 models and a 2x guard, neither
 ## Reproduce
 
 ```bash
-<install-python> scripts/grid_k_predict_probe.py --out-file docs/wsp/verified/logs/grid-k-predict/rows.json
+<install-python> harness/scripts/grid_k_predict_probe.py --out-file docs/wsp/verified/logs/grid-k-predict/rows.json
 ```

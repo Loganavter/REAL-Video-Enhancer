@@ -1,6 +1,6 @@
 # A cheap model on a whole shot: refused, by two orders of magnitude
 
-Measured 2026-11-17 with `harness/scripts/probe_shot_cascade.py`: the expensive model is the reference, the
+Measured 2026-11-17 with `harness/harness/scripts/probe_shot_cascade.py`: the expensive model is the reference, the
 cheap one is the candidate, and the statistic is the project's usual one on the 4K output.
 
 | frame | cheap (SPAN) against expensive (Futsuu): share above 8 levels | peak |

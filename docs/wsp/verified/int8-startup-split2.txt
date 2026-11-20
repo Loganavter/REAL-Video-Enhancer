@@ -62,12 +62,12 @@ answered for the current tree.
 ## Reproduce
 
 ```bash
-RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/body_build_split.py            # warm cache
-RVE_INT8_CALIB_CACHE=0 TRITON_CACHE_DIR=$(mktemp -d) python3 scripts/body_build_split.py   # cold cache
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 harness/scripts/body_build_split.py            # warm cache
+RVE_INT8_CALIB_CACHE=0 TRITON_CACHE_DIR=$(mktemp -d) python3 harness/scripts/body_build_split.py   # cold cache
 ARMS="off cert alloc warm" ARM_ENV_OFF="RVE_INT8_CERTIFY=0" ARM_ENV_CERT="RVE_INT8_CERTIFY=1" \
     ARM_ENV_ALLOC="RVE_DIAG_ALLOC_MB=2048" ARM_ENV_WARM="RVE_DIAG_WARM_ENGINE=1" \
-    SINK=ffv1 ROUNDS=1 CLIPS="bd_violet20s.mkv" scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/startup_split2_records.py
+    SINK=ffv1 ROUNDS=1 CLIPS="bd_violet20s.mkv" harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/startup_split2_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-startup-split2.txt \
     --records docs/wsp/verified/records/int8-startup-split2.jsonl --bars docs/claims-bars.json
 ```

@@ -1595,7 +1595,7 @@ proportionality suggests: the shipped tactic is `tilesize128x64x32`, so an N til
 by 48 channels and K = 432 is 14 steps of 32 against 18. The expectation is nearer **1.29x than
 1.78x**, and C=32 is the width that fills both 64 and 32 exactly (MAC x0.25, K = 288 = 9 steps). All
 of it is a time question, and it is measurable without asking anyone about the picture - which is what
-`scripts/probe_channel_width.py` does.
+`harness/scripts/probe_channel_width.py` does.
 
 ##### E30a: a channel cut is worth 1.23x, not 1.78x - measured
 
@@ -2465,7 +2465,7 @@ The second result explains the fusion break at C=32 better than "the width is to
 family changes, and both families that win at narrow widths - `scudnn_winograd` here,
 `sm80_xmma_..._indexed_wo_smem_...` in the full model - take no epilogue, so myelin leaves the PReLU
 outside. Whatever restores the epilogue at C=32 has to beat those kernels while staying in a family
-that fuses, which is exactly what `harness/scripts/force_tactic.py` scans by forcing one tactic index at a time
+that fuses, which is exactly what `harness/harness/scripts/force_tactic.py` scans by forcing one tactic index at a time
 and reading the resulting layer names.
 
 ##### The counters are unblocked, and the int8 kernel is not at any limit (2026-11-15)
@@ -2700,7 +2700,7 @@ kernel or a separate branch - which is a kernel change, not a modelling one.
 
 ##### The direct launcher runs, and fails its own bit-exact check (2026-11-15)
 
-`scripts/launch_cubin.py` loads the capped cubin with `cuModuleLoadData`, launches 32 x 128 threads with
+`harness/scripts/launch_cubin.py` loads the capped cubin with `cuModuleLoadData`, launches 32 x 128 threads with
 `sharedMemBytes` from the metadata, and compares against the shift-plus-`_int_mm` reference. Two things were
 needed to get that far, both of the "silent contract" class:
 
@@ -2837,7 +2837,7 @@ not the next step.
 
 ##### The int8 fit probe (2026-11-15)
 
-`scripts/probe_int8_fit.py` answers the only product question left: does int8 fit *this* video? It takes N
+`harness/scripts/probe_int8_fit.py` answers the only product question left: does int8 fit *this* video? It takes N
 adjacent pairs spread over the clip, calibrates on a disjoint half, applies the gate's own statistic so
 only pairs it would actually reuse enter the composition, and returns one verdict.
 
@@ -3035,7 +3035,7 @@ Entry point for "what is true now": `python -m harness.cli db current`.
 
 #### Three activation forms at C=32, and the C=64 control (B3)
 
-Measured 2026-11-17, one session, interleaved rounds, `harness/scripts/probe_prelu_forms.py`, 1920x1080 fp16
+Measured 2026-11-17, one session, interleaved rounds, `harness/harness/scripts/probe_prelu_forms.py`, 1920x1080 fp16
 opt 5 avg_timing_iters 8 workspace 8 GiB, 16-block body, synthesized random weights (tactics depend on
 shapes, not values - the same trick E30a used).
 
@@ -3055,7 +3055,7 @@ layers, one tactic, three rounds within 0.11 ms of each other. The same-session 
 would be a cross-session quotient.
 
 The C=32 build is **bimodal**: three rebuilds of one ONNX gave 39.23 / 39.29 / 20.95 ms with 0/0/18
-fused layers (ledger B3 section; reproducible with `harness/scripts/probe_build_stability.py --trials 3`). The
+fused layers (ledger B3 section; reproducible with `harness/harness/scripts/probe_build_stability.py --trials 3`). The
 19-fused census does not discriminate - the conv tactic tile does, and the fast draw is the one with
 `..._tilesize256x32x32_stage1_...`.
 
@@ -3831,7 +3831,7 @@ cd backend && $PY rve-backend.py --input clip1080.mkv --output out_body.mkv \
 RVE_INT8_BODY=off $PY rve-backend.py ... --output out_fp16.mkv
 
 #### утверждения
-$PY scripts/claim_check.py docs/claims-int8-stage4.txt
+$PY harness/scripts/claim_check.py docs/claims-int8-stage4.txt
 ```
 
 <a id="evidence-docs-wsp-verified-int8-tactics-txt"></a>
@@ -3840,7 +3840,7 @@ $PY scripts/claim_check.py docs/claims-int8-stage4.txt
 
 #### The int8 body's per-convolution rate (E33, first pass)
 
-Measured 2026-11-17 with `harness/scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
+Measured 2026-11-17 with `harness/harness/scripts/probe_int8_tactics.py` on the plan the 2026-11-16 lane left behind
 (`c2x_int8_fp16heads.plan`), same session, 20 executions x 3 rounds, `trt.IProfiler` for the per-layer
 times.
 
@@ -3867,7 +3867,7 @@ Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tactics.tx
 #
 #### Ledger (line 1019): '1.91 ms and 80 TOPS, measured, not projected', with no instrument named
 #### (the inventory flagged it as the load-bearing number of the int8 section and the weakest
-#### provenance in the range). Re-run: harness/scripts/int8_block_probe.py, three separate invocations,
+#### provenance in the range). Re-run: harness/harness/scripts/int8_block_probe.py, three separate invocations,
 #### torch.cuda.Event over 20 iterations, one GPU job at a time.
 ####   runs: 1.840 / 1.779 / 1.841 ms  -> 83.1 / 86.0 / 83.0 TOPS
 ####   correctness: max |diff| vs the int32 reference = 0, share of differing outputs 0.00%
@@ -3886,7 +3886,7 @@ Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-block.txt 
 
 ### `docs/claims-int8-stage4.txt`
 
-#### Stage 4 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage4.txt
+#### Stage 4 claims, 2026-11-16. Run: harness/scripts/claim_check.py docs/claims-int8-stage4.txt
 #### The probe reads adjacent pairs from a clip, calibrates on a disjoint half, and reports two statistics
 #### separately because they answer different questions.
 
@@ -4186,7 +4186,7 @@ Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-block.txt 
 
 #### Two streams do not overlap on this card (task C, strips)
 
-Measured 2026-11-17 with `harness/scripts/probe_strips.py`: one plan deserialized into independent engines with
+Measured 2026-11-17 with `harness/harness/scripts/probe_strips.py`: one plan deserialized into independent engines with
 independent contexts, one CUDA stream each. The reported value is `concurrent / serial` per-frame time,
 so **1.00 means no overlap** (the pair takes twice as long as one frame) and 0.50 would be perfect
 overlap.
@@ -4215,7 +4215,7 @@ Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/streams.txt \
 
 #### The L2 pyramid's arithmetic (E29 phase 1)
 
-Measured 2026-11-17 by `harness/scripts/pyramid_budget.py`, CPU only, no GPU job. Reproduces the queue's own
+Measured 2026-11-17 by `harness/harness/scripts/pyramid_budget.py`, CPU only, no GPU job. Reproduces the queue's own
 decomposition (8.49 GB logical traffic, 19.7 ms DRAM at 1/3 absorption, 33.1 ms fp16 compute floor,
 56.8 ms measured) and adds the size the queue also asked about, 4K.
 
@@ -4245,7 +4245,7 @@ Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/pyramid-budget.
 
 #### The cone against the cylinder (E36 phase 1)
 
-Measured 2026-11-17 by `harness/scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
+Measured 2026-11-17 by `harness/harness/scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
 region dilated by `17-L` px; the cylinder gives every layer 18. The 1-D control the ledger already
 recorded (2 px band, cylinder 16*38*L against cone 304*L) must print 2.00x and does, so the convention
 is the one the earlier number used.
@@ -4284,7 +4284,7 @@ Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/cone-budget.txt
 
 #### The int8 window at 1920x1080, ungated: 37.5 ms = 26.6 fps, and the picture that does not hold
 
-Measured 2026-11-17 with `harness/scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
+Measured 2026-11-17 with `harness/harness/scripts/int8_pipeline.py`, one GPU job at a time, CUDA events (the same
 instrument `bench_plan.py` uses), 8 executions per configuration, one process.
 
 ##### The number the objective asked for

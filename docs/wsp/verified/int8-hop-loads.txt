@@ -54,9 +54,9 @@ hop.
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_schedule_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_schedule_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-schedule/probe.json
-PYTHONPATH=. python3 harness/scripts/hop_schedule_records.py
+PYTHONPATH=. python3 harness/harness/scripts/hop_schedule_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-loads.txt \

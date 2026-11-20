@@ -4,7 +4,7 @@ The isolated arms are one hop and the sixteen-hop chain, both epilogues, same co
 arms are the same configuration with `RVE_INT8_EPILOGUE_FOLD` 0/1 alternating inside one session, read from
 the body's own phase counter (`hops ...`) and the render loop line.
 
-Usage: python harness/scripts/epilogue_records.py [--probe docs/wsp/verified/logs/epilogue-fold/probe.json]
+Usage: python harness/harness/scripts/epilogue_records.py [--probe docs/wsp/verified/logs/epilogue-fold/probe.json]
                                           [--logs docs/wsp/verified/logs/epilogue-fold/ab]
                                           [--out docs/wsp/verified/records/int8-epilogue-fold.jsonl]
 """
@@ -19,9 +19,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -67,7 +69,7 @@ def main(argv=None) -> int:
                        population=Population(kind=pop.kind, items=pop.items,
                                              label=f"{pop.label}, arm {kind} fold={fold}"),
                        instrument=inst, config=cfg, session=psess,
-                       statistic="median", tier="measured", id=rid, run="scripts/hop_epilogue_probe.py",
+                       statistic="median", tier="measured", id=rid, run="harness/scripts/hop_epilogue_probe.py",
                        artifact=args.probe,
                        extra={"artifact_sha256": pdig, "kind": kind, "fold": int(fold)}))
         ids[(kind, fold)] = rid
@@ -79,7 +81,7 @@ def main(argv=None) -> int:
     st.emit(Record(value=round(100.0 * c["chain_diff"] / c["chain_total"], 5), unit="%", population=pop,
                    instrument="int8 codes compared element-wise after sixteen hops on the same input",
                    config=cfg, session=psess, statistic="single",
-                   tier="measured", id="E005", run="scripts/hop_epilogue_probe.py", artifact=args.probe,
+                   tier="measured", id="E005", run="harness/scripts/hop_epilogue_probe.py", artifact=args.probe,
                    extra={"artifact_sha256": pdig, "max_abs_diff": c["chain_max"],
                           "hop1_diff": c["hop_diff"], "of": "codes"}))
 

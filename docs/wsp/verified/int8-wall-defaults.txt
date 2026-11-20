@@ -77,8 +77,8 @@ the current product figure.
 
 ```bash
 ARMS="fp16 int8" CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=null \
-  LOGDIR=docs/wsp/verified/logs/wall-defaults/null scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/wall_ab_records.py --logs docs/wsp/verified/logs/wall-defaults/null \
+  LOGDIR=docs/wsp/verified/logs/wall-defaults/null harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/wall_ab_records.py --logs docs/wsp/verified/logs/wall-defaults/null \
   --out docs/wsp/verified/records/int8-wall-defaults.jsonl
 ```
 

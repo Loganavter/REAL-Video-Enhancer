@@ -55,9 +55,9 @@ implied per-launch term is **0.011 ms** - eighteen times smaller than a millisec
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_constant_probe.py \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_constant_probe.py \
     --out-file docs/wsp/verified/logs/hop-constant/probe.json
-PYTHONPATH=. python3 harness/scripts/hop_constant_records.py
+PYTHONPATH=. python3 harness/harness/scripts/hop_constant_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-constant.txt \

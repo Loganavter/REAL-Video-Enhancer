@@ -1,7 +1,7 @@
 # The ink lift is 0.5-0.8 levels today and it lives in the decode, not the quantiser
 
 Measured 2026-11-20, `2x-Futsuu-Anime(1)` at 1920x1080 -> 4K, BD Violet frame at t=5 s, crop calibration. Records
-`int8-ink-lift.jsonl` (IK001-IK005), raw `logs/ink-lift.json`, probe `scripts/ink_lift_probe.py`.
+`int8-ink-lift.jsonl` (IK001-IK005), raw `logs/ink-lift.json`, probe `harness/scripts/ink_lift_probe.py`.
 
 `int8-scales-bd.txt` (2026-11-19) found the rendered file reading **+4.40/+6.60 levels** on line art against the
 model while the body in RGB read **-0.5**, and left it open: "whatever shifts the ink by ~5 levels happens between
@@ -45,8 +45,8 @@ the body and the pack are faithful in the opposite direction, and the 4-6 level 
 
 ```bash
 ffmpeg -ss 5 -i <render>.mkv -frames:v 1 -pix_fmt rgb24 -f rawvideo /tmp/opencode/decoded_frame5.rgb
-RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/ink_lift_probe.py --decoded /tmp/opencode/decoded_frame5.rgb
-PYTHONPATH=. python3 harness/scripts/ink_lift_records.py
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 harness/scripts/ink_lift_probe.py --decoded /tmp/opencode/decoded_frame5.rgb
+PYTHONPATH=. python3 harness/harness/scripts/ink_lift_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-ink-lift.txt \
     --records docs/wsp/verified/records/int8-ink-lift.jsonl --bars docs/claims-bars.json
 ```

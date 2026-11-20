@@ -96,17 +96,17 @@ warning and served by cuDNN. Nothing here changes the body's own coverage bounda
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/tail_int8_emulation.py \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/tail_int8_emulation.py \
     --out-file docs/wsp/verified/logs/tail-hop/emulation.json
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/tail_hop_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/tail_hop_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/tail-hop/kernel.json
 ARMS="tailf16 tailint8" ARM_ENV_TAILF16="RVE_TAIL_INT8=0" ARM_ENV_TAILINT8="RVE_TAIL_INT8=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null harness/scripts/wall_ab.sh
 ARMS="tailf16 tailint8" ARM_ENV_TAILF16="RVE_TAIL_INT8=0" ARM_ENV_TAILINT8="RVE_TAIL_INT8=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/tail-hop scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py <f16.mkv> <int8.mkv> --out pair.json \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/tail-hop harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py <f16.mkv> <int8.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix TF
-PYTHONPATH=. python3 harness/scripts/tail_hop_records.py --pair <pair-records.jsonl>
+PYTHONPATH=. python3 harness/harness/scripts/tail_hop_records.py --pair <pair-records.jsonl>
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-tail-hop.txt \

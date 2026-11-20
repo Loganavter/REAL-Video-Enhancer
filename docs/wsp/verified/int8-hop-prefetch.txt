@@ -70,11 +70,11 @@ known fix in either language.
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_prefetch_probe.py --rounds 3 --iters 20 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_prefetch_probe.py --rounds 3 --iters 20 \
     --out-file docs/wsp/verified/logs/hop-prefetch/probe.json
 /opt/cuda/bin/nvcc -O3 -arch=sm_89 -shared -Xcompiler -fPIC -o smem_bench.so smem_bench.cu
 <install-python> smem_drive.py          # both files are in logs/hop-smem-theory/
-PYTHONPATH=. python3 harness/scripts/hop_prefetch_records.py
+PYTHONPATH=. python3 harness/harness/scripts/hop_prefetch_records.py
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-prefetch.txt \

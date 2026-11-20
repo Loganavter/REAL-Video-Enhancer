@@ -1,4 +1,4 @@
-# Stage 2 claims, 2026-11-16. Run: scripts/claim_check.py docs/claims-int8-stage2.txt
+# Stage 2 claims, 2026-11-16. Run: harness/scripts/claim_check.py docs/claims-int8-stage2.txt
 # The fp16 baseline is the cached TensorRT engine the app itself loads, in the same process, both cached.
 
 @bar gate_ratio 1.40 x      # engine >= 1.4x

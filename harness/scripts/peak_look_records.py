@@ -1,6 +1,6 @@
 """Records for the peak look: what the shipped default's worst pixel actually is.
 
-Usage: python harness/scripts/peak_look_records.py [--frames docs/wsp/verified/logs/peak-look/frames.json]
+Usage: python harness/harness/scripts/peak_look_records.py [--frames docs/wsp/verified/logs/peak-look/frames.json]
                                            [--out docs/wsp/verified/records/peak-look.jsonl]
 """
 from __future__ import annotations
@@ -12,9 +12,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -41,7 +43,7 @@ def main(argv=None) -> int:
 
     def emit(rid, value, unit, statistic, why, **extra):
         st.emit(Record(value=value, unit=unit, population=pop, instrument=inst, config=cfg, session=sess,
-                       statistic=statistic, tier="measured", id=rid, run="scripts/peak_look.py",
+                       statistic=statistic, tier="measured", id=rid, run="harness/scripts/peak_look.py",
                        artifact=args.frames, extra={"artifact_sha256": dig, **extra, "note": why}))
 
     emit("P001", float(max(r["peak"] for r in per_frame)), "levels", "max", "the worst pixel on any frame",

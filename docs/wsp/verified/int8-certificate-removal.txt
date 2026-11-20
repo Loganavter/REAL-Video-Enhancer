@@ -50,12 +50,12 @@ the certificate present; the configuration that ships now does not have it.
 
 ```bash
 # baseline (today, certificate off - the shipped path)
-CLIPS=bd_violet20s.mkv ROUNDS=2 SINK=ffv1 RENDERS=<dir> scripts/wall_ab.sh
+CLIPS=bd_violet20s.mkv ROUNDS=2 SINK=ffv1 RENDERS=<dir> harness/scripts/wall_ab.sh
 # the diagnostic override
 RVE_INT8_CERTIFY=1 <the same rve-backend.py invocation>
 # and the pre-change tree
 git worktree add <dir> 462bf94f && (render from its backend/)
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py NEW OLD --out stats.json \
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py NEW OLD --out stats.json \
     --reference-kind config --config "..."
 ```
 

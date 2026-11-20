@@ -12,7 +12,7 @@ peak), computed on the 4K output.
 
 Usage (one GPU job at a time; ~0.3 s per frame per model):
   F=~/.cache/opencode/venvs/trt310/bin/python
-  $F harness/scripts/probe_shot_cascade.py --frames '/tmp/opencode/vin8/v*.raw' \
+  $F harness/harness/scripts/probe_shot_cascade.py --frames '/tmp/opencode/vin8/v*.raw' \
       --expensive "$B/custom_models/2x-Futsuu-Anime(1).pth" \
       --cheap "$B/custom_models/2x_ModernSpanimationV1.pth" --emit /tmp/opencode/cascade.jsonl
 """
@@ -27,9 +27,11 @@ import numpy as np
 import torch
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from cut_channels_naive import load, statistic  # noqa: E402
 
 BUNDLE = "/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2"

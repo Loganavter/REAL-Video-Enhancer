@@ -1,7 +1,7 @@
 # The int8 frame is accounted for - and the profile line cannot be summed
 
 Measured 2026-11-18 18:00-18:15 on BD Violet and the Chainsaw same-shot cut, reuse off, one run per arm
-(`scripts/wall_ab.sh`, null sink). The question came from `int8-wall-ab.txt`: the app's profile printed
+(`harness/scripts/wall_ab.sh`, null sink). The question came from `int8-wall-ab.txt`: the app's profile printed
 "frame total 50.40 ms" against named parts summing to 44.17, and the 6.23 ms left over was 88% of what
 int8 bought - so "where the frame goes" was unsafe to quote.
 
@@ -54,8 +54,8 @@ arm; the gate is off, so the gate's own `get_frame_tensor` cost (2.80 ms in the 
 ## Reproduce
 
 ```bash
-CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=1 SINK=null scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/frame_accounting.py --logs docs/wsp/verified/logs/frame-accounting
+CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=1 SINK=null harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/frame_accounting.py --logs docs/wsp/verified/logs/frame-accounting
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-frame-accounting.txt \

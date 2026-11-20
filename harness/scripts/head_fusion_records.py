@@ -1,6 +1,6 @@
 """Records for the fused head: the isolated probe, the in-app A/B, and the render pair.
 
-Usage: python harness/scripts/head_fusion_records.py [--probe .../probe.json] [--logs .../ab]
+Usage: python harness/harness/scripts/head_fusion_records.py [--probe .../probe.json] [--logs .../ab]
                                              [--pair .../pair-records.jsonl]
                                              [--out docs/wsp/verified/records/int8-head-fusion.jsonl]
 """
@@ -15,9 +15,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -57,13 +59,13 @@ def main(argv=None) -> int:
                        population=Population(kind=pop.kind, items=pop.items,
                                              label=f"{pop.label}, arm {arm}: {label}"),
                        instrument=inst, config=cfg, session=psess, statistic="median", tier="measured",
-                       id=rid, run="scripts/head_fusion_probe.py", artifact=args.probe,
+                       id=rid, run="harness/scripts/head_fusion_probe.py", artifact=args.probe,
                        extra={"artifact_sha256": pdig, "arm": arm, "of": "head_time"}))
     st.delta("H004", "H001", note="the fused head against the shipped three-step head")
     st.emit(Record(value=round(100.0 * pr["codes"]["n_diff"] / pr["codes"]["total"], 5), unit="%",
                    population=pop, instrument="int8 codes compared element-wise on the same frame",
                    config=cfg, session=psess, statistic="single", tier="measured", id="H005",
-                   run="scripts/head_fusion_probe.py", artifact=args.probe,
+                   run="harness/scripts/head_fusion_probe.py", artifact=args.probe,
                    extra={"artifact_sha256": pdig, "max_abs_diff": pr["codes"]["max"], "of": "codes"}))
 
     loops: dict[str, list[float]] = {}

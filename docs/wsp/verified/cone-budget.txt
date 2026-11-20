@@ -1,6 +1,6 @@
 # The cone against the cylinder (E36 phase 1)
 
-Measured 2026-11-17 by `harness/scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
+Measured 2026-11-17 by `harness/harness/scripts/cone_budget.py`, CPU only. Convention: layer L (1..16) reads the changed
 region dilated by `17-L` px; the cylinder gives every layer 18. The 1-D control the ledger already
 recorded (2 px band, cylinder 16*38*L against cone 304*L) must print 2.00x and does, so the convention
 is the one the earlier number used.

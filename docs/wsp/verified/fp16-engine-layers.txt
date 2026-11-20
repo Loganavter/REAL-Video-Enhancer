@@ -65,7 +65,7 @@ python3 -c "import sys,torch; sys.path.insert(0,'<app>/backend/src/pytorch'); fr
   torch.onnx.export(m, torch.rand(1,3,1080,1920), '/tmp/opencode/futsuu.onnx', opset_version=17, dynamo=False)"
 ~/.local/bin/trtexec --onnx=/tmp/opencode/futsuu.onnx --fp16 --builderOptimizationLevel=5 --dumpProfile \
     --iterations=20 --avgRuns=20 --warmUp=500
-PYTHONPATH=. python3 harness/scripts/fp16_engine_records.py
+PYTHONPATH=. python3 harness/harness/scripts/fp16_engine_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/fp16-engine-layers.txt \
     --records docs/wsp/verified/records/fp16-engine.jsonl --bars docs/claims-bars.json
 ```
@@ -73,7 +73,7 @@ PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/fp16-engine-layers.t
 ## What the same tool makes available, and what is still unmeasured
 
 - `--int8` with a calibrator: TensorRT's own int8 for this model, the one comparison never built here. In flight
-  (`scripts/trt_int8_calibrate.py`, engines built from this ONNX with `IInt8EntropyCalibrator2` over eight named
+  (`harness/scripts/trt_int8_calibrate.py`, engines built from this ONNX with `IInt8EntropyCalibrator2` over eight named
   frames, profiled by the same `trtexec --loadEngine --dumpProfile`).
 - `--timingCacheFile`: level 5 costs 280.72 s per build against 132.96 at level 3, and the app rebuilds per model
   and shape. A timing cache is a start-up cost, not a frame cost.

@@ -13,9 +13,11 @@ import os
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 
@@ -44,7 +46,7 @@ def main(argv=None) -> int:
             pop = Population.of("pixels of one frame", (f"{frame}:{policy}",), f"{frame}, policy {policy}")
             st.emit(Record(value=float(row["share_gt8_pct"]), unit="%", population=pop, instrument=instr,
                            config=cfg, session=st.session, statistic="single", tier="measured",
-                           id=f"BK{n:03d}", run="scripts/beacon_scale_probe.py", artifact=path("beacon.json"),
+                           id=f"BK{n:03d}", run="harness/scripts/beacon_scale_probe.py", artifact=path("beacon.json"),
                            extra={"artifact_sha256": sha(path("beacon.json")), "policy": policy,
                                   "frame": frame}))
             n += 1
@@ -55,13 +57,13 @@ def main(argv=None) -> int:
     st.emit(Record(value=float(clip["worst_sat_fit_pct"]), unit="%", population=pop, instrument=instr,
                    config=cfg + "; share of codes at the int8 rail under the FITTED grids",
                    session=st.session, statistic="max", tier="measured", id=f"BK{n:03d}",
-                   run="scripts/beacon_scale_probe.py (clipping analysis)", artifact=path("beacon-clipping.json"),
+                   run="harness/scripts/beacon_scale_probe.py (clipping analysis)", artifact=path("beacon-clipping.json"),
                    extra={"artifact_sha256": sha(path("beacon-clipping.json")), "of": "saturation_fit"}))
     n += 1
     st.emit(Record(value=float(clip["worst_ratio"]), unit="x", population=pop, instrument=instr,
                    config=cfg + "; grid ratio K=2 mean / fitted mean",
                    session=st.session, statistic="max", tier="measured", id=f"BK{n:03d}",
-                   run="scripts/beacon_scale_probe.py (clipping analysis)", artifact=path("beacon-clipping.json"),
+                   run="harness/scripts/beacon_scale_probe.py (clipping analysis)", artifact=path("beacon-clipping.json"),
                    extra={"artifact_sha256": sha(path("beacon-clipping.json")), "of": "grid_ratio"}))
     st.dump(a.out)
     print(st.claims_text().strip())

@@ -52,7 +52,7 @@ tasks:
   - backend/src/pytorch/TensorRTHandler.py
   - docs/MODEL.md
   owns_files:
-  - scripts/probe_winograd.py
+  - harness/scripts/probe_winograd.py
   refutes: Forcing CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD (or the WINOGRAD_NONFUSED variant)
     on one 3x3 64->64 conv at 1920x1080 fp16 NHWC is not faster than the implicit-GEMM
     default, or the algorithm is unavailable for the shape (constructor returns BAD_PARAM
@@ -89,7 +89,7 @@ tasks:
   - backend/src/pytorch/int8_plugin/
   - backend/tests/test_int8_plugin.py
   resolution: 'closed 2026-11-17: the plugin exists and is measured IN the chain. `body_kernel` in
-    harness/scripts/int8_pipeline.py is the fused int8 conv + per-channel PReLU + per-channel requant, and with
+    harness/harness/scripts/int8_pipeline.py is the fused int8 conv + per-channel PReLU + per-channel requant, and with
     its per-layer tensors hoisted out of the frame loop it runs at 1.82 ms/hop (84 TOPS) at BLOCK_M 256
     - against 3.14 ms/hop for the two-pass prologue form on the same frames. End to end the window is
     37.46-37.73 ms = 26.5-26.7 fps against a same-process fp16 TRT plan at 53.25-53.56 ms = 18.7 fps,
@@ -162,7 +162,7 @@ tasks:
     i.e. it is already doing what the memory system allows. Disappearing into the
     convolution is the plugin, not a graph fix. RUNNABLE NOW 2026-11-17: TensorRT
     10.12.0.36 and torch are installed and the harness can time and profile a plan
-    end to end (scripts/build_plan.py, harness/scripts/bench_plan.py, scripts/make_width_probe.py).
+    end to end (harness/scripts/build_plan.py, harness/harness/scripts/bench_plan.py, harness/scripts/make_width_probe.py).
     No environment blocker.'
   resolution: 'answered 2026-11-17: the PReLU pass is at its traffic floor (530.8
     MB at 288 GB/s = 1.84 ms against 1.71-2.37 measured), and the later lane removed
@@ -188,7 +188,7 @@ tasks:
   relates_to:
   - docs/RESEARCH-LEDGER.md
   owns_files:
-  - harness/scripts/probe_int8_tactics.py
+  - harness/harness/scripts/probe_int8_tactics.py
   resolution: 'closed 2026-11-17 as a question about a path that stopped being the candidate: the
     sweep would raise the TRT int8 plan, and the plan is not what ships. Measured on both sides: the
     TRT plan runs at a median 79.2 TOPS (trt-int8-rate-79), our Triton chain at 84 TOPS in the chain
@@ -210,8 +210,8 @@ tasks:
     path from 40 ms to 28 ms; fusion does not help because this GEMM is compute-bound
     (int8 is 1.7x the fp16 conv while moving the same bytes). RUNNABLE NOW 2026-11-17:
     TensorRT 10.12.0.36 and torch are installed and the harness can time and profile
-    a plan end to end (scripts/build_plan.py, harness/scripts/bench_plan.py, scripts/make_width_probe.py).
-    No environment blocker. STARTING POINT 2026-11-17 (harness/scripts/probe_int8_tactics.py on the 2026-11-16
+    a plan end to end (harness/scripts/build_plan.py, harness/harness/scripts/bench_plan.py, harness/scripts/make_width_probe.py).
+    No environment blocker. STARTING POINT 2026-11-17 (harness/harness/scripts/probe_int8_tactics.py on the 2026-11-16
     plan): 67.67 ms/frame, 84 layers, 1 myelin, 22 reformat, 19 pointwise - and the per-conv rate is a
     median 79.2 TOPS (min 76.2, max 119.7 over 18 conv layers), NOT the 91 this item and E27 assume. At
     79 the 16-conv floor is 30.9 ms, so the gap to close is a 1.5x on the GEMM. COST REVISED: each
@@ -281,7 +281,7 @@ tasks:
   - docs/MODEL.md
   - docs/RESEARCH-LEDGER.md
   owns_files:
-  - harness/scripts/pyramid_budget.py
+  - harness/harness/scripts/pyramid_budget.py
   refutes: The buffer arithmetic does not hold at 4K (reuse buffer per layer boundary
     or the 16-boundary sum exceeds what stays resident), or the traffic decomposition
     attributes less than ~20 ms to DRAM, leaving no 1.5x ceiling.
@@ -290,7 +290,7 @@ tasks:
     GB, L2 absorption ~1/3, DRAM 19.7 ms, compute floor 33.1 ms, measured 56.8 ms).
     Phase 2, only if phase 1 survives: a boundary search per the Welder model and
     one fused prototype.'
-  resolution: 'phase 1 answered 2026-11-17 (harness/scripts/pyramid_budget.py, CPU only, no GPU job): the
+  resolution: 'phase 1 answered 2026-11-17 (harness/harness/scripts/pyramid_budget.py, CPU only, no GPU job): the
     16-boundary reuse buffer is 7.5 MB at 1080p and 15.0 MB at 4K, both inside the card''s 32 MiB L2,
     so the residency half of the refutes does NOT fire. The ceiling half does: at both sizes the fp16
     compute floor (33.1 / 132.2 ms) is above the unabsorbed DRAM time (29.5 / 118.0 ms), so absorbing
@@ -335,7 +335,7 @@ tasks:
   - docs/RESEARCH-LEDGER.md
   - backend/src/pytorch/RawTRTEngine.py
   owns_files:
-  - scripts/probe_channel_width.py
+  - harness/scripts/probe_channel_width.py
   refutes: 'The measured ratio does not follow the MAC ratio. E19 already showed FLOPs
     are not time on this engine (C=3 -> 8 raised FLOPs 0.48% and moved time 3.36 ms),
     and the shipped tactic is tilesize128x64x32, so C=48 fills 75% of an N tile of
@@ -455,7 +455,7 @@ tasks:
   resolution: 'measured 2026-11-15 on a real 1080p frame: correction |out - nearest(x)|
     median 0.9 levels, p90 2.1, p99 10.1, p99.9 19.4, max 44.5; 98.43% of pixels under
     the 8-level bar. Licences approximations wrong by up to ~40% of the correction.
-    Instrument: scripts/residual_scale.py'
+    Instrument: harness/scripts/residual_scale.py'
   priority: P0
   gpu: true
   cost: 10m
@@ -468,7 +468,7 @@ tasks:
   - docs/RESEARCH-LEDGER.md
   - docs/MODEL.md
   owns_files:
-  - scripts/residual_scale.py
+  - harness/scripts/residual_scale.py
   note: 'Cheapest measurement in the queue and the only one that widened the admissible
     set instead of narrowing it. It also reorders the plan: a channel cut at fp16
     is now the shortest route to 2x, and the int8 plugin is no longer the critical
@@ -514,7 +514,7 @@ tasks:
     with warps 4x1x1, while the ledger''s nsys trace shows 128x64x32 with warps 2x2x1
     - same family, different tile, at a comparable frame time (50-56 ms here against
     the recorded 51.37).'
-  resolution: 'answered 2026-11-17 by a DETAILED build of the shipped geometry (scripts/build_plan.py
+  resolution: 'answered 2026-11-17 by a DETAILED build of the shipped geometry (harness/scripts/build_plan.py
     --detailed, fp16, opt 5, iters 8, 1920x1080, TRT 10.12.0.36) and an IEngineInspector
     dump. All 16 body convolutions select `sm75_xmma_fprop_implicit_gemm_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize256x64x32_stage1_warpsize4x1x1_...`;
     the head selects an indexed 128x16x32 stage1 kernel and the tail 64x32x64 stage1.
@@ -538,7 +538,7 @@ tasks:
   - backend/src/utils/TemporalReuse.py
   - docs/RESEARCH-LEDGER.md
   owns_files:
-  - harness/scripts/cone_budget.py
+  - harness/harness/scripts/cone_budget.py
   refutes: 'The arithmetic does not survive contact with the gate: the changed region
     has to be estimated, and an underestimate is visible by construction (it recomputes
     less than the motion implies), which is the failure mode the pixel veto exists
@@ -547,7 +547,7 @@ tasks:
     cone} at 16 layers with halo k at layer k, for r in {5,10,20,40}, plus the per-frame
     launch cost of the extra regions. Phase 2 only if the ratio is above 2x at a radius
     the gate can actually certify.'
-  resolution: 'phase 1 answered 2026-11-17 (harness/scripts/cone_budget.py, CPU only): the 1-D control
+  resolution: 'phase 1 answered 2026-11-17 (harness/harness/scripts/cone_budget.py, CPU only): the 1-D control
     reproduces the ledger''s own 2.00x (a 2 px band, cylinder 16*38*L against cone 304*L), so the
     convention is the one the earlier number used, and the 2-D ratios reproduce the review''s figures
     (2.54x at r=5, 2.12x at r=10 against 2.6x and 2.16x). The ratio is not the number that decides
@@ -604,7 +604,7 @@ tasks:
     or ''the builder was the culprit'' does not reproduce in this graph. That is B2''s
     starting point, not a refutation: the record does not carry the graph the fused
     C=32 result came from.'
-  resolution: 'measured 2026-11-17 on an independent build (scripts/make_width_probe.py
+  resolution: 'measured 2026-11-17 on an independent build (harness/scripts/make_width_probe.py
     -> build_plan.py with fp16, opt 5, iters 8, 8 GiB workspace, DETAILED inspector;
     artifact: /home/jorj/.local/share/opencode/shell/sh_1e6d5acdd002ioeVbD0LEJ051R.out).
     C=64: 25 layers, 20 __myl_, 2 reformat, 0 pointwise, 50.2-56.5 ms. C=48: 23 layers,
@@ -630,7 +630,7 @@ tasks:
   - backend/src/pytorch/RawTRTEngine.py
   - docs/RESEARCH-LEDGER.md
   owns_files:
-  - harness/scripts/force_tactic.py
+  - harness/harness/scripts/force_tactic.py
   resolution: 'closed 2026-11-17 by the premise dissolving, not by a failed method: the epilogue-
     capable tactic at C=32 EXISTS and the default builder finds it on its own about one build in
     three (39.23 / 39.29 / 20.95 ms from one ONNX, 0/0/18 fused layers - ledger B3), so there was
@@ -640,7 +640,7 @@ tasks:
     builds of the real checkpoint (48.40-51.39 ms, 19-20 myelin every time). A deterministic fast draw
     at a width the picture rejects is worth nothing. Kept as a row because the mechanism is the useful
     part: any future build that lands outside drift of its siblings should be re-built rather than
-    believed. harness/scripts/probe_build_stability.py is the instrument.'
+    believed. harness/harness/scripts/probe_build_stability.py is the instrument.'
   refutes: No tactic in the epilogue-capable family can be built for C=32 - then the
     width genuinely needs a kernel of our own with a 32-wide N tile, and the prize
     moves to E27.
@@ -666,7 +666,7 @@ tasks:
     whether the selector can identify a tactic by family, since IAlgorithmVariant
     gives implementation+tactic hash rather than a kernel name. RUNNABLE NOW 2026-11-17:
     TensorRT 10.12.0.36 and torch are installed and the harness can time and profile
-    a plan end to end (scripts/build_plan.py, harness/scripts/bench_plan.py, scripts/make_width_probe.py).
+    a plan end to end (harness/scripts/build_plan.py, harness/harness/scripts/bench_plan.py, harness/scripts/make_width_probe.py).
     No environment blocker. STARTING POINT 2026-11-17: at C=32 a default build of
     the synthesized probe does NOT fuse (0 __myl_, 50 reformat, 18 pointwise, 40.6
     ms), while C=48 and C=64 do. The ledger''s claim that C=32 fuses with an explicit
@@ -696,8 +696,8 @@ tasks:
   relates_to:
   - docs/RESEARCH-LEDGER.md
   owns_files:
-  - harness/scripts/probe_prelu_forms.py
-  resolution: 'answered 2026-11-17 (harness/scripts/probe_prelu_forms.py, one session, interleaved, 1920x1080
+  - harness/harness/scripts/probe_prelu_forms.py
+  resolution: 'answered 2026-11-17 (harness/harness/scripts/probe_prelu_forms.py, one session, interleaved, 1920x1080
     fp16 opt5 iters8 8 GiB): the PReLU ALREADY FUSES at C=32 - 19 myelin layers, 2 reformat, 0
     pointwise, 23.24 ms - so the item''s premise is false and the rewrite has nothing to fix. The
     affine form also fuses (20 myelin, 1 reformat, 24.68 ms) and is 6% SLOWER; the scalar-slope
@@ -716,8 +716,8 @@ tasks:
     from one width does not transfer: this investigation has caught that class of
     error three times (build path, calibration window, statistic population). RUNNABLE
     NOW 2026-11-17: TensorRT 10.12.0.36 and torch are installed and the harness can
-    time and profile a plan end to end (scripts/build_plan.py, harness/scripts/bench_plan.py,
-    scripts/make_width_probe.py). No environment blocker.'
+    time and profile a plan end to end (harness/scripts/build_plan.py, harness/harness/scripts/bench_plan.py,
+    harness/scripts/make_width_probe.py). No environment blocker.'
 - id: rve-shot-cascade-2026-11-15
   title: 'A: route whole shots between models - use the 78-model collection instead
     of one model'
@@ -737,7 +737,7 @@ tasks:
   - docs/RESEARCH-LEDGER.md
   - docs/MODEL.md
   owns_files:
-  - harness/scripts/probe_shot_cascade.py
+  - harness/harness/scripts/probe_shot_cascade.py
   resolution: 'closed 2026-11-17 by its own refutes clause, on four Violet frames at 1920x1080: SPAN
     against Futsuu differs by 76.5% of pixels above 8 levels on one frame, 13.8% and 11.7% on two
     others and 2.7% on the calmest - between 27x and 765x the 0.1% bar, with peaks of 57-203 levels.
@@ -860,14 +860,14 @@ tasks:
   relates_to:
   - docs/RESEARCH-LEDGER.md
   owns_files:
-  - harness/scripts/probe_strips.py
+  - harness/harness/scripts/probe_strips.py
   resolution: 'closed 2026-11-17 by measurement, and by its own refutes clause: two independent
     contexts of one plan, on two streams, buy NOTHING - per-frame time is 1.001x the serial time on
     both a split plan (87.9 ms) and a fused one (54.0 ms), three interleaved rounds each, with SM at
     100.0% and 155-162 W of the 165 W cap throughout. The card is power-limited at full occupancy, so
     there is no second lane for a strip to run in, and the halo tax (1.067x at two strips) is never
     outweighed. No strip geometry needed building. Ledger C section; instrument:
-    harness/scripts/probe_strips.py (wall clock around one synchronize - the first version timed the host by
+    harness/harness/scripts/probe_strips.py (wall clock around one synchronize - the first version timed the host by
     recording events outside the stream and reported 0.1 ms for a 50 ms plan).'
   refutes: 'Two independent streams do not overlap on this GPU: the frame time does
     not improve past the halo tax (2 strips 1.067x, 3 strips 1.10x, 4 strips 1.133x).
@@ -974,8 +974,8 @@ tasks:
     path - worse than the print it replaces. Needs one runnable probe environment.
     UNBLOCKED 2026-11-16: the repo now has .venv with torch 2.15.0+cu132 and triton
     3.9.0 (GPU verified: RTX 4060 Ti sm89, a Triton add kernel runs). Pure-Triton
-    probes run today (harness/scripts/int8_block_probe.py reproduced the int8 block); engine
-    probes still need python-tensorrt. FIRST LANE DONE 2026-11-17: harness/scripts/int8_block_probe.py
+    probes run today (harness/harness/scripts/int8_block_probe.py reproduced the int8 block); engine
+    probes still need python-tensorrt. FIRST LANE DONE 2026-11-17: harness/harness/scripts/int8_block_probe.py
     takes --emit and writes harness records (population = launches, instrument = torch.cuda.Event,
     config = device/triton/BLOCK_M); verified on the GPU at 1.848 ms / 82.8 TOPS with
     the bit-exact row still clean. The remaining probes need the same treatment; the
@@ -1107,8 +1107,8 @@ tasks:
   relates_to:
   - docs/MODEL.md
   - docs/RESEARCH-LEDGER.md
-  - scripts/ls_refit.py
-  - scripts/probe_int8_fit.py
+  - harness/scripts/ls_refit.py
+  - harness/scripts/probe_int8_fit.py
   owns_files:
   - scripts/probe_slope_refit.py
   refutes: Either the last-layer fit residual keeps the acceptance statistic above
@@ -1477,8 +1477,8 @@ tasks:
   - docs/wsp/verified/gate-bd.txt
   - docs/PLAN-int8-body-2026-11-17.md
   owns_files:
-  - harness/scripts/int8_accuracy_sim.py
-  - scripts/int8_heldout.py
+  - harness/harness/scripts/int8_accuracy_sim.py
+  - harness/scripts/int8_heldout.py
   refutes: >-
     Per-tensor activation scales cannot represent BD material: the int8 body measured 0.53318% of
     pixels above 8 levels on the worst frame of a 494-frame BD clip with reuse OFF (356 frames above
@@ -1500,7 +1500,7 @@ tasks:
     x1.5 tripped the body's own self-certification), bias correction (0.00563% -> 0.00515%, i.e. real but
     irrelevant at this margin). See docs/wsp/verified/int8-scales-bd.txt.
   measured: >-
-    2026-11-18, scales isolated in the simulation (harness/scripts/int8_accuracy_sim.py --act-scale / --clip-pct,
+    2026-11-18, scales isolated in the simulation (harness/harness/scripts/int8_accuracy_sim.py --act-scale / --clip-pct,
     calibration and test frames disjoint): PER-CHANNEL conv-input scales take the worst frame from
     0.06510% to 0.00162% on frame 29, 0.02461% -> 0.00187% on f44 and 0.01362% -> 0.00118% on f274, and
     collapse peak 19 -> 13 and median 2.99 -> 0.75 levels. PERCENTILE CLIPPING IS NOT A LEVER: p99.9 makes
@@ -1562,7 +1562,7 @@ tasks:
   - backend/src/utils/Int8Probe.py
   - backend/src/RenderVideo.py
   - backend/tests/test_int8_probe_modes.py
-  - harness/scripts/probe_cost.py
+  - harness/harness/scripts/probe_cost.py
   - docs/wsp/verified/int8-probe-cost-2026-11-19.txt
   refutes: >-
     The probe's own pair population changes with the gate configuration and with the forced verdict:
@@ -1626,12 +1626,12 @@ tasks:
   - simulation
   base_branch: perf/inference
   relates_to:
-  - harness/scripts/int8_accuracy_sim.py
+  - harness/harness/scripts/int8_accuracy_sim.py
   - backend/src/pytorch/Int8Body.py
   - backend/src/pytorch/Int8Kernels.py
   - docs/wsp/verified/int8-scales-bd.txt
   owns_files:
-  - scripts/int8_hopwise.py
+  - harness/scripts/int8_hopwise.py
   refutes: >-
     The simulation and the kernel are the same quantiser measured two ways. If the hop-by-hop comparison
     does not find the term (rounding mode, clamp, grid, the head quantise, the requant shift), then the
@@ -1646,7 +1646,7 @@ tasks:
     again. Against the BODY the simulation reads 0.06510% on frame 29 where the body reads 0.01684% - 4x, not
     14x - and both are under the 0.1% bar, so this row no longer gates anything. It stays for the next reader
     who wonders why the two instruments disagree, not as a blocker.
-    ATTEMPTED AND INVALID 2026-11-18 (scripts/int8_hopwise.py): comparing the kernel's hops with the
+    ATTEMPTED AND INVALID 2026-11-18 (harness/scripts/int8_hopwise.py): comparing the kernel's hops with the
     simulation's hops measures the difference between two RECIPES - the body quantises symmetrically on
     +-127, the simulation asymmetrically over 0..255 - so the diff came out at 100-290% of the activation
     scale, which is a unit/convention error, not a finding. The corrected design is: emulate the KERNEL's
@@ -1731,7 +1731,7 @@ tasks:
     measured (two model families, ~1.2x, indistinguishable on the 2x model) and keeps the card caveat, which
     is the one axis still untested. If a second GPU ever exists here, the row's acceptance is already written.
     docs/wsp/verified/fast-preset-second-family.txt, records fast-preset.jsonl (F001-F003, R001),
-    logs/fast-preset/animevideov3/. scripts/wall_ab.sh gained a MODEL override so one instrument can compare a
+    logs/fast-preset/animevideov3/. harness/scripts/wall_ab.sh gained a MODEL override so one instrument can compare a
     second family with the model held equal inside the session.
   priority: P2
   gpu: true
@@ -1809,8 +1809,8 @@ tasks:
   - docs/wsp/verified/int8-wall-ab.txt
   - docs/wsp/verified/records/int8-wall-ab.jsonl
   - docs/wsp/verified/logs/wall-ab/
-  - scripts/wall_ab.sh
-  - harness/scripts/wall_ab_records.py
+  - harness/scripts/wall_ab.sh
+  - harness/harness/scripts/wall_ab_records.py
   refutes: >-
     int8 is faster than the shipped fp16 engine in the product. The three numbers on the record disagree by
     more than drift: the offline window says 1.35-1.42x, one in-app draw says 1.14x on Violet and 0.95x
@@ -2216,7 +2216,7 @@ tasks:
   - backend/src/pytorch/Int8Body.py
   - docs/wsp/verified/int8-tail-split.txt
   owns_files:
-  - scripts/tail_conv_probe.py
+  - harness/scripts/tail_conv_probe.py
   refutes: >-
     The tail conv's 4.86-5.99 ms is what a 64->12 3x3 convolution costs at 1080p. It is 28.7 GFLOP in
     ~5 ms = ~5 TFLOPS, against ~44 (fp16 CUDA cores) and ~176 (tensor cores) on this card, and the measured
@@ -2259,7 +2259,7 @@ tasks:
   relates_to:
   - backend/src/pytorch/Int8Body.py
   - docs/wsp/verified/int8-tail-split.txt
-  - scripts/tail_conv_probe.py
+  - harness/scripts/tail_conv_probe.py
   owns_files:
   - docs/wsp/verified/int8-tail-layout.txt
   refutes: >-
@@ -2441,7 +2441,7 @@ tasks:
     fused variant: a head that writes int8 codes directly, which removes the 265 MB fp16 write and the 1.58
     ms quantise pass - byte-identity is the criterion, since the arithmetic need not change.
   resolution: >-
-    measured 2026-11-19 in isolation (scripts/head_conv_probe.py, 1080p fp16, 10 iters, one GPU job). The
+    measured 2026-11-19 in isolation (harness/scripts/head_conv_probe.py, 1080p fp16, 10 iters, one GPU job). The
     layout lever that gave the TAIL 2.5x gives the HEAD 19%: NCHW/NCHW 3.788 ms (1.89 TFLOPS), NHWC view +
     channels_last weights 3.196 (2.24), and the engine's 3 -> 8 padded input is SLOWER (3.66-4.50). So the
     row's premise is refuted - the head is not layout-bound. Why: intensity 7.17 GFLOP / 278 MB = 26
@@ -2531,7 +2531,7 @@ tasks:
     on one hop, 0.029% after sixteen (max 53). NOT adopted: 0.22-0.7 ms does not pay for a
     different-arithmetic change never measured against the MODEL, and it would break byte-identity with every
     recorded render. RVE_INT8_EPILOGUE_FOLD=1 is the opt-in; FOLD=0 is verified bit-identical to the kernel at
-    HEAD (scripts/epilogue_control.py, 0 differing codes over all sixteen hops). Adopt path is written in the
+    HEAD (harness/scripts/epilogue_control.py, 0 differing codes over all sixteen hops). Adopt path is written in the
     doc. docs/wsp/verified/int8-epilogue-fold.txt, records int8-epilogue-fold.jsonl (E001-E009, R001-R004,
     EF001-EF004), logs/epilogue-fold/ (probe-r8.json, ab/, ab-ffv1/).
   priority: P1
@@ -2561,7 +2561,7 @@ tasks:
     Report the hop's ms and the picture delta (worst share, peak) separately.
   note: >-
     From the researcher's C5 (docs/wsp/RESEARCH-candidates-2026-11-19.md), which also corrects a misreading
-    worth keeping: the "6 of 16 on the three-accumulator kernel" split belongs to harness/scripts/int8_pipeline.py, a
+    worth keeping: the "6 of 16 on the three-accumulator kernel" split belongs to harness/harness/scripts/int8_pipeline.py, a
     different object - the SHIPPED body runs this one kernel for all sixteen. Estimate 1.3-2.7 ms of the
     26.95 if the divide is 5-10% of a hop; zero if not, which the same timing settles.
 
@@ -2609,7 +2609,7 @@ tasks:
     of an adoptable variant. If the emulation moves the picture past its margin, stop there.
   acceptance: >-
     Staged, cheapest first. (a) Emulate the folded-scale int8 tail against today's fp16 tail on the four
-    held-out BD frames with scripts/int8_kernel_emulation.py (the bit-exact emulation the corpus already
+    held-out BD frames with harness/scripts/int8_kernel_emulation.py (the bit-exact emulation the corpus already
     trusts) - no GPU, 1-2 h; the share and peak must stay inside their bars. (b) One Triton conv 576 -> 16 at
     1080p with zero-padded outputs, timed against 2.35 ms. (c) In the app: the tail phase line beside the
     frame total, interleaved A/B, >=3 rounds, and the picture on the full clip with --reference-kind config.
@@ -2735,7 +2735,7 @@ tasks:
   base_branch: perf/inference
   relates_to:
   - docs/wsp/RESEARCH-candidates-2026-11-19.md
-  - scripts/int8_kernel_emulation.py
+  - harness/scripts/int8_kernel_emulation.py
   owns_files:
   - docs/wsp/verified/int8-sub8-codes.txt
   refutes: >-
@@ -2745,7 +2745,7 @@ tasks:
     the share and peak on the same four held-out frames. Today the body sits at 0.003% against a 0.1% bar, so
     there is room - but two bits is a lot, and if the emulation says no, the row closes before any kernel.
   acceptance: >-
-    The bit-exact emulation (scripts/int8_kernel_emulation.py) with 6-bit codes between hops, share and peak
+    The bit-exact emulation (harness/scripts/int8_kernel_emulation.py) with 6-bit codes between hops, share and peak
     on four held-out BD frames, against the 8-bit body on the same frames. If the share or the peak leaves its
     bar, close it. No GPU, no kernel: the emulation is the whole falsifier, and a Triton unpack path is only
     worth writing after it passes.
@@ -3854,7 +3854,7 @@ tasks:
     1.96% of pixels sitting within 1% of the gamut edge (TB009), which is the same conversion validated at mean
     |d| 1.85/255 against ffmpeg - not depth. (d) The 10-bit clip runs the old path end to end: no payload line,
     `out dtype torch.float16`, no 8-bit pipe (logs/tail-csc-10bit). docs/wsp/verified/tenbit-pipe.txt, records
-    tenbit-pipe.jsonl, logs/tenbit-pipe/probe.json, scripts/tenbit_pipe_probe.py.
+    tenbit-pipe.jsonl, logs/tenbit-pipe/probe.json, harness/scripts/tenbit_pipe_probe.py.
   note: >-
     Asked for by the owner on 2026-11-20: "we must not lose the ten bits on the way in or on the way out".
     Two of the three instruments were wrong before they were right, and both errors are recorded on the page
@@ -4071,7 +4071,7 @@ tasks:
     65.5%, and a third of the frame is not convolution at all. Next to the Compact lane that ceiling is worse
     (78% in ONE uniform kernel) and the work is larger: two widths (48 pads to 64, measured to cost what 64
     costs), ~19 block boundaries needing quantise/dequantise pairs, and a mixed fp16 remainder. docs/wsp/
-    verified/span-int8-scope.txt, logs/span-scope/probe.json, scripts/span_scope_probe.py. If SPAN ever becomes
+    verified/span-int8-scope.txt, logs/span-scope/probe.json, harness/scripts/span_scope_probe.py. If SPAN ever becomes
     the target model, the first lever is the 32.2% that is elementwise and concat - a graph problem, not a
     quantisation one.
   note: >-
@@ -4182,7 +4182,7 @@ tasks:
     65.5%, and a third of the frame is not convolution at all. Next to the Compact lane that ceiling is worse
     (78% in ONE uniform kernel) and the work is larger: two widths (48 pads to 64, measured to cost what 64
     costs), ~19 block boundaries needing quantise/dequantise pairs, and a mixed fp16 remainder. docs/wsp/
-    verified/span-int8-scope.txt, logs/span-scope/probe.json, scripts/span_scope_probe.py. If SPAN ever becomes
+    verified/span-int8-scope.txt, logs/span-scope/probe.json, harness/scripts/span_scope_probe.py. If SPAN ever becomes
     the target model, the first lever is the 32.2% that is elementwise and concat - a graph problem, not a
     quantisation one.
   note: >-
@@ -4243,7 +4243,7 @@ tasks:
     65.5%, and a third of the frame is not convolution at all. Next to the Compact lane that ceiling is worse
     (78% in ONE uniform kernel) and the work is larger: two widths (48 pads to 64, measured to cost what 64
     costs), ~19 block boundaries needing quantise/dequantise pairs, and a mixed fp16 remainder. docs/wsp/
-    verified/span-int8-scope.txt, logs/span-scope/probe.json, scripts/span_scope_probe.py. If SPAN ever becomes
+    verified/span-int8-scope.txt, logs/span-scope/probe.json, harness/scripts/span_scope_probe.py. If SPAN ever becomes
     the target model, the first lever is the 32.2% that is elementwise and concat - a graph problem, not a
     quantisation one.
   note: >-
@@ -4289,7 +4289,7 @@ tasks:
     SECOND ATTEMPT, the outside reader's better formulation, also measured 2026-11-20: predict argmin_K inside
     one model from `input_err(K) + beta*weight_err(K)`, both computed as exact functions of K from the
     calibration activations and the weights (no forward per candidate). Result: 4 of 22 at every beta from 1.0 to
-    6.0 (logs/grid-k-beta/rows.json, scripts/grid_k_beta_probe.py). What it DID establish is why the optimum is
+    6.0 (logs/grid-k-beta/rows.json, harness/scripts/grid_k_beta_probe.py). What it DID establish is why the optimum is
     interior: input_err falls monotonically with K (median 2.88x from K=1 to K=4) while weight_err has an
     interior MINIMUM - 0.021 at K=1, 0.009 at K=4, 0.029 at per-channel - because folding the per-channel scale
     into the weights first balances the columns and only past that point crushes the small ones. The sum still
@@ -4305,7 +4305,7 @@ tasks:
     sixteen layers into a thresholded picture statistic. The measurement that WOULD capture that is a per-layer
     ablation, which costs more than the sweep it would replace and is valid only for the model it ran on.
     So the start-up sweep stays (RVE_INT8_GRID_K=auto, ~3 s, guard x2). docs/wsp/verified/int8-grid-k-predict.txt,
-    logs/grid-k-predict/rows.json, scripts/grid_k_predict_probe.py.
+    logs/grid-k-predict/rows.json, harness/scripts/grid_k_predict_probe.py.
   resolution: >-
     STAGE (a) DONE 2026-11-20, and it closes the row: CLOSED AS NOT WORTH A KERNEL, by measurement rather than
     by difficulty. torch.profiler cannot be used in this build (CUPTI device timing reads 0 even for a matmul),
@@ -4316,7 +4316,7 @@ tasks:
     65.5%, and a third of the frame is not convolution at all. Next to the Compact lane that ceiling is worse
     (78% in ONE uniform kernel) and the work is larger: two widths (48 pads to 64, measured to cost what 64
     costs), ~19 block boundaries needing quantise/dequantise pairs, and a mixed fp16 remainder. docs/wsp/
-    verified/span-int8-scope.txt, logs/span-scope/probe.json, scripts/span_scope_probe.py. If SPAN ever becomes
+    verified/span-int8-scope.txt, logs/span-scope/probe.json, harness/scripts/span_scope_probe.py. If SPAN ever becomes
     the target model, the first lever is the 32.2% that is elementwise and concat - a graph problem, not a
     quantisation one.
   note: >-
@@ -4339,8 +4339,8 @@ tasks:
   - tensorrt
   base_branch: perf/inference
   relates_to:
-  - scripts/trt_int8_calibrate.py
-  - scripts/trt_int8_accuracy.py
+  - harness/scripts/trt_int8_calibrate.py
+  - harness/scripts/trt_int8_accuracy.py
   - docs/wsp/verified/fp16-engine-layers.txt
   owns_files:
   - docs/wsp/verified/trt-int8-calibrated.txt
@@ -4378,13 +4378,13 @@ tasks:
     reads 1.07% on one frame. So the hand body is faster AND three orders of magnitude better on the picture; a
     494-frame pair of the calibrated engine would only confirm what one held-out frame already shows, so it is
     not run. The speed half is then closed with ONE instrument instead of a comparison of two:
-    scripts/trt_vs_body_probe.py runs the fp16 engine, TensorRT's int8 and the Triton body in one process on one
+    harness/scripts/trt_vs_body_probe.py runs the fp16 engine, TensorRT's int8 and the Triton body in one process on one
     input frame, interleaved, same CUDA event bracket - 48.401 / 38.814 / 27.051 ms (TV001-TV003), i.e. the body
     is 1.435x faster than TensorRT's int8 (TV004) and 1.789x faster than fp16 (TV005); pictures against the SAME
     fp16 reference: bright frame 5.79 vs 5.85 codes (body 1.7 dB lower), dark frame 0.0089% vs 1.0715% above 8
     codes and 49.36 vs 39.34 dB (TV007-TV018). Model scope: no tiling, no pack, both arms whole-frame.
     docs/wsp/verified/trt-int8-calibrated.txt, logs/trt-int8/, scripts/trt_int8_{calibrate,accuracy,records}.py,
-    scripts/trt_vs_body_probe.py.
+    harness/scripts/trt_vs_body_probe.py.
 
 - id: rve-certificate-picture-2026-11-20
   title: "The certificate was withdrawn to save 33 s and it moved the picture 0.45% - re-measure and decide"
@@ -4644,7 +4644,7 @@ tasks:
     the 0.1% bar, worst block mean 1.87, peak 15. The residual risk is named rather than assumed away: the first
     seconds of a clip can be a fade or a logo, which would give a lower ceiling than the clip contains - filed as
     rve-calib-fade-2026-11-20 with a black-head clip as the test. docs/wsp/verified/int8-calib-seq.txt,
-    logs/calib-seq/, harness/scripts/calib_seq_records.py.
+    logs/calib-seq/, harness/harness/scripts/calib_seq_records.py.
 
 - id: rve-calib-fade-2026-11-20
   title: "A clip whose first seconds are black: does the sequential calibration clip later?"
@@ -4683,7 +4683,7 @@ tasks:
     always contains the middle of the clip. Hybrid reads 0.03777% (0 frames above the bar) on the black-head cut
     and 0.00035% on BD Violet; start-up 6.05 s against 4.95 for the pure sequential and 9.79 for the full spread.
     The earlier row shipped the pure sequential default with the risk in prose - the prose was right and the
-    default was wrong. docs/wsp/verified/int8-calib-fade.txt, logs/calib-fade/, harness/scripts/calib_fade_records.py.
+    default was wrong. docs/wsp/verified/int8-calib-fade.txt, logs/calib-fade/, harness/harness/scripts/calib_fade_records.py.
 
 - id: rve-price-curvature-predictor-2026-11-20
   title: "A curvature-priced predictor for K, the class the price paper says is correct"
@@ -4831,7 +4831,7 @@ tasks:
     67.4-69.2 ms reproduces engine-int8.txt's 64.3-70.4, and the rewrite reads 141.6-145.5 (0.47x) with the
     picture in the same class on both eval frames (csm 0.000%/peak 7.4-7.7; violet 1.93% vs 1.99%, both over
     the bar, peak ~107). So E9' STANDS and is not an artefact of the PRelu being left as an op. Trap recorded
-    with it: scripts/build_plan.py --parse sets only BuilderFlag.FP16, so a Q/DQ graph built through it runs
+    with it: harness/scripts/build_plan.py --parse sets only BuilderFlag.FP16, so a Q/DQ graph built through it runs
     the quantise/dequantise nodes in fp16 (133 ms); build_int8qdq.py is the same builder plus BuilderFlag.INT8.
     SECOND MODEL 2026-11-20, same instrument, 2x_Ani4K_Compact_35000 at 1x3x1080x1920: the speed mechanism
     reproduces (int8 41.29 -> 31.57 ms, 1.308x against 1.341x on Futsuu; PWN 18 -> 3; layers 74 -> 91 - the
@@ -4883,7 +4883,7 @@ tasks:
   - docs/wsp/verdicts.yaml
   owns_files:
   - docs/wsp/verified/reuse-decision-statistic.txt
-  - scripts/reuse_stats.py
+  - harness/scripts/reuse_stats.py
   progress: >-
     MEASURED 2026-11-19, first pass. The population the lane was closed on (bd_csm_same.mkv, 539 frames, 17
     damaged) is NOT reproducible - sources.yaml records it as cut: {mode: not_proved} and the file lived in
@@ -4998,7 +4998,7 @@ tasks:
   - backend/src/utils/TemporalReuse.py
   owns_files:
   - docs/wsp/verified/reuse-codec-mv.txt
-  - scripts/reuse_codec_mv.py
+  - harness/scripts/reuse_codec_mv.py
   refutes: >-
     The remaining failure class of the reopened reuse gate is geometry: with the frequency-split correction the
     calm clip reads 0/130 frames over the bar at texture 1.001, but the held-out clip keeps 4/124 and those are the
@@ -5096,7 +5096,7 @@ tasks:
     to be counted before the gate is trusted.
   resolution: >-
     FALSIFIER MET 2026-11-20: the geometry axis is closed. The reference search is built into
-    `scripts/reuse_mv_gate.py` and it works - the field's best display distance is 2 (the previous P anchor), where
+    `harness/scripts/reuse_mv_gate.py` and it works - the field's best display distance is 2 (the previous P anchor), where
     it buys 2.9% of residual over 72 P frames against -16.1% at distance 1, which is what RU035 misread. But on the
     four reuse frames that sit over the bar, the field reduces the residual in the border band on only one, and in
     that band it is negative at the codec's own reference too (medians -8.1% at the reuse depth, -13.45% at

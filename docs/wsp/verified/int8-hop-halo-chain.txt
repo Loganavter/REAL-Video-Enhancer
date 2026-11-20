@@ -67,15 +67,15 @@ chain needs no conversion pass anywhere.
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/hop_halo_chain_probe.py --rounds 3 --iters 15 \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_halo_chain_probe.py --rounds 3 --iters 15 \
     --out-file docs/wsp/verified/logs/hop-halo-chain/probe.json
 ARMS="halo0 halo1" ARM_ENV_HALO0="RVE_HOP_HALO=0" ARM_ENV_HALO1="RVE_HOP_HALO=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null scripts/wall_ab.sh
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null harness/scripts/wall_ab.sh
 ARMS="halo0 halo1" ARM_ENV_HALO0="RVE_HOP_HALO=0" ARM_ENV_HALO1="RVE_HOP_HALO=1" \
-  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/hop-halo scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py <halo0.mkv> <halo1.mkv> --out pair.json \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/hop-halo harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py <halo0.mkv> <halo1.mkv> --out pair.json \
   --emit pair-records.jsonl --reference-kind config ... --id-prefix HL
-PYTHONPATH=. python3 harness/scripts/hop_halo_chain_records.py --pair <pair-records.jsonl>
+PYTHONPATH=. python3 harness/harness/scripts/hop_halo_chain_records.py --pair <pair-records.jsonl>
 ```
 
 Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-hop-halo-chain.txt \

@@ -1,6 +1,6 @@
 # SPAN scope: 65.5% of the frame is in 3x3 convolutions, and that is not enough to justify a kernel
 
-Measured 2026-11-20 (local), probe `scripts/span_scope_probe.py`, raw `logs/span-scope/probe.json`,
+Measured 2026-11-20 (local), probe `harness/scripts/span_scope_probe.py`, raw `logs/span-scope/probe.json`,
 model `2x_ModernSpanimationV1.pth` (SPAN, x2, 3.94M parameters, 102 convolutions).
 
 The row asked one question before any int8 work on this family: if only the 3x3 convolutions could be quantised,
@@ -144,11 +144,11 @@ Run: PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/span-int8-scope
 ## Reproduce
 
 ```bash
-flock -n /var/tmp/opencode/gpu.lock <install-python> scripts/span_scope_probe.py \
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/span_scope_probe.py \
     --out-file docs/wsp/verified/logs/span-scope/probe.json
 # the app-level number, same clip, through the engine
 ARMS="fp16" MODEL=<path>/2x_ModernSpanimationV1.pth CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=null \
-  LOGDIR=docs/wsp/verified/logs/span-app scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/ab_records.py --clip bd_violet20s --logdir docs/wsp/verified/logs/span-app \
+  LOGDIR=docs/wsp/verified/logs/span-app harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/ab_records.py --clip bd_violet20s --logdir docs/wsp/verified/logs/span-app \
   --arms fp16 --sink null --first-round 1 --rounds 1 --out docs/wsp/verified/records/span-app.jsonl
 ```

@@ -8,7 +8,7 @@ so the answer is not a one-clip claim:
   delta             nvenc - null, same arm: what the encoder actually costs on THAT clip
   ratio             fp16 / int8-yuv under each sink
 
-Usage: python harness/scripts/encoder_delta_records.py [--out ...]
+Usage: python harness/harness/scripts/encoder_delta_records.py [--out ...]
 """
 from __future__ import annotations
 
@@ -20,9 +20,11 @@ import statistics
 import sys
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 
 from harness.core import Population, Record, Store  # noqa: E402
 
@@ -88,7 +90,7 @@ def main(argv=None) -> int:
                     config=f"{clip}, {sink} sink, reuse off, one process per arm"
                            + ("" if sink == "null" else " (hevc_nvenc encoding alongside)"),
                     session=session, statistic="median", tier="measured",
-                    run=f"rve-backend.py --int8_fit {arm}, logs from scripts/wall_ab.sh",
+                    run=f"rve-backend.py --int8_fit {arm}, logs from harness/scripts/wall_ab.sh",
                     artifact=path,
                     extra={"of": "frame_time", "arm": arm, "sink": sink,
                            "artifact_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}))

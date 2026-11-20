@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 
@@ -31,7 +33,7 @@ def main(argv=None) -> int:
                                       "sensitivity of the final output to a 5% perturbation of each layer",
                            config=f"{d['model']} at {d['scale']}x, K={k}", session=st.session,
                            statistic="single", tier="measured", id=f"PR{n:03d}",
-                           run="scripts/price_predictor_probe.py", artifact=path,
+                           run="harness/scripts/price_predictor_probe.py", artifact=path,
                            extra={"artifact_sha256": sha(path), "k": k,
                                   "predicted_best": d["predicted_best"], "ladder_best": d["ladder_best"]}))
             n += 1
@@ -42,7 +44,7 @@ def main(argv=None) -> int:
                    instrument="models where the priced argmin equals the ladder's argmin",
                    config="curvature-priced predictor against the ladder", session=st.session,
                    statistic="single", tier="measured", id=f"PR{n:03d}",
-                   run="scripts/price_predictor_probe.py", artifact=os.path.join(a.dir, "price-realesr-animevideov3(1).json"),
+                   run="harness/scripts/price_predictor_probe.py", artifact=os.path.join(a.dir, "price-realesr-animevideov3(1).json"),
                    extra={"artifact_sha256": sha(os.path.join(a.dir, "price-realesr-animevideov3(1).json")),
                           "of": "agreement", "n_models": total}))
     st.dump(a.out)

@@ -24,9 +24,11 @@ import triton
 import triton.language as tl
 
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from cut_channels_naive import load, statistic  # noqa: E402
 from int8_prologue_kernel import body_prologue_kernel  # noqa: E402
 from int8_prologue_kernel import dequantise_nhwc_to_nchw, dequantise_nhwc_to_nhwc  # noqa: E402
@@ -502,9 +504,11 @@ def main() -> int:
     if args.emit:
         import hashlib as _h
         import os as _bos, sys as _bsys
-        _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-        if _HARNESS_ROOT not in _bsys.path:
-            _bsys.path.insert(0, _HARNESS_ROOT)
+        _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+        _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+        for _p in (_ROOT, _HERE):
+            if _p not in _bsys.path:
+                _bsys.path.insert(0, _p)
         from harness import Population, Record, Store
         fsha = _h.sha256(open(args.frame, "rb").read()).hexdigest()[:16]
         store = Store()
@@ -827,9 +831,11 @@ def main() -> int:
         if args.emit:
             import sys as _sys
             import os as _bos, sys as _bsys
-            _HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-            if _HARNESS_ROOT not in _bsys.path:
-                _bsys.path.insert(0, _HARNESS_ROOT)
+            _HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+            _ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+            for _p in (_ROOT, _HERE):
+                if _p not in _bsys.path:
+                    _bsys.path.insert(0, _p)
             from harness import Population, Record, Store
             st = Store()
             pop2 = Population.of("chain launches", [f"launch-{i+1}" for i in range(16)],

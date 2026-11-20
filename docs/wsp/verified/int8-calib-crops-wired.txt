@@ -63,12 +63,12 @@ and that the start-up halves.
 ## Reproduce
 
 ```bash
-RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 scripts/calib_crops_probe.py \
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 harness/scripts/calib_crops_probe.py \
     --calib /tmp/opencode/calib-frames --frames /tmp/opencode/eval3 --crops 0,4
 ARMS="full crops" ARM_ENV_FULL="RVE_INT8_CALIB_CROPS=0" ARM_ENV_CROPS="RVE_INT8_CALIB_CROPS=4" \
-    SINK=ffv1 ROUNDS=1 CLIPS="bd_violet20s.mkv" scripts/wall_ab.sh
-PYTHONPATH=. python3 harness/scripts/gate_sweep.py <crops.mkv> <full.mkv> --reference-kind config --out pair.json
-PYTHONPATH=. python3 harness/scripts/calib_crops_records.py
+    SINK=ffv1 ROUNDS=1 CLIPS="bd_violet20s.mkv" harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/harness/scripts/gate_sweep.py <crops.mkv> <full.mkv> --reference-kind config --out pair.json
+PYTHONPATH=. python3 harness/harness/scripts/calib_crops_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-calib-crops-wired.txt \
     --records docs/wsp/verified/records/int8-calib-crops.jsonl --bars docs/claims-bars.json
 ```

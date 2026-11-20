@@ -2,8 +2,8 @@
 
 Measured 2026-11-20 (local), CPU prototype: PyAV decode with motion-vector side data, `cv2.remap` warps, the
 app's own gated/ungated renders of the two labelled clips (`w1040`, `w960`). Records:
-`records/reuse-mv-reference.jsonl`; instrument: `scripts/reuse_mv_gate.py` (the reference search and the region
-split), `scripts/reuse_compose.py` (the flow route), `scripts/reuse_split.py` (the shipped correction).
+`records/reuse-mv-reference.jsonl`; instrument: `harness/scripts/reuse_mv_gate.py` (the reference search and the region
+split), `harness/scripts/reuse_compose.py` (the flow route), `harness/scripts/reuse_split.py` (the shipped correction).
 
 This closes the geometry axis of the reuse lane. The queue row is
 `rve-reuse-mv-reference-2026-11-20`, and its falsifier is met: the coded field, applied at any reference and
@@ -119,12 +119,12 @@ the network does to the 4K detail from the 1080p frame, which is the network its
 python3 backend/rve-backend.py ... --input cut.mkv --output on.mkv  --temporal_reuse
 python3 backend/rve-backend.py ... --input cut.mkv --output off.mkv
 # the reference search and the region split, per reused frame
-python3 scripts/reuse_mv_gate.py --clip cut.mkv --depth-log gate.log --emit mv_gate.json
+python3 harness/scripts/reuse_mv_gate.py --clip cut.mkv --depth-log gate.log --emit mv_gate.json
 # the flow route from the served reference
-python3 scripts/reuse_compose.py --gated on.mkv --ungated off.mkv --lr cut.mkv --depth-log gate.log \
+python3 harness/scripts/reuse_compose.py --gated on.mkv --ungated off.mkv --lr cut.mkv --depth-log gate.log \
     --alpha 1.35 --fb-tol 1.0 --emit compose.json
 # the shipped correction
-python3 scripts/reuse_split.py --gated on.mkv --ungated off.mkv --lr cut.mkv --depth-log gate.log \
+python3 harness/scripts/reuse_split.py --gated on.mkv --ungated off.mkv --lr cut.mkv --depth-log gate.log \
     --alpha 1.35 --recursive --emit split.json
 ```
 

@@ -2,9 +2,11 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, sys
 import os as _bos, sys as _bsys
-_HARNESS_ROOT = _bos.path.dirname(_bos.path.dirname(_bos.path.dirname(_bos.path.abspath(__file__))))
-if _HARNESS_ROOT not in _bsys.path:
-    _bsys.path.insert(0, _HARNESS_ROOT)
+_HERE = _bos.path.dirname(_bos.path.abspath(__file__))
+_ROOT = _bos.path.dirname(_bos.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in _bsys.path:
+        _bsys.path.insert(0, _p)
 from harness.core import Population, Record, Store  # noqa: E402
 
 
@@ -26,7 +28,7 @@ def main(argv=None) -> int:
                            instrument="channel-max |delta| against the fp16 model, mean over 3 held-out frames",
                            config=f"{d['model']} at {d['scale']}x, 1920x1080, crops calibration; {label}",
                            session=st.session, statistic="mean", tier="measured", id=f"PK{n:03d}",
-                           run="scripts/grid_k_perlayer_probe.py", artifact=path,
+                           run="harness/scripts/grid_k_perlayer_probe.py", artifact=path,
                            extra={"artifact_sha256": sha(path), "policy": label}))
             n += 1
     st.dump(a.out)

@@ -758,5 +758,5 @@ cd backend && $PY rve-backend.py --input clip1080.mkv --output out_body.mkv \
 RVE_INT8_BODY=off $PY rve-backend.py ... --output out_fp16.mkv
 
 # утверждения
-$PY scripts/claim_check.py docs/claims-int8-stage4.txt
+$PY harness/scripts/claim_check.py docs/claims-int8-stage4.txt
 ```

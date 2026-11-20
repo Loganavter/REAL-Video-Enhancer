@@ -175,6 +175,6 @@ the tail's channel dim, now the stride) - and in all three the fix belongs at th
 ## 10. Reproduce
 
 ```bash
-<install-python> scripts/grid_k_predict_probe.py --out-file docs/wsp/verified/logs/grid-k-predict/rows.json
-<install-python> scripts/int8_grid_modes_probe.py --out-file docs/wsp/verified/logs/grid-modes/probe.json
+<install-python> harness/scripts/grid_k_predict_probe.py --out-file docs/wsp/verified/logs/grid-k-predict/rows.json
+<install-python> harness/scripts/int8_grid_modes_probe.py --out-file docs/wsp/verified/logs/grid-modes/probe.json
 ```

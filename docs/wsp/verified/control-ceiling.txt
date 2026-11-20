@@ -8,7 +8,7 @@
 > Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
 > label is still the wrong file.
 
-A maximum over a subset cannot exceed the maximum over the set. `scripts/check_control_ceiling.py`
+A maximum over a subset cannot exceed the maximum over the set. `harness/scripts/check_control_ceiling.py`
 takes a probe control record and a sweep record and exits 1 when the control is above the sweep.
 
 It fires on both clips:

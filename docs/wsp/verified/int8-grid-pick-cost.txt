@@ -52,7 +52,7 @@ If a model is known to sit near the bar (Epsilon), the knob is the answer for th
 ```bash
 python3 /tmp/opencode/timed_run.py                                  # fixed K=2
 RVE_INT8_GRID_K=auto python3 /tmp/opencode/timed_run.py             # the pick
-PYTHONPATH=. python3 harness/scripts/grid_pick_records.py
+PYTHONPATH=. python3 harness/harness/scripts/grid_pick_records.py
 PYTHONPATH=. python3 -m harness.cli check docs/wsp/verified/int8-grid-pick-cost.txt \
     --records docs/wsp/verified/records/int8-grid-pick-cost.jsonl --bars docs/claims-bars.json
 ```
