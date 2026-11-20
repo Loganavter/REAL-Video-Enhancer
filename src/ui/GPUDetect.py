@@ -81,3 +81,62 @@ class GPUDetect:
     
 if __name__ == '__main__':
     print(GPUDetect().getPyTorchFeatures())
+
+
+# --- what the int8 body needs from the card --------------------------------------------------------------
+#
+# The Fast preset swaps the model's body for Triton kernels that accumulate in int32 (`backend/src/pytorch/
+# compact/int8_kernels.py`, `tl.dot(..., out_dtype=tl.int32)`). `tl.dot` with int8 lowers to the integer tensor-core
+# instruction, which exists from Turing (compute capability 7.5) onward; below that Triton has nothing to lower to,
+# so the body is not a slower path there - it is an unavailable one.
+#
+# Unknown capability does NOT hide the option: on a machine where neither nvidia-smi nor the backend's torch can
+# answer, the probe still decides at render time, and hiding a working configuration is worse than offering one
+# that may fall back to fp16.
+
+INT8_MIN_CAPABILITY = (7, 5)
+
+
+def compute_capability():
+    """(major, minor) of the first CUDA GPU, or None when it cannot be determined without a full torch import."""
+    try:
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+            text=True, timeout=5, stderr=subprocess.DEVNULL,
+        )
+        major, minor = out.strip().splitlines()[0].strip().split(".")
+        return int(major), int(minor)
+    except Exception:
+        pass
+    try:
+        from ..constants import PYTHON_EXECUTABLE_PATH
+        result = subprocess.run(
+            [PYTHON_EXECUTABLE_PATH, "-c", "import torch;print(*torch.cuda.get_device_capability(0))"],
+            capture_output=True, text=True, timeout=40,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            major, minor = result.stdout.split()[:2]
+            return int(major), int(minor)
+    except Exception:
+        pass
+    return None
+
+
+def int8_decision(vendor, capability):
+    """Pure decision, so it can be tested without a GPU: (available, reason)."""
+    if vendor is not None and vendor != "Nvidia":
+        return False, f"{vendor} GPU: the int8 body is a CUDA/Triton kernel path"
+    if capability is None:
+        return True, "compute capability unknown; the probe decides at render time"
+    if tuple(capability) < INT8_MIN_CAPABILITY:
+        return False, (f"compute capability {capability[0]}.{capability[1]} is below "
+                       f"{INT8_MIN_CAPABILITY[0]}.{INT8_MIN_CAPABILITY[1]}: no int8 tensor cores")
+    return True, f"compute capability {capability[0]}.{capability[1]}"
+
+
+def int8_body_available():
+    """Whether the Fast preset can run here: (available, human-readable reason)."""
+    capability = compute_capability()
+    vendor = "Nvidia" if capability is not None else GPUDetect().getVendor()
+    return int8_decision(vendor, capability)
+
