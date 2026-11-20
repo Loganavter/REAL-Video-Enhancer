@@ -21,6 +21,7 @@ from . import Frame as frame_module  # Frame owns the lazily-initialised torch m
 
 class PreviewStager:
     def __init__(self, thumb_width, thumb_height):
+        # The box the thumbnails must fit in; each frame says its own w/h.
         self.width = int(thumb_width)
         self.height = int(thumb_height)
         self.device = None        # resolved on first use: torch is initialised lazily
@@ -30,6 +31,8 @@ class PreviewStager:
         self._event = None
         self._pending = False
         self._pending_fmt = None
+        self._pending_w = 0
+        self._pending_h = 0
         self._pending_len = 0
         self._pending_flags = 0
 
@@ -47,12 +50,14 @@ class PreviewStager:
             self._scratch = torch.empty(worst, dtype=torch.float16, device=self.device)
         return self._out, self._scratch
 
-    def submit(self, frame, high_bitdepth=False):
+    def submit(self, frame, thumb_width=None, thumb_height=None, high_bitdepth=False):
         """Gather `frame`'s thumbnail into pinned memory and let the device copy it."""
         if self._pending or frame_module._torch is None:
             return False
+        tw = int(thumb_width or self.width)
+        th = int(thumb_height or self.height)
         out, scratch = self._buffers()
-        got = frame.preview_planes(self.width, self.height, out=out, scratch=scratch)
+        got = frame.preview_planes(tw, th, out=out, scratch=scratch)
         if got is None:
             return False
         planes, fmt = got
@@ -69,17 +74,19 @@ class PreviewStager:
         if self._event is not None:
             self._event.record()
         self._pending_fmt = fmt
+        self._pending_w = tw
+        self._pending_h = th
         self._pending_len = n
         self._pending_flags = 1 if high_bitdepth else 0
         self._pending = True
         return True
 
     def take(self):
-        """`(payload, fmt, high_bitdepth)` of the previous frame if it has arrived, else None."""
+        """`(payload, fmt, w, h, high_bitdepth)` of the previous frame, or None if it is late."""
         if not self._pending:
             return None
         if self._event is not None and not self._event.query():
             return None
         self._pending = False
         payload = self._pinned[:self._pending_len].numpy().tobytes()
-        return payload, self._pending_fmt, bool(self._pending_flags)
+        return payload, self._pending_fmt, self._pending_w, self._pending_h, bool(self._pending_flags)

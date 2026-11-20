@@ -112,11 +112,13 @@ LIBS_PATH = os.path.join(
 IS_INSTALLED = os.path.isfile(FFMPEG_PATH) and os.path.isfile(PYTHON_EXECUTABLE_PATH)
 
 IMAGE_SHARED_MEMORY_ID = "/image_preview" + str(os.getpid())
-# Preview thumbnail geometry. Both sides size the block from this: the GUI allocates
-# header + two slots, the backend is told the same numbers via --preview_size. 640x360 is
-# 0.69 MB per frame to copy, against a 4K frame's 24.9 MB.
+# The preview BOX: the largest thumbnail either side may use, not the aspect ratio. The
+# backend sizes each thumbnail to the frame it has (long side 640, both axes sampled at the
+# same rate), and says the actual w/h in the header, so a 4:3 source is not cropped and not
+# stretched - a fixed 640x360 did both. Two slots of 640x640 RGB = 2.5 MB, against a 4K
+# frame's 24.9 MB to copy.
 PREVIEW_WIDTH = 640
-PREVIEW_HEIGHT = 360
+PREVIEW_HEIGHT = 640
 PAUSED_STATE_SHARED_MEMORY_ID = "/paused_state" + str(os.getpid())
 INPUT_TEXT_FILE = os.path.join(CWD, f"INPUT{os.getpid()}.txt")
 if (

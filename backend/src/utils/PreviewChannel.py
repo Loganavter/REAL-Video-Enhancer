@@ -69,8 +69,11 @@ def slot_stride(width, height):
 class PreviewChannel:
     """Writer side of the preview block. One per render; cheap to ask, cheap to fill."""
 
-    def __init__(self, shm_id, wait_seconds=10.0):
+    def __init__(self, shm_id, wait_seconds=10.0, box=(640, 640)):
         self.name = shm_id
+        # The slots are laid out for the largest thumbnail the box allows, not for the
+        # current frame's: a 4:3 frame and a 16:9 frame in one render must not overlap.
+        self._stride = 3 * int(box[0]) * int(box[1])
         self.shm = None
         if not shm_id:
             return
@@ -115,7 +118,7 @@ class PreviewChannel:
         seq = struct.unpack_from("<I", self.shm.buf, OFF_SEQ)[0]
         seq = (seq + 1) & 0xFFFFFFFF
         slot = seq & 1
-        offset = HEADER.size + slot * slot_stride(width, height)
+        offset = HEADER.size + slot * self._stride
         self.shm.buf[offset:offset + expected] = payload
         HEADER.pack_into(
             self.shm.buf, OFF_SEQ,

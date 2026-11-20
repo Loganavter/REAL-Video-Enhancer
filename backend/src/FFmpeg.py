@@ -72,7 +72,11 @@ class InformationWriteOut:
         self.framesRendered = 1
         # The preview is a thumbnail on its own small channel (utils/PreviewChannel.py):
         # no full-size frame, no writer thread holding a copy of the last one.
-        self.preview = PreviewChannel(sharedMemoryID) if sharedMemoryID else None
+        # The box fixes the slot stride for the whole render: a 4:3 frame's 640x480
+        # thumbnail and a 16:9 frame's 640x360 one must not overlap in the block.
+        self.preview = (PreviewChannel(sharedMemoryID,
+                                       box=(int(preview_size[0]), int(preview_size[1])))
+                        if sharedMemoryID else None)
         self.previewWidth, self.previewHeight = int(preview_size[0]), int(preview_size[1])
 
         self.pausedManager = PauseManager(paused_shared_memory_id)

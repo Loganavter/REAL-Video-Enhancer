@@ -3,8 +3,10 @@
 The preview used to be the output frame itself: `Frame.raw_payload_preview` cast the packed
 payload to float, ran the BT.709 matrix over all 8.3 Mpx and transferred a full 4K picture
 (24.9 MB) to the host **on every frame**, and the GUI then shrank it to a ~600 px label with
-a nearest-neighbour scale. It is now a 640x360 thumbnail sampled in the tensor (0.35 MB from
-the int8 body's payload, 0.69 MB from an RGB tensor), published only when the viewer
+a nearest-neighbour scale. It is now a thumbnail sampled in the tensor - 0.35 MB of yuv from the int8 body's payload,
+0.69 MB of rgb from an RGB tensor at 640x360, and the geometry follows the picture: the box
+is 640x640 and a 4:3 frame ships 640x480, so nothing is cropped and nothing is stretched
+(a fixed 640x360 did both to a 4:3 source) - published only when the viewer
 consumed the last one, and transferred one frame late through a pinned buffer so the loop
 never waits for the device.
 
