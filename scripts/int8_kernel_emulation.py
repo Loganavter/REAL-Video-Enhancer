@@ -1,6 +1,6 @@
 """Emulate the KERNEL's own quantiser in torch, prove the emulation, then let it explain the 6-14x gap.
 
-The lane has a disagreement it cannot explain: `scripts/int8_accuracy_sim.py` reads 0.06510% on frame 29
+The lane has a disagreement it cannot explain: `harness/scripts/int8_accuracy_sim.py` reads 0.06510% on frame 29
 while the app's Triton body reads 0.42-0.91% over the same clip. Two earlier attempts to compare them hop by
 hop failed because they compared two different recipes (the body quantises SYMMETRICALLY on +-127, the sim
 ASYMMETRICALLY over 0..255), so the diff was a unit error.

@@ -14,7 +14,7 @@ mistake is not repeated rather than deleted.
 
 Original intent:
 
-The lane has a 6-14x disagreement between `scripts/int8_accuracy_sim.py` (0.065% on frame 29) and the app's
+The lane has a 6-14x disagreement between `harness/scripts/int8_accuracy_sim.py` (0.065% on frame 29) and the app's
 Triton body (0.42-0.91% over the clip). Every lever the simulation proposed was then worth ~0 in the kernel,
 which means the simulation is not modelling what the kernel does. This script localises that:
 
