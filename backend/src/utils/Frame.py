@@ -283,13 +283,17 @@ def payload_planes(tensor, height: int, width: int, thumb_width: int, thumb_heig
     if (tuple(y.shape) != (thumb_height, thumb_width)
             or tuple(u.shape) != (ch, cw) or tuple(v.shape) != (ch, cw)):
         return None
-    total = n + 2 * ch * cw
+    total = thumb_width * thumb_height + 2 * ch * cw
     if out is None:
         return _torch.cat((y.reshape(-1), u.reshape(-1), v.reshape(-1))).contiguous()
+    # the OUTPUT offsets are the thumbnail's, not the source frame's: `n` above is the
+    # source Y plane (8.3 Mpx at 4K), and using it here silently wrote past the buffer on
+    # every 4K frame
+    thumb_n = thumb_width * thumb_height
     view = out[:total]
-    view[:n].copy_(y.reshape(-1))
-    view[n:n + ch * cw].copy_(u.reshape(-1))
-    view[n + ch * cw:].copy_(v.reshape(-1))
+    view[:thumb_n].copy_(y.reshape(-1))
+    view[thumb_n:thumb_n + ch * cw].copy_(u.reshape(-1))
+    view[thumb_n + ch * cw:].copy_(v.reshape(-1))
     return view
 
 

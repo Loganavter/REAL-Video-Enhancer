@@ -39,6 +39,19 @@ RTX 4060 Ti 16 GB, one GPU job at a time, `bd_violet120s` = 118 frames of 1920x1
   what this change removed is the *wait*, which is why the median is stable and the transfer
   no longer sits inside the frame.
 
+## Live proof (the window half)
+
+The reader on a leased X display (`:91`, `live-lease`, never the desktop), a real `QLabel`
+painted from a real render publishing into the same block:
+`docs/wsp/verified/logs/preview-2026-11-20/live-window-640x360.png` and the reader's own
+output beside it. Ten frames arrived (the render built ten thumbnails in 28 frames at the
+viewer's cadence), the label and the grab are 640x360, the centre pixel reads 238,223,211 and
+a 64x64 sample holds 1679 distinct colours - a picture, not a blank, black or torn frame.
+What that run also caught: the int8 arm had produced *zero* thumbnails since the output
+offsets were taken from the source Y plane instead of the thumbnail's, which the 8x6 unit
+fixture could not see (source size == thumbnail size there). The regression test now uses a
+frame four times wider than the thumbnail.
+
 ## What this does not cover
 
 * One card, one host, one clip, one model. The tail belongs to this desktop (the same clients
