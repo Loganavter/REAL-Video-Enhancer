@@ -335,7 +335,8 @@ class ProcessTab:
                             re.search(r"Current Frame: (\d+)", line).group(1)
                         )
                         self.fps = re.search(r"FPS: (\d+)", line).group(1)
-                        self.eta = re.search(r"ETA: (.+)", line).group(1)
+                        # bounded to h:mm:ss: the stream can carry a log record on the same line
+                        self.eta = re.search(r"ETA: (\d+(?::\d+){2})", line).group(1)
                         self.status = "Rendering"
 
                     if "this may take a while" in line.lower():

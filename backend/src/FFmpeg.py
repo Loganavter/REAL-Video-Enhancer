@@ -4,10 +4,13 @@ import time
 import numpy as np
 
 if __name__ != "__main__":
-    from .utils.Util import log, padFrame, subprocess_popen_without_terminal
+    from .utils.Util import log, padFrame, subprocess_popen_without_terminal, set_inplace_line
 else:
     def log(message):
         print(message)
+
+    def set_inplace_line(open_: bool = True):
+        pass
 
 
 
@@ -103,6 +106,9 @@ class InformationWriteOut:
 
         # Update the length of the last printed line
         self.last_length = len(data)
+        # the line stays open until something writes a whole line (see Util.end_inplace_line);
+        # without this the next log record lands on its tail
+        set_inplace_line(True)
 
     def get_is_paused(self):
         return self.isPaused
