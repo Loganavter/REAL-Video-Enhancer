@@ -6,7 +6,7 @@ Using Device: NVIDIA GeForce RTX 4060 Ti
 BACKEND: Handling precision: float32
 Initialized Frame PyTorch utils
 frame 3840x2160 on cuda, thumbnail 640x360, median of 8
-  old (whole-frame float + full D2H): 18.03 ms, 24.9 MB to the host
-  new (sampled planes, thumbnail D2H): 0.19 ms, 0.35 MB to the host
-  ratio: 93.1x
+  old (whole-frame float + full D2H): 16.46 ms, 24.9 MB to the host
+  new (sampled planes, thumbnail D2H): 0.20 ms, 0.35 MB to the host
+  ratio: 82.8x
 uncovered scope: one frame, one card, one session; this prices the two bodies, it is not the loop's per-frame cost (see the render's `preview ... ms` line).

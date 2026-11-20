@@ -14,14 +14,14 @@ RTX 4060 Ti 16 GB, one GPU job at a time, `bd_violet120s` = 118 frames of 1920x1
 
 ## Claims
 
-@claim PV001 0.16 ms "frames [d8cadbad658ad4df] n=118" measured
-@claim PV002 0.43 ms "thumbnails [cb0afc179b1dacba] n=41" measured
-@claim PV003 0.71 ms "thumbnails [cb0afc179b1dacba] n=41" measured
-@claim PV004 0.36 ms "frames [d8cadbad658ad4df] n=118" measured
-@claim PV005 0.5 ms "thumbnails [77a86c6db02a0777] n=67" measured
-@claim PV006 4.41 ms "thumbnails [77a86c6db02a0777] n=67" measured
-@claim PV007 18.03 ms "calls [4a953ad706c33ab2] n=8" measured
-@claim PV008 0.19 ms "calls [4a953ad706c33ab2] n=8" measured
+@claim PV001 0.18 ms "frames [d8cadbad658ad4df] n=118" measured
+@claim PV002 0.41 ms "thumbnails [cb0afc179b1dacba] n=41" measured
+@claim PV003 2.83 ms "thumbnails [cb0afc179b1dacba] n=41" measured
+@claim PV004 0.28 ms "frames [d8cadbad658ad4df] n=118" measured
+@claim PV005 0.49 ms "thumbnails [7d7ba4c96e821c9f] n=65" measured
+@claim PV006 1.84 ms "thumbnails [7d7ba4c96e821c9f] n=65" measured
+@claim PV007 16.46 ms "calls [4a953ad706c33ab2] n=8" measured
+@claim PV008 0.2 ms "calls [4a953ad706c33ab2] n=8" measured
 @claim PV009 24.0 ms "calls [12e91200be06e86c] n=60" measured
 
 ## What the numbers say, and what they do not
