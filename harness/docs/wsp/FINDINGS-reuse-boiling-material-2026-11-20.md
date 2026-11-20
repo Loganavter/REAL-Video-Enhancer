@@ -64,6 +64,60 @@ level is invisible to it. It is not the wrong wiring - the synthetic control pro
 - Fixing the denoiser's temporal consistency upstream, in the restoration pipeline rather than in
   RVE.
 
+## Second pass: calibration does not save it, and the ceiling is the real number
+
+Asked after the first write-up: if the calibration is the problem, does reuse grow? Measured, on
+a 30 s run started on the calm opening (which is what a per-scene calibration would look like):
+
+| | |
+|---|---|
+| gate decision | engaged, threshold 4, chain 4, floor 0.01, acceptance 0.00% on the 16 calibration frames |
+| reuse | **81/720 = 11.2%** |
+| damage on the run | **0.482% worst frame, 46 of 540 frames above the 0.1% bar** |
+
+So reuse grows from 0% to ~11% and the picture fails by 4.8x. The calibration sample is calmer
+than the run it decides - the documented ~5x sample bias, here unbounded (0.00 against 0.482).
+Calibration is not the lever.
+
+The ceiling says why. Sampled at native 24 fps over the episode (`--clip`):
+
+    <= 2 levels:  6-8% of frame pairs      <= 8 levels: 37%
+    <= 4 levels:  8-10%                    median delta 11-13, 21-35% of pairs are cuts
+
+No mechanism can exceed the ceiling, and the ceiling at the gate's thresholds is ~10%.
+
+## Why the pairs differ on what should be held cels - open
+
+An animation shot on twos should give ~50% identical consecutive frames, and this gives 8%.
+Phase correlation over several windows shows the shift between consecutive frames is
+**sub-pixel** (median 0.05-0.15 px, max ~1 px) - so no camera pan - and compensating it removes
+10-50% of the delta on some windows (t=200: 20.5 -> 9.3) and almost nothing on others (t=60:
+55.4 -> 55.0, cuts). What is left is not a global move.
+
+Candidates, none measured yet: animation on ones; the 23.976-from-24 transfer; the dust-removal's
+own temporal filter; 8-bit-equivalent encode noise on a 10-bit stream.
+
+The deeper measurement problem: a fraction-of-a-pixel shift of line art moves edge pixels by tens
+of levels, so the gate's statistic (max over blocks of the mean |difference|) and the acceptance
+statistic (share of pixels >8 levels) both read invisible sub-pixel shimmer as motion. Nothing in
+the current instrument set separates "invisible" from "moved".
+
+## Harness: the guard against repeating this
+
+`harness/scripts/reuse_ceiling.py` - one command answers the question the day was spent on:
+
+* `--clip CLIP` reports the reuse ceiling (share of frame pairs under 2/4/8 levels, cut share,
+  median) sampled at **native frame rate**. The 1 fps sampling that made this material look static
+  is not possible through this instrument.
+* `--pair A B` prints correlation, mean difference and share >8 levels before any model is fed a
+  pair. The blind-consistency check first ran on the wrong "original" and read as "the model does
+  nothing"; the true pair correlates 0.9997 and differs by 1.1 levels.
+* `--wobble CLIP` prints the per-pair shift and the delta before and after shift compensation,
+  so the next investigator sees whether the obstacle is translatable.
+* A **control runs on every invocation**: identical frames must read exactly 0 and a known
+  +8-level difference must read >= 8. A broken instrument now fails loudly instead of producing a
+  plausible number.
+
 ## Reproduce
 
 ```bash
@@ -75,6 +129,11 @@ python3 harness/scripts/residual_reuse_probe.py CLIP --frames 8 --scale 0.5 --co
 
 # MCTF with the installed flow
 python3 harness/scripts/mctf_stabilize_probe.py CLIP --frames 12
+
+# the ceiling, the pair check and the wobble - start here, not with a mechanism
+python3 harness/scripts/reuse_ceiling.py --clip CLIP --duration 20
+python3 harness/scripts/reuse_ceiling.py --pair ORIGINAL PROCESSED --start 120
+python3 harness/scripts/reuse_ceiling.py --wobble CLIP --start 200 --frames 14
 
 # the AABB stabiliser, end to end (encode stabilised -> render -> gate_sweep)
 # see the commit of 2026-11-20 for the exact commands; the numbers above are its output
