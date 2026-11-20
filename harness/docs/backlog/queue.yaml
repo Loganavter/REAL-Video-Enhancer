@@ -5205,9 +5205,20 @@ tasks:
 - id: rve-reuse-structural-gate-2026-11-20
   title: 'Decide reuse on the drawing, not on the scan: coarse-scale comparison plus a warped reuse'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
+  resolution: >-
+    Coarse statistic (`--temporal_reuse_statistic coarse`: 3 px low-pass + FFT phase correlation, minimum of
+    the warped and un-warped comparison) plus a warped emission (`TemporalCorrection.align`). On the calm
+    window of 078 Pink Plasma: 63.8% of frames reused (51/80, depths 1-4), coarse-scale damage 0.030% worst
+    with 0 of 80 frames over the 0.1% bar, and 8.15% worst at the pixel scale of which 0.77% median is dust
+    dots. Cost 1.49 ms statistic + 0.81 ms emission warp per reused frame against ~39 ms of model call. The
+    tuner certifies at the coarse scale and prices the EMISSION (stale 0.343%, moved 0.181%, moved+residual
+    0.000%), which is what made it certify at all. Three measurement-caught bugs are recorded with the note:
+    the grid_sample sign, an inverted x parabola, and a shift subtracted twice in the emission warp.
+    Evidence: harness/docs/wsp/verified/reuse-structural-gate.txt. Opt-in (`--temporal_reuse`); the gate is
+    still off by default. Covered by 8 new torch tests in harness/tests/test_reference_gate.py.
   gpu: true
   cost: 2d
   tags:

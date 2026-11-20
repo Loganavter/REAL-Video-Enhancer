@@ -678,3 +678,150 @@ def test_a_scene_cut_is_reported_so_callers_can_reset_their_histories():
     assert gate.last_scene_cut is True
     gate.is_duplicate(bright)
     assert gate.last_scene_cut is False           # the new reference is now stable
+
+
+# --------------------------------------------------------------------------------------
+# torch layer: the coarse statistic (decide on the drawing, not on the scan's registration)
+# --------------------------------------------------------------------------------------
+def _line_art(torch, height=270, width=360, seed=0):
+    """A deterministic line-art frame: strokes on a mid field, i.e. the content a worst-block rule must see."""
+    generator = torch.Generator().manual_seed(seed)
+    frame = torch.full((1, 3, height, width), 0.66)
+    for _ in range(40):
+        y = int(torch.randint(4, height - 6, (1,), generator=generator).item())
+        x = int(torch.randint(4, width - 8, (1,), generator=generator).item())
+        frame[:, :, y:y + 2, x:x + max(3, width // 40)] = 0.10
+    return frame
+
+
+def _shift_torch(torch, frame, dx, dy):
+    """Content moved by exactly (dx, dy) pixels, replicate borders - what a scan's wobble does."""
+    height, width = int(frame.shape[-2]), int(frame.shape[-1])
+    ys = torch.arange(height, dtype=torch.float32) - float(dy)
+    xs = torch.arange(width, dtype=torch.float32) - float(dx)
+    grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")
+    grid = torch.stack(((grid_x / (width - 1)) * 2 - 1, (grid_y / (height - 1)) * 2 - 1), dim=-1)[None]
+    return torch.nn.functional.grid_sample(frame, grid, mode="bilinear", padding_mode="border",
+                                           align_corners=True)
+
+
+def test_coarse_warp_moves_content_in_the_direction_it_is_given():
+    """The sign of the geometry, pinned on a single bright dot.
+
+    Both warps in this feature are one ``grid_sample`` call, and ``grid_sample`` reads the INPUT at the grid's
+    coordinates - so an offset of +d moves the CONTENT by -d. The first version got this backwards in the
+    statistic and in the emission, and the measurement that caught it was exactly this: a dot moved by +3 and
+    then read where it is.
+    """
+    torch = _torch()
+    frame = torch.zeros(1, 1, 32, 48)
+    frame[0, 0, 10, 20] = 1.0
+    gate = TR.ReferenceFrameGate(statistic="coarse", pixel_veto=None)
+    for dx, dy in ((3.0, 5.0), (-4.0, 0.0), (0.0, -2.0)):
+        moved = gate._shift_tensor(frame, dx, dy)
+        y, x = divmod(int(moved.flatten().argmax()), 48)
+        assert (x, y) == (20 + int(dx), 10 + int(dy)), f"content moved by ({dx},{dy}) landed at ({x},{y})"
+
+
+def test_coarse_corrector_align_moves_the_base_by_the_shift():
+    torch = _torch()
+    from src.utils.TemporalCorrection import ReferenceFrameCorrector
+    lr = torch.zeros(1, 1, 32, 48)
+    lr[0, 0, 10, 20] = 1.0
+    corrector = ReferenceFrameCorrector()
+    corrector.seed(lr, lr)
+    assert corrector.align(3.0, 5.0) is True
+    y, x = divmod(int(corrector._lr.flatten().argmax()), 48)
+    assert (x, y) == (23, 15)
+    assert corrector.aligned == 1
+
+
+def test_coarse_registration_reads_a_known_shift_with_the_right_sign():
+    """A synthetic shift must come back with its sign and within a fraction of a pixel of itself."""
+    torch = _torch()
+    frame = _line_art(torch, 216, 288)
+    gate = TR.ReferenceFrameGate(statistic="coarse", pixel_veto=None)
+    reference = gate._lowpass(torch.nn.functional.avg_pool2d(gate.luma(frame), 2),
+                              gate.coarse_sigma / 2.0)
+    for truth in ((2.0, 3.0), (-2.0, -3.0)):
+        moved = _shift_torch(torch, frame, *truth)
+        current = gate._lowpass(torch.nn.functional.avg_pool2d(gate.luma(moved), 2),
+                                gate.coarse_sigma / 2.0)
+        dx, dy, response, trusted = gate._register(reference, current)
+        assert trusted and response > 0.2
+        # the estimator is biased low on a broad peak (measured 0.37 px read as 0.21); the sign is not
+        assert dx == pytest.approx(truth[0], abs=0.6), f"{truth} read as ({dx:.2f},{dy:.2f})"
+        assert dy == pytest.approx(truth[1], abs=0.6), f"{truth} read as ({dx:.2f},{dy:.2f})"
+
+
+def test_coarse_statistic_accepts_a_sub_pixel_wobble_the_pixel_statistic_refuses():
+    """The whole point, on one frame pair: 0.4 px of scan wobble is not a changed cel."""
+    torch = _torch()
+    frame = _line_art(torch, 216, 288)
+    moved = _shift_torch(torch, frame, 0.4, -0.25)
+
+    pixel_gate = TR.ReferenceFrameGate(statistic="mean_abs", threshold=4.0, pixel_veto=None)
+    pixel_gate.is_duplicate(frame)
+    pixel_reuse = pixel_gate.is_duplicate(moved)
+    pixel_delta = pixel_gate.last_delta
+
+    coarse_gate = TR.ReferenceFrameGate(statistic="coarse", threshold=4.0, pixel_veto=None)
+    coarse_gate.is_duplicate(frame)
+    coarse_reuse = coarse_gate.is_duplicate(moved)
+    coarse_delta = coarse_gate.last_delta
+
+    print(f"\n0.4 px wobble: pixel statistic {pixel_delta:.2f} (reuse {pixel_reuse}), "
+          f"coarse {coarse_delta:.2f} (reuse {coarse_reuse})")
+    assert not pixel_reuse and pixel_delta > 4.0
+    assert coarse_reuse and coarse_delta <= 4.0
+    assert coarse_delta < pixel_delta / 2
+
+
+def test_coarse_statistic_still_catches_a_change_that_matters():
+    """A statistic that accepts everything is not a statistic: a 12-level area change must be a miss."""
+    torch = _torch()
+    frame = _line_art(torch, 216, 288)
+    changed = frame.clone()
+    changed[:, :, 60:140, 80:200] = (changed[:, :, 60:140, 80:200] + 12.0 / 255.0).clamp(0, 1)
+    gate = TR.ReferenceFrameGate(statistic="coarse", threshold=4.0, pixel_veto=None)
+    gate.is_duplicate(frame)
+    assert gate.is_duplicate(changed) is False
+    assert gate.last_delta >= 10.0
+
+
+def test_coarse_identity_reads_exactly_zero_and_registers_no_shift():
+    torch = _torch()
+    frame = _line_art(torch, 216, 288)
+    gate = TR.ReferenceFrameGate(statistic="coarse", threshold=0.001, pixel_veto=None)
+    gate.is_duplicate(frame)
+    assert gate.is_duplicate(frame) is True
+    assert gate.last_delta == pytest.approx(0.0, abs=1e-9)
+    assert gate.last_shift == (pytest.approx(0.0, abs=1e-6), pytest.approx(0.0, abs=1e-6))
+
+
+def test_coarse_registration_is_refused_on_a_flat_frame_instead_of_inventing_half_the_picture():
+    """A uniform frame has no correlation peak; the estimator answered with half the picture (120 px)."""
+    torch = _torch()
+    flat = torch.full((1, 3, 216, 288), 0.5)
+    gate = TR.ReferenceFrameGate(statistic="coarse", threshold=4.0, pixel_veto=None)
+    gate.is_duplicate(flat)
+    assert gate.is_duplicate(flat) is True
+    assert gate.registration_refusals >= 1
+    assert gate.last_shift == (0.0, 0.0)
+    assert gate.last_shift_step == (0.0, 0.0)
+
+
+def test_coarse_shift_step_is_the_increment_for_the_emitter():
+    """A reuse must move the picture by the increment against the previous frame, not against the reference."""
+    torch = _torch()
+    frame = _line_art(torch, 216, 288)
+    gate = TR.ReferenceFrameGate(statistic="coarse", threshold=12.0, max_chain=4, pixel_veto=None)
+    gate.is_duplicate(frame)                               # miss: the reference
+    gate.is_duplicate(_shift_torch(torch, frame, 1.0, 0.0))
+    first = gate.last_shift_step
+    gate.is_duplicate(_shift_torch(torch, frame, 2.0, 0.0))
+    second = gate.last_shift_step
+    assert first[0] == pytest.approx(1.0, abs=0.6)
+    # the second step is one more pixel on top of the first, so the increment is ~1 not ~2
+    assert second[0] == pytest.approx(1.0, abs=0.7)
+    assert gate.last_shift[0] == pytest.approx(2.0, abs=0.7)
