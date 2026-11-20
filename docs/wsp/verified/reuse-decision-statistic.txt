@@ -274,6 +274,39 @@ needed to explain the sign: a predictor built on texture complexity is, on this 
 @claim RU027 0.776 AUC "reused frames [55a222f0b8bdd68b] n=130" measured
 @claim RU028 0.180 AUC "reused frames [5f0cfcb6920156cd] n=123" measured
 
+
+## Splitting the correction by frequency, not by gain: both instruments satisfied on 1040 s
+
+The gain scan said one scalar cannot satisfy both instruments. It cannot - but the two components of
+`LR_t - LR_ref` are not distinguished by their amplitude, they are distinguished by their **content**: the
+displacement/tone part is low-frequency and must be added once, the grain part is high-frequency and the network
+amplifies it by `alpha`. So split the residual with a 5 px box low-pass and give the two halves different gains,
+applying the grain gain only where it cannot move an edge (local `|r| < 3` levels and LR gradient `< 5`), with the
+correction computed **per channel**:
+
+`out = cached_SR + up(lowpass(r) + alpha * highpass(r))`
+
+| clip | variant | frames over 0.1% | texture |
+|---|---|---|---|
+| 1040 s | verbatim skip | 37 / 130 | 0.000 |
+| 1040 s | structural only (alpha 1.0) | 0 / 130 | 0.775 |
+| 1040 s | **split, alpha 1.35** | **0 / 130** (worst 0.09166%) | **1.001** |
+| 960 s, held out | structural only | 4 / 124 | 0.760 |
+| 960 s, held out | split, alpha 1.35 | **4 / 124** (worst 0.19207%) | **1.020** |
+
+Two results. First, **the grain half is free at the acceptance bar**: alpha 1.35 lifts the texture from 0.775 to
+1.001 on 1040 s and from 0.760 to 1.020 on the held-out clip without adding a single frame above the bar. Second,
+**the four remaining failures on 960 s are geometry, not grain**: the structural-only variant reads the same
+4 / 124 and the same worst share, which is the coherent-motion case a non-warped residual cannot fix.
+
+Correction to earlier rows: RU017/RU018 (0.09329% / 0.388) were computed with the LR read as **luma** and the
+correction broadcast across the three channels. The per-channel variant reads 0.08046% / 0.775 at the same unit
+gain, so the 0.388 was an instrument artefact and the texture deficit was half of what the record said before the
+grain half is added.
+
+@claim RU029 1.001 x "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU030 1.020 x "reused frames [af066356217e17b1] n=124" measured
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so
