@@ -167,6 +167,26 @@ The texture half is solved - 0.974 against the fresh render, nothing frozen - an
 the clean plate lowers the noise floor (0.65 against 0.87), so the gate engages on more frames and its
 structural errors are now un-masked. 42 of 204 frames over the bar, against 37 of 130 for the verbatim skip.
 
+
+### The certification rule, simulated
+
+The same ranker, used as a rule: skip when `block_maxabs` (against the served reference) exceeds the threshold
+picked on 1040 s (2.172 levels), and count a violation when a skipped frame is past the 0.1% bar.
+
+| clip | skipped | violations | rate |
+|---|---|---|---|
+| 1040 s (calibration) | 130 | 37 | **28.46%** |
+| 960 s (held out) | 123 | 6 | **4.88%** |
+
+So the rule is not a certificate: at the calibrated threshold the *calibration* clip itself violates on 28% of
+its skips, and the held-out clip on 5%. A per-chunk audit controller (10% of each 20-reuse chunk rendered and
+scored, threshold moved 5% up or 2% down by the audited rate) does not converge on this data: with two audited
+frames per chunk the estimate is too noisy to steer, and the threshold drifts up (2.172 -> 2.485) while the
+violations stay where they were. The arithmetic above says why - a sample of 18 cannot bound a 0.77% rate.
+
+@claim RU023 28.46 % "reused frames [b7010cf3b0acf799] n=130" measured
+@claim RU024 4.88 % "reused frames [8634db61097bc953] n=123" measured
+
 **Why the certification cannot be bought cheaply.** A per-shot audit of the frames the gate wanted to skip is
 the natural way to certify a threshold without labels. With zero violations in `n` audited reuses, the 95%
 upper bound on the violation rate is `1 - 0.05^(1/n)`: 45% at n=5, 26% at n=10, 5.8% at n=50, 2.3% at n=130,
