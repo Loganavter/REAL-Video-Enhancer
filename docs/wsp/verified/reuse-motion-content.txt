@@ -1,0 +1,97 @@
+# The class the population was missing: dense moving line art, where the correction fails by 30x and the gate refuses
+
+Measured 2026-11-20 (local), the app's own renderer (TensorRT, 2x Futsuu Anime, 1080p -> 4K, ffv1 lossless sink).
+Records: `records/reuse-motion-content.jsonl`; clip provenance: `sources.yaml` (`motion8s.mkv`).
+
+The queue row `rve-reuse-motion-content-2026-11-20` asked for the one content class the accepted population does
+not cover. Every failure measured so far was either a near-blank flash whose whole error is a 1-2 px border line, or
+a still face with a 21/255 line-art softening. Dense line art that *moves* was not in the population, and it is the
+class where the residual's error would scale with the moving area instead of hiding in a border.
+
+## How the segment was picked
+
+An automated scan of the whole episode (36 612 frames of the 25:27 BDRemux, decoded at 480p) computed per frame the
+share of detail (gradient > 20) and the share of pixels changed by more than 8 levels against the previous frame.
+Episode medians: **detail 4.07%, motion 0.48%**. The best 8 s window by their product is **163-171 s** - a
+bowling-alley scene, several characters, line art across the frame, the hero throwing a ball - at **detail 15.6%,
+motion 40.6%**, i.e. 4x and 85x the episode medians. The cut was made before any acceptance number was looked at.
+
+Provenance is a packet subsequence, not a re-encode: `-c copy`, 204 packets, **38.3 Mbps**, and the first ten packet
+sizes of the cut match the source at offset **3910** exactly. Recorded in `sources.yaml`.
+
+## The gate refuses it, and that is the product's protection
+
+With the app's own auto tuner (`--temporal_reuse`), the noise floor reads **31.16** against the **1.5** refusal
+limit, and reuse is switched off: **0 of 204 frames**. The same tuner engages on the 1040 s cut (floor 0.87) and on
+960 s, so the refusal is content-driven, not a global setting.
+
+@claim RU048 31.16 levels "frames [b28472c139dbce0b] n=204" measured
+
+## Forced through, the correction fails on every frame
+
+Forcing the gate (`--no_temporal_reuse_auto --temporal_reuse_threshold 20`, i.e. blocks allowed to move by up to 20
+levels) still reuses only **8 of 204 frames (3.9%)**, all at depth 1 - the picture really does change everywhere.
+On those eight the split + recursive correction reads:
+
+| frame | share over 0.1% bar | interior | band (8 px) | max level |
+|---|---|---|---|---|
+| 15 | 3.03% | 2.91% | 0.48% | 127 |
+| 19 | 0.44% | 0.39% | 0.07% | 87 |
+| 24 | 3.19% | 2.77% | 0.14% | 171 |
+| 27 | 3.13% | 2.78% | 0.17% | 189 |
+| 29 | 3.17% | 2.79% | 0.15% | 180 |
+| 34 | 3.16% | 2.78% | 0.41% | 181 |
+| 47 | 3.19% | 2.81% | 0.40% | 178 |
+| 190 | 0.10% | 0.05% | 0.00% | 31 |
+
+**Eight of eight over the bar**, worst 3.19% - 30x the bar and 16x the worst frame of the held-out action clip. The
+failure is **interior**, the opposite of the earlier class: 2.78-2.91% of the interior against 0.14-0.48% of the
+band, with peaks of **171-189 levels**. The picture is wrong, not softened: at frame 24 the hair strands are doubled
+and shifted (`images/motion24_ours.png` against `images/motion24_fresh.png`).
+
+The two numbers that separate this class from the accepted one: amplitude (189 levels against 39) and location
+(interior against a 1-2 px border line). The accepted population's worst frames are frames where the picture does
+not move; here it moves everywhere, and a 1080p residual cannot move 4K line art.
+
+@claim RU044 3.1879 % "reused frames [4422e0927a2cd85e] n=8" measured
+@claim RU045 2.914 % "reused frames [4422e0927a2cd85e] n=8" measured
+@claim RU046 189 levels "reused frames [4422e0927a2cd85e] n=8" measured
+@claim RU047 8 count "reused frames [4422e0927a2cd85e] n=8" measured
+
+## What this changes
+
+Nothing in the accepted result, and one thing in the reasoning: **the gate's auto refusal is load-bearing, not
+incidental.** The class where the correction is visibly broken is exactly the class where the tuner's noise floor
+exceeds its limit and reuse never happens. That is why the product default (gate off, opt-in) and the tuner's own
+refusal agree with each other.
+
+It also bounds the verdict `reuse-residual-imperceptible`: the residual is imperceptible on the population it was
+judged on - frames that are blank or still - and this cut is the counterexample that shows why the class had to be
+measured rather than assumed.
+
+## Reproduce
+
+```bash
+# the cut (stream copy; the packet-subsequence proof is in sources.yaml)
+ffmpeg -v error -ss 163 -t 8 -i "<BDRemux>" -c copy motion8s.mkv
+# the gate's own decision, and the refusal line
+RVE_DEBUG_DEPTH=1 python3 backend/rve-backend.py ... --input motion8s.mkv --output null --temporal_reuse
+# forced reuse, the pair, and the correction
+RVE_DEBUG_DEPTH=1 python3 backend/rve-backend.py ... --input motion8s.mkv --output null \
+    --temporal_reuse --no_temporal_reuse_auto --temporal_reuse_threshold 20
+python3 backend/rve-backend.py ... --input motion8s.mkv --output on.mkv  --temporal_reuse \
+    --no_temporal_reuse_auto --temporal_reuse_threshold 20
+python3 backend/rve-backend.py ... --input motion8s.mkv --output off.mkv
+python3 scripts/reuse_split.py --gated on.mkv --ungated off.mkv --lr motion8s.mkv \
+    --depth-log gate.log --alpha 1.35 --recursive --emit split.json
+```
+
+## NOT checked
+
+The band/interior split in `mot_class.json` was recomputed with an OpenCV box filter rather than the
+integral-image one `reuse_split.py` uses, so its shares read 0.1-0.3 points lower than the table's (`3.03%` against
+`2.89%` at frame 15); the class conclusion - interior, 171-189 levels - does not depend on that difference. The
+segment is one 8.5 s cut of one episode, and the forced configuration is a stress test, not a product setting: what
+it establishes is that the correction *would* break here, not that the product permits it. No perceptual metric was
+run on this class (VMAF is known to be blind to doubled thin lines, and the owner's eye already settled the accepted
+population).

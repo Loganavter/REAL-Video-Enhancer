@@ -53,6 +53,17 @@ clips:
       doubled by the 2x upscaler.
     facts: {bit_rate_mbps: 3.982, packets: 480, pix_fmt: yuv420p, color_range: tv, has_b_frames: "2"}
 
+  # The dense-motion cut (2026-11-20): picked by an automated scan of the whole episode for high detail AND
+  # high inter-frame change, not by eye and not after seeing any acceptance number. It is the content class the
+  # reuse population was missing - a bowling-alley scene at 163-171 s where line art covers the frame and moves.
+  - file: motion8s.mkv
+    label: BDRemux 8.5 s cut, -c copy (2026-11-20, dense moving line art)
+    source: /home/jorj/2Tb/remastering/Chainsaw Man/01. Dog & Chainsaw.mkv
+    cut: {mode: stream_copy, offset: 3910, compared: 10, packets: 204}
+    contaminated: false
+    min_bitrate_mbps: 20.0
+    facts: {bit_rate_mbps: 38.312, packets: 204, pix_fmt: yuv420p, color_range: "", has_b_frames: "4"}
+
 # Cuts already made from the source in the earlier rounds. Their bit rates say they are stream copies;
 # the packet-subsequence proof is recorded when it was run (see the `cut` block).
   - file: csm8s.mkv

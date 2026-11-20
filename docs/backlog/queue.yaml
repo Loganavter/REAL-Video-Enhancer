@@ -5112,7 +5112,7 @@ tasks:
 - id: rve-reuse-motion-content-2026-11-20
   title: 'Reuse on a segment with dense MOVING line art: the one content class the population does not cover'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
   gpu: true
@@ -5147,3 +5147,15 @@ tasks:
     Filed because the owner judged the measured residual imperceptible (verdict reuse-residual-imperceptible) and
     the only population gap left is moving detail. Cheap: one cut, one render pair, one correction pass (~20 min),
     so it is worth having before the gate is ever enabled by default.
+  resolution: >-
+    DONE 2026-11-20, and the answer is two-sided. The segment was picked mechanically: a scan of all 36 612 frames
+    of the episode on detail x motion put 163-171 s (bowling alley, line art across the frame, the hero throwing)
+    at 15.6% detail and 40.6% motion against episode medians of 4.07% and 0.48%; the cut is a stream copy whose
+    first ten packet sizes match the source at offset 3910 (38.3 Mbps). The app's auto gate REFUSES it - noise
+    floor 31.16 against the 1.5 limit, 0 of 204 frames reused - so the product never reuses this class. Forced
+    through at threshold 20 it still only reuses 8 of 204, and on those the split+recursive correction reads 8 of 8
+    over the bar, worst 3.19% (30x the bar), interior (2.78-2.91% against 0.14-0.48% in the band), peaks of
+    171-189 levels - doubled hair strands, obvious to the eye. So: the class is real and the correction is visibly
+    broken on it, and the gate's noise-floor refusal is what keeps it out of the product. Evidence:
+    docs/wsp/verified/reuse-motion-content.txt, records RU044-RU048.
+  evidence: docs/wsp/verified/reuse-motion-content.txt
