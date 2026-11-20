@@ -248,7 +248,10 @@ def rgb_planes(image, thumb_width: int, thumb_height: int, out=None, scratch=Non
         scratch.copy_(small)
         scratch.clamp_(0.0, 1.0)
         scratch.mul_(255.0)
-        out.copy_(scratch)
+        # FMT_RGB888 is interleaved HWC. The transpose has to happen HERE, once, on the
+        # thumbnail: shipping the CHW planes under an RGB888 label is what turned every
+        # fp16 preview into three sheared bands (it looked like a 3x3 grid of the frame).
+        out.copy_(scratch.permute(1, 2, 0))
         return out
     return (small.clamp(0.0, 1.0) * 255.0).to(_torch.uint8).contiguous()
 
@@ -634,7 +637,7 @@ class Frame:
                                     out=out)
             return (planes, PREVIEW_FMT_YUV420) if planes is not None else None
         image = tensor[0] if tensor.dim() == 4 else tensor
-        rgb_out = None if out is None else out.view(3, height, width)
+        rgb_out = None if out is None else out.view(height, width, 3)
         rgb_scratch = None if scratch is None else scratch.view(3, height, width)
         planes = rgb_planes(image, width, height, out=rgb_out, scratch=rgb_scratch)
         return (planes, PREVIEW_FMT_RGB888) if planes is not None else None
