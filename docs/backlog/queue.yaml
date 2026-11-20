@@ -5108,3 +5108,42 @@ tasks:
     are worse. Product state unchanged: split + recursive, 0/130 + texture 1.001 on the calibration clip,
     3/124 + 1.021 on the held-out one, 2.428 ms/frame, gate off by default.
   evidence: docs/wsp/verified/reuse-mv-reference.txt
+
+- id: rve-reuse-motion-content-2026-11-20
+  title: 'Reuse on a segment with dense MOVING line art: the one content class the population does not cover'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: true
+  cost: 4h
+  tags:
+  - reuse
+  - acceptance
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/verified/reuse-mv-reference.txt
+  - docs/wsp/verdicts.yaml
+  owns_files:
+  - docs/wsp/verified/reuse-motion-content.txt
+  refutes: >-
+    Every frame the reuse correction fails on in our population is either a near-blank flash (frames 18/21/22 of
+    the 960 s cut: 0.09-0.22% detail, the whole failure being a 1-2 px border line) or a still face (frame 56:
+    1.45% detail, a 21/255 line-art softening). A segment where dense line art MOVES under the gate - a fight or a
+    fast pan with detail across the frame - is not in the population, and it is the class where the residual's
+    error would scale with the moving area instead of being confined to a border. Falsifier: if such a segment
+    reads at or below the calibration clip's rate (0 frames over the bar per 130 reuses) the acceptance is
+    content-independent and reuse can ship on anime; if it reads materially worse, the gate needs the
+    changed-pixel veto (share of |LR_t - LR_ref| > 8 levels above ~0.2%, measured to catch 3 of 4 held-out
+    failures for 3 renders) or a per-segment decision.
+  acceptance: >-
+    (a) A provable 8 s -c copy cut whose gate engagement is non-trivial and whose frames carry dense moving line
+    art, picked and labelled BEFORE the render (not after seeing the bar). (b) The gated and ungated lossless pair
+    plus the depth log, the split+recursive correction, and the per-frame bar. (c) The result reported both as the
+    raw share and split by the detail class of each frame, with the number of clusters and where they sit (border
+    / line art / fill). (d) If frames fail, the changed-pixel veto measured on the same clip: how many renders it
+    costs and whether the failures disappear.
+  note: >-
+    Filed because the owner judged the measured residual imperceptible (verdict reuse-residual-imperceptible) and
+    the only population gap left is moving detail. Cheap: one cut, one render pair, one correction pass (~20 min),
+    so it is worth having before the gate is ever enabled by default.

@@ -785,3 +785,27 @@
     0.003% while taking passing frames from 0.007% to 0.30%; the VSR line''s efficient systems (RLSP 2019,
     RelayVSR 2026) all keep a network pass on every frame and carry the detail in the state, and their own sweep
     shows quality falling monotonically with the reuse interval.'
+
+- id: reuse-residual-imperceptible
+  lane: reuse
+  status: current
+  scope: owner judgement on the quality question of the reopened reuse lane, 2026-11-20; does NOT by itself
+    change reuse-gate-shelved (the gate still ships off by default until the owner says otherwise)
+  date: 2026-11-20
+  statement: 'The residual of the shipped correction is imperceptible. The owner looked at the 1:1 crops of every
+    frame that sits over the 0.1% pixel bar (18, 21, 22, 56 of the 960 s cut) and judged the difference to be at
+    the level of an unnoticeable error. Three measurements agree from three directions: (a) the failures decompose
+    by content - frames 18/21/22 carry 0.09-0.22% detail (a white flash whose only picture is a 1-2 px border
+    line, which is what the 0.10-0.20% share is made of) while frame 56 carries 1.45% detail and reads a 21/255
+    line-art softening; (b) VMAF (4K model) reads 100.0 on all seven frames 16-22 for the correction, against
+    97.7-98.6 for the hevc_nvenc cq18 delivery encode and 96.0-100.0 for the verbatim skip - so the perceptual
+    metric is blind to the correction while it sees both alternatives; (c) a blind A/B at 3-4x on the worst block
+    could not separate the correction from the fresh render (12/17/54 no call, 18/21 called backwards, 56 correct
+    without confidence).'
+  evidence: docs/wsp/PRIOR-ART-reuse-detail-2026-11-20.md
+  note: 'What this does NOT establish: behaviour in MOTION on a display (measured: the border band mean tracks the
+    fresh render within 0.15 luma levels with cross-correlation peaking at lag 0, i.e. no lag - but that is a
+    measurement of the band, not a viewing test), and a segment with dense MOVING line art is not in the
+    population: every failure we have is either a near-blank flash or a still face. The 0.1% pixel bar stays as a
+    conservative screen, not as the shipping criterion; the queue row rve-reuse-motion-content-2026-11-20 carries
+    the one measurement that is still missing.'
