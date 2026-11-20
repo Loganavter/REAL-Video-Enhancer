@@ -1,0 +1,10 @@
+preview sink: /pv_final_best 640x360 (1382415 bytes, 1.38 MB)
+attached 120.0 s, consumed 65 frames (0.54 fps), 44.93 MB copied
+formats: rgb888 65, sampled yuv420 0
+reader copy: median 0.072 ms, max 1.802 ms per frame
+interval between frames: median 100 ms, max 103 ms
+uncovered scope: geometry/format only - this instrument does not judge the picture, and a zero frame count means the producer never saw `wanted`.
+/usr/lib/python3.14/multiprocessing/resource_tracker.py:475: UserWarning: resource_tracker: There appear to be 1 leaked shared_memory objects to clean up at shutdown: {'//pv_final_best'}
+  warnings.warn(
+/usr/lib/python3.14/multiprocessing/resource_tracker.py:491: UserWarning: resource_tracker: '//pv_final_best': [Errno 2] No such file or directory: '//pv_final_best'
+  warnings.warn('resource_tracker: %r: %s' % (name, e))
