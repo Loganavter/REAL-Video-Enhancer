@@ -31,13 +31,10 @@ def qualityPresetValueToLabel(value: str) -> str:
 # convolutions (fp16 engine against the int8 body). The wording is the measurement, not a promise - the
 # picture effect depends on the model and the material, which is exactly what the tooltip says.
 QUALITY_PRESET_TOOLTIP = (
-    "How the upscale is computed.\n\n"
-    "Best quality: full precision - the picture is exactly what the model draws. Pick it when the result "
-    "matters more than the clock.\n\n"
-    "Fast: about 1.6x faster on average. Only the inner layers run in 8 bit; the first and last layers stay "
-    "in full precision, so the picture stays very close to Best - on fine line art the difference can show "
-    "up after the video is encoded. Fast also engages only when the fit check says this particular video is "
-    "safe for it; otherwise it quietly falls back to full precision."
+    "Speed or fidelity.\n"
+    "Best quality: full precision, the model's own picture.\n"
+    "Fast: about 1.6x faster - 8-bit inner layers, full precision at the ends. Very close to Best; "
+    "fine line art can differ once the video is encoded."
 )
 
 
@@ -78,8 +75,7 @@ def hide_int8_preset_if_unsupported(parent, settings) -> None:
         combo.setCurrentText("Best quality")
     applyQualityPresetTooltip(
         combo, getattr(parent, "qualityPresetInfoLabel", None),
-        extra=("Fast is not offered on this graphics card: 8-bit kernels need NVIDIA tensor cores, "
-               "i.e. a GTX 16-series / RTX card or newer."))
+        extra="Not offered on this card: it needs NVIDIA tensor cores (GTX 16-series / RTX or newer).")
 
 
 
