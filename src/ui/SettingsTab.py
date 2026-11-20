@@ -317,6 +317,22 @@ class SettingsTab:
             self.parent.frameReuse.stateChanged.connect(
                 lambda: self.settings.writeSetting(
                     "temporal_reuse", "True" if self.parent.frameReuse.isChecked() else "False"))
+            self.parent.frameReuse.stateChanged.connect(self.onFrameReuseSwitch)
+        if getattr(self.parent, "celReuse", None) is not None:
+            self.parent.celReuse.setChecked(
+                self.settings.settings.get("temporal_reuse_statistic", "mean_abs") == "coarse")
+            self.parent.celReuse.setToolTip(
+                "Decide reuse on the drawing instead of on the film: a 3 px low-pass with the scan's sub-pixel "
+                "wobble compensated, and the reused frame is moved by that estimate. On a denoised animation this "
+                "raises the reusable share from ~12% to ~64% at the same acceptance, because a half-pixel wobble "
+                "of a 1-2 px line otherwise reads as a changed cel. It also means grain, dust dots and the scan's "
+                "own jitter are NOT preserved on the reused frames - that is the trade this switch makes.")
+            self.parent.celReuse.setEnabled(self.parent.frameReuse.isChecked())
+            self.parent.celReuse.stateChanged.connect(
+                lambda: self.settings.writeSetting(
+                    "temporal_reuse_statistic",
+                    "coarse" if self.parent.celReuse.isChecked() else "mean_abs"))
+        self.onFrameReuseSwitch()
         self.parent.qualityPresetComboBox.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "quality_preset",
@@ -352,6 +368,18 @@ class SettingsTab:
         self.parent.subtitle_encoder.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
+
+    def onFrameReuseSwitch(self, *args):
+        """The cel switch only means something while reuse is on - an option inside an option.
+
+        Disabled rather than hidden: a hidden checkbox that is checked would still write its setting, and the
+        user would have no way to see what the gate is about to compare.
+        """
+        reuse = getattr(self.parent, "frameReuse", None)
+        cel = getattr(self.parent, "celReuse", None)
+        if cel is None:
+            return
+        cel.setEnabled(reuse.isChecked() if reuse is not None else True)
 
     def writeOutputFolder(self):
         outputlocation = self.parent.output_folder_location.text()
@@ -511,6 +539,11 @@ class Settings:
             # reuse of unchanged frames: on by default since 2026-11-20 (the gate refuses material it
             # cannot certify, so the default is safe; this switch is for people who want it off entirely)
             "temporal_reuse": "True",
+            # what the gate compares. "mean_abs" is the shipped statistic; "coarse" decides on a 3 px low-pass
+            # with the translation compensated, i.e. on the drawing rather than on the film's grain, dust and
+            # scan wobble (harness/docs/wsp/verified/reuse-structural-gate.txt). Not the default: it certifies
+            # its own acceptance at that same coarse scale, which is a picture judgement the owner makes.
+            "temporal_reuse_statistic": "mean_abs",
         }
         self.allowedSettings = {
             "precision": ("auto", "float32", "float16"),
@@ -558,6 +591,7 @@ class Settings:
             "auto_hdr_mode": ("True", "False"),
             "quality_preset": ("best", "fast"),
             "temporal_reuse": ("True", "False"),
+            "temporal_reuse_statistic": ("mean_abs", "coarse"),
         }
         self.settings = self.defaultSettings.copy()
         if not os.path.isfile(self.settingsFile):
