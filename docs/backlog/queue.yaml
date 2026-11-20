@@ -5180,8 +5180,14 @@ tasks:
     the maintainer's own README has said since 2026-06-08 "This project is under a massive refactor, the current
     version will not be updated for a while." The 2026-11-17 push I first read as liveness is one drive-by PR
     (#260) merged into a line that is deliberately frozen, and the rewrite it points at is not in this repository
-    or in the account's public repos. So a PR to this line is a REFERENCE artefact - it documents the work and gives
-    the maintainer something to pull from - not a delivery path; delivery is our fork and its releases.
+    or in the account's public repos - WRONG on the last point, corrected the same day: the refactor HAS started, on
+    `origin/refactor` (4 commits 2026-10-29..11-08: I/O moved into `backend/src/io/`, modules renamed to PEP 8,
+    +1066/-6285), and it is 4 ahead of v2-main. Its plan is one sentence in `backend/src/filters/TOOD.md` (a typo
+    for TODO.md): "Specific pre-rendered filters go here ... refactor so that frame has an attribute to
+    skip_render_if the class is apart of interpolate" - i.e. the maintainer's own plan is OUR feature, generalised
+    to filters and interpolation, expressed as a Frame attribute rather than a gate object. So the PR target is
+    `refactor`, not `v2-main`, and it must be framed as the implementation of their `skip_render_if`, in their PEP 8
+    and io-package conventions. Delivery stays our fork; a PR/issue on a mid-refactor line is an offer, not a path.
   acceptance: >-
     (a) Three export branches off origin/v2-main, each independently green and each with a render pair (gated or
     A/B) proving the picture is unchanged or better: PIPELINE (GPU yuv420p pack instead of rgb24, ~2.3 ms/frame;
