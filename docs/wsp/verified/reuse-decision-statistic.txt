@@ -307,6 +307,39 @@ grain half is added.
 @claim RU029 1.001 x "reused frames [55a222f0b8bdd68b] n=130" measured
 @claim RU030 1.020 x "reused frames [af066356217e17b1] n=124" measured
 
+
+### The composed correction (warp where the flow agrees), and what it costs
+
+Gating the warp by forward-backward flow consistency and blending into the non-warped residual, with the grain half
+on top:
+
+| fb tolerance | frames over 0.1% | worst share | texture |
+|---|---|---|---|
+| 0.5 px | 6 / 130 | 0.48904% | 1.141 |
+| 1.0 px | 6 / 130 | 0.49160% | 1.212 |
+| 2.0 px | 6 / 130 | 0.49145% | 1.260 |
+
+**The gating does not help**: the same six frames fail at every tolerance, and they are the six the pure warp
+variant already failed. Those are cases where the flow is *consistent and wrong*, which a consistency check cannot
+see. So on this clip the split-only variant (0 / 130, texture 1.001) remains the best configuration, and the warp
+is not worth its failures unless the motion field comes from somewhere better than DIS - the codec's own motion
+vectors, which is what NEMO and Palantir read instead of estimating.
+
+**The correction's own cost**, measured on the GPU with the inputs already resident (what the pipeline would do):
+
+| part | ms/frame |
+|---|---|
+| residual + 5 px low-pass + high-pass (1080p) | 0.645 |
+| flat/static mask (|r| and gradient) | 0.646 |
+| nearest 2x + add into the cached 4K frame | 0.854 |
+| **total** | **2.428** |
+
+Against a 35-50 ms model that is 5-7% overhead - shippable as it is, no custom kernel. The 1 s/frame of the
+measurement harness is three decodes, two DIS flows and float32 numpy at 4K, none of which the product does.
+
+@claim RU031 0.4916 % "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU032 2.428 ms "iterations [42e8edb589b2aeba] n=50" measured
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so
