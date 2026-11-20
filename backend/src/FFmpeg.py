@@ -3,8 +3,10 @@ import sys
 import time
 import numpy as np
 
+from .utils.PreviewChannel import FMT_RGB888, PreviewChannel
+
 if __name__ != "__main__":
-    from .utils.Util import log, padFrame, subprocess_popen_without_terminal, set_inplace_line
+    from .utils.Util import log, subprocess_popen_without_terminal, set_inplace_line
 else:
     def log(message):
         print(message)
@@ -53,43 +55,26 @@ class PauseManager:
 class InformationWriteOut:
     def __init__(
         self,
-        sharedMemoryID,  # image memory id
-        sharedMemoryChunkSize,  # size of the image memory
+        sharedMemoryID,  # preview channel id, None = no viewer
         paused_shared_memory_id,
         outputWidth,
         outputHeight,
-        croppedOutputWidth,
-        croppedOutputHeight,
         totalOutputFrames,
-        border_detect: bool = False,
-        hdr_mode: bool = False,
+        preview_size=(640, 360),
     ):
         self.startTime = time.time()
         self.sharedMemoryID = sharedMemoryID
         self.paused_shared_memory_id = paused_shared_memory_id
         self.width = outputWidth
         self.height = outputHeight
-        self.croppedOutputWidth = croppedOutputWidth
-        self.croppedOututHeight = croppedOutputHeight
         self.totalOutputFrames = totalOutputFrames
-        self.border_detect = border_detect
-        self.previewFrame = None
         self.last_length = 0
         self.framesRendered = 1
-        self.hdr_mode = hdr_mode
-        self.sharedMemoryChunkSize = sharedMemoryChunkSize
+        # The preview is a thumbnail on its own small channel (utils/PreviewChannel.py):
+        # no full-size frame, no writer thread holding a copy of the last one.
+        self.preview = PreviewChannel(sharedMemoryID) if sharedMemoryID else None
+        self.previewWidth, self.previewHeight = int(preview_size[0]), int(preview_size[1])
 
-        if self.sharedMemoryID is not None:
-            while True:
-                try:
-                    self.shm = shared_memory.SharedMemory(
-                        name=self.sharedMemoryID
-                    )
-                    break
-                except FileNotFoundError:
-                    log(f"Waiting for shared memory to be created: {self.sharedMemoryID}")
-                    time.sleep(0.5)
-            
         self.pausedManager = PauseManager(paused_shared_memory_id)
         self.isPaused = False
         self.stop = False
@@ -133,27 +118,42 @@ class InformationWriteOut:
         hours, minutes, seconds = convertTime(remaining_time)
         return f"{hours}:{minutes}:{seconds}"
 
-    def setPreviewFrame(self, frame):
-        self.previewFrame = frame
+    def previewAttached(self):
+        """True when a viewer allocated the block (used to decide whether to warm up)."""
+        return self.preview is not None and self.preview.attached
+
+    def previewWanted(self):
+        """True when the viewer consumed the last thumbnail and wants the next one."""
+        return self.preview is not None and self.preview.wanted()
+
+    def publishPreview(self, payload, width, height, fmt=None, high_bitdepth=False):
+        """Hand one thumbnail to the channel; cheap, and only called when wanted."""
+        return self.preview.publish(
+            payload, width, height,
+            fmt=fmt if fmt is not None else FMT_RGB888,
+            high_bitdepth=high_bitdepth,
+        )
 
     def setFramesRendered(self, framesRendered: int):
         self.framesRendered = framesRendered
 
     def stopWriting(self):
         self.stop = True
+        if self.preview is not None:
+            self.preview.close()
 
     def writeOutInformation(self):
+        """Print FPS/ETA for the GUI's progress line.
+
+        The preview used to ride on this thread as a full-size frame copy every 0.5 s;
+        it now lives on its own small channel and is published by the render loop, so
+        this loop only formats a line - and `padFrame`/the chunk size are not needed.
         """
-        fcs = framechunksize
-        """
-        # Create a shared memory block
-        if self.sharedMemoryID is not None:
-            log(f"Shared memory name: {self.shm.name}")
+        if self.preview is not None and self.preview.attached:
+            log(f"Preview channel: {self.preview.name} ({self.previewWidth}x{self.previewHeight})")
         i = 0
         while not self.stop:
-            
-            if self.previewFrame is not None and self.framesRendered > 0:
-                # print out data to stdout
+            if self.framesRendered > 0:
                 fps = round(self.framesRendered / (time.time() - self.startTime))
                 eta = self.calculateETA(framesRendered=self.framesRendered)
                 message = f"FPS: {fps} Current Frame: {self.framesRendered} ETA: {eta}"
@@ -161,24 +161,5 @@ class InformationWriteOut:
                     print("\n", file=sys.stderr)
                     i = 1
                 self.realTimePrint(message)
-                if self.sharedMemoryID is not None and self.previewFrame is not None:
-                    # Update the shared array
-                    if self.border_detect:
-                        padded_frame = padFrame(
-                            self.previewFrame,
-                            self.width,
-                            self.height,
-                            self.croppedOutputWidth,
-                            self.croppedOututHeight,
-                        )
-                        try:
-                            self.shm.buf[:self.sharedMemoryChunkSize] = bytes(padded_frame)
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            self.shm.buf[:self.sharedMemoryChunkSize] = bytes(self.previewFrame)
-                        except Exception:
-                            pass
                 self.isPaused = self.pausedManager.pause_manager()
             time.sleep(0.5) # setting this to a higher value will reduce the cpu usage, and increase fps
