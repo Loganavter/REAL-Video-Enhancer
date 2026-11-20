@@ -785,7 +785,9 @@ class AutoGateTuner:
                  chain_policy: str = "certified",
                  accept_bar: float = 0.1,
                  calibration_window: int = 0,
-                 certify_on: str = "proxy"):
+                 certify_on: str = "proxy",
+                 min_informative: float | None = None,
+                 patience: int = 0):
         self.budget = float(budget)
         # The clamp is load-bearing *once the tile path is out of the way*: with tile reuse
         # enabled, thresholds 12 and 4 measured the same (0.288% against 0.287% of pixels above
@@ -852,6 +854,17 @@ class AutoGateTuner:
         # 0 means "the same frames the proxy always used": the window experiment is recorded in the
         # ledger (E25) and did not survive its own verification.
         self.calibration_window = max(int(calibration_window) or int(min_pairs), int(min_pairs))
+        # Which frames may DECIDE the threshold. A frame whose own delta is below the narrowest candidate is
+        # reused by every candidate, so it cannot tell them apart - but it dominates the sample: a film that opens
+        # on black fed this tuner 16 frames at delta 0.01 and the threshold for a 25-minute episode was chosen
+        # there (measured: noise floor 0.01, would reuse 100% of the calibration frames, and the run then reused
+        # 42.6% while the same material is 33-57% at thresholds 4-8). None keeps the old behaviour, which is what
+        # the shipped `mean_abs` path still uses: its noise-floor guard was calibrated on the unfiltered sample.
+        self.min_informative = None if min_informative is None else float(min_informative)
+        # How many frames to observe before giving up and deciding on what arrived: bounded patience, because a
+        # clip with no informative frame at all (a still, a black test) must still settle - an unsettled tuner
+        # disables reuse for the whole render, which is worse than a threshold chosen from little evidence.
+        self.patience = max(int(patience) or 4 * self.calibration_window, self.calibration_window)
         # Which instrument certifies the DEPTH. "proxy" is the block-mean p90; "acceptance" is the
         # worst per-pixel share. Measured on Violet Evergarden: the acceptance path refused chain 2
         # because one simulated depth-2 reuse read 99.69% of pixels, while the actual chain-2 render
@@ -862,7 +875,9 @@ class AutoGateTuner:
         if certify_on not in ("proxy", "acceptance"):
             raise ValueError(f"certify_on must be 'proxy' or 'acceptance', got {certify_on!r}")
         self.certify_on = certify_on
-        self._window: list[tuple[float, tuple[float, ...], tuple[float, ...]]] = []
+        self._window: list[tuple[float, tuple[float, ...], tuple[float, ...]]] = []   # informative only
+        self._all: list[tuple[float, tuple[float, ...], tuple[float, ...]]] = []      # everything observed
+        self._skipped = 0
         self._pairs: list[tuple[float, tuple[float, ...]]] = []
         if fallback not in ("strictest", "off"):
             raise ValueError(f"fallback must be 'strictest' or 'off', got {fallback!r}")
@@ -903,10 +918,14 @@ class AutoGateTuner:
         else:
             accept = []
         if clean:
-            self._window.append((float(lr_delta), tuple(clean), tuple(accept)))
-        if len(self._window) < self.calibration_window:
-            return
-        self.settle()
+            sample = (float(lr_delta), tuple(clean), tuple(accept))
+            self._all.append(sample)
+            if self.min_informative is None or sample[0] >= self.min_informative:
+                self._window.append(sample)
+            else:
+                self._skipped += 1
+        if len(self._window) >= self.calibration_window or len(self._all) >= self.patience:
+            self.settle()
 
     def settle(self) -> None:
         """Decide on the frames seen so far.
@@ -915,7 +934,7 @@ class AutoGateTuner:
         never calibrate), and tests that feed a fixed number of frames. Keeps the same adversarial
         subset - the `min_pairs` frames with the largest LR delta.
         """
-        if self.settled or not self._window:
+        if self.settled or not self._all:
             return
         # The whole observed window decides, not a subset of it. Selecting the top-k by LR delta -
         # the obvious "adversarial" move - starves the narrow candidates: the 16 most marginal frames
@@ -927,7 +946,8 @@ class AutoGateTuner:
         # frames that candidate would actually reuse (`lr <= cand`) and takes the WORST of them. A
         # population that matches the decision is the whole point - a top-k of the marginal frames
         # measures the thresholds we never use.
-        self._pairs = list(self._window)
+        pool = (self._window if len(self._window) >= self.min_pairs else self._all)
+        self._pairs = list(pool)
         self._decide()
 
     @property
@@ -943,7 +963,7 @@ class AutoGateTuner:
         # calmest third is not calm at all - measured on Chainsaw Man the same clip read a floor of
         # 0.95 with arrival-order frames and 9.38 with the adversarial subset, which refused reuse on
         # material that had been reusing safely at 0.005%.
-        source = self._window or self._pairs
+        source = self._pairs or self._window or self._all
         ordered = sorted(p[0] for p in source)
         k = max(1, len(ordered) // 3)
         return ordered[k // 2]
@@ -1071,6 +1091,9 @@ class AutoGateTuner:
 
     def stats(self) -> str:
         if not self.settled:
+            if self.min_informative is not None:
+                return (f"auto gate: calibrating ({len(self._window)}/{self.calibration_window} informative "
+                        f"frames, {len(self._all)} observed, {self._skipped} skipped as trivially identical)")
             return (f"auto gate: calibrating ({len(self._window)}/{self.calibration_window} frames "
                     f"observed, keeping the {self.min_pairs} most marginal)")
         if self.chosen is None:
@@ -1104,4 +1127,6 @@ class AutoGateTuner:
                 f"noise floor {self._noise_floor():.2f}, would reuse {reuse:.0f}% of the "
                 f"{len(self._pairs)} calibration frames"
                 + (f"; at this threshold {chosen_value:.2f}" if chosen_value is not None else "")
-                + (f"; certified {depths}" if depths else ""))
+                + (f"; certified {depths}" if depths else "")
+                + (f"; calibration: {len(self._window)} informative of {len(self._all)} frames"
+                   if self.min_informative is not None else ""))

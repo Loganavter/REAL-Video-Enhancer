@@ -303,3 +303,48 @@ def test_the_tuner_certifies_on_the_acceptance_statistic_when_it_has_one():
                         (0.6, (0.2, 0.3), (0.004, 0.5))])
     assert picture_bad.ready
     assert picture_bad.chosen_chain == 1, "0.5% is over the bar however calm the proxy looks"
+
+
+def test_calibration_skips_frames_that_no_candidate_could_distinguish():
+    """A black opening used to decide the threshold for a 25-minute episode.
+
+    Measured on 078 Pink Plasma: the first 16 frames are black, the tuner reported a noise floor of 0.01 and
+    "would reuse 100% of the calibration frames", chose 4, and the run then reused 42.6% of a film whose material
+    is 33-57% at thresholds 4-8. A frame whose delta is below the narrowest candidate is reused by every
+    candidate, so it cannot tell them apart - and it must not fill the window either.
+    """
+    # noise_floor_refuse=None mirrors the coarse wiring: the guard's premise is the grain the low-pass
+    # removes, so what this test exercises is the skipping, not the floor
+    tuner = AutoGateTuner(min_informative=2.0, min_pairs=4, calibration_window=4, patience=64,
+                          noise_floor_refuse=None)
+    # sixteen trivially identical frames, as a black opening produces
+    for _ in range(16):
+        tuner.add(0.01, (0.0, 0.0), (0.0, 0.0))
+    assert not tuner.ready, "a black opening must not settle the calibration"
+    # then real content
+    for delta in (3.0, 3.5, 4.0, 4.5):
+        tuner.add(delta, (0.05, 0.2), (0.0, 0.02))
+    assert tuner.ready
+    assert tuner.chosen is not None
+    assert "informative of" in tuner.stats()
+
+
+def test_calibration_keeps_the_old_sample_when_nothing_is_informative():
+    """Bounded patience: an unsettled tuner disables reuse for the whole render, which is worse."""
+    tuner = AutoGateTuner(min_informative=2.0, min_pairs=4, calibration_window=4, patience=8)
+    for _ in range(8):
+        tuner.add(0.0, (0.0,), (0.0,))
+    assert not tuner.ready, "lr_delta == 0 carries no comparison at all"
+    for _ in range(8):
+        tuner.add(0.05, (0.0,), (0.0,))       # identical frames, but a real comparison
+    assert tuner.ready, "patience must settle the tuner"
+    assert isinstance(tuner.chosen, (float, type(None)))    # a verdict either way, never silence
+    assert "informative of" in tuner.stats()
+
+
+def test_without_min_informative_the_window_is_unchanged():
+    """The shipped `mean_abs` path keeps the population its noise-floor guard was calibrated on."""
+    tuner = AutoGateTuner(min_pairs=4, calibration_window=4)
+    for _ in range(4):
+        tuner.add(0.01, (0.0,), (0.0,))
+    assert tuner.ready, "no filtering means the window fills on any frames, as before"
