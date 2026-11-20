@@ -2263,9 +2263,6 @@ background-color:#343b47
                                          <height>25</height>
                                         </size>
                                        </property>
-                                       <property name="toolTip">
-                                        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:700;&quot;&gt;Quality Preset:&lt;/span&gt;&lt;/p&gt;&lt;p&gt; - How much of the previous frame and neighbouring tile results may be reused. &lt;span style=&quot; font-weight:700;&quot;&gt;Best quality&lt;/span&gt; re-checks every reuse before accepting it, &lt;span style=&quot; font-weight:700;&quot;&gt;Fast&lt;/span&gt; accepts more reuse and renders quicker.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-                                       </property>
                                        <property name="text">
                                         <string/>
                                        </property>

@@ -31,18 +31,54 @@ def qualityPresetValueToLabel(value: str) -> str:
 # convolutions (fp16 engine against the int8 body). The wording is the measurement, not a promise - the
 # picture effect depends on the model and the material, which is exactly what the tooltip says.
 QUALITY_PRESET_TOOLTIP = (
-    "Best quality: the picture is what the model produces.\n"
-    "Fast: the body runs in 8-bit. Measured on 1080p Blu-ray sources at 4K with an RTX 4060 Ti: about 1.2x "
-    "faster end to end on TWO model families (a 2x Compact and a 4x animevideov3), and on the 2x model the "
-    "picture was indistinguishable from Best across whole clips. Other models and other cards may differ; the "
-    "speed-up depends on the card."
+    "Best quality: the body runs in float16, i.e. the picture is exactly what the model produces.\n"
+    "Fast: the body runs in 8-bit (int8 kernels), head and tail stay in float16, and the switch only takes "
+    "effect when the fit probe certifies the material - otherwise Fast still renders in float16.\n"
+    "Measured on a 1080p Blu-ray source at 4K, RTX 4060 Ti, two arms alternating in one session: 1.09-1.14x "
+    "end to end on a 2x Compact model (median 1.13x, the engine alone is 1.49-1.63x) and 1.23x on a 4x "
+    "animevideov3. The picture differed on 0.00004% of pixels on the 2x model.\n"
+    "Other models and other cards are unmeasured: the speed-up depends on the card, and on an older card the "
+    "body may not have int8 tensor cores at all - in that case Fast is not offered."
 )
 
 
-def applyQualityPresetTooltip(comboBox) -> None:
-    """Attach the explanation to the Best/Fast switch, once, from one place."""
-    if comboBox is not None and not comboBox.toolTip():
-        comboBox.setToolTip(QUALITY_PRESET_TOOLTIP)
+def applyQualityPresetTooltip(comboBox, infoLabel=None, extra: str = "") -> None:
+    """Attach the explanation to the Best/Fast switch, from one place.
+
+    The combo box and the "?" label next to it used different texts - the label still carried the pre-2026-11-18
+    wording about frame/tile reuse, which stopped being true when the switch became the fp16/int8 choice. Both are
+    set here so the pair cannot drift again.
+    """
+    text = QUALITY_PRESET_TOOLTIP + (f"\n{extra}" if extra else "")
+    for widget in (comboBox, infoLabel):
+        if widget is not None:
+            widget.setToolTip(text)
+
+
+def hide_int8_preset_if_unsupported(parent, settings) -> None:
+    """Remove Fast when this card cannot run the int8 body, and say why in the tooltip.
+
+    Hiding beats disabling: a greyed-out option invites the user to hunt for a way to enable it, and there is none -
+    the kernels need int8 tensor cores (compute capability 7.5, Turing and later). The setting is clamped to Best
+    so a machine that moves between cards cannot keep a value the combo no longer offers.
+    """
+    combo = getattr(parent, "qualityPresetComboBox", None)
+    if combo is None:
+        return
+    from .GPUDetect import int8_body_available
+    available, reason = int8_body_available()
+    if available:
+        log(f"quality preset: Fast (int8) available - {reason}")
+        return
+    index = combo.findText("Fast")
+    if index >= 0:
+        combo.removeItem(index)
+    log(f"quality preset: Fast (int8) hidden - {reason}")
+    if settings.settings.get("quality_preset") == "fast":
+        settings.writeSetting("quality_preset", "best")
+        combo.setCurrentText("Best quality")
+    applyQualityPresetTooltip(combo, getattr(parent, "qualityPresetInfoLabel", None),
+                              extra=f"Fast is not offered on this machine: {reason}.")
 
 
 
@@ -271,7 +307,9 @@ class SettingsTab:
                 "video_encoder_speed", self.parent.video_encoder_speed.currentText()
             )
         )
-        applyQualityPresetTooltip(getattr(self.parent, "qualityPresetComboBox", None))
+        applyQualityPresetTooltip(getattr(self.parent, "qualityPresetComboBox", None),
+                                  getattr(self.parent, "qualityPresetInfoLabel", None))
+        hide_int8_preset_if_unsupported(self.parent, self.settings)
         self.parent.qualityPresetComboBox.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "quality_preset",
