@@ -14,7 +14,13 @@ with PReLU between them, so the question is empirical: how far is
 on the failing material? Damage is quoted with the project's own statistic: share of pixels
 more than 8 levels off in the worst channel, on the worst frame, bar 0.1%.
 
-Usage: python3 harness/scripts/residual_reuse_probe.py CLIP [--frames 6] [--start 0]
+The accuracy curve says nothing about speed: the paper's 3-4x needs sparse kernels, and this
+model is 64 channels wide, where a dense convolution is already cheap. `--cost` measures the
+floor for a sparse implementation on this card - the gate, and the gather+matmul that replaces
+the dense conv. If those exceed a dense conv at the skip fractions the gate actually achieves,
+the mechanism cannot pay here, whatever its accuracy.
+
+Usage: python3 harness/scripts/residual_reuse_probe.py CLIP [--frames 6] [--start 0] [--cost]
 """
 from __future__ import annotations
 import os as _bos, sys as _bsys
@@ -26,6 +32,7 @@ for _p in (_ROOT, _bos.path.join(_ROOT, "backend"), _HERE):
 
 import argparse
 import subprocess
+import time as _time
 
 import numpy as np
 import torch
@@ -135,6 +142,41 @@ def damage(a, b):
     return float((d > 8).float().mean()) * 100.0, float(d.max())
 
 
+def cost_bench(width=1440, height=1080, channels=64, repeats=8):
+    """Dense conv vs the pieces a sparse implementation would need, on this card."""
+    import torch.nn.functional as F
+
+    def timed(fn, n=repeats):
+        for _ in range(2):
+            fn()
+        torch.cuda.synchronize()
+        start = _time.perf_counter()
+        for _ in range(n):
+            fn()
+        torch.cuda.synchronize()
+        return (_time.perf_counter() - start) / n * 1000.0
+
+    device = "cuda"
+    x = torch.randn(1, channels, height, width, device=device, dtype=torch.float16)
+    w = torch.randn(channels, channels, 3, 3, device=device, dtype=torch.float16)
+    r = torch.randn_like(x) * 0.004
+    dense = timed(lambda: F.conv2d(x, w, padding=1))
+    ones = torch.ones(channels, 1, 3, 3, device=device, dtype=torch.float16)
+    gate = timed(lambda: F.conv2d(r.abs(), ones, padding=1, groups=channels).sum(1, keepdim=True))
+    cols = F.unfold(r, 3, padding=1)[0].t().contiguous()
+    support = F.conv2d(r.abs(), ones, padding=1, groups=channels).sum(1, keepdim=True).view(-1)
+    print(f"one dense {channels}->{channels} 3x3 hop at {width}x{height}: {dense:.3f} ms")
+    print(f"the gate that decides what to skip:                        {gate:.3f} ms "
+          f"({100*gate/dense:.0f}% of the hop)")
+    for keep in (0.54, 0.27, 0.10):
+        threshold = torch.quantile(support.float(), 1 - keep)
+        idx = (support > threshold).nonzero().squeeze(1)
+        gather = timed(lambda: cols[idx], 3)
+        both = timed(lambda: cols[idx] @ w.reshape(channels, -1).t(), 3)
+        print(f"  keep {100*len(idx)/support.numel():>4.1f}%: gather {gather:5.2f} ms, "
+              f"gather+matmul {both:5.2f} ms, + gate {both+gate:5.2f} ms vs dense {dense:.2f} ms")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("clip")
@@ -142,6 +184,8 @@ def main():
     ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--width", type=int, default=1440)
     ap.add_argument("--height", type=int, default=1080)
+    ap.add_argument("--cost", action="store_true",
+                    help="also measure the dense-vs-sparse cost floor on this card")
     ap.add_argument("--scale", type=float, default=1.0,
                     help="decode smaller (0.5 = half each side); the 2x comparison is the same")
     args = ap.parse_args()
@@ -157,6 +201,11 @@ def main():
     model = load_model()
     print(f"{len(frames)} frames {width}x{height}; model 2x on {torch.cuda.get_device_name(0)}")
     print("Skip-Conv recursion with the input-norm gate, damage against a full pass:")
+
+    if args.cost:
+        print()
+        cost_bench(width, height)
+        print()
 
     for eps_levels in (0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0):
         eps = eps_levels / 255.0
