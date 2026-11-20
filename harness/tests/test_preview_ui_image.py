@@ -123,3 +123,56 @@ def test_the_reader_ticks_without_a_preview_block():
     got = json.loads(proc.stdout.strip().splitlines()[-1])
     assert got["ticks"] >= 3, f"expected ~6 ticks in 600 ms at 10 Hz, got {got['ticks']}"
     assert got["all_null"], "a tick carries no picture - the slot must skip the pixmap branch"
+
+
+_HOME_CHILD = r"""
+import json, os, sys, types
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+root, cache = sys.argv[1], sys.argv[2]
+sys.path.insert(0, root)
+try:
+    from PySide6 import QtWidgets
+except ImportError:
+    print("NOQT"); raise SystemExit(0)
+cpuinfo = types.ModuleType("cpuinfo"); cpuinfo.get_cpu_info = lambda: {}; sys.modules["cpuinfo"] = cpuinfo
+app = QtWidgets.QApplication([])
+from src.ui import HomeTab as HT
+HT.CHANGELOG_CACHE = cache
+HT.NotesFetcher.run = lambda self: None          # no network in a test
+
+class P(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        self.githubBtn = QtWidgets.QPushButton(self)
+        self.kofiBtn = QtWidgets.QPushButton(self)
+        self.changeLogText = QtWidgets.QTextBrowser(self)
+
+p = P()
+tab = HT.HomeTab(p)
+before = p.changeLogText.toPlainText()
+tab.applyFetchedNotes("# 9.9.9\nfrom the api")
+print(json.dumps({
+    "shipped_chars": len(tab.getChangelog()),
+    "panel_before_head": before.splitlines()[:1],
+    "panel_after_head": p.changeLogText.toPlainText().splitlines()[:2],
+    "cache_written": open(cache).read().splitlines()[:2] if os.path.exists(cache) else None,
+}))
+"""
+
+
+def test_the_changelog_panel_opens_on_the_shipped_file():
+    """The window used to fetch these notes on every start, twice, on the UI thread and with
+    no cache - so a spent anonymous quota (60/h per address) left the panel blank. The repo
+    ships the same notes; they must be on screen before any network call is made."""
+    import tempfile
+    cache = os.path.join(tempfile.mkdtemp(prefix="rve-home-"), "cache.md")
+    proc = subprocess.run([sys.executable, "-c", _HOME_CHILD, ROOT, cache],
+                          capture_output=True, text=True, timeout=120)
+    if "NOQT" in proc.stdout:
+        pytest.skip("PySide6 is not installed for this interpreter")
+    assert proc.returncode == 0, proc.stderr[-1500:]
+    got = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert got["shipped_chars"] > 1000, f"the shipped changelog is {got['shipped_chars']} chars"
+    assert got["panel_before_head"] == ["RVE 2.4.1"], got["panel_before_head"]
+    assert got["panel_after_head"][0] == "9.9.9", "a fetched update replaces the panel"
+    assert got["cache_written"] == ["# 9.9.9", "from the api"], "and it is cached for the next start"
