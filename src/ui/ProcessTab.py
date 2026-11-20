@@ -529,6 +529,10 @@ class ProcessTab:
             f"{renderOptions.backend}",
             "--precision",
             f"{self.settings.settings['precision']}",
+            # the run report is written next to the output, always: it is what makes "it got slower" a
+            # number with a commit and a card (python3 -m harness.ingest <report>)
+            "--report",
+            f"{os.path.splitext(renderOptions.outputPath)[0]}.report.json",
             "--custom_encoder",
             f" {renderOptions.encoderCommand} ",
             "--tensorrt_opt_profile",

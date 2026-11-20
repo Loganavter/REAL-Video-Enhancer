@@ -12,72 +12,45 @@ a measurement that will be re-taken and re-quoted).
 """
 from __future__ import annotations
 
-import datetime as _dt
-import hashlib
-import os
-import subprocess
-from pathlib import Path
+# One implementation, in the product: the backend writes the same stamp into its run report, and two provenance
+# functions that disagree would be worse than none. The harness may import this; the backend must never import the
+# harness. The import is lazy so the harness still works in a tree where the backend was not installed.
+try:
+    from backend.src.utils.Provenance import (  # noqa: F401
+        device, git_state, model_digest, stamp, versions,
+    )
+except Exception:  # pragma: no cover - a fallback for a tree without the backend package
+    import datetime as _dt
+    import hashlib
+    import os
+    import subprocess
 
-
-def _run(cmd: list[str], timeout: float = 5.0) -> str | None:
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if out.returncode == 0:
-            return out.stdout.strip()
-    except Exception:
-        pass
-    return None
-
-
-def git_state(root: str | Path = ".") -> tuple[str | None, bool | None]:
-    """(commit, dirty) of the tree the measurement ran in. `dirty` matters: a result taken on an edited
-    working tree cannot be reproduced from the commit alone."""
-    commit = _run(["git", "-C", str(root), "rev-parse", "HEAD"])
-    status = _run(["git", "-C", str(root), "status", "--porcelain"])
-    return commit, (bool(status) if status is not None else None)
-
-
-def device() -> dict:
-    """Name and compute capability of GPU 0, from nvidia-smi (no torch import)."""
-    info: dict = {}
-    row = _run(["nvidia-smi", "--query-gpu=name,compute_cap,driver_version",
-                "--format=csv,noheader"], timeout=5)
-    if row:
-        name, cap, driver = (part.strip() for part in row.splitlines()[0].split(","))
-        info.update(device=name, capability=cap, driver=driver)
-    return info
-
-
-def versions() -> dict:
-    """Library versions that change what the kernels compile to."""
-    found: dict = {}
-    for module, key in (("torch", "torch"), ("triton", "triton"), ("tensorrt", "tensorrt")):
+    def _run(cmd, timeout=5.0):
         try:
-            mod = __import__(module)
-            found[key] = getattr(mod, "__version__", None)
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            return out.stdout.strip() if out.returncode == 0 else None
         except Exception:
-            continue
-    return found
+            return None
 
+    def git_state(root="."):
+        return _run(["git", "-C", str(root), "rev-parse", "HEAD"]), None
 
-def model_digest(path: str | None) -> str | None:
-    if not path or not os.path.isfile(path):
-        return None
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()[:16]
+    def device():
+        return {}
 
+    def versions():
+        return {}
 
-def stamp(root: str | Path = ".", model: str | None = None) -> dict:
-    """The full provenance tuple, with every field best-effort."""
-    commit, dirty = git_state(root)
-    return {
-        "measured_at": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
-        "commit": commit,
-        "dirty": dirty,
-        "model_sha": model_digest(model),
-        **device(),
-        **versions(),
-    }
+    def model_digest(path=None):
+        if not path or not os.path.isfile(path):
+            return None
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()[:16]
+
+    def stamp(root=".", model=None):
+        commit, dirty = git_state(root)
+        return {"measured_at": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+                "commit": commit, "dirty": dirty, "model_sha": model_digest(model)}

@@ -183,6 +183,7 @@ class HandleApplication:
             tile_reuse_threshold=self.args.tile_reuse_threshold,
             temporal_reuse=bool(self.args.temporal_reuse and not self.args.no_temporal_reuse),
             temporal_reuse_correction=not getattr(self.args, "no_temporal_reuse_correction", False),
+            report_path=getattr(self.args, "report", None),
             temporal_reuse_threshold=self.args.temporal_reuse_threshold,
             temporal_reuse_statistic=self.args.temporal_reuse_statistic,
             temporal_reuse_max_block_mean=self.args.temporal_reuse_max_block_mean,
@@ -526,6 +527,14 @@ class HandleApplication:
                  "of the last KEPT frame. Default 5.0 (TheAnimeScripter: sens 35 / 7).",
             default=5.0,
             type=float,
+        )
+        parser.add_argument(
+            "--report",
+            help="Write a machine-readable run report (settings, per-stage ms/frame, reuse statistics, and the "
+                 "commit/card/versions it ran on) to this path. `python3 -m harness.ingest <report>` turns it into "
+                 "records, so a slowdown can be compared across commits instead of remembered.",
+            default=None,
+            type=str,
         )
         parser.add_argument(
             "--quality_preset",
