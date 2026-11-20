@@ -705,10 +705,22 @@ class Render:
         frames = getattr(self, "_hr_rgb8", None)
         if frames is None:
             frames = self._hr_rgb8 = []
-        rgb8 = (tensor[:, :, ::2, ::2].clamp(0.0, 1.0) * 255.0).round().to(torch.uint8)
-        for past in reversed(frames[-max(depth, 1):]):
-            delta = (rgb8.to(torch.int16) - past.to(torch.int16)).abs().max(dim=1).values
-            accept.append(float((delta > 8).float().mean()) * 100.0)
+        # The acceptance estimate needs an RGB tensor. The int8 tail can hand over a PACKED yuv420p payload
+        # instead (11.87 MB for a 4K frame, no fp16 RGB intermediate), and slicing that as a 4-D tensor killed
+        # the render thread on 2026-11-20 - the first run where int8, reuse-by-default and the auto tuner met.
+        # Luma still certifies the threshold: `AutoGateTuner._uses_acceptance` falls back to the proxy
+        # instrument when no acceptance samples arrive, so the decision stays, only the second opinion is gone.
+        rgb_capable = tensor is not None and tensor.dim() == 4 and tensor.shape[1] >= 3
+        rgb8 = None
+        if rgb_capable:
+            rgb8 = (tensor[:, :, ::2, ::2].clamp(0.0, 1.0) * 255.0).round().to(torch.uint8)
+            for past in reversed(frames[-max(depth, 1):]):
+                delta = (rgb8.to(torch.int16) - past.to(torch.int16)).abs().max(dim=1).values
+                accept.append(float((delta > 8).float().mean()) * 100.0)
+        elif not getattr(self, "_calib_rgb_skipped", False):
+            log("auto gate: the output frame is a packed yuv420p payload, so the acceptance estimate (share of "
+                "pixels >8 levels in RGB) is not computed on it; the luma grids still certify the threshold")
+            self._calib_rgb_skipped = True
         if history:
             # one delta per chain depth, so the tuner can certify "two frames deep" when
             # "four" is too stale rather than throwing the gate away
@@ -719,9 +731,10 @@ class Render:
         if os.environ.get("RVE_CALIB_DEBUG") == "1":
             log(f"calib: depth {depth}, hr frames {len(frames)}, accept {len(accept)}, "
                 f"lr {float(getattr(self.temporalReuse, 'last_delta', 0.0) or 0.0):.2f}")
-        frames.append(rgb8)
-        if len(frames) > max(1, depth):
-            del frames[:-max(1, depth)]
+        if rgb8 is not None:
+            frames.append(rgb8)
+            if len(frames) > max(1, depth):
+                del frames[:-max(1, depth)]
         history.append(grid)
         if len(history) > max(1, depth):
             del history[:-max(1, depth)]
