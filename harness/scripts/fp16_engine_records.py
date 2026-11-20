@@ -62,9 +62,9 @@ def group(rows, pred) -> list[tuple[float, str]]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--opt3", default="docs/wsp/verified/logs/fp16-engine/opt3-default.log")
-    ap.add_argument("--opt5", default="docs/wsp/verified/logs/fp16-engine/opt5.log")
-    ap.add_argument("--out", default="docs/wsp/verified/records/fp16-engine.jsonl")
+    ap.add_argument("--opt3", default="harness/docs/wsp/verified/logs/fp16-engine/opt3-default.log")
+    ap.add_argument("--opt5", default="harness/docs/wsp/verified/logs/fp16-engine/opt5.log")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/fp16-engine.jsonl")
     a = ap.parse_args(argv)
 
     r3, built3, ver3 = profile(a.opt3)

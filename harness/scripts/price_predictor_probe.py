@@ -50,7 +50,7 @@ def main(argv=None) -> int:
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--ks", default="2,3,4")
-    ap.add_argument("--ladder", default="docs/wsp/verified/logs/grid-k/ladder.jsonl")
+    ap.add_argument("--ladder", default="harness/docs/wsp/verified/logs/grid-k/ladder.jsonl")
     ap.add_argument("--out-file", required=True)
     a = ap.parse_args(argv)
 

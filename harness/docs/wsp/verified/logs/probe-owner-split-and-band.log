@@ -1,0 +1,25 @@
+# Points 4, 8, 9, 10 of the last order, 2026-11-18.
+
+=== 4. the 6.3-level peak is the REPRESENTATION, not rounding
+RGB -> yuv420p -> RGB on one 4K frame: share>8 0.1071%, peak 24, mean 1.77.
+So an engine-RGB output against a YUV-stored render carries a chroma term of up to 24 levels - three
+times the bar's 8 - and "rounding" was the wrong label for it. Inside the probe both sides are RGB
+(torch vs engine), so that term is not in the composition measurement; it is in the comparison of the
+engine against the encoded render.
+
+=== 8. Violet's split on the render's population (int8, channel-max gate)
+max over the 336 REUSED frames  : 0.12727%  (3 frames above 0.1%)
+max over the 144 RENDERED frames: 0.08738%  (0 above)
+So the engine's own error is 87% of the bar on Violet - it eats the budget, and composition adds the
+rest. The probe's own-defect reading (0.082%) was close to this.
+
+=== 9. the marginal band around the 0.07 threshold
+Chainsaw, LR in [0.0686, 0.0714]: exactly ONE frame - 475, LR 0.07108, HR 0.07546, rejected in the
+simulation and reused in the product. The worst HR among ALL rejected frames is that same 0.07546%,
+under the bar. So the 1.6% simulation/product jitter can flip 475 in or out and either way the frame
+is inside the bar: no rejected frame hides a failure.
+
+=== 10. the second condition is renamed
+--temporal_reuse_block_max -> --temporal_reuse_max_block_mean, and ReferenceFrameGate.block_max ->
+max_block_mean, because it is `max of block means`, not `max within block` - which is why it never
+fired at 4 or 8 levels.

@@ -1,0 +1,119 @@
+==PROF== Connected to process 2738584 (/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/python/bin/python3.12)
+int8 head FUSED: one kernel writes the codes (K=32 from a 3-channel head, no separate quantise pass)
+int8 tail FUSED with shuffle+residual: one kernel, scale 2
+==PROF== Profiling "body_prologue_kernel": 0%....50%....100% - 9 passes
+target done
+==PROF== Disconnected from process 2738584
+[2738584] python3.12@127.0.0.1
+  body_prologue_kernel (16200, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         8,74
+    SM Frequency                    Ghz         2,60
+    Elapsed Cycles                cycle    4 167 698
+    Memory Throughput                 %        73,93
+    DRAM Throughput                   %        55,98
+    Duration                         ms         1,60
+    L1/TEX Cache Throughput           %        74,05
+    Waves Per SM                              119,12
+    L2 Cache Throughput               %        44,40
+    SM Active Cycles              cycle 4 159 161,53
+    Compute (SM) Throughput           %        73,93
+    ----------------------- ----------- ------------
+
+    GPU Throughput Chart
+    Table Name : GPU Throughput
+    ---------------- ----------- ------------
+    Metric Name      Metric Unit Metric Value
+    ---------------- ----------- ------------
+    Memory [%]                 %        73,93
+    Compute (SM) [%]           %        73,93
+    ---------------- ----------- ------------
+
+    GPU Throughput Breakdown
+    Table Name : Compute Throughput Breakdown
+    -------------------------------------------- ----------- ------------
+    Metric Name                                  Metric Unit Metric Value
+    -------------------------------------------- ----------- ------------
+    SM: Inst Executed Pipe Lsu                             %        73,93
+    SM: Pipe Tensor Cycles Active                          %        52,70
+    SM: Pipe Tensor Cycles Active V2                       %        52,70
+    SM: Inst Executed                                      %        43,70
+    SM: Issue Active                                       %        43,70
+    SM: Pipe Alu Cycles Active                             %        38,84
+    SM: Mio2rf Writeback Active                            %        27,50
+    SM: Mio Inst Issued                                    %        25,34
+    SM: Inst Executed Pipe Xu                              %        18,57
+    SM: Mio Pq Read Cycles Active                          %        11,35
+    SM: Mio Pq Write Cycles Active                         %        11,35
+    SM: Pipe Fmaheavy Cycles Active                        %        10,40
+    SM: Pipe Fma Cycles Active                             %         7,90
+    SM: Inst Executed Pipe Adu                             %         2,10
+    IDC: Request Cycles Active                             %            0
+    SM: Inst Executed Pipe Cbu Pred On Any                 %         0,05
+    SM: Inst Executed Pipe Ipa                             %            0
+    SM: Inst Executed Pipe Tex                             %            0
+    SM: Inst Executed Pipe Uniform                         %         0,14
+    SM: Instruction Throughput Internal Activity           %            0
+    SM: Memory Throughput Internal Activity                %            0
+    SM: Pipe Fp64 Cycles Active                            %            0
+    -------------------------------------------- ----------- ------------
+
+    Table Name : Memory Throughput Breakdown
+    -------------------------------------------------------- ----------- ------------
+    Metric Name                                              Metric Unit Metric Value
+    -------------------------------------------------------- ----------- ------------
+    L1: Lsuin Requests                                                 %        73,93
+    L1: Data Pipe Lsu Wavefronts                                       %        66,17
+    DRAM: Cycles Active                                                %        55,98
+    L1: Lsu Writeback Active                                           %        53,86
+    L2: T Sectors                                                      %        44,40
+    L2: Lts2xbar Cycles Active                                         %        40,57
+    L1: M Xbar2l1tex Read Sectors                                      %        30,77
+    DRAM: Dram Sectors                                                 %        29,14
+    L2: D Sectors                                                      %        25,84
+    GPU: Compute Memory Access Throughput Internal Activity            %        24,60
+    L2: T Tag Requests                                                 %        24,54
+    L2: Xbar2lts Cycles Active                                         %        22,92
+    L1: Data Bank Reads                                                %        15,78
+    L1: Data Bank Writes                                               %         9,52
+    L1: M L1tex2xbar Req Cycles Active                                 %         7,70
+    L2: D Sectors Fill Device                                          %         7,73
+    GPU: Compute Memory Request Throughput Internal Activity           %            0
+    L1: Data Pipe Tex Wavefronts                                       %            0
+    L1: F Wavefronts                                                   %            0
+    L1: Tex Writeback Active                                           %            0
+    L1: Texin Sm2tex Req Cycles Active                                 %         0,25
+    L2: D Atomic Input Cycles Active                                   %            0
+    L2: D Sectors Fill Sysmem                                          %            0
+    -------------------------------------------------------- ----------- ------------
+
+    INF   Compute and Memory are well-balanced: To reduce runtime, both computation and memory traffic must be reduced. 
+          Check both the Compute Workload Analysis and Memory Workload Analysis sections.                               
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s       156,59
+    Mem Busy                                          %        66,17
+    Max Bandwidth                                     %        73,93
+    Instructions Executed                          inst  247 600 800
+    L1/TEX Hit Rate                                   %        22,33
+    L2 Persisting Size                            Mbyte         6,29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        91,37
+    L2 Sector Misses                             sector    4 150 047
+    L2 Sector Misses from Promotion              sector            0
+    Mem Pipes Busy                                    %        73,93
+    --------------------------------------- ----------- ------------
+

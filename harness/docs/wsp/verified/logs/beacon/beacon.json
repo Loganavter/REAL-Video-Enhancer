@@ -1,0 +1,84 @@
+{
+ "model": "2x-Futsuu-Anime(1).pth",
+ "scale": 2,
+ "policies": {
+  "K=2": {
+   "csm_10.rgb": {
+    "share_gt8_pct": 0.0,
+    "max_codes": 5.665,
+    "mean_codes": 0.61551
+   },
+   "violet_15.rgb": {
+    "share_gt8_pct": 0.000161,
+    "max_codes": 9.525,
+    "mean_codes": 0.63521
+   },
+   "violet_5.rgb": {
+    "share_gt8_pct": 0.000382,
+    "max_codes": 10.957,
+    "mean_codes": 0.63012
+   }
+  },
+  "K=3": {
+   "csm_10.rgb": {
+    "share_gt8_pct": 0.0,
+    "max_codes": 4.42,
+    "mean_codes": 0.53272
+   },
+   "violet_15.rgb": {
+    "share_gt8_pct": 0.00092,
+    "max_codes": 12.327,
+    "mean_codes": 0.56993
+   },
+   "violet_5.rgb": {
+    "share_gt8_pct": 0.002793,
+    "max_codes": 12.98,
+    "mean_codes": 0.55008
+   }
+  },
+  "K=4": {
+   "csm_10.rgb": {
+    "share_gt8_pct": 0.0,
+    "max_codes": 4.731,
+    "mean_codes": 0.53149
+   },
+   "violet_15.rgb": {
+    "share_gt8_pct": 0.003533,
+    "max_codes": 16.062,
+    "mean_codes": 0.57445
+   },
+   "violet_5.rgb": {
+    "share_gt8_pct": 0.003967,
+    "max_codes": 14.817,
+    "mean_codes": 0.55592
+   }
+  },
+  "fitted": {
+   "csm_10.rgb": {
+    "share_gt8_pct": 0.0,
+    "max_codes": 6.35,
+    "mean_codes": 1.17532
+   },
+   "violet_15.rgb": {
+    "share_gt8_pct": 0.623453,
+    "max_codes": 47.314,
+    "mean_codes": 1.34687
+   },
+   "violet_5.rgb": {
+    "share_gt8_pct": 0.476631,
+    "max_codes": 45.447,
+    "mean_codes": 1.28513
+   }
+  }
+ },
+ "frames": [
+  "csm_10.rgb",
+  "violet_15.rgb",
+  "violet_5.rgb"
+ ],
+ "fit_frame": "csm_10.rgb",
+ "best_swept": "K=2",
+ "fitted_mean_pct": 0.36669466666666667,
+ "best_swept_mean_pct": 0.00018100000000000004,
+ "verdict": "sweep wins"
+}

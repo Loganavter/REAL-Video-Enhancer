@@ -1,0 +1,112 @@
+# The depth-2 blocker has two owners, and the reference fix moved Violet by 37-214%
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 18 record(s) in this file (R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R012, R013, R014, R015, R016, R017, R018) name
+> `csm20s.mkv, violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+Measured with the product's own probe (`backend/src/utils/Int8Probe.py`) through
+`harness/scripts/probe_int8_app.py`, one GPU job at a time, bundled interpreter torch 2.9.0+cu130.
+
+The probe now prints, on the SAME pairs and at the SAME separation it reads the composition on, the fp16
+reference against fp16. Only the renderer changes, so the gap between the two lines is the quantiser's
+share of the depth-2 number and the rest is the gate's own reference.
+
+**The reference was wrong in the first version of this file.** `_calibrate` loads int8-rounded weights
+into the model, and `ref` was computed after it - so the "fp16" side was fp16 arithmetic on quantised
+weights, measured at peak 4 levels and 0.00000% above 8. It was assumed not to move any number. It does:
+
+| clip | sample | d2 before | d2 after | change |
+|---|---|---|---|---|
+| Chainsaw | 16 | 0.217689% | 0.217737% | +0.02% |
+| Chainsaw | 32 | 0.174793% | 0.174805% | +0.01% |
+| Violet | 16 | 0.121950% | **0.167450%** | **+37%** |
+| Violet | 24 | 0.024800% | **0.038219%** | **+54%** |
+| Violet | 32 | 0.026452% | **0.083189%** | **+214%** |
+
+Chainsaw is unmoved because its number is dominated by the reference term; Violet is not, because its
+number is dominated by the quantiser, and the quantised reference had been hiding part of it. The
+reference is now taken from the original weights before `_calibrate` runs.
+
+## The product's sample: 16 triples, 8 test pairs, 2-6 of them at depth 2
+
+Label convention for every table here: `frames=N` counts decoded TRIPLES, the test pairs are every other
+triple (`N/2`), and the depth-2 subset is smaller still. So 16 triples = 8 test pairs, 24 = 12, 32 = 16.
+
+`RenderVideo._probe_int8_fit` calls `probe(...)` with the default `frames=16`.
+
+| clip | d2 int8 | d2 fp16 | fp16 share of d2 | d1 int8 | d1 fp16 | verdict |
+|---|---|---|---|---|---|---|
+| Chainsaw Man 20 s | 0.2177% | **0.1910%** | 88% | 0.000072% | 0.000% | fp16 |
+| Violet Evergarden 20 s | 0.1675% | 0.0769% | 46% | 0.1081% | 0.0271% | fp16 |
+
+On Chainsaw the gate's own reference alone reads 0.191% against a 0.1% bar: the refusal survives a
+renderer with no quantisation error at all.
+
+## The estimator, not the material: three samples of the same two clips
+
+Each `frames` value samples different times, so these are three populations, not one growing sample.
+
+| clip | sample | test pairs | d2 pairs | d2 int8 | d2 fp16 | verdict |
+|---|---|---|---|---|---|---|
+| Chainsaw | 16 | 8 | 2 | 0.2177% | 0.1910% | fp16 |
+| Chainsaw | 24 | 12 | 4 | 0.1603% | 0.1389% | fp16 |
+| Chainsaw | 32 | 16 | 5 | 0.1748% | 0.1580% | fp16 |
+| Violet | 16 | 8 | 6 | 0.1675% | 0.0769% | fp16 |
+| Violet | 24 | 12 | 7 | 0.0382% | 0.0131% | **int8** |
+| Violet | 32 | 16 | 11 | 0.0832% | 0.0045% | **int8** |
+
+1. **Chainsaw's refusal is robust and it is the gate's.** The fp16 reference is above the bar in all
+   three samples (0.1910 / 0.1389 / 0.1580), and the quantiser contributes 0.017-0.027 pp.
+2. **Violet's refusal exists only on the 8-pair sample.** At 12 and 16 pairs the same probe passes, at
+   0.0382% and 0.0832%. And with the corrected reference the quantiser owns 95% of Violet's depth-2
+   number at 16 pairs (0.0045 of 0.0832 is the reference) - the opposite ownership to Chainsaw.
+3. **The registry's suspicion was wrong in an instructive way.** `int8-composition-d2` asked whether one
+   of the two numbers was "not the population it is labelled with". Both are; what differs between the
+   titles is the *reference term's share*, 88% on Chainsaw against 5-46% on Violet.
+4. **The depth-2 statistic is thinner than the engine statistic.** It is the intersection of the test
+   pairs with the pairs the gate would reuse: 2 pairs on Chainsaw at the product's sample against 8 for
+   the engine statistic and the 13-19 the protocol asks.
+
+## What this does not cover
+
+- The probe approximates the gate's served reference ("both block-mean steps pass") rather than
+  modelling the chain state and the pixel veto (E25), so the control measures the quantiser's share of
+  the *probe's* depth-2 number, not of the gate's actual reuse.
+- The pair order is mirrored: `_read_pairs` returns three frames in time order and the probe renders
+  index 0 against references 1 and 2, so the render is the EARLIEST frame of the triple while the gate
+  only reuses past frames.
+- The fp16 reference is the torch fp16 model, not the TensorRT plan the app falls back to.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-d2-control.txt \
+       --records harness/docs/wsp/verified/records/int8-d2-control.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 0.21773725748062134 % "pairs [de83663eda830288] n=2" measured
+@claim R002 0.19100839272141457 % "pairs [de83663eda830288] n=2" measured
+@claim R003 7.233796281980176e-05 % "pairs [c0bf5e609125efef] n=4" measured
+@claim R004 0.0 % "pairs [c0bf5e609125efef] n=4" measured
+@claim R005 0.00018084490420733346 % "pairs [52b6ddac799df0fb] n=8" measured
+@claim R006 0.16745033208280802 % "pairs [d718d86fa4ebb484] n=6" measured
+@claim R007 0.07691936916671693 % "pairs [d718d86fa4ebb484] n=6" measured
+@claim R008 0.10813319822773337 % "pairs [5166a3703f7c0cd0] n=7" measured
+@claim R009 0.02705439692363143 % "pairs [5166a3703f7c0cd0] n=7" measured
+@claim R010 0.043764468864537776 % "pairs [8c223c60bf041ed4] n=8" measured
+@claim R011 0.16031297855079174 % "pairs [409d7d6326e85c9d] n=4" measured
+@claim R012 0.13888889225199819 % "pairs [409d7d6326e85c9d] n=4" measured
+@claim R013 0.03821855643764138 % "pairs [50bbd6288e3e1738] n=7" measured
+@claim R014 0.013069059059489518 % "pairs [50bbd6288e3e1738] n=7" measured
+@claim R015 0.1748046837747097 % "pairs [529be68831b4d639] n=5" measured
+@claim R016 0.15799816465005279 % "pairs [529be68831b4d639] n=5" measured
+@claim R017 0.0831886543892324 % "pairs [628688717c56cd1e] n=11" measured
+@claim R018 0.00449701001343783 % "pairs [628688717c56cd1e] n=11" measured
+
+# The control's own pass side, checked against the bar it is compared to.
+@below R004 bar_share
+@below R009 bar_share
+@below R013 bar_share
+@below R014 bar_share
+@below R017 bar_share
+@below R018 bar_share

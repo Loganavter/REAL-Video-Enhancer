@@ -1,0 +1,185 @@
+# The tail writes yuv420p itself: -2.16 ms in the app, 0.00000% on 494 frames
+
+Measured 2026-11-19/20 (local). Records: `int8-tail-csc.jsonl` (isolated N001-N003, in-app JC001-JC010,
+pair TC001-TC004); raw: `logs/tail-csc/probe.json`, `logs/tail-csc-ratio/`, `logs/tail-csc-pair/`; kernel:
+`tail_int8_yuv_kernel` in `backend/src/pytorch/Int8Kernels.py`, knob `RVE_TAIL_YUV` in `Int8Body`.
+
+Row `rve-tail-csc-yuv-2026-11-20`, from an outside reader who noticed two things the lane had not: the pack's
+4.37 ms is **not a copy** (the stream pipeline measured -0.01) but YCbCr arithmetic over 8.3 Mpx; and
+**PixelShuffle(2) makes 4:2:0 chroma register-local** - the 12 tail channels of one input pixel become a 2x2
+output block, and that block is exactly what the chroma average covers.
+
+## Why it can be done inside the tail kernel at all
+
+Y, Cb and Cr are each LINEAR in (R, G, B), so each is a weighted sum over the channel axis of the reshaped
+(16, ...) epilogue tile. With BT.709 and limited range:
+
+```
+Y  =  0.2126 R + 0.7152 G + 0.0722 B                    -> Yq  = round(219 Y + 16),   clamp 16..235
+Cb = (B - Y) * 0.5/(1-0.0722) = -0.11459 R - 0.38547 G + 0.50000 B
+Cr = (R - Y) * 0.5/(1-0.2126) =  0.50000 R - 0.45419 G - 0.04585 B
+Uq = round(224 mean(Cb) + 128)                        -> clamp 16..240
+```
+
+The residual adds the SAME LR pixel to all four subpixels, so its contribution collapses to one value per
+position per output channel - no second pass. Output: **6 bytes per input pixel** (4 Y in the 2H x 2W plane, then
+U and V in two H x W planes) = 12.44 MB against the 49.77 MB of fp16 RGB the tail writes otherwise.
+
+## The payload agrees, and that was checked before the kernel existed
+
+An offline gate ran both orders in torch from the SAME tail output: **max |delta| 1 level** over the
+12 441 600-byte payload (4.6% of bytes off by one, 0.00000% off by more). So this is a **different-arithmetic**
+change with a bounded one-level difference - the rounding moves relative to the chroma average - and the
+acceptance criterion is the render pair, not byte-identity.
+
+## Timing, isolated, with the conversion inside each arm
+
+| arm | ms |
+|---|---|
+| tail kernel -> fp16 RGB (49.77 MB) -> `tensor_to_yuv420p` | **5.123** |
+| tail kernel -> yuv420p (12.44 MB) directly | **0.869** |
+
+## In the app: -2.16 ms, and the whole of it lands in the pack
+
+The isolated 4.25 was never going to be the loop: the pack keeps its 12.44 MB transfer. What the app shows,
+three arms interleaved in ONE session, medians of rounds 2-3, null sink, 494 frames per draw:
+
+| arm | ms/frame |
+|---|---|
+| fp16 engine | **52.39** |
+| int8, tail writes fp16 RGB, pack converts (`RVE_TAIL_YUV=0`) | **33.63** |
+| int8, tail writes yuv420p (`RVE_TAIL_YUV=1`) | **31.47** |
+
+Ratios from the records (a quotient of two records, not a typed number): **1.665x** against the fp16 engine,
+**1.558x** without the change - so this row is worth **1.069x on the int8 arm** (JC004, JC005, JC006).
+
+With `hevc_nvenc` in the loop - the product's own condition - the same two arms read JC011 / JC012 and the
+product's ratio is **JC013 = 1.667x**, i.e. the encoder changes nothing here: on this clip it is almost entirely
+overlapped and both arms sit within 0.2 ms of their null-sink numbers. The stale product figure this replaces
+(1.511x) predates both the halo buffers and the shuffle fold.
+
+The phase split says where it comes from, and it disagrees with the isolated prediction in an instructive way:
+
+| phase | conv (RGB) | yuv | what it means |
+|---|---|---|---|
+| tail | 1.00 | 1.00 | the fused CSC is NOT cheaper than the shuffle it replaces: 24.9 MB of fp16 stores became 12.44 MB of bytes, but the epilogue now does the colour arithmetic. Isolated this read 0.869 against ~1.0 - in the app it is a wash |
+| pack+queue | 4.37 | **2.06** | the whole saving: YCbCr over 8.3 Mpx disappeared; what remains is one DMA (12.44 MB at the 6.55 GB/s measured under load, 1.9 ms) plus the queue |
+
+So the honest attribution is **-2.3 ms of arithmetic out of the pack**, not "the tail got faster". It also means
+the pack now sits ~0.16 ms above its floor: what is left is the link, not work.
+
+## The picture: 0.00000% on 494 frames
+
+Different arithmetic, so byte-identity was never the expectation. The instrument is the project's own: the share
+of pixels with any channel more than 8 levels off, on the worst frame of the pair, bar 0.1%.
+
+```
+494 frames, block 64, reference-kind config (RVE_TAIL_YUV=1 against RVE_TAIL_YUV=0)
+  worst share 0.00000% (frame 0), frames above 0.1%: 0
+  worst block mean 0.52 levels (frame 278), peak 6 levels
+```
+
+**0.00000% of pixels, peak 6 levels.** The six is the peak of a one-level payload difference read back through a
+4:4:4 ffv1 sink - inside the one-level rounding the offline gate predicted. The worst block mean (0.52 levels) is
+the more sensitive read, because a systematic shift would show there rather than in a peak, and it is half a
+level.
+
+## Why the isolated stand and the app read different numbers
+
+The isolated arms read 5.123 against 0.869 (-4.25), the app phases read -2.31. That difference is not the stand
+lying, it is a boundary: in the isolated pair the `copy_` into the host buffer sat INSIDE the "today" arm (it is
+what `tensor_to_yuv420p` does) and inside the fused arm there was nothing, while in the app both arms pay the
+transfer. The arithmetic closes on the app's own number: 4.254 - 2.31 = 1.944, and 12.4416 MB at the measured
+6.55 GB/s is 1.90 ms, leaving 0.044. So the two instruments differ by a stated boundary, and the lesson is to
+name the boundary - not to distrust the probe.
+
+The same goes for the 0.15 ms between the phase lines (-2.31) and the loop (-2.16): it lands in `everything
+else`, i.e. the payload branch in `Frame`, the Y-plane reads for the preview and the gate's luma, and the
+guard's event. Named, not absorbed.
+
+**And the reason the tail phase did not move is a floor argument, not a mystery.** Its floor is the traffic it
+cannot avoid - 132.71 MB of codes + 12.44 MB of residual to read, plus the output: 0.677 ms when the output was
+49.77 MB of fp16 RGB, 0.547 with the payload. The floor moved 0.13 ms; the measured phase moved by zero. So the
+tail was never bounded by its write, and removing bytes from a member that is not binding buys nothing in time.
+
+## The safety coupling, now load-bearing
+
+Writing the payload directly removes the `cat()` intermediate that made the old payload copy effectively
+synchronous (`frame-pipeline.txt` section 2). The copy now goes into a pinned slot under the same event guard, and
+**`RVE_PAYLOAD_GUARD=1` is not optional on this path**: the guard is what keeps the writer from reading a slot
+whose DMA has not landed, and without it the 12.6 dB race that once disabled the pooled path returns. That is why
+the guard became a default rather than a knob that happens to be on.
+
+## Not covered
+
+- One clip (BD Violet), one card. The pair is 494 frames of one title; a title whose chroma character differs is
+  untested, and the matrix is the BT.709 the source declares.
+- The 0.00000% is a pair of two CONFIGURATIONS, not against the model: it measures this change, not the lane's
+  total distance from fp16.
+- The ffv1 sink carries 4:4:4, so the pair was decoded after ffmpeg upsampled 4:2:0 to 4:4:4 on both arms. A
+  chroma defect both arms share through that upsample would be invisible here - the same limitation the halo and
+  ring identity pairs have.
+- **The gate is a scope decision, not a limit of the mechanism.** Register-local chroma does not depend on the
+  bit depth: on 10-bit material the coefficients, the rounding and the stride change, the mechanism does not.
+  What the gate encodes is that the app keeps an RGB/rgb48 pipe there, so a yuv420p payload would be the wrong
+  bytes on the wire. The render log prints the RESOLUTION (`int8 tail output: ...`) rather than the flag,
+  because with `RVE_TAIL_YUV=1` by default a refused gate would otherwise read as two identical A/B arms.
+- 8-bit SDR only, and that was RUN, not argued: the 10-bit native clip (`native1440_20s.mkv`, 1440x1080 HEVC
+  10-bit) rendered with `RVE_TAIL_YUV=1` keeps the old path end to end - `10-bit source detected`, no `8-bit
+  pipe: packing yuv420p` line, no `int8 tail writes the payload` line, and the frame handover still reports
+  `out dtype torch.float16 shape (1, 3, 2160, 2880)` (`logs/tail-csc-10bit/`). The gate is
+  `tail_yuv and yuv8_output and pipe_pixel_format == "yuv420p"`, i.e. it follows the pipe decision.
+  That check also surfaced a PRE-EXISTING divergence in the same corner - the packer derives `yuv8_output`
+  from the bit depth alone while the writer derives the pipe from the source's declared matrix, so an 8-bit
+  source declaring bt601 gets yuv420p bytes on an rgb24 pipe. It is not caused by this row and is filed as
+  `rve-yuv8-flag-divergence-2026-11-20`.
+
+## Reproduce
+
+```bash
+# isolated: the kernel against the old conversion, with the conversion inside each arm
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/tail_csc_probe.py --rounds 3 --iters 20 \
+    --out-file harness/docs/wsp/verified/logs/tail-csc/probe.json
+PYTHONPATH=. python3 harness/scripts/tail_csc_records.py
+
+# in the app: three arms, one session, interleaved
+ARMS="fp16 conv yuv" ARM_ENV_CONV="RVE_TAIL_YUV=0" ARM_ENV_YUV="RVE_TAIL_YUV=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null LOGDIR=harness/docs/wsp/verified/logs/tail-csc-ratio \
+  harness/scripts/wall_ab.sh
+
+# the picture: a lossless pair, then the project's own acceptance statistic
+ARMS="conv yuv" ARM_ENV_CONV="RVE_TAIL_YUV=0" ARM_ENV_YUV="RVE_TAIL_YUV=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 LOGDIR=harness/docs/wsp/verified/logs/tail-csc-pair \
+  RENDERS=/home/jorj/2Tb/tail-csc harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <conv.mkv> <yuv.mkv> \
+    --out harness/docs/wsp/verified/logs/tail-csc-pair/pair.json --reference-kind config \
+    --clip-name bd_violet20s.mkv --id-prefix TC \
+    --artifact harness/docs/wsp/verified/logs/tail-csc-pair/pair.json \
+    --emit harness/docs/wsp/verified/logs/tail-csc-pair/pair-records.jsonl \
+    --run "harness/scripts/gate_sweep.py over two ffv1 renders" --session s-tail-csc-2026-11-19
+PYTHONPATH=. python3 harness/scripts/tail_csc_inapp_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-tail-csc.txt \
+       --records harness/docs/wsp/verified/records/int8-tail-csc.jsonl --bars harness/docs/claims-bars.json
+
+@claim N001 5.123 ms "frames [10cff28ea287d300] n=1" measured
+@claim N002 0.869 ms "frames [10cff28ea287d300] n=1" measured
+@claim N003 1.0 levels "frames [10cff28ea287d300] n=1" measured
+@claim JC001 52.39 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim JC002 33.63 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim JC003 31.47 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim JC004 1.66476 x "rounds [95af4551238ca2b0] n=2" derived
+@claim JC005 1.557835 x "rounds [95af4551238ca2b0] n=2" derived
+@claim JC006 1.068637 x "rounds [95af4551238ca2b0] n=2" derived
+@claim JC007 1.0 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim JC008 4.37 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim JC009 1.0 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim JC010 2.06 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim JC011 52.59 ms "rounds [0f938831d44909aa] n=2" measured
+@claim JC012 31.54 ms "rounds [0f938831d44909aa] n=2" measured
+@claim JC013 1.667406 x "rounds [0f938831d44909aa] n=2" derived
+@claim TC001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim TC002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim TC003 0.52099609375 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim TC004 6.0 levels "frames [13137e4e7dd10e98] n=494" measured

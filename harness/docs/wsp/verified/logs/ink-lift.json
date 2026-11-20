@@ -1,0 +1,45 @@
+{
+ "model": "2x-Futsuu-Anime(1).pth",
+ "frame": "violet_5.rgb",
+ "scale": 2,
+ "body_rgb": {
+  "mean_abs": 0.6093,
+  "mean_signed": -0.2076,
+  "ink_mean_signed": -0.2336,
+  "ink_mean_abs": 0.6069,
+  "share_gt8_pct": 0.000201,
+  "ink_share": 16.423
+ },
+ "yuv_roundtrip": {
+  "mean_abs": 0.8638,
+  "mean_signed": -0.216,
+  "ink_mean_signed": -0.2635,
+  "ink_mean_abs": 0.8268,
+  "share_gt8_pct": 0.103182,
+  "ink_share": 16.423
+ },
+ "rgb_vs_roundtrip": {
+  "mean_abs": 0.7005,
+  "mean_signed": -0.0085,
+  "ink_mean_signed": -0.0263,
+  "ink_mean_abs": 0.6533,
+  "share_gt8_pct": 0.086002,
+  "ink_share": 16.872
+ },
+ "decoded_file": {
+  "mean_abs": 1.1869,
+  "mean_signed": 0.7559,
+  "ink_mean_signed": 0.5352,
+  "ink_mean_abs": 1.041,
+  "share_gt8_pct": 0.130807,
+  "ink_share": 16.423
+ },
+ "decoded_vs_roundtrip": {
+  "mean_abs": 1.3723,
+  "mean_signed": 0.972,
+  "ink_mean_signed": 0.8382,
+  "ink_mean_abs": 1.2654,
+  "share_gt8_pct": 0.050014,
+  "ink_share": 16.218
+ }
+}

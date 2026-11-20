@@ -1,0 +1,26 @@
+{
+ "take": "2026-11-19T06:32:52Z",
+ "clip": "bd_violet20s.mkv",
+ "frame": 169,
+ "rounds": 3,
+ "iters": 20,
+ "draws": {
+  "today (rgb + pack csc)": [
+   5.1241310119628904,
+   5.122510528564453,
+   5.124009704589843
+  ],
+  "fused (yuv from tail)": [
+   0.8683631896972657,
+   0.868899154663086,
+   0.8690176010131836
+  ]
+ },
+ "median": {
+  "today (rgb + pack csc)": 5.123260116577148,
+  "fused (yuv from tail)": 0.8689583778381348
+ },
+ "saving_ms": 4.254301738739013,
+ "max_code_diff": 1,
+ "share_gt1_pct": 0.0
+}

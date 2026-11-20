@@ -10,7 +10,7 @@ all. This builds three engines from the same ONNX with the same builder settings
 
 and writes the calibration cache, so the run can be reproduced without re-calibrating. Timing and
 per-layer precision are read by `trtexec --loadEngine --dumpProfile --dumpLayerInfo`, i.e. by the
-same instrument that produced the fp16 budget in `docs/wsp/verified/fp16-engine-layers.txt`.
+same instrument that produced the fp16 budget in `harness/docs/wsp/verified/fp16-engine-layers.txt`.
 
 The frames are the population: their sha256 goes into the manifest, because "calibrated on 8 frames"
 without naming them is the defect this project keeps re-learning.

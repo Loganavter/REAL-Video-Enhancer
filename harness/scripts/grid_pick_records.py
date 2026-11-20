@@ -12,9 +12,9 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fixed", default="docs/wsp/verified/logs/startup-timed-hybrid.log")
-    ap.add_argument("--pick", default="docs/wsp/verified/logs/startup-timed-pick.log")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-grid-pick-cost.jsonl")
+    ap.add_argument("--fixed", default="harness/docs/wsp/verified/logs/startup-timed-hybrid.log")
+    ap.add_argument("--pick", default="harness/docs/wsp/verified/logs/startup-timed-pick.log")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-grid-pick-cost.jsonl")
     a = ap.parse_args(argv)
     def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
     st = Store(session="s-2026-11-19T17:00:00+03:00")

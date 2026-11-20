@@ -1,0 +1,51 @@
+frame 29: share 0.53318%  peak 61  mean |d| 1.619
+
+periodicity (mean |d| on the pitch against the rest):
+  pitch   4: rows 1.004x   cols 0.992x
+  pitch   8: rows 1.003x   cols 0.992x
+  pitch  16: rows 1.003x   cols 0.991x
+  pitch  32: rows 0.999x   cols 0.994x
+  pitch  64: rows 1.004x   cols 0.999x
+  pitch 128: rows 1.006x   cols 0.996x
+  pitch 256: rows 0.993x   cols 0.993x
+
+|d| against the reference's local gradient:
+  gradient   -1.0..   1.7: mean |d|   1.46  share>8  0.002%  pixels  52.5%
+  gradient    1.7..   2.7: mean |d|   1.51  share>8  0.006%  pixels  28.3%
+  gradient    2.7..   3.7: mean |d|   1.56  share>8  0.018%  pixels   9.5%
+  gradient    3.7..   5.7: mean |d|   1.67  share>8  0.091%  pixels   4.7%
+  gradient    5.7..  55.0: mean |d|   3.14  share>8  5.911%  pixels   4.0%
+  gradient   55.0..  -1.0: mean |d|   7.29  share>8 29.206%  pixels   1.0%
+
+|d| against the reference's brightness (clipping test):
+  level   0.. 32: mean |d|  23.83  share>8 89.231%  pixels   0.0%
+  level  32.. 64: mean |d|   1.54  share>8  0.205%  pixels  22.0%
+  level  64..128: mean |d|   1.63  share>8  0.838%  pixels  33.4%
+  level 128..192: mean |d|   1.65  share>8  0.686%  pixels  18.0%
+  level 192..234: mean |d|   1.67  share>8  0.355%  pixels  21.0%
+  level 234..256: mean |d|   1.57  share>8  0.170%  pixels   5.6%
+
+per channel:
+  R: mean |d|  1.06  share>8  0.435%  peak 61
+  G: mean |d|  0.79  share>8  0.315%  peak 49
+  B: mean |d|  1.06  share>8  0.396%  peak 58
+
+worst 64px block at (2240,256): mean 4.27  pixels >8: 609/4096 = 14.9%  max 46
+  the flagged pixels span 64 x 64 px inside the block, filling 14.9% of it
+  shape (rows x cols, ' '=0  '@'=140 levels):
+    | ......                         |
+    |    ...                         |
+    |                                |
+    |...       ...                   |
+    | .. .                           |
+    |   .                            |
+    |                .               |
+    |                                |
+    |                                |
+    |                                |
+    |                       ..       |
+    |                         .      |
+    |                                |
+    |                            .   |
+    |.                               |
+    |                                |

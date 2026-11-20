@@ -1,0 +1,146 @@
+# What int8 actually saves on the wall: 1.09-1.14x, interleaved, both sinks, one session
+
+Measured 2026-11-18, 16:26-16:57 MSK, on the two packet-proved BD cuts (`bd_violet20s.mkv` 494 frames,
+`bd_csm_same.mkv` 539 frames - see `sources-bd.txt`). Both arms, both clips, three rounds, two sinks,
+**24 runs back to back in one session** (two invocations of one script: the null pass, then the nvenc
+pass, no other GPU job in between), `flock -n /var/tmp/opencode/gpu.lock` around every run.
+
+The row this answers (`rve-int8-wall-ab-2026-11-19`) existed because the record held three mutually
+inconsistent readings, none of them a protocol: 1.35-1.42x from the offline window, 1.14x from one in-app
+draw on Violet, 0.95x (slower) from one in-app draw on Chainsaw, and 52.7-54.8 against 52.1-54.5 ms in
+the app's own phase log. All of those were single draws taken while other work ran on the machine.
+
+## Protocol
+
+- `harness/scripts/wall_ab.sh`: arms alternate **inside** each round (r1 fp16→int8, r2 int8→fp16, r3 fp16→int8),
+  so a warm-up or a neighbour's load lands on both arms; `--no_temporal_reuse` and nothing else in
+  common; `--int8_fit fp16|int8` is the only difference between arms.
+- Statistics: **median of rounds 2-3**, round 1 dropped (the first draw after engine load is warmup).
+  Round-to-round pairs are printed next to it so a reader sees the spread, not just the median.
+- Two sinks: `--output null` (measures the render) and a real `x265_nvenc` encode (measures render +
+  encode). The sink does not dominate: against its null twin the nvenc loop reads 1.4-4.9 ms lower in
+  7 of 12 pairs and up to 2.6 ms higher in 5, i.e. the size of the round drift, not a separate cost.
+- A/A before A/B: the unchanged arm was rendered twice and the ENCODED files compared frame by frame.
+  **494/494 and 539/539 frames decode bit-identically**, in both arms, on both clips
+  (`ffmpeg -f framemd5`, decoded pixel hashes). The container bytes are NOT identical (md5 differs,
+  byte size equal) - so the encoder is pixel-deterministic and not bit-reproducible; a content
+  comparison must use the ffv1 path, a timing comparison may use this one.
+
+## The numbers
+
+| clip | sink | arm | r1 | r2 | r3 | median r2-3 | ratio (median) | round pairs r2 / r3 |
+|---|---|---|---|---|---|---|---|---|
+| Violet BD | null | fp16 | 54.36 | 57.67 | 57.80 | **57.73** ms | | |
+| | | int8 | 47.71 | 50.29 | 50.93 | **50.61** ms | **1.141x** | 1.147 / 1.135 |
+| Violet BD | nvenc | fp16 | 54.78 | 54.91 | 55.91 | **55.41** ms | | |
+| | | int8 | 48.16 | 48.85 | 53.00 | **50.92** ms | **1.088x** | 1.124 / 1.055 |
+| Chainsaw same-shot | null | fp16 | 57.68 | 58.26 | 52.81 | **55.53** ms | | |
+| | | int8 | 53.94 | 51.57 | 47.70 | **49.64** ms | **1.119x** | 1.130 / 1.107 |
+| Chainsaw same-shot | nvenc | fp16 | 53.73 | 55.49 | 55.45 | **55.47** ms | | |
+| | | int8 | 49.02 | 48.94 | 49.04 | **48.99** ms | **1.132x** | 1.134 / 1.131 |
+
+Median of the four ratios: **1.126x**; span **1.088-1.141x**.
+
+## What this says, and what it does not
+
+- **int8 buys wall clock in the product, and less than the record claimed.** Every one of the four
+  quotients is above 1.0 and above the row's 1.05x line, so the Fast preset does not need a "not faster"
+  caveat. All four are **below the recorded `bar_int8_wall` = 1.2x**, so the 1.35-1.42x offline window is
+  not what a user sees. Why the two differ is not settled here (see the instrument/model bullet below);
+  what the phases do show is that 36-38% of the body's frame is boundary work, which is the shape E9' and
+  E30a predicted is expensive.
+- **The 1.14x Violet draw reproduces exactly** (today 1.141x null; absolutes 4% lower: 57.73/50.61 against
+  the earlier 60.15/52.60). **The 0.95x Chainsaw draw does not**: same clip, same `reuse off` flags, but
+  the int8 arm reads 49.64 today against 62.42 then - a 20% cross-session swing, larger than any effect
+  measured here, on a single draw. A quotient taken inside one session on that clip is 1.107-1.134x, and
+  nothing in this session supports "slower than fp16". Which session is right about the absolute is not
+  answerable from two draws; the ratio is, because only it is interleaved.
+- **The sink changes the quotient by up to 5%** (Violet: 1.141 null against 1.088 nvenc). That is inside
+  the within-arm drift this session itself shows (Chainsaw fp16: 58.26 against 52.81, 9.4% between
+  rounds), so no claim is made about WHICH sink is "true"; both are reported and both sit in the same
+  band. The attribution below is from the body's own phase counter, not from the ratio.
+- **The spread is the host, not the arm.** Absolute times move by up to 9.4% between rounds (Chainsaw
+  fp16: 58.26 against 52.81); the four median ratios sit in a 4.9% band (1.088-1.141) and the per-round
+  pairs in an 8.7% band (1.055-1.147). Only same-session ratios are quoted anywhere in this project, and
+  this session is one session by construction.
+- **Why 1.13x here and 1.41x in `int8-window.txt`** is NOT answered by this file, and the record should
+  not pretend otherwise. Three things differ between the two, and separating them needs a paired run per
+  variable: the instrument (CUDA events around the chain against the product's wall clock), the model
+  (the window row is `harness/scripts/int8_pipeline.py` on compact-2x; the product runs `2x-Futsuu-Anime`, whose
+  head alone reads 4.65-5.2 ms today against the 1.6-2.6 ms the window row records for head+quantise -
+  different head, so not a contradiction, and not comparable either), and the non-body share of the frame
+  (17% of the 49.6-50.6 ms frame is outside the body here). The only claim this file makes is the
+  product-visible one: 1.09-1.14x, same session, both sinks, repeatable.
+
+## Where the int8 frame goes (body's own phase counter, median r2-3, null sink)
+
+| clip | head | quantise | 16 hops | tail | body total | frame (median) |
+|---|---|---|---|---|---|---|
+| Violet BD | 4.65 | 1.6 | 26.95 | 8.8 | **42.0** | 50.61 |
+| Chainsaw same-shot | 5.2 | 1.55 | 25.8 | 8.75 | **41.3** | 49.64 |
+
+The hops are 25.8-27.0 ms per frame at 1080p->4K, and head+quantise+tail is another 15.1-15.5 ms of
+body outside the multiply - i.e. **36-38% of the int8 body's frame is boundary work**, which is why
+1.13x and not the 1.4x the arithmetic suggests. The body is 83% of the frame; the other 8.3-8.6 ms
+(17%) sits outside the body, and the product's own profile line names only 2.2 of it (engine 1.93, read
+wait 0.27) - the remaining 6.2 ms are the components `ledger-export.md` already lists for the tiled path
+(get_frame_tensor's 10-bit upload and colour stage, the output Frame's construction, pack + D2H + queue),
+just not attributed when the gate is off. Not a newly discovered cost: a naming gap, queued as
+`rve-frame-accounting-2026-11-19`.
+
+## Not covered
+
+- One card (RTX 4060 Ti), one model (`2x-Futsuu-Anime`), reuse OFF on both arms (the gate is shelved;
+  with the gate engaged the frame is cheaper and the ratio would change). Nothing here is a per-hardware
+  result - see `rve-fast-preset-per-hardware-2026-11-18`.
+- The picture is NOT judged here. int8's accuracy on these clips is `rve-int8-on-bd` / `gate-bd.txt`;
+  this file only says what the clock does.
+- The machine was not idle: a neighbouring offscreen pytest suite ran throughout (load average 1.9-2.6),
+  which is part of the drift the interleaving is designed to absorb. No GPU compute job besides these
+  runs (checked: `nvidia-smi --query-compute-apps` showed only desktop/editor contexts).
+- Round 1 is dropped by protocol, so each median rests on n=2. A third kept round would narrow the
+  spread; it would not move the verdict (the four quotients never cross 1.2 or 1.05).
+
+## Reproduce
+
+```bash
+CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=null  harness/scripts/wall_ab.sh
+CLIPS="bd_violet20s.mkv bd_csm_same.mkv" ROUNDS=3 SINK=nvenc harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/scripts/wall_ab_records.py     # logs -> records
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-wall-ab.txt \
+       --records harness/docs/wsp/verified/records/int8-wall-ab.jsonl --bars harness/docs/claims-bars.json
+
+Logs: `harness/docs/wsp/verified/logs/wall-ab/` (24 files; each carries its own load_avg and clock state).
+
+@claim W039 57.73 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W040 50.61 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W041 1.140684 x "rounds [f6f0b2fae971ea4a] n=2" derived
+@claim W042 1.146749 x "rounds [1efe91c5d2bea5c7] n=1" derived
+@claim W043 1.134891 x "rounds [a78b69797e1ef313] n=1" derived
+@claim W055 55.41 ms "rounds [36302566b4afd210] n=2" measured
+@claim W056 50.92 ms "rounds [36302566b4afd210] n=2" measured
+@claim W057 1.088178 x "rounds [36302566b4afd210] n=2" derived
+@claim W058 1.124053 x "rounds [9085e9fe3dc8e317] n=1" derived
+@claim W059 1.054906 x "rounds [25ff176222b7500a] n=1" derived
+@claim W007 55.53 ms "rounds [03467af95ad930d9] n=2" measured
+@claim W008 49.64 ms "rounds [03467af95ad930d9] n=2" measured
+@claim W009 1.118654 x "rounds [03467af95ad930d9] n=2" derived
+@claim W010 1.129727 x "rounds [56d65451bdbceb09] n=1" derived
+@claim W011 1.107128 x "rounds [3e5dc2fd0a589a7b] n=1" derived
+@claim W023 55.47 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W024 48.99 ms "rounds [25b85e3aa4a10fa5] n=2" measured
+@claim W025 1.132272 x "rounds [25b85e3aa4a10fa5] n=2" derived
+@claim W026 1.133837 x "rounds [0a2a2146d670318e] n=1" derived
+@claim W027 1.13071 x "rounds [a0135c3f60b5dac6] n=1" derived
+@claim W044 4.65 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W045 1.6 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W046 26.95 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W047 8.8 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W048 42.0 ms "rounds [f6f0b2fae971ea4a] n=2" measured
+@claim W012 5.2 ms "rounds [03467af95ad930d9] n=2" measured
+@claim W013 1.55 ms "rounds [03467af95ad930d9] n=2" measured
+@claim W014 25.8 ms "rounds [03467af95ad930d9] n=2" measured
+@claim W015 8.75 ms "rounds [03467af95ad930d9] n=2" measured
+@claim W016 41.3 ms "rounds [03467af95ad930d9] n=2" measured

@@ -46,7 +46,7 @@ def resolve_int8_fit(int8_fit: str | None, quality_preset: str) -> str:
     """The Best/Fast switch picks the body's precision; an explicit --int8_fit wins over it.
 
     `best` runs the fp16 engine (the picture is the model's own output), `fast` runs the int8 body.
-    Plain `--int8_fit` is left alone, which is what every measurement run in docs/wsp passes.
+    Plain `--int8_fit` is left alone, which is what every measurement run in harness/docs/wsp passes.
     """
     if quality_preset not in ("best", "fast"):
         raise ValueError(f"quality_preset must be 'best' or 'fast', got {quality_preset!r}")
@@ -143,7 +143,7 @@ class Render:
         # noise - and at low contrast a small delta may be real motion rather than noise. Measured on
         # BD stream copies: Violet refuses (1.67) and renders bit-identically to ungated; the calm
         # Chainsaw shot engages and then exceeds the acceptance bar (0.52379%, 17/539 frames). It is
-        # an opt-in measurement tool now, not a default. See docs/wsp/verified/gate-bd.txt.
+        # an opt-in measurement tool now, not a default. See harness/docs/wsp/verified/gate-bd.txt.
         # TheAnimeScripter calibration: --dedup_sens 35 / 7 = 5.0 luma levels, max span 4
         temporal_reuse_threshold: float = 5.0,
         temporal_reuse_statistic: str = "mean_abs",
@@ -185,7 +185,7 @@ class Render:
         self.qualityPreset = quality_preset
         # The window's Best/Fast switch is the int8 switch (2026-11-18). The gate it used to control is
         # off by default, so the old meaning was dead. `None` means "follow the preset"; an explicit
-        # --int8_fit still wins, which is what every measurement run in docs/wsp uses.
+        # --int8_fit still wins, which is what every measurement run in harness/docs/wsp uses.
         # "auto" asks the probe; "int8"/"fp16" force it, for measurement only
         self.int8FitPreset = resolve_int8_fit(int8_fit, quality_preset)
         self.int8Fit = self.int8FitPreset
@@ -635,7 +635,7 @@ class Render:
         The calibration is the part the body cannot run without: per-layer scales measured on THIS video.
         The verdict is not taken on the shipped path any more - a forced `int8Fit` (which is what the Fast
         preset sets) overwrites it, and its pair set moved with the configuration, so its percentages are
-        not evidence (2026-11-19; `docs/wsp/verified/int8-wall-ab.txt` and the queue row
+        not evidence (2026-11-19; `harness/docs/wsp/verified/int8-wall-ab.txt` and the queue row
         `rve-int8-probe-population-2026-11-18`). Callers that force the verdict pass `certify=False` and
         save the reference forwards.
         """

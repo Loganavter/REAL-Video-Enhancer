@@ -1,8 +1,8 @@
 """Records for the fused head: the isolated probe, the in-app A/B, and the render pair.
 
-Usage: python harness/harness/scripts/head_fusion_records.py [--probe .../probe.json] [--logs .../ab]
+Usage: python harness/scripts/head_fusion_records.py [--probe .../probe.json] [--logs .../ab]
                                              [--pair .../pair-records.jsonl]
-                                             [--out docs/wsp/verified/records/int8-head-fusion.jsonl]
+                                             [--out harness/docs/wsp/verified/records/int8-head-fusion.jsonl]
 """
 from __future__ import annotations
 
@@ -35,10 +35,10 @@ def sha256(path: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/head-fusion/probe.json")
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/head-fusion/ab")
-    ap.add_argument("--pair", default="docs/wsp/verified/records/int8-head-fusion-pair.jsonl")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-head-fusion.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/head-fusion/probe.json")
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/head-fusion/ab")
+    ap.add_argument("--pair", default="harness/docs/wsp/verified/records/int8-head-fusion-pair.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-head-fusion.jsonl")
     args = ap.parse_args(argv)
 
     pr = json.load(open(args.probe))

@@ -1,11 +1,11 @@
 """Emit the source facts as records, so `sources-bd.txt` cites them instead of restating them.
 
-Reads docs/wsp/sources.yaml, probes each clip that is reachable, and writes one record per clip for
+Reads harness/docs/wsp/sources.yaml, probes each clip that is reachable, and writes one record per clip for
 the bit rate and the packet count, plus the stream-copy proof when the manifest carries it. Prints the
 `@claim` lines the prose file quotes.
 
-Usage: python harness/harness/scripts/emit_source_records.py docs/wsp/sources.yaml --clip-root /tmp/opencode \
-           --out docs/wsp/verified/records/sources-bd.jsonl --artifact docs/wsp/verified/logs/sources-bd.log
+Usage: python harness/scripts/emit_source_records.py harness/docs/wsp/sources.yaml --clip-root /tmp/opencode \
+           --out harness/docs/wsp/verified/records/sources-bd.jsonl --artifact harness/docs/wsp/verified/logs/sources-bd.log
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def main(argv=None) -> int:
                 value=value, unit=unit, population=pop,
                 instrument=f"ffprobe ({what})", config=label, session=args.session,
                 statistic="single", tier="measured",
-                run="python3 -m harness.cli source-check docs/wsp/sources.yaml --clip-root /tmp/opencode",
+                run="python3 -m harness.cli source-check harness/docs/wsp/sources.yaml --clip-root /tmp/opencode",
                 artifact=args.artifact, extra={"artifact_sha256": digest}, id=f"S{seq:03d}"))
         cut = clip.get("cut") or {}
         if cut.get("mode") == "stream_copy" and cut.get("compared"):

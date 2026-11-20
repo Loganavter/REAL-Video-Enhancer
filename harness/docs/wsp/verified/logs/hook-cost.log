@@ -1,0 +1,10 @@
+# What the calibration hooks cost, 2026-11-17. Same model, same frames, bundled interpreter.
+forward plain               158.0 ms/frame
+forward with hooks          879.7 ms/frame   (+721.7 ms, 21.2 ms per hook)
+same hooks, no float()      889.4 ms/frame   (the syncs are not the cost)
+
+# The reduction itself, on an idle GPU, on the tensor the hook actually receives:
+amin(dim=(0,2,3)) on [1,64,1080,1920] fp16   0.99 ms  (one 265 MB sweep, 268 GB/s)
+amin + amax                                  2.20 ms  (1.2x the 288 GB/s roofline)
+same tensor inside the forward (in-hook)    13.27 ms  - it charges the conv that produced it
+layout: channels_last, stride (132710400, 1, 122880, 64), fp16

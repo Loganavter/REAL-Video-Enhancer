@@ -4,9 +4,9 @@ The isolated arms are one hop and the sixteen-hop chain, both epilogues, same co
 arms are the same configuration with `RVE_INT8_EPILOGUE_FOLD` 0/1 alternating inside one session, read from
 the body's own phase counter (`hops ...`) and the render loop line.
 
-Usage: python harness/harness/scripts/epilogue_records.py [--probe docs/wsp/verified/logs/epilogue-fold/probe.json]
-                                          [--logs docs/wsp/verified/logs/epilogue-fold/ab]
-                                          [--out docs/wsp/verified/records/int8-epilogue-fold.jsonl]
+Usage: python harness/scripts/epilogue_records.py [--probe harness/docs/wsp/verified/logs/epilogue-fold/probe.json]
+                                          [--logs harness/docs/wsp/verified/logs/epilogue-fold/ab]
+                                          [--out harness/docs/wsp/verified/records/int8-epilogue-fold.jsonl]
 """
 from __future__ import annotations
 
@@ -43,9 +43,9 @@ def read(path: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/epilogue-fold/probe-r8.json")
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/epilogue-fold/ab")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-epilogue-fold.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/epilogue-fold/probe-r8.json")
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/epilogue-fold/ab")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-epilogue-fold.jsonl")
     ap.add_argument("--pair", default="",
                     help="records emitted by gate_sweep for the render pair; appended, not re-derived")
     args = ap.parse_args(argv)

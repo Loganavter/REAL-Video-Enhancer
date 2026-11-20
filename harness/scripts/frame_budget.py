@@ -1,10 +1,10 @@
 """The frame budget, assembled from records instead of typed by hand.
 
-Every number in `docs/FRAME-BUDGET.md` is either parsed out of a render log (which is named in the table) or
+Every number in `harness/docs/FRAME-BUDGET.md` is either parsed out of a render log (which is named in the table) or
 fetched by id from a record file. Nothing is transcribed: a stale table is the same failure as a stale
 number, and this lane has retracted ten of those.
 
-Usage: python harness/scripts/frame_budget.py [--logs DIR] [--arm int8] [--out docs/FRAME-BUDGET.md]
+Usage: python harness/scripts/frame_budget.py [--logs DIR] [--arm int8] [--out harness/docs/FRAME-BUDGET.md]
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ GRID = re.compile(r"int8 grid: ([^\n]+?) \(RVE_INT8_GRID_K=([^,]+), RVE_INT8_PER
 PACK = re.compile(r"pack\+queue ([\d.]+)")
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-RECORDS = os.path.join(REPO, "docs/wsp/verified/records")
+RECORDS = os.path.join(REPO, "harness/docs/wsp/verified/records")
 
 # what the frame has gained and lost, each cited by record id (resolved below, never typed)
 ADOPTED = [
@@ -101,9 +101,9 @@ def newest_log(logdir: str, arm: str):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/wall-defaults/null")
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/wall-defaults/null")
     ap.add_argument("--arm", default="int8")
-    ap.add_argument("--out", default="docs/FRAME-BUDGET.md")
+    ap.add_argument("--out", default="harness/docs/FRAME-BUDGET.md")
     args = ap.parse_args(argv)
 
     log = newest_log(args.logs, args.arm)
@@ -144,7 +144,7 @@ def main(argv=None) -> int:
     A("# The frame budget, as it stands")
     A("")
     A("**Generated** by `harness/scripts/frame_budget.py` - do not edit. Every number is parsed from the render log")
-    A("named below or resolved by id from `docs/wsp/verified/records/`. The prose says what each line IS and")
+    A("named below or resolved by id from `harness/docs/wsp/verified/records/`. The prose says what each line IS and")
     A("what its floor is, so a reader who was never in this lane can challenge any of it.")
     A("")
     A("## The machine, the model, the build")
@@ -281,7 +281,7 @@ def main(argv=None) -> int:
     A("|---|---|---|---|---|")
     for what, expected, against, rid, src in REJECTED:
         stem = os.path.splitext(src)[0]
-        A(f"| {what} | {expected} | **{val(stem, rid)}** | {against} | `docs/wsp/verified/{stem}.txt` : "
+        A(f"| {what} | {expected} | **{val(stem, rid)}** | {against} | `harness/docs/wsp/verified/{stem}.txt` : "
           f"{rid} |")
     A("")
     A("## What is still open, and what it costs")
@@ -350,7 +350,7 @@ def main(argv=None) -> int:
     A("## Regenerate")
     A("")
     A("```bash")
-    A("python harness/scripts/frame_budget.py --logs docs/wsp/verified/logs/wall-final --arm int8")
+    A("python harness/scripts/frame_budget.py --logs harness/docs/wsp/verified/logs/wall-final --arm int8")
     A("```")
     A("")
     open(os.path.join(REPO, args.out), "w").write("\n".join(lines) + "\n")

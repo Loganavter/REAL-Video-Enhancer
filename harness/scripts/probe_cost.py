@@ -7,7 +7,7 @@ pays: a fresh interpreter, a fresh CUDA context, a fresh model load. Rounds alte
 neighbour's load lands on both modes.
 
 Usage:
-  python harness/harness/scripts/probe_cost.py --rounds 2 --out docs/wsp/verified/records/int8-probe-cost.jsonl
+  python harness/scripts/probe_cost.py --rounds 2 --out harness/docs/wsp/verified/records/int8-probe-cost.jsonl
 """
 
 from __future__ import annotations
@@ -85,8 +85,8 @@ def main(argv=None) -> int:
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--rounds", type=int, default=2)
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-probe-cost.jsonl")
-    ap.add_argument("--log", default="docs/wsp/verified/logs/probe-cost-2026-11-19.log")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-probe-cost.jsonl")
+    ap.add_argument("--log", default="harness/docs/wsp/verified/logs/probe-cost-2026-11-19.log")
     ap.add_argument("--session", default="")
     ap.add_argument("--from-log", action="store_true",
                     help="rebuild the records from an existing log instead of re-running the probes")
@@ -130,7 +130,7 @@ def main(argv=None) -> int:
             instrument="wall clock around Int8Probe.probe in a fresh process, flock on the GPU",
             config=f"Int8Probe.probe at {args.width}x{args.height}, one process per run",
             session=session, statistic="max", tier="measured",
-            run=f"harness/harness/scripts/probe_cost.py --mode {name}", artifact=args.log,
+            run=f"harness/scripts/probe_cost.py --mode {name}", artifact=args.log,
             extra={"artifact_sha256": digest, "of": "frame_time", "mode": name}))
     ids["delta"] = store.delta(ids["certify"].id, ids["calibration"].id,
                                instrument="difference of two measured modes, same rounds, same session",

@@ -1,0 +1,5 @@
+/tmp/opencode/csm_luma.mkv vs /tmp/opencode/csm_un3.mkv
+  481 frames, block 64
+  worst share 0.49372% (frame 164), frames above 0.1%: 18
+  worst block mean 11.00 (frame 164), peak 105
+  NOT covered: temporal judgement beyond the pair, perceptual models, whether the ungated reference is right, and whether this clip is representative of the title.

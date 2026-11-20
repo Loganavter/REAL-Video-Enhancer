@@ -1,0 +1,20 @@
+# The two action cuts, 2026-11-17. Cuts: ffmpeg -ss <t> -t 20 -c copy (no re-encode).
+#   Chainsaw Man ep01 at 19:40 (start of the battle), 502 frames
+#   Violet Evergarden ep01 at 14:23, 487 frames
+# Renders: backend/rve-backend.py, ffv1/yuv444p, shipped defaults vs --no_temporal_reuse.
+
+=== Chainsaw Man 19:40, gated
+BACKEND: auto gate: noise floor 22.58 is above the 1.5 limit for this material, so reuse is OFF - at this noise the measured worst frame is 0.105-0.470% of pixels above 8 levels, past the 0.1% acceptance bar
+  503 frames compared, worst 0.00000%
+
+=== Violet Evergarden 14:23, gated
+BACKEND: auto gate: noise floor 36.73 is above the 1.5 limit for this material, so reuse is OFF - at this noise the measured worst frame is 0.105-0.470% of pixels above 8 levels, past the 0.1% acceptance bar
+  487 frames compared, worst 0.00000%
+
+# Comparator A/A: the torch.cuda sweep over ctl_gated/ctl_ungated (481 frames) reproduces the numpy
+# one exactly - every per-frame share and peak identical, 18 frames above 0.1%, worst 0.49372% on 164.
+# Wall clock on the same 481-frame pair: numpy 234 s, torch.cuda 55 s (4.3x). The decode is unchanged:
+# ffv1 4K decode 24.0 s, and -hwaccel cuda measured 26.9 s - ffv1 has no GPU decoder.
+#
+# One render (violet_action_ungated) was truncated at 338 of 487 frames when /tmp - a 20 GiB tmpfs -
+# filled up. Caught by counting frames before the sweep; re-rendered, and the sweep then read 487.

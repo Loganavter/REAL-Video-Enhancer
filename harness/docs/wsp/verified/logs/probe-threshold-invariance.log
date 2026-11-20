@@ -1,0 +1,17 @@
+# The probe's depth-2 verdict against the gate's threshold, 2026-11-17.
+# probe_int8_app.py --frames 16 --gate-threshold <t>, reference from the original weights.
+
+=== gate_threshold 4.0 (what the auto tuner picks on this clip)
+csm20s:    composition d1 0.000% / d2 0.218% ... fp16 reference d1 0.000% / d2 0.191%
+           RAW d2=0.21773725748062134 pairs=4 (2 at d2)
+violet20s: composition d1 0.108% / d2 0.167% ... fp16 reference d1 0.027% / d2 0.077%
+           RAW d2=0.16745033208280802 pairs=7 (6 at d2)
+
+=== gate_threshold 3.0 (the candidate fix)
+csm20s:    composition d1 0.000% / d2 0.218% ... fp16 reference d1 0.000% / d2 0.191%
+           RAW d2=0.21773725748062134 pairs=4 (1 at d2)
+violet20s: composition d1 0.108% / d2 0.167% ... fp16 reference d1 0.027% / d2 0.077%
+           RAW d2=0.16745033208280802 pairs=7 (6 at d2)
+
+=== gate_threshold 5.0 (the probe's built-in default)
+identical to 4.0 on both clips.

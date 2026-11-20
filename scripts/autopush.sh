@@ -8,7 +8,7 @@
 # listed so nobody has to diff the two scripts to find them:
 #
 #   * no push. This checkout's only remote is the local source repo, so a
-#     snapshot is local by design (see docs/backlog/DELEGATION.md).
+#     snapshot is local by design (see harness/docs/backlog/DELEGATION.md).
 #   * retention. The sibling kept an unbounded chain; a 15-minute timer would
 #     grow it forever, so the chain is bounded here (see "Retention" below).
 #   * explicit identity. A timer run must not depend on the invoking user's

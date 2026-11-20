@@ -1,0 +1,6 @@
+/home/jorj/2Tb/rve-rem-2026-11-18/bd_vio_luma.mkv vs /home/jorj/2Tb/rve-rem-2026-11-18/bd_vio_un.mkv
+  494 frames, block 32
+  worst share 0.00000% (frame 0), frames above 0.1%: 0
+  worst block mean 0.00 (frame 0), peak 0
+  IDENTITY: every frame is bit-identical between the two files
+  NOT covered: temporal judgement beyond the pair, perceptual models, whether the ungated reference is right, and whether this clip is representative of the title.

@@ -4,7 +4,7 @@ The backend writes the report (`--report path.json`); this reads it and emits on
 statistics. That is the difference between "it felt slower" and "model wall went 31.7 -> 40.2 ms at commit X on this
 card", which is the whole point of the harness: a claim that cannot be compared across commits is a memory.
 
-    python3 -m harness.ingest run.json [--out docs/wsp/verified/records/run-reports.jsonl] [--render RU100]
+    python3 -m harness.ingest run.json [--out harness/docs/wsp/verified/records/run-reports.jsonl] [--render RU100]
 
 Record ids default to the next free RU number in the target file, so ingesting twice does not collide.
 """
@@ -70,7 +70,7 @@ def records_from(report: dict, start: int = 1000) -> list[Record]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m harness.ingest")
     parser.add_argument("report")
-    parser.add_argument("--out", default="docs/wsp/verified/records/run-reports.jsonl")
+    parser.add_argument("--out", default="harness/docs/wsp/verified/records/run-reports.jsonl")
     parser.add_argument("--render", default="", help="record id for the first emitted record, e.g. RU100")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)

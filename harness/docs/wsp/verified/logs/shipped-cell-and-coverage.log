@@ -1,0 +1,25 @@
+# Points 1-4 of the last order, 2026-11-18.
+
+=== 1. the shipped cell is fp16 + luma, and int8 + luma is refused
+Product defaults on Chainsaw 20 s (luma gate, auto tuner):
+BACKEND: int8 probe: engine 0.001%  composition 0.001%  peak 11  (4 pairs, bar 0.1%) -> fp16
+BACKEND:   composition d1 0.001% / d2 0.220% -> worst 0.220% > bar 0.1% (own defect 0.001%, 4 of 8
+           pairs at d1, 2 at d2); fp16 reference on the same pairs: d1 0.000% / d2 0.187%
+So the 0.001% was d1 only: the verdict is taken on d2 = 0.220%, and int8 is refused under the luma gate.
+The shipped combination is fp16 + luma, whose full sweep is 0.49372% with 18 frames above the bar
+(gate-default-vs-ungated) - a known violation that ships today, independent of int8.
+
+=== 2. frame 475 was reused, and the product's own share is 0.06887
+RVE_DEBUG_DEPTH line from the render: "reuse frame=475 depth=1 share=0.06887"
+0.06887 <= 0.07, so it is a legitimate reuse. The 0.07108 quoted earlier was the SIMULATION's value,
+not the gate's - a labelling error on my side, not a contradiction inside the product.
+
+=== 3. Violet's int8 peak in the space the bar is defined in
+decoded sweep: max peak 146 (frame 330, share 0.08502%); 192 frames above 20 levels, 24 above 55.
+fp16 under the same gate: max peak 149.
+So the peak is the material's, not an int8 increment: fp16 alone peaks higher.
+
+=== 4. coverage of the probe's pairs
+probe: 4 depth-1 pairs; render: 83 reuses (41 at depth 1, 36 at depth 2, 6 at depth 3).
+Coverage 4/83 = 4.8% of the reuses, and 0 of the 42 that the gate serves at depth >= 2.
+Per-frame agreement is not computable yet: the probe does not emit the frame indices of its pairs.

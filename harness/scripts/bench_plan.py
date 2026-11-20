@@ -11,8 +11,8 @@ another session. Ratios are only meaningful inside one session; the ledger says 
 prints every repeat for that reason.
 
 Usage:
-  python3 harness/harness/scripts/bench_plan.py <plan> [--width 1920] [--height 1080] [--iters 25] [--repeat 3]
-  python3 harness/harness/scripts/bench_plan.py <plan> --dump-layers     # layer/reformat counts, no timing
+  python3 harness/scripts/bench_plan.py <plan> [--width 1920] [--height 1080] [--iters 25] [--repeat 3]
+  python3 harness/scripts/bench_plan.py <plan> --dump-layers     # layer/reformat counts, no timing
 """
 from __future__ import annotations
 

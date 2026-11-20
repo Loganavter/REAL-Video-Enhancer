@@ -1,0 +1,20 @@
+# Violet with int8 FORCED past the probe (--int8_fit int8), 2026-11-18.
+# The probe refuses Violet (d1 0.108%); this run measures what the refusal was protecting.
+BACKEND: int8 body self-certification on the first frame: 0.00000% of pixels >8 levels -> serving
+BACKEND: render loop: 33.76 s for 480 frames (70.33 ms/frame)
+BACKEND: profile over 480 frames: gate 4.23 ms (input to tensor 2.43), inference 14.64 ms, frame total 72.49 ms
+BACKEND: reference reuse: 340/480 frames reused (70.8%), 3 scene cuts
+
+full sweep against the ungated fp16 render:
+  worst 0.56613% (frame 280, peak 52), frames above 0.1%: 372 of 480
+  for reference, fp16 under the same gate: worst 0.07345%, above 0.1%: 0
+
+# the same clip, fp16, same gate (wall pair for the int8 ratio):
+BACKEND: render loop: 52.21 s for 480 frames (108.76 ms/frame)
+BACKEND: profile over 480 frames: gate 4.42 ms (input to tensor 2.49), inference 14.63 ms, frame total 109.03 ms
+
+# shipped lane, luma gate, same clip (docs/wsp/verified/logs/live-violet20s-fp16.log):
+BACKEND: render loop: 16.86 s for 480 frames (35.12 ms/frame)
+BACKEND: profile over 480 frames: gate 5.39 ms (input to tensor 3.34), inference 14.78 ms, frame total 35.32 ms
+# NOTE: the 70/108/35 ms walls are not one population - the first two were written lossless (ffv1),
+# the third through libx264. Only same-container pairs are comparable.

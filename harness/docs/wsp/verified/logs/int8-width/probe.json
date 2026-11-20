@@ -1,0 +1,257 @@
+{
+ "take": "2026-11-19T09:10:16Z",
+ "frames": [
+  100,
+  169,
+  250
+ ],
+ "rows": [
+  {
+   "file": "Archivist_AntiLines.pth",
+   "feat": 48,
+   "inner": 16,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.0001,
+   "shares": [
+    0.0,
+    0.0001,
+    0.0001
+   ],
+   "body_ms": 27.14,
+   "draws": [
+    26.74,
+    26.81,
+    27.48
+   ],
+   "tile_sweep": [
+    {
+     "block_m": 64,
+     "warps": 2,
+     "body_ms": 29.76
+    },
+    {
+     "block_m": 64,
+     "warps": 4,
+     "body_ms": 38.61
+    },
+    {
+     "block_m": 64,
+     "warps": 8,
+     "body_ms": 41.84
+    },
+    {
+     "block_m": 128,
+     "warps": 2,
+     "body_ms": 28.17
+    },
+    {
+     "block_m": 128,
+     "warps": 4,
+     "body_ms": 27.25
+    },
+    {
+     "block_m": 128,
+     "warps": 8,
+     "body_ms": 39.39
+    },
+    {
+     "block_m": 256,
+     "warps": 2,
+     "body_ms": 75.31
+    },
+    {
+     "block_m": 256,
+     "warps": 4,
+     "body_ms": 28.46
+    },
+    {
+     "block_m": 256,
+     "warps": 8,
+     "body_ms": 29.97
+    }
+   ]
+  },
+  {
+   "file": "Archivist_Soft.pth",
+   "feat": 48,
+   "inner": 16,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "body_ms": 27.26,
+   "draws": [
+    26.99,
+    26.99,
+    27.52
+   ]
+  },
+  {
+   "file": "Archivist_RGB.pth",
+   "feat": 48,
+   "inner": 16,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "body_ms": 27.32,
+   "draws": [
+    27.02,
+    26.97,
+    27.67
+   ]
+  },
+  {
+   "file": "Archivist_Medium.pth",
+   "feat": 48,
+   "inner": 16,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.00039,
+   "shares": [
+    0.0,
+    0.0,
+    0.00039
+   ],
+   "body_ms": 27.28,
+   "draws": [
+    26.94,
+    26.89,
+    27.68
+   ]
+  },
+  {
+   "file": "Archivist_Rough.pth",
+   "feat": 48,
+   "inner": 16,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "body_ms": 27.28,
+   "draws": [
+    26.92,
+    26.93,
+    27.62
+   ]
+  },
+  {
+   "file": "1x-RGB-max-Denoise.pth",
+   "feat": 32,
+   "inner": 16,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "body_ms": 11.8,
+   "draws": [
+    11.83,
+    11.8,
+    11.79
+   ]
+  },
+  {
+   "file": "1x-RGB-max-Denoise-lite.pth",
+   "feat": 32,
+   "inner": 16,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "body_ms": 11.81,
+   "draws": [
+    11.8,
+    11.79,
+    11.82
+   ]
+  },
+  {
+   "file": "1x-WB-Denoise.pth",
+   "feat": 32,
+   "inner": 16,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "body_ms": 11.8,
+   "draws": [
+    11.79,
+    11.8,
+    11.81
+   ]
+  },
+  {
+   "file": "2x-DigitalFlim-SuperUltraCompact.pth",
+   "feat": 24,
+   "inner": 8,
+   "scale": 2,
+   "tail_out": 12,
+   "ok": true,
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "body_ms": 6.22,
+   "draws": [
+    6.16,
+    6.22,
+    6.23
+   ]
+  },
+  {
+   "file": "1x-HurrDeblur-SuperUltraCompact(1).pth",
+   "feat": 24,
+   "inner": 8,
+   "scale": 1,
+   "tail_out": 3,
+   "ok": true,
+   "share": 0.0,
+   "shares": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "body_ms": 6.3,
+   "draws": [
+    6.24,
+    6.29,
+    6.3
+   ]
+  }
+ ]
+}

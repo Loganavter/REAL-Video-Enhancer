@@ -18,7 +18,7 @@ recorded C=64/48/32 builds (50.2-56.5 / 42.4 / 40.6-41.4 ms).
 
 Usage (one GPU job at a time):
   flock -n /var/tmp/opencode/gpu.lock ~/.cache/opencode/venvs/trt310/bin/python \
-      harness/harness/scripts/probe_prelu_forms.py --channels 32 --emit /tmp/opencode/b3-records.jsonl
+      harness/scripts/probe_prelu_forms.py --channels 32 --emit /tmp/opencode/b3-records.jsonl
 
   --channels 64        the control width, where fusion already works
   --forms prelu,affine,leaky

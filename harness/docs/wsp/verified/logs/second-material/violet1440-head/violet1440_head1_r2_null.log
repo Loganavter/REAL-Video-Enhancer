@@ -1,0 +1,456 @@
+# wall_ab 2026-11-19T05:38:47+03:00 clip=violet1440.mkv arm=head1 round=2 sink=null
+# load_avg 3.39 2.75 2.09
+# clocks 2790 MHz, 8751 MHz, 48, 44.05 W
+# model /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth
+# cmd rve-backend.py --ffmpeg_path /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg --backend tensorrt --upscale_model /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth --overwrite --no_temporal_reuse --input /tmp/opencode/violet1440.mkv --int8_fit int8 --output null --video_encoder_preset ffv1 --video_pixel_format yuv444p
+BACKEND: Getting Input Video Properties
+==============
+RVE Backend Version: 2.4.1-dev16
+==============
+CLI Arguments: 
+['rve-backend.py', '--ffmpeg_path', '/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '--backend', 'tensorrt', '--upscale_model', '/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth', '--overwrite', '--no_temporal_reuse', '--input', '/tmp/opencode/violet1440.mkv', '--int8_fit', 'int8', '--output', 'null', '--video_encoder_preset', 'ffv1', '--video_pixel_format', 'yuv444p']
+==============
+BACKEND: No Working Directory specified, using current directory: /home/jorj/Загрузки/projects/REAL-Video-Enhancer/backend
+BACKEND: Getting Input Video Properties
+BACKEND: 8-bit pipe: packing yuv420p on the GPU - 1.5 bytes/px instead of rgb24's 3, and no ffmpeg scale filter (RVE_YUV8=0 reverts)
+BACKEND: Using backend: tensorrt
+BACKEND: Setting up Upscale
+BACKEND: Handling device: auto, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: auto
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: head convolution body.0: 3 input channels -> 8 (zeros, padded inside the head so the model's own residual keeps its 3 channels), so the engine can fuse it with its PReLU
+Loading TensorRT engine from /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth_fp16_NVIDIA GeForce RTX 4060 Ti_trt-10.12.0.36_torch_tensorrt-2.9.0+cu130_opt-5_tiling-full_headpad5_1440x1080.engine_2.4.1-dev16.engine.
+BACKEND: int8 probe: calibration only, 16 frames (certification withdrawn 2026-11-19: its pair set moved with the configuration, so its percentages are not comparable across runs)
+BACKEND: int8 calibration frames handed to the body: 24 (forced verdict: int8)
+BACKEND: int8 fit FORCED to int8; the probe calibrated only
+BACKEND: DEBUG after assign: option=140589388091888 int8Fit=int8
+BACKEND: Using Upscaling Model: /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth
+BACKEND: head convolution body.0: 3 input channels -> 8 (zeros, padded inside the head so the model's own residual keeps its 3 channels), so the engine can fuse it with its PReLU
+Loading TensorRT engine from /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth_fp16_NVIDIA GeForce RTX 4060 Ti_trt-10.12.0.36_torch_tensorrt-2.9.0+cu130_opt-5_tiling-full_headpad5_1440x1080.engine_2.4.1-dev16.engine.
+BACKEND: DEBUG after hotReload: option=140589388091888 int8Fit=int8
+BACKEND: Upscale Times: 2
+BACKEND: Interpolate Factor: 1.0
+BACKEND: Total Output Frames: 494
+BACKEND: Model Scale: 2
+BACKEND: HDR Mode: False
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', '/tmp/opencode/violet1440.mkv', '-vf', 'crop=1440:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1440x1080', '-']
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', '/tmp/opencode/violet1440.mkv', '-vf', 'crop=1440:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1440x1080', '-']
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', '/tmp/opencode/violet1440.mkv', '-vf', 'crop=1440:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1440x1080', '-']
+BACKEND: 
+FFMPEG WRITE COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-loglevel', 'error', '-framerate', '23.976023976023978', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-colorspace', 'bt709', '-color_range', 'tv', '-vcodec', 'rawvideo', '-s', '2880x2160', '-i', '-', '-r', '23.976023976023978', '-fflags', '+genpts', '-i', '/tmp/opencode/violet1440.mkv', '-map', '0:v', '-map', '1:a?', '-map', '1:s?', '-avoid_negative_ts', 'make_zero', '-max_interleave_delta', '0', '-muxpreload', '0', '-muxdelay', '0', '-c:v', 'ffv1', '-crf', '18', '-c:a', 'copy', '-c:s', 'copy', '-pix_fmt', 'yuv444p', '-c:v', 'rawvideo', '-f', 'null', '-', '-y']
+
+BACKEND: Rendering
+Duration: 20.603916666666667 seconds
+Total Frames: 494
+Resolution: 1440x1080
+FPS: 23.976023976023978
+Color Space: None
+Color Transfer: None
+Color Primaries: None
+Pixel Format: yuv420p
+Video Codec: h264
+Video Bitrate: 18444 kbps
+Is HDR: False
+Bit Depth: 8
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling device: auto, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: auto
+int8: start (tilesize=0, tile_upscaler=False, int8Fit=int8)
+int8: wrapper=UpscaleModelWrapper model=SRVGGNetCompact
+int8: built (supports=True)
+int8 head FUSED: one kernel writes the codes (K=32 from a 8-channel head, no separate quantise pass)
+int8 tail FUSED with shuffle+residual: one kernel, scale 2
+int8 body first-frame sanity: 0.00005% of pixels >8 levels against the fp16 model (n=1, gross gate 1.0%; NOT an acceptance number - the picture is judged on renders)
+host timeline: upload 2.37  upload_sync 0.79  model-call 5632.61  frame-ctor 0.01  final-sync 19.50  | total 5655.28 ms | last_inference_ms 5652.12 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+BACKEND: startup: first frame enqueued 27.92 s after process start (interpreter, engine, ffmpeg/NVENC init)
+host timeline: upload 2.64  upload_sync 0.02  model-call 1.05  frame-ctor 0.01  final-sync 20.12  | total 23.85 ms | last_inference_ms 21.18 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+host timeline: upload 1.99  upload_sync 0.01  model-call 2.55  frame-ctor 0.01  final-sync 23.43  | total 28.00 ms | last_inference_ms 25.99 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+int8 host: 16 launches cost 0.75 ms of HOST (0.047 ms each); whole hop loop 0.76 ms
+int8 body GPU: 54.19 ms/frame (last 8), frame 8
+int8 phases: head 0.7  quantise 0.0  hops 21.3  tail 2.0  SUM 24.1  BODY-TOTAL 24.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 2.01  shuffle 0.00  residual 0.00  SUM 2.02 ms
+host timeline: upload 1.29  upload_sync 0.01  model-call 1.95  frame-ctor 0.01  final-sync 19.58  | total 22.84 ms | last_inference_ms 21.53 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.47 ms/frame (last 8); alloc_retries 0
+
+
+Initialized Frame PyTorch utils
+FPS: 1 Current Frame: 9 ETA: 0:05:23int8 host: 16 launches cost 0.38 ms of HOST (0.024 ms each); whole hop loop 0.39 ms
+int8 body GPU: 21.93 ms/frame (last 8), frame 16
+int8 phases: head 0.6  quantise 0.0  hops 19.0  tail 0.7  SUM 20.3  BODY-TOTAL 20.3 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.40  upload_sync 0.01  model-call 1.94  frame-ctor 0.01  final-sync 24.11  | total 27.46 ms | last_inference_ms 26.05 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.65 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 2.32 ms of HOST (0.145 ms each); whole hop loop 2.33 ms
+int8 body GPU: 23.04 ms/frame (last 8), frame 24
+int8 phases: head 0.7  quantise 0.0  hops 23.3  tail 0.8  SUM 24.7  BODY-TOTAL 24.7 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.35  upload_sync 0.02  model-call 1.91  frame-ctor 0.01  final-sync 23.26  | total 26.55 ms | last_inference_ms 25.18 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.06 ms/frame (last 8); alloc_retries 0
+                                    FPS: 4 Current Frame: 27 ETA: 0:01:52int8 host: 16 launches cost 0.57 ms of HOST (0.036 ms each); whole hop loop 0.58 ms
+int8 body GPU: 22.75 ms/frame (last 8), frame 32
+int8 phases: head 0.5  quantise 0.0  hops 22.7  tail 0.7  SUM 24.0  BODY-TOTAL 24.0 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.34  upload_sync 0.02  model-call 2.13  frame-ctor 0.01  final-sync 19.23  | total 22.73 ms | last_inference_ms 21.36 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.74 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.63 ms of HOST (0.039 ms each); whole hop loop 0.64 ms
+int8 body GPU: 22.55 ms/frame (last 8), frame 40
+int8 phases: head 0.6  quantise 0.0  hops 23.1  tail 0.7  SUM 24.4  BODY-TOTAL 24.4 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.24  upload_sync 0.02  model-call 2.23  frame-ctor 0.01  final-sync 19.83  | total 23.33 ms | last_inference_ms 22.07 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.00 ms/frame (last 8); alloc_retries 0
+                                     FPS: 6 Current Frame: 44 ETA: 0:01:11int8 host: 16 launches cost 0.40 ms of HOST (0.025 ms each); whole hop loop 0.41 ms
+int8 body GPU: 22.43 ms/frame (last 8), frame 48
+int8 phases: head 0.6  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.34  upload_sync 0.01  model-call 2.67  frame-ctor 0.01  final-sync 22.07  | total 26.10 ms | last_inference_ms 24.75 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.23 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.98 ms of HOST (0.061 ms each); whole hop loop 0.98 ms
+int8 body GPU: 22.99 ms/frame (last 8), frame 56
+int8 phases: head 0.7  quantise 0.0  hops 19.9  tail 0.8  SUM 21.4  BODY-TOTAL 21.4 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.32  upload_sync 0.01  model-call 2.02  frame-ctor 0.01  final-sync 23.20  | total 26.56 ms | last_inference_ms 25.23 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.21 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 1.97 ms of HOST (0.123 ms each); whole hop loop 1.98 ms
+                                     FPS: 8 Current Frame: 61 ETA: 0:00:53int8 body GPU: 22.88 ms/frame (last 8), frame 64
+int8 phases: head 0.7  quantise 0.0  hops 22.9  tail 0.8  SUM 24.3  BODY-TOTAL 24.3 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.76  shuffle 0.00  residual 0.00  SUM 0.76 ms
+host timeline: upload 1.32  upload_sync 0.01  model-call 1.35  frame-ctor 0.02  final-sync 19.21  | total 21.91 ms | last_inference_ms 20.57 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.54 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.61 ms of HOST (0.038 ms each); whole hop loop 0.62 ms
+int8 body GPU: 21.27 ms/frame (last 8), frame 72
+int8 phases: head 0.6  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.35  upload_sync 0.01  model-call 3.25  frame-ctor 0.01  final-sync 22.61  | total 27.24 ms | last_inference_ms 25.87 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.28 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.43 ms of HOST (0.027 ms each); whole hop loop 0.44 ms
+int8 body GPU: 22.24 ms/frame (last 8), frame 80
+int8 phases: head 0.6  quantise 0.0  hops 22.9  tail 0.7  SUM 24.3  BODY-TOTAL 24.3 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.33  upload_sync 0.02  model-call 1.88  frame-ctor 0.01  final-sync 19.99  | total 23.23 ms | last_inference_ms 21.88 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 21.95 ms/frame (last 8); alloc_retries 0
+                                     FPS: 10 Current Frame: 79 ETA: 0:00:42int8 host: 16 launches cost 0.95 ms of HOST (0.060 ms each); whole hop loop 0.96 ms
+int8 body GPU: 22.52 ms/frame (last 8), frame 88
+int8 phases: head 0.7  quantise 0.0  hops 20.4  tail 0.7  SUM 21.8  BODY-TOTAL 21.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.28  upload_sync 0.02  model-call 2.00  frame-ctor 0.01  final-sync 19.17  | total 22.48 ms | last_inference_ms 21.17 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.64 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.58 ms of HOST (0.036 ms each); whole hop loop 0.59 ms
+int8 body GPU: 22.06 ms/frame (last 8), frame 96
+int8 phases: head 1.0  quantise 0.0  hops 18.8  tail 0.7  SUM 20.5  BODY-TOTAL 20.5 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.38  upload_sync 0.03  model-call 3.37  frame-ctor 0.01  final-sync 23.19  | total 27.97 ms | last_inference_ms 26.57 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.03 ms/frame (last 8); alloc_retries 0
+                                      FPS: 11 Current Frame: 97 ETA: 0:00:34int8 host: 16 launches cost 0.38 ms of HOST (0.024 ms each); whole hop loop 0.38 ms
+int8 body GPU: 22.36 ms/frame (last 8), frame 104
+int8 phases: head 2.2  quantise 0.0  hops 22.9  tail 0.7  SUM 25.8  BODY-TOTAL 25.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.34  upload_sync 0.03  model-call 1.87  frame-ctor 0.01  final-sync 21.90  | total 25.15 ms | last_inference_ms 23.77 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.47 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.53 ms of HOST (0.033 ms each); whole hop loop 0.53 ms
+int8 body GPU: 21.95 ms/frame (last 8), frame 112
+int8 phases: head 0.5  quantise 0.0  hops 20.6  tail 0.8  SUM 21.8  BODY-TOTAL 21.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.33  upload_sync 0.02  model-call 1.72  frame-ctor 0.01  final-sync 19.23  | total 22.31 ms | last_inference_ms 20.95 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 21.89 ms/frame (last 8); alloc_retries 0
+                                      FPS: 13 Current Frame: 115 ETA: 0:00:29int8 host: 16 launches cost 0.55 ms of HOST (0.034 ms each); whole hop loop 0.55 ms
+int8 body GPU: 22.45 ms/frame (last 8), frame 120
+int8 phases: head 0.6  quantise 0.0  hops 18.8  tail 0.7  SUM 20.2  BODY-TOTAL 20.2 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.36  upload_sync 0.01  model-call 2.73  frame-ctor 0.01  final-sync 23.08  | total 27.19 ms | last_inference_ms 25.83 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.32 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.56 ms of HOST (0.035 ms each); whole hop loop 0.57 ms
+int8 body GPU: 23.07 ms/frame (last 8), frame 128
+int8 phases: head 1.9  quantise 0.0  hops 22.9  tail 0.7  SUM 25.5  BODY-TOTAL 25.5 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.72  upload_sync 0.01  model-call 1.13  frame-ctor 0.01  final-sync 23.24  | total 26.11 ms | last_inference_ms 24.37 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.11 ms/frame (last 8); alloc_retries 0
+                                       FPS: 14 Current Frame: 132 ETA: 0:00:26int8 host: 16 launches cost 1.70 ms of HOST (0.106 ms each); whole hop loop 1.71 ms
+int8 body GPU: 23.29 ms/frame (last 8), frame 136
+int8 phases: head 0.5  quantise 0.0  hops 22.9  tail 0.7  SUM 24.2  BODY-TOTAL 24.2 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.33  upload_sync 0.01  model-call 1.75  frame-ctor 0.01  final-sync 19.23  | total 22.32 ms | last_inference_ms 20.98 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.02 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.41 ms of HOST (0.026 ms each); whole hop loop 0.42 ms
+int8 body GPU: 22.90 ms/frame (last 8), frame 144
+int8 phases: head 1.0  quantise 0.0  hops 18.8  tail 0.7  SUM 20.5  BODY-TOTAL 20.5 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.37  upload_sync 0.03  model-call 1.87  frame-ctor 0.01  final-sync 19.25  | total 22.52 ms | last_inference_ms 21.12 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.09 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.55 ms of HOST (0.035 ms each); whole hop loop 0.56 ms
+                                       FPS: 15 Current Frame: 150 ETA: 0:00:22int8 body GPU: 22.47 ms/frame (last 8), frame 152
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.0  BODY-TOTAL 20.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.33  upload_sync 0.02  model-call 2.85  frame-ctor 0.01  final-sync 23.33  | total 27.54 ms | last_inference_ms 26.19 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.49 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.58 ms of HOST (0.036 ms each); whole hop loop 0.58 ms
+int8 body GPU: 22.94 ms/frame (last 8), frame 160
+int8 phases: head 0.5  quantise 0.0  hops 22.9  tail 0.7  SUM 24.2  BODY-TOTAL 24.2 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.68  upload_sync 0.01  model-call 0.97  frame-ctor 0.01  final-sync 21.77  | total 24.43 ms | last_inference_ms 22.74 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.97 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.52 ms of HOST (0.032 ms each); whole hop loop 0.52 ms
+int8 body GPU: 21.82 ms/frame (last 8), frame 168
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.8  SUM 20.1  BODY-TOTAL 20.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.44  upload_sync 0.01  model-call 2.13  frame-ctor 0.01  final-sync 19.24  | total 22.83 ms | last_inference_ms 21.38 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 21.99 ms/frame (last 8); alloc_retries 0
+                                       FPS: 16 Current Frame: 167 ETA: 0:00:20int8 host: 16 launches cost 0.58 ms of HOST (0.036 ms each); whole hop loop 0.59 ms
+int8 body GPU: 21.85 ms/frame (last 8), frame 176
+int8 phases: head 0.6  quantise 0.0  hops 22.5  tail 0.7  SUM 23.8  BODY-TOTAL 23.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.27  upload_sync 0.02  model-call 1.75  frame-ctor 0.01  final-sync 23.46  | total 26.49 ms | last_inference_ms 25.21 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.93 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.36 ms of HOST (0.022 ms each); whole hop loop 0.36 ms
+int8 body GPU: 22.81 ms/frame (last 8), frame 184
+int8 phases: head 0.5  quantise 0.0  hops 22.9  tail 0.7  SUM 24.2  BODY-TOTAL 24.2 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.36  upload_sync 0.02  model-call 1.96  frame-ctor 0.01  final-sync 20.57  | total 23.92 ms | last_inference_ms 22.54 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.84 ms/frame (last 8); alloc_retries 0
+                                       FPS: 17 Current Frame: 185 ETA: 0:00:18int8 host: 16 launches cost 0.59 ms of HOST (0.037 ms each); whole hop loop 0.60 ms
+int8 body GPU: 22.42 ms/frame (last 8), frame 192
+int8 phases: head 0.5  quantise 0.0  hops 20.1  tail 0.7  SUM 21.4  BODY-TOTAL 21.4 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.92  upload_sync 0.01  model-call 1.23  frame-ctor 0.01  final-sync 19.16  | total 22.33 ms | last_inference_ms 20.40 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.51 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.53 ms of HOST (0.033 ms each); whole hop loop 0.54 ms
+int8 body GPU: 22.49 ms/frame (last 8), frame 200
+int8 phases: head 1.0  quantise 0.0  hops 18.8  tail 0.7  SUM 20.5  BODY-TOTAL 20.5 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.40  upload_sync 0.03  model-call 2.66  frame-ctor 0.01  final-sync 23.36  | total 27.45 ms | last_inference_ms 26.03 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.32 ms/frame (last 8); alloc_retries 0
+                                       FPS: 18 Current Frame: 202 ETA: 0:00:16int8 host: 16 launches cost 0.78 ms of HOST (0.049 ms each); whole hop loop 0.79 ms
+int8 body GPU: 22.67 ms/frame (last 8), frame 208
+int8 phases: head 0.5  quantise 0.0  hops 21.3  tail 2.0  SUM 23.8  BODY-TOTAL 23.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.98  shuffle 0.00  residual 0.00  SUM 1.98 ms
+host timeline: upload 1.33  upload_sync 0.02  model-call 2.04  frame-ctor 0.01  final-sync 22.17  | total 25.57 ms | last_inference_ms 24.21 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.90 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.60 ms of HOST (0.037 ms each); whole hop loop 0.61 ms
+int8 body GPU: 22.62 ms/frame (last 8), frame 216
+int8 phases: head 0.7  quantise 0.0  hops 20.1  tail 2.0  SUM 22.8  BODY-TOTAL 22.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 2.00  shuffle 0.00  residual 0.00  SUM 2.00 ms
+host timeline: upload 1.39  upload_sync 0.03  model-call 2.04  frame-ctor 0.01  final-sync 19.79  | total 23.26 ms | last_inference_ms 21.83 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.77 ms/frame (last 8); alloc_retries 0
+                                       FPS: 18 Current Frame: 220 ETA: 0:00:14int8 host: 16 launches cost 0.37 ms of HOST (0.023 ms each); whole hop loop 0.37 ms
+int8 body GPU: 21.94 ms/frame (last 8), frame 224
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.0  BODY-TOTAL 20.0 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 2.51  upload_sync 0.01  model-call 1.22  frame-ctor 0.01  final-sync 19.21  | total 22.94 ms | last_inference_ms 20.43 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.35 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.40 ms of HOST (0.025 ms each); whole hop loop 0.40 ms
+int8 body GPU: 22.20 ms/frame (last 8), frame 232
+int8 phases: head 0.4  quantise 0.0  hops 20.1  tail 0.7  SUM 21.2  BODY-TOTAL 21.2 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.30  upload_sync 0.63  model-call 1.22  frame-ctor 0.01  final-sync 23.34  | total 26.50 ms | last_inference_ms 24.56 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.02 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.44 ms of HOST (0.027 ms each); whole hop loop 0.45 ms
+                                       FPS: 19 Current Frame: 237 ETA: 0:00:13int8 body GPU: 23.68 ms/frame (last 8), frame 240
+int8 phases: head 1.6  quantise 0.0  hops 23.1  tail 0.7  SUM 25.5  BODY-TOTAL 25.5 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.30  upload_sync 0.44  model-call 1.08  frame-ctor 0.01  final-sync 19.98  | total 22.80 ms | last_inference_ms 21.06 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.38 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.53 ms of HOST (0.033 ms each); whole hop loop 0.54 ms
+int8 body GPU: 22.00 ms/frame (last 8), frame 248
+int8 phases: head 0.5  quantise 0.0  hops 20.1  tail 0.7  SUM 21.4  BODY-TOTAL 21.4 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.88  upload_sync 0.02  model-call 1.24  frame-ctor 0.01  final-sync 19.26  | total 22.42 ms | last_inference_ms 20.51 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.43 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.98 ms of HOST (0.061 ms each); whole hop loop 0.99 ms
+int8 body GPU: 22.68 ms/frame (last 8), frame 256
+int8 phases: head 0.6  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.35  upload_sync 0.02  model-call 2.65  frame-ctor 0.01  final-sync 22.91  | total 26.94 ms | last_inference_ms 25.57 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.48 ms/frame (last 8); alloc_retries 0
+                                       FPS: 20 Current Frame: 255 ETA: 0:00:12int8 host: 16 launches cost 2.08 ms of HOST (0.130 ms each); whole hop loop 2.09 ms
+int8 body GPU: 22.66 ms/frame (last 8), frame 264
+int8 phases: head 0.7  quantise 0.0  hops 23.4  tail 0.8  SUM 24.9  BODY-TOTAL 24.9 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.76 ms
+host timeline: upload 1.30  upload_sync 0.01  model-call 1.75  frame-ctor 0.01  final-sync 23.19  | total 26.27 ms | last_inference_ms 24.95 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.88 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.52 ms of HOST (0.032 ms each); whole hop loop 0.52 ms
+int8 body GPU: 22.52 ms/frame (last 8), frame 272
+int8 phases: head 0.5  quantise 0.0  hops 21.4  tail 0.7  SUM 22.7  BODY-TOTAL 22.7 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.27  upload_sync 0.02  model-call 2.11  frame-ctor 0.01  final-sync 19.14  | total 22.55 ms | last_inference_ms 21.25 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.27 ms/frame (last 8); alloc_retries 0
+                                       FPS: 20 Current Frame: 272 ETA: 0:00:11int8 host: 16 launches cost 1.30 ms of HOST (0.081 ms each); whole hop loop 1.31 ms
+int8 body GPU: 22.20 ms/frame (last 8), frame 280
+int8 phases: head 0.6  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.41  upload_sync 0.03  model-call 2.41  frame-ctor 0.01  final-sync 24.01  | total 27.87 ms | last_inference_ms 26.42 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.22 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.47 ms of HOST (0.030 ms each); whole hop loop 0.48 ms
+int8 body GPU: 23.16 ms/frame (last 8), frame 288
+int8 phases: head 1.5  quantise 0.0  hops 23.9  tail 0.7  SUM 26.1  BODY-TOTAL 26.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.36  upload_sync 0.63  model-call 1.25  frame-ctor 0.01  final-sync 23.45  | total 26.70 ms | last_inference_ms 24.71 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.27 ms/frame (last 8); alloc_retries 0
+                                       FPS: 21 Current Frame: 290 ETA: 0:00:09int8 host: 16 launches cost 0.54 ms of HOST (0.034 ms each); whole hop loop 0.55 ms
+int8 body GPU: 22.50 ms/frame (last 8), frame 296
+int8 phases: head 0.8  quantise 0.0  hops 21.7  tail 2.1  SUM 24.7  BODY-TOTAL 24.7 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 2.12  shuffle 0.00  residual 0.00  SUM 2.13 ms
+host timeline: upload 1.31  upload_sync 0.01  model-call 1.71  frame-ctor 0.01  final-sync 19.15  | total 22.19 ms | last_inference_ms 20.87 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.22 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.33 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+int8 body GPU: 21.43 ms/frame (last 8), frame 304
+int8 phases: head 0.6  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.33  upload_sync 0.02  model-call 3.38  frame-ctor 0.01  final-sync 23.04  | total 27.78 ms | last_inference_ms 26.43 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.51 ms/frame (last 8); alloc_retries 0
+                                       FPS: 21 Current Frame: 308 ETA: 0:00:08int8 host: 16 launches cost 0.47 ms of HOST (0.029 ms each); whole hop loop 0.47 ms
+int8 body GPU: 22.23 ms/frame (last 8), frame 312
+int8 phases: head 0.5  quantise 0.0  hops 23.0  tail 0.7  SUM 24.3  BODY-TOTAL 24.3 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.29  upload_sync 0.01  model-call 1.96  frame-ctor 0.01  final-sync 19.09  | total 22.36 ms | last_inference_ms 21.05 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 21.81 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.52 ms of HOST (0.033 ms each); whole hop loop 0.53 ms
+int8 body GPU: 22.50 ms/frame (last 8), frame 320
+int8 phases: head 0.9  quantise 0.0  hops 22.9  tail 0.7  SUM 24.5  BODY-TOTAL 24.5 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.37  upload_sync 0.56  model-call 1.27  frame-ctor 0.01  final-sync 19.22  | total 22.42 ms | last_inference_ms 20.49 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.63 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.57 ms of HOST (0.036 ms each); whole hop loop 0.58 ms
+                                       FPS: 22 Current Frame: 326 ETA: 0:00:07int8 body GPU: 22.41 ms/frame (last 8), frame 328
+int8 phases: head 0.5  quantise 0.0  hops 19.0  tail 1.3  SUM 20.8  BODY-TOTAL 20.8 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 1.29  shuffle 0.00  residual 0.00  SUM 1.30 ms
+host timeline: upload 1.45  upload_sync 0.03  model-call 3.18  frame-ctor 0.01  final-sync 23.52  | total 28.20 ms | last_inference_ms 26.70 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.33 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.81 ms of HOST (0.050 ms each); whole hop loop 0.82 ms
+int8 body GPU: 22.93 ms/frame (last 8), frame 336
+int8 phases: head 0.6  quantise 0.0  hops 23.0  tail 0.8  SUM 24.3  BODY-TOTAL 24.3 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.28  upload_sync 0.01  model-call 1.49  frame-ctor 0.01  final-sync 21.99  | total 24.78 ms | last_inference_ms 23.49 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.97 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.97 ms of HOST (0.061 ms each); whole hop loop 0.98 ms
+int8 body GPU: 23.02 ms/frame (last 8), frame 344
+int8 phases: head 0.6  quantise 0.0  hops 22.4  tail 0.7  SUM 23.7  BODY-TOTAL 23.7 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 2.25  upload_sync 0.02  model-call 1.19  frame-ctor 0.01  final-sync 19.23  | total 22.69 ms | last_inference_ms 20.43 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.11 ms/frame (last 8); alloc_retries 0
+                                       FPS: 22 Current Frame: 343 ETA: 0:00:06int8 host: 16 launches cost 0.40 ms of HOST (0.025 ms each); whole hop loop 0.41 ms
+int8 body GPU: 22.29 ms/frame (last 8), frame 352
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.41  upload_sync 0.01  model-call 2.46  frame-ctor 0.01  final-sync 23.77  | total 27.65 ms | last_inference_ms 26.23 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.36 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.53 ms of HOST (0.033 ms each); whole hop loop 0.53 ms
+int8 body GPU: 22.84 ms/frame (last 8), frame 360
+int8 phases: head 0.4  quantise 0.0  hops 22.5  tail 0.7  SUM 23.7  BODY-TOTAL 23.7 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.30  upload_sync 0.01  model-call 1.78  frame-ctor 0.01  final-sync 23.34  | total 26.44 ms | last_inference_ms 25.13 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.06 ms/frame (last 8); alloc_retries 0
+                                       FPS: 23 Current Frame: 361 ETA: 0:00:05int8 host: 16 launches cost 0.40 ms of HOST (0.025 ms each); whole hop loop 0.41 ms
+int8 body GPU: 22.16 ms/frame (last 8), frame 368
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 2.66  upload_sync 0.02  model-call 1.05  frame-ctor 0.01  final-sync 20.01  | total 23.74 ms | last_inference_ms 21.06 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.03 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.42 ms of HOST (0.026 ms each); whole hop loop 0.42 ms
+int8 body GPU: 22.14 ms/frame (last 8), frame 376
+int8 phases: head 0.5  quantise 0.1  hops 18.8  tail 0.7  SUM 20.2  BODY-TOTAL 20.2 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.51  upload_sync 0.05  model-call 3.11  frame-ctor 0.02  final-sync 23.86  | total 28.54 ms | last_inference_ms 26.98 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.96 ms/frame (last 8); alloc_retries 0
+                                       FPS: 23 Current Frame: 378 ETA: 0:00:05int8 host: 16 launches cost 0.56 ms of HOST (0.035 ms each); whole hop loop 0.57 ms
+int8 body GPU: 23.10 ms/frame (last 8), frame 384
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.33  upload_sync 0.02  model-call 3.41  frame-ctor 0.01  final-sync 22.21  | total 26.97 ms | last_inference_ms 25.63 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.24 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.55 ms of HOST (0.034 ms each); whole hop loop 0.55 ms
+int8 body GPU: 23.51 ms/frame (last 8), frame 392
+int8 phases: head 1.1  quantise 0.0  hops 22.7  tail 0.7  SUM 24.6  BODY-TOTAL 24.6 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.93  upload_sync 0.02  model-call 1.32  frame-ctor 0.01  final-sync 20.66  | total 23.93 ms | last_inference_ms 21.98 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.32 ms/frame (last 8); alloc_retries 0
+                                       FPS: 23 Current Frame: 396 ETA: 0:00:04int8 host: 16 launches cost 0.52 ms of HOST (0.033 ms each); whole hop loop 0.53 ms
+int8 body GPU: 22.54 ms/frame (last 8), frame 400
+int8 phases: head 0.5  quantise 0.0  hops 20.1  tail 0.7  SUM 21.4  BODY-TOTAL 21.4 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.26  upload_sync 0.01  model-call 1.94  frame-ctor 0.01  final-sync 19.18  | total 22.39 ms | last_inference_ms 21.13 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.54 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.59 ms of HOST (0.037 ms each); whole hop loop 0.60 ms
+int8 body GPU: 22.04 ms/frame (last 8), frame 408
+int8 phases: head 0.7  quantise 0.0  hops 18.9  tail 0.7  SUM 20.3  BODY-TOTAL 20.3 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.38  upload_sync 0.05  model-call 2.37  frame-ctor 0.01  final-sync 23.42  | total 27.23 ms | last_inference_ms 25.80 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.11 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 1.06 ms of HOST (0.066 ms each); whole hop loop 1.07 ms
+                                       FPS: 24 Current Frame: 414 ETA: 0:00:03int8 body GPU: 22.62 ms/frame (last 8), frame 416
+int8 phases: head 0.5  quantise 0.0  hops 22.9  tail 0.7  SUM 24.2  BODY-TOTAL 24.2 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.33  upload_sync 0.01  model-call 2.02  frame-ctor 0.01  final-sync 18.76  | total 22.13 ms | last_inference_ms 20.78 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.22 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.51 ms of HOST (0.032 ms each); whole hop loop 0.52 ms
+int8 body GPU: 22.03 ms/frame (last 8), frame 424
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.54  upload_sync 0.12  model-call 2.04  frame-ctor 0.01  final-sync 22.45  | total 26.16 ms | last_inference_ms 24.49 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.72 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 1.88 ms of HOST (0.117 ms each); whole hop loop 1.89 ms
+int8 body GPU: 22.87 ms/frame (last 8), frame 432
+int8 phases: head 0.5  quantise 0.0  hops 23.7  tail 0.8  SUM 25.0  BODY-TOTAL 25.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.36  upload_sync 0.03  model-call 1.40  frame-ctor 0.01  final-sync 22.16  | total 24.94 ms | last_inference_ms 23.56 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.94 ms/frame (last 8); alloc_retries 0
+                                       FPS: 24 Current Frame: 431 ETA: 0:00:02int8 host: 16 launches cost 0.47 ms of HOST (0.030 ms each); whole hop loop 0.48 ms
+int8 body GPU: 22.27 ms/frame (last 8), frame 440
+int8 phases: head 0.5  quantise 0.0  hops 22.8  tail 0.7  SUM 24.0  BODY-TOTAL 24.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.41  upload_sync 0.03  model-call 1.73  frame-ctor 0.01  final-sync 19.30  | total 22.48 ms | last_inference_ms 21.03 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.40 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.33 ms of HOST (0.020 ms each); whole hop loop 0.33 ms
+int8 body GPU: 21.34 ms/frame (last 8), frame 448
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.0  BODY-TOTAL 20.0 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.52  upload_sync 0.05  model-call 2.04  frame-ctor 0.01  final-sync 24.33  | total 27.95 ms | last_inference_ms 26.38 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.42 ms/frame (last 8); alloc_retries 0
+                                       FPS: 24 Current Frame: 449 ETA: 0:00:01int8 host: 16 launches cost 0.38 ms of HOST (0.024 ms each); whole hop loop 0.39 ms
+int8 body GPU: 23.13 ms/frame (last 8), frame 456
+int8 phases: head 1.2  quantise 0.0  hops 23.1  tail 0.7  SUM 25.1  BODY-TOTAL 25.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.59  upload_sync 0.01  model-call 0.89  frame-ctor 0.01  final-sync 23.44  | total 25.94 ms | last_inference_ms 24.33 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 23.11 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.54 ms of HOST (0.034 ms each); whole hop loop 0.55 ms
+int8 body GPU: 22.01 ms/frame (last 8), frame 464
+int8 phases: head 0.5  quantise 0.0  hops 20.1  tail 0.7  SUM 21.4  BODY-TOTAL 21.4 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.75  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.60  upload_sync 0.01  model-call 0.94  frame-ctor 0.01  final-sync 19.46  | total 22.02 ms | last_inference_ms 20.40 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 21.65 ms/frame (last 8); alloc_retries 0
+                                       FPS: 25 Current Frame: 467 ETA: 0:00:01int8 host: 16 launches cost 0.51 ms of HOST (0.032 ms each); whole hop loop 0.51 ms
+int8 body GPU: 21.75 ms/frame (last 8), frame 472
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.22  upload_sync 0.02  model-call 0.95  frame-ctor 0.01  final-sync 23.57  | total 25.77 ms | last_inference_ms 24.53 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.47 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.35 ms of HOST (0.022 ms each); whole hop loop 0.35 ms
+int8 body GPU: 22.23 ms/frame (last 8), frame 480
+int8 phases: head 0.5  quantise 0.0  hops 21.4  tail 0.7  SUM 22.6  BODY-TOTAL 22.6 ms (gap -0.0)
+int8 tail: dequant 0.00  conv 0.74  shuffle 0.00  residual 0.00  SUM 0.75 ms
+host timeline: upload 1.19  upload_sync 0.02  model-call 0.92  frame-ctor 0.01  final-sync 19.48  | total 21.61 ms | last_inference_ms 20.40 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 21.79 ms/frame (last 8); alloc_retries 0
+int8 host: 16 launches cost 0.32 ms of HOST (0.020 ms each); whole hop loop 0.32 ms
+                                       FPS: 25 Current Frame: 485 ETA: 0:00:00int8 body GPU: 21.85 ms/frame (last 8), frame 488
+int8 phases: head 0.5  quantise 0.0  hops 18.8  tail 0.7  SUM 20.1  BODY-TOTAL 20.1 ms (gap 0.0)
+int8 tail: dequant 0.00  conv 0.73  shuffle 0.00  residual 0.00  SUM 0.74 ms
+host timeline: upload 1.24  upload_sync 0.03  model-call 0.86  frame-ctor 0.01  final-sync 23.60  | total 25.73 ms | last_inference_ms 24.47 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig False stride (18662400, 1, 8640, 3)
+fp16 engine GPU: 22.43 ms/frame (last 8); alloc_retries 0
+BACKEND: render loop: 13.98 s for 494 frames (28.30 ms/frame), total 41.90 s since process start
+BACKEND: profile over 494 frames: gate 0.00 ms (input to tensor 0.00), model wall 36.11 ms (self-reported 34.42, engine 13.10, frame handover 0.01), input convert 0.00 ms, preview 0.00 ms, pack+queue 3.62 ms, read wait 0.16 ms, named 39.89 of frame total 39.74 ms, unaccounted -0.15 ms
+BACKEND: 
+Time to complete render: 19.73
+BACKEND: writer: 494 frames, write 4.27 ms/frame (max 14.8), wait for frames 35.65 ms/frame, 4610 MB total, busy 2.11 s of 19.73 s, queue max 1

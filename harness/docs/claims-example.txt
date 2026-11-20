@@ -1,0 +1,56 @@
+# Claims from this investigation, including three that were published and later withdrawn.
+# Run: harness/scripts/claim_check.py harness/docs/claims-example.txt
+
+@claim reuse_chainsaw        66.4   %     "Chainsaw, gate on, per-title counts"  @session=example
+@claim breakeven_rendered    47.8   %     "Chainsaw, break-even RENDERED share"  @session=example
+@claim margin_chainsaw       18.6   pp    "Chainsaw, margin"  @session=example
+
+# 1. The published margin subtracted a rendered-column threshold from a reuse percentage.
+@ratio margin_chainsaw reuse_chainsaw 1.0 "Chainsaw, gate on, per-title counts"
+
+@claim tops_bm128_capped     67.6   TOPS  "1080x1080, int8 BM128 128 regs"  @session=example
+@claim tops_bm256            77.6   TOPS  "1920x1080, int8 BM256 255 regs"  @session=example
+
+# 2. A ratio between two different frames is not a ratio.
+@ratio tops_bm256 tops_bm128_capped 1.148 "1920x1080, int8 BM256 255 regs"
+
+@claim tiles_share           0.071  %     "anime, tile path, worst frame"  @session=example
+@claim routing_margin        14.13  pp    "Chainsaw, reuse points"  @session=example
+
+# 3. A share in percent cannot be compared with a margin in points.
+@ratio tiles_share routing_margin 0.005
+
+@claim gate_share            0.005  %     "Chainsaw, gate only"  @session=example
+@claim engine_share          0.006  %     "Chainsaw, int8 engine only"  @session=example
+@claim composition_share     0.017  %     "Chainsaw, gate + int8"  @session=example
+
+# 4. Two sub-threshold errors do not partition the composition - the sum is a null hypothesis.
+@sum 0.011% @of gate_share + engine_share
+
+@claim pipeline_share         1.870  %     "512x512 crop, int8 chain, pipeline"  @session=example
+@claim simulation_share       0.000  %     "512x512 crop, int8 chain, simulation"  @session=example
+@claim acceptance_bar         0.1    %     "the project's bar, worst frame RGB"  @session=example
+
+# 5. The stage-1 gate: the pipeline must sit under the bar it will be judged by.
+@below pipeline_share 0.1
+@below simulation_share 0.1
+
+@bar bar_share  0.1  %
+@bar bar_peak   20   levels
+
+# 6. A peak judged against the SHARE threshold: 8 is a share threshold, not the peak bar.
+@claim peak_value            7    levels "Chainsaw, int8 engine"  @session=example
+@below peak_value bar_share
+
+# 7. A causal claim whose mechanism was never varied.
+@claim dram_write_bytes    184.6  MB     "block kernel, BM256, one launch"  @session=example
+@claim dram_write_bytes_b  184.6  MB     "block kernel, BM256, one launch"  @session=example
+@cause write_allocate "write-allocate" dram_write_bytes dram_write_bytes_b
+
+# 8. A verdict over claims from two sessions: each is true, the pair is not.
+@claim engine_ms_violet     51.4  ms     "Violet, session A" measured  @session=example
+@claim engine_ms_other      56.3  ms     "anime, session B"  measured  @session=example
+@verdict int8_speedup engine_ms_violet engine_ms_other
+
+# 9. A derived number with no derivation line.
+@claim triangle_bound       0.067  %      "Violet + anime, summed shares" derived  @session=example

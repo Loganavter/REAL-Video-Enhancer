@@ -3,7 +3,7 @@
 The population is frames for the share and rounds for the time, as everywhere else; the config carries the width
 and the tile, because the tile was tuned at 64 and a native width is only trusted after it has been re-tuned.
 
-Usage: python harness/harness/scripts/int8_width_records.py [--probe ...] [--out ...]
+Usage: python harness/scripts/int8_width_records.py [--probe ...] [--out ...]
 """
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/int8-width/probe.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-width.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/int8-width/probe.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-width.jsonl")
     args = ap.parse_args(argv)
 
     pr = json.load(open(args.probe))

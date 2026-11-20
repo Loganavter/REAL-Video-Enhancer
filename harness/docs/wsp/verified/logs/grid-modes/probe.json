@@ -1,0 +1,179 @@
+{
+ "take": "2026-11-19T08:12:16Z",
+ "rows": [
+  {
+   "file": "2x-Futsuu-Anime(1).pth",
+   "per_tensor": {
+    "weight_rel_err": 0.02078,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "input_rel_err": [
+     0.14877,
+     0.14936,
+     0.1156
+    ]
+   },
+   "per_channel": {
+    "weight_rel_err": 0.02918,
+    "clip_share_pct": [
+     0.0,
+     1e-05,
+     0.0
+    ],
+    "input_rel_err": [
+     0.04604,
+     0.04626,
+     0.03559
+    ]
+   }
+  },
+  {
+   "file": "2xken-v1-evA-01.pth",
+   "per_tensor": {
+    "weight_rel_err": 0.02043,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "input_rel_err": [
+     0.13516,
+     0.13493,
+     0.11422
+    ]
+   },
+   "per_channel": {
+    "weight_rel_err": 0.02687,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     1e-05
+    ],
+    "input_rel_err": [
+     0.04051,
+     0.04045,
+     0.03407
+    ]
+   }
+  },
+  {
+   "file": "2xHFA2k_LUDVAE_compact(2).pth",
+   "per_tensor": {
+    "weight_rel_err": 0.02154,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "input_rel_err": [
+     0.08811,
+     0.08851,
+     0.07921
+    ]
+   },
+   "per_channel": {
+    "weight_rel_err": 0.02584,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     1e-05
+    ],
+    "input_rel_err": [
+     0.0332,
+     0.03335,
+     0.02989
+    ]
+   }
+  },
+  {
+   "file": "2x_GarfieldJr_net_g_51000.pth",
+   "per_tensor": {
+    "weight_rel_err": 0.01996,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "input_rel_err": [
+     0.15771,
+     0.15417,
+     0.13193
+    ]
+   },
+   "per_channel": {
+    "weight_rel_err": 0.02561,
+    "clip_share_pct": [
+     0.0,
+     1e-05,
+     1e-05
+    ],
+    "input_rel_err": [
+     0.04274,
+     0.04184,
+     0.03549
+    ]
+   }
+  },
+  {
+   "file": "2x_AniSD_AC_G6i2a_Compact_72500.pth",
+   "per_tensor": {
+    "weight_rel_err": 0.0162,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "input_rel_err": [
+     0.23151,
+     0.22798,
+     0.18613
+    ]
+   },
+   "per_channel": {
+    "weight_rel_err": 0.02036,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     1e-05
+    ],
+    "input_rel_err": [
+     0.0599,
+     0.05871,
+     0.04749
+    ]
+   }
+  },
+  {
+   "file": "2x-AniScale.pth",
+   "per_tensor": {
+    "weight_rel_err": 0.02009,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "input_rel_err": [
+     0.16005,
+     0.1596,
+     0.13152
+    ]
+   },
+   "per_channel": {
+    "weight_rel_err": 0.02711,
+    "clip_share_pct": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "input_rel_err": [
+     0.04626,
+     0.04606,
+     0.03772
+    ]
+   }
+  }
+ ]
+}

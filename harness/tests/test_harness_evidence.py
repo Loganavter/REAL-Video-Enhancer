@@ -1,7 +1,7 @@
 """The harness itself: the tuple, the gates, the three-state probe, the artifact parsers.
 
 No GPU, no torch (the checkpoint parser is torch-free on purpose), no network. Every test here is a
-retraction from docs/RESEARCH-LEDGER.md turned into a rule that can no longer be violated quietly.
+retraction from harness/docs/RESEARCH-LEDGER.md turned into a rule that can no longer be violated quietly.
 """
 from __future__ import annotations
 

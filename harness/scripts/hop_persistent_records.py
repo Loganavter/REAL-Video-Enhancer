@@ -1,7 +1,7 @@
 """Records for the persistent-CTA falsifier: three arms, the codes, and the achieved TOPS.
 
-Usage: python harness/harness/scripts/hop_persistent_records.py [--probe docs/wsp/verified/logs/hop-persistent/probe.json]
-                                                [--out docs/wsp/verified/records/int8-hop-persistent.jsonl]
+Usage: python harness/scripts/hop_persistent_records.py [--probe harness/docs/wsp/verified/logs/hop-persistent/probe.json]
+                                                [--out harness/docs/wsp/verified/records/int8-hop-persistent.jsonl]
 """
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/hop-persistent/probe.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-hop-persistent.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/hop-persistent/probe.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-hop-persistent.jsonl")
     args = ap.parse_args(argv)
     pr = json.load(open(args.probe))
     dig, sess = hashlib.sha256(open(args.probe, "rb").read()).hexdigest(), f"s-{pr['take']}"

@@ -1,0 +1,19 @@
+# The forced int8 flag was bypassing the probe, and with it the spread calibration. 2026-11-18.
+# BEFORE: --int8_fit int8 skipped _probe_int8_fit, so int8Frames stayed None and UpscaleTorch fell
+# back to `frame` (one frame). Violet, 0.56613%, 372 of 480 frames above the bar.
+# AFTER: the probe always runs (it decodes the frames), the verdict is overridden separately.
+BACKEND: int8 calibration frames handed to the body: 24 (forced verdict: int8)
+BACKEND: int8 fit FORCED to int8; the probe said fp16
+int8 body self-certification on the first frame: 0.00007% of pixels >8 levels -> serving
+BACKEND: reference reuse: 340/480 frames reused (70.8%), 3 scene cuts, max chain=4
+
+full sweep against the ungated render:
+  worst 0.12727% (frame 227, peak 33), frames above 0.1%: 3 of 480  (was 372)
+  the three: 227 reused, 271 reused, 280 reused - composition, not the body's own defect on rendered frames
+  fp16 under the same gate: worst 0.07345%
+
+per-frame int8/fp16 ratio over the 336 reused frames (simulation):
+  median 7.31, p90 89.83, max 746 - the ratio is not a constant on this material
+
+# the 372 > 340 arithmetic that exposed this: 372 above the bar but only 340 reused means >=32
+# RENDERED frames were above the bar, which is the body's own error, not composition.

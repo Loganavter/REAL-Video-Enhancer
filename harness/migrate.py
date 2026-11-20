@@ -1,6 +1,6 @@
 """Migrate the existing findings into the harness, and fail while they are unprotected.
 
-The 473 lines of `docs/claims-*.txt` are 213 `@claim`, 46 free-text `@derived`, 16 `@bar`, and a handful
+The 473 lines of `harness/docs/claims-*.txt` are 213 `@claim`, 46 free-text `@derived`, 16 `@bar`, and a handful
 of relations. Every one of them predates the tuple, so the honest question is not "are they consistent"
 (the legacy auditor answers that) but **what is each one missing before it can be evidence again**.
 

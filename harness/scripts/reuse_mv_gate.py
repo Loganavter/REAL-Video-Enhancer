@@ -11,7 +11,7 @@ the chosen distance is reported per frame - no assumption about the codec's list
 The second half is the question the correction lane actually needs answered: on the frames the
 gate reused, does the field reduce the residual in the region that fails? The region is measured
 two ways - an 8 px border band and a high-gradient mask - because on the held-out clip the failing
-pixels sit almost entirely in the former (see docs/wsp/verified/reuse-mv-reference.txt).
+pixels sit almost entirely in the former (see harness/docs/wsp/verified/reuse-mv-reference.txt).
 
 Usage:
   python3 harness/scripts/reuse_mv_gate.py --clip cut.mkv --depth-log gate.log [--band 8] [--grad 20]

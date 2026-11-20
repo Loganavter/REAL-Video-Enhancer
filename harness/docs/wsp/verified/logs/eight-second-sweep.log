@@ -1,0 +1,24 @@
+# The two 8 s cuts the shipping numbers came from, re-made and swept in full, 2026-11-17.
+# Cuts: ffmpeg -ss 300 -t 9.2 -c copy from the remastering library (no re-encode, so the source
+# noise is preserved). Renders: backend/rve-backend.py, ffv1/yuv444p, shipped defaults vs
+# --no_temporal_reuse. Sweep: every frame, channel-max |delta| > 8 levels.
+
+=== Chainsaw Man 8 s at 5:00
+BACKEND: reference reuse: 165/249 frames reused (66.3%), 0 scene cuts, 0 pixel vetoes, threshold=4.0/255 over scaledpx blocks, max chain=2, pixel veto=off
+BACKEND: auto gate: threshold 4.0/255, chain 2, veto None, noise floor 0.95, would reuse 69% of the 16 calibration frames; certified d1 p90 0.27 at 12 (limit 2), d2 p90 0.25 at 12 (limit 12)
+  249 frames
+  full sweep: worst 0.00274% on frame 182, peak 16
+  15-frame spread sample: worst 0.00069%  -> under-reports by 4.0x
+  frames above 0.1%: 0   above 0.01%: 0
+  median 0.00016%
+  ledger, same cut: 0.005% (peak 14), 146/220 = 66.4%, noise floor 0.95
+
+=== Violet Evergarden 8 s at 5:00
+BACKEND: reference reuse: 160/250 frames reused (64.0%), 3 scene cuts, 0 pixel vetoes, threshold=4.0/255 over scaledpx blocks, max chain=2, pixel veto=off
+BACKEND: auto gate: threshold 4.0/255, chain 2, veto None, noise floor 1.32, would reuse 69% of the 16 calibration frames; certified d1 p90 0.41 at 12 (limit 2), d2 p90 0.42 at 12 (limit 12)
+  250 frames
+  full sweep: worst 0.04989% on frame 230, peak 18
+  15-frame spread sample: worst 0.04496%  -> under-reports by 1.1x
+  frames above 0.1%: 0   above 0.01%: 76
+  median 0.00632%
+  ledger, same cut: 0.096% (peak 18), 142/219 = 64.8%, noise floor 1.32

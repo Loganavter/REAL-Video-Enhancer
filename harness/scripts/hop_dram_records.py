@@ -21,8 +21,8 @@ ROWS = [
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--report", default="docs/wsp/verified/logs/hop-dram/report.txt")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-hop-dram.jsonl")
+    ap.add_argument("--report", default="harness/docs/wsp/verified/logs/hop-dram/report.txt")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-hop-dram.jsonl")
     a = ap.parse_args(argv)
     dig = hashlib.sha256(open(a.report, "rb").read()).hexdigest()
     pop = Population.of("frames", ("bd_violet20s.mkv#frame169",),

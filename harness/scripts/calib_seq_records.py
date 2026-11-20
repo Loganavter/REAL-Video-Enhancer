@@ -12,8 +12,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="docs/wsp/verified/logs/calib-seq")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-calib-seq.jsonl")
+    ap.add_argument("--dir", default="harness/docs/wsp/verified/logs/calib-seq")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-calib-seq.jsonl")
     a = ap.parse_args(argv)
     def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
     d = json.load(open(os.path.join(a.dir, "decode-split.json")))
@@ -33,12 +33,12 @@ def main(argv=None) -> int:
                    instrument="channel-max |delta| over 64px blocks (gate_sweep --reference-kind config)",
                    config="sequential first-48-frame calibration against the spread decode, crops on both",
                    session=st.session, statistic="worst_of", tier="measured", id="SQ003",
-                   run="harness/scripts/wall_ab.sh + harness/harness/scripts/gate_sweep.py", artifact=os.path.join(a.dir, "pair.json"),
+                   run="harness/scripts/wall_ab.sh + harness/scripts/gate_sweep.py", artifact=os.path.join(a.dir, "pair.json"),
                    extra={"artifact_sha256": sha(os.path.join(a.dir, "pair.json")),
                           "peak": pair["worst_peak"], "frames_above_bar": pair["frames_above_bar"]}))
     # the end-to-end start-up with both changes on (crops + sequential), same instrument as the split page
     import re
-    log = "docs/wsp/verified/logs/startup-timed-seq.log"
+    log = "harness/docs/wsp/verified/logs/startup-timed-seq.log"
     total = None
     for line in open(log):
         m = re.search(r"startup: first frame enqueued ([\d.]+) s", line)

@@ -1,0 +1,23 @@
+# Points 5, 6, 7 of the last order, 2026-11-18.
+
+=== 7. the per-frame ratio with a denominator floor (fp16 >= 0.01%)
+Violet, 67 of 336 reused pairs qualify:
+  delta (pp): median 0.0215, p90 0.0376, max 0.0538
+  ratio:      median 1.95, max 3.73
+  frame 227: fp16 0.0734 -> int8 0.1273 (+0.0538 pp)
+  frame 271: fp16 0.0535 -> int8 0.1037 (+0.0502 pp)
+  frame 280: fp16 0.0658 -> int8 0.1088 (+0.0430 pp)
+Chainsaw frame 441: fp16 0.07489 -> int8 0.08876 (+0.01387 pp, 1.19x)
+So the increment is ADDITIVE and of order 0.02 pp on Violet (0.014 on Chainsaw), not multiplicative.
+
+=== 6. the null path's payload
+  yuv420p (shipped): 12.4 MB/frame
+  rgb24 (null path): 24.9 MB/frame  -> 2.0x
+So 1.118x is a LOWER bound for the shipped wall: the null path pays double the pipe traffic, and at
+Violet's shipped reuse (r=0.442) the back-calculation gives ~1.18x.
+
+=== 5. the peak clause
+The product probe now reads Violet's int8 peak at 128 levels, against bar_int8_peak = 20 (PENDING
+OWNER DECISION, accepted debt recorded as 29-55). The artifact that started this lane was 0.29% of
+pixels at a peak near 100, rejected by the owner's eye at VMAF min 93.65. The product does not refuse
+on the peak, so a title at 0.09% share and peak 128 would be certified and rendered.

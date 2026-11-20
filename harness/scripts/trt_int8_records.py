@@ -1,6 +1,6 @@
 """Records for TensorRT's own int8 (calibrated, implicit) against the fp16 engine of the same model.
 
-Inputs, all committed under `docs/wsp/verified/logs/trt-int8/`:
+Inputs, all committed under `harness/docs/wsp/verified/logs/trt-int8/`:
   prof_fp16.log, prof_int8_entropy.log, prof_int8_minmax.log   `trtexec --loadEngine --dumpProfile`
   trt-int8-accuracy.json                                        `harness/scripts/trt_int8_accuracy.py`
   trt-int8-manifest.json                                        `harness/scripts/trt_int8_calibrate.py` (frames by sha256)
@@ -50,9 +50,9 @@ def profile(path: str) -> list[tuple[float, str]]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="docs/wsp/verified/logs/trt-int8")
-    ap.add_argument("--out", default="docs/wsp/verified/records/trt-int8-calibrated.jsonl")
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/trt-int8/trt-vs-body.json")
+    ap.add_argument("--dir", default="harness/docs/wsp/verified/logs/trt-int8")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/trt-int8-calibrated.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/trt-int8/trt-vs-body.json")
     a = ap.parse_args(argv)
 
     def path(name: str) -> str:

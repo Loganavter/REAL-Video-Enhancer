@@ -162,7 +162,7 @@ class Int8Body:
         # Zero-haloed hop buffers: no bounds mask in the kernel, and every hop writes into the NEXT hop's
         # padded interior, so the halo costs one border zeroing per frame (0.08 ms) instead of a copy per hop.
         # Measured on the 16-hop chain: +0.61 ms/frame net (+2.3%) with identical codes
-        # (docs/wsp/verified/int8-hop-halo-chain.txt). RVE_HOP_HALO=0 restores the plain buffers.
+        # (harness/docs/wsp/verified/int8-hop-halo-chain.txt). RVE_HOP_HALO=0 restores the plain buffers.
         # DEFAULT ON since 2026-11-19: 34.50 -> 33.51 ms/frame (-0.99, -2.9%) in 3 of 3 interleaved rounds, and
         # the render is byte-identical (0 differing pixels on two frames, IDENTITY on the 494-frame pair).
         # Costs 382 MB of buffers (three padded ones); RVE_HOP_HALO=0 restores the plain layout.
@@ -413,7 +413,7 @@ class Int8Body:
         s_act, outs = self._grids
         # 2026-11-18: the hop boundary keeps its PER-CHANNEL grid instead of being collapsed to
         # max(s_in) and repacked with an m multiplier. The simulation isolated this as the lever
-        # (docs/wsp/verified/int8-scales-bd.txt: 0.06510% -> 0.00162% on the worst BD frame), and the way
+        # (harness/docs/wsp/verified/int8-scales-bd.txt: 0.06510% -> 0.00162% on the worst BD frame), and the way
         # to get it in the kernel is to fold s_in per INPUT channel into the weights at build time - the
         # integer dot then needs no multiplier at all (m = 1 << SHIFT, identity). Build-time cost: one
         # requantise of 16 x 64 x 64 x 3 x 3 weights; runtime cost: none.
@@ -434,7 +434,7 @@ class Int8Body:
         # far one channel's grid can fall below the layer maximum - so no channel can be crushed by more than
         # K. The fold stays EXACT for any positive s[c]: codes x/s[c], weights w*s[c], and s[c] cancels in
         # the accumulation, so this axis costs nothing in arithmetic and needs no epilogue change.
-        # Grid margin. The ink/rim probe (docs/wsp/verified/int8-scales-bd.txt) showed int8 lifting the
+        # Grid margin. The ink/rim probe (harness/docs/wsp/verified/int8-scales-bd.txt) showed int8 lifting the
         # line by ~+5 levels while the rim stays - the signature the simulation produces only when the
         # quantiser CLIPS. The kernel does not clip on purpose, but its per-tensor grid comes from 24
         # calibration frames, so activations outside that range clamp at +-127. A margin widens the grid

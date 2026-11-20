@@ -7,7 +7,7 @@ with the commit, the card and the library versions, pointing at the record ids i
 supersedes.
 
     python3 -m harness.journal add "int8 wall re-measured: 1.65x end to end" --refs RU053 --supersedes W009
-    python3 -m harness.journal render          # docs/wsp/JOURNAL.md from docs/wsp/journal.jsonl
+    python3 -m harness.journal render          # harness/docs/wsp/JOURNAL.md from harness/docs/wsp/journal.jsonl
     python3 -m harness.journal list            # the last ten entries
 
 The file is append-only and the rendered page is a view, like the ledger.
@@ -19,10 +19,11 @@ import json
 import textwrap
 from pathlib import Path
 
+from . import paths
 from .provenance import stamp
 
-JOURNAL = Path("docs/wsp/journal.jsonl")
-PAGE = Path("docs/wsp/JOURNAL.md")
+JOURNAL = Path(paths.doc("wsp/journal.jsonl"))
+PAGE = Path(paths.doc("wsp/JOURNAL.md"))
 
 
 def _read(path: Path = JOURNAL) -> list[dict]:
@@ -80,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--refs", default="")
     ap.add_argument("--supersedes", default="")
     ap.add_argument("--model", default="")
-    sub.add_parser("render", help="write docs/wsp/JOURNAL.md from the jsonl")
+    sub.add_parser("render", help="write harness/docs/wsp/JOURNAL.md from the jsonl")
     sub.add_parser("list", help="print the last ten entries")
     args = parser.parse_args(argv)
 

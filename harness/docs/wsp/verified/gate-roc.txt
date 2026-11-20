@@ -1,0 +1,94 @@
+# The gate's threshold does separate - except on the one frame that decides
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 8 record(s) in this file (R001, R002, R003, R004, R005, R006, R007, R008) name
+> `csm20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+Measured 2026-11-17 on the 100 frames the shipped gate reused on Chainsaw Man 20 s: the product's own
+`ReferenceFrameGate` fed the LR frames (its counters reproduce the render: 100 reused, 2 scene cuts), and
+the per-frame HR acceptance share of the gated-vs-ungated decode over all 481 frames. Joining the two
+answers the question "does anything the gate can see predict the damage".
+
+| feature | AUC | Spearman vs HR share |
+|---|---|---|
+| LR share of pixels above 4 levels | **0.993** | +0.66 |
+| the gate's own delta | **0.989** | +0.56 |
+| LR share above 6 / above 8 | 0.945 / 0.947 | +0.64 / +0.63 |
+| LR max \|delta\| (what the veto sees) | 0.910 | +0.49 |
+| chain depth | **0.507** | +0.09 |
+
+So the gate's variable is not blind: it ranks the damage almost perfectly on average, and the chain
+depth carries no information at all. But the ranking fails on the frame that matters.
+
+## Two classes, and only one of them is visible to any LR statistic
+
+| | frame 164 (worst by share) | frame 432 (worst by peak) |
+|---|---|---|
+| HR share | **0.4937%** | 0.3053% |
+| HR peak | 14 | **75** |
+| gate delta | 3.294 | 3.935 |
+| chain | 3 | 2 |
+| LR share above 8 | **0.000%** | 0.259% |
+| LR max \|delta\| | **5.25** | 56.75 |
+| bad pixels | 40951 in 63 blocks, 8-16 levels only | 25319 over 379 blocks, up to 75 |
+| reference luminance at those pixels | **median 252, 100% above 240** | median 50, p10 24, p90 107 |
+
+Frame 164 is a **saturated white region shifted by 8-14 levels**: 63 blocks fully covered, no pixel
+above 16, and every one of them at 252/255 in the ungated render. Frame 432 is the **moving-edge**
+class: thin structures, sparse, up to 75 levels, at ordinary exposure.
+
+The gate cannot see 164 at all - its LR max delta is 5.25 and not one LR pixel moves by more than 8. The
+error is manufactured by the upscaler from a sub-threshold, spatially smooth change. Seventeen of the
+eighteen bad frames are the other class, and they carry LR peaks of 41-75.
+
+## What a threshold would cost, and what the veto would catch
+
+Lowering the gate's delta from 4.0:
+
+| threshold | reuse kept | bad left | bad blocked | good lost |
+|---|---|---|---|---|
+| 4.0 (shipped) | 100% | 18 | 0 | 0 |
+| 3.9 | 97% | 15 | 3 | 0 |
+| 3.7 | 95% | 13 | 5 | 0 |
+| 3.3 | 90% | 9 | 9 | 1 |
+| 3.0 | 84% | 3 | 15 | 1 |
+| 2.5 | 80% | 0 | 18 | 2 |
+
+The first version of this table had the last two columns swapped, which inverted its conclusion: at
+3.0 the threshold blocks 15 of 18 bad frames for 16% of the reuse and **one** good frame, not "9 left
+and 10% of the reuse". Frame 164 (delta 3.294) is blocked at 3.0 - a threshold above 3.294 is what
+misses it.
+
+Measured on the product at threshold 3.0 (forced, chain 3, same clip): reuse 88/481 = 18.3% and **6
+frames above the bar instead of 18**, with the worst frame unchanged at 0.49372% - 164 is still served
+from the same reference, because in the app's own luma its delta lands just under 3.0 where this
+simulation reads 3.294. Wall cost of the change: 7.14 + 0.817 x 51.06 = 48.85 ms against 47.58, +2.7%,
+and all 12 dropped reuses were defective frames - no good frame lost.
+
+The pixel veto is the sharper instrument and it is **off** in the shipped auto path (`pixel veto=off`).
+At 40 levels on the LR max delta it keeps 82 of 100 reuses and catches **16 of 18** - it is aimed at
+exactly the class that dominates this clip, and it is disabled.
+
+## The probe's reference is not the fp16 model
+
+`_calibrate` loads int8-rounded weights into `model`, and the probe computes `ref` after that call, so
+the "fp16" side of every composition number is fp16 arithmetic on quantised weights. Measured on one
+frame: peak 4 levels, 0.00000% of pixels above 8, **not bit-identical**. The magnitude is below the bar
+and does not move any recorded number, but the reference is not what it is labelled, and the fix is to
+compute `ref` before `_calibrate`.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/gate-roc.txt \
+       --records harness/docs/wsp/verified/records/gate-roc.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 0.989 x "frames [da91caad7866b640] n=100" measured
+@claim R002 0.993 x "frames [da91caad7866b640] n=100" measured
+@claim R003 0.507 x "frames [da91caad7866b640] n=100" measured
+@claim R004 82.0 frames "frames [da91caad7866b640] n=100" measured
+@claim R005 18.0 frames "frames [da91caad7866b640] n=100" measured
+@claim R006 252.0 levels "frames [d3dc230812aad7da] n=1" measured
+@claim R007 50.0 levels "frames [e629c91e9b72478a] n=1" measured
+@claim R008 4.0 levels "frames [1a7984f1f594383c] n=1" measured

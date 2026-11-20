@@ -1,0 +1,64 @@
+# The persistent-CTA grid is 2.2x slower: the hop has no schedule left
+
+Measured 2026-11-20 (local), RTX 4060 Ti (34 SMs), one hop of the int8 body on its own codes (frame 169 of BD
+Violet), three arms in one process, 3 interleaved rounds, medians of rounds 2+.
+Records: `int8-hop-persistent.jsonl`; raw: `logs/hop-persistent/probe.json`.
+
+Row `rve-hop-persistent-cta-2026-11-20` - the third and last schedule idea, named in `int8-hop-loads.txt` as
+the one variant the earlier negatives did not cover. Two were already measured dead: vectorised loads (+0.9%,
+the compiler was doing it) and the weight hoist (-54%, two accumulators spill).
+
+| arm | CTAs | ms | TOPS | % of 176 | GB/s | % of 288 |
+|---|---|---|---|---|---|---|
+| shipped, one CTA per tile | 16 200 | **1.703** | 89.8 | 51.0% | 155.6 | 54.0% |
+| persistent, one CTA per SM | 34 | 3.709 | 41.2 | 23.4% | 71.4 | 24.8% |
+| persistent, two per SM | 68 | 2.251 | 67.9 | 38.6% | 117.7 | 40.9% |
+
+**Both persistent grids are slower - 2.2x and 1.3x - and all three arms produce 0 differing codes of 132.7 M**,
+so this is one schedule against another and not one arithmetic against another.
+
+## Why it loses, in one sentence
+
+Forty-eight CTAs cannot hide the dependent chain inside a tile: each CTA loops over ~476 tiles *sequentially*,
+and at 34 resident CTAs the card has no second wave to overlap the loads of one tile with the arithmetic of
+another. The shipped grid's 16 200 CTAs are exactly what a latency-bound kernel needs - the launch overhead
+the row hoped to remove (a few hundred µs at 5-27 µs per launch, and this is ONE launch anyway) was never the
+cost.
+
+## What this closes, for good
+
+With the traffic lever dead on the picture (`int8-sub8-codes`: 6-bit codes read 2.71% of pixels) and all three
+schedule variants measured negative, **no known lever remains unmeasured** - which is NOT the same as a floor,
+and `int8-hop-roof.txt` (measured the same day) shows why: 0.59 ms of every launch does not scale with the tap
+count, so 9.4 ms of the 25.7 is a fixed per-launch cost that none of these three variants touched. The
+honest statement of what binds it is not "bad scheduling" but "nine gathers and one 64-byte write per pixel,
+and the two costs do not overlap" - 51% of the arithmetic roof and 54% of the traffic roof at the same time is
+what that shape does here.
+
+That means the frame's remaining headroom is entirely outside the hop: the deliverable pack (3.59 ms, floor
+2.44), and the ~10 ms of non-body time the loop still carries.
+
+## Not covered
+
+- One card, one hop, one frame's codes. `tl.make_block_ptr` was not used (a 3x3 window is not a block); the
+  load-path hint WAS measured (`int8-hop-loads.txt`) and moved nothing.
+- A grid between 68 CTAs and 16 200 was not swept: the trend between 34 and 68 is monotone and the shipped
+  grid is 240x the larger persistent one, so a middle point would have to beat both ends of a 1.7x span.
+- Nothing here says another card behaves the same - an SM count and a memory system are properties of a card.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_persistent_probe.py --rounds 3 --iters 20 \
+    --out-file harness/docs/wsp/verified/logs/hop-persistent/probe.json
+PYTHONPATH=. python3 harness/scripts/hop_persistent_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-hop-persistent.txt \
+       --records harness/docs/wsp/verified/records/int8-hop-persistent.jsonl --bars harness/docs/claims-bars.json
+
+@claim N001 1.703 ms "frames [10cff28ea287d300] n=1" measured
+@claim N002 3.709 ms "frames [10cff28ea287d300] n=1" measured
+@claim N003 2.251 ms "frames [10cff28ea287d300] n=1" measured
+@claim R001 2.006 ms "frames [10cff28ea287d300] n=1" derived
+@claim R002 0.548 ms "frames [10cff28ea287d300] n=1" derived

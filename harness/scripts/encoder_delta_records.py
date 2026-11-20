@@ -8,7 +8,7 @@ so the answer is not a one-clip claim:
   delta             nvenc - null, same arm: what the encoder actually costs on THAT clip
   ratio             fp16 / int8-yuv under each sink
 
-Usage: python harness/harness/scripts/encoder_delta_records.py [--out ...]
+Usage: python harness/scripts/encoder_delta_records.py [--out ...]
 """
 from __future__ import annotations
 
@@ -31,10 +31,10 @@ from harness.core import Population, Record, Store  # noqa: E402
 LOOP = re.compile(r"render loop: [\d.]+ s for (\d+) frames \(([\d.]+) ms/frame\)")
 STAMP = re.compile(r"^# wall_ab (\S+)", re.M)
 CLIPS = {
-    "bd_violet20s": {"null": "docs/wsp/verified/logs/tail-csc-ratio",
-                     "nvenc": "docs/wsp/verified/logs/tail-csc-nvenc"},
-    "bd_csm_same": {"null": "docs/wsp/verified/logs/tail-csc-action-null",
-                    "nvenc": "docs/wsp/verified/logs/tail-csc-nvenc-action"},
+    "bd_violet20s": {"null": "harness/docs/wsp/verified/logs/tail-csc-ratio",
+                     "nvenc": "harness/docs/wsp/verified/logs/tail-csc-nvenc"},
+    "bd_csm_same": {"null": "harness/docs/wsp/verified/logs/tail-csc-action-null",
+                    "nvenc": "harness/docs/wsp/verified/logs/tail-csc-nvenc-action"},
 }
 ARMS = ("fp16", "yuv")
 ROUNDS = (1, 2, 3)
@@ -60,7 +60,7 @@ def read(logdir: str, clip: str, arm: str, sink: str) -> tuple[dict, str, str]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-encoder-delta.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-encoder-delta.jsonl")
     args = ap.parse_args(argv)
 
     store = Store(session="s-encoder-delta-2026-11-20")
