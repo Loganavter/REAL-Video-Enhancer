@@ -157,6 +157,10 @@ class Render:
         # picture verbatim, which loses everything that changed (measured 37/130 over the bar);
         # with it the frequency-split residual takes that to 0/130 on the calibration cut.
         temporal_reuse_correction: bool = True,
+        # machine-readable run report: what ran, on what, and what each stage cost. `harness.ingest`
+        # turns it into records, so "it got slower" becomes a number with a commit and a card instead
+        # of a memory. None = do not write one.
+        report_path: str | None = None,
         quality_preset: str = "best",
     ):
         self.inputFile = inputFile
@@ -428,6 +432,7 @@ class Render:
         )
         
 
+        self.reportPath = report_path
         self.temporalReuse = None
         # created together with the gate, below; None means a reused frame is emitted verbatim
         self.temporalCorrection = None
@@ -763,6 +768,60 @@ class Render:
         frame.set_frame_tensor(corrected, sync=False)
         return frame
 
+    def _run_report(self) -> dict:
+        """What ran, on what, and what each stage cost - the machine-readable twin of the log summary."""
+        from .utils.Provenance import stamp
+        prof = getattr(self, "_profile", None) or {}
+        n = max(1, prof.get("frames", 0))
+        gate = self.temporalReuse
+        auto = getattr(self, "autoTuner", None)
+
+        def per_frame(key):
+            return round(prof.get(key, 0.0) / n, 3) if prof.get("frames") else None
+
+        phases = {k: per_frame(k) for k in ("gate", "to_tensor", "up_wall", "infer", "model", "handover",
+                                            "conv", "preview", "pack", "read", "frame")}
+        named = sum(prof.get(k, 0.0) for k in ("gate", "up_wall", "read", "preview", "pack")) / n
+        phases["unaccounted"] = round(prof.get("frame", 0.0) / n - named, 3) if prof.get("frames") else None
+        return {
+            "provenance": stamp(".", model=self.upscaleModel),
+            "run": {"input": getattr(self, "inputFile", None), "output": getattr(self, "outputFile", None),
+                    "backend": getattr(self, "backend", None), "model": self.upscaleModel,
+                    "precision": str(getattr(self, "precision", "")), "frames": prof.get("frames")},
+            "settings": {
+                "temporal_reuse": self.temporalReuse is not None,
+                "temporal_reuse_correction": bool(self.temporalReuseCorrection),
+                "temporal_reuse_threshold": getattr(self, "temporalReuseThreshold", None),
+                "temporal_reuse_max_chain": getattr(self, "temporalReuseMaxChain", None),
+                "temporal_reuse_statistic": getattr(self, "temporalReuseStatistic", None),
+                "int8_fit": getattr(self, "int8FitPreset", None),
+            },
+            "phases_ms_per_frame": phases,
+            "gate": None if gate is None else {
+                "processed": gate.processed, "reused": gate.reused,
+                "reuse_pct": round(100.0 * gate.reused / gate.processed, 2) if gate.processed else None,
+                "depth_histogram": dict(sorted(gate.depth_counts.items())),
+                "vetoes": gate.vetoes, "scene_cuts": gate.scene_cuts,
+            },
+            "autotuner": None if auto is None else {
+                "chosen_threshold": getattr(auto, "chosen", None),
+                "chosen_chain": getattr(auto, "chosen_chain", None),
+                "stats": auto.stats() if hasattr(auto, "stats") else None,
+            },
+        }
+
+    def _write_run_report(self) -> None:
+        if not self.reportPath:
+            return
+        try:
+            import json
+            report = self._run_report()
+            with open(self.reportPath, "w") as handle:
+                json.dump(report, handle, indent=2)
+            log(f"run report: {self.reportPath}")
+        except Exception as exc:  # a report must never take a render down
+            log(f"run report FAILED ({exc}); the render is unaffected")
+
     def render(self):
         frames_rendered = 0
         """
@@ -965,6 +1024,7 @@ class Render:
             tu = getattr(up, "tile_upscaler", None)
             if tu is not None:
                 log(tu.stats())
+        self._write_run_report()
         self.writeBuffer.writeQueue.put(None)
         """
         tracer.stop()
