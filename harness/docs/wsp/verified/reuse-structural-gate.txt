@@ -49,7 +49,11 @@ Registration was refused on 0 of 71 comparisons on the calm window.
 | | |
 |---|---|
 | frames reused | **51/80 = 63.8%**, depth histogram `{1: 29, 2: 8, 3: 7, 4: 7}`, 0 scene cuts, 0 vetoes |
+
+@claim RV002 63.8 % "clips [395de5e624f59174] n=1" measured
 | the gate's own threshold | chosen by the tuner on 16 calibration frames: **4.0**, chain 4, all depths certified at worst share 0.00 against the 0.1% bar |
+
+@claim RV001 2.23 levels "frames [d37a5d8cc177f68d] n=16" measured
 | **coarse scale** (6 px at HR, sigma 3 LR px), all 80 frames | **worst 0.030%, median 0.000%, 0 of 80 frames over 0.1%** |
 | pixel scale (the shipped bar's instrument) | worst 8.15%, median 0.867%, 41 of 80 frames over 0.1% |
 | of that, dust dots (components <= 64 px) | median 0.766%, worst 2.076% |
@@ -149,6 +153,11 @@ $PY -m pytest harness/tests/test_reference_gate.py -q -p no:cacheprovider -o add
 ```
 
 Clean runs of this note's commands: `harness/tests` 471 passed / 6 skipped, `backend/tests` 12 passed.
+
+Records: `records/reuse-structural-gate.jsonl` (the reuse share and the gate's own noise floor, emitted from the
+render log this note commits). The pair tables are not registered as records: their population is an 80-frame cut of
+one clip, and `emit_render_records.py` wants a digest of an artifact - the renders are 300 MB and reproduce from the
+command above rather than from a committed file. The tables carry their population and instrument inline instead.
 
 ## What this does NOT cover
 
