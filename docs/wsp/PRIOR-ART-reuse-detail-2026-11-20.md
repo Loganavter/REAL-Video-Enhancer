@@ -77,6 +77,23 @@ quality, exactly like RLSP's hidden state.
 
 Sources: <https://arxiv.org/pdf/2609.37850>, <https://github.com/kopperx/RelayVSR>
 
+**Plug-and-play adaptation of a frozen SISR model** (Wang et al., Sensors 23(11):5030, 2023) is the closest
+published thing to "teach our upscaler about time without retraining it": a temporal feature module (offset
+estimation → spatial aggregation → temporal aggregation, deformable convolutions) is inserted between the shallow
+and deep feature extractors of an *unmodified* SISR model, and only that module is trained (Vimeo90K, MSE, 3·10^5
+iterations, 5 frames in).
+
+- Across five SISR models it adds **+1.16…1.26 dB PSNR** and **+0.036…0.067 SSIM** on Vid4/SPMC-11, and beats
+  several state-of-the-art VSR models.
+- Its own efficiency table is the answer to "is this the cheap path?": EDSR 9.87 ms → EDSR-VSR **41.54 ms**, i.e.
+  the temporal module costs **4.2x the base model**, because it runs on all five frames; only 22.66% of the
+  adapted model's latency is the original SISR part.
+- It is not a reuse mechanism either — it does not skip the model or consume a cached output; it is a multi-frame
+  input head. So the literature's "cheap" answer is cheap only relative to training a whole VSR model, not
+  relative to running the SISR model once per frame.
+
+Source: <https://pmc.ncbi.nlm.nih.gov/articles/PMC10255317/>
+
 ## 3. The transfer test: variance clipping on our four failing frames
 
 The one mechanism from Section 1 that needs no training is the clamp, so it was measured on our population. Target:
@@ -115,6 +132,38 @@ survey's Fig. 10 and the k-DOP paper's limitation, reproduced on our material an
 - **No free lever was found.** For this repo the options are: ship the measured state (0/130 + 1.001, 3/124 + 1.021,
   2.428 ms), render the frames a cheap test distrusts (no such test separated the three — measured), or move the
   reuse into the feature domain, which is a retraining project, not a perf change.
+
+## 5. The bar against the delivery encoder (measured, 2026-11-20)
+
+The 0.1% bar is worth checking against the encoder the product actually ships through, because a defect smaller
+than the delivery damage is not a product defect. Same statistic (share of pixels more than 8 levels off in any
+channel), measured on the first 61 frames of the fresh 4K render of the 960 s cut, against the lossless source:
+
+| delivery encode | worst frame | median frame |
+|---|---|---|
+| hevc_nvenc, `-cq 18`, yuv420p | **0.044%** (f57) | 0.000% |
+| hevc_nvenc, `-cq 23`, yuv420p | 0.089% (f57) | 0.002% |
+| hevc_nvenc, `-cq 18`, yuv444p | 0.007% (f57) | 0.000% |
+| libx265, `-crf 18`, yuv420p | 0.187% (f57) | 0.004% |
+
+So on this material at these settings the encoder's own damage is **the same order as the bar**, not ten times
+above it: the bar is a screening level of the delivery's own magnitude. (Caveat, and it matters: this clip is a
+mostly flat white flash whose detail sits at the edges, which is an easy encode. Grainy live action would read
+much higher, and there the bar would have to be stated relative to the encoder.)
+
+The other half of the question — does the reuse defect survive the encode — was measured on frames 16-22 of the
+same cut (a 23-frame segment carrying the correction; its absolute numbers are not the lane's because the segment
+was built with a recursive base and a jump-k residual, so it reads higher than the shipped configuration):
+
+| frame | lossless pair | after hevc_nvenc cq18/420 |
+|---|---|---|
+| 18 | 0.38% | 0.27% |
+| 21 | 0.19% | 0.19% |
+| 22 | 0.48% | 0.48% |
+
+The encoder does not hide it: a structured error of this size passes through the delivery encode essentially
+unchanged, while the encoder's own error is spread thin (median 0.000% over the same frames). That is the
+argument for keeping the bar where it is.
 
 ## Sources
 
