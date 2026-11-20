@@ -94,8 +94,16 @@ Phase correlation over several windows shows the shift between consecutive frame
 10-50% of the delta on some windows (t=200: 20.5 -> 9.3) and almost nothing on others (t=60:
 55.4 -> 55.0, cuts). What is left is not a global move.
 
-Candidates, none measured yet: animation on ones; the 23.976-from-24 transfer; the dust-removal's
-own temporal filter; 8-bit-equivalent encode noise on a 10-bit stream.
+**Answered for the source**: there are no identical frames to reuse. Over 47 consecutive pairs of
+the clean `nxl1` (before any denoise), exactly **one** pair is bit-identical and one is within 0.5
+levels; the median pair differs by 15.0 levels. The drawing may well be held, but the film scan
+does not hold: grain, dust and sub-pixel weave make every frame unique at pixel level (the denoised
+file reads the same: 1 of 47, median 14.9). So the 8-10% ceiling is a property of the material, not
+a measurement error - those are the pairs where grain and weave happen to be small, and they reuse
+safely (0.096% at the opening, against the 0.1% bar).
+
+Still unmeasured: how much of that per-frame difference is grain, how much is scan weave, and how
+much the dust-removal adds. That split is what a spatially-aware statistic would need.
 
 The deeper measurement problem: a fraction-of-a-pixel shift of line art moves edge pixels by tens
 of levels, so the gate's statistic (max over blocks of the mean |difference|) and the acceptance
