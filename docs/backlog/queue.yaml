@@ -5174,16 +5174,14 @@ tasks:
   relates_to:
   - docs/wsp/JOURNAL.md
   refutes: >-
-    "Our branch is not PR-able, therefore nothing goes upstream" is false in both halves. The upstream project is
-    alive - last push 2026-11-17, PR #260 merged, 2424 stars, default branch v2-main, and it has no
-    backend/src/utils/TemporalReuse.py at all - so PRs are the transport, not a graveyard. And the branch is not one
-    thing: most of the 544 commits and 204k lines are the evidence plane (harness/, docs/wsp/), which stays home, but
-    a large part of the engine work is a general pipeline fix that benefits anyone on the stock TensorRT engine -
-    colour handling between the branches, the full-frame host copies, the 10-bit reader/packer, an engine loaded
-    twice at startup, frame accounting. Only the int8 body is a second inference path that needs the maintainer's
-    buy-in rather than a patch. Falsifier: if the pipeline-only layer, built from origin/v2-main, does not pass the
-    repo's tests and a render pair that is picture-identical or better, then the "general fix" claim is wrong and
-    only the reuse feature is upstream-able.
+    "The upstream project is alive, so a PR is the delivery path" is false, and so is "our branch is not PR-able,
+    therefore nothing goes anywhere". Measured 2026-11-20: upstream commits per quarter are 424 / 297 / 210 / 181
+    through 2025, then 38 in 2026Q1 and **2 / 2 / 2** since April; the last release is RVE-2.4.1 on 2026-01-02; and
+    the maintainer's own README has said since 2026-06-08 "This project is under a massive refactor, the current
+    version will not be updated for a while." The 2026-11-17 push I first read as liveness is one drive-by PR
+    (#260) merged into a line that is deliberately frozen, and the rewrite it points at is not in this repository
+    or in the account's public repos. So a PR to this line is a REFERENCE artefact - it documents the work and gives
+    the maintainer something to pull from - not a delivery path; delivery is our fork and its releases.
   acceptance: >-
     (a) Three export branches off origin/v2-main, each independently green and each with a render pair (gated or
     A/B) proving the picture is unchanged or better: PIPELINE (GPU yuv420p pack instead of rgb24, ~2.3 ms/frame;
