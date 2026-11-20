@@ -103,7 +103,39 @@ a measurement error - those are the pairs where grain and weave happen to be sma
 safely (0.096% at the opening, against the 0.1% bar).
 
 Still unmeasured: how much of that per-frame difference is grain, how much is scan weave, and how
-much the dust-removal adds. That split is what a spatially-aware statistic would need.
+much the dust-removal adds.
+
+## The lever that is left: decide on the structure, not on the pixels
+
+If only the drawing has to survive - grain, dust and weave are not content - then the reuse
+decision should compare the structure. Measured on the clean `nxl1`, block-mean delta after a
+2-px Gaussian low-pass and after compensating the sub-pixel shift:
+
+| window | raw pixels, <=4 | low-pass, <=4 | low-pass + shift, <=4 |
+|---|---|---|---|
+| t=120 | 4.3% (median 11.84) | 30.4% | **47.8%** (median 4.08) |
+| t=200 | 8.7% (12.92) | 26.1% | **34.8%** (4.83) |
+| t=280 (fast motion) | 4.3% (26.70) | 4.3% | 8.7% (8.26) |
+
+So in calm shots the share of pairs that carry the same drawing is **5-10x the share the pixel
+statistic sees**, and it still refuses the fast-motion window - the statistic separates the two
+cases, which the raw block mean cannot.
+
+**The blocker is the acceptance bar, not the gate.** It is written on pixels ("share of pixels
+more than 8 levels off, worst frame, 0.1%"), so it counts the grain difference of a reused frame
+as damage - exactly the difference the owner says need not be preserved. With a pixel bar, a
+structural reuse cannot pass however correct the drawing is. To take this lever, the bar has to be
+redefined for this material (compare after the same low-pass, and keep the pixel bar for the
+frames that are freshly rendered), which is the owner's call - the picture judgement is his, and
+this note can only price what each choice costs:
+
+* structure bar: ~35-48% of frames reusable in calm shots, grain frozen on those frames (a pulsing
+  grain pattern between reused and fresh frames is the visible risk);
+* pixel bar: 8-10% ceiling, and only where grain and weave happen to be small.
+
+A third path removes the conflict: denoise the grain away *before* the upscale, which is the one
+thing the current dust-removal does not do (the denoised file reads the same per-frame difference
+as the clean one: 1 exact duplicate in 47 pairs, median 14.9 against 15.0).
 
 The deeper measurement problem: a fraction-of-a-pixel shift of line art moves edge pixels by tens
 of levels, so the gate's statistic (max over blocks of the mean |difference|) and the acceptance
