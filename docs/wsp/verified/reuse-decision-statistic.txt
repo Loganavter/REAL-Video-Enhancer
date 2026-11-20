@@ -271,8 +271,8 @@ Caveats on the approximation: one reference instead of three, DIS flow instead o
 an 8-bit luma round trip rather than the codec's own residual. Any of those could matter, but none of them is
 needed to explain the sign: a predictor built on texture complexity is, on this material, pointed the wrong way.
 
-@claim RU027 0.776 AUC "reused frames [b7010cf3b0acf799] n=130" measured
-@claim RU028 0.180 AUC "reused frames [8634db61097bc953] n=123" measured
+@claim RU027 0.776 AUC "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU028 0.180 AUC "reused frames [5f0cfcb6920156cd] n=123" measured
 
 ## The artifact the acceptance statistic cannot see: frozen grain
 
