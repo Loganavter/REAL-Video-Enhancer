@@ -35,7 +35,10 @@ class Frames:
         self.size = w * h * self.ch
         vf = f"scale={w}:{h}" + (",format=gray" if pix == "gray" else "")
         self.proc = subprocess.Popen([FF, "-v", "error", "-i", path, "-vf", vf,
-                                      "-f", "rawvideo", "-"], stdout=subprocess.PIPE)
+                                      "-pix_fmt", pix,          # NOT the input's pix_fmt: rawvideo would
+                                      "-f", "rawvideo", "-"],  # otherwise emit yuv420p and every read()
+                                      stdout=subprocess.PIPE)  # would consume two frames
+
 
     def read(self):
         buf = self.proc.stdout.read(self.size)
@@ -68,6 +71,10 @@ def main() -> int:
     ap.add_argument("--depth-log", required=True)
     ap.add_argument("--block", type=int, default=64)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--gain", type=float, default=1.0,
+                    help="multiplier on the LR difference. Unit gain restores the correction at 1x while the "
+                         "net multiplies noise by alpha (median 2.04 here), so a unit-gain correction leaves "
+                         "the texture at ~1/alpha of fresh; the gain is calibrated by one pass and reported")
     ap.add_argument("--emit", default="")
     a = ap.parse_args()
 
@@ -93,7 +100,7 @@ def main() -> int:
         k = depth.get(i, 0)
         if k:
             ref = lr_hist[max(0, len(lr_hist) - 1 - k)]
-            diff = up_double(fr_l.astype(np.float32) - ref)          # HR-sized correction
+            diff = a.gain * up_double(fr_l.astype(np.float32) - ref)  # HR-sized correction
             pred = np.clip(fr_g.astype(np.float32) + diff[..., None], 0, 255)
         else:
             pred = fr_g.astype(np.float32)                           # a rendered frame is its own output

@@ -4909,9 +4909,15 @@ tasks:
     calibrated on one clip never beat the block branch on the other, and "non-stationary" was our t-1 artefact.
     (c) DONE for the criterion: 119 of 130 reuses freeze the flat-area texture and 82 of them pass the 0.1% bar,
     so acceptance needs a second instrument - and reuse with an upscaled LR residual (RU015/RU016) brings the
-    texture back to 0.989 while REDUCING the frames over the bar from 37 to 30. (d) OPEN: the denoise-then-reuse
-    prototype (motion-rejected temporal filter on LR, gate on the clean plate, source grain re-added on ALL
-    frames) and a certification rule, with the default staying OFF.
+    texture back to 0.989 while REDUCING the frames over the bar from 37 to 30. (d) DONE 2026-11-20, and it
+    closes as a TRADE-OFF, not a fix. Skip + residual at unit gain: worst 0.09329%, ZERO of 130 frames over the
+    bar, texture 0.388 (~1/alpha, alpha ~ 2.04); gain 2.0: 0.67232% / 51 over / 0.775; gain 2.58: 3.11501% /
+    117 over / 1.000. Denoise plate + gate + regrain on all frames: texture 0.9738 (the texture half solved)
+    but worst 0.79771% and 42 of 204 frames over the bar, because the clean plate lowers the noise floor
+    (0.65 against 0.87) and the gate engages on more frames with un-masked structural errors. Certification by
+    audit cannot buy the bar either: zero violations in n audits bounds the violation rate at 1-0.05^(1/n),
+    i.e. 5.8% at n=50 and 0.77% at n=388 - more audits than there are reuses. What is left is a policy choice:
+    which end of the knob, and whether the acceptance bar becomes a rate. Default stays OFF.
   note: >-
     Owner order 2026-11-19 reopens the investigation that reuse-gate-shelved and rve-reuse-gate-forbidden
     2026-11-18 closed; the product decision (frame skipping off by default) is untouched. Literature entry

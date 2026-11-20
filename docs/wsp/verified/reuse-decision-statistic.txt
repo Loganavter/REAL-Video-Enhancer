@@ -130,25 +130,56 @@ reuses through - and (b) any criterion at all for the frozen texture, which 82 o
 @claim RU014 0.488 AUC "reused frames [af066356217e17b1] n=124" measured
 
 
-## Reuse with a correction: the texture comes back, and the pixel cost falls
+## Reuse with a correction, the denoise prototype, and the trade-off between the two instruments
 
-The review's step 1 - reuse with a residual instead of verbatim - was measured on the same 130 reused frames:
-output = the gated frame + nearest-2x of `(LR_t - LR_ref)` with the reference the gate actually served.
+**Retraction first.** The first version of this section reported the correction at 0.26648% with texture 0.989.
+That was an instrument bug: the frame reader asked ffmpeg for rgb24 but did not set `-pix_fmt`, so rawvideo
+emitted yuv420p and every `read()` consumed two frames - the three streams were misaligned and the numbers
+described nothing. Fixed in `scripts/reuse_residual.py` and `scripts/reuse_regrain.py`; everything below is on
+the corrected reader. (Second instrument bug of this lane in two days; the pattern is the same - the reader was
+trusted because the pipeline ran.)
 
-| construction | worst share | frames over 0.1% | texture ratio (median) | frames frozen |
+On the same 130 reused frames, output = gated frame + `gain * nearest-2x(LR_t - LR_ref)`:
+
+| gain | worst share | frames over 0.1% | texture ratio | frames frozen |
 |---|---|---|---|---|
-| verbatim skip (ships) | 0.44121% | 37 / 130 | **0.000** | 91.5% |
-| skip + upscaled LR residual | **0.26648%** | **30 / 130** | **0.989** | **0%** |
+| 0 (verbatim skip) | 0.44121% | 37 / 130 | 0.000 | 91.5% |
+| 1.0 | **0.09329%** | **0 / 130** | 0.388 | 91.5% |
+| 2.0 | 0.67232% | 51 / 130 | 0.775 | 31.5% |
+| 2.58 | 3.11501% | 117 / 130 | **1.000** | **0%** |
 
-So the correction is a strict improvement on both instruments at once: the texture stops freezing (ratio 0.989
-against the fresh render's 1.026) and **fewer** frames cross the pixel bar than with the plain skip, not more -
-the opposite of what the perception-distortion concern predicted for this particular correction, because the
-added LR-band difference is small in amplitude while being temporally alive. It is still not sufficient: 30
-frames remain over the bar, and the added grain is LR-band (nearest 2x), so its spectrum is not the source's at
-4K.
+So the two objectives are the two ends of one knob. At unit gain the structural class is fixed completely -
+**zero of 130 reuses over the bar**, against 37 for the verbatim skip - while the texture stays at 0.388,
+which is about `1/alpha` with the net's noise gain `alpha` ~ 2.04 measured earlier: the correction adds the
+fresh noise at 1x where the net adds its own response at ~2x. Turning the gain up to restore the texture
+restores the pixel damage with it.
 
-@claim RU015 0.26648 % "reused frames [55a222f0b8bdd68b] n=130" measured
-@claim RU016 0.989 x "reused frames [55a222f0b8bdd68b] n=130" measured
+**The review's architecture, measured.** A motion-rejected 3-tap bilateral filter on LR (`scripts/reuse_denoise.py`,
+tau 4, 2.03 levels of grain removed), the gate on the clean plate, then the removed grain re-added on ALL frames
+(`scripts/reuse_regrain.py`):
+
+| plate | reuse | worst share | frames over 0.1% | texture ratio | frozen |
+|---|---|---|---|---|---|
+| noisy (ships) | 63.4% | 0.44121% | 37 / 130 | 0.000 | 91.5% |
+| denoised | **66.2%** | **0.79771%** | **42 / 204** | **0.9738** | **0%** |
+
+The texture half is solved - 0.974 against the fresh render, nothing frozen - and the pixel half gets *worse*:
+the clean plate lowers the noise floor (0.65 against 0.87), so the gate engages on more frames and its
+structural errors are now un-masked. 42 of 204 frames over the bar, against 37 of 130 for the verbatim skip.
+
+**Why the certification cannot be bought cheaply.** A per-shot audit of the frames the gate wanted to skip is
+the natural way to certify a threshold without labels. With zero violations in `n` audited reuses, the 95%
+upper bound on the violation rate is `1 - 0.05^(1/n)`: 45% at n=5, 26% at n=10, 5.8% at n=50, 2.3% at n=130,
+and **0.77% (one in 130) needs n=388**. Certifying the bar this lane actually uses - zero frames above 0.1% -
+costs more audits than there are reuses to audit, so an audit can only certify a *rate*, and choosing a rate
+is a policy decision, not a measurement.
+
+@claim RU017 0.09329 % "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU018 0.388 x "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU019 0.775 x "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU020 1.0 x "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU021 0.79771 % "reused frames [b8fe18a159def933] n=135" measured
+@claim RU022 0.9738 x "reused frames [b8fe18a159def933] n=135" measured
 
 ## The artifact the acceptance statistic cannot see: frozen grain
 
