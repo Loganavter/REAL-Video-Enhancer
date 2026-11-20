@@ -137,6 +137,36 @@ A third path removes the conflict: denoise the grain away *before* the upscale, 
 thing the current dust-removal does not do (the denoised file reads the same per-frame difference
 as the clean one: 1 exact duplicate in 47 pairs, median 14.9 against 15.0).
 
+## Why a pixel statistic is the wrong instrument for line art (measured)
+
+The owner's description of the material is exact: after the dust-removal there is no grain - there
+are **dust dots that come and go**, and the frame **wobbles because the scan is imperfect**. So the
+difference between two frames carrying the same drawing is registration, not content.
+
+That is fatal for a full-resolution pixel statistic, and the measurements say why:
+
+| pair at t=120 (median block delta, share <=4) | |
+|---|---|
+| raw | 13.82, 6.7% |
+| global translation-compensated (phase correlation) | 11.22, 6.7% |
+| **dense flow-compensated (Farneback)** | **6.27, 13.3%** |
+| low-pass 2 px + translation-compensated | **4.08, 47.8%** |
+
+Even a dense flow only halves it: the residual sits on the **contours**, because a 0.5 px shift
+moves a 1-2 px black line by tens of levels, and flow is ambiguous along a thin line (aperture
+problem). The compensated difference image is a lit-up line drawing - every edge, nothing else.
+
+So a blur of ~2 px is not "hiding motion": it is the scale at which the drawing is stable against
+the scan's own registration error, and at that scale 5-10x more pairs qualify. A gate that decides
+on 32-px blocks at full resolution is measuring the alignment of the scan, not whether the cel
+changed.
+
+**Consequence for the design**: the reuse decision and the acceptance statistic have to be taken
+at the same coarse scale (and the reused HR frame warped by the estimated motion, or the drawing
+will jump). Dust dots remain the only content difference at that scale, and they are small-area -
+a robust (e.g. trimmed or median-based) comparison ignores them, which is what "the drawing only"
+means in practice.
+
 The deeper measurement problem: a fraction-of-a-pixel shift of line art moves edge pixels by tens
 of levels, so the gate's statistic (max over blocks of the mean |difference|) and the acceptance
 statistic (share of pixels >8 levels) both read invisible sub-pixel shimmer as motion. Nothing in
