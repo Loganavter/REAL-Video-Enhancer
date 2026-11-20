@@ -370,6 +370,18 @@ class ReferenceFrameGate:
         """Block side this gate uses for a frame of ``height`` pixels."""
         return scaled_block(height) if self.block is None else self.block
 
+    def progress(self) -> str:
+        """One line for a long render, so the reuse share is visible while it runs.
+
+        The full :meth:`stats` is printed at the end, and a cancelled render prints nothing - a user watching a
+        25-minute encode had no way to tell whether the gate was doing anything, which reads exactly like "it does
+        not work".
+        """
+        pct = 100.0 * self.reused / self.processed if self.processed else 0.0
+        deepest = max(self.depth_counts) if self.depth_counts else 0
+        return (f"{pct:.1f}% of {self.processed} frames ({self.reused} reused), depth up to {deepest}, "
+                f"{self.scene_cuts} scene cuts, threshold {self.threshold:g}/255")
+
     def stats(self) -> str:
         pct = 100.0 * self.reused / self.processed if self.processed else 0.0
         scale = (f" on a {self.coarse_sigma:g} px low-pass with the translation compensated"

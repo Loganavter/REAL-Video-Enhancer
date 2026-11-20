@@ -894,6 +894,7 @@ class Render:
                 pixel_delta = (rgb8.to(torch.int16) - past.to(torch.int16)).abs().max(dim=1).values
                 pixel_share = float((pixel_delta > 8).float().mean()) * 100.0
                 self._accept_pixel.append(pixel_share)
+                del self._accept_pixel[:-512]
                 if coarse:
                     accumulated = (sum(s[0] for s in shifts[-distance:]),
                                    sum(s[1] for s in shifts[-distance:]))
@@ -916,6 +917,7 @@ class Render:
                     # dust dots plus whatever registration the warp left. Reported, never certified.
                     emitted = float(((moved - rgb8).abs().max(dim=1).values > 8).float().mean()) * 100.0
                     self._accept_emitted.append(emitted)
+                    del self._accept_emitted[:-512]
         elif not getattr(self, "_calib_rgb_skipped", False):
             log("auto gate: the output frame is a packed yuv420p payload, so the acceptance estimate (share of "
                 "pixels >8 levels in RGB) is not computed on it; the luma grids still certify the threshold")
@@ -1224,6 +1226,10 @@ class Render:
                     self._t_first_frame = _time.time()
                     log(f"startup: first frame enqueued {self._t_first_frame - _T0:.2f} s "
                         f"after process start (interpreter, engine, ffmpeg/NVENC init)")
+                if (self.temporalReuse is not None and hasattr(self, "_profile")
+                        and self._profile["frames"] % 250 == 0):
+                    # visible during the render, not only in the summary: a cancelled encode used to say nothing
+                    log("reuse: " + self.temporalReuse.progress())
                 if hasattr(self, "_profile"):
                     self._profile["frames"] += 1
                     self._profile["frame"] += (_perf_counter() - _t_frame) * 1000.0
