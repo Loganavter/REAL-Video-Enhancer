@@ -646,6 +646,11 @@ class ProcessTab:
         # an old settings.txt cannot silently mean something else than what the checkbox shows
         if self.settings.settings.get("temporal_reuse", "True") == "False":
             command += ["--no_temporal_reuse"]
+        # "by cel": compare the drawing, not the film (3 px low-pass + the scan's translation compensated, and
+        # the reused frame is moved by that estimate). Passed only when chosen - the backend's default is the
+        # shipped statistic, so an old settings.txt that predates the key cannot mean something else.
+        elif self.settings.settings.get("temporal_reuse_statistic", "mean_abs") == "coarse":
+            command += ["--temporal_reuse_statistic", "coarse"]
 
         if self.settings.settings["preview_enabled"] == "True":
             command += [
