@@ -825,3 +825,15 @@ def test_coarse_shift_step_is_the_increment_for_the_emitter():
     # the second step is one more pixel on top of the first, so the increment is ~1 not ~2
     assert second[0] == pytest.approx(1.0, abs=0.7)
     assert gate.last_shift[0] == pytest.approx(2.0, abs=0.7)
+
+
+def test_progress_reports_the_share_while_the_render_runs():
+    """A cancelled render printed nothing: the share has to be visible mid-run, not only in the summary."""
+    gate = TR.ReferenceFrameGate(statistic="mean_abs", threshold=4.0, pixel_veto=None)
+    assert "0.0% of 0 frames" in gate.progress()
+    gate.processed, gate.reused = 1000, 426
+    gate.depth_counts = {1: 250, 2: 100, 3: 76}
+    gate.scene_cuts, gate.threshold = 3, 4.0
+    line = gate.progress()
+    assert line.startswith("42.6% of 1000 frames (426 reused)")
+    assert "depth up to 3" in line and "3 scene cuts" in line and "threshold 4/255" in line
