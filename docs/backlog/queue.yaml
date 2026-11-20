@@ -4982,7 +4982,7 @@ tasks:
 - id: rve-reuse-codec-mv-2026-11-20
   title: 'Warp the cached SR by the codec''s own motion vectors: the only geometry the measured failure class still needs'
   type: experiment
-  status: todo
+  status: blocked
   owner: '@supervisor'
   priority: P1
   gpu: true
@@ -5009,6 +5009,24 @@ tasks:
     use them instead of estimating. Falsifier: if warping by codec MVs does not take the held-out clip from 4/124
     to at most 1/124 while keeping 0/130 on the calibration clip and texture >= 0.95 on both, the geometry axis is
     not reachable inside this pipeline either and the gate stays refusal-limited on motion.
+  progress: >-
+    BLOCKED 2026-11-20 at acceptance (a), after the extraction worked and the field failed verification.
+    Extraction: PyAV surfaces motion vectors only when `stream.codec_context.options = {"flags2": "+export_mvs"}`
+    is set before decoding (ffprobe prints the side data but not its contents; frames otherwise carry timecode
+    only). The field is 16x16 blocks with dst/src positions and quarter-pel vectors (motion_scale 4), two
+    reference indices (-1 and +1) because the stream is I B B P. Verification FAILED: warping LR_{t-1} by the
+    source == -1 vectors makes the mean residual 15.6% WORSE at the median and improves only 24% of the 192 hops
+    that carry a field; on P frames in display order the gain is -9..+9% (RU035). The mechanism is not the warp -
+    it is that `source` is a reference-list index, and the side data does not say which frame that is; with
+    has_b_frames=4 a P frame's list0 entry can be several frames back, so the vector is applied to the wrong
+    reference. Mapping it needs decoder-level bookkeeping (the DPB / ref list), which ffmpeg's MV side data does
+    not expose.
+  blocked_by: >-
+    A decision, not a measurement: (i) a small libavcodec extractor that also reports each vector's reference
+    frame (C shim or a patched PyAV), (ii) switching the geometry route to a decoder that exposes motion fields
+    with their reference identity (or a codec that only uses one backward reference), or (iii) dropping the
+    geometry axis and accepting the measured state - split/recursive correction, 0/130 on the calibration clip,
+    3/124 on the held-out one, both with texture ~1.0.
   acceptance: >-
     (a) MV extraction that provably matches the decoded frames: `-flags2 +export_mvs` side data (or pyav), one
     script that prints, for a given frame pair, the MV field and the residual it implies, and a check that

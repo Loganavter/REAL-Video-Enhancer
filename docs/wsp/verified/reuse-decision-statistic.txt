@@ -380,6 +380,30 @@ next thing to attack, and the codec's own motion vectors are the natural way to 
 @claim RU033 3 count "reused frames [af066356217e17b1] n=124" measured
 @claim RU034 0.997 x "reused frames [55a222f0b8bdd68b] n=130" measured
 
+
+### Codec motion vectors: extracted, and not usable as read
+
+The queue row for the geometry axis (`rve-reuse-codec-mv-2026-11-20`) reached the first acceptance gate and stopped
+there. Extraction works: PyAV surfaces motion vectors only when
+`stream.codec_context.options = {"flags2": "+export_mvs"}` is set before decoding - without it the frames carry
+timecode only, and `ffprobe` prints the side-data type but not its contents. The field is 16x16 blocks with
+destination and source positions and quarter-pel vectors (`motion_scale` 4), and the stream is I B B P, so every
+frame carries two reference indices (-1 and +1).
+
+**Verification failed, and that is the finding.** Warping `LR_{t-1}` by the `source == -1` vectors makes the mean
+residual over the coded-motion blocks **15.6% worse at the median**, improving only 24% of the 192 hops that carry
+a field; on P frames in display order the gain stays inside -9..+9%. The warp is not what fails - the reference is:
+`source` is a reference-list index, and the side data does not say which frame it points at. With
+`has_b_frames=4` a P frame's list0 entry can be several frames back, so the vector is applied to the wrong picture,
+which reads exactly like "the motion vectors are wrong".
+
+So the row is **blocked on a decision**, not on a measurement: a small libavcodec extractor that also reports each
+vector's reference frame, a decoder that exposes motion fields with their reference identity, or dropping the
+geometry axis and shipping the measured state (split/recursive correction, 0/130 on the calibration clip, 3/124 on
+the held-out one, texture ~1.0 on both).
+
+@claim RU035 -15.6 % "frame hops [27bf4d3d46052a40] n=192" measured
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so
