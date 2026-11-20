@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS record (
   pop_kind TEXT, items_sha TEXT, n INTEGER, pop_label TEXT,
   instrument TEXT, config TEXT, session TEXT, run TEXT, artifact TEXT,
   formula TEXT, inputs TEXT, note TEXT, extra TEXT,
+  measured_at TEXT, git_commit TEXT, dirty INTEGER, device TEXT, capability TEXT, driver TEXT,
+  torch TEXT, triton TEXT, tensorrt TEXT, model_sha TEXT, superseded_by TEXT,
   PRIMARY KEY (source, rid)
 );
 CREATE TABLE IF NOT EXISTS verdict (
@@ -94,12 +96,18 @@ def build(db_path: str = "docs/wsp/ledger.db", records: str = DEFAULT_RECORDS,
                 continue
             r = json.loads(line)
             pop = r.get("population", {})
-            con.execute("INSERT OR REPLACE INTO record VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+            con.execute("INSERT OR REPLACE INTO record VALUES ("
+                        + ",".join("?" * 30) + ")", (
                 r.get("id", ""), path, r.get("value"), r.get("unit"), r.get("statistic"),
                 r.get("tier"), pop.get("kind"), pop.get("items_sha"), pop.get("n"),
                 pop.get("label", ""), r.get("instrument"), r.get("config"), r.get("session"),
                 r.get("run"), r.get("artifact"), r.get("formula"),
-                ",".join(r.get("inputs") or []), r.get("note"), json.dumps(r.get("extra", {}))))
+                ",".join(r.get("inputs") or []), r.get("note"), json.dumps(r.get("extra", {})),
+                r.get("measured_at", ""), r.get("commit", ""),
+                None if r.get("dirty") is None else int(bool(r.get("dirty"))),
+                r.get("device", ""), r.get("capability", ""), r.get("driver", ""),
+                r.get("torch", ""), r.get("triton", ""), r.get("tensorrt", ""),
+                r.get("model_sha", ""), r.get("superseded_by", "")))
             counts["records"] += 1
 
     for path in sorted(glob.glob(claims)):

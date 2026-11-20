@@ -7,7 +7,7 @@
 # is a population this project never decided on. One GPU job at a time - the caller holds the lock:
 #   flock -n /var/tmp/opencode/gpu.lock harness/scripts/measure_int8_acc.sh <frame>
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 PY="${RVE_TRT_PY:-$HOME/.cache/opencode/venvs/trt310/bin/python}"
 MODEL="${RVE_MODEL:-/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth}"
 FRAME="$1"; W="${2:-1920}"; H="${3:-1080}"
