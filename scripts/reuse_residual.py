@@ -76,6 +76,7 @@ def main() -> int:
                          "net multiplies noise by alpha (median 2.04 here), so a unit-gain correction leaves "
                          "the texture at ~1/alpha of fresh; the gain is calibrated by one pass and reported")
     ap.add_argument("--emit", default="")
+    ap.add_argument("--output", default="", help="write the constructed video (ffv1) for the eye")
     a = ap.parse_args()
 
     depth = {}
@@ -89,6 +90,12 @@ def main() -> int:
     g = Frames(a.gated, lw * 2, lh * 2, "rgb24")
     u = Frames(a.ungated, lw * 2, lh * 2, "rgb24")
 
+    enc = None
+    if a.output:
+        enc = subprocess.Popen([FF, "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                                "-s", f"{lw * 2}x{lh * 2}", "-r", "24000/1001", "-i", "-",
+                                "-c:v", "ffv1", "-pix_fmt", "yuv444p", a.output, "-y"],
+                               stdin=subprocess.PIPE)
     lr_hist = []
     prev_pred = prev_u = None
     rows, i = [], 0
@@ -104,6 +111,8 @@ def main() -> int:
             pred = np.clip(fr_g.astype(np.float32) + diff[..., None], 0, 255)
         else:
             pred = fr_g.astype(np.float32)                           # a rendered frame is its own output
+        if enc is not None:
+            enc.stdin.write(np.clip(pred, 0, 255).astype(np.uint8).tobytes())
         if k:
             d = np.abs(pred - fr_u.astype(np.float32)).max(axis=2)
             share = float((d > 8).mean()) * 100.0
@@ -124,6 +133,9 @@ def main() -> int:
             break
     for f in (lr, g, u):
         f.close()
+    if enc is not None:
+        enc.stdin.close()
+        enc.wait()
 
     reused = [r for r in rows if r["depth"]]
     shares = [r["share"] for r in reused]
