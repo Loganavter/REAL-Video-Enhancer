@@ -64,8 +64,19 @@ def main() -> int:
 
     rows = []
     for i in range(engine.num_layers):
-        info = json.loads(inspector.get_layer_information(i, trt.LayerInformationFormat.JSON))
-        name = info.get("Name", f"layer{i}")
+        # The inspector's JSON comes back as a string on some engines and double-encoded on others; a str here
+        # crashed the census with AttributeError instead of counting anything (measured on the 4x Compact engine).
+        info = inspector.get_layer_information(i, trt.LayerInformationFormat.JSON)
+        if isinstance(info, (str, bytes)):
+            info = json.loads(info)
+        if isinstance(info, str):
+            try:
+                info = json.loads(info)
+            except ValueError:
+                info = {"Name": info}          # a bare string, not JSON: take it as the layer's name
+        if not isinstance(info, dict):
+            info = {}
+        name = info.get("Name") or f"layer{i}"
         rows.append((name, per.get(name, 0.0), info.get("TacticName") or info.get("LayerType") or ""))
 
     measured = sum(r[1] for r in rows)

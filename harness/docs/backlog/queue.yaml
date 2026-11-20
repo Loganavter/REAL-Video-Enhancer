@@ -4782,9 +4782,27 @@ tasks:
 - id: rve-prelu-form-int8-2026-11-20
   title: 'A per-channel PReLU written as a*x + (1-a)*relu(x) keeps the int8 boundary: 1.34x engine, and it costs 18% on fp16'
   type: experiment
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P1
+  resolution: >-
+    Closed by measurement on a THIRD model with a different tail, which is where the claim stops: the form's
+    win is model- and census-specific, not universal. `realesr-animevideov3` (4x Compact, 48-channel tail) at
+    480x270 -> 1920x1080, same builder and calibrator: fp16 3.14 ms, int8 as-is 2.30 ms, int8 rewritten 2.21 ms,
+    i.e. **1.041x** for the rewrite against 1.341x on Futsuu and 1.308x on Ani4K, and the census says why - at
+    this geometry myelin fused NOTHING in either arm (0 fused, 51 PReLU passes as-is, 79 -> 96 layers), so
+    there is no Conv+PReLU boundary to keep in int8. The row's own note is confirmed from the other side: what
+    pays is the number of passes leaving int8, not the form and not the layer count. Picture on 16 held-out
+    frames: int8 as-is 1.4783% worst (16/16 over the bar), rewritten 0.67298% (15/16), fp16 algebra control
+    0.00000% / peak 1; fp16 cost of the form is neutral here (3.04 against 3.14), as on Ani4K, where only
+    Futsuu pays 18%. int8 itself is not shippable on this model, before any form change - recorded as such, not
+    as a defect of the rewrite. Acceptance: (a) done at 1080p in the app (1.251x, 0/52 over the bar); (b) done
+    for the third model, and the answer is negative; (c) done and closes (Q/DQ arm 0.47x, E9' stands); (d)
+    dropped by the owner's call (a 4K app pair would measure a build that does not ship). Records PF016-PF022
+    in verified/records/prelu-form-third-model.jsonl; page: harness/docs/wsp/verified/prelu-form-int8.txt.
+    Tooling fixed on the way: build_plan.py exports through the legacy path (torch 2.9's default exporter
+    needs onnxscript, which the runtime does not ship), trt_int8_calibrate.py creates its --out directory,
+    inspect_plan.py survives the double-encoded layer JSON.
   gpu: true
   cost: 4h
   tags:
