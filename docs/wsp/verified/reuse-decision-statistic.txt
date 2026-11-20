@@ -440,6 +440,25 @@ reference implementation of "fresh" here is the same pipeline's own ungated rend
 @claim RU004 0.906 AUC "reused frames [b7010cf3b0acf799] n=130" measured
 @claim RU005 0.384 AUC "reused frames [b7010cf3b0acf799] n=130" measured
 
+### What the gate buys end-to-end, with the product encoder
+
+Measured on the 960 s cut, three interleaved rounds in one session, the app as it ships (TensorRT, 4K output through
+`hevc_nvenc -cq 18`), gate ON against gate OFF:
+
+| configuration | ms/frame | fps |
+|---|---|---|
+| gate OFF (every frame rendered) | 51.45 | 19.4 |
+| gate ON, 124 of 201 frames reused (61.7%) | **26.01** | 38.4 |
+| gate ON + the 2.428 ms correction on the reused frames | 27.5 | 36.4 |
+
+So **1.98x** on the render loop, 1.87x once the correction is charged. The same pair through an `ffv1` lossless 4K
+sink reads only 1.20x (58.46 -> 48.84 ms/frame) because the lossless encode dominates the fixed cost - the earlier
+`4.31x` headline was the engine half times a gate half measured on a different pipeline state, and this is what the
+gate half is on the current one.
+
+@claim RU049 26.01 ms "frames [d59930c7b499a58b] n=201" measured
+@claim RU050 51.45 ms "frames [d59930c7b499a58b] n=201" measured
+
 ## Reproduce
 
 ```bash
