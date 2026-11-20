@@ -5159,3 +5159,42 @@ tasks:
     broken on it, and the gate's noise-floor refusal is what keeps it out of the product. Evidence:
     docs/wsp/verified/reuse-motion-content.txt, records RU044-RU048.
   evidence: docs/wsp/verified/reuse-motion-content.txt
+
+- id: rve-upstream-pr-2026-11-20
+  title: 'Upstream PR, in layers: the pipeline fixes first, then the reuse feature, then (maybe) the int8 path'
+  type: docs
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  cost: 3d
+  tags:
+  - upstream
+  - pr
+  base_branch: perf/inference
+  relates_to:
+  - docs/wsp/JOURNAL.md
+  refutes: >-
+    "Our branch is not PR-able, therefore nothing goes upstream" is false in both halves. The upstream project is
+    alive - last push 2026-11-17, PR #260 merged, 2424 stars, default branch v2-main, and it has no
+    backend/src/utils/TemporalReuse.py at all - so PRs are the transport, not a graveyard. And the branch is not one
+    thing: most of the 544 commits and 204k lines are the evidence plane (harness/, docs/wsp/), which stays home, but
+    a large part of the engine work is a general pipeline fix that benefits anyone on the stock TensorRT engine -
+    colour handling between the branches, the full-frame host copies, the 10-bit reader/packer, an engine loaded
+    twice at startup, frame accounting. Only the int8 body is a second inference path that needs the maintainer's
+    buy-in rather than a patch. Falsifier: if the pipeline-only layer, built from origin/v2-main, does not pass the
+    repo's tests and a render pair that is picture-identical or better, then the "general fix" claim is wrong and
+    only the reuse feature is upstream-able.
+  acceptance: >-
+    (a) Three export branches off origin/v2-main, each independently green and each with a render pair (gated or
+    A/B) proving the picture is unchanged or better: PIPELINE (GPU yuv420p pack instead of rgb24, ~2.3 ms/frame;
+    pooled pinned output payloads; the 10-bit reader/packer; the engine loaded twice at startup; frame accounting),
+    REUSE (TemporalReuse + TemporalCorrection + the render-loop hook + CLI + the GUI switch and tooltips), INT8
+    (body, kernels, fused tail, probe) only if the maintainer wants a second inference path. (b) No harness/ and no
+    docs/wsp/ in any branch. (c) PR text quoting the measured numbers with their commit stamps, and naming what is
+    NOT measured (other cards). (d) The fork branch pushed; the PR itself is opened by the owner, because the agent
+    token's gh allow-list covers our three repos only.
+  note: >-
+    Filed after the owner pointed out that the colour shifts and the speed locks we removed were in the pipeline
+    itself, not in the int8 lane - and that they are the part an upstream user feels on the stock engine. Order
+    matters: the pipeline layer is the smallest, the most obviously correct and the one that needs no new
+    configuration; it should land (or be rejected) before the reuse feature is proposed on top of it.
