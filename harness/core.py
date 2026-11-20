@@ -114,6 +114,19 @@ class Record:
     artifact: str = ""
     threshold_unit: str = ""      # for bars: the unit of the threshold the value is a share of
     note: str = ""
+    # Provenance (harness/provenance.py). Absent means the record predates it: a 2026-11-18 number whose
+    # subject changed since cannot be tied to a commit by guessing, so it stays honestly unknown.
+    measured_at: str = ""
+    commit: str = ""
+    dirty: bool | None = None
+    device: str = ""
+    capability: str = ""
+    driver: str = ""
+    torch: str = ""
+    triton: str = ""
+    tensorrt: str = ""
+    model_sha: str = ""
+    superseded_by: str = ""
     extra: dict = field(default_factory=dict)   # calibration id, engine layer counts, anything keyed
 
     def __post_init__(self) -> None:

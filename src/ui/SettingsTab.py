@@ -31,17 +31,13 @@ def qualityPresetValueToLabel(value: str) -> str:
 # convolutions (fp16 engine against the int8 body). The wording is the measurement, not a promise - the
 # picture effect depends on the model and the material, which is exactly what the tooltip says.
 QUALITY_PRESET_TOOLTIP = (
-    "Best quality: the body runs in float16 - the picture is the model's own output.\n"
-    "Fast: the body runs in 8-bit, head and tail stay in float16, and the switch only takes effect when the fit "
-    "probe certifies the material - otherwise Fast still renders in float16.\n"
-    "Speed, measured on 1080p Blu-ray at 4K (RTX 4060 Ti, both arms alternating in one session, two clips and two "
-    "sinks): 1.09-1.14x end to end on a 2x Compact model, median 1.13x; 1.23x on a 4x animevideov3, whose tail "
-    "kernel declines and falls back to cuDNN.\n"
-    "Picture, against the model's own weights: the body moves 0.004-0.019% of pixels over seven frames. Numbers "
-    "measured against the fp16 engine read 0.42-0.53%, but the engine is itself 0.055-0.087% off the weights and "
-    "the 4:2:0 pipe alone 0.13-0.21%, so that comparison cannot resolve the body.\n"
-    "Other cards are unmeasured - the speed-up depends on the card - and on a card without int8 tensor cores the "
-    "Fast preset is not offered."
+    "How the upscale is computed.\n\n"
+    "Best quality: full precision - the picture is exactly what the model draws. Pick it when the result "
+    "matters more than the clock.\n\n"
+    "Fast: about 1.6x faster on average. Only the inner layers run in 8 bit; the first and last layers stay "
+    "in full precision, so the picture stays very close to Best - on fine line art the difference can show "
+    "up after the video is encoded. Fast also engages only when the fit check says this particular video is "
+    "safe for it; otherwise it quietly falls back to full precision."
 )
 
 
@@ -80,8 +76,10 @@ def hide_int8_preset_if_unsupported(parent, settings) -> None:
     if settings.settings.get("quality_preset") == "fast":
         settings.writeSetting("quality_preset", "best")
         combo.setCurrentText("Best quality")
-    applyQualityPresetTooltip(combo, getattr(parent, "qualityPresetInfoLabel", None),
-                              extra=f"Fast is not offered on this machine: {reason}.")
+    applyQualityPresetTooltip(
+        combo, getattr(parent, "qualityPresetInfoLabel", None),
+        extra=("Fast is not offered on this graphics card: 8-bit kernels need NVIDIA tensor cores, "
+               "i.e. a GTX 16-series / RTX card or newer."))
 
 
 

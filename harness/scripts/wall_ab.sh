@@ -16,7 +16,8 @@
 # Environment: CLIPS (space separated, default the two BD cuts), ROUNDS, SINK, LOGDIR, RENDERS.
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# ../.. because this script lives in harness/scripts/, not in the repository root
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 APP=/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2
 # The backend runs on the installed portable interpreter: the repo's own .venv has no cv2, and the
 # installed packages are what every recorded wall number was taken with (REPORT-int8-lane-2026-11-16 10).
@@ -49,6 +50,7 @@ common=(
 run_arm() {  # clip arm round
   local clip=$1 arm=$2 round=$3 out preset
   local name="${clip%.mkv}_${arm}_r${round}_${SINK}"
+  mkdir -p "$LOGDIR/$(dirname "$name")"
   local log="$LOGDIR/$name.log"
   local fit=$arm
   case "$arm" in fp16|int8) ;; *) fit=int8 ;; esac
@@ -60,9 +62,12 @@ run_arm() {  # clip arm round
     # LOSSLESS sink: the only one whose decoded frames are the pipeline's own output, so a picture
     # comparison through it is not also a measurement of the encoder
     out="$RENDERS/$name.mkv"
+    mkdir -p "$(dirname "$out")"
     args+=(--output "$out" --video_encoder_preset ffv1 --video_pixel_format yuv444p)
   else
     out="$RENDERS/$name.mkv"
+    # a clip name may carry a subdirectory (scan2/w960.mkv); the render path has to exist before ffmpeg opens it
+    mkdir -p "$(dirname "$out")"
     args+=(--output "$out" --video_encoder_preset x265_nvenc)
   fi
   {
