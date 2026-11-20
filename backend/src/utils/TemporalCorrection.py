@@ -10,7 +10,7 @@ calibration cut). The measured fix is algebraic, not geometric:
     out    = out_{t-1} + nearest_s(r_lf + alpha_g * r_hf)
 
 Recursive (`out_{t-1}` is the previous EMITTED frame, not the cached model output) so a chain of reuses does not
-jump k frames back. Measured in `docs/wsp/verified/reuse-decision-statistic.txt`: per channel, alpha 1.35 with the
+jump k frames back. Measured in `harness/docs/wsp/verified/reuse-decision-statistic.txt`: per channel, alpha 1.35 with the
 mask, 0/130 over the bar at texture 1.001 on the calibration clip and 3/124 at 1.021 on the held-out one, for
 2.428 ms per reused frame on this GPU (`harness/scripts/reuse_correction_cost.py`).
 
@@ -26,13 +26,13 @@ render has been measured at those scales.
 
 Two alternatives are measured and refused, so they are not implemented here. Warping the cached frame by a motion
 field: the codec's own vectors reference a picture that is not the one the gate holds, and a DIS flow from the held
-frame fails on the same frames (`docs/wsp/verified/reuse-mv-reference.txt`). Clamping the result into the local
+frame fails on the same frames (`harness/docs/wsp/verified/reuse-mv-reference.txt`). Clamping the result into the local
 colour range: it does not move the failures and costs 35x on frames that pass
-(`docs/wsp/PRIOR-ART-reuse-detail-2026-11-20.md`).
+(`harness/docs/wsp/PRIOR-ART-reuse-detail-2026-11-20.md`).
 
 The failure this correction does NOT fix, and which is why the gate refuses dense moving line art on its own:
 doubled line art at 171-189 levels, 8 of 8 reuses on a segment where the picture moves everywhere
-(`docs/wsp/verified/reuse-motion-content.txt`).
+(`harness/docs/wsp/verified/reuse-motion-content.txt`).
 """
 from __future__ import annotations
 

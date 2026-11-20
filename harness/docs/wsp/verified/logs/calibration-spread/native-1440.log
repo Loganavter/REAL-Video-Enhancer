@@ -1,0 +1,4 @@
+# calibration coverage s-2026-11-18T18:07:42Z clip=/tmp/opencode/native1440.mkv crop=256 per_frame=4 calib=[0, 22, 43, 65, 86, 108, 129, 151, 172, 194, 215, 237, 258, 280, 301, 323, 344, 366, 387, 409, 430, 452, 473, 495] test=[29, 44, 274, 400]
+# pixels: full arm 24 x 1555200 = 37.3 Mpx; crop arm 96 x 65536 = 6.3 Mpx
+# arm=full calibrate=5.29s worst_share=0.03601% peak=16 per_frame=[0.03601, 0.03495, 0.01381, 0.00601]
+# arm=crop calibrate=0.46s worst_share=0.02826% peak=17 per_frame=[0.02823, 0.02826, 0.0101, 0.00439]

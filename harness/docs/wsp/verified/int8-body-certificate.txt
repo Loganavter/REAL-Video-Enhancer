@@ -1,0 +1,82 @@
+# The first-frame gate stays - as a gross sanity check, with its population on the line
+
+No new measurement. This file records a decision about an instrument, and it is written because the log
+line it replaces printed a percentage that no population supported: on every int8 run of 2026-11-18 the
+body printed `self-certification on the first frame: 0.00000% (bar 0.1%) -> serving`, while the whole clip
+on the same material reads 0.53% body-against-engine and 356 of 494 frames above the bar.
+
+## What the gate is actually for
+
+`Int8Body.certify` compares this body against the fp16 model on one frame, and it exists to catch a
+coverage bug - a grid that does not cover the activations.
+
+**Where the numbers come from, stated because one of them is not a record.** The signature quoted in the
+kernel's docstring - **3.53%** at 1920x1080 against 0.00004% for the validated pipeline, 0.00000% at
+256x256, 1.23% at 512x512, "an error that grows with resolution" - was written when that bug was live and
+is NOT in `harness/docs/wsp/verified/`: it is a docstring figure. The record holds the opposite state of the same
+kernel: body against the MODEL at 1080p reads **0.00442-0.01917%** over seven frames
+(`int8-scales-bd.txt`, the body-vs-model table), i.e. 180x below the docstring's 3.53%. Either the coverage
+bug was fixed after that docstring was written, or the 3.53% was measured on a different (broken)
+configuration; nothing here separates the two, and no one has recorded body-vs-model at any resolution
+other than 1080p. Two broken correction experiments read **29.5%** and **100%** and were refused
+(`int8-scales-bd.txt`) - those two numbers ARE in the record, and they are what makes a gross gate a real
+gate rather than decoration.
+
+What it cannot do is certify the picture. The acceptance statistic is `bar_share` = 0.1% of pixels on the
+**worst frame of a spread sample** (n>=2, `harness/docs/claims-bars.json`); one frame has no population, and on
+this material the number is dominated by which frame the clip opens on. Borrowing the acceptance bar also
+risked the failure class this project already paid for once: a correct body refusing on a hard first frame.
+
+## What changed
+
+| before | after |
+|---|---|
+| gate at the acceptance bar, 0.1% | gate at **1.0%** (`FIRST_FRAME_SANITY`), a gross-error threshold |
+| `self-certification on the first frame: X% (bar 0.1%) -> serving` | `first-frame sanity: X% (n=1, gross gate 1.0%; NOT an acceptance number - the picture is judged on renders)` |
+| refusal message said only "refusing" | names the signature: "the quantiser's grid does not cover this frame at this resolution" |
+
+The threshold sits between the two clusters: the worst **valid** reading on record is 0.28825% (a
+deliberately broken grid margin x1.5, `int8-scales-bd.txt`), and the smallest **bug** reading is the
+docstring's 3.53% - so 1.0% gives ~3.5x margin either way, with the smaller cluster's edge on the record and
+the larger one's on the docstring. `Int8Body.sanity_ok(share, bar)` is a pure function so the separation is pinned
+without a GPU, and `harness/tests/test_int8_probe_modes.py` asserts both clusters (0.00000, 0.00442,
+0.01917, 0.28825 pass; 3.53, 29.5, 100 fail).
+
+Evidence it runs: BD Violet, int8 forced, reuse off, 2026-11-18
+(`harness/docs/wsp/verified/logs/sanity/bd_violet20s_int8_r1_null.log`) -
+
+```
+int8 body first-frame sanity: 0.00007% of pixels >8 levels against the fp16 model
+(n=1, gross gate 1.0%; NOT an acceptance number - the picture is judged on renders)
+```
+
+## The resolution envelope, in code
+
+- **Accuracy of the body: measured at LR 1920x1080 only** - 0.00442-0.01917% against the model on seven
+  frames. Nothing on record covers 256x256, 512x512 or any other size, so the docstring's resolution
+  sweep cannot be confirmed or refuted from the record.
+- **The app refuses the body above 2.5 Mpx of LR input**
+  (`UpscaleTorch`: `pixels > 2_500_000` -> refuse, logged as "measured 0.77x at 4K against 0.96x at
+  1080p"). LR 1080p is 2.07 Mpx and fits; LR 1440p is 3.69 Mpx and does not. That refusal is a SPEED
+  decision, not the gate above.
+- Two further conditions, both checked in code: the model needs 64 body channels (`Int8Body` raises, the
+  render logs "int8: build failed" and the fp16 engine runs), and the body serves the whole-frame path
+  only (with the temporal gate on, the render is tiled and the body is not wired in).
+
+## Not covered
+
+- The gate is NOT re-validated against a broken build here: 29.5% and 100% are read off the record, 3.53%
+  off a docstring. Reproducing a coverage bug is a separate job and would have to change the kernel on
+  purpose - and until someone does, the lower edge of "broken" is a docstring figure.
+- One frame is still one frame. A body that is subtly wrong on this clip's opening and right elsewhere
+  passes; that is the accepted price of a gross gate, and the picture's real judge is the render pair.
+- The certificate the probe used to take (the composition statistic, `certify=False` since 2026-11-19) is
+  a different object and stays withdrawn; this file is only about the body's own first-frame gate.
+
+## Reproduce
+
+```bash
+CLIPS=bd_violet20s.mkv ROUNDS=1 SINK=null LOGDIR=/tmp/x harness/scripts/wall_ab.sh
+grep -a "first-frame sanity" /tmp/x/*int8*.log
+cd backend && PYTHONPATH=../scripts QT_QPA_PLATFORM=offscreen <install-python> -m pytest tests/test_int8_probe_modes.py -q
+```

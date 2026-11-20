@@ -1,0 +1,52 @@
+{
+ "model": "2x-Futsuu-Anime(1).pth",
+ "scale": 2,
+ "k": "2",
+ "arms": [
+  {
+   "crops": 0,
+   "calibrate_s": 2.095,
+   "build_s": 0.021,
+   "frames": {
+    "csm_10.rgb": {
+     "share_gt8_pct": 0.0,
+     "max_codes": 5.665,
+     "mean_codes": 0.61551
+    },
+    "violet_15.rgb": {
+     "share_gt8_pct": 0.000161,
+     "max_codes": 9.525,
+     "mean_codes": 0.63521
+    },
+    "violet_5.rgb": {
+     "share_gt8_pct": 0.000382,
+     "max_codes": 10.957,
+     "mean_codes": 0.63012
+    }
+   }
+  },
+  {
+   "crops": 4,
+   "calibrate_s": 0.287,
+   "build_s": 0.007,
+   "frames": {
+    "csm_10.rgb": {
+     "share_gt8_pct": 0.0,
+     "max_codes": 5.603,
+     "mean_codes": 0.59684
+    },
+    "violet_15.rgb": {
+     "share_gt8_pct": 0.000117,
+     "max_codes": 9.65,
+     "mean_codes": 0.61624
+    },
+    "violet_5.rgb": {
+     "share_gt8_pct": 0.000201,
+     "max_codes": 10.21,
+     "mean_codes": 0.60932
+    }
+   },
+   "speedup_vs_full": 7.3
+  }
+ ]
+}

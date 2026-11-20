@@ -1,6 +1,6 @@
 """CLI: verify a claims file against the records it cites, and print what was not verified.
 
-    python -m harness.cli check docs/claims-x.txt --records /tmp/records.jsonl [--bars bars.json]
+    python -m harness.cli check harness/docs/claims-x.txt --records /tmp/records.jsonl [--bars bars.json]
 
 Difference from ``harness/scripts/claim_check.py``: that auditor compares *typed labels* in a text file, so
 a derived number is free text and its arithmetic is read only for ``@ratio``. Here every ``@claim``
@@ -19,6 +19,7 @@ import json
 import re
 import sys
 
+from . import paths
 from .core import RecordError, Store, unit_family
 from .gates import Bar, Claim, Scope, above, below, check_claims
 
@@ -267,7 +268,7 @@ def below_report(paths: list[str], bars_path: str, quiet: bool = False) -> int:
     print(f"\n{len(rows)} @below assertions: {counts['under']} under the bar, {counts['over']} OVER, "
           f"{counts['literal']} against a literal, {counts['unknown']} unknown, "
           f"{counts['ineligible']} not evaluable as a decision (no n recorded)")
-    print("bars: docs/claims-bars.json; a bar that is not a record is not a bar")
+    print("bars: harness/docs/claims-bars.json; a bar that is not a record is not a bar")
     return 1 if (counts["over"] or counts["literal"] or counts["unknown"]) else 0
 
 
@@ -281,9 +282,9 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--bars")
     c.add_argument("--quiet", action="store_true")
 
-    b = sub.add_parser("below-report", help="evaluate every @below assertion against docs/claims-bars.json")
+    b = sub.add_parser("below-report", help="evaluate every @below assertion against harness/docs/claims-bars.json")
     b.add_argument("paths", nargs="+")
-    b.add_argument("--bars", default="docs/claims-bars.json")
+    b.add_argument("--bars", default=paths.doc("claims-bars.json"))
     b.add_argument("--quiet", action="store_true")
 
     sub.add_parser("scope", help="print what this harness does and does not check")
@@ -292,12 +293,12 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("query", choices=("build", "current", "lane", "lineage", "orphans", "stale",
                                      "summary", "current-block", "write-block", "export-md"))
     d.add_argument("arg", nargs="?")
-    d.add_argument("--db", default="docs/wsp/ledger.db")
+    d.add_argument("--db", default=paths.doc("wsp/ledger.db"))
     d.add_argument("--no-evidence", action="store_true")
     d.add_argument("--with-logs", action="store_true")
 
     v = sub.add_parser("verdicts", help="validate the verdict registry and list what is current")
-    v.add_argument("--path", default="docs/wsp/verdicts.yaml")
+    v.add_argument("--path", default=paths.doc("wsp/verdicts.yaml"))
     v.add_argument("--cite", nargs="*", default=[], help="verdict ids a claim wants to cite")
 
     e = sub.add_parser("env-check", help="check the docs' claims about this machine against it")
@@ -306,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("source-check", help="read what a measurement's input file IS, and refuse a "
                                             "false population label (bit rate, colour tags, "
                                             "-c copy proof, contaminated inputs)")
-    s.add_argument("manifest", nargs="?", default="docs/wsp/sources.yaml")
+    s.add_argument("manifest", nargs="?", default=paths.doc("wsp/sources.yaml"))
     s.add_argument("--clip-root", default="")
     s.add_argument("--records", default="", help="records dir/glob whose populations name an input")
     s.add_argument("--no-probe", action="store_true")

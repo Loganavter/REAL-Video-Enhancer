@@ -1,7 +1,7 @@
 """Prototype step 1: a motion-rejected temporal filter on the LR source, written back as a lossless clip.
 
 Why: verbatim skip cannot be safe on noisy material because the reused frame carries the reference's noise
-(docs/wsp/verified/reuse-decision-statistic.txt: 119 of 130 reuses frozen, 82 of them passing the 0.1% bar). The
+(harness/docs/wsp/verified/reuse-decision-statistic.txt: 119 of 130 reuses frozen, 82 of them passing the 0.1% bar). The
 review's architecture separates the plate from the grain before any reuse happens, so the gate decides on clean
 content and the grain is re-added per frame afterwards.
 

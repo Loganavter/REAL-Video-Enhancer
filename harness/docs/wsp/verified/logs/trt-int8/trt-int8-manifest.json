@@ -1,0 +1,50 @@
+{
+ "onnx": "/tmp/opencode/futsuu.onnx",
+ "onnx_sha256": "bcc65c5c2657990e",
+ "frames": {
+  "csm_13.rgb": "66bfde4fb81b66e1",
+  "csm_18.rgb": "3d4b206dd2bc3ab6",
+  "csm_3.rgb": "6e387e593d9a0491",
+  "csm_8.rgb": "d12f26d7bc009bdd",
+  "violet_12.rgb": "f71c6db2080aeb03",
+  "violet_17.rgb": "ed7395c16f6dfc3a",
+  "violet_2.rgb": "bc3b7d55958468a4",
+  "violet_7.rgb": "b3ad830fe0662210"
+ },
+ "shape": [
+  1,
+  3,
+  1080,
+  1920
+ ],
+ "opt": 5,
+ "arms": [
+  {
+   "engine": "/tmp/opencode/futsuu_fp16.trt",
+   "build_s": 193.496,
+   "bytes": 3670016,
+   "int8": "",
+   "opt": 5,
+   "calibration_cache": "",
+   "from": "build-run-1.log (the manifest was overwritten by the later --arms run before it merged)"
+  },
+  {
+   "engine": "/tmp/opencode/futsuu_int8_entropy.trt",
+   "build_s": 170.854,
+   "bytes": 1363148,
+   "int8": "entropy",
+   "opt": 5,
+   "calibration_cache": "/tmp/opencode/calib-entropy.cache",
+   "from": "build-run-1.log (the manifest was overwritten by the later --arms run before it merged)"
+  },
+  {
+   "engine": "/tmp/opencode/futsuu_int8_minmax.trt",
+   "build_s": 167.876,
+   "bytes": 1319188,
+   "int8": "minmax",
+   "opt": 5,
+   "calibration_cache": "/tmp/opencode/calib-minmax.cache"
+  }
+ ],
+ "note": "built by harness/scripts/trt_int8_calibrate.py; the fp16 and int8-entropy arms were recovered from build-run-1.log after the min-max run overwrote the manifest - the script now merges"
+}

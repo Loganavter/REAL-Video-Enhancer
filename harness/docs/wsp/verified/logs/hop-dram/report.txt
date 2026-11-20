@@ -1,0 +1,20 @@
+==PROF== Connected to process 2750376 (/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/python/bin/python3.12)
+int8 head FUSED: one kernel writes the codes (K=32 from a 3-channel head, no separate quantise pass)
+int8 tail FUSED with shuffle+residual: one kernel, scale 2
+==PROF== Profiling "body_prologue_kernel": 0%....50%....100% - 3 passes
+target done
+==PROF== Disconnected from process 2750376
+[2750376] python3.12@127.0.0.1
+  body_prologue_kernel (16200, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: Command line profiler metrics
+    -------------------------- ----------- ------------
+    Metric Name                Metric Unit Metric Value
+    -------------------------- ----------- ------------
+    dram__bytes.sum.per_second     Gbyte/s       156,67
+    dram__bytes_read.sum             Mbyte       132,84
+    dram__bytes_write.sum            Mbyte       117,63
+    gpu__time_duration.sum              ms         1,60
+    lts__t_sector_hit_rate.pct           %        91,25
+    lts__t_sectors.sum              sector   47 719 429
+    -------------------------- ----------- ------------
+

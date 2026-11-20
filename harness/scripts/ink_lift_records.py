@@ -12,8 +12,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--json", default="docs/wsp/verified/logs/ink-lift.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-ink-lift.jsonl")
+    ap.add_argument("--json", default="harness/docs/wsp/verified/logs/ink-lift.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-ink-lift.jsonl")
     a = ap.parse_args(argv)
     d = json.load(open(a.json))
     dig = hashlib.sha256(open(a.json, "rb").read()).hexdigest()

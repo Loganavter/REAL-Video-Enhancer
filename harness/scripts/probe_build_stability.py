@@ -11,7 +11,7 @@ and the tile, and never read `__myl_` alone - two plans with 19 fused layers wer
 Usage (one GPU job at a time):
   F=~/.cache/opencode/venvs/trt310/bin/python
   $F harness/scripts/make_width_probe.py /tmp/opencode/p32.onnx --width-ch 32
-  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/probe_build_stability.py /tmp/opencode/p32.onnx \
+  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/probe_build_stability.py /tmp/opencode/p32.onnx \
       --trials 3 --emit /tmp/opencode/stability.jsonl
 """
 from __future__ import annotations

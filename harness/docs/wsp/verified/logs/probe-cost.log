@@ -1,0 +1,10 @@
+# Where the probe's cost goes, 2026-11-17 (second measurement, mirroring the shipped loops).
+# The first version ran the depth-2 control over every pair (48 forwards); the shipped loop runs it
+# over the pairs the gate would reuse - 4 of 8 test pairs on this clip = 12 forwards.
+/tmp/opencode/csm20s.mkv frames=16: 16 triples, 48 fp16 forwards, 24 quantised, 12 control forwards (pairs [1, 3, 5, 15])
+  decode            2.88 s    6.4%
+  load+upload       0.14 s    0.3%
+  control pass      1.93 s    4.3%
+  calibrate        21.14 s   46.8%
+  forwards         19.06 s   42.2%
+  TOTAL            45.14 s

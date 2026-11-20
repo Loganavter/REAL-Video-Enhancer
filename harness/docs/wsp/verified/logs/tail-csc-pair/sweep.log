@@ -1,0 +1,11 @@
+/home/jorj/2Tb/tail-csc/bd_violet20s_conv_r1_ffv1.mkv vs /home/jorj/2Tb/tail-csc/bd_violet20s_yuv_r1_ffv1.mkv
+  reference (config): reference is the same renderer in another CONFIGURATION: the difference is that configuration's effect, not an error
+  494 frames, block 64
+  worst share 0.00000% (frame 0), frames above 0.1%: 0
+  worst block mean 0.52 (frame 278), peak 6
+  NOT covered: temporal judgement beyond the pair, perceptual models, whether the ungated reference is right, and whether this clip is representative of the title.
+  emitted 4 records -> docs/wsp/verified/logs/tail-csc-pair/pair-records.jsonl (artifact sha256 01cd483eb13440a6...)
+  @claim TC001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+  @claim TC002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+  @claim TC003 0.52099609375 levels "frames [13137e4e7dd10e98] n=494" measured
+  @claim TC004 6.0 levels "frames [13137e4e7dd10e98] n=494" measured

@@ -1,0 +1,18 @@
+{
+ "model": "2x_ModernSpanimationV1.pth",
+ "shape": {
+  "scale": 2,
+  "arch": "SPAN"
+ },
+ "total_ms": 302.133,
+ "categories": {
+  "conv3x3": 197.851,
+  "conv1x1": 7.004
+ },
+ "counts": {
+  "conv3x3": 105,
+  "conv1x1": 5
+ },
+ "non_conv_ms": 97.279,
+ "take": "2026-11-19T09:55:31Z"
+}

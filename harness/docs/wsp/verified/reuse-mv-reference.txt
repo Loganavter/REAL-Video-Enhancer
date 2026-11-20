@@ -1,0 +1,137 @@
+# The codec's motion field, resolved and measured where the reuse fails: it does not fix them
+
+Measured 2026-11-20 (local), CPU prototype: PyAV decode with motion-vector side data, `cv2.remap` warps, the
+app's own gated/ungated renders of the two labelled clips (`w1040`, `w960`). Records:
+`records/reuse-mv-reference.jsonl`; instrument: `harness/scripts/reuse_mv_gate.py` (the reference search and the region
+split), `harness/scripts/reuse_compose.py` (the flow route), `harness/scripts/reuse_split.py` (the shipped correction).
+
+This closes the geometry axis of the reuse lane. The queue row is
+`rve-reuse-mv-reference-2026-11-20`, and its falsifier is met: the coded field, applied at any reference and
+gated per frame, does not take the held-out clip below 3/124.
+
+## What the side data actually says
+
+PyAV surfaces motion vectors only when the decoder option is set **before** decoding:
+
+```python
+stream.codec_context.options = {"flags2": "+export_mvs"}
+```
+
+Without it frames carry timecode only, and `ffprobe` prints the side-data type but not its contents. The field is
+`AVMotionVector`: `dst_x/dst_y` is the block's position in this frame, `src_x/src_y` its position in the
+reference, `motion_x/motion_y` the displacement in `motion_scale` units (quarter-pel on H.264), and `source` a
+**reference-list tag** (-1 = list0, +1 = list1), not a frame distance.
+
+That tag is what RU035 tripped on. The residual search over the last four display-order frames puts the match at
+**two frames back** - the previous P anchor, since this stream's anchors are two display frames apart
+(`P B P B`):
+
+| distance | median residual gain | frames improved |
+|---|---|---|
+| 1 | **-16.1%** | 18% |
+| **2** | **+2.9%** | **53%** |
+| 3 | -0.1% | 49% |
+| 4 | -0.6% | 44% |
+
+So the vectors are not wrong; they were applied to the wrong picture. The magnitude matters too: an earlier probe
+on the first 18 P frames read +9.6%, which is a prefix of the population. Over all 72 P frames of the cut the
+field buys 2.9% - the same population trap this lane has already retracted twice, caught here before it was
+recorded.
+
+@claim RU036 2.9 % "P frames [56cd92ecec6c1a9e] n=72" measured
+
+## The frames that fail, at the distance the gate actually holds
+
+119 of the 124 reused frames of the held-out cut carry a usable field. The four that sit over the bar under the
+split correction, in the border band, at the frame's own reuse depth and at the codec's anchor:
+
+| frame | depth | type | gain in the band, reuse depth | gain in the band, distance 2 |
+|---|---|---|---|---|
+| 18 | 3 | P | +3.3% | +1.9% |
+| 21 | 2 | B | -10.4% | -10.4% |
+| 22 | 3 | P | -5.8% | -16.5% |
+| 56 | 1 | P | -32.5% | -24.4% |
+
+Negative on three of four at the depth the gate holds, and negative on three of four at the reference the field
+was coded against. The gate holds exactly one HR frame - the last it rendered - so the warp can only be applied at
+the reuse depth; the codec's own reference is a different frame in three of these four cases, and the field does
+not help there either.
+
+@claim RU037 -8.1 % "reused frames [c0952bc8b9e44357] n=4" measured
+@claim RU038 -13.45 % "reused frames [c0952bc8b9e44357] n=4" measured
+
+## Where the failures are: a moving border band, measured against a moving target
+
+Splitting each failing frame's pixels-above-the-bar into an 8 px border band (2.3% of the area) and the interior:
+
+| frame | band | interior |
+|---|---|---|
+| 18 | 9.05% | **0.0000%** |
+| 21 | 9.38% | **0.0000%** |
+| 22 | 16.67% | **0.0000%** |
+| 56 | 0.001% | **0.168%** |
+
+Three of the four are the band, one is not. And the band is not a renderer artefact: its LR content changes 3.2x
+faster than the interior's over the segment (1.0x at frame 9, 9.4x at frame 22), and the SR change follows it.
+The interior is a held cel; the band is where this clip's picture moves.
+
+The control that fixes what the bar can mean there: two **consecutive freshly rendered** frames of the ungated
+render - no reuse involved - differ by more than 8 levels on 14.32% of the band at the worst frame, i.e. 0.33% of
+the whole frame, 3.3x the bar. Median over the population: 0.0888%. So a verbatim reuse of any frame fails the
+bar on that frame, and the correction's job is to beat 0.33%; it reads 0.19% instead. That is an improvement of
+the band and not a pass.
+
+@claim RU039 3 count "reused frames [c0952bc8b9e44357] n=4" measured
+@claim RU040 14.32 % "frame pairs [c4d5d6d3adf30ada] n=21" measured
+@claim RU041 3.2 x "reused frames [e20a42cee42b03b4] n=16" measured
+
+## The other handles, measured and refused
+
+- **A flow from the frame the gate holds** (`reuse_compose.py`: DIS, forward-backward gated, warped SR plus warped
+  residual, grain half on top) reads 4/124 on the same clip with the same four frames over the bar and frame 56
+  worse (0.150% -> 0.205%), texture 1.238. The second, independent geometry route fails on the same frames.
+- **Bilinear residual upsampling** (NEMO upsamples the codec residual) reads 4 over the bar where nearest-2x reads
+  3 on the same 12 frames. An edge that has to move is not helped by smoothing.
+- **Amplifying the residual at edges** (the correction at gain 2.0 on the frames the mask leaves at unit gain)
+  takes frame 56 from 0.166% to 2.775%. The residual under-shoots there because it is a 1080p quantity, not
+  because it is too small: scaling it misplaces the 4K edge further.
+
+@claim RU042 4 count "reused frames [af066356217e17b1] n=124" measured
+@claim RU043 4 count "reused frames [94e9146f386d656d] n=12" measured
+
+## What closes, and what ships
+
+The falsifier is met, so the geometry axis is closed: no motion field available to the gate - the codec's, which
+references a different picture, or an estimated one from the held frame - reduces the residual where the reuse
+fails, and the region that fails is where the picture moves faster than a 1080p residual can express at 4K.
+
+What ships is the measured state, unchanged: **frequency split + recursive correction**, `0/130` and texture 1.001
+on the calibration clip, `3/124` and texture 1.021 on the held-out one, 2.428 ms/frame on the GPU. The gate stays
+off by default, because three frames out of 124 on action footage carry a visible defect and no cheap statistic
+separates them: the failing frames' worst LR delta is 17-62 levels against 54 on passing frames, and frame 56's LR
+share above 8 levels is 0.04% against 0.15% on passing ones. Predicting those three would require predicting what
+the network does to the 4K detail from the 1080p frame, which is the network itself.
+
+## Reproduce
+
+```bash
+# the gate's own decision and the pair of renders (see reuse-decision-statistic.txt for the full recipe)
+python3 backend/rve-backend.py ... --input cut.mkv --output on.mkv  --temporal_reuse
+python3 backend/rve-backend.py ... --input cut.mkv --output off.mkv
+# the reference search and the region split, per reused frame
+python3 harness/scripts/reuse_mv_gate.py --clip cut.mkv --depth-log gate.log --emit mv_gate.json
+# the flow route from the served reference
+python3 harness/scripts/reuse_compose.py --gated on.mkv --ungated off.mkv --lr cut.mkv --depth-log gate.log \
+    --alpha 1.35 --fb-tol 1.0 --emit compose.json
+# the shipped correction
+python3 harness/scripts/reuse_split.py --gated on.mkv --ungated off.mkv --lr cut.mkv --depth-log gate.log \
+    --alpha 1.35 --recursive --emit split.json
+```
+
+## NOT checked
+
+Bi-predicted blocks carry two vectors for one block and are used here as two separate fields, not weighted as
+the codec weights them; occlusion is not detected (a vector with no matching source content shows up as a
+negative gain and nothing else); no GPU implementation of the warp was written, so the geometry route's cost is
+unmeasured beyond the 2.428 ms of the correction it would replace; and the 4K grain spectrum of the added
+residual is still unmeasured.

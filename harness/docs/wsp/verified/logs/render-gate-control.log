@@ -1,0 +1,39 @@
+# The gate measured on the product's own render, 2026-11-17.
+# Two renders of /tmp/opencode/csm20s.mkv through backend/rve-backend.py, bundled interpreter
+# torch 2.9.0+cu130, one GPU job at a time, lossless container (--video_encoder_preset ffv1
+# --video_pixel_format yuv444p), everything else at the shipped defaults.
+
+=== A: gated (default), ctl_gated.mkv
+BACKEND: int8 probe: engine 0.000%  composition 0.000%  peak 11  (4 pairs, bar 0.1%) -> fp16
+BACKEND: auto gate tuning: the threshold will be chosen from the first rendered frames (LR delta vs the real HR delta they cause)
+BACKEND: auto gate: threshold 4.0/255, chain 3, veto None, noise floor 0.66, would reuse 75% of the 16 calibration frames; certified d1 p90 0.73 at 12 (limit 2), d2 p90 0.69 at 12 (limit 12), d3 p90 0.66 at 12 (limit 12)
+BACKEND: reference reuse: 100/481 frames reused (20.8%), 2 scene cuts, 0 pixel vetoes, threshold=4.0/255 over scaledpx blocks, max chain=3, pixel veto=off
+
+=== B: --no_temporal_reuse, ctl_ungated.mkv
+BACKEND: int8 probe: engine 0.000%  composition 0.000%  peak 11  (4 pairs, bar 0.1%) -> fp16
+
+=== A/A: gated rendered twice (ctl_gated.mkv vs ctl_gated2.mkv)
+cmp: the two container files differ at byte 221 (muxing metadata); both are 1669364397 bytes.
+Decoded comparison:
+  frames compared: 481
+  worst frame 0: share 0.00000%  peak 0  block-mean 0.00
+  frames above 0.1%: 0   above 0.01%: 0
+
+=== A/B: gated vs ungated
+ctl_gated.mkv vs ctl_ungated.mkv
+  frames compared: 481
+  worst frame 164: share 0.49372%  peak 14  block-mean 3.91
+  frames above 0.1%: 18   above 0.01%: 21
+  median share 0.00000%   mean 0.00820%
+  top 8 frames by share:
+    frame  164  share  0.49372%  peak  14  block-mean  3.91
+    frame  478  share  0.32559%  peak  57  block-mean 11.02
+    frame  432  share  0.30525%  peak  75  block-mean  8.87
+    frame  433  share  0.29830%  peak  74  block-mean  8.72
+    frame  396  share  0.27452%  peak  44  block-mean  5.25
+    frame  466  share  0.23302%  peak  59  block-mean  8.95
+    frame  431  share  0.20896%  peak  60  block-mean  8.71
+    frame  467  share  0.18362%  peak  59  block-mean  8.92
+
+# The container round trip is not the instrument's noise floor: rgb24 -> yuv444p -> ffv1 ->
+# rgb24 on a synthetic frame reads max 2 levels and 0.000000% above 8.

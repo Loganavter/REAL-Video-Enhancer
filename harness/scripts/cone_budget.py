@@ -17,8 +17,8 @@ sixteen launches cost more than their work - the arithmetic is a ceiling on the 
 overhead is a floor on the cost. Both are printed.
 
 Usage:
-  python3 harness/harness/scripts/cone_budget.py                       # 1080p
-  python3 harness/harness/scripts/cone_budget.py --width 1920 --height 1080 --emit /tmp/opencode/e36.jsonl
+  python3 harness/scripts/cone_budget.py                       # 1080p
+  python3 harness/scripts/cone_budget.py --width 1920 --height 1080 --emit /tmp/opencode/e36.jsonl
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """Is int8's accuracy on real material fixable by the activation SCALES? One probe, five policies.
 
-The measured decomposition (docs/wsp/verified/logs/bd/diff-int8-violet-f*.log) says the error sits at the
+The measured decomposition (harness/docs/wsp/verified/logs/bd/diff-int8-violet-f*.log) says the error sits at the
 ends of the range (234-255: 100% of those pixels over the bar; 0-32: 25-89%) and on thin line art (top 1%
 gradient: 21-29%), while flat mid-tones are clean (0.001-0.003%). Only the range-end class is
 scale-shaped; the edge class is 8-bit rounding and no scale policy touches it.
@@ -16,7 +16,7 @@ PReLU outputs (what the shipped sim does), varying ONLY the conv-input quantiser
 
 Asymmetric = 256 codes over [lo, hi]; decoders reconstruct q*step + lo.
 
-The probe is anchored: A has to agree with harness/harness/scripts/int8_accuracy_sim.py on the same frame before any
+The probe is anchored: A has to agree with harness/scripts/int8_accuracy_sim.py on the same frame before any
 other row is read. Frames are 1080p RGB dumps of the BD clip; calibration and test sets are disjoint.
 
 Usage:
@@ -135,7 +135,7 @@ def forward(model, x, cal, chans: bool, pct: float, sym: bool = False):
             out = module(out)
         elif isinstance(module, torch.nn.PReLU):
             out = module(out)
-            # ALWAYS per channel here: that is what harness/harness/scripts/int8_accuracy_sim.py does, and that sim is
+            # ALWAYS per channel here: that is what harness/scripts/int8_accuracy_sim.py does, and that sim is
             # the instrument that produced the recorded numbers. Varying two axes at once would make
             # this probe incomparable to the anchor.
             lo, hi = _span(out_range[f"body.{name}"], out_samp[f"body.{name}"], True, pct)
@@ -167,7 +167,7 @@ def main(argv=None) -> int:
     test = [(int(i), load_frame(path(int(i)))) for i in args.test.split(",")]
     # The reference is the UNQUANTISED model: calibrate() loads int8 weights in place, so computing the
     # reference afterwards measures the int8 model against itself. That mistake read 0.0026% where this
-    # probe's anchor (harness/harness/scripts/int8_accuracy_sim.py) reads 0.065% on the same frame.
+    # probe's anchor (harness/scripts/int8_accuracy_sim.py) reads 0.065% on the same frame.
     refs = {}
     for i, f in test:
         refs[i] = model(f).float()

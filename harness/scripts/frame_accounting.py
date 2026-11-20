@@ -6,7 +6,7 @@ three stages the line did not print (pack+queue, the wrapper around the body, re
 what the instrument actually says now, plus the one number that shows whether the instrument can be summed
 at all: the profile's frame total divided against the render loop's wall clock.
 
-Usage: python harness/harness/scripts/frame_accounting.py --logs /tmp/opencode/acct2 --out docs/wsp/verified/records/int8-frame-accounting.jsonl
+Usage: python harness/scripts/frame_accounting.py --logs /tmp/opencode/acct2 --out harness/docs/wsp/verified/records/int8-frame-accounting.jsonl
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def parse(text: str) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--logs", default="/tmp/opencode/acct2")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-frame-accounting.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-frame-accounting.jsonl")
     ap.add_argument("--session", default="")
     ap.add_argument("--first-clip-only", action="store_true",
                     help="keep one clip (the repeats of the same clip are a level check, not new data)")

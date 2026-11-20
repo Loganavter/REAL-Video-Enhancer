@@ -8,7 +8,7 @@ The arm is the variable under test, so it lives in `run` and `extra`, never in `
 ratio whose configurations differ, and putting the arm there would make the ratio unrepresentable.
 
 Usage:
-  python harness/harness/scripts/ab_records.py --clip bd_violet20s --logdir docs/wsp/verified/logs/ultra-null2 \
+  python harness/scripts/ab_records.py --clip bd_violet20s --logdir harness/docs/wsp/verified/logs/ultra-null2 \
       --arms fp16,k2 --sink null --model "2x-sudo-UltraCompact" --out records/int8-ultra.jsonl
 """
 from __future__ import annotations

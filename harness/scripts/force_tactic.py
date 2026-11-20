@@ -16,9 +16,9 @@ Two graph sizes, on purpose:
 
 Usage (one GPU job at a time):
   F=~/.cache/opencode/venvs/trt310/bin/python
-  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/force_tactic.py --channels 32 --graph block --scan
-  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/force_tactic.py --channels 32 --graph body --body 4 --scan
-  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/force_tactic.py --channels 32 --graph body --body 16 --index 7
+  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/force_tactic.py --channels 32 --graph block --scan
+  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/force_tactic.py --channels 32 --graph body --body 4 --scan
+  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/force_tactic.py --channels 32 --graph body --body 16 --index 7
 """
 from __future__ import annotations
 

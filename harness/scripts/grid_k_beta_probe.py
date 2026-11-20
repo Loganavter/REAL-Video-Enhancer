@@ -120,7 +120,7 @@ def errors_for(model, frames, margin: float = 1.0):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ladder", default="docs/wsp/verified/logs/grid-k/ladder.jsonl")
+    ap.add_argument("--ladder", default="harness/docs/wsp/verified/logs/grid-k/ladder.jsonl")
     ap.add_argument("--frames", type=int, default=4)
     ap.add_argument("--out-file", default="")
     args = ap.parse_args(argv)

@@ -1,0 +1,4 @@
+# calibration coverage s-2026-11-18T17:56:44Z clip=/tmp/opencode/violet1440.mkv crop=256 per_frame=4 calib=[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45, 47] test=[29, 44, 274, 400]
+# pixels: full arm 24 x 1555200 = 37.3 Mpx; crop arm 96 x 65536 = 6.3 Mpx
+# arm=full calibrate=5.24s worst_share=0.01186% peak=22 per_frame=[0.00794, 0.00868, 0.01186, 0.00412]
+# arm=crop calibrate=0.47s worst_share=0.01347% peak=22 per_frame=[0.01124, 0.01043, 0.01347, 0.00434]

@@ -1,0 +1,63 @@
+# The last 2.3 s: Triton's cold cache, and the engine that was loaded twice
+
+Measured 2026-11-20 on the current tree (crops + hybrid decode + fixed K=2). Records `int8-triton-warm.jsonl`
+(TW001-TW002), raw `logs/startup_triton_{cold,warm}.log`.
+
+## The engine was loaded twice per process
+
+`TensorRTHandler.load_engine` read the same 32 MB plan twice in one start-up: once for the probe's reference,
+once for the render path, 3 s apart. Now the module is cached by absolute path for the life of the process and the
+second call logs `already loaded`. The saving is 0.11 s - small, mechanical, and it removes a whole file read from
+a path that runs on every render.
+
+## Triton's cache is the real item, and only on a machine's first render
+
+| configuration | start-up to the first frame |
+|---|---|
+| Triton cache **empty** (a fresh install's first render) | **8.64 s** |
+| Triton cache **warm** (every render after that) | **6.34 s** |
+
+2.30 s, paid once per machine and never visible in a benchmark run on a development box - which is exactly why it
+was never in the record. `harness/scripts/warm_triton.py` moves it to the install:
+
+| run | time |
+|---|---|
+| first (compiles 19 kernels into the cache) | **2.73 s** |
+| second, same cache | **0.49 s** |
+
+The cache is 2.1 MB in `~/.triton`, and **one shape is enough** - measured, not assumed. The kernels specialise on
+the channel count, the tile height and the warp count, not on the frame geometry:
+
+| shape | same cache | time |
+|---|---|---|
+| 1920x1080, empty | - | **2.58 s** (compiles) |
+| 1440x1080 | after 1080p | **0.48 s** (reuses everything) |
+| 2560x1440 | after 1080p | **1.84 s** (some new kernels) |
+
+So the default is the single shape the lane renders; a 1440x1080 render pays nothing and a larger one pays only the
+difference on its first use. Warming "for the shape the user actually runs" cannot be done at install time - the
+installer does not know it - and would not help anyway: the compile happens on first use inside that process, so
+moving it earlier only moves the wait.
+
+The script calibrates on one random frame because the compiler needs the geometry, not the grids.
+
+## What this leaves
+
+With the warm-up run at install, the shipped start-up is **6.34 s** on a machine that has never rendered, and the
+same on every later render. Without it, the first one is 8.64 s. The remaining blocks are the interpreter (2.4 s),
+the decode (1.6 s), the engine (0.7 s), calibration (0.56 s) and the body's first call (0.28 s warm) - all of them
+either cheap, risky to touch, or already argued.
+
+## Reproduce
+
+```bash
+TRITON_CACHE_DIR=$(mktemp -d) python3 /tmp/opencode/timed_run.py     # 8.64 s, cold
+python3 harness/scripts/warm_triton.py --model "<model>.pth"                 # 2.59 s, once per machine
+python3 /tmp/opencode/timed_run.py                                   # 6.34 s, warm
+PYTHONPATH=. python3 harness/scripts/triton_warm_records.py
+PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-triton-warm.txt \
+    --records harness/docs/wsp/verified/records/int8-triton-warm.jsonl --bars harness/docs/claims-bars.json
+```
+
+@claim TW001 8.64 s "process starts [f6b8fd5cdd44132a] n=2" measured
+@claim TW002 6.34 s "process starts [f6b8fd5cdd44132a] n=2" measured

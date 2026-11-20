@@ -5,9 +5,9 @@ the gate prints how many frames it reused, and the loop prints ms/frame. Reading
 hand is how a number loses its population, so this parser is the only path from a log to a claim.
 
 Usage:
-  python harness/harness/scripts/emit_render_records.py LOG [LOG ...] --clip bd_violet20s.mkv \
-      --artifact docs/wsp/verified/logs/bd/vio_luma.log --config "fp16, auto luma gate" \
-      --out docs/wsp/verified/records/gate-bd.jsonl --id-prefix B
+  python harness/scripts/emit_render_records.py LOG [LOG ...] --clip bd_violet20s.mkv \
+      --artifact harness/docs/wsp/verified/logs/bd/vio_luma.log --config "fp16, auto luma gate" \
+      --out harness/docs/wsp/verified/records/gate-bd.jsonl --id-prefix B
 """
 from __future__ import annotations
 

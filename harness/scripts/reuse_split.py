@@ -1,6 +1,6 @@
 """Split the correction by frequency instead of by geometry: structure at 1x, grain at alpha.
 
-The measured trade-off (docs/wsp/verified/reuse-decision-statistic.txt) says one scalar gain cannot satisfy both
+The measured trade-off (harness/docs/wsp/verified/reuse-decision-statistic.txt) says one scalar gain cannot satisfy both
 instruments: unit gain fixes the structure (0/130 over the bar) and leaves the texture at 0.388 ~ 1/alpha; alpha on
 the whole residual restores the texture and breaks the structure. The two components are not distinguished by a
 gain, they are distinguished by their *content*: the structural part of `LR_t - LR_ref` is a low-frequency

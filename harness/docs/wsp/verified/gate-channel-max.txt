@@ -1,0 +1,102 @@
+# The defect is in the projection: channel-max separates perfectly where luma cannot
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 10 record(s) in this file (R001, R002, R003, R004, R005, R006, R007, R008, R009, R010) name
+> `csm20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+Measured 2026-11-17 by recomputing the same LR statistics in channel-max instead of luma, over the same
+100 reused frames of Chainsaw Man 20 s, joined with the per-frame HR share of the gated-vs-ungated
+decode.
+
+| feature | AUC |
+|---|---|
+| share above 8 levels, **any channel** | **1.000** |
+| share above 6 levels, any channel | **1.000** |
+| share above 4 levels, any channel | 0.999 |
+| share above 4 levels, luma (the gate's projection) | 0.993 |
+| max channel delta | 0.936 |
+| max luma delta | 0.910 |
+
+Frame 164 - the worst frame by HR share and the one no luma statistic could see - is **rank 1 of 100**
+by the channel-max share above 8 (0.619%), against rank 27 by the luma share above 4. The class does not
+need a second mechanism; the projection does.
+
+## Why luma is blind here
+
+Frame 164 is a clipped highlight: ungated (244, 255, 255), gated (255, 255, 255), so the difference is
+**11 levels in R only** and zero in G and B. The gate's luma taps are `(1, 2, 1) / 4`, so R enters with
+a weight of 0.25 and the same 11 levels read 2.75 in the gate's variable against 11 in the acceptance
+variable - a factor of 4. On a blue highlight the factor would be 4 as well; on BT.709 weights it would
+be 4.7. Any luma gate is blind to colour restored on a clipped highlight by construction, and Chainsaw
+Man is fire, blood and muzzle flashes.
+
+The change is **real in the LR input**: the mean R delta between frame 164 and its reference 161 over
+the flagged area is 11.2 levels (max 15). It is not manufactured by the upscaler - that reading came
+from the luma number, where the same change is 2.75.
+
+## The operating point, with the domains named
+
+The separation above is in **LR** shares (the gate's input); the bar is an **HR** share. They are not
+interchangeable:
+
+| | LR share | HR share |
+|---|---|---|
+| worst of the 82 survivors | 0.0651% | **0.0755%** |
+| best of the 18 bad | 0.0818% | 0.1013% |
+
+So the surviving population is not at 0.065% - it is at 0.0755%, which leaves 0.0245 pp of headroom to
+the bar, and int8's measured increment on Chainsaw is 0.0267 pp. **The gate fix alone does not unblock
+int8**: it lands about 0.002 pp over, if the increment transfers.
+
+And the threshold is not portable, because the LR-to-HR mapping is not a constant: HR/LR has a median of
+**2.04**, a p90 of **9.50** and a max of **35.4** over the 100 frames. A fixed LR threshold is a fit to
+this clip's edge density, which is why the tuner already measures the real HR delta on its calibration
+frames and should keep doing so.
+
+The threshold itself: 0.07% (1451 LR px) sits between the good max (1349) and the bad min (1696) with
+14.4% of margin, against 2.2% for 0.08% (1658 px, 37 px from the first missed defect). Same reuse, same
+wall, six times the margin - 0.07% dominates.
+
+## What a channel-max gate would cost
+
+The separation at the acceptance threshold itself: bad frames bottom out at 0.0818% and good frames top
+out at 0.0651%, a 1.3x gap. Blocking everything above 0.08% blocks **18 of 100 - all 18 bad, zero
+good**. Reuse falls to 17.0% and the wall becomes 7.14 + 0.830 x 51.06 = 49.50 ms against 47.58, i.e.
+**+4.0%** - and the worst frame is gone, which the luma threshold at 3.0 could not achieve for +2.7%.
+
+The 1.3x gap is thin and the threshold was read off this clip, so it must be calibrated on a population
+that contains the failure mode, not on a calm cut.
+
+## The gate's threshold cannot substitute for it
+
+Measured across the whole tuner clamp, not just its upper half: the probe's depth-2 number is 0.2177%
+at gate thresholds **5.0, 4.0, 3.0 and 2.0**. The damaged pair is under 2.0 - the tightest setting the
+tuner can choose - so no threshold on the luma variable removes it.
+
+## Why the simulator and the app disagree at the boundary
+
+The app converts YUV to RGB with `cv2.cvtColor(yuv, COLOR_YUV2RGB_I420)` - BT.601, full range - while
+this simulator decodes with ffmpeg, BT.709, tv range. The luma taps are the same `(1,2,1)/4` in both,
+the RGB underneath is not. So the simulator reproduces the app's *decisions* (100 reused, 2 scene cuts)
+at threshold 4.0, where the sign of `delta - 4` is not close, and it diverges at the boundary (84
+predicted against 88 measured at 3.0). Every absolute threshold quoted from the simulation is on a
+slightly different variable than the product's, which is why the channel-max threshold above must be
+re-derived on the app's own numbers before it ships.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/gate-channel-max.txt \
+       --records harness/docs/wsp/verified/records/gate-channel-max.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 1.0 x "frames [da91caad7866b640] n=100" measured
+@claim R002 0.993 x "frames [da91caad7866b640] n=100" measured
+@claim R003 1.0 count "frames [da91caad7866b640] n=100" measured
+@claim R004 17.0 % "frames [da91caad7866b640] n=100" measured
+@claim R005 11.2 levels "frames [d3dc230812aad7da] n=1" measured
+@claim R006 0.21773725748062134 % "pairs [260529ca474bec38] n=1" measured
+@claim R007 0.0755 % "frames [74d852c301caa1ac] n=82" measured
+@claim R008 2.04 x "frames [da91caad7866b640] n=100" measured
+@claim R009 9.5 x "frames [da91caad7866b640] n=100" measured
+@claim R010 3.0 levels "frames [dca1e064948711e3] n=1" measured

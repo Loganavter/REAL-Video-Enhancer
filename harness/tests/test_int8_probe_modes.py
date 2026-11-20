@@ -7,7 +7,7 @@ opt-in, the calibration stays mandatory, and a log line must not claim the fp16 
 render is running the body.
 
 These tests hold the seam, not the arithmetic: the numbers that matter are measured on renders
-(`docs/wsp/verified/`), because that is what a viewer sees.
+(`harness/docs/wsp/verified/`), because that is what a viewer sees.
 """
 from __future__ import annotations
 

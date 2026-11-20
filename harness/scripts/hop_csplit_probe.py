@@ -2,7 +2,7 @@
 
 The measured bottleneck is occupancy, not traffic: 3.96 of 12 warps per scheduler, 56% of cycles with no eligible
 warp, and the first tap costing 0.59 ms because there are no warps to hide its round trip
-(docs/wsp/verified/int8-hop-occupancy.txt). The accumulator is BLOCK_M x 64 int32 - 32 KB per CTA at BLOCK_M 128 -
+(harness/docs/wsp/verified/int8-hop-occupancy.txt). The accumulator is BLOCK_M x 64 int32 - 32 KB per CTA at BLOCK_M 128 -
 which is what caps the resident CTAs.
 
 The BLOCK_M/warps sweep could not fix it: shrinking BLOCK_M keeps the 64-wide output and thins the MMA.

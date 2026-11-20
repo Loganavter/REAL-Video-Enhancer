@@ -71,8 +71,8 @@ def stats(path: str) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ladder", default="docs/wsp/verified/logs/grid-k/ladder.jsonl")
-    ap.add_argument("--inventory", default="docs/wsp/verified/logs/model-fit/inventory.json")
+    ap.add_argument("--ladder", default="harness/docs/wsp/verified/logs/grid-k/ladder.jsonl")
+    ap.add_argument("--inventory", default="harness/docs/wsp/verified/logs/model-fit/inventory.json")
     ap.add_argument("--out-file", default="")
     args = ap.parse_args(argv)
 

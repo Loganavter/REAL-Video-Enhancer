@@ -4,8 +4,8 @@ Four measured records (one per arm) plus three deltas. The arm is the variable: 
 population label and in `run`, while config/instrument/session/statistic are held equal - the same
 convention `wall_ab_records.py` uses, and what `Store._relation` demands of a delta.
 
-Usage: python harness/harness/scripts/input_path_records.py --probe docs/wsp/verified/logs/input-path/probe.json \
-           --out docs/wsp/verified/records/input-path.jsonl
+Usage: python harness/scripts/input_path_records.py --probe harness/docs/wsp/verified/logs/input-path/probe.json \
+           --out harness/docs/wsp/verified/records/input-path.jsonl
 """
 from __future__ import annotations
 
@@ -39,8 +39,8 @@ def sha256(path: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/input-path/probe.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/input-path.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/input-path/probe.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/input-path.jsonl")
     args = ap.parse_args(argv)
 
     probe = json.load(open(args.probe))

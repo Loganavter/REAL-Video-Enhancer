@@ -11,9 +11,9 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/hop-prefetch/probe.json")
-    ap.add_argument("--bench", default="docs/wsp/verified/logs/hop-smem-theory/bench.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-hop-prefetch.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/hop-prefetch/probe.json")
+    ap.add_argument("--bench", default="harness/docs/wsp/verified/logs/hop-smem-theory/bench.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-hop-prefetch.jsonl")
     a = ap.parse_args(argv)
     pr = json.load(open(a.probe))
     dig = hashlib.sha256(open(a.probe, "rb").read()).hexdigest()

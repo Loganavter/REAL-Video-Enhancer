@@ -4,7 +4,7 @@ Why: `int8-window.txt` splits the tail as 2.1 / 3.6 / 2.4 ms, measured on a diff
 output size, and the row that proposed fusing the tail's passes rested on that split. The split is now
 printed per run by the body itself (`int8 tail: ...`), so the row can be judged on the shipped path.
 
-Usage: python harness/harness/scripts/tail_split.py --logs /tmp/opencode/tail --out docs/wsp/verified/records/int8-tail-split.jsonl
+Usage: python harness/scripts/tail_split.py --logs /tmp/opencode/tail --out harness/docs/wsp/verified/records/int8-tail-split.jsonl
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ NAME = re.compile(r"^(?P<clip>.+)_(?P<arm>[a-z0-9]+)_r(?P<round>\d+)_(?P<sink>\w
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--logs", default="/tmp/opencode/tail")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-tail-split.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-tail-split.jsonl")
     ap.add_argument("--session", default="s-2026-11-18T19:05:00Z")
     args = ap.parse_args(argv)
 

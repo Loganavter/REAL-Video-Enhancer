@@ -1,0 +1,17 @@
+# The luma cell's block mean, over all 480 frames of Violet 20 s, 2026-11-18.
+# Same clip, same comparator, same ungated reference - only the gate differs.
+
+64x64 blocks:
+  luma 4.0         worst block mean  3.78 (frame 20,  share there 0.00034%)
+  channel-max 0.07 worst block mean 37.27 (frame 330, share there 0.06934%)
+32x32 blocks:
+  luma 4.0         worst block mean  5.32 (frame 22,  share there 0.00087%)
+  channel-max 0.07 worst block mean 60.88 (frame 342, share there 0.06838%)
+
+Both gates: worst share 0.07345% (frame 227), zero frames above 0.1%.
+
+# So the two gates do NOT make near-identical decisions on the block-mean statistic: the maxima sit
+# on different frames and differ by 7-10x at either block size. The channel-max gate introduces the
+# class on Violet; the luma gate does not have it.
+# The "7.57 rejected fist" figure quoted earlier is the owner's and is not present in this repo - it
+# is context, not a checked anchor.

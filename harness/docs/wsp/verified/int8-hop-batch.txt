@@ -1,0 +1,61 @@
+# M x 2 batching is a wash: the per-row index cost grows exactly as fast as the constant amortises
+
+Measured 2026-11-19 (local), the hop over a flat `B*H*W` run carrying 1, 2 and 3 consecutive frames' codes,
+three interleaved rounds, medians of rounds 2+, **per frame**. Records: `int8-hop-batch.jsonl`; raw:
+`logs/hop-batch/probe.json`.
+
+Why this was worth an hour: the hop's cost is dominated by a **per-launch** constant - one tap costs 0.59 ms,
+three cost the same, nine cost 1.55 (`int8-hop-occupancy.txt`) - because the first gather's round trip has only
+3.96 of 12 warps to hide behind. A constant paid per launch should halve per frame if a launch carries two
+frames, which is the one batching argument that follows from the measurement rather than from a hunch.
+
+## Measured
+
+| arm | ms per FRAME | 16 hops | vs batch 1 |
+|---|---|---|---|
+| batch 1 | **1.769** | 28.30 | - |
+| batch 2 | 1.764 | 28.22 | +0.3% |
+| batch 3 | 1.763 | 28.21 | +0.3% |
+
+**+0.3%, i.e. nothing.** And the number that explains it is the batch-1 arm itself: **1.769 ms per frame against
+the shipped kernel's 1.55** - the batched formulation's own index arithmetic (`b = rows // (H*W)`,
+`h = (rows // W) % H`, and one extra term in the mask) costs **14% per row**, which is more than the amortisation
+can ever return. The constant is per launch; the index arithmetic is per ROW, and batching multiplies rows.
+
+A second, harder fact: **the batched arms do not reproduce the shipped codes** (34.8 M of 265 M differ at batch 2
+and 70 M of 398 M at batch 3). The index arithmetic that costs 14% also changes which pixels each lane reads at
+the image boundary, so this variant is not merely slow - it would need the boundary handling fixed before it
+could be adopted at all. Both facts are reported because either one closes the idea.
+
+## What this leaves
+
+With batching dead, the hop has now been attacked through **seven** families of knobs - launch shape (9 arms),
+tap staging (3), cache policy (5), CTA tile shape (4), buffer layout (2), output-channel split (4) and
+frame batching (3) - thirty configurations, and the shipped kernel wins every family.
+
+The next step that is not a knob: a kernel that hides the first gather's round trip on purpose - explicit
+shared-memory staging with double buffering (Im2win's recipe) - which Triton cannot express. Its arithmetic prize
+is ~0.59 ms per launch, i.e. hops 25.7 -> ~16 ms and the frame 34.5 -> ~26, about 2.0x against fp16; its cost is
+a CUDA kernel plus a per-architecture cubin path, roughly two weeks to product quality, and the prize is
+unmeasured - the same reasoning that predicted a win for 2-D tiles produced -3%.
+
+## Not covered
+
+- The batched codes differ, so no timing claim here can be transferred to an adoptable kernel.
+- Three frames is not the limit of what could be batched; the index cost grows with the batch, so the trend is
+  extrapolated from two points and is monotone.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_batch_probe.py --rounds 3 \
+    --out-file harness/docs/wsp/verified/logs/hop-batch/probe.json
+PYTHONPATH=. python3 harness/scripts/hop_batch_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-hop-batch.txt \
+       --records harness/docs/wsp/verified/records/int8-hop-batch.jsonl --bars harness/docs/claims-bars.json
+
+@claim Y001 1.769 ms "frames [c8f0df94633fad7e] n=1" measured
+@claim Y002 1.764 ms "frames [c8f0df94633fad7e] n=1" measured
+@claim Y003 1.763 ms "frames [c8f0df94633fad7e] n=1" measured

@@ -1,0 +1,98 @@
+# The fp16 engine's layer budget: 85% is the sixteen convolutions, and the build level decides 30 ms
+
+Measured 2026-11-20 with `trtexec 10.12.0.36` (installed without root: the `libnvinfer-bin` .deb from the CUDA
+ubuntu2204 repo, extracted, `LD_LIBRARY_PATH` pointed at the app's own `tensorrt_libs` so the version cannot
+drift). Model `2x-Futsuu-Anime(1).pth`, exported to ONNX at 1920x1080 (opset 17), profiled with `--dumpProfile`,
+20 iterations averaged. Records `fp16-engine.jsonl` (FE001-FE017), raw
+`logs/fp16-engine/opt3-default.log`, `logs/fp16-engine/opt5.log`.
+
+Why this page: the lane had the fp16 engine only as a single number (52.39 ms, `int8-tail-csc.jsonl` JC001) and as
+the app's own phase counters. It never had the engine's own per-layer budget, so "what else could be optimised in
+the fp16 arm" was unanswerable - and the answer turns out to be "nothing in the graph, but a lot in one setting".
+
+## The build level changes the graph, and the app's level is the good one
+
+| build | layers | per frame | build time |
+|---|---|---|---|
+| `--fp16` (builder level 3, the CLI default) | 60 | **78.33 ms** - every PReLU is its own pass: 17 x 2.09 = **35.47 ms** of read-modify-write over 132 MB | 132.96 s |
+| `--fp16 --builderOptimizationLevel=5` | 25 | **47.50 ms** - the PReLUs are inside the convolutions | 280.72 s |
+
+The two builds differ in one field, so this is a clean pair: **30.83 ms per frame, 39% of the default build, for a
+setting**. The cost is build time: 2.1x, paid once per model and shape.
+
+The app builds at level 5 - `SettingsTab.py` default `"5"`, `rve-backend.py` `--tensorrt_opt_profile` default 5,
+`UpscaleTorch`/`RenderVideo`/`InterpolateRIFE` defaults 5 (commit `c33dd7db`, 2026-11-15). That is why its engine
+reads 52.39 rather than 78. The installed 2.4.2 build predates that commit and still ships `"3"`, so a user of the
+shipped build gets the 78 ms class unless they raise the setting by hand - and nothing in the log says so.
+`TensorRTHandler`'s own default was the last 3 left in the tree (all callers pass a value, so it was dead, not
+wrong); it is 5 now, so a future caller that forgets cannot silently cost a third of the frame.
+
+## The opt-5 budget (25 layers, 47.50 ms; the app's engine reads 52.39, the difference is its tiling wrapper)
+
+| layer | ms | share | what it is |
+|---|---|---|---|
+| 16 x `__myl_CorrMulLtSele_*` | 2.49-2.61 each, **40.58 total** | **85.4%** | the sixteen hops: 3x3 conv, bias, PReLU and the select, fused into one kernel each |
+| `__myl_MulLtSele_myl3_2` | 2.19 | 4.6% | the first body conv at its own shape (head side), same fusion |
+| `/body_34/Conv` | 1.63 | 3.4% | the tail conv 64 -> 12, fused |
+| `/body_0/Conv` | 1.10 | 2.3% | the head conv 3 -> 64, fused |
+| `__myl_TranReshMoveAdd` | 0.92 | 1.9% | pixel shuffle + residual add, already ONE kernel |
+| copies / reformat | 0.69 | 1.5% | 0.548 PReLU-output reformat + 0.144 Clip-input reformat |
+| `/Resize` | 0.30 | 0.6% | the nearest-neighbour upsample of the LR input |
+| `__myl_Move`, `__myl_MaxMin` | 0.09 | 0.2% | |
+
+## What that says
+
+- **The fp16 engine is the sixteen convolutions.** 85.4% in the hops; add the head, tail, first conv and the
+  shuffle and it is 97.7%. There is no hidden elementwise tax: TRT fused PReLU into the convs at level 5, and it
+  already does the shuffle+residual in one kernel - the same fold this lane wrote by hand for the int8 tail.
+- **Copies are 1.5%** (0.69 ms), unlike SPAN's engine where the unfused remainder was 7.8% of layout copies. So for
+  this model there is nothing to win by "one layout end to end".
+- **The int8 win is arithmetic, not fusion.** The int8 body reads 26.1 ms in the app against 46.4 ms of
+  engine layers that the body replaces (40.58 + 2.19 + 1.63 + 1.10 + 0.92). Those are **different instruments**
+  (app phase counters vs trtexec layer sums), so the lane does not turn them into a ratio: the same-instrument
+  ratio is the app's own 1.665x against the fp16 engine (JC013). What the layer budget does settle is that the
+  fp16 comparator is not fat - both arms fuse the same things, so the gap is the int8 kernels.
+- **What is left in the fp16 arm** is `/Resize` (0.30) and the copies (0.69): 2.1% together. Improving the fp16 arm
+  would *hurt* the ratio (it is the numerator), which is why the lane does not do it - but it also means the ratio
+  is not resting on an optimisable comparator.
+
+## Reproduce
+
+```bash
+# the ONNX (the app's .engine is a TorchScript archive, trtexec cannot load it)
+python3 -c "import sys,torch; sys.path.insert(0,'<app>/backend/src/pytorch'); from spandrel import ModelLoader; \
+  m=ModelLoader().load_from_file('<model>.pth').model.eval().float(); \
+  torch.onnx.export(m, torch.rand(1,3,1080,1920), '/tmp/opencode/futsuu.onnx', opset_version=17, dynamo=False)"
+~/.local/bin/trtexec --onnx=/tmp/opencode/futsuu.onnx --fp16 --builderOptimizationLevel=5 --dumpProfile \
+    --iterations=20 --avgRuns=20 --warmUp=500
+PYTHONPATH=. python3 harness/scripts/fp16_engine_records.py
+PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/fp16-engine-layers.txt \
+    --records harness/docs/wsp/verified/records/fp16-engine.jsonl --bars harness/docs/claims-bars.json
+```
+
+## What the same tool makes available, and what is still unmeasured
+
+- `--int8` with a calibrator: TensorRT's own int8 for this model, the one comparison never built here. In flight
+  (`harness/scripts/trt_int8_calibrate.py`, engines built from this ONNX with `IInt8EntropyCalibrator2` over eight named
+  frames, profiled by the same `trtexec --loadEngine --dumpProfile`).
+- `--timingCacheFile`: level 5 costs 280.72 s per build against 132.96 at level 3, and the app rebuilds per model
+  and shape. A timing cache is a start-up cost, not a frame cost.
+- `--useCudaGraph`: the launch overhead of 25 kernels - small at this layer count, unmeasured.
+- `--minShapes/--optShapes/--maxShapes`: what the engine costs at 4K, where the int8 body refuses to run.
+@claim FE001 78.328 ms "layers [cd012d869ff15364] n=60" measured
+@claim FE002 35.468 ms "layers [3ce57f9e49ac6040] n=17" measured
+@claim FE003 37.483 ms "layers [7f5eb194d0c98255] n=16" measured
+@claim FE004 1.233 ms "layers [47fec237447e8413] n=21" measured
+@claim FE005 60.0 count "layers [cd012d869ff15364] n=60" measured
+@claim FE017 132.955 s "layers [cd012d869ff15364] n=60" measured
+@claim FE006 47.503 ms "layers [1658c37c90b82508] n=25" measured
+@claim FE007 40.577 ms "layers [ef8eaa01a3a98fd0] n=16" measured
+@claim FE008 2.193 ms "layers [be8872d181b725d8] n=1" measured
+@claim FE009 1.625 ms "layers [4e46a3684b4bf5ed] n=1" measured
+@claim FE010 1.104 ms "layers [5b4b6a565826df63] n=1" measured
+@claim FE011 0.92 ms "layers [8da650be1dce5d01] n=1" measured
+@claim FE012 0.692 ms "layers [d6f7c3aca6c17d24] n=2" measured
+@claim FE013 0.301 ms "layers [c54c91415170ac63] n=1" measured
+@claim FE014 0.548 ms "layers [d78728f5185a2e3f] n=1" measured
+@claim FE015 25.0 count "layers [1658c37c90b82508] n=25" measured
+@claim FE016 280.72 s "layers [1658c37c90b82508] n=25" measured

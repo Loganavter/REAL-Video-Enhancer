@@ -1,0 +1,20 @@
+# int8 on the product and Violet out-of-sample, 2026-11-18.
+# Gate: channel_max_share, threshold 0.07%, forced past the auto tuner.
+
+=== Chainsaw Man 20 s, int8 body under the channel-max gate
+BACKEND: int8 probe: engine 0.000%  composition 0.000%  peak 11  (4 pairs, bar 0.1%) -> int8
+int8 body self-certification on the first frame: 0.00001% of pixels >8 levels (bar 0.1%) -> serving
+BACKEND: reference reuse: 83/481 frames reused (17.3%), 2 scene cuts, 0 pixel vetoes
+full sweep against the ungated fp16 render: worst 0.08876% (frame 441, peak 40), above 0.1%: 0
+   for reference: fp16 under the same gate 0.07546%, fp16 under the luma gate 0.49372% (18 above)
+
+=== Violet Evergarden 20 s, fp16 under the channel-max gate (out-of-sample threshold)
+BACKEND: int8 probe: engine 0.044%  composition 0.108%  peak 125  (8 pairs) -> fp16
+BACKEND: reference reuse: 340/480 frames reused (70.8%), 3 scene cuts, 0 pixel vetoes
+full sweep against the ungated render: worst 0.07345% (frame 227, peak 31), above 0.1%: 0
+
+=== depth histogram of the channel-max reuses (Chainsaw, replay of the product's gate)
+d1 38, d2 34, d3 6   (the probe certifies d1-d2 only)
+worst HR per depth: d1 0.07489%, d2 0.02670%, d3 0.00917%
+frame 475 (worst HR): LR share 0.07108% - 1.6% above the 0.07% threshold
+band LR in [0.04,0.10]: 2 reuses, HR/LR 1.11 and 1.32 (global median 2.83)

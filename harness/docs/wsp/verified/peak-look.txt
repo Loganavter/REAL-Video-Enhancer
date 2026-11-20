@@ -1,0 +1,84 @@
+# What the peak actually is: 17 levels on one pixel, in slivers along ink lines - and zero pixels over 20
+
+Measured 2026-11-20 (local), BD Violet, seven spread frames held out of the eight calibration frames, the
+SHIPPED int8 default (fused head kernel + 16 int8 hops + int8 tail kernel) against the model's own fp16 output,
+on the pre-encode 4K tensor.
+Records: `peak-look.jsonl`; raw: `logs/peak-look/frames.json`; crops: `logs/peak-look/*.png`.
+
+Why this exists: `bar_int8_peak` = 20 levels carries a PENDING OWNER DECISION note, and the number that note
+argues about (a 29-55 range) is from the int8 kernel FAMILY as measured on 2026-11-17, not from what ships
+today. No one had looked at the shipped default's worst pixel - the two adopted changes were recorded as
+DELTAS between int8 configurations (6 and 13 levels), which is a different quantity.
+
+## The number
+
+| frame | peak | pixels >8 | >20 | >40 | largest run of >8 pixels |
+|---|---|---|---|---|---|
+| 29 | 15.1 | 0.01084% | **0** | 0 | 8 px (of 619 runs) |
+| 44 | 14.2 | 0.01072% | **0** | 0 | 11 px (of 606) |
+| 100 | 14.3 | 0.00415% | **0** | 0 | 5 px (of 258) |
+| 169 | **16.9** | 0.00757% | **0** | 0 | 12 px (of 412) |
+| 274 | 14.5 | 0.01461% | **0** | 0 | 19 px (of 768) |
+| 400 | 13.4 | 0.00549% | **0** | 0 | 9 px (of 318) |
+| 460 | 13.1 | 0.00310% | **0** | 0 | 4 px (of 207) |
+
+**The shipped default does not reach 20 levels anywhere, on any of the seven frames.** Its worst pixel is
+16.9, and there is not a single pixel over 20 in 7 x 8.3 M pixels. Both bars are met: share 0.01461% against
+0.1%, peak 16.9 against 20.
+
+## What it looks like - and where it lives
+
+Two crops were rendered as four panels each (`peak_look.py`: reference | shipped default | difference x8 |
+the >8 mask): `peak_frame0169_crop_y2134_x2929_peak17_blob12.png` and
+`peak_frame0274_crop_y38_x468_peak15_blob19.png`. Read them in that order - the first pair look identical, and
+the mask panel is where the story is.
+
+- **The errors are on ink lines, not in flat areas.** The mask panel of frame 274 shows a thin red sliver
+  tracking a single vertical contour, exactly the place the int8 rounding has something to lose: a
+  high-contrast edge between a dark line and a flat field.
+- **They are slivers, not patches.** The largest connected run of >8-level pixels on any frame is **19 px**,
+  and the typical frame's largest is 4-12 px. The rest are single pixels: 207-768 separate runs per frame.
+  At 4K, 19 pixels is a 5x4 speck on a 3840x2160 canvas.
+- **The 8x difference panel is a haze over the whole crop**, which is why gain panels mislead: at x8, a
+  1-2 level rounding difference is visible everywhere. The mask is the honest panel - it shows only what
+  crosses the 8-level threshold.
+
+## What this does to the decision
+
+The bar's question was "is a peak of 29-55 acceptable, or is 20 right?". On the shipped path the question does
+not arise: **the default is inside 20 by 3 levels**, and the 29-55 range belongs to configurations that are not
+shipped (the older epilogue/three-accumulator variants the ledger measured). So:
+
+- `bar_int8_peak` **stays at 20**, and the shipped default **meets** it. No threshold needs inventing and no
+  product claim needs an "out of spec on the peak axis" label.
+- The 29-55 family range remains a true statement about those configurations; it is not a statement about the
+  default, and quoting it as one would be the population error this lane keeps paying for.
+- What is still a human judgement, and stays one: whether a 17-level speck on an ink contour at 4K is
+  acceptable. The measurement can say it is invisible at x1 and 19 px at its largest; it cannot say whether
+  anyone cares.
+
+## Not covered
+
+- The pre-encode 4K tensor, not the delivered stream. The colour pipe alone moves 0.21% of pixels past the
+  8-level bar on 4:2:0 material (`int8-scales-bd`), which is exactly why render pairs are the acceptance
+  instrument and this is an attribution instrument: the numbers here are the body's own error, not the
+  product's.
+- Seven frames of one clip, one model, one card. The largest runs are a property of the material's ink lines.
+- The chunks were chosen as the largest 8-level component of each frame, which biases them toward the worst
+  case - deliberately: a test that shows the typical case would be a sales document.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/peak_look.py \
+    --out-file harness/docs/wsp/verified/logs/peak-look/frames.json
+PYTHONPATH=. python3 harness/scripts/peak_look_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/peak-look.txt \
+       --records harness/docs/wsp/verified/records/peak-look.jsonl --bars harness/docs/claims-bars.json
+
+@claim P001 16.9 levels "frames [43a8b61206e43ed6] n=7" measured
+@claim P002 0.01461 % "frames [43a8b61206e43ed6] n=7" measured
+@claim P003 19.0 count "frames [43a8b61206e43ed6] n=7" measured
+@claim P004 4.0 count "frames [43a8b61206e43ed6] n=7" measured

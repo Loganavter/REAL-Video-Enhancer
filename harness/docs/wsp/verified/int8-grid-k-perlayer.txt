@@ -1,0 +1,60 @@
+# Per-hop K: 2.3-4x better, on a quantity that is already three orders inside the bar
+
+Measured 2026-11-20, crops calibration, three held-out frames, `Int8Body` with `RVE_INT8_GRID_K` as a per-hop list
+(new: `"2,3,2,..."`). Records `int8-grid-k-perlayer.jsonl` (PK001-PK004), raw
+`logs/grid-perlayer-{futsuu,realesr}.json`, probe `harness/scripts/grid_k_perlayer_probe.py`.
+
+This is stage (b) of `rve-grid-k-learned-2026-11-20` - PAMS's falsifier, done without training. PAMS says a
+**learned** per-layer truncated scale beats a fixed one. If the per-layer choice made by *search* on the same frames
+cannot beat the best single K, a learned one will not either, and the training loop never gets written.
+
+## The two models, chosen at the ends of the ladder
+
+| model | best single K | per-hop greedy K | gain |
+|---|---|---|---|
+| `2x-Futsuu-Anime(1)` | K=2, **0.000106%** | **0.000027%** | 3.96x |
+| `realesr-animevideov3(1)` | K=3, **0.003283%** | **0.001415%** | 2.32x |
+
+Futsuu is the model the lane ships against (K=2 already clean); realesr is the ladder's second-worst case at K=2
+(0.05038%), so it is the model where a per-layer choice had the most room to help.
+
+## What that says
+
+- **Per-hop K does help, and by a real factor** - 2.3x on the model with the most room, 4x on the clean one. The
+  mechanism is what the ladder already showed per model, now per hop: different hops want different floors.
+- **The absolute numbers are negligible.** 0.000106% -> 0.000027% is three orders below the 0.1% bar; 0.0033% ->
+  0.0014% is 70x below it. The quantity the training loop would optimise is already invisible to the decision
+  statistic.
+- **So stage (c) is not justified.** A learned scale (PAMS-style, fine-tuning the scale with weights frozen) would
+  chase the same 2-4x on the same negligible quantity, at the cost of a training loop, a new artefact to version,
+  and a start-up that depends on training convergence instead of a 3 s sweep.
+
+## Verdict
+
+Row `rve-grid-k-learned-2026-11-20` closes: the offline per-hop search shows the per-layer idea is real but the
+prize is three orders below the bar, so the learned variant is not worth a kernel, a training loop, or a start-up
+dependency. The per-hop list stays available (`RVE_INT8_GRID_K="2,3,..."`) as a probe, off by default - the shipped
+path keeps the single-K sweep with its K=2-clean skip.
+
+## What is NOT claimed
+
+- **Two models, three frames.** The greedy search is per model and per frame set; a different clip could move the
+  per-hop optimum.
+- **Greedy, not global.** The per-hop vector is found one hop at a time from the best single K, so the reported gain
+  is a lower bound on what a full search would find - which only strengthens the verdict.
+- **No training was run.** That is the point: stage (b) was designed to decide whether to write it.
+
+## Reproduce
+
+```bash
+RVE_TAIL_YUV=0 RVE_INT8_NO_EVENTS=1 python3 harness/scripts/grid_k_perlayer_probe.py \
+    --model "<model>.pth" --out-file /tmp/opencode/grid-perlayer.json
+PYTHONPATH=. python3 harness/scripts/grid_k_perlayer_records.py
+PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-grid-k-perlayer.txt \
+    --records harness/docs/wsp/verified/records/int8-grid-k-perlayer.jsonl --bars harness/docs/claims-bars.json
+```
+
+@claim PK001 0.000106 % "pixels of one frame [ac6a00cfa99772f7] n=1" measured
+@claim PK002 2.7e-05 % "pixels of one frame [ac6a00cfa99772f7] n=1" measured
+@claim PK003 0.003283 % "pixels of one frame [19d31ba46dacc41f] n=1" measured
+@claim PK004 0.001415 % "pixels of one frame [19d31ba46dacc41f] n=1" measured

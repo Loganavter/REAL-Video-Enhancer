@@ -1,0 +1,4 @@
+# calibration coverage s-2026-11-18T18:08:32Z clip=/tmp/opencode/bd_violet20s.mkv crop=256 per_frame=4 calib=[0, 21, 43, 64, 86, 107, 129, 150, 172, 193, 215, 236, 258, 279, 301, 322, 344, 365, 387, 408, 430, 451, 473, 494] test=[29, 44, 274, 400]
+# pixels: full arm 23 x 2073600 = 47.7 Mpx; crop arm 92 x 65536 = 6.0 Mpx
+# arm=full calibrate=6.77s worst_share=0.02159% peak=17 per_frame=[0.01553, 0.01536, 0.02159, 0.00963]
+# arm=crop calibrate=0.42s worst_share=0.02139% peak=16 per_frame=[0.01554, 0.01454, 0.02139, 0.0094]

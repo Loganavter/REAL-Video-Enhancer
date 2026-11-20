@@ -1,0 +1,23 @@
+# The assert the invariant needs, and its verdict on this session's own records, 2026-11-18.
+# scripts/check_control_ceiling.py <control> <sweep>, each "<file>.jsonl:<ID>" when the id repeats.
+
+$ python3 scripts/check_control_ceiling.py \
+    docs/wsp/verified/records/probe-adversarial.jsonl:R002 \
+    docs/wsp/verified/records/gate-channel-max-product.jsonl:R001
+control R002 = 0.08300%  (probe-adversarial.jsonl)
+sweep   R001 = 0.07546%  (gate-channel-max-product.jsonl)
+VIOLATION: a max over the probe's pairs (0.08300%) exceeds the max over the render's population
+(0.07546%). The probe's pairs are not a subset - its composition number is about a different
+population than the bar judges.
+exit=1
+
+$ python3 scripts/check_control_ceiling.py \
+    docs/wsp/verified/records/probe-mirror-and-blockmax.jsonl:R002 \
+    docs/wsp/verified/records/int8-and-violet-sweeps.jsonl:R003
+control R002 = 0.07700%  (probe-mirror-and-blockmax.jsonl)
+sweep   R003 = 0.07345%  (int8-and-violet-sweeps.jsonl)
+VIOLATION: ... exit=1
+
+# Both fire. That is the honest state: the probe re-decides which frames the gate reuses, so its
+# pair set is not a subset of the render's, and its composition number is about a different
+# population. The check is a detector, not a formality - it is the mechanical form of the rule.

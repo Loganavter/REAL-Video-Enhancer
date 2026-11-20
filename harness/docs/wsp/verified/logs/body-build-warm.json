@@ -1,0 +1,18 @@
+{
+ "model": "2x-Futsuu-Anime(1).pth",
+ "calibration_frames": 8,
+ "arms": {
+  "warm": {
+   "calibrate_s": 0.018,
+   "build_s": 0.041,
+   "first_call_s": 0.275,
+   "steady_call_s": 0.0267
+  },
+  "cold": {
+   "calibrate_s": 0.005,
+   "build_s": 0.006,
+   "first_call_s": 0.029,
+   "steady_call_s": 0.0268
+  }
+ }
+}

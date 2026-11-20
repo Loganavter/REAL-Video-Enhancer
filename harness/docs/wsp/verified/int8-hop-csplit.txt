@@ -1,0 +1,79 @@
+# The output-channel split: the last occupancy lever Triton can express, and it loses badly
+
+Measured 2026-11-19 (local), one hop of the int8 body on its own codes (frame 169), three interleaved rounds,
+medians of rounds 2+. Records: `int8-hop-csplit.jsonl`; raw: `logs/hop-csplit/probe.json`.
+
+Why this was the right thing to try last: the bottleneck is measured as **occupancy**, not traffic - 3.96 of 12
+warps per scheduler, 56% of cycles with no eligible warp, and the first tap costing 0.59 ms of the 1.55
+(`int8-hop-occupancy.txt`). The accumulator is BLOCK_M x 64 int32 = 32 KB per CTA, which is what caps the
+resident CTAs; the BLOCK_M sweep could not help because shrinking BLOCK_M thins the MMA. The one remaining
+knob is the other factor: **split the 64 output channels across CTAs**, so each accumulator is BLOCK_M x 32 and
+twice as many CTAs can be resident - at the cost of reading the input twice, which the measurements say is
+affordable (L2 at 44-50%, DRAM at 54%, SM at 74%).
+
+## Measured
+
+| arm | ms | TOPS | vs shipped |
+|---|---|---|---|
+| **64 ch per CTA (shipped)** | **1.591** | 96.1 | - |
+| 2 x 32 ch per CTA, 4 warps | 2.632 | 58.1 | **-65.4%** |
+| 2 x 32 ch per CTA, 2 warps | 2.058 | 74.3 | -29.3% |
+| 4 x 16 ch per CTA, 4 warps | 4.387 | 34.9 | **-175.7%** |
+
+All four produce **identical codes** (0 of 132.7 M differ), so this is one schedule against another.
+
+**The trade is not affordable in either direction.** Halving the accumulator doubles the resident CTAs and the
+kernel still gets 65% slower, because a 32-wide N tile halves what the tensor pipe does per instruction and the
+doubled input reads land on the same L2. Going to 16 wide is catastrophic (34.9 TOPS). Cutting warps to 2
+recovers part of it (2.058) exactly as the occupancy story predicts - but nowhere near the baseline.
+
+## So the answer to "what remains" is no longer "smem"
+
+Six families of knobs have now been measured on this kernel, every one with identical codes:
+
+| family | arms | best result |
+|---|---|---|
+| launch shape (BLOCK_M x warps) | 9 | shipped is best (128/4), others -6.7 to -80% |
+| tap staging / pipelining | 3 | -12 to -20% (recorded in Int8Kernels.py) |
+| cache policy | 5 | flat to +1% (inside the spread) |
+| CTA tile shape (2-D) | 4 | -3.0 to -16.9% |
+| buffer layout (zero halo) | 2 | +2.3% on the kernel, but a 1.59 ms build pass |
+| output-channel split | 4 | -29 to -176% |
+
+Twenty-seven configurations, none better than what ships. **In Triton the hop is done**, and the occupancy that
+the profiler names cannot be bought at any price this language exposes: the accumulator, the MMA tile and the
+number of warps are one quantity, and it is already at its optimum.
+
+## What is actually left
+
+1. **A CUDA kernel with explicit shared-memory staging** - Im2win's recipe (arXiv:2306.14316): load the
+   three-row window once per CTA into smem, form the nine taps from it, double-buffer the next window. That
+   attacks the measured cause (the first gather's round trip) rather than its symptoms, and the prize is
+   arithmetic: if the first tap's 0.59 ms per launch fell to the ~0.08 ms the other eight cost, the hop would
+   read ~1.0 ms, sixteen hops ~16 ms, and the frame ~26 ms instead of 34.5 - i.e. **~2.0x against fp16**.
+2. **Thread-block clusters (DSMEM)** - CREDIT (arXiv:2609.01864) reports 1.32-1.47x geomean and explicitly beats
+   Triton baselines on six workloads. Ada supports clusters of 8; Triton exposes them only experimentally. Same
+   boundary: leaving the Triton body.
+3. **The inline halo**, +0.6 ms/frame, described in `int8-hop-tiles.txt`: no new kernel, just every hop storing
+   into the next hop's padded buffer at a (+1,+1) offset and a border zeroing once per frame. This is the only
+   remaining item that is inside Triton, and it is the only one a row could collect today.
+
+## Not covered
+
+- One card, one hop, one frame's codes.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_csplit_probe.py --rounds 3 --iters 20 \
+    --out-file harness/docs/wsp/verified/logs/hop-csplit/probe.json
+PYTHONPATH=. python3 harness/scripts/hop_csplit_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-hop-csplit.txt \
+       --records harness/docs/wsp/verified/records/int8-hop-csplit.jsonl --bars harness/docs/claims-bars.json
+
+@claim X001 1.591 ms "frames [10cff28ea287d300] n=1" measured
+@claim X002 2.632 ms "frames [10cff28ea287d300] n=1" measured
+@claim X003 4.387 ms "frames [10cff28ea287d300] n=1" measured
+@claim X004 2.058 ms "frames [10cff28ea287d300] n=1" measured

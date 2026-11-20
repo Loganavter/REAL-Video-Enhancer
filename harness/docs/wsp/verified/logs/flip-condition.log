@@ -1,0 +1,20 @@
+# The flip's own condition, measured, 2026-11-18.
+
+=== the 2x2, completed: Violet 20 s under the luma gate
+BACKEND: reference reuse: 335/480 frames reused (69.8%), threshold=4.0, max chain=4, depth {1:139,2:128,3:35,4:33}
+  worst share 0.07345% (frame 227), max peak 49 (frame 371), 0 frames above 0.1%
+  worst-peak frame 371: share>8 0.01523%, peak 49, pixels>55 0, pixels>100 0, worst 64px block mean 2.49
+
+=== the same clip under channel-max 0.07 (chain 4)
+BACKEND: reference reuse: 340/480 frames reused (70.8%), depth {1:134,2:122,3:43,4:41}
+  worst share 0.07345% (the SAME frame 227), max peak 149 (frame 330), 0 frames above 0.1%
+  worst-peak frame 330: share>8 0.06934%, peak 149, pixels>55 3399, pixels>100 60,
+  worst 64px block mean 37.27
+
+# The rejected fist was 0.29% share at a worst 64px block mean of 7.57. The channel-max gate's
+# Violet frame 330 reads 37.27 - five times that - while its share stays inside the bar. The luma
+# gate on the same clip has zero pixels above 55 and a block mean of 2.49.
+#
+# So the flip is NOT uniformly better: it removes 18 share violations on Chainsaw and introduces a
+# block-mean of 37.27 on Violet, in a configuration whose share passes. Held until the channel-max
+# pixel veto exists (the only mechanism that bounds a narrow peak without the block mean diluting it).

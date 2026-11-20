@@ -11,9 +11,9 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sweep", default="docs/wsp/verified/logs/hop-occupancy/probe.json")
-    ap.add_argument("--epi", default="docs/wsp/verified/logs/hop-epilogue/probe.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-hop-occupancy.jsonl")
+    ap.add_argument("--sweep", default="harness/docs/wsp/verified/logs/hop-occupancy/probe.json")
+    ap.add_argument("--epi", default="harness/docs/wsp/verified/logs/hop-epilogue/probe.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-hop-occupancy.jsonl")
     a = ap.parse_args(argv)
     sw, ep = json.load(open(a.sweep)), json.load(open(a.epi))
     d1, d2 = hashlib.sha256(open(a.sweep, "rb").read()).hexdigest(), \

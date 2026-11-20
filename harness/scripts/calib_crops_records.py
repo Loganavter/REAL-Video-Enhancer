@@ -18,8 +18,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="docs/wsp/verified/logs/calib-crops")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-calib-crops.jsonl")
+    ap.add_argument("--dir", default="harness/docs/wsp/verified/logs/calib-crops")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-calib-crops.jsonl")
     a = ap.parse_args(argv)
 
     def path(n: str) -> str:
@@ -60,7 +60,7 @@ def main(argv=None) -> int:
                    instrument="channel-max |delta| in RGB over 64px blocks (gate_sweep --reference-kind config)",
                    config="calibration on 4 crops per frame against full frames, everything else held",
                    session=st.session, statistic="worst_of", tier="measured", id=f"CC{n:03d}",
-                   run="harness/harness/scripts/gate_sweep.py", artifact=path("pair.json"),
+                   run="harness/scripts/gate_sweep.py", artifact=path("pair.json"),
                    extra={"artifact_sha256": sha(path("pair.json")), "of": "worst_share",
                           "frames_above_bar": pair["frames_above_bar"]}))
     n += 1
@@ -68,7 +68,7 @@ def main(argv=None) -> int:
                    instrument="peak channel-max |delta| in 8-bit codes over the same pair",
                    config="calibration on 4 crops per frame against full frames, everything else held",
                    session=st.session, statistic="max", tier="measured", id=f"CC{n:03d}",
-                   run="harness/harness/scripts/gate_sweep.py", artifact=path("pair.json"),
+                   run="harness/scripts/gate_sweep.py", artifact=path("pair.json"),
                    extra={"artifact_sha256": sha(path("pair.json")), "of": "peak"}))
     st.dump(a.out)
     print(st.claims_text().strip())

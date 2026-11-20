@@ -50,8 +50,8 @@ code lives in `harness/scripts/`; `scripts/` keeps the two upstream utilities an
 
 ```bash
 python3 -m harness.cli scope
-python3 -m harness.cli check docs/wsp/verified/<file>.txt --records docs/wsp/verified/records/<file>.jsonl
-python3 -m harness.cli db build && python3 -m harness.cli db write-block docs/RESEARCH-LEDGER.md
+python3 -m harness.cli check harness/docs/wsp/verified/<file>.txt --records harness/docs/wsp/verified/records/<file>.jsonl
+python3 -m harness.cli db build && python3 -m harness.cli db write-block harness/docs/RESEARCH-LEDGER.md
 python3 harness/scripts/gate_sweep.py --help
 ```
 

@@ -1,0 +1,40 @@
+# The calibration hooks cost 722 ms a frame, and neither of the two obvious causes is the cause
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 5 record(s) in this file (R001, R002, R003, R004, R005) name
+> `csm20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+Measured 2026-11-17 on the same model, frames and interpreter as the probe.
+
+| configuration | ms/frame |
+|---|---|
+| forward, no hooks | 158.0 |
+| forward with the shipped hooks | **879.7** (+721.7, 21.2 ms per hook) |
+| the same hooks with the `float()` casts removed | 889.4 |
+
+The hypothesis this tested was that the hooks hold full tensors. They do not: both hook bodies reduce
+immediately to a 64-vector, and `_calibrate`'s pre-hook keeps two Python floats. Removing the two
+device syncs per conv changes nothing (889 against 880), so the syncs are not the cost either.
+
+What the reduction costs when it is not inside a forward: 2.20 ms for `amin + amax` on a
+`[1,64,1080,1920]` fp16 tensor, which is 1.2x its 288 GB/s roofline. Inside the forward the same call on
+the same channels_last tensor measures 13.27 ms, and the difference is the conv that produced the
+tensor being charged to the hook. **The mechanism is not established**: 34 reductions at 2.2 ms would
+be 75 ms, and the measured overhead is 722 ms.
+
+The prize is nevertheless real and bounded: if the hooks cost their isolated 2.2 ms, calibration would
+be 24 x (0.158 + 0.075) = 5.6 s instead of 21.1 s, i.e. **-15.5 s on the probe's 45 s**. No fix has
+been shown to recover it, and this file does not claim one.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/hook-cost.txt \
+       --records harness/docs/wsp/verified/records/hook-cost.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 879.7 ms "frames [dca1e064948711e3] n=1" measured
+@claim R002 158.0 ms "frames [dca1e064948711e3] n=1" measured
+@claim R003 889.4 ms "frames [dca1e064948711e3] n=1" measured
+@claim R004 2.2 ms "frames [dca1e064948711e3] n=1" measured
+@claim R005 13.27 ms "frames [dca1e064948711e3] n=1" measured

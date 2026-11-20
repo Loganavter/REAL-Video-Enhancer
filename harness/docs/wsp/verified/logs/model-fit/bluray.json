@@ -1,0 +1,120 @@
+{
+ "take": "2026-11-19T07:44:00Z",
+ "frame": 169,
+ "rounds": 3,
+ "iters": 10,
+ "rows": [
+  {
+   "file": "2x-AniScale.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.0,
+   "fp16_ms": 203.57,
+   "int8_ms": 27.216,
+   "ratio": 7.4799,
+   "draws": {
+    "fp16": [
+     203.46214599609374,
+     203.57335205078124,
+     203.565673828125
+    ],
+    "int8": [
+     27.048141479492188,
+     27.210342407226562,
+     27.220684814453126
+    ]
+   }
+  },
+  {
+   "file": "2x-Futsuu-Anime(1).pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.00757,
+   "fp16_ms": 203.546,
+   "int8_ms": 27.249,
+   "ratio": 7.4698,
+   "draws": {
+    "fp16": [
+     203.5501953125,
+     203.55133056640625,
+     203.54027099609374
+    ],
+    "int8": [
+     27.26400146484375,
+     27.247412109375,
+     27.250790405273438
+    ]
+   }
+  },
+  {
+   "file": "2x-LD-Anime-Compact.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.00633,
+   "fp16_ms": 203.532,
+   "int8_ms": 27.176,
+   "ratio": 7.4894,
+   "draws": {
+    "fp16": [
+     203.54376220703125,
+     203.5367919921875,
+     203.5271728515625
+    ],
+    "int8": [
+     27.150234985351563,
+     27.183514404296876,
+     27.16866455078125
+    ]
+   }
+  },
+  {
+   "file": "2x_Ani4K_Compact_35000.pth",
+   "verdict": "FULL",
+   "scale": 2,
+   "ok": true,
+   "flags": {
+    "head_fused": true,
+    "tail_int8": true,
+    "tail_shuffle": true,
+    "tail_yuv": true
+   },
+   "share": 0.04802,
+   "fp16_ms": 203.541,
+   "int8_ms": 27.364,
+   "ratio": 7.4382,
+   "draws": {
+    "fp16": [
+     203.54476318359374,
+     203.54129638671876,
+     203.54017333984376
+    ],
+    "int8": [
+     27.344082641601563,
+     27.368551635742186,
+     27.359844970703126
+    ]
+   }
+  }
+ ]
+}

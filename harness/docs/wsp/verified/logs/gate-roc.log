@@ -1,0 +1,53 @@
+# Does any LR statistic separate the bad reuses? 2026-11-17.
+# gate_frames.py (the product's ReferenceFrameGate over the LR frames) joined with
+# dump_shares.py (per-frame HR share of gated vs ungated, 481 frames).
+reused 100, above the bar 18, below 82
+all-frame max share 0.49372%  on frame 164
+
+feature                     AUC   spearman vs HR share
+  delta (gate's variable)  0.989   +0.558
+  chain                    0.507   +0.088
+  lr_share>4               0.993   +0.661
+  lr_share>6               0.945   +0.641
+  lr_share>8               0.947   +0.626
+  lr_max                   0.910   +0.493
+  delta + 0.5*chain        0.993   +0.600
+
+the bad frames, worst first:
+  frame  164  HR  0.4937%  peak  14  delta 3.294  chain 3  lr8  0.000%  lr_max   5.25
+  frame  478  HR  0.3256%  peak  57  delta 3.775  chain 1  lr8  0.284%  lr_max  41.75
+  frame  432  HR  0.3053%  peak  75  delta 3.935  chain 2  lr8  0.259%  lr_max  56.75
+  frame  433  HR  0.2983%  peak  74  delta 3.797  chain 3  lr8  0.246%  lr_max  56.75
+  frame  396  HR  0.2745%  peak  44  delta 3.939  chain 1  lr8  0.068%  lr_max  16.25
+  frame  466  HR  0.2330%  peak  59  delta 3.163  chain 1  lr8  0.187%  lr_max  47.00
+  frame  431  HR  0.2090%  peak  60  delta 3.585  chain 1  lr8  0.175%  lr_max  56.75
+  frame  467  HR  0.1836%  peak  59  delta 3.233  chain 2  lr8  0.139%  lr_max  47.00
+  frame  445  HR  0.1546%  peak  72  delta 2.848  chain 2  lr8  0.124%  lr_max  54.75
+  frame  455  HR  0.1529%  peak  59  delta 3.113  chain 1  lr8  0.129%  lr_max  49.75
+  frame  449  HR  0.1490%  peak  56  delta 3.473  chain 1  lr8  0.119%  lr_max  47.75
+  frame  468  HR  0.1462%  peak  57  delta 3.044  chain 3  lr8  0.121%  lr_max  41.00
+  frame  450  HR  0.1398%  peak  66  delta 3.326  chain 2  lr8  0.114%  lr_max  47.25
+  frame  462  HR  0.1245%  peak  65  delta 2.791  chain 1  lr8  0.093%  lr_max  43.00
+  frame  480  HR  0.1213%  peak  54  delta 3.192  chain 1  lr8  0.095%  lr_max  42.00
+  frame  446  HR  0.1103%  peak  66  delta 3.967  chain 3  lr8  0.090%  lr_max  49.00
+  frame  444  HR  0.1080%  peak  60  delta 2.609  chain 1  lr8  0.088%  lr_max  44.50
+  frame  471  HR  0.1013%  peak  56  delta 3.395  chain 1  lr8  0.072%  lr_max  56.00
+
+what a lower delta threshold would cost (reuse kept / bad caught):
+  t= 3.9: reuse  97/100 (97%)  bad caught 15/18  bad left 3
+  t= 3.8: reuse  97/100 (97%)  bad caught 15/18  bad left 3
+  t= 3.7: reuse  95/100 (95%)  bad caught 13/18  bad left 5
+  t= 3.6: reuse  94/100 (94%)  bad caught 13/18  bad left 5
+  t= 3.5: reuse  93/100 (93%)  bad caught 12/18  bad left 6
+  t= 3.4: reuse  92/100 (92%)  bad caught 11/18  bad left 7
+  t= 3.3: reuse  90/100 (90%)  bad caught  9/18  bad left 9
+  t= 3.0: reuse  84/100 (84%)  bad caught  3/18  bad left 15
+  t= 2.5: reuse  80/100 (80%)  bad caught  0/18  bad left 18
+  t= 2.0: reuse  79/100 (79%)  bad caught  0/18  bad left 18
+
+# frame 164: 40951 bad px in 63 blocks, magnitudes 8-16 only, reference luma 252 (100% >240)
+# frame 432: 25319 bad px over 379 blocks, magnitudes to 75, reference luma median 50
+# veto is off in the shipped auto path (log: 'pixel veto=off'); at 40 it would keep 82/100
+#   and catch 16/18 - frame 164 (lr_max 5.25) and 396 (16.25) survive it
+# ref vs control: the probe's ref is computed after _calibrate loaded int8 weights -
+#   peak 4 levels, 0.00000% above 8, not bit-identical.

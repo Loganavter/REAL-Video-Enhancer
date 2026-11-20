@@ -93,4 +93,4 @@ def test_db_build_and_queries(tmp_path) -> None:
         '@claim block_ms 1.91 ms "block launches [x] n=2" measured  @session=s1\n')
     (tmp_path / "verdicts.yaml").write_text(
         "- id: v1\n  lane: int8\n  status: current\n  scope: our kernel\n  date: 2026-11-17\n"
-        "  statement: the block closes the epilogue\n  evidence: docs/wsp/verified/does-not-exist.txt\n")
+        "  statement: the block closes the epilogue\n  evidence: harness/docs/wsp/verified/does-not-exist.txt\n")

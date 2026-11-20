@@ -1,0 +1,12 @@
+# The gate's own decision variable on the worst frame, 2026-11-17.
+# The product's ReferenceFrameGate fed the LR frames of csm20s.mkv in order, with the parameters the
+# render's log reported (threshold 4.0, chain 3, veto off). Counters reproduce the run exactly.
+statistic=mean_abs  block=32px  threshold=4.0  max_chain=3  pixel_veto=None
+  frame  160: reuse=False  delta= 10.764 levels  chain=0  (reference is fresh)
+  frame  161: reuse=False  delta=249.779 levels  chain=0  (reference is fresh)
+  frame  162: reuse=True  delta=  0.000 levels  chain=1  (reference is kept)
+  frame  163: reuse=True  delta=  0.829 levels  chain=2  (reference is kept)
+  frame  164: reuse=True  delta=  3.294 levels  chain=3  (reference is kept)
+  frame  165: reuse=False  delta=  8.837 levels  chain=0  (reference is fresh)
+  frame  166: reuse=False  delta=  8.968 levels  chain=0  (reference is fresh)
+  frames fed: 481  reused: 100  scene cuts: 2  vetoes: 0

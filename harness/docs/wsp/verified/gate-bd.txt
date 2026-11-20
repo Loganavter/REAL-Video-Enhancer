@@ -1,0 +1,116 @@
+# The gate lane on BD: it fails where it engages, and it is off by default now
+
+> **CLOSED BY THE OWNER, 2026-11-18.** Frame reuse is shelved, off by default, and **any further
+> investigation of it is forbidden** (`rve-reuse-gate-forbidden-2026-11-18`). This file is the record of
+> what was measured before that order, not an open question: do not re-run these cells, do not extend
+> them, and do not treat the rows below as a road map.
+
+Measured 2026-11-18 on BD stream copies (`sources-bd.txt` proves the cuts are `-c copy`). The owner's
+decision, taken on these numbers: **frame skipping is shelved and OFF by default** - on a 1080p source
+the gate's own noise floor is almost always above its 1.5 refusal limit, because the material always
+carries digital noise, and at low contrast a small delta can be significant motion rather than noise.
+`--temporal_reuse` is now the opt-in flag; `--no_temporal_reuse` is a deprecated no-op.
+
+The engine half of the old headline is untouched: 1.63x, every frame, every clip. What follows is the
+gate half, which ships nowhere.
+
+## The whole table
+
+All shares are `>8 levels in any RGB channel, worst frame of the clip`; the reference is the same clip
+rendered ungated, ffv1, `--output null` never used for content (only for the wall rows).
+
+| clip (frames) | configuration | noise floor | reuse | worst share | frames > 0.1% | block mean 64 | peak |
+|---|---|---|---|---|---|---|---|
+| Violet BD (494) | fp16, auto luma | **1.67** | **0%** (refused) | 0.00000% | 0 | 0.00 | 0 |
+| Violet BD (494) | A/A: same config twice | - | 0% | 0.00000% | 0 | 0.00 | 0 |
+| Violet BD (494) | fp16, channel-max 0.07 forced, chain 3 | - | **67.8%** | 0.07337% (f257) | **0** | **20.90** (f179) | **142** |
+| Violet BD (494) | int8, reuse off | - | 0% | **0.53318%** (f29) | **356** | 6.90 (f169) | 65 |
+| Violet BD (494) | int8 + channel-max 0.07 | - | 67.8% | 0.71096% (f257) | 432 | 21.12 (f179) | 139 |
+| CSM battle BD (503) | fp16, auto luma | **22.58** | 0% (refused) | 0.00000% | 0 | 0.00 | 0 |
+| CSM battle BD (503) | A/A: same config twice | - | 0% | 0.00000% | 0 | 0.00 | 0 |
+| CSM same-shot BD (539) | fp16, auto luma | **1.00** | **25.6%** | **0.52379%** (f219) | **17** | 11.15 (f219) | 115 |
+| CSM same-shot BD (539) | int8, reuse off | - | 0% | **0.00339%** (f205) | **0** | 2.13 (f187) | 30 |
+
+Read the three rows that matter together:
+
+1. **Where the luma gate engages it fails**: 0.52379% on 17 of 539 frames of the calm Chainsaw shot.
+   The 4 Mbps version of the find read 0.49372% on 18 of 481 - the same class, a slightly different
+   population. The finding was right; its material was wrong.
+2. **Where it refuses, the render is the ungated render to the bit**: Violet 494/494 and the battle cut
+   503/503 identical, both confirmed by an A/A of the same configuration. So on Violet the shipped
+   default was not "safe reuse", it was "no reuse", and the 69.8% recorded there came from the re-encode.
+3. **The channel-max cell that passes the share concentrates the damage**: 0.07337% with zero frames
+   over the bar, but block mean 20.90 and peak 142 on a saturated edge, against the 7.57 the owner
+   rejected by eye. The eye (`EYE-CHECK-2026-11-18.md`) agrees with the block mean, not the share.
+
+## The noise floor rises when the re-encode is replaced by the BD
+
+Same shot, same session, both re-run today:
+
+| clip | 4 Mbps re-encode | BD stream copy | limit |
+|---|---|---|---|
+| Violet same shot | **1.23** (69.8% reuse, chain 4) | **1.67** (refused) | 1.5 |
+| Chainsaw calm shot | **0.66** (20.8% reuse, chain 3) | **1.00** (25.6% reuse, chain 4) | 1.5 |
+
+The queue expected the floors to fall ("compression noise was being counted as material noise"). They
+rise: a 4 Mbps encode that stays static inside a GOP makes consecutive frames more alike, while the BD
+keeps the grain the gate reads as motion. On Violet the limit sits between the two numbers, which is why
+the gate engaged on that shot at all.
+
+Both 4 Mbps runs are in this session (the old 1.23 / 0.66 were recorded hours earlier), because this
+project has already paid once for a cross-session quotient.
+
+## int8 on BD: two orders of magnitude between two clips
+
+| clip | int8 worst share | frames > 0.1% | what was recorded on the re-encode |
+|---|---|---|---|
+| Violet BD | **0.53318%** | 356 / 494 | 0.08876%, zero frames (int8-and-violet-sweeps) |
+| Chainsaw same-shot BD | **0.00339%** | 0 / 539 | probe 0.010%, peak 19 |
+
+So int8 is not simply "broken on real material": on the calm Chainsaw shot it is nearly exact, and on
+Violet it is over the bar on 72% of frames. The difference is the per-tensor activation grids, which are
+calibrated per clip - the lane already recorded that calibration must be split per title
+(`int8-split-calibration`); what is new is that the outcome spans two orders of magnitude, so "int8 is
+accurate" is not a statement about the engine, it is a statement about the clip.
+
+The probe's own numbers move with the configuration as well as the clip - Violet reads engine 0.082% on
+7 pairs in an fp16 run and 0.688% on 7 pairs in an int8-forced run, the Chainsaw cuts are probed on 4
+and 2 pairs - so probe numbers are comparable only inside one configuration. Queued as
+`rve-int8-probe-population-2026-11-18`.
+
+## Wall, with the output sink out of the way
+
+`--output null` (writer ~10 ms/frame), same session:
+
+| clip | configuration | ms/frame | ratio |
+|---|---|---|---|
+| Violet BD | fp16, reuse off | 60.15 | 1.00 |
+| Violet BD | int8, reuse off | **52.60** | **1.14x** |
+| Chainsaw same-shot BD | fp16, reuse off | 59.42 | 1.00 |
+| Chainsaw same-shot BD | fp16 + luma gate (25.6%) | **47.94** | **1.24x** |
+| Chainsaw same-shot BD | int8, reuse off | 62.42 | 0.95x |
+
+The gate's 1.24x on the calm shot is real and is what it costs 0.52379% of pixels for. int8 is 1.14x on
+Violet and slightly SLOWER than fp16 on Chainsaw - the body only serves the whole-frame path, so the win
+is a property of the clip as much as of the quantiser.
+
+## What is not covered
+
+- One 20 s cut per shot. The floor is a property of the calibration window, so a different opening can
+  read differently; the BD cuts also start 9-11 frames earlier than the re-encodes (a `-c copy` cut lands
+  on a keyframe), so the windows are the same shot, not the same frame indices.
+- The BD cuts declare no colour matrix and no range (the re-encodes declared `tv`). Inside a
+  gated-vs-ungated or int8-vs-fp16 delta that is common-mode; against the source it is not, and it is not
+  resolved here.
+- The channel-max and int8 cells on the Chainsaw clip were NOT run: they answered "which gate cell should
+  ship", and nothing ships now.
+- The wall rows are single runs of a 20 s clip, not three interleaved rounds: they are large effects
+  (1.14x, 1.24x) but they are one draw each.
+
+## Records
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/gate-bd.txt \
+       --records harness/docs/wsp/verified/records/gate-bd.jsonl --bars harness/docs/claims-bars.json
+
+@claims below are emitted by harness/scripts/gate_sweep.py --from-json and harness/scripts/emit_render_records.py from
+the artefacts in `harness/docs/wsp/verified/logs/bd/`; nothing here is hand-copied.

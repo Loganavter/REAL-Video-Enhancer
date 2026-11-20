@@ -1,0 +1,97 @@
+# Two literature ideas, both measured on the hop: the halo pays 2.3% and costs 25x, and 2-D tiling is worse
+
+Measured 2026-11-19 (local), one hop of the int8 body on its own codes (frame 169), three interleaved rounds,
+medians of rounds 2+. Two hypotheses taken from the literature and tested in Triton:
+Records: `int8-hop-tiles.jsonl`; raw: `logs/hop-halo/probe.json`, `logs/hop-tile2d/probe.json`.
+
+## 1. Mask-free access via a zero halo (arXiv:2306.14316, Im2win)
+
+Im2win's argument is that direct convolution loses to GEMM-based convolution because of **discontinuous memory
+access**, and it wins back with window-ordered contiguous loads plus shared memory. The shared-memory half is
+not expressible in Triton; the contiguity half is: a `(H+2, W+2, C)` buffer with a one-pixel zero border lets
+the kernel drop the bounds mask entirely (three compares and a select per tap per row) and read every tap at a
+fixed stride.
+
+| arm | ms | TOPS |
+|---|---|---|
+| masked, as shipped | **1.590** | 96.2 |
+| zero halo, mask-free | **1.552** | 98.5 |
+
+**2.3% on the kernel, and the codes are identical** (0 of 132.7 M differ - a halo changes no arithmetic). But
+the halo has to be *built*: the measured strided copy costs **1.591 ms**, i.e. 25x the gain, and sixteen hops
+would pay **25.5 ms per frame**.
+
+The obvious repair - have each hop **store into the next hop's padded buffer** with a (+1, +1) offset, so no
+separate pass exists at all, and zero only the border once per frame (~0.5 MB instead of 134 MB) - is a real
+path to +0.6 ms/frame and is written down here rather than in a row, because the row's own bar was 5% and this
+is 2.3% **as measured**. A future row that wants 0.6 ms should implement the inline halo, not the copy.
+
+## 2. Rectangular CTA tiles (the amplification arithmetic)
+
+The shipped CTA owns 128 **consecutive** pixels, i.e. 128 pixels of one image row, so its 3x3 window needs
+`(128+2)*3/128 = 3.05x` the pixels it produces. A rectangle does better on paper:
+
+| tile | window amplification |
+|---|---|
+| 128x1 (shipped) | 3.05x |
+| 64x2 | 2.06x |
+| 32x4 | 1.59x |
+| 16x8 | 1.41x |
+
+Measured, all at BLOCK_M 128 / 4 warps, all with identical codes (0 differing):
+
+| tile | ms | TOPS | vs shipped |
+|---|---|---|---|
+| **128x1 (shipped)** | **1.504** | 101.7 | - |
+| 64x2 | 1.548 | 98.7 | -3.0% |
+| 32x4 | 1.550 | 98.7 | -3.0% |
+| 16x8 | 1.617 | 94.6 | -7.5% |
+| 64x4 | 1.757 | 87.0 | -16.9% |
+
+**The hypothesis is refuted: halving the window amplification makes the kernel slower.** The reason is visible
+in the other measurements of the same day: L2 sits at 44-50% and DRAM at 54%, so the amplification is not the
+binding constraint - the kernel is bound by the first gather's round trip and by having 3.96 of 12 warps to hide
+it. A flat run of 128 pixels reads ONE contiguous stretch; a 32x4 tile reads four distant 32-pixel stretches and
+writes four strided runs, and the memory system charges for that more than the window reuse saves.
+
+## What this does to the three papers
+
+- **Im2win** describes a real effect in its domain (a kernel that IS traffic-bound). Applied to ours it gives a
+  2.3% kernel gain that a build pass eats - the effect exists, the economics don't.
+- **I/O lower bounds (arXiv:2012.15667)**: the bound for our tile can be computed by hand
+  (`(Tw+2)(Th+2)/(Tw*Th)`, above) and the answer is that **the bound is not the constraint** - the tile that
+  meets it best is the slowest one measured. A bound is only actionable when the resource it bounds is the one
+  that saturates, and here it is not.
+- **CREDIT (arXiv:2609.01864, DSMEM cluster tiling, 1.32-1.47x geomean)**: the one paper whose mechanism is not
+  expressible even in principle from Triton as we use it (thread-block clusters), and the one whose measured
+  baseline includes Triton. It is the only remaining lead with a number behind it, and taking it means leaving
+  the Triton body for a CUDA kernel - the same boundary `int8-hop-smem.txt` recorded.
+
+## Not covered
+
+- One card, one hop, one frame's codes; the halo was built with a torch strided copy (the inline variant is
+  described, not measured).
+- Tile arms keep BLOCK_M at 128, so the MMA shape is constant across them - a 64x4 arm at BLOCK_M 256 was not
+  tested (that size already loses 12.6% on its own, `int8-hop-occupancy.txt`).
+- Nothing here re-derives the papers' own numbers; they are cited as motivation, not as evidence about our kernel.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_halo_probe.py --rounds 3 --iters 20 \
+    --out-file harness/docs/wsp/verified/logs/hop-halo/probe.json
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_tile2d_probe.py --rounds 3 --iters 20 \
+    --out-file harness/docs/wsp/verified/logs/hop-tile2d/probe.json
+PYTHONPATH=. python3 harness/scripts/hop_tiles_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-hop-tiles.txt \
+       --records harness/docs/wsp/verified/records/int8-hop-tiles.jsonl --bars harness/docs/claims-bars.json
+
+@claim T001 1.59 ms "frames [10cff28ea287d300] n=1" measured
+@claim T002 1.552 ms "frames [10cff28ea287d300] n=1" measured
+@claim T003 1.504 ms "frames [10cff28ea287d300] n=1" measured
+@claim T004 1.55 ms "frames [10cff28ea287d300] n=1" measured
+@claim T005 1.617 ms "frames [10cff28ea287d300] n=1" measured
+@claim T006 1.548 ms "frames [10cff28ea287d300] n=1" measured
+@claim T007 1.757 ms "frames [10cff28ea287d300] n=1" measured

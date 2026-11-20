@@ -1,0 +1,106 @@
+{
+ "model": "/home/jorj/\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0438/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth",
+ "shape": [
+  1,
+  3,
+  1080,
+  1920
+ ],
+ "scale": 2,
+ "rounds": {
+  "fp16-engine": [
+   46.9449,
+   48.401,
+   47.9496,
+   48.9479
+  ],
+  "trt-int8": [
+   38.6325,
+   38.7195,
+   38.8141,
+   39.0677
+  ],
+  "triton-body": [
+   27.1624,
+   27.0444,
+   27.0509,
+   27.1807
+  ]
+ },
+ "median_ms": {
+  "fp16-engine": 48.401,
+  "trt-int8": 38.8141,
+  "triton-body": 27.0509
+ },
+ "ratio_body_over_trt_int8": 1.4349,
+ "ratio_body_over_fp16": 1.7893,
+ "ratio_trt_int8_over_fp16": 1.247,
+ "accuracy": {
+  "eval_csm.rgb": {
+   "trt-int8": {
+    "max_codes": 5.852,
+    "mean_codes": 0.52523,
+    "share_gt8_pct": 0.0,
+    "psnr_db": 51.574,
+    "shape": [
+     1,
+     3,
+     2160,
+     3840
+    ]
+   },
+   "triton-body": {
+    "max_codes": 5.79,
+    "mean_codes": 0.64432,
+    "share_gt8_pct": 0.0,
+    "psnr_db": 49.864,
+    "shape": [
+     1,
+     3,
+     2160,
+     3840
+    ]
+   }
+  },
+  "eval_violet.rgb": {
+   "trt-int8": {
+    "max_codes": 91.143,
+    "mean_codes": 0.80101,
+    "share_gt8_pct": 1.071494,
+    "psnr_db": 39.343,
+    "shape": [
+     1,
+     3,
+     2160,
+     3840
+    ]
+   },
+   "triton-body": {
+    "max_codes": 17.618,
+    "mean_codes": 0.66359,
+    "share_gt8_pct": 0.008942,
+    "psnr_db": 49.358,
+    "shape": [
+     1,
+     3,
+     2160,
+     3840
+    ]
+   }
+  }
+ },
+ "frames": [
+  "eval_csm.rgb",
+  "eval_violet.rgb"
+ ],
+ "calibration_frames": [
+  "csm_13.rgb",
+  "csm_18.rgb",
+  "csm_3.rgb",
+  "csm_8.rgb",
+  "violet_12.rgb",
+  "violet_17.rgb",
+  "violet_2.rgb",
+  "violet_7.rgb"
+ ]
+}

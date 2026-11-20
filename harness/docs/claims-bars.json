@@ -1,0 +1,113 @@
+{
+  "bar_share": {
+    "value": 0.1,
+    "unit": "%",
+    "of": "share",
+    "statistic": "worst_of",
+    "min_n": 2,
+    "note": "the acceptance bar: share of pixels whose worst channel is >8 levels off, worst frame of a spread sample"
+  },
+  "bar_peak": {
+    "value": 20,
+    "unit": "levels",
+    "of": "peak",
+    "statistic": "max",
+    "min_n": 2,
+    "note": "the peak bar; NOT the 8-level threshold that defines a bad pixel"
+  },
+  "gate_anime": {
+    "value": 0.005,
+    "unit": "%",
+    "of": "share",
+    "statistic": "worst_of",
+    "min_n": 2
+  },
+  "gate_ratio": {
+    "value": 1.4,
+    "unit": "x",
+    "of": "speedup",
+    "statistic": "single",
+    "min_n": 2,
+    "note": "the int8 ceiling with a scalar epilogue - a speedup, so never a share"
+  },
+  "kill_prob": {
+    "value": 0.3,
+    "unit": "x",
+    "of": "pass_rate",
+    "statistic": "single",
+    "min_n": 1,
+    "note": "P(pass) below this and the lane is not worth its probe"
+  },
+  "kill_ratio": {
+    "value": 1.15,
+    "unit": "x",
+    "of": "speedup",
+    "statistic": "single",
+    "min_n": 2
+  },
+  "max_ratio": {
+    "value": 2.0,
+    "unit": "x",
+    "of": "speedup",
+    "statistic": "single",
+    "min_n": 2
+  },
+  "zero_excess": {
+    "value": 0.0,
+    "unit": "ms",
+    "of": "excess",
+    "statistic": "single",
+    "min_n": 2,
+    "note": "a margin bar: the excess must be at or below zero"
+  },
+  "bar_slope_span": {
+    "value": 2.0,
+    "unit": "x",
+    "of": "slope",
+    "statistic": "max",
+    "min_n": 2,
+    "note": "beyond +-2 the PReLU is no longer a leaky rectifier"
+  },
+  "bar_block_time": {
+    "value": 2.0,
+    "unit": "ms",
+    "of": "engine_time",
+    "statistic": "median",
+    "min_n": 2,
+    "note": "the probe's own acceptance: a 64->64 block at 2.07 Mpx including the per-channel epilogue"
+  },
+  "bar_int8_window": {
+    "value": 1.4,
+    "unit": "x",
+    "of": "speedup",
+    "statistic": "median",
+    "min_n": 2,
+    "direction": "above",
+    "note": "accepted: the model window against fp16 in the SAME session, >=1.4x"
+  },
+  "bar_int8_wall": {
+    "value": 1.2,
+    "unit": "x",
+    "of": "speedup",
+    "statistic": "median",
+    "min_n": 2,
+    "direction": "above",
+    "note": "accepted: wall clock under the gate on a long clip"
+  },
+  "bar_int8_share": {
+    "value": 0.1,
+    "unit": "%",
+    "of": "share",
+    "statistic": "worst_of",
+    "min_n": 2,
+    "note": "the quality gate: worst frame of a spread sample, worst channel >8 levels"
+  },
+  "bar_int8_peak": {
+    "value": 20,
+    "unit": "levels",
+    "of": "peak",
+    "statistic": "max",
+    "min_n": 2,
+    "note": "PENDING OWNER DECISION: 20 is the project's existing peak bar; 23 is the tile-reuse opt-in's peak, not an int8 number"
+  }
+}

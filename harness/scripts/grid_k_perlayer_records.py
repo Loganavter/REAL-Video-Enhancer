@@ -12,8 +12,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="docs/wsp/verified/logs")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-grid-k-perlayer.jsonl")
+    ap.add_argument("--dir", default="harness/docs/wsp/verified/logs")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-grid-k-perlayer.jsonl")
     a = ap.parse_args(argv)
     def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
     st = Store(session="s-2026-11-19T16:20:00+03:00")

@@ -28,9 +28,9 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/model-fit/all.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/model-fit.jsonl")
-    ap.add_argument("--probe-pc", default="docs/wsp/verified/logs/model-fit/all-perchannel.json",
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/model-fit/all.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/model-fit.jsonl")
+    ap.add_argument("--probe-pc", default="harness/docs/wsp/verified/logs/model-fit/all-perchannel.json",
                     help="the same sweep with per-channel grids: its shares are records too, because the page "
                          "quotes them")
     args = ap.parse_args(argv)

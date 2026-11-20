@@ -1,7 +1,7 @@
 """The reuse correction, unit-tested on tiny tensors: zero change means zero correction, and the
 low-frequency part is passed at unit gain.
 
-The numbers the shipped correction is held to are in docs/wsp/verified/reuse-decision-statistic.txt; these tests
+The numbers the shipped correction is held to are in harness/docs/wsp/verified/reuse-decision-statistic.txt; these tests
 only pin the algebra, because a correction that silently adds the wrong term is indistinguishable from a good one
 until a frame is rendered.
 """

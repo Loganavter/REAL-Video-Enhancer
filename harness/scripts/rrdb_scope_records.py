@@ -16,8 +16,8 @@ MODELS = ["2x-sudo-RealESRGAN(1).pth", "2x_Pooh_RPLKSR_Candidate_1_387k.pth",
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default="/home/jorj/Загрузки/Upscaling/Models/All")
-    ap.add_argument("--log", default="docs/wsp/verified/logs/rrdb/build-killed.log")
-    ap.add_argument("--out", default="docs/wsp/verified/records/rrdb-scope.jsonl")
+    ap.add_argument("--log", default="harness/docs/wsp/verified/logs/rrdb/build-killed.log")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/rrdb-scope.jsonl")
     a = ap.parse_args(argv)
     def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
     st = Store(session="s-2026-11-19T17:35:00+03:00")
@@ -33,7 +33,7 @@ def main(argv=None) -> int:
                        instrument="sum over the checkpoint's conv shapes of Cin*Cout*kh*kw*2*H*W",
                        config=f"{name}, {len(convs)} convolutions, 1920x1080 in", session=st.session,
                        statistic="single", tier="measured", id=f"RB{n:03d}",
-                       run="harness/harness/scripts/rrdb_scope_records.py", artifact=p,
+                       run="harness/scripts/rrdb_scope_records.py", artifact=p,
                        extra={"artifact_sha256": sha(p), "convs": len(convs)}))
         n += 1
     # the build that was killed: a LOWER BOUND on the engine build, and the reason the row closes

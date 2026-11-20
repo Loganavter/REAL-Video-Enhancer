@@ -1,0 +1,19 @@
+# Adversarial pair selection in the int8 probe, 2026-11-18.
+# Scan the whole clip with the gate's channel-max statistic (no model), rank the reuses, render the
+# top-k, and take the worst composition. Two bugs found and fixed on the way, both by the self-check.
+
+=== Chainsaw Man 20 s, 16 triples (the spread sample), channel-max filter at 0.07
+  composition d1 0.000% / d2 nan% -> worst 0.000% (0 pairs at d2) -> int8
+=== Chainsaw Man 20 s, adversarial top-13, same gate
+  adversarial top-13 of the clip: 0.110% (fp16 control 0.083%) -> fp16
+  full render ground truth: int8+gate worst 0.08876%, fp16+gate 0.07546%
+
+=== Violet Evergarden 20 s, adversarial top-13, chain 4
+  composition d1 0.108% / d2 0.167%; adversarial top-13: 0.168% (fp16 control 0.077%) -> fp16
+
+# bugs the self-check caught:
+#  1. select=eq(n,index) returns a different frame than the stream index under B-frames: 12 of 13
+#     pairs came back with a measured share above the gate's threshold (0.18% against 0.057%).
+#     Replaced by one streaming pass over the wanted indices.
+#  2. without the self-check the bogus pairs rendered a scene change as a composition error and the
+#     probe read 86.7%.
