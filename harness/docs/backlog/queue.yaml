@@ -5273,9 +5273,20 @@ tasks:
 - id: rve-start-end-time-ignored-2026-11-21
   title: '--start_time / --end_time are accepted and never applied: a segment render renders the whole file'
   type: code
-  status: todo
+  status: done
   owner: '@supervisor'
   priority: P2
+  resolution: >-
+    The read is bounded at the input (`-ss` seek before `-i`, `-t` input duration), in a pure helper
+    (`backend/src/utils/Segment.py:segment_args`) so the arithmetic is testable where cv2/torch are absent.
+    Measured: `--start_time 0 --end_time 8` on the 25-minute episode now reports **192 frames**
+    (round(8 * 23.976)) and renders in 9.4 s instead of 385 s of frames; 120-123 s gives 73 frames, i.e. within
+    one frame of the arithmetic 72 (the bound is time-based). The audio had to be bounded too: the writer maps
+    the source's audio as a COPY, so the `atrim=start=` filter never applied and a 3-second segment came out
+    6:25 long with the source's remaining audio after the last frame - the same `segment_args` now goes before
+    the audio input as well, and the segment reads 3.32 s. Tests: 8 in
+    backend/tests/unit_tests/test_ffmpeg_read_segment.py (6 argument cases, the audio filter, a real synthetic
+    clip read end to end, and the command's argument order).
   gpu: false
   cost: 2h
   tags:

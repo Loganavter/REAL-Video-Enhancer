@@ -14,6 +14,7 @@ from .utils.Util import (
 )
 from .utils.Encoders import  EncoderSettings
 from .utils.Frame import Frame
+from .utils.Segment import audio_trim_filter, segment_args
 
 class Buffer(ABC):
     @abstractmethod
@@ -90,9 +91,11 @@ class FFmpegRead(Buffer):
         self.readQueue = queue.Queue(maxsize=25)
 
     def command(self):
-        
-        command = [
-            f"{self.ffmpeg_path}",
+
+        command = [f"{self.ffmpeg_path}"]
+        # the segment bound, before the input so the seek does not decode what precedes it (see segment_args)
+        command += segment_args(self.start_time, self.end_time)
+        command += [
             "-i",
             f"{self.inputFile}",
         ]
@@ -392,7 +395,7 @@ class FFmpegWrite(Buffer):
                 "0",
                 *self._color_convert_args(),
                 "-af",
-                f"atrim=start={self.start_time},asetpts=PTS-STARTPTS",
+                audio_trim_filter(self.start_time, self.end_time),
 
             ]
             
@@ -457,6 +460,13 @@ class FFmpegWrite(Buffer):
                     # Put timestamp hygiene flags *before* the input they apply to.
                     "-fflags",
                     "+genpts",
+                ]
+                # The same segment bound on the audio input. `-af atrim` cannot do this job on the shipped path:
+                # the audio is usually COPIED (`-c:a copy`), and a filter does not apply to a copied stream - a
+                # 3-second segment render came out 6:25 long, with the source's remaining audio after the last
+                # video frame. Bounding the input works for copy and for re-encode alike.
+                command += segment_args(self.start_time, self.end_time)
+                command += [
                     "-i",
                     f"{self.inputFile}",
                     "-map",
