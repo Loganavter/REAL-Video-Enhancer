@@ -492,6 +492,15 @@ class Render:
                     budget=2.0,
                     fallback="off" if best else "strictest",
                     chain_policy="certified" if best else "max",
+                    # Certify with the statistic the pictures are judged by. The tuner collects
+                    # acceptance samples from the same forced-render calibration frames
+                    # (`_calibrate_gate` -> `autoTuner.add(lr, hr, accept)`), and with the default
+                    # "proxy" it then decided on the block-mean budget instead: measured
+                    # 2026-11-20 on a stabilised source, the proxy certified threshold 4 / chain 4
+                    # and the render came out 0.81% of pixels over the 0.1% bar. Every false
+                    # "price of quality" in the ledger is that mismatch; when no samples arrive
+                    # (int8 packed payload) `_uses_acceptance` still falls back to the proxy.
+                    certify_on="acceptance",
                 )
                 log("auto gate tuning: the threshold will be chosen from the first rendered "
                     "frames (LR delta vs the real HR delta they cause)")
