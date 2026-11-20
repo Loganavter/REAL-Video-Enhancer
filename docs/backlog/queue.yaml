@@ -5022,11 +5022,12 @@ tasks:
     reference. Mapping it needs decoder-level bookkeeping (the DPB / ref list), which ffmpeg's MV side data does
     not expose.
   blocked_by: >-
-    A decision, not a measurement: (i) a small libavcodec extractor that also reports each vector's reference
-    frame (C shim or a patched PyAV), (ii) switching the geometry route to a decoder that exposes motion fields
-    with their reference identity (or a codec that only uses one backward reference), or (iii) dropping the
-    geometry axis and accepting the measured state - split/recursive correction, 0/130 on the calibration clip,
-    3/124 on the held-out one, both with texture ~1.0.
+    RESOLVED 2026-11-20 without a C shim: the reference is recoverable empirically by residual search over the last
+    four display-order frames, which puts it at distance 2 or 3 on this stream (never 1). With that reference the
+    codec field explains the change where there is motion (9.6% residual reduction at the median and 94% of P frames
+    improving on the action clip at 9.51 px; -1.2% and 44% on the calm clip at 5.09 px). The follow-up row is
+    rve-reuse-mv-reference-2026-11-20, which uses the field as a per-frame geometry gate; this row stays blocked
+    because its acceptance was written against the raw t-1 field.
   acceptance: >-
     (a) MV extraction that provably matches the decoded frames: `-flags2 +export_mvs` side data (or pyav), one
     script that prints, for a given frame pair, the MV field and the residual it implies, and a check that
@@ -5046,3 +5047,49 @@ tasks:
     residual are already parsed by the decoder and are thrown away today. Two costs to check first: the app's
     decoder loop reads rawvideo (the side data must be requested and carried), and MV granularity is per coding
     block, not per pixel, so the warp is block-constant unless it is interpolated.
+
+- id: rve-reuse-mv-reference-2026-11-20
+  title: 'Resolve the coded reference per frame by residual search, then use the codec field as a per-frame geometry gate'
+  type: experiment
+  status: todo
+  owner: '@supervisor'
+  priority: P1
+  gpu: true
+  cost: 1d
+  tags:
+  - reuse
+  - motion-vectors
+  - codec
+  - geometry
+  base_branch: perf/inference
+  relates_to:
+  - docs/backlog/queue.yaml
+  - docs/wsp/verified/reuse-decision-statistic.txt
+  owns_files:
+  - docs/wsp/verified/reuse-mv-reference.txt
+  refutes: >-
+    `source` in ffmpeg's motion-vector side data is a reference-list index, not a frame distance, which is why
+    applying the vectors to t-1 read as "the vectors are wrong" (RU035: 15.6% worse at the median). Measured: a
+    residual search over the last four display-order frames puts the best reference at distance 2 or 3 on this
+    stream - never 1 - and with that reference the codec field does explain the change where there IS motion:
+    on the action clip (median 9.51 px of motion) the warped residual is 9.6% lower at the median and 94% of
+    P frames improve, while on the calm clip (5.09 px) it is -1.2% and 44% improve, i.e. there is nothing to
+    explain there. Falsifier: if applying the field at the resolved reference, gated per frame by whether it
+    explains the change, does not take the held-out clip from 3/124 to at most 1/124 while keeping the calibration
+    clip at 0/130 and texture >= 0.95, then the geometry axis is closed for good and the product ships the
+    split/recursive correction alone.
+  acceptance: >-
+    (a) The reference search built into the correction: for each frame, the residual is evaluated against the last
+    four display-order frames and the best one is used, with the chosen distance reported per frame - no assumption
+    about the codec's list order. (b) A per-frame decision on whether to warp at all: warp only where the coded
+    field reduces the residual by a threshold (measured: 94% of P frames on the action clip at 9.5 px, 44% on the
+    calm one at 5 px), otherwise the split residual. (c) The two labelled clips against the current best
+    (0/130 + texture 1.001; 3/124 + 1.021), plus the occluded blocks, where a coded vector exists but the reference
+    content does not. (d) Cost: reference search is up to four warps per reused frame; report it against the
+    2.428 ms correction and say which of the four can be skipped by caching.
+  note: >-
+    Follows the blocked row rve-reuse-codec-mv-2026-11-20, which stopped at acceptance (a) because the side data
+    does not say which frame a vector points at; the residual search answers that empirically and the numbers above
+    were taken with it. Two ways this can still fail: bi-predicted B frames carry two vectors per block and the
+    side data tags them by the same index, and occlusions have a vector with no matching source content - both need
+    to be counted before the gate is trusted.
