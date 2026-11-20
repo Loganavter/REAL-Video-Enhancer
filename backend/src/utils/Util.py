@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import contextlib
+import logging
 from .Colors import Colors
 # non standard python libraries
 try:
@@ -60,10 +61,67 @@ def errorAndLog(message: str):
 def log_error(message: str):
     log(Colors.RED + "ERROR: "+ message + Colors.RESET, show_backend=False)
 
+
+# --- in-place progress line -------------------------------------------------
+# FFmpeg.InformationWriteOut.realTimePrint repaints a single status line with "\r" on stdout
+# while a render runs, and never ends it with "\n". Everything else writes whole lines, and the
+# front end merges stderr into stdout and reads that pipe line by line
+# (src/ui/ProcessTab.py), so a record written while the progress line is open is appended to its
+# tail: "ETA: 0:03:19host timeline: upload 0.12 ..." reaches the ETA label and the output box.
+# A writer that emits a whole line therefore ends the in-place line first.
+_inplace_line_open = False
+
+
+def set_inplace_line(open_: bool = True):
+    """Record that an in-place ("\r") line is on screen, or that it was ended."""
+    global _inplace_line_open
+    _inplace_line_open = bool(open_)
+
+
+def end_inplace_line(stream=None):
+    """Terminate an open in-place line so the next writer starts a clean one."""
+    global _inplace_line_open
+    if not _inplace_line_open:
+        return
+    _inplace_line_open = False
+    try:
+        out = stream if stream is not None else sys.stdout
+        out.write("\n")
+        out.flush()
+    except Exception:
+        pass
+
+
+class _EndInplaceLineFilter(logging.Filter):
+    def filter(self, record):
+        end_inplace_line()
+        return True
+
+
+def _install_rve_handler():
+    """Print RVE records (all of them warnings) on their own line, never on a progress line."""
+    logger = logging.getLogger("RVE")
+    for handler in logger.handlers:
+        if getattr(handler, "_rve_inplace_aware", False):
+            return
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler._rve_inplace_aware = True
+    handler.addFilter(_EndInplaceLineFilter())
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    # our handler is the one place RVE records print, so a basicConfig elsewhere cannot double them
+    logger.propagate = False
+
+
+_install_rve_handler()
+
+
 def log(message: str, show_backend = True):
     """
     Log is now depricated, just using print now.
     """
+    end_inplace_line()
     if show_backend:
         print("BACKEND: " + message, file=sys.stderr)
     else:

@@ -29,3 +29,7 @@ docs/wsp/ledger.db
 /python
 /bin
 /custom_models
+
+# backend runtime logs written next to the app
+/ffmpeg_log.txt
+/backend_log.txt
