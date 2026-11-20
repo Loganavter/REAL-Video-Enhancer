@@ -4,7 +4,18 @@ Every measurement and every decision that changes a quoted number, newest first.
 the commit, the card and the library versions it was taken on: a number without those describes a
 build that may no longer exist (`harness/provenance.py`).
 
-Entries: 2
+Entries: 3
+
+## 2026-11-20T13:12:22+03:00 - a9f15fcb74f9 (dirty tree) - NVIDIA GeForce RTX 4060 Ti (cc 8.9)
+*triton 3.6.0*
+
+Crash found on the first run where int8, reuse-by-default and the auto tuner met: the int8 tail hands over a
+packed yuv420p payload (11.87 MB at 4K, no fp16 RGB intermediate), and _calibrate_gate sliced that flat tensor
+as a 4-D RGB one - IndexError in the render thread, render dead. The luma branch already handled the payload;
+the acceptance estimate did not. Fixed by computing the RGB acceptance only when the frame is a 4-D RGB
+tensor, logging the skip once; the tuner falls back to its proxy instrument (AutoGateTuner._uses_acceptance)
+so the threshold is still certified - verified on 41 frames: no traceback, the skip line once, gate still
+reused 27/41 at 24.2 ms/frame.
 
 ## 2026-11-20T12:31:44+03:00 - 0feb0d1c0587 (dirty tree) - NVIDIA GeForce RTX 4060 Ti (cc 8.9)
 *triton 3.6.0*
