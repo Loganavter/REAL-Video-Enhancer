@@ -220,6 +220,35 @@ is a policy decision, not a measurement.
 @claim RU021 0.79771 % "reused frames [b8fe18a159def933] n=135" measured
 @claim RU022 0.9738 x "reused frames [b8fe18a159def933] n=135" measured
 
+
+## The published correction, done as published (NEMO Eq. 2)
+
+NEMO reconstructs a non-anchor block as the *warped* cached SR plus the bilinearly upscaled codec residual; their
+ablation prices the motion vector at 9.9 dB and the residual at 1.6 dB. Our earlier "residual reuse" omitted the
+warp, i.e. the term worth 9.9 dB. Done the published way with DIS flow standing in for the codec's motion vectors
+(`scripts/reuse_warp.py`): `out = remap(cached_SR, 2u) + bilinear_up(LR_t - warp(LR_ref, u))`.
+
+| correction, gain 1.0 | worst share | frames over 0.1% | texture ratio | frozen |
+|---|---|---|---|---|
+| verbatim skip | 0.44121% | 37 / 130 | 0.000 | 91.5% |
+| residual, NOT warped | **0.09329%** | **0 / 130** | 0.388 | 91.5% |
+| **warped + residual (NEMO-style)** | 0.34400% | 6 / 130 | **0.838** | **0%** |
+| warped + residual at gain 2.04 | 1.02387% | 46 / 130 | 1.348 | 0% |
+
+The warp buys the texture back at unit gain (0.838 against 0.388) because remapping the cached SR moves its noise
+too - the temporal change no longer depends on the correction's amplitude. It costs six frames over the bar,
+against zero for the non-warped variant: those are where a DIS flow stands in badly for a real codec motion
+vector (occlusion, disocclusion, a vector field that does not exist in the stream we took the frames from). At
+gain 2.04 both instruments go wrong at once (46 frames, texture 1.348), so the texture is not the reason to raise
+the gain in the warped variant.
+
+So the two best configurations are still on opposite sides: `0 / 130 + 0.388` non-warped and
+`6 / 130 + 0.838` warped. Neither is a pass, and the gap between them is the flow's quality rather than the
+correction's algebra.
+
+@claim RU025 0.344 % "reused frames [55a222f0b8bdd68b] n=130" measured
+@claim RU026 0.838 x "reused frames [55a222f0b8bdd68b] n=130" measured
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so
