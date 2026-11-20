@@ -31,14 +31,17 @@ def qualityPresetValueToLabel(value: str) -> str:
 # convolutions (fp16 engine against the int8 body). The wording is the measurement, not a promise - the
 # picture effect depends on the model and the material, which is exactly what the tooltip says.
 QUALITY_PRESET_TOOLTIP = (
-    "Best quality: the body runs in float16, i.e. the picture is exactly what the model produces.\n"
-    "Fast: the body runs in 8-bit (int8 kernels), head and tail stay in float16, and the switch only takes "
-    "effect when the fit probe certifies the material - otherwise Fast still renders in float16.\n"
-    "Measured on a 1080p Blu-ray source at 4K, RTX 4060 Ti, two arms alternating in one session: 1.09-1.14x "
-    "end to end on a 2x Compact model (median 1.13x, the engine alone is 1.49-1.63x) and 1.23x on a 4x "
-    "animevideov3. The picture differed on 0.00004% of pixels on the 2x model.\n"
-    "Other models and other cards are unmeasured: the speed-up depends on the card, and on an older card the "
-    "body may not have int8 tensor cores at all - in that case Fast is not offered."
+    "Best quality: the body runs in float16 - the picture is the model's own output.\n"
+    "Fast: the body runs in 8-bit, head and tail stay in float16, and the switch only takes effect when the fit "
+    "probe certifies the material - otherwise Fast still renders in float16.\n"
+    "Speed, measured on 1080p Blu-ray at 4K (RTX 4060 Ti, both arms alternating in one session, two clips and two "
+    "sinks): 1.09-1.14x end to end on a 2x Compact model, median 1.13x; 1.23x on a 4x animevideov3, whose tail "
+    "kernel declines and falls back to cuDNN.\n"
+    "Picture, against the model's own weights: the body moves 0.004-0.019% of pixels over seven frames. Numbers "
+    "measured against the fp16 engine read 0.42-0.53%, but the engine is itself 0.055-0.087% off the weights and "
+    "the 4:2:0 pipe alone 0.13-0.21%, so that comparison cannot resolve the body.\n"
+    "Other cards are unmeasured - the speed-up depends on the card - and on a card without int8 tensor cores the "
+    "Fast preset is not offered."
 )
 
 
