@@ -2229,7 +2229,25 @@ background-color:#343b47
                                   </item>
                                   <item>
                                    <widget class="QWidget" name="qualityPresetContainer" native="true">
-                                    <layout class="QHBoxLayout" name="horizontalLayout_qualityPreset">
+                                    <layout class="QVBoxLayout" name="verticalLayout_qualityPreset">
+                                     <property name="spacing">
+                                      <number>2</number>
+                                     </property>
+                                     <item>
+                                      <widget class="QWidget" name="qualityPresetRow" native="true">
+                                       <layout class="QHBoxLayout" name="horizontalLayout_qualityPresetRow">
+                                        <property name="leftMargin">
+                                         <number>0</number>
+                                        </property>
+                                        <property name="topMargin">
+                                         <number>0</number>
+                                        </property>
+                                        <property name="rightMargin">
+                                         <number>0</number>
+                                        </property>
+                                        <property name="bottomMargin">
+                                         <number>0</number>
+                                        </property>
                                      <item>
                                       <widget class="QLabel" name="qualityPresetLabel">
                                        <property name="font">
@@ -2294,66 +2312,27 @@ background-color:#343b47
                                        </item>
                                       </widget>
                                      </item>
-                                     <item>
-                                      <widget class="QWidget" name="reuseOptionsContainer" native="true">
-                                       <layout class="QVBoxLayout" name="verticalLayout_reuseOptions">
-                                        <property name="spacing">
-                                         <number>0</number>
-                                        </property>
-                                        <property name="leftMargin">
-                                         <number>0</number>
-                                        </property>
-                                        <property name="topMargin">
-                                         <number>0</number>
-                                        </property>
-                                        <property name="rightMargin">
-                                         <number>0</number>
-                                        </property>
-                                        <property name="bottomMargin">
-                                         <number>0</number>
-                                        </property>
-                                        <item>
-                                         <widget class="QCheckBox" name="frameReuse">
-                                          <property name="text">
-                                           <string>Reuse unchanged frames</string>
-                                          </property>
-                                          <property name="checked">
-                                           <bool>true</bool>
-                                          </property>
-                                         </widget>
-                                        </item>
-                                        <item>
-                                         <widget class="QWidget" name="celReuseRow" native="true">
-                                          <layout class="QHBoxLayout" name="horizontalLayout_celReuse">
-                                           <property name="spacing">
-                                            <number>0</number>
-                                           </property>
-                                           <property name="leftMargin">
-                                            <number>18</number>
-                                           </property>
-                                           <property name="topMargin">
-                                            <number>0</number>
-                                           </property>
-                                           <property name="rightMargin">
-                                            <number>0</number>
-                                           </property>
-                                           <property name="bottomMargin">
-                                            <number>0</number>
-                                           </property>
-                                           <item>
-                                            <widget class="QCheckBox" name="celReuse">
-                                             <property name="text">
-                                              <string>By cel (ignore grain, dust and scan wobble)</string>
-                                             </property>
-                                             <property name="checked">
-                                              <bool>false</bool>
-                                             </property>
-                                            </widget>
-                                           </item>
-                                          </layout>
-                                         </widget>
-                                        </item>
                                        </layout>
+                                      </widget>
+                                     </item>
+                                     <item>
+                                      <widget class="QCheckBox" name="frameReuse">
+                                       <property name="text">
+                                        <string>Reuse unchanged frames</string>
+                                       </property>
+                                       <property name="checked">
+                                        <bool>true</bool>
+                                       </property>
+                                      </widget>
+                                     </item>
+                                     <item>
+                                      <widget class="QCheckBox" name="celReuse">
+                                       <property name="text">
+                                        <string>By cel (ignore grain, dust and scan wobble)</string>
+                                       </property>
+                                       <property name="checked">
+                                        <bool>false</bool>
+                                       </property>
                                       </widget>
                                      </item>
                                     </layout>
