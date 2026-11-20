@@ -1,0 +1,38 @@
+# The gate's threshold does not move the probe's verdict - the damaged pair is already under it
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 3 record(s) in this file (R001, R002, R003) name
+> `csm20s.mkv, violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+Measured 2026-11-17 with the product's own probe, reference taken from the original weights, 16 triples.
+
+| gate threshold | Chainsaw d2 | pairs at d2 | Violet d2 | pairs at d2 |
+|---|---|---|---|---|
+| 5.0 (probe default) | 0.2177% | 2 | 0.1675% | 6 |
+| 4.0 (what the tuner picks here) | 0.2177% | 2 | 0.1675% | 6 |
+| 3.0 (the candidate fix) | 0.2177% | **1** | 0.1675% | 6 |
+
+Lowering the threshold shrinks the pair set and leaves the worst value untouched, on both clips. The
+pair that carries the damage has a delta below 3.0 - it is a pair the gate *certifies*, at every
+threshold in its clamp. So the render-side threshold fix, which removes 12 of the 18 bad frames for
++2.7% of the wall, does not unblock int8 on Chainsaw: the probe reads 0.2177% before and after.
+
+The probe's own filter constant is a separate defect, worth fixing on its own terms: it uses 5.0 while
+the auto tuner clamps its choice to (2.0, 4.0), so the probe certifies on a superset of the pairs the
+shipped gate can serve. It happens not to change the worst here - the worst pair passes all three - but
+the population is not the gate's.
+
+What this leaves: the pairs that carry the damage are inside the certificate, so no threshold on the
+gate's own variable can remove them. The lever is the statistic (the difference is a clipped highlight
+whose error lives in one saturated channel) or a certificate taken on the rendered output.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/probe-threshold-invariance.txt \
+       --records harness/docs/wsp/verified/records/probe-threshold-invariance.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 0.21773725748062134 % "pairs [de83663eda830288] n=2" measured
+@claim R002 0.21773725748062134 % "pairs [260529ca474bec38] n=1" measured
+@claim R003 0.16745033208280802 % "pairs [d718d86fa4ebb484] n=6" measured

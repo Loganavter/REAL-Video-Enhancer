@@ -1,0 +1,25 @@
+# A cheap model on a whole shot: refused, by two orders of magnitude
+
+Measured 2026-11-17 with `harness/scripts/probe_shot_cascade.py`: the expensive model is the reference, the
+cheap one is the candidate, and the statistic is the project's usual one on the 4K output.
+
+| frame | cheap (SPAN) against expensive (Futsuu): share above 8 levels | peak |
+|---|---|---|
+| v120 | 76.5169% | 57 |
+| v400 | 13.7809% | 97 |
+| v800 | 11.7037% | 144 |
+| v1200 | 2.6696% | 203 |
+| **worst** | **76.5169%** (bar 0.1%) | 203 |
+
+The queue item is written around the 78-model collection, but its refutes clause only needs two models:
+"on every shot the cheap model exceeds the bar against the expensive one". It does, by 27x on the best
+frame and 765x on the worst. A shot-level cascade is therefore not a routing question - the members of
+this collection are not interchangeable at all, and the routing half ("which of the 78") would be
+built on a premise the picture rejects on the first frame.
+
+Not checked: the other 74 models (four are on this host), the shot boundary, and the wall clock.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/shot-cascade.txt \
+       --records harness/docs/wsp/verified/records/shot-cascade.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 76.5169 % "frames [bf76f141c714826b] n=4" measured

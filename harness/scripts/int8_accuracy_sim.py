@@ -236,7 +236,7 @@ def main() -> int:
                             + (f", clip p{args.clip}" if args.clip else "")
                             + ", calibration on 8 disjoint frames",
                      session="s-2026-11-18T09:00:00Z", statistic="worst_of", tier="measured",
-                     run="harness/harness/scripts/int8_accuracy_sim.py", id=args.rec_id)
+                     run="harness/scripts/int8_accuracy_sim.py", id=args.rec_id)
         rec.validate()
         with open(args.emit, "a") as fh:
             fh.write(_json.dumps(rec.to_dict()) + "\n")

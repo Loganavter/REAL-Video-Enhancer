@@ -18,8 +18,8 @@ Scoring: the SAME held-out full frames for every arm, against the model's own fp
 >8 levels and peak - the project's own statistic, so the arms are comparable to the record.
 
 Usage:
-  python harness/harness/scripts/calibration_coverage.py --clip /tmp/opencode/bd_violet20s.mkv \
-      --model "<install>/custom_models/2x-Futsuu-Anime(1).pth" --out docs/wsp/verified/records/int8-calibration-crops.jsonl
+  python harness/scripts/calibration_coverage.py --clip /tmp/opencode/bd_violet20s.mkv \
+      --model "<install>/custom_models/2x-Futsuu-Anime(1).pth" --out harness/docs/wsp/verified/records/int8-calibration-crops.jsonl
 """
 from __future__ import annotations
 
@@ -110,8 +110,8 @@ def main(argv=None) -> int:
     # a percentile arm is NOT implemented in Int8Body yet (the grids are maxima); it is the follow-up if
     # the crop arm fails, not something this run can pretend to measure
 
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-calibration-crops.jsonl")
-    ap.add_argument("--log", default="docs/wsp/verified/logs/int8-calibration-crops.log")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-calibration-crops.jsonl")
+    ap.add_argument("--log", default="harness/docs/wsp/verified/logs/int8-calibration-crops.log")
     ap.add_argument("--session", default="")
     ap.add_argument("--frames-total", type=int, default=0,
                     help="frame count to spread the sample over; 0 = ask ffprobe")
@@ -177,7 +177,7 @@ def main(argv=None) -> int:
             instrument="the body's certify() share, worst of the held-out frames, against the model",
             config=f"calibration arm {name}: {len(frames) if name == 'full' else len(crops)} samples",
             session=session, statistic="worst_of", tier="measured",
-            run=f"harness/harness/scripts/calibration_coverage.py --arm {name}", artifact=args.log,
+            run=f"harness/scripts/calibration_coverage.py --arm {name}", artifact=args.log,
             extra={"artifact_sha256": digest, "of": "share", "arm": name}))
         ids[name] = rec.id
         rec2 = store.emit(Record(
@@ -185,7 +185,7 @@ def main(argv=None) -> int:
             instrument="wall clock around Int8Body.calibrate, one GPU job, synchronised",
             config=f"calibration arm {name}: {len(frames) if name == 'full' else len(crops)} samples",
             session=session, statistic="single", tier="measured",
-            run=f"harness/harness/scripts/calibration_coverage.py --arm {name}", artifact=args.log,
+            run=f"harness/scripts/calibration_coverage.py --arm {name}", artifact=args.log,
             extra={"artifact_sha256": digest, "of": "frame_time", "arm": name}))
         ids[name + "-cost"] = rec2.id
         print(rec.claims_line())

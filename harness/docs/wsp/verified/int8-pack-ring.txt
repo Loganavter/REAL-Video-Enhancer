@@ -1,0 +1,126 @@
+# The pack ring is correct now and buys nothing: the copy was never the 4.3 ms
+
+Measured 2026-11-19 (local), RTX 4060 Ti, BD Violet 494 frames, null sink, reuse off, arms alternating in one
+session, 3 rounds, medians of rounds 2-3; then one lossless render pair.
+Records: `int8-pack-ring.jsonl`; raw: `logs/pack-ring/ab/`, `logs/pack-ring/pair.json`.
+
+Row `rve-pack-async-ring-2026-11-20`, from the researcher's C4, and the last of the five. The premise: the
+deliverable payload is built on the GPU and copied into a host `bytes` object inside the frame window - at the
+measured 1.5 bytes/px a 4K frame is 12.44 MB, whose floor at the recorded 5.1-6.0 GB/s link is 2.07-2.44 ms -
+so a pinned ring filled asynchronously should take most of it off the critical path.
+
+## What was actually there
+
+The ring already exists in the tree (`utils.Frame.PinnedSlotPool`: semaphore per slot, acquire → fill →
+release after `stdin.write()` returns) and was **disabled** because an earlier attempt read 12.6 dB: slots were
+rewritten before ffmpeg had the bytes. So this row was not "build a ring" but "is the protocol that now exists
+worth turning on".
+
+`RVE_PACK_RING=1` enables it (default remains 0, i.e. the shipped path is untouched). The instrumentation
+added for this confirms it is live:
+
+```
+pack: PINNED RING in use - 4 slots x 12441600 bytes per frame (no per-frame tobytes)
+```
+
+12 441 600 bytes = exactly the 4K yuv420p payload at 1.5 bytes/px, and the per-frame `tobytes` copy is gone.
+
+## And the measurement says no
+
+| arm | render loop median | pack+queue median |
+|---|---|---|
+| ring off (per-frame `tobytes`) | **34.42 ms** | **4.36 ms** |
+| ring on (pinned slots) | **34.36 ms** | **4.32 ms** |
+| delta | **-0.06 ms** | **-0.04 ms** |
+
+Both differences are inside the draw-to-draw spread of their own arms (loop 34.41/34.41/34.44 against
+34.32/34.36/34.36). **The row's own falsifier fires: the loop does not move by 1.0 ms, so the 4.3 ms is not
+the copy.** Removing the copy entirely - which is what the ring does - changes the pack line by 0.9%.
+
+What is left in that 4.32 ms accounts for most of it: the 12.44 MB host transfer itself at 2.9 GB/s of
+effective throughput, i.e. about half the recorded link rate, plus whatever the writer's slot consumption
+imposes. Neither is addressed by a ring, and this file does not separate them - it says only which one it is
+NOT.
+
+## Under the encoder - the one configuration where this could have flipped
+
+The row named the NVENC arm as the case that could turn a null-sink negative into a positive, because a real
+encoder is a slower writer and a slower writer is what a payload ring is for. Measured anyway, `SINK=nvenc`,
+3 rounds, same clip:
+
+| arm | render loop | pack+queue |
+|---|---|---|
+| ring off | **34.54 ms** | **4.31 ms** |
+| ring on | **34.61 ms** | **4.40 ms** |
+| delta | **+0.07 ms** | **+0.09 ms** |
+
+**It does not flip - it goes the other way, by a hair.** With the encoder present the ring is 0.07 ms slower
+on the loop and 0.09 ms more expensive on the pack line, which is the semaphore and the slot bookkeeping
+costing slightly more than the 12.44 MB copy they replace. Both differences are at the edge of the draw-to-draw
+spread (ring0 34.49/34.56/34.52), so the honest reading is "no effect, sign if anything negative", and the
+conclusion does not depend on the sink: **the pack cost is the transfer and the reader, not the copy.**
+
+The encoder also explains why the pack line barely moves between sinks at all (4.36 null against 4.31 nvenc):
+the writer consumes pinned slots at the same rate either way, because the payload is copied into ffmpeg's own
+buffer before the encoder sees it - which is exactly why a deeper ring has nothing to buy.
+
+## The picture: the pool is now correct
+
+Lossless ffv1 renders of both arms, then `gate_sweep --reference-kind config`:
+
+```
+494 frames, block 64
+worst share 0.00000% (frame 0), frames above 0.1%: 0
+worst block mean 0.00, peak 0
+IDENTITY: every frame is bit-identical between the two files
+```
+
+So the 12.6 dB bug that got the ring disabled is **gone** - the protocol now holds - and the ring still buys
+nothing. That is worth recording on its own: the next person who finds the "disabled because 12.6 dB" comment
+should not re-derive it.
+
+## Decision: the knob stays, off
+
+No adoption: 0.06 ms on a 34.4 ms frame is not worth a second payload path in the render loop, and the ring
+is not free of subtleties (a pooled frame cannot be emitted twice, which is why it is incompatible with
+temporal reuse). `RVE_PACK_RING=1` keeps the experiment reproducible in one environment variable, and the
+one-line instrumented warning names the pool when it is live.
+
+## Not covered
+
+- The split inside the 4.3 ms is NOT separated here (see below): the NVENC arm was run and did not move it.
+- The split inside the 4.32 ms (transfer vs writer consumption) is NOT separated here. Separating it needs a
+  null writer, which is a different experiment.
+- One card, one clip, one resolution. Two sinks (null and nvenc) - both negative.
+
+## Reproduce
+
+```bash
+ARMS="ring0 ring1" ARM_ENV_RING0="RVE_PACK_RING=0" ARM_ENV_RING1="RVE_PACK_RING=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null harness/scripts/wall_ab.sh
+ARMS="ring0 ring1" ARM_ENV_RING0="RVE_PACK_RING=0" ARM_ENV_RING1="RVE_PACK_RING=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/pack-ring harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <ring0.mkv> <ring1.mkv> --out pair.json \
+  --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix PK
+PYTHONPATH=. python3 harness/scripts/pack_ring_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-pack-ring.txt \
+       --records harness/docs/wsp/verified/records/int8-pack-ring.jsonl --bars harness/docs/claims-bars.json
+
+@claim K001 34.42 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim K002 34.36 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim K004 4.36 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim K005 4.32 ms "rounds [95af4551238ca2b0] n=2" measured
+@claim R001 -0.06 ms "rounds [95af4551238ca2b0] n=2" derived
+@claim R002 -0.04 ms "rounds [95af4551238ca2b0] n=2" derived
+@claim K101 34.54 ms "rounds [0f938831d44909aa] n=2" measured
+@claim K102 34.61 ms "rounds [0f938831d44909aa] n=2" measured
+@claim K104 4.31 ms "rounds [0f938831d44909aa] n=2" measured
+@claim K105 4.4 ms "rounds [0f938831d44909aa] n=2" measured
+@claim R101 0.07 ms "rounds [0f938831d44909aa] n=2" derived
+@claim R102 0.09 ms "rounds [0f938831d44909aa] n=2" derived
+@claim PK001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim PK002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim PK003 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim PK004 0.0 levels "frames [13137e4e7dd10e98] n=494" measured

@@ -12,7 +12,7 @@ was certifying (on one clip, 7 pairs read engine 0.082% / composition 0.266% / p
 engine 0.688% / composition 0.918% / peak 68 in an int8-forced run - because a forced verdict sets the
 reference's own ``int8Fit`` before the probe reads it), so its percentages are not comparable across runs.
 And in the shipped path the verdict never decided anything: the Fast preset forces int8 and the verdict is
-overwritten. The picture is judged on renders (`docs/wsp/verified/` - gate_sweep on the encoded pair),
+overwritten. The picture is judged on renders (`harness/docs/wsp/verified/` - gate_sweep on the encoded pair),
 not by this module. The certificate code is kept, not deleted: it is how the population defect above was
 found, and a future certification has to start from a pair set that is a function of the clip alone.
 

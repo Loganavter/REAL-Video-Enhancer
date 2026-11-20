@@ -1,13 +1,13 @@
 """Mark every verified file that cites a contaminated input, once, mechanically.
 
-`docs/wsp/sources.yaml` says which inputs are contaminated; a record's population items name them. This
+`harness/docs/wsp/sources.yaml` says which inputs are contaminated; a record's population items name them. This
 walks the verified corpus, and for each file with at least one such record inserts a header right after
 the H1. Idempotent (the marker line is the guard), and it never deletes or rewrites a number: the point
 is that a reader meets the contamination before the table, not after the conclusion.
 
 Usage:
-  python harness/scripts/mark_contaminated.py docs/wsp/sources.yaml --records 'docs/wsp/verified/records/*.jsonl' \
-      --dir docs/wsp/verified            # insert
+  python harness/scripts/mark_contaminated.py harness/docs/wsp/sources.yaml --records 'harness/docs/wsp/verified/records/*.jsonl' \
+      --dir harness/docs/wsp/verified            # insert
   python harness/scripts/mark_contaminated.py ... --check   # report only, exit 1 if any file is unmarked
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ BLOCK = """\
 > **Population flagged 2026-11-18.** {n} record(s) in this file ({ids}) name
 > `{named}` - a {label}. Every content number below was measured on that material, so none of them is
 > current. The BD replacement and the check that finds this mechanically are in
-> `docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
 > Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
 > label is still the wrong file.
 """
@@ -85,7 +85,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("manifest")
     ap.add_argument("--records", required=True)
-    ap.add_argument("--dir", default="docs/wsp/verified")
+    ap.add_argument("--dir", default="harness/docs/wsp/verified")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--refresh", action="store_true", help="rewrite an existing block")
     ap.add_argument("--skip", default="sources-bd.txt",

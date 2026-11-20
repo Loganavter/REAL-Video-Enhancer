@@ -1,0 +1,47 @@
+# Adversarial pair selection: the probe moves from 26x optimistic to 1.24x conservative
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 4 record(s) in this file (R001, R002, R003, R004) name
+> `csm20s.mkv, violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+The spread sample can only find damage it happens to land on. On Chainsaw the product's 16 triples
+produce **no depth-2 pair at all**, so the verdict rested on depth 1 and read 0.000% where the render
+shows 0.08876%.
+
+`probe(..., adversarial=k)` now scans the whole clip with the gate's own channel-max statistic (no model,
+one streaming pass), ranks the reuses it would make, and renders the top-k.
+
+| measurement | Chainsaw | Violet |
+|---|---|---|
+| spread sample (16 triples) | **0.000%** (no depth-2 pair) | 0.167% |
+| **adversarial top-13** | **0.110%** (control 0.083%) | **0.168%** (control 0.077%) |
+| full render, ground truth | 0.08876% | 0.56613% |
+
+On Chainsaw the number moves from 26x **under** the render to 1.24x **over** it, and the verdict flips
+from int8 to fp16 - a refusal of a configuration the render shows passing (0.08876 against a 0.1% bar).
+That is the safe direction: the probe now errs by refusing, not by admitting.
+
+On Violet nothing moves: with 70.8% of frames reused, the spread sample already lands on the damage, and
+the adversarial scan confirms 0.168%.
+
+## Two bugs the self-check caught
+
+- **`select=eq(n,index)` does not return the stream's frame index** under B-frames. Twelve of thirteen
+  ranked pairs came back with a measured share above the gate's threshold (0.18% against the 0.057% the
+  scan recorded) - pairs the gate would never serve. Replaced by one streaming pass that counts frames.
+- **Without a self-check the bogus pairs rendered a scene change as a composition error**: the first run
+  read 86.7%, with an fp16 control of 86.3% - the control is what made it obvious, because the gate's
+  own term cannot be 86% on a pair it certified. Every pair is now re-measured from the decoded pixels
+  and dropped if its share exceeds the gate's threshold.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/probe-adversarial.txt \
+       --records harness/docs/wsp/verified/records/probe-adversarial.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 0.11 % "pairs [14d7fad13e263e2d] n=13" measured
+@claim R002 0.083 % "pairs [14d7fad13e263e2d] n=13" measured
+@claim R003 0.0 % "pairs [65ef8098a72f82e4] n=4" measured
+@claim R004 0.168 % "pairs [f9987fa9d245f0a7] n=13" measured

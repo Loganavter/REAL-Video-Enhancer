@@ -1,0 +1,56 @@
+# Points 4, 5 and 7: the mirror, the invariant, the level, the discard rate and the block-max
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 5 record(s) in this file (R001, R002, R003, R004, R005) name
+> `csm20s.mkv, violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+## The pair order is now the gate's
+
+The probe rendered index 0 (the earliest of a decoded triple) against references 1 and 2 - a direction
+the gate never serves. Mirrored: the frame served is the later one, the reference earlier.
+
+| | before | after |
+|---|---|---|
+| Violet d1 | 0.108% | **0.095%** |
+| Violet d2 | 0.167% | 0.168% |
+| Chainsaw d1 / d2 | 0.000% / nan | 0.000% / nan |
+
+## The invariant still fires, and the cause is not the order
+
+`control_max <= sweep_max` is violated on both clips (0.083 against 0.07546, 0.077 against 0.07345).
+Mirroring removed one cause; the other is structural: **the probe re-decides the gate on its own decoded
+frames instead of replaying the render's decisions**, so its pair set is not a subset of the render's
+reuses and the invariant cannot hold by construction. It stays a valid detector - it fires exactly when
+the probe and the render disagree about which frames are reused - but satisfying it needs a replay the
+probe cannot do without the render.
+
+## Frame 475 is the same level
+
+share above 4: 0.45534%, above 6: 0.13860%, above 8: **0.07108%** - and the gate's recorded delta is
+0.07108. So the 0.07108 > 0.07 that looked like a level mix-up is the level-8 value, and the gap to the
+threshold is a **1.6% difference between the simulation and the product** in the same statistic.
+
+## The discard rate
+
+0 of 13 pairs discarded after the streaming reader replaced `select=eq(n,index)` (12 of 13 before it).
+The run is valid by the 20% rule, and the rule is now printed with the result.
+
+## The block-max second condition
+
+`--temporal_reuse_block_max 8` on Chainsaw 20 s: **83/481 reused, identical** to the share-only gate -
+free. And there is nothing left for it to catch there: over the channel-max gate's 78 reuses no frame is
+above the bar. Its value is structural (it bounds the per-block delta, which the share does not), and its
+benefit is unmeasured: on the calm cut at matched chain the worst is 0.02932%, well under the bar.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/probe-mirror-and-blockmax.txt \
+       --records harness/docs/wsp/verified/records/probe-mirror-and-blockmax.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 0.095 % "pairs [1b7dc617dd2d1f7b] n=8" measured
+@claim R002 0.077 % "pairs [1b7dc617dd2d1f7b] n=8" measured
+@claim R003 0.07108 % "frames [c34199ad098a741c] n=1" measured
+@claim R004 17.3 % "frames [718310b673d2e8ba] n=481" measured
+@claim R005 0.0 count "pairs [1b7dc617dd2d1f7b] n=8" measured

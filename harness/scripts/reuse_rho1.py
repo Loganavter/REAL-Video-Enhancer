@@ -7,7 +7,7 @@ frozen grain, and it needs no reference at all.
 
 Optionally measures the residual-reuse construction instead of a video: out = video + bilinear(LR_t - LR_ref),
 which is what "reuse with a correction" would emit if the correction is the upscaled LR difference (the
-algebra in docs/wsp/REVIEW-reuse-gate-2026-11-19.md, reviewer's step 1).
+algebra in harness/docs/wsp/REVIEW-reuse-gate-2026-11-19.md, reviewer's step 1).
 
 Usage:
   python3 harness/scripts/reuse_rho1.py --video on.mkv --lr clip.mkv [--radd --depth-log gate.log]

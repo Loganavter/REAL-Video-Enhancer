@@ -1,0 +1,88 @@
+# The shared-memory theory does not survive its own test - three ways, all negative
+
+Tested 2026-11-19 (local), RTX 4060 Ti. The plan this was meant to justify: leave Triton for a CUDA kernel that
+stages the three-row window in shared memory, on the argument that the hop's **first tap costs 0.59 ms** because
+its round trip has no warps to hide behind (`int8-hop-occupancy.txt`), and that smem is the classic fix.
+Records: `int8-hop-prefetch.jsonl`; raw: `logs/hop-prefetch/probe.json`, `logs/hop-smem-theory/`.
+
+## Test 1 - reorder the loads inside Triton (no CUDA needed)
+
+If the cost is a dependent round trip, issuing the nine loads before the nine dots should overlap them.
+
+| arm | ms | TOPS | vs today |
+|---|---|---|---|
+| rolled (today) | **1.546** | 98.9 | - |
+| unrolled (`static_range`) | 2.332 | 65.6 | -50.9% |
+| prefetch: nine loads, then nine dots | 3.108 | 49.2 | **-101.1%** |
+
+Codes identical in all three (0 of 132.7 M differ). **Holding the nine tiles costs more than the overlap saves**:
+nine 128x64 int8 tiles are 72 KB of registers per CTA, which collapses occupancy. That is the real reason the
+literature's "issue early" advice fails here - and the reason smem is supposed to help: it holds the window
+off-register.
+
+## Test 2 - the same mechanism, written in CUDA, without MMA
+
+A 40-line microbenchmark (`logs/hop-smem-theory/smem_bench.cu`) that isolates the address pattern: nine masked
+64-byte gathers per pixel against one cooperative load of a 3-row window into shared memory followed by nine smem
+reads. Scalar int8 sums, no tensor cores - deliberately, because the question is the memory mechanism, not the
+MMA.
+
+| arm | ms | vs gather9 |
+|---|---|---|
+| nine dependent gathers | **6.445** | - |
+| smem window, BM 64 | 6.725 | -4.4% |
+| smem window, BM 128 | 8.107 | **-25.8%** |
+| smem window, BM 256 | *invalid* | launch fails: 49.5 KB of dynamic smem exceeds the 48 KB default |
+
+Both arms produce identical sums, so this is one mechanism against another. **Staging in shared memory is
+slower.** The cooperative load costs a modulo per element, a `__syncthreads`, and a strided pattern - and the
+latency it saves is small because the taps were already hitting L2.
+
+## Test 3 - the number that explains tests 1 and 2
+
+`int8-hop-dram.txt`: **L2 hit rate 91.25%**. The nine taps do not round-trip to DRAM; they round-trip to **L2**,
+which on Ada is a few hundred cycles, not six hundred. There is far less latency to hide than the theory assumed,
+and both smem staging and load reordering pay their overhead for a saving that is not there.
+
+## What this means for the plan
+
+**The CUDA/smem project is not recommended, and I would not start it on this evidence.** The three tests above
+each attack the theory's own mechanism, and the mechanism fails in both directions: more registers (test 1) is
+worse, and off-register staging (test 2) is worse. The 2-week estimate would buy an unmeasured hope that is now
+*negatively* measured in its cheap forms.
+
+What the 0.59 ms per launch most plausibly is, given that memory latency has been ruled out as the dominant term,
+is **pipeline fill and drain per launch** - the MMA pipeline warming up over 16200 CTAs at 4 warps each, which
+neither more warps (measured worse), nor fewer CTAs (measured worse), nor a shorter latency to hide (measured
+irrelevant) can remove. That is a different diagnosis from the one the plan carried, and it does not have a
+known fix in either language.
+
+## Not covered
+
+- The microbenchmark has no MMA and one thread per pixel: it tests the memory mechanism in isolation, not the
+  shipped kernel's time. Its absolute numbers are not comparable to 1.55 ms - only the sign of the comparison is.
+- The BM 256 smem arm could not run (dynamic smem above 48 KB needs `cudaFuncSetAttribute`); it was measured as
+  invalid rather than reported as a win.
+- A CUDA kernel with a *hand-tuned* smem layout and MMA is not written, so "smem inside a real tensor-core
+  kernel" remains formally untested - but the two mechanisms it depends on are both negative above, and that is
+  the honest basis for not funding it.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_prefetch_probe.py --rounds 3 --iters 20 \
+    --out-file harness/docs/wsp/verified/logs/hop-prefetch/probe.json
+/opt/cuda/bin/nvcc -O3 -arch=sm_89 -shared -Xcompiler -fPIC -o smem_bench.so smem_bench.cu
+<install-python> smem_drive.py          # both files are in logs/hop-smem-theory/
+PYTHONPATH=. python3 harness/scripts/hop_prefetch_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-hop-prefetch.txt \
+       --records harness/docs/wsp/verified/records/int8-hop-prefetch.jsonl --bars harness/docs/claims-bars.json
+
+@claim P001 1.546 ms "frames [10cff28ea287d300] n=1" measured
+@claim P002 2.332 ms "frames [10cff28ea287d300] n=1" measured
+@claim P003 3.108 ms "frames [10cff28ea287d300] n=1" measured
+@claim P004 6.445 ms "frames [d4a113e952765a98] n=1" measured
+@claim P005 6.725 ms "frames [d4a113e952765a98] n=1" measured
+@claim P006 8.107 ms "frames [d4a113e952765a98] n=1" measured

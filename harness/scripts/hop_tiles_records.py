@@ -11,9 +11,9 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--halo", default="docs/wsp/verified/logs/hop-halo/probe.json")
-    ap.add_argument("--tile", default="docs/wsp/verified/logs/hop-tile2d/probe.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-hop-tiles.jsonl")
+    ap.add_argument("--halo", default="harness/docs/wsp/verified/logs/hop-halo/probe.json")
+    ap.add_argument("--tile", default="harness/docs/wsp/verified/logs/hop-tile2d/probe.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-hop-tiles.jsonl")
     a = ap.parse_args(argv)
     ha, ti = json.load(open(a.halo)), json.load(open(a.tile))
     d1 = hashlib.sha256(open(a.halo, "rb").read()).hexdigest()

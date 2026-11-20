@@ -1,0 +1,102 @@
+# The certificate built the body before the calibration frames arrived
+
+Found 2026-11-19 while chasing a 0.45% picture difference between two lossless renders of the same code.
+This is the cause, read off the run order in two logs from the same session, same clip, same settings - the
+only difference being whether the probe ran its certificate (`RVE_INT8_CERTIFY=1` versus plain).
+
+## The order, from the logs
+
+Certificate ON (`arm4`):
+
+```
+36  int8: start (tilesize=0, tile_upscaler=False, int8Fit=int8)
+38  int8: built (supports=True)                 <- body built and calibrated HERE
+41  int8 body first-frame sanity: 0.00000%
+80  int8 probe: engine 0.688% ... -> fp16       <- the probe is still running
+82  int8 calibration frames handed to the body: 24
+```
+
+Certificate OFF (`arm1`):
+
+```
+30  int8 probe: calibration only, 16 frames
+31  int8 calibration frames handed to the body: 24   <- frames arrive FIRST
+68  int8: built (supports=True)
+70  int8 body first-frame sanity: 0.00007%
+```
+
+The certificate runs the upscaler as its fp16 reference (`engine_ref=upscaleOption`). That call builds the
+int8 body - which, at that moment, has no `int8Frames`, so it calibrates on the single frame in hand
+(`body.calibrate(_frames or frame)`). The 24 spread frames arrive afterwards and go nowhere: the body is
+already built.
+
+## Why it matters
+
+Single-frame calibration is the failure this lane already paid for once: **0.116% composition against
+0.006%** for a spread sample (20x, `int8-body-hop` notes), and **0.566% against 0.050%** on Violet
+(`violet-calibration-fix`). So the certificate-on renders were not merely "a different draw" - they were
+the known-bad calibration, and the 0.45% picture difference is the size of that bug:
+
+| pair (lossless ffv1, 494 frames) | worst share | frames above 0.1% |
+|---|---|---|
+| certificate ON vs OFF, same code | 0.45050% | 356 |
+| arm with a 2 GB allocation, vs certificate ON | 0.45050% | 356 |
+| arm with the engine warmed, vs certificate ON | 0.41998% | 356 |
+
+Two side-arms that were built to test other mechanisms reproduced neither: an allocation of the quantised
+twin's size changed nothing, and warming the fp16 engine moved it by 0.03 pp. Neither the tail conv nor the
+calibration grids were unstable in isolation (0.00000% across allocation and warm-up states, measured at the
+layer). The instability was never numerical - it was ordering.
+
+## The fix
+
+`UpscaleTorch` no longer builds the body without calibration frames:
+
+```python
+if getattr(self, "int8Frames", None) is None:
+    log("int8: no calibration frames yet - the body is built on a later frame, with the probe's "
+        "spread sample (a single-frame calibration is 20x worse on composition)")
+    return None
+```
+
+So the spread sample is mandatory rather than best-effort, and a future certificate cannot quietly
+un-do it by calling the upscaler early. A run whose probe fails now renders fp16 instead of a
+single-frame-calibrated body, which is the correct side of that trade.
+
+## Not covered
+
+- **The picture has not been re-measured with the fix.** Every app-measured int8 content number in this
+  corpus was taken with the certificate on, i.e. with single-frame calibration. The model-referenced
+  numbers (`int8-scales-bd.txt`, body vs model 0.004-0.019%) came from `scripts/`, which calibrates
+  explicitly, so they are not affected - but the app-side numbers await re-taking
+  (`rve-int8-picture-remeasure-2026-11-19`).
+- One clip, one model, one card; the certificate-on connect is reproduced twice (two runs) but not at
+  other resolutions.
+- `auto` mode still certifies, so the same ordering hazard exists there until the invariant above is
+  exercised in that path too; the invariant should make it harmless, which is not the same as tested.
+
+## Reproduce
+
+```bash
+# certificate on and off, same code
+RVE_INT8_CERTIFY=1 <rve-backend.py ... --int8_fit int8 --output a.mkv ffv1>
+<same without the env> ...
+grep -an "int8 probe:\|int8: built\|calibration frames" arm*.log
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py a.mkv b.mkv --out s.json --reference-kind config
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-calibration-ordering.txt \
+       --records harness/docs/wsp/verified/records/int8-calibration-ordering.jsonl --bars harness/docs/claims-bars.json
+
+@claim A001 0.45049672067901236 % "frames [13137e4e7dd10e98] n=494" measured
+@claim A002 356.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim A003 6.23486328125 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim A004 60.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim B001 0.00318287037037037 % "frames [13137e4e7dd10e98] n=494" measured
+@claim B002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim B003 2.205810546875 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim B004 25.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim C001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim C002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim C003 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim C004 0.0 levels "frames [13137e4e7dd10e98] n=494" measured

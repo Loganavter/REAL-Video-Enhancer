@@ -1,0 +1,69 @@
+# The hop's 265 MB was a construction: the counters read 250.6 MB - and L2 carries 6.1x that
+
+Measured 2026-11-19 (local) with ncu 2026.4.0 on one `body_prologue_kernel` launch inside a real body run.
+Report: `logs/hop-dram/report.txt`; records: `int8-hop-dram.jsonl`.
+
+Row `rve-hop-dram-bytes-2026-11-20`, filed from the critique that "265 MB/hop and a 14.7 ms floor is a sum of
+tensors, not a measurement". The critique was right that it was a construction. It was wrong about the likely
+answer, and the counters say why.
+
+## The counters
+
+| counter | value |
+|---|---|
+| `dram__bytes_read.sum` | **132.84 MB** |
+| `dram__bytes_write.sum` | **117.63 MB** |
+| DRAM total | **250.6 MB** |
+| `dram__bytes.sum.per_second` | 156.7 GB/s |
+| `lts__t_sectors.sum` | 47.72 M sectors = **1528 MB** through L2 |
+| `lts__t_sector_hit_rate.pct` | 91.25% |
+| duration | 1.60 ms |
+
+**250.6 MB measured against 265 MB constructed: the construction was 5.5% high, not wrong.** At 288 GB/s that
+is a 0.87 ms floor, and the hop runs it in 1.60 ms - 54% of the DRAM roof, which is what the earlier
+throughput percentage said. The traffic floor stands, now on a counter.
+
+## The number that was not in anybody's model: L2 moves 6.1x the DRAM
+
+1528 MB through L2 for 250.6 MB of DRAM, i.e. **955 GB/s of L2 traffic**, at a 91.25% hit rate. That is the
+nine taps: each pixel's 64-byte row is fetched by the `dy,dx` neighbours, so the compulsory 132.84 MB is read
+once from DRAM and **~6 times from L2**. The read count matches one read per pixel almost exactly (132.84 against
+132.7 constructed), which is the reassuring part: the gathers are not re-reading DRAM nine times.
+
+Three things follow.
+
+1. **"The hop re-reads its input nine times" was never true of DRAM** - it is true of L2, and L2 is what is at
+   44-50% while DRAM sits at 54% and the SM at 74%. The three roofs are within 25 points of each other: this is a
+   kernel pressing on all three at once, which is why every single-lever change came out flat.
+2. **The staging idea now has a target and a size.** A CTA that loads its three-row window once and forms the
+   nine taps from it would cut L2 traffic from ~6x to ~3x of DRAM - roughly 750 MB instead of 1528 - which is the
+   first mechanism anyone has named that touches the *lowest* of the three roofs without adding arithmetic. That
+   is `rve-hop-smem-staging-2026-11-20`, and its acceptance now has a number to beat.
+3. **The 14.7 ms figure in the corpus should be quoted as 0.87 ms/hop -> 13.9 ms**, i.e. the measured floor, not
+   the constructed one. The difference is small but it is the difference between a derived number and a
+   measured one, and this lane has paid for that distinction repeatedly.
+
+## Not covered
+
+- One launch, one frame, one card; DRAM bytes are per-launch.
+- The write counter reads 117.6 against 132.7 constructed, i.e. 15 MB of the output was still in L2 when the
+  kernel ended - a measurement of write-back timing, not of missing writes.
+- No conclusion about time: the timing claim stays with the CUDA events; this file only settles traffic.
+
+## Reproduce
+
+```bash
+~/.local/nsight/2026.4.0/ncu --target-processes all -k regex:body_prologue_kernel --launch-skip 20 \
+  --launch-count 1 --metrics dram__bytes_read.sum,dram__bytes_write.sum,lts__t_sectors.sum,\
+lts__t_sector_hit_rate.pct,dram__bytes.sum.per_second,gpu__time_duration.sum <install-python> <target.py>
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-hop-dram.txt \
+       --records harness/docs/wsp/verified/records/int8-hop-dram.jsonl --bars harness/docs/claims-bars.json
+
+@claim D001 132.84 MB "frames [10cff28ea287d300] n=1" measured
+@claim D002 117.63 MB "frames [10cff28ea287d300] n=1" measured
+@claim D003 1528.0 MB "frames [10cff28ea287d300] n=1" measured
+@claim D004 91.25 % "frames [10cff28ea287d300] n=1" measured
+@claim D005 156.67 GB/s "frames [10cff28ea287d300] n=1" measured
+@claim D006 1.6 ms "frames [10cff28ea287d300] n=1" measured

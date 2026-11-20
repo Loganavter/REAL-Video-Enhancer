@@ -11,8 +11,8 @@ the population label and in ``run``, while ``config``/``instrument``/``session``
 equal, which is what ``Store._relation`` demands of a ratio.
 
 Usage:
-  python harness/harness/scripts/wall_ab_records.py --logs docs/wsp/verified/logs/wall-ab \
-      --out docs/wsp/verified/records/int8-wall-ab.jsonl
+  python harness/scripts/wall_ab_records.py --logs harness/docs/wsp/verified/logs/wall-ab \
+      --out harness/docs/wsp/verified/records/int8-wall-ab.jsonl
 """
 from __future__ import annotations
 
@@ -69,8 +69,8 @@ def median(vals: list[float]) -> float:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--logs", default="docs/wsp/verified/logs/wall-ab")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-wall-ab.jsonl")
+    ap.add_argument("--logs", default="harness/docs/wsp/verified/logs/wall-ab")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-wall-ab.jsonl")
     ap.add_argument("--first-round", type=int, default=2,
                     help="first round kept in the median (2 drops the draw taken right after engine load)")
     args = ap.parse_args(argv)

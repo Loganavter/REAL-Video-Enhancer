@@ -13,9 +13,9 @@ where more than one plan is alive.
 Usage (one GPU job at a time; a build at opt5/iters8 on 1080p costs ~10-20 min):
   F=~/.cache/opencode/venvs/trt310/bin/python
   # measure an existing plan: no build, ~1 min
-  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/probe_int8_tactics.py --plan /tmp/opencode/compact2x_1080p_int8.plan
+  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/probe_int8_tactics.py --plan /tmp/opencode/compact2x_1080p_int8.plan
   # rebuild from the same QDQ graph at another tiling level
-  flock -n /var/tmp/opencode/gpu.lock $F harness/harness/scripts/probe_int8_tactics.py \
+  flock -n /var/tmp/opencode/gpu.lock $F harness/scripts/probe_int8_tactics.py \
       --qdq /tmp/opencode/compact2x_1080p.qdq.onnx --tiling none --build-only
 """
 from __future__ import annotations

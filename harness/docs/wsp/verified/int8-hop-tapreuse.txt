@@ -1,0 +1,109 @@
+# Tap reuse in Triton: the idea is expressible, and `tl.gather` costs thirteen times what it saves
+
+Measured 2026-11-19 (local), one hop of the int8 body on its own codes (frame 169), three interleaved rounds,
+medians of rounds 2+. Records: `int8-hop-tapreuse.jsonl`; raw: `logs/hop-tapreuse/probe.json`; kernel:
+`harness/scripts/hop_tapreuse_probe.py`.
+
+The premise was the strongest one left in the queue (`rve-hop-fuse2-cascade`, re-filed as tap reuse): the hop
+reads every pixel **nine times** - 9 x 132.71 MB = 1194 MB of logical reads - and L2 sees 1528.7 MB, i.e. 128% of
+that, so coalescing and the NHWC layout are fine; **LSU is the highest-utilised pipe at 73.9%**. Six families of
+schedule knobs (BLOCK_M, warps, cache policy, tile shape, channel split, batching) were tried around those nine
+gathers and all lost; none touched the reads. If the reads fell, the hop could approach its compute roof, and
+sixteen hops would go from 24.30 to 13.90 ms.
+
+The blocker used to be that Triton has no explicit shared memory. **Triton 3.5 has `tl.gather`**, which makes the
+horizontal shift expressible inside a tile, so the family was reopened: load the three rows once, form the nine
+taps by shifting in registers.
+
+## Measured
+
+| arm | ms | TOPS | vs today |
+|---|---|---|---|
+| today, nine gathers | **1.478** | 103.4 | - |
+| three rows loaded once + nine register gathers, BLOCK_M 128 | **19.895** | 7.7 | **-1246%** |
+| the same at BLOCK_M 64 | 11.928 | 12.8 | -707% |
+
+Codes identical in both arms (0 of 132.7 M differ), so this is the same arithmetic through a different data path.
+
+**`tl.gather` costs thirteen times the whole kernel.** It lowers to a lane permutation - in effect a shared-memory
+round trip per element - and doing nine of them per output row is far more expensive than nine L1/L2-resident
+loads, which is exactly what the current kernel does. The mechanism (fewer reads) is real; the only in-language
+way to build it is not.
+
+## What the power-of-two restriction cost on top
+
+`tl.arange` requires a power of two, so the three-row band cannot be BLOCK_M+2 wide: it was loaded 2*BLOCK_M wide
+with two lanes wasted, which caps this formulation at **1.5x fewer reads** (6 per pixel against 9) rather than the
+3.05x a hand-written band gets, or the 8x that vertical reuse across tiles would. So even had the gather been
+free, Triton's arithmetic would have delivered half the available reduction.
+
+## Where this leaves the family
+
+| route | status |
+|---|---|
+| Triton, register gathers | **closed here**: `tl.gather` 13x the kernel, and the band is capped at 1.5x by `tl.arange` |
+| Triton, pipelined taps (`num_stages`) | closed earlier: 2.497 / 2.635 ms against 2.198 |
+| Triton, reordered loads / hoisted weights | closed earlier: -101% and -54% |
+| CUDA with explicit shared memory | **not measured on the real shape**; a microbenchmark of the same mechanism was -26% |
+
+So the one big lever that would attack the actual limiter now rests entirely on a hand-written kernel, and every
+in-language expression of it has been measured and lost. That is a stronger statement than "closed" - it is the
+boundary of the instrument, and it took one session to establish rather than the two the row budgeted.
+
+## Not covered
+
+- One card, one hop, one frame's codes; `tl.gather`'s cost is a Triton 3.5 codegen fact, not a hardware one.
+- The CUDA kernel is not written. Its prior is unfavourable (the microbenchmark) but its ceiling is the largest
+  in the queue (-10.4 ms), so it remains a decision rather than a closed question.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/hop_tapreuse_probe.py --rounds 3 --iters 20 \
+    --out-file harness/docs/wsp/verified/logs/hop-tapreuse/probe.json
+PYTHONPATH=. python3 harness/scripts/hop_tapreuse_records.py
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-hop-tapreuse.txt \
+       --records harness/docs/wsp/verified/records/int8-hop-tapreuse.jsonl --bars harness/docs/claims-bars.json
+
+@claim U001 1.478 ms "frames [10cff28ea287d300] n=1" measured
+@claim U002 19.895 ms "frames [10cff28ea287d300] n=1" measured
+@claim U003 11.928 ms "frames [10cff28ea287d300] n=1" measured
+
+## The mechanism, measured: staging moves the wrong counter
+
+An outside reader supplied the explanation this family needed, and the counters confirm it. The hop's instruction
+mix, measured with ncu on the shipped kernel (one launch, frame 169):
+
+```
+sm__inst_executed.sum             230 752 800 inst
+sm__inst_executed_pipe_lsu.sum     52 358 400 inst   = 22.7% of all instructions
+gpu__time_duration.sum                    1.52 ms
+```
+
+**Shared-memory staging does not reduce the instructions that hit the LSU - it increases them.** A staged variant
+pays a global load, an smem store and an smem load where today pays one global load (which is L1/L2-resident
+anyway, at a 91% L2 hit rate):
+
+| variant | global loads | smem stores | smem loads | LSU instructions |
+|---|---|---|---|---|
+| today | 9 per output pixel | 0 | 0 | **9** |
+| 2-D tile T=32 (1.13x reads) | 1.13 | 1.13 | 9 | 11.26 (**+25%**) |
+| 3-row band, BM 128 (3.05x reads) | 3.05 | 3.05 | 9 | 15.09 (**+68%**) |
+
+LSU is already the busiest pipe (73.9% of its issue slots). Staging buys a reduction in L2 *traffic* - which is
+healthy at 128% of the logical volume - and pays for it in the one resource that is saturating. That single
+sentence predicts, without any theory, the three measurements already on this page: the register-gather route
+13.5x slower, the pipelined taps -12/-20%, the CUDA microbenchmark of cooperative staging -26%.
+
+The register route fails for a different and equally structural reason: in an mma layout, adjacent spatial
+positions live in different lanes, so intra-register reuse is *inter-lane*, and `tl.gather` prices that at 13.5x.
+A register-local alternative (per-thread spatial blocks, dp4a) has a roof of 34 SM x 64 INT32 x 8 ops x 2.54 GHz =
+**44.2 TOPS**, against the 103.4 the mma kernel already reaches - i.e. the non-tensor-core escape is 2.3x worse
+than what we have.
+
+So the family is closed **by mechanism**: the only levers that reduce reads pay in the saturated resource, and the
+only lever that avoids that costs more arithmetic than it saves. What the -10.4 ms ceiling actually required was
+removing the FIRST tap's exposed latency (0.590 ms, 37% of the hop) - a latency-hiding problem, which staging does
+not touch, because the first data still has to arrive.

@@ -8,7 +8,7 @@ Two instruments, two populations, deliberately not merged:
   the reader's own RGB conversion and its clamping at saturated pixels. The share of clipped pixels is
   emitted next to it, because that is the part of the residual that is not depth.
 
-Usage: python harness/harness/scripts/tenbit_pipe_records.py [--probe ...] [--out ...]
+Usage: python harness/scripts/tenbit_pipe_records.py [--probe ...] [--out ...]
 """
 from __future__ import annotations
 
@@ -30,8 +30,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/tenbit-pipe/probe.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/tenbit-pipe.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/tenbit-pipe/probe.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/tenbit-pipe.jsonl")
     args = ap.parse_args(argv)
 
     pr = json.load(open(args.probe))

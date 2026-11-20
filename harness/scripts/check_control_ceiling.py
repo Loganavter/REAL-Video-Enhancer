@@ -37,7 +37,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("control")
     ap.add_argument("sweep")
-    ap.add_argument("--records", default="docs/wsp/verified/records")
+    ap.add_argument("--records", default="harness/docs/wsp/verified/records")
     args = ap.parse_args()
 
     control, cpath = load(args.control, args.records)

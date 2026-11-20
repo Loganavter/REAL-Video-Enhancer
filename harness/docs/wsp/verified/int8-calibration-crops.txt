@@ -1,0 +1,93 @@
+# Calibration on crops: 15.7x cheaper, and the picture did not get worse
+
+Measured 2026-11-18 on BD Violet (`bd_violet20s.mkv`, 494 frames), 1080p LR, `2x-Futsuu-Anime`, one GPU job,
+body against the model's own fp16 output on four held-out frames (29, 44, 274, 400) - frames that are in
+neither calibration arm.
+
+Why: calibration was the last big cost in the probe (21.1 s of its 45.1 s in `probe-cost.txt`), and after the
+certificate was removed it is *all* that is left. The field calibrates post-training quantisation on a small
+unlabelled set - a few forward passes over crops - and the grids here are per-channel **maxima**, so the
+question is concrete: does a maximum over 32x fewer samples under-cover the ranges?
+
+## The two arms
+
+| arm | samples | pixels per channel | calibrate | worst share | peak |
+|---|---|---|---|---|---|
+| full frames (today) | 24 x 1080p | 49.8 M | **7.09 s** | 0.02256% | 26 |
+| crops 256x256, 4 per frame | 96 crops | 6.3 M | **0.45 s** | 0.01881% | 19 |
+
+**The maximum over 32x fewer samples did not hurt: the crop-calibrated body is 1.2x *better* on the worst
+held-out frame and its peak is lower (19 against 26), both far under the 0.1% share bar.** The feared
+mechanism - lower ceiling, clipping, a different error rather than a softer one - did not show up on this
+material. That is one clip and one draw; it is enough to stop treating full frames as necessary, not enough
+to call the two arms equivalent (see below).
+
+## What this changes
+
+- Calibration cost falls from seconds to a fraction of a second: **15.7x** on the same frames and the same
+  body. In the probe, whose calibration path runs its own hooked forwards, the same ratio applies to its
+  21.1 s.
+- With the certificate already withdrawn, the probe's remaining cost is decode (2.9 s) plus calibration;
+  at 0.45 s the calibration stops being a decision input and int8's break-even on BD falls from 2.9-3.5 min
+  of video to roughly the decode alone.
+
+## Not covered, and one number that does not match the record
+
+- **n=1 per arm.** One calibration draw each, one clip, four test frames. The two arms differ by
+  0.00375 pp - far below the bar either way, but this is not an A/A: a second draw could move it.
+- **The peak moved too** (26 -> 19) and nothing here explains that direction; a lower ceiling should clip
+  more, not less. Worth one repeat before the peak number is quoted.
+- **`crop-p` was not run.** A percentile ceiling is not implemented in `Int8Body` (the grids are maxima);
+  it was going to be the fallback if crops under-covered, and they did not.
+- **The calibration wall clock here (7.09 s) is not the probe's (21.1 s)** for the same 24 frames: the probe
+  runs its own hooked forwards (`Int8Probe._calibrate`), the body's `calibrate` runs `_measure`. The ratio is
+  what transfers, not the absolute.
+- Not covered: another model, 1440x1080, 10-bit sources, a clip whose bright content is concentrated (the
+  case where fewer samples should hurt most).
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock env PYTHONPATH=. <install-python> \
+    harness/scripts/calibration_coverage.py \
+    --model "<install>/custom_models/2x-Futsuu-Anime(1).pth"
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-calibration-crops.txt \
+       --records harness/docs/wsp/verified/records/int8-calibration-crops.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 0.02256 % "clips [3a0964f03208b6f8] n=1" measured
+@claim R002 7.09 s "clips [3a0964f03208b6f8] n=1" measured
+@claim R003 0.01881 % "clips [3a0964f03208b6f8] n=1" measured
+@claim R004 0.45 s "clips [3a0964f03208b6f8] n=1" measured
+
+## Correction 2026-11-19: the sample was clustered, and the numbers are re-taken
+
+The arms above were reported as "24 spread frames", but `harness/scripts/calibration_coverage.py` carried a hardcoded
+`total = 48`, so every calibration frame came from the **first two seconds** of a 494-frame clip - a clustered
+sample wearing a spread label. Found while pointing the script at a 6-minute source; the script now asks
+`ffprobe` for the frame count and clamps to what it decoded.
+
+Re-taken on the same clip with the sample spread over the whole file (records
+`int8-calibration-crops-spread.jsonl`):
+
+| arm | calibrate | worst share | peak |
+|---|---|---|---|
+| 24 full frames, spread | 6.77 s | **0.02159%** | 17 |
+| 96 crops of 256x256 | 0.42 s | **0.02139%** | 16 |
+
+So the conclusion survives and gets cleaner: **16x cheaper, and 0.9% apart on the worst held-out frame**,
+with the crop arm marginally better. Two things the clustered sample had distorted:
+
+- the absolute values (0.02256 / 0.01881 -> 0.02159 / 0.02139) and the calibration cost (7.09 -> 6.77 s);
+- **the peak direction**: the old run moved the peak 26 -> 19 in the direction a lower ceiling should not,
+  and that anomaly is gone here (17 vs 16). It was an artefact of which frames were sampled, not a property
+  of the crops.
+
+The earlier numbers are not deleted: they describe the first two seconds and are labelled as such.
+
+
+@claim S001 0.02159 % "clips [3a0964f03208b6f8] n=1" measured
+@claim S002 6.77 s "clips [3a0964f03208b6f8] n=1" measured
+@claim S003 0.02139 % "clips [3a0964f03208b6f8] n=1" measured
+@claim S004 0.42 s "clips [3a0964f03208b6f8] n=1" measured

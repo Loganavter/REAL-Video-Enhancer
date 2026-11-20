@@ -18,15 +18,15 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--split", default="docs/wsp/verified/logs/body-build-split.json")
-    ap.add_argument("--certdir", default="docs/wsp/verified/logs/cert-picture")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-startup-split2.jsonl")
+    ap.add_argument("--split", default="harness/docs/wsp/verified/logs/body-build-split.json")
+    ap.add_argument("--certdir", default="harness/docs/wsp/verified/logs/cert-picture")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-startup-split2.jsonl")
     a = ap.parse_args(argv)
 
     def sha(p: str) -> str:
         return hashlib.sha256(open(p, "rb").read()).hexdigest()
 
-    warm = json.load(open("docs/wsp/verified/logs/body-build-warm.json"))["arms"]["warm"]
+    warm = json.load(open("harness/docs/wsp/verified/logs/body-build-warm.json"))["arms"]["warm"]
     cold = json.load(open(a.split))["arms"]["warm"]        # the second run, TRITON_CACHE_DIR empty
     st = Store(session="s-2026-11-19T15:30:00+03:00")
     pop = Population.of("process starts", ("body-build#warm-triton", "body-build#cold-triton"),
@@ -34,9 +34,9 @@ def main(argv=None) -> int:
     cfg = "2x-Futsuu-Anime(1).pth, 1920x1080, K=2, calibration on 4 crops per frame"
     n = 1
     for value, note, art in (
-        (warm["build_s"], "build (grids -> int8 weights)", "docs/wsp/verified/logs/body-build-warm.json"),
-        (warm["first_call_s"], "first body call, Triton cache WARM", "docs/wsp/verified/logs/body-build-warm.json"),
-        (warm["steady_call_s"], "steady-state call (median of 5)", "docs/wsp/verified/logs/body-build-warm.json"),
+        (warm["build_s"], "build (grids -> int8 weights)", "harness/docs/wsp/verified/logs/body-build-warm.json"),
+        (warm["first_call_s"], "first body call, Triton cache WARM", "harness/docs/wsp/verified/logs/body-build-warm.json"),
+        (warm["steady_call_s"], "steady-state call (median of 5)", "harness/docs/wsp/verified/logs/body-build-warm.json"),
         (cold["first_call_s"], "first body call, Triton cache COLD (compiled from scratch)", a.split),
     ):
         st.emit(Record(value=float(value), unit="s", population=pop,
@@ -55,7 +55,7 @@ def main(argv=None) -> int:
         st.emit(Record(value=float(j["worst_share"]), unit="%", population=frames,
                        instrument="channel-max |delta| in RGB over 64px blocks (gate_sweep --reference-kind config)",
                        config=label, session=st.session, statistic="worst_of", tier="measured",
-                       id=f"CP{n:03d}", run="harness/scripts/wall_ab.sh + harness/harness/scripts/gate_sweep.py",
+                       id=f"CP{n:03d}", run="harness/scripts/wall_ab.sh + harness/scripts/gate_sweep.py",
                        artifact=os.path.join(a.certdir, f"{arm}.json"),
                        extra={"artifact_sha256": sha(os.path.join(a.certdir, f"{arm}.json")),
                               "arm": arm, "peak": j["worst_peak"], "frames_above_bar": j["frames_above_bar"]}))

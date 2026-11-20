@@ -1,7 +1,7 @@
 """Records for the 6-bit-codes falsifier: two variants against the 8-bit body, and the control.
 
-Usage: python harness/harness/scripts/sub8_records.py [--probe docs/wsp/verified/logs/sub8/probe.json]
-                                      [--out docs/wsp/verified/records/int8-sub8-codes.jsonl]
+Usage: python harness/scripts/sub8_records.py [--probe harness/docs/wsp/verified/logs/sub8/probe.json]
+                                      [--out harness/docs/wsp/verified/records/int8-sub8-codes.jsonl]
 """
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ from harness.core import Population, Record, Store  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--probe", default="docs/wsp/verified/logs/sub8/probe.json")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-sub8-codes.jsonl")
+    ap.add_argument("--probe", default="harness/docs/wsp/verified/logs/sub8/probe.json")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-sub8-codes.jsonl")
     args = ap.parse_args(argv)
 
     pr = json.load(open(args.probe))

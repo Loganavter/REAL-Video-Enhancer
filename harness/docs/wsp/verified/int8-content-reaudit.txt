@@ -1,0 +1,67 @@
+# Audit: does any current number rest on the single-frame calibration?
+
+Written 2026-11-19, after the ordering bug (`int8-calibration-ordering.txt`) made every app render of the
+int8 body suspect: until that day the certificate's `engine_ref` call built the body before its calibration
+frames arrived, so the body calibrated on one frame.
+
+The question this answers: **which recorded numbers were taken in that configuration, and does anything
+current rest on them?** Method: enumerate every record in the corpus (479 across 54 files), classify by
+instrument, and isolate the class "a decode of two app renders whose config mentions the int8 body". No new
+GPU work - the answer is a property of the corpus.
+
+## What was found
+
+| class | records |
+|---|---|
+| probe (instrument is the int8 probe) | 135 - withdrawn from the evidence chain 2026-11-19 |
+| app timing (loop, phase counter, profile) | 78 - not picture |
+| kernel / plan / CUDA-event | 26 - not the app |
+| body vs model (scripts, explicit calibration) | 2 |
+| render pair from the app on the int8 body | **6** |
+| everything else (gate counters, source checks, arithmetic) | 232 |
+
+The six app-render int8 content records are in three files, and **all three files are already marked
+`population: contaminated input`** - their measurements are on the 4 Mbps re-encodes retracted on
+2026-11-18, so they were non-current before today's bug and for an unrelated reason:
+
+| file | records | why it is not current |
+|---|---|---|
+| `int8-and-violet-sweeps.txt` | R001 0.08876%, R002 0 frames | contaminated input |
+| `violet-calibration-fix.txt` | R001 0.12727%, R004 7.31x | contaminated input |
+| `violet-int8-forced.txt` | R001 0.56613%, R002 372 frames | contaminated input **and** the withdrawn single-frame reading |
+
+## The answer
+
+**No current record rests on the single-frame calibration.** The numbers that do survive are the
+model-referenced ones (`int8-scales-bd.txt`, body vs model 0.00442-0.01917%), and they come from `scripts/`,
+which calibrates explicitly and never went through the certificate path.
+
+So the ordering bug was real - it changed the picture by 0.45050% between two renders - and its blast radius
+on the *record* is zero, because every app-render int8 content number had already been retired by the older
+BD-population retraction. The wall-clock numbers are untouched either way: a picture difference does not
+move a loop time.
+
+## What this does NOT cover
+
+- **Numbers quoted only in prose.** A figure that never became a record cannot be classified mechanically.
+  The corpus has 213 `@claim` lines for 479 records, so a number can live in a sentence and be inherited by
+  nothing; if one of those was taken in the buggy configuration, this audit cannot see it. Re-tell such a
+  number only from `harness/docs/wsp/verified/`.
+- **The fix itself is verified only at one clip and one model** (494 frames, BD Violet, `2x-Futsuu-Anime`).
+  That is enough to say the ordering hazard existed and is closed in code; it is not a survey.
+- **`auto` mode** still certifies, so it exercises the same early-upcaller path. The invariant makes it
+  harmless by construction (the body refuses to build without frames), which is not the same as tested.
+
+## Reproduce
+
+```bash
+PYTHONPATH=. python3 - <<'PY'
+import json, glob
+for p in sorted(glob.glob('harness/docs/wsp/verified/records/*.jsonl')):
+    for line in open(p):
+        r = json.loads(line)
+        if 'ffmpeg decode of both renders' in (r.get('instrument') or '').lower() \
+           and 'int8' in ((r.get('config') or '') + (r.get('run') or '')).lower():
+            print(p.split('/')[-1], r['id'], r['value'], r['unit'])
+PY
+```

@@ -4,7 +4,7 @@ The ladder is the evidence for the lever this row turned into - `s[c] = max(s_in
 is a ladder and not a choice between the two shipped modes. Every K costs the same arithmetic (the fold cancels),
 so the population is frames and the only quantity is the gross-error share.
 
-Usage: python harness/harness/scripts/int8_grid_k_records.py [--ladder ...] [--out ...] [--table]
+Usage: python harness/scripts/int8_grid_k_records.py [--ladder ...] [--out ...] [--table]
 """
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ ORDER = ("per_tensor", "K=1", "K=2", "K=3", "K=4", "per_channel")
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ladder", default="docs/wsp/verified/logs/grid-k/ladder.jsonl")
-    ap.add_argument("--out", default="docs/wsp/verified/records/int8-grid-k-ladder.jsonl")
+    ap.add_argument("--ladder", default="harness/docs/wsp/verified/logs/grid-k/ladder.jsonl")
+    ap.add_argument("--out", default="harness/docs/wsp/verified/records/int8-grid-k-ladder.jsonl")
     ap.add_argument("--table", action="store_true", help="print the markdown table the page quotes")
     args = ap.parse_args(argv)
 

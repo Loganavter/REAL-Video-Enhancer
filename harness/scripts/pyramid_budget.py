@@ -15,8 +15,8 @@ memory system (L2 hit rate under this access pattern), and it needs ncu counters
 Phase 1's job is to say whether the arithmetic is worth a phase 2 at all.
 
 Usage:
-  python3 harness/harness/scripts/pyramid_budget.py                    # 1080p and 4K
-  python3 harness/harness/scripts/pyramid_budget.py --width 1920 --height 1080 --emit /tmp/opencode/e29.jsonl
+  python3 harness/scripts/pyramid_budget.py                    # 1080p and 4K
+  python3 harness/scripts/pyramid_budget.py --width 1920 --height 1080 --emit /tmp/opencode/e29.jsonl
 """
 from __future__ import annotations
 

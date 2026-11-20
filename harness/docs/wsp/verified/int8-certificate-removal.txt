@@ -1,0 +1,80 @@
+# Withdrawing the probe's certificate changed the picture by 0.45% - it was not a logging-only change
+
+Measured 2026-11-18/19, BD Violet, 494 frames, int8 body, reuse off, **ffv1 (lossless) sink** so the
+comparison is not also a measurement of the encoder. Four renders, three comparisons:
+
+| pair | worst share | frames above 0.1% | peak | verdict |
+|---|---|---|---|---|
+| today **with** certificate vs the pre-change tree (462bf94f) | 0.00000% | 0 | 0 | **IDENTITY, 494/494** |
+| today **without** certificate vs the pre-change tree | 0.45050% | 356 | 60 | differs |
+| today with vs today without certificate | 0.45050% | 356 | 60 | differs |
+| A/A: today without, two renders | 0.00000% | 0 | 0 | IDENTITY |
+
+The only variable that separates the identity pair from the differing pair is **whether the probe runs its
+certificate**. Everything else - the tree, the sink, the encoder settings, the clip, the card state - is
+held fixed, and the A/A says the pipeline is otherwise reproducible inside one code state.
+
+## What this means, and why it is worse than it looks
+
+The certificate was withdrawn from the evidence chain on 2026-11-19 (its pair set moved with the
+configuration, and the shipped path overwrote its verdict) and removed from the code path to save 33.4 s of
+startup. That was treated as a change to *reporting* and to *cost*. It is also a change to the **picture**.
+
+The mechanism is not isolated here, but the candidates are all lazy-first-call state that the certificate
+touches and a plain render does not:
+
+- cudnn's algorithm choice for the tail or body convolutions depends on the free-memory state when it is
+  chosen, and the certificate allocates the quantised twin (~2 GB) before the render starts;
+- the certificate runs the fp16 TensorRT engine as its reference (`engine_ref=upscaleOption`), so it warms
+  the engine and its tactic cache before the first real frame.
+
+Either way the consequence is the same and it is a verdict-level fact: **the app's pixels are not a function
+of the configuration alone.** An A/A that holds the code fixed can read identity while a one-line change to
+allocation history moves half the clip across the bar. Every picture number in this lane was measured with
+the certificate present; the configuration that ships now does not have it.
+
+## What is NOT claimed here
+
+- **The mechanism is not identified.** Memory state and engine warm-up are two candidates and this file
+  separates neither; the discriminating experiment is an allocation-only perturbation (allocate the same
+  2 GB and free it) against the certificate.
+- **Which side is "right" is not judged.** 0.45% is a difference, not an error; against the model the
+  certificate-on render may be no closer than the certificate-off one. That needs the model reference, not
+  this pair.
+- **The wall-clock results are unaffected**: `int8-wall-ab.txt` records loop times, and a 0.45% picture
+  difference at the same frame time does not touch a ratio.
+- **Everything upstream of the body is unaffected**: the difference lives in the int8 tail/body arithmetic
+  (the fp16 arms were not part of this experiment).
+
+## Reproduce
+
+```bash
+# baseline (today, certificate off - the shipped path)
+CLIPS=bd_violet20s.mkv ROUNDS=2 SINK=ffv1 RENDERS=<dir> harness/scripts/wall_ab.sh
+# the diagnostic override
+RVE_INT8_CERTIFY=1 <the same rve-backend.py invocation>
+# and the pre-change tree
+git worktree add <dir> 462bf94f && (render from its backend/)
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py NEW OLD --out stats.json \
+    --reference-kind config --config "..."
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-certificate-removal.txt \
+       --records harness/docs/wsp/verified/records/int8-certificate-removal.jsonl --bars harness/docs/claims-bars.json
+
+@claim A001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim A002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim A003 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim A004 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim B001 0.45049672067901236 % "frames [13137e4e7dd10e98] n=494" measured
+@claim B002 356.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim B003 6.23486328125 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim B004 60.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim C001 0.45049672067901236 % "frames [13137e4e7dd10e98] n=494" measured
+@claim C002 356.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim C003 6.23486328125 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim C004 60.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim D001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim D002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim D003 0.0 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim D004 0.0 levels "frames [13137e4e7dd10e98] n=494" measured

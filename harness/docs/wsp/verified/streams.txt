@@ -1,0 +1,24 @@
+# Two streams do not overlap on this card (task C, strips)
+
+Measured 2026-11-17 with `harness/scripts/probe_strips.py`: one plan deserialized into independent engines with
+independent contexts, one CUDA stream each. The reported value is `concurrent / serial` per-frame time,
+so **1.00 means no overlap** (the pair takes twice as long as one frame) and 0.50 would be perfect
+overlap.
+
+Two plans, three interleaved rounds each: a split fp16 plan (111 layers, 87 ms solo) and a fused one
+(24 layers, 54 ms solo). Both read **1.001x**, with SM at 100.0% and 155-162 W of the card's 165 W cap
+during the concurrent rounds. A third context on the fastest plan changes nothing (1.001x).
+
+So the strips proposal cannot pay its halo tax (1.067x at two strips): the second stream contributes
+1.00x of throughput. The card is power-limited at full SM occupancy, so there is no idle lane.
+
+Instrument history, kept because both failures produced plausible numbers: contexts' buffers were
+freed on return (dangling addresses, a 50 ms plan "ran" in 0.07 ms), and CUDA events recorded outside
+the stream context timed the host. The current instrument is wall clock around one synchronize; it
+reads ~6% above `bench_plan.py`'s events on the same plan, which is enqueue overhead.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/streams.txt \
+       --records harness/docs/wsp/verified/records/streams.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 1.001 x "rounds [a4c54229b5a868cd] n=3" measured
+@claim R002 1.001 x "rounds [a4c54229b5a868cd] n=3" measured

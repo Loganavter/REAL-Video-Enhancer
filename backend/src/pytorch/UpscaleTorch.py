@@ -177,7 +177,7 @@ class UpscalePytorch:
         self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
         # 8-bit planar YUV pipe, ON by default since 2026-11-18 (RVE_YUV8=0 reverts to rgb24).
         # Half the host traffic of rgb24 and no ffmpeg scale filter; the A/B that cleared it is in
-        # docs/PERFORMANCE.md (two titles: mean |delta| 0.12-0.17 levels, worst frame 1 px over the
+        # harness/docs/PERFORMANCE.md (two titles: mean |delta| 0.12-0.17 levels, worst frame 1 px over the
         # 8-level bar on one title, none on the other).
         # The decision follows the PIPE FORMAT, not the bit depth: the writer is told the same string and
         # these two must never disagree (see pipe_is_yuv8).
@@ -667,7 +667,7 @@ class UpscalePytorch:
             # calibrates on a single frame - measured 20x worse on composition (0.116% against 0.006%) and
             # 0.566% against 0.050% on Violet. That is not hypothetical: the certificate's engine reference
             # calls the upscaler, which builds the body DURING the probe, i.e. before `int8Frames` exists
-            # (found 2026-11-19, docs/wsp/verified/int8-calibration-ordering.txt). Refusing to build here is
+            # (found 2026-11-19, harness/docs/wsp/verified/int8-calibration-ordering.txt). Refusing to build here is
             # what makes the spread sample mandatory instead of best-effort.
             if getattr(self, "int8Frames", None) is None:
                 log("int8: no calibration frames yet - the body is built on a later frame, with the "

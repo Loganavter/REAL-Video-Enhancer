@@ -12,7 +12,7 @@ peak), computed on the 4K output.
 
 Usage (one GPU job at a time; ~0.3 s per frame per model):
   F=~/.cache/opencode/venvs/trt310/bin/python
-  $F harness/harness/scripts/probe_shot_cascade.py --frames '/tmp/opencode/vin8/v*.raw' \
+  $F harness/scripts/probe_shot_cascade.py --frames '/tmp/opencode/vin8/v*.raw' \
       --expensive "$B/custom_models/2x-Futsuu-Anime(1).pth" \
       --cheap "$B/custom_models/2x_ModernSpanimationV1.pth" --emit /tmp/opencode/cascade.jsonl
 """

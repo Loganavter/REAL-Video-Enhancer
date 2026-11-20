@@ -1,0 +1,69 @@
+# The head conv is not layout-bound - it is a shape that cannot be made efficient, and the lever is fusion
+
+Measured 2026-11-19, isolated torch conv, 1920x1080, fp16, random tensor (latency does not depend on values),
+one GPU job, 10 iterations behind 3 warm-ups. Serialised arm-by-arm inside one process.
+Records: `int8-head-conv.jsonl`; raw sweep: `harness/docs/wsp/verified/logs/head-conv/probe.json`.
+
+Why this was measured: the phase counter puts `head + quantise` at 6.25 ms of a 50 ms frame, and the
+quantise half (1.58) sits at its own traffic floor (1.38 of 1.58 for 398 MB), which leaves **4.65-5.2 ms for
+a 7.17 GFLOP convolution** - 1.5 TFLOPS, 3.5% of this card's fp16 CUDA-core peak. Nothing in the corpus had
+ever timed that convolution on its own.
+
+## What it responds to
+
+| input | weights | ms | TFLOPS | x its 0.96 ms traffic floor |
+|---|---|---|---|---|
+| NCHW | NCHW | 3.788 | 1.89 | 3.9 |
+| NHWC view | NCHW | 3.411 | 2.10 | 3.5 |
+| NCHW | channels_last | 3.290 | 2.18 | 3.4 |
+| **NHWC view** | **channels_last** | **3.196** | **2.24** | **3.3** |
+| NCHW, input padded 3 -> 8 | channels_last | 3.936 | 1.82 | 4.1 |
+| NHWC view, input padded 3 -> 8 | channels_last | 3.663 | 1.96 | 3.8 |
+
+**The layout lever that gave the tail 2.5x gives the head 19%** (3.79 -> 3.20). Padding the input to 8
+channels - which the engine build does so myelin can fuse the head with its PReLU - makes it *slower* here.
+So the row's premise ("the head is layout-bound like the tail") is refuted.
+
+## Why: the shape sits far on the memory side of the roofline
+
+- arithmetic intensity = 7.17 GFLOP / 278 MB = **26 FLOP/byte**, against this card's ridge of ~611. A
+  convolution with 3 input channels writes 265 MB to compute 7 GFLOP: it can never be compute-bound.
+- K = 27 (3 x 3 x 3) against a 16-wide tensor-core k-step: 27/32 of the tensor-core work is useful at best,
+  and 27 is too small to amortise the epilogue over.
+- The best variant is still **3.3x its own traffic floor**, so even the write is not being served well - that
+  is where the remaining 2.2 ms lives, and no layout knob tested here moves it.
+
+## What that leaves
+
+The head conv's arithmetic is small and its output is large, which makes the pass itself the target:
+
+- **fuse head conv + PReLU + quantise into one kernel that writes int8 codes** (133 MB instead of 265 MB,
+  and the 1.58 ms quantise pass disappears). Ceiling: the 265 MB fp16 write at 288 GB/s is 0.92 ms, plus the
+  pass; realistically 1.5-2.5 ms of the 6.25. Filed as `rve-head-quantise-fusion-2026-11-19`.
+- Everything layout-side is now measured and closed: NCHW/NHWC in either direction, weights in either
+  layout, and the 3 -> 8 padding, all within 3.2-4.5 ms of each other.
+
+## Not covered
+
+- The in-app head reads 4.65-5.2 ms against 3.2 isolated. The difference is the clamp, the input conversion
+  and whatever the frame pipeline adds; this file does not decompose it.
+- One card, one resolution, fp16 only. The convolution is called with `cin=3` because that is what the model
+  has; a different model family would need its own sweep.
+- The fusion's arithmetic identity is NOT established: a Triton head would compute the conv in its own order,
+  so byte-identity is not a given, and the picture bar (0.1% worst frame) is the fallback criterion.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/head_conv_probe.py \
+    --out-file harness/docs/wsp/verified/logs/head-conv/probe.json
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-head-conv.txt \
+       --records harness/docs/wsp/verified/records/int8-head-conv.jsonl --bars harness/docs/claims-bars.json
+
+@claim H001 3.788 ms "clips [9a9523005b3baba1] n=1" measured
+@claim H002 3.411 ms "clips [9a9523005b3baba1] n=1" measured
+@claim H003 3.29 ms "clips [9a9523005b3baba1] n=1" measured
+@claim H004 3.196 ms "clips [9a9523005b3baba1] n=1" measured
+@claim H005 3.663 ms "clips [70242732c1a61917] n=1" measured

@@ -47,7 +47,7 @@ def undeclared(paths: list[str]) -> list[tuple[str, str, str]]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--records", default="docs/wsp/verified/records/*.jsonl")
+    ap.add_argument("--records", default="harness/docs/wsp/verified/records/*.jsonl")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
 

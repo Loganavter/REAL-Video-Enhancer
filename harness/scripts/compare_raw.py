@@ -6,7 +6,7 @@ the design is unmeasured, not good"), and it needs no TensorRT at all - just two
 definition the project uses everywhere: the share of pixels whose WORST channel is more than 8 levels
 off, the peak, and PSNR.
 
-Usage: python3 harness/harness/scripts/compare_raw.py ref.raw cand.raw --width 1920 --height 1080 [--scale 2] [--emit F]
+Usage: python3 harness/scripts/compare_raw.py ref.raw cand.raw --width 1920 --height 1080 [--scale 2] [--emit F]
 """
 from __future__ import annotations
 

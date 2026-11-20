@@ -36,7 +36,7 @@ def hop_padded_kernel(x_ptr, w_ptr, m_next_ptr, shift, w_scale_ptr, bias_ptr, sl
                       WRITE_PADDED: tl.constexpr = 1):
     """The hop against a zero-haloed buffer: no bounds mask, and the store lands in the next interior.
 
-    Measured (docs/wsp/verified/int8-hop-tiles.txt, int8-hop-halo-chain.txt): the mask-free form is 2.3% faster
+    Measured (harness/docs/wsp/verified/int8-hop-tiles.txt, int8-hop-halo-chain.txt): the mask-free form is 2.3% faster
     with identical codes, and the halo costs nothing when every hop writes into the next hop's padded buffer at a
     (+1, +1) offset - the border is zeroed once per frame (~0.08 ms) instead of a 134 MB copy per hop.
 

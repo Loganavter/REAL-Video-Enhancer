@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reproducible benchmark harness for the TensorRT engines this repo builds.
 
-Every number in ``docs/MODEL.md`` and ``docs/RESEARCH-LEDGER.md`` was taken with a
+Every number in ``harness/docs/MODEL.md`` and ``harness/docs/RESEARCH-LEDGER.md`` was taken with a
 throwaway script in /tmp. This file is the same measurement, kept in the repository, so a
 number can be re-taken instead of re-derived from prose::
 
@@ -14,7 +14,7 @@ installed must still be able to re-take the numbers. ``torch``/``torch_tensorrt`
 one-line error rather than a traceback (and so the geometry/formatting half is importable
 and testable where no CUDA exists - see ``harness/tests/test_bench_tool.py``).
 
-Measurement protocol, as recorded in ``docs/MODEL.md`` §8 and the "Measurement protocol"
+Measurement protocol, as recorded in ``harness/docs/MODEL.md`` §8 and the "Measurement protocol"
 section of the research ledger:
 
 * one GPU job at a time - a second render or engine build on the same card invalidates
@@ -68,7 +68,7 @@ __all__ = [
 # (torch_tensorrt.dynamo.CompilationSettings.tiling_optimization_level).
 TILING_LEVELS: Tuple[str, ...] = ("none", "fast", "moderate", "full")
 
-# The x2 compact net of docs/MODEL.md §1, in the form its FLOP table is written:
+# The x2 compact net of harness/docs/MODEL.md §1, in the form its FLOP table is written:
 #   head  conv3x3(3  -> 64)          every convolution at the LOW-resolution size
 #   body  16 x conv3x3(64 -> 64)
 #   tail  conv3x3(64 -> 3*scale^2)   then PixelShuffle
@@ -107,7 +107,7 @@ def _conv_flops(planes: int, channels_in: int, channels_out: int, kernel: int = 
 def derive_tflops(width: int, height: int, scale: int = 2) -> float:
     """TFLOP of one frame through the compact SR net, from its own layer arithmetic.
 
-    Reproduces the table in ``docs/MODEL.md`` §1: 2.48 TFLOP at 1920x1080 for x2 and
+    Reproduces the table in ``harness/docs/MODEL.md`` §1: 2.48 TFLOP at 1920x1080 for x2 and
     ~2.57 for x4, i.e. the x4 tail adds 0.09 TFLOP while all the work stays at the input
     resolution. This is arithmetic, not a measurement: the summary prints it as derived.
     """
@@ -255,7 +255,7 @@ def format_summary(rows: Sequence[Measurement]) -> str:
             out.append(f"      note     {row.note}")
     out.append(
         "  ratios compare measurements taken in one process only; one GPU job at a time "
-        "(docs/RESEARCH-LEDGER.md)"
+        "(harness/docs/RESEARCH-LEDGER.md)"
     )
     return "\n".join(out)
 
@@ -273,7 +273,7 @@ def format_tactic_table(engine_info: str) -> str:
     """Compact tactic table from ``IEngineInspector.get_engine_information(JSON)``.
 
     The raw JSON is one object per layer and hundreds of lines long; what the sm75 lead in
-    ``docs/MODEL.md`` §5 needed was the grouped tactic names and then the per-layer list.
+    ``harness/docs/MODEL.md`` §5 needed was the grouped tactic names and then the per-layer list.
     """
     try:
         payload = json.loads(engine_info)
@@ -641,7 +641,7 @@ class ClockSampler:
 class NvencAlongside:
     """Run an ``ffmpeg hevc_nvenc`` encode of synthetic 10-bit 4K raw for the block.
 
-    This is the encoder-contention measurement of ``docs/MODEL.md`` §2 (51.37 -> 55.99 ms
+    This is the encoder-contention measurement of ``harness/docs/MODEL.md`` §2 (51.37 -> 55.99 ms
     for one engine at 1920x1080): the encoder is a second GPU job on the same card, which
     the "one GPU job at a time" rule normally forbids - so it is opt-in and the summary
     says which row had it.
@@ -717,7 +717,7 @@ class NvencAlongside:
 def dump_tactics(model_path: str, sample: Any, args: argparse.Namespace) -> str:
     """Rebuild the engine with DETAILED profiling verbosity and dump the tactic table.
 
-    ``docs/MODEL.md`` §8 records this exact path: ``cfg.profiling_verbosity =
+    ``harness/docs/MODEL.md`` §8 records this exact path: ``cfg.profiling_verbosity =
     trt.ProfilingVerbosity.DETAILED``, then
     ``IEngineInspector().get_engine_information(LayerInformationFormat.JSON)``. The
     high-level dynamo API does not expose the verbosity field, so the only knob available

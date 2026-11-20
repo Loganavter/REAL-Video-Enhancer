@@ -1,0 +1,110 @@
+# The body works at LR 1440x1080: 0.012% against the model, and the frame is 1.22x the fp16 engine
+
+Measured 2026-11-19 on a 1440x1080 version of the BD Violet cut. Why: the body's accuracy had only ever been
+recorded at LR 1920x1080, while the film lane runs at 1440x1080 (94 frames, 1440p -> 2880p, `harness/docs/MODEL.md`),
+and the app's own envelope allows anything up to 2.5 Mpx of LR input. "It will work at 1440x1080" was a size
+comparison, not a measurement.
+
+## The input, and why its label matters
+
+`/tmp/opencode/violet1440.mkv`: 494 frames, 20.6 s, **1440x1080 [SAR 4:3 DAR 16:9]**, yuv420p progressive,
+**18.4 Mbps h264 CRF-12**, produced by `scale=1440:1080` on the packet-proved BD cut (`bd_violet20s.mkv`)
+followed by a re-encode. Three consequences of that provenance, all of them narrowing:
+
+- it is **not a stream copy**: the picture went through a scaler and an encoder, so its grain is not the BD's;
+- it is **anamorphic** (SAR 4:3, DAR 16:9): the 1920-wide frame was squeezed into 1440 storage, so horizontal
+  detail is compressed and the body sees a horizontally-reduced picture. That geometry is what a 1080i
+  anamorphic film source stores, so the *shape* is representative of the film lane even though the *material*
+  is not;
+- it is **not the film clip** MODEL.md names (94 frames, 1440p -> 2880p): nothing here describes that clip's
+  grain, telecine or compression artefacts.
+
+So: the answer to "does the body work at 1440x1080" is measured, on a squeezed re-encode of anime; the film
+lane's own material remains unmeasured.
+
+**A native 1440x1080 measurement now exists** (2026-11-19, corrected: an earlier version of this paragraph
+claimed no such source was on this machine, which was wrong - the search looked at `*.mkv` only and missed
+`remastering/Untitled78.mov`). The cut: `/tmp/opencode/native1440.mkv`, stream copy at 1:00, 496 frames,
+**HEVC Main 10, yuv420p10le, 1440x1080 [SAR 1:1 DAR 4:3]**, 23.98 fps, 10 Mbps. Owner's note on it: **no
+grain** - it is clean material, so this measures the resolution question, not grain.
+
+| calibration | cost | worst share | peak |
+|---|---|---|---|
+| 24 full frames (spread over the clip) | 5.29 s | **0.03601%** | **16** |
+| 96 crops of 256x256 | 0.46 s | **0.02826%** | 17 |
+
+Both are ~3x under the 0.1% share bar and, unlike the synthetic clip, the peak (16-17) is **under**
+`bar_int8_peak` = 20 as well. Everything else about the envelope is unchanged: LR 1.56 Mpx, 64 body channels,
+whole-frame path.
+
+## Accuracy against the model (the reference the record requires)
+
+`harness/scripts/calibration_coverage.py --width 1440 --height 1080`, 24 calibration frames, four held-out test
+frames (29, 44, 274, 400 - none in either calibration arm), body against the model's own fp16 output:
+
+| calibration | cost | worst share | peak |
+|---|---|---|---|
+| 24 full frames | 5.24 s | **0.01186%** | 22 |
+| 96 crops of 256x256 | 0.47 s | **0.01347%** | 22 |
+
+Both are ~8x under the 0.1% share bar. The peak (22) sits just above `bar_int8_peak` = 20 - consistent with
+the known `int8-peak-unmet` debt (29-55 recorded on the earlier kernel family), not a new failure.
+
+## The frame in the app
+
+One run per arm, null sink, reuse off, same clip:
+
+| arm | render loop | body | hops | head | tail |
+|---|---|---|---|---|---|
+| fp16 engine | 43.71 ms/frame | - | - | - | - |
+| int8 body | **35.80 ms/frame** | 32.6 | 22.6 | 3.9 + 1.4 quantise | 4.7 |
+
+**1.22x on the frame**, in one run each - not a bar claim (that needs >=3 rounds, medians of 2+), but it
+bounds the film lane: the body is allowed here (1.56 Mpx against the 2.5 Mpx refusal) and it pays.
+
+The tail at this size: dequant 1.17, conv 1.97, shuffle 0.90, residual 0.64 = 4.68 ms, i.e. the tail conv
+scales with the LR area as expected (1.97 against 2.35 at 1080p) because it runs on LR.
+
+## What this closes and what it does not
+
+- **Closes**: the body is measured at the film lane's resolution, accuracy first, with the app's envelope
+  respected. The answer to "will 1440x1080 work" is yes, with the numbers above.
+- **Does not close**: the peak bar on the *synthetic* clip (22 > 20) - on native clean material it is met
+  (16-17); grain-heavy native 1440p is still unmeasured, and the owner states this source has no grain; the
+  1.22x on the synthetic clip is one draw per arm.
+
+## Correction to this file's own provenance claim
+
+The first version of this paragraph said a native 1440x1080 source "is not on this machine", based on a
+search for recent `*.mkv` files only. `remastering/Untitled78.mov` is a native 1440x1080 HEVC 10-bit source
+and the owner pointed it out. The claim was wrong and is corrected here rather than deleted, because the way
+it was wrong - a filename filter mistaken for an inventory - is the same failure class as a population label
+mistaken for a population.
+
+## Reproduce
+
+```bash
+<ffmpeg> -i /tmp/opencode/bd_violet20s.mkv -vf scale=1440:1080 -c:v libx264 -crf 12 -an /tmp/opencode/violet1440.mkv
+flock -n /var/tmp/opencode/gpu.lock env PYTHONPATH=. <install-python> harness/scripts/calibration_coverage.py \
+    --clip /tmp/opencode/violet1440.mkv --width 1440 --height 1080 --calib 24 \
+    --model "<install>/custom_models/2x-Futsuu-Anime(1).pth"
+CLIPS=violet1440.mkv ROUNDS=1 SINK=null LOGDIR=<dir> harness/scripts/wall_ab.sh
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-1440x1080.txt \
+       --records "harness/docs/wsp/verified/records/int8-1440x1080*.jsonl" --bars harness/docs/claims-bars.json
+
+@claim R001 0.01186 % "clips [642494e6c1438e31] n=1" measured
+@claim R002 5.24 s "clips [642494e6c1438e31] n=1" measured
+@claim R003 0.01347 % "clips [642494e6c1438e31] n=1" measured
+@claim R004 0.47 s "clips [642494e6c1438e31] n=1" measured
+@claim N001 0.03601 % "clips [a1c7e020a2ebda5b] n=1" measured
+@claim N002 5.29 s "clips [a1c7e020a2ebda5b] n=1" measured
+@claim N003 0.02826 % "clips [a1c7e020a2ebda5b] n=1" measured
+@claim N004 0.46 s "clips [a1c7e020a2ebda5b] n=1" measured
+@claim T001 4.68 ms "clips [642494e6c1438e31] n=1" measured
+@claim T002 1.17 ms "clips [642494e6c1438e31] n=1" measured
+@claim T003 1.97 ms "clips [642494e6c1438e31] n=1" measured
+@claim T004 0.9 ms "clips [642494e6c1438e31] n=1" measured
+@claim T005 0.64 ms "clips [642494e6c1438e31] n=1" measured
+@claim T006 4.7 ms "clips [642494e6c1438e31] n=1" measured

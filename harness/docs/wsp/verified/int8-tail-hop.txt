@@ -1,0 +1,136 @@
+# The tail is a seventeenth int8 hop: 3.2 ms of the frame, 0.00000% of pixels
+
+Measured 2026-11-20 (local), RTX 4060 Ti, BD Violet 1920x1080, int8 body (head fp16, 16 int8 hops, tail).
+Three staged steps, cheapest first: a CPU/GPU emulation, then a kernel on its own, then the app.
+Records: `int8-tail-hop.jsonl`; raw: `logs/tail-hop/emulation.json`, `logs/tail-hop/kernel.json`,
+`logs/tail-hop/ab/`, `logs/tail-hop/pair.json`.
+
+Row `rve-tail-as-int8-hop-2026-11-19` (researcher's C1). The last hop writes int8 codes on a per-channel
+grid; the shipped tail dequantises them to fp16 (a full 400 MB pass) and feeds a cuDNN fp16 convolution.
+A convolution is linear in its input, so `w'[k,o] = s_k * w[k,o]` folded offline makes the codes themselves
+the input: one kernel instead of two, no dequant pass, the integer accumulation exact (64*9 terms of
+127*127 = 9.3e6, far below 2^24).
+
+## Stage (a): the picture, before any kernel
+
+Four held-out BD frames (29, 44, 274, 400), calibrated on the eight spread frames, the corpus's own
+emulation recipe:
+
+| frame | int8 tail vs today's tail | algebra only (no weight quantisation) |
+|---|---|---|
+| 29 | 0.00113%, peak 10 | 0.00096%, peak 10 |
+| 44 | 0.00113%, peak 11 | 0.00109%, peak 10 |
+| 274 | 0.00147%, peak 11 | 0.00129%, peak 11 |
+| 400 | 0.00063%, peak 13 | 0.00051%, peak 13 |
+| **worst** | **0.00147% / 13** | **0.00129% / 13** |
+
+Bars are 0.1% and 20 levels, so the worst frame sits **68x inside the share bar**. The fourth column is the
+control: the fold's algebra alone reads 0.00129%, so quantising the folded weights to int8 adds
+**0.0002%** - the fold is not what costs, and the estimate that it would was worth checking.
+
+## Stage (b): one kernel on its own
+
+| arm | median of rounds 2+ |
+|---|---|
+| the shipped tail (dequant + cuDNN fp16 conv) | **4.444 ms** |
+| dequantise_nhwc alone | 1.839 ms |
+| cuDNN fp16 conv alone | 2.556 ms |
+| **one int8 Triton conv 576 -> 16 + epilogue** | **0.974 ms** |
+
+**-3.47 ms per frame, 78% of the tail.** Against the recorded in-app conv (2.35 ms) the candidate reads
+0.974 ms for conv *and* epilogue, 2.6x the conv alone. On the same codes the kernel's output is within
+max 0.007 of the cuDNN tail (mean 0.0002 on an output whose mean is 0.006) - the weight quantisation, as
+stage (a) said.
+
+## Stage (c): in the app, and the picture on the full clip
+
+Null sink, one session, arms alternating, 3 rounds:
+
+| round | tail = cuDNN fp16 | tail = one int8 kernel |
+|---|---|---|
+| 1 | 45.87 | 42.62 |
+| 2 | 45.83 | 42.71 |
+| 3 | 45.93 | 42.71 |
+| **median** | **45.87** | **42.71** |
+
+**-3.16 ms per frame (-6.9%)**, in 3 rounds of 3. The body's own phase counter attributes it: the tail line
+reads dequant 1.67 -> **0.00**, conv 2.49 -> **0.96**, SUM 5.66 -> **2.56** - the pass is gone and the
+convolution is 2.6x faster, while shuffle and residual are unchanged (0.90 -> 0.78 and 0.94 -> 0.98).
+
+Lossless ffv1 renders of both arms, then `gate_sweep --reference-kind config`:
+
+```
+494 frames, block 64
+worst share 0.00000% (frame 0), frames above 0.1%: 0
+worst block mean 0.48 (frame 225), peak 6
+```
+
+Invisible to the decision statistic on the whole clip. Two one-frame checks say the same more sharply: on
+frames 29 and 274 the int8 tail reads **0.00000% / peak 1-2** against the shipped tail, and against the
+MODEL it is *closer* than the cuDNN path on both - 0.01131% -> 0.01057% (peak 17 both) on frame 29 and
+0.01613% -> 0.01501% (peak 16 -> 15) on frame 274.
+
+## Adopted
+
+`RVE_TAIL_INT8` defaults to **1** since 2026-11-20; `RVE_TAIL_INT8=0` restores the cuDNN path for an A/B.
+Why adopted where the epilogue fold was not: that one bought 0.22 ms and its mechanism was unexplained;
+this one buys 3.16 ms, removes a pass outright, and is measurably closer to the model on the frames checked.
+
+The guard: this kernel pads 16 output channels, so a model whose tail has more than 16 is declined with a
+warning and served by cuDNN. Nothing here changes the body's own coverage boundary (64 body channels).
+
+## Not covered
+
+- One card, one clip, one label, 2x model. The tail's output count is 12 for this model family; the padding
+  argument ("zeros contribute nothing") is what keeps other counts of 16 or fewer admissible, and that is
+  arithmetic, not a measurement of them.
+- The picture is a config-vs-config pair plus two model-referenced frames, not 494 frames against the model.
+- The peak bar's own status is unchanged: `bar_int8_peak` = 20 still carries a PENDING OWNER DECISION note,
+  and the peaks quoted here are deltas between two int8 configurations, not the int8 path's deviation from
+  the model (that one is 15-17 on the two frames above).
+- Timing is null sink, reuse off; the NVENC arm is not measured here.
+- Suite: `pytest harness/tests` reads 409 passed, 1 failed - the failure is `ModuleNotFoundError: yaml` in
+  `harness/db.py` under the app's portable interpreter, which has no PyYAML; no file of this change
+  is on that import path.
+
+## Reproduce
+
+```bash
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/tail_int8_emulation.py \
+    --out-file harness/docs/wsp/verified/logs/tail-hop/emulation.json
+flock -n /var/tmp/opencode/gpu.lock <install-python> harness/scripts/tail_hop_probe.py --rounds 3 --iters 20 \
+    --out-file harness/docs/wsp/verified/logs/tail-hop/kernel.json
+ARMS="tailf16 tailint8" ARM_ENV_TAILF16="RVE_TAIL_INT8=0" ARM_ENV_TAILINT8="RVE_TAIL_INT8=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=3 SINK=null harness/scripts/wall_ab.sh
+ARMS="tailf16 tailint8" ARM_ENV_TAILF16="RVE_TAIL_INT8=0" ARM_ENV_TAILINT8="RVE_TAIL_INT8=1" \
+  CLIPS="bd_violet20s.mkv" ROUNDS=1 SINK=ffv1 RENDERS=/home/jorj/2Tb/tail-hop harness/scripts/wall_ab.sh
+PYTHONPATH=. python3 harness/scripts/gate_sweep.py <f16.mkv> <int8.mkv> --out pair.json \
+  --emit pair-records.jsonl --reference-kind config --clip-name bd_violet20s.mkv ... --id-prefix TF
+PYTHONPATH=. python3 harness/scripts/tail_hop_records.py --pair <pair-records.jsonl>
+```
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/int8-tail-hop.txt \
+       --records harness/docs/wsp/verified/records/int8-tail-hop.jsonl --bars harness/docs/claims-bars.json
+
+@claim A001 0.00113 % "frames [d607a3811478aeb4] n=4" measured
+@claim A002 0.00113 % "frames [d607a3811478aeb4] n=4" measured
+@claim A003 0.00147 % "frames [d607a3811478aeb4] n=4" measured
+@claim A004 0.00063 % "frames [d607a3811478aeb4] n=4" measured
+@claim A005 0.00147 % "frames [d607a3811478aeb4] n=4" measured
+@claim A006 13.011474609375 levels "frames [d607a3811478aeb4] n=4" measured
+@claim A007 0.00129 % "frames [d607a3811478aeb4] n=4" measured
+@claim B001 4.444 ms "frames [10cff28ea287d300] n=1" measured
+@claim B002 1.839 ms "frames [10cff28ea287d300] n=1" measured
+@claim B003 2.556 ms "frames [10cff28ea287d300] n=1" measured
+@claim B004 0.974 ms "frames [10cff28ea287d300] n=1" measured
+@claim R001 -3.47 ms "frames [10cff28ea287d300] n=1" derived
+@claim C001 45.87 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim C002 42.71 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim R002 -3.16 ms "frames [c171112dd7b0ab2c] n=1" derived
+@claim C003 5.66 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim C004 2.56 ms "frames [c171112dd7b0ab2c] n=1" measured
+@claim R003 -3.1 ms "frames [c171112dd7b0ab2c] n=1" derived
+@claim TF001 0.0 % "frames [13137e4e7dd10e98] n=494" measured
+@claim TF002 0.0 count "frames [13137e4e7dd10e98] n=494" measured
+@claim TF003 0.482666015625 levels "frames [13137e4e7dd10e98] n=494" measured
+@claim TF004 6.0 levels "frames [13137e4e7dd10e98] n=494" measured

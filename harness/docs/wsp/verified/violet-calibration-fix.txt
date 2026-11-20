@@ -1,0 +1,48 @@
+# Violet's 0.566% was the forced flag measuring itself
+
+<!-- population: contaminated input -->
+> **Population flagged 2026-11-18.** 4 record(s) in this file (R001, R002, R003, R004) name
+> `violet20s.mkv` - a 4 Mbps h264 re-encode (labelled "BD" until 2026-11-18). Every content number below was measured on that material, so none of them is
+> current. The BD replacement and the check that finds this mechanically are in
+> `harness/docs/wsp/verified/sources-bd.txt`; the verdict that replaces the conclusion is named there.
+> Instrument-only rows (cost, timing, counters) are unaffected as measurements but their population
+> label is still the wrong file.
+
+The arithmetic that exposed it: 372 frames above the bar but only 340 reused, so at least 32 *rendered*
+frames were above the bar - the body's own error, not composition. That is not a composition failure,
+and a probe that only looks at reuse pairs cannot see it.
+
+Cause: `--int8_fit int8` skipped `_probe_int8_fit`, and that function is also what decodes the spread
+frames the body calibrates on. `UpscaleTorch` falls back to `frame` (one frame) when `int8Frames` is
+None, so the forced run calibrated on the first frame:
+
+```
+BEFORE:  int8 body self-certification 0.00000%  -> worst 0.56613%, 372 of 480 above the bar
+AFTER:   int8 calibration frames handed to the body: 24
+         int8 fit FORCED to int8; the probe said fp16
+         worst 0.12727% (frame 227), 3 of 480 above the bar
+```
+
+The verdict is still fp16 (0.127% against a 0.1% bar), but the margin and the mechanism are different:
+three frames, all three **reused**, i.e. composition after all. The spread calibration is what the
+lane's own `int8-split-calibration` verdict demanded; the flag was bypassing it.
+
+## The multiplicative factor does not hold on this material
+
+Per-frame int8/fp16 ratio over the 336 reused frames: **median 7.31, p90 89.8, max 746**. The 1.18x
+quoted for Chainsaw is a ratio of two maxima on one clip, not a transferable factor; on Violet the
+increment is not multiplicative at all.
+
+## What this retracts
+
+The earlier reading of 0.56613% and its 372 frames is withdrawn, together with the conclusion drawn
+from it ("the body damages Violet badly"). What survives is: int8 on Violet reads 0.127% with three
+composition frames over the bar, and the probe's refusal is correct.
+
+Run: PYTHONPATH=. python3 -m harness.cli check harness/docs/wsp/verified/violet-calibration-fix.txt \
+       --records harness/docs/wsp/verified/records/violet-calibration-fix.jsonl --bars harness/docs/claims-bars.json
+
+@claim R001 0.12727 % "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R002 3.0 frames "frames [3e7bd4c273e44ee9] n=480" measured
+@claim R003 24.0 frames "frames [42d684d8b62cfc6f] n=1" measured
+@claim R004 7.31 x "frames [3e7bd4c273e44ee9] n=480" measured
