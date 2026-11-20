@@ -619,6 +619,22 @@ class Frame:
         planes, fmt = got
         return planes.cpu().numpy().tobytes(), fmt
 
+    def preview_source_size(self):
+        """`(W, H)` of the picture this frame would sample - the emitted one, not the input.
+
+        An upscaled frame's `width`/`height` can lag the tensor it holds, so the geometry is
+        taken from the tensor when there is one.
+        """
+        tensor = self._tensor
+        if tensor is None or _torch is None or not isinstance(tensor, _torch.Tensor):
+            return int(self.width), int(self.height)
+        if self._is_raw_payload():
+            return int(self.width), int(self.height)
+        image = tensor[0] if tensor.dim() == 4 else tensor
+        if image.dim() == 3:
+            return int(image.shape[2]), int(image.shape[1])
+        return int(self.width), int(self.height)
+
     def preview_planes(self, width: int, height: int, out=None, scratch=None):
         """`(device planes, fmt)` for the stager, or None when the frame cannot provide one.
 
@@ -637,8 +653,10 @@ class Frame:
                                     out=out)
             return (planes, PREVIEW_FMT_YUV420) if planes is not None else None
         image = tensor[0] if tensor.dim() == 4 else tensor
-        rgb_out = None if out is None else out.view(height, width, 3)
-        rgb_scratch = None if scratch is None else scratch.view(3, height, width)
+        # the buffers are sized for the BOX; this frame's thumbnail is usually smaller
+        need = int(height) * int(width) * 3
+        rgb_out = None if out is None else out[:need].view(height, width, 3)
+        rgb_scratch = None if scratch is None else scratch[:need].view(3, height, width)
         planes = rgb_planes(image, width, height, out=rgb_out, scratch=rgb_scratch)
         return (planes, PREVIEW_FMT_RGB888) if planes is not None else None
 

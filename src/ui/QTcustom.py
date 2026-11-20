@@ -272,9 +272,11 @@ class UpdateGUIThread(QThread):
                 self.shm = None
         self.previewWidth = int(width)
         self.previewHeight = int(height)
+        self.previewBoxW = int(width)
+        self.previewBoxH = int(height)
         size = (
             self.PREVIEW_HEADER.size
-            + 2 * self.previewWidth * self.previewHeight * 3
+            + 2 * self.previewBoxW * self.previewBoxH * 3
         )
         try:
             self.shm = shared_memory.SharedMemory(
@@ -317,9 +319,11 @@ class UpdateGUIThread(QThread):
                         self.PREVIEW_FMT_RGB888, self.PREVIEW_FMT_YUV420
                     ):
                         last_seq = seq
+                        # the slots were laid out for the BOX: a 4:3 frame's 640x480
+                        # thumbnail must not make the reader step into the other slot
                         offset = (
                             self.PREVIEW_HEADER.size
-                            + (seq & 1) * width * height * 3
+                            + (seq & 1) * self.previewBoxW * self.previewBoxH * 3
                         )
                         length = self._payload_length(fmt, width, height)
                         # bytes(): own the pixels, so the QImage cannot end up pointing at

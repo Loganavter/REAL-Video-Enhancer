@@ -538,6 +538,22 @@ class Render:
         frame_array = cv2.cvtColor(frame_array, cv2.COLOR_BGR2RGB)
         cv2.imwrite("frame.jpg", frame_array)
 
+    def _preview_geometry(self, frame):
+        """Thumbnail `(w, h)` for this frame: long side fits the box, both axes equally.
+
+        A fixed 640x360 was wrong for anything but 16:9: a 4:3 frame sampled 720 columns and
+        kept 640 of them, so the preview both cropped the picture and stretched it 1.5x.
+        Scaling by one factor gives a uniform sample rate in both axes - the whole frame, the
+        picture's own aspect ratio.
+        """
+        w, h = frame.preview_source_size()
+        if w <= 0 or h <= 0:
+            return self.previewWidth, self.previewHeight
+        scale = min(self.previewWidth / w, self.previewHeight / h)
+        tw = max(2, int(round(w * scale)))
+        th = max(2, int(round(h * scale)))
+        return tw, th
+
     def _publish_preview(self, frame):
         """Publish the thumbnail that has arrived, and enqueue this frame's.
 
@@ -556,13 +572,15 @@ class Render:
         try:
             ready = stager.take()
             if ready is not None:
-                payload, fmt, high_bitdepth = ready
+                payload, fmt, thumb_w, thumb_h, high_bitdepth = ready
                 published = bool(self.informationHandler.publishPreview(
-                    payload, self.previewWidth, self.previewHeight,
+                    payload, thumb_w, thumb_h,
                     fmt=fmt, high_bitdepth=high_bitdepth,
                 ))
             if not stager.busy():
-                stager.submit(frame, high_bitdepth=bool(getattr(frame, "hdr_mode", False)))
+                thumb_w, thumb_h = self._preview_geometry(frame)
+                stager.submit(frame, thumb_w, thumb_h,
+                              high_bitdepth=bool(getattr(frame, "hdr_mode", False)))
         except Exception as exc:
             log(f"preview: dropping this frame ({exc})")
         return published

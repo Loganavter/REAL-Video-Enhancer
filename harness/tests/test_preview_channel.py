@@ -47,7 +47,7 @@ def block():
 
 def test_publish_writes_the_header_and_clears_wanted(block):
     name, width, height, shm = block
-    channel = PreviewChannel(name)
+    channel = PreviewChannel(name, box=(width, height))
     assert channel.attached
     shm.buf[OFF_WANTED] = 1
     assert channel.wanted()
@@ -61,7 +61,7 @@ def test_publish_writes_the_header_and_clears_wanted(block):
 
 def test_two_publishes_land_in_different_slots_and_advance_the_sequence(block):
     name, width, height, shm = block
-    channel = PreviewChannel(name)
+    channel = PreviewChannel(name, box=(width, height))
     slot = width * height * 3
     channel.publish(b"\x01" * slot, width, height)
     channel.publish(b"\x02" * slot, width, height)
@@ -75,7 +75,7 @@ def test_two_publishes_land_in_different_slots_and_advance_the_sequence(block):
 
 def test_a_wrong_sized_payload_is_refused_loudly(block):
     name, width, height, _shm = block
-    channel = PreviewChannel(name)
+    channel = PreviewChannel(name, box=(width, height))
     with pytest.raises(ValueError):
         channel.publish(b"\x00" * 5, width, height)
 

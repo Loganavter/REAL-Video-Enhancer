@@ -496,9 +496,16 @@ class ProcessTab:
                 self.parent.ETA.setVisible(False)
             self.parent.STATUS.setText(f"Status: {self.status}")
         if not qimage.isNull():
-            # The backend already shrank the frame to the label's budget (PREVIEW_WIDTH x
-            # PREVIEW_HEIGHT), so there is no 4K scale here any more: it made the GUI
-            # thread point-sample 8.3 Mpx down to ~600 px on every update.
+            # The backend already shrank the frame to the preview box, so nothing 4K ever
+            # reaches this thread. The thumbnail keeps the picture's aspect ratio (640x480
+            # for a 4:3 source), so it can still be a little larger than the panel: fit it
+            # down when it is, never scale it up.
+            area = self.parent.previewLabel.size()
+            if qimage.width() > area.width() or qimage.height() > area.height():
+                qimage = qimage.scaled(
+                    area, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             pixmap = QtGui.QPixmap.fromImage(qimage)
             roundedPixmap = self.getRoundedPixmap(pixmap, corner_radius=10)
             self.parent.previewLabel.setPixmap(roundedPixmap)

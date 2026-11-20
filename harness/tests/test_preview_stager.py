@@ -65,8 +65,9 @@ def test_take_is_empty_until_the_copy_lands():
 def test_the_payload_belongs_to_the_submitted_frame():
     stager = PreviewStager(8, 6)
     stager.submit(payload_frame(128))
-    payload, fmt, high_bitdepth = drain(stager)
+    payload, fmt, w, h, high_bitdepth = drain(stager)
     assert fmt == FMT_YUV420 and high_bitdepth is False
+    assert (w, h) == (8, 6), "the frame's own geometry travels with the payload"
     assert len(payload) == 72, "8x6 Y plus 4x3 U and V"
     levels = np.frombuffer(payload, np.uint8)
     assert levels.min() == 128 and levels.max() == 128
@@ -78,7 +79,7 @@ def test_a_finished_thumbnail_frees_the_slot_for_the_next_frame():
     drain(stager)
     assert not stager.busy()
     assert stager.submit(payload_frame(200))
-    payload, _fmt, _flags = drain(stager)
+    payload, _fmt, _w, _h, _flags = drain(stager)
     assert np.frombuffer(payload, np.uint8).min() == 200
 
 
@@ -89,7 +90,7 @@ def test_a_thumbnail_much_smaller_than_the_frame_keeps_the_output_offsets():
     frame = payload_frame(128, width=64, height=48)
     stager = PreviewStager(16, 12)
     assert stager.submit(frame)
-    payload, fmt, _flags = drain(stager)
+    payload, fmt, _w, _h, _flags = drain(stager)
     assert fmt == FMT_YUV420
     assert len(payload) == 16 * 12 + 2 * 8 * 6, "Y at 16x12, chroma at 8x6"
     levels = np.frombuffer(payload, np.uint8)
@@ -110,7 +111,7 @@ def test_an_rgb_thumbnail_is_interleaved_not_planar():
     frame._tensor = img
     stager = PreviewStager(8, 6)
     assert stager.submit(frame)
-    payload, fmt, _flags = drain(stager)
+    payload, fmt, _w, _h, _flags = drain(stager)
     assert fmt == 1, "an fp16 frame ships RGB"
     levels = np.frombuffer(payload, np.uint8)
     assert len(levels) == 8 * 6 * 3
@@ -145,3 +146,22 @@ def test_a_preview_that_raises_costs_only_the_preview():
     rv.informationHandler = FakeInfo()
     rv.previewWidth, rv.previewHeight = 8, 6
     assert rv._publish_preview(object()) is False
+
+
+def test_the_thumbnail_keeps_the_frames_aspect_ratio():
+    """A fixed 640x360 was neither letterboxed nor cropped-but-honest: for a 4:3 frame the
+    sampler took every 4th column (720 of them) and kept 640, so the preview showed the left
+    89% of the picture and stretched it 1.5x. The geometry now comes from the frame."""
+    from src.RenderVideo import Render
+
+    class F:
+        def __init__(self, w, h):
+            self._size = (w, h)
+        def preview_source_size(self):
+            return self._size
+
+    rv = Render.__new__(Render)
+    rv.previewWidth, rv.previewHeight = 640, 640
+    assert rv._preview_geometry(F(2880, 2160)) == (640, 480), "4:3"
+    assert rv._preview_geometry(F(3840, 2160)) == (640, 360), "16:9"
+    assert rv._preview_geometry(F(1440, 2560)) == (360, 640), "portrait is bounded by the box"
