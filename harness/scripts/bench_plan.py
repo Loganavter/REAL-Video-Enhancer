@@ -1,6 +1,6 @@
 """Time a TensorRT plan without torch-tensorrt.
 
-Why this exists: `backend/tests/tools/bench_engine.py` is the repo's instrument, but it loads the
+Why this exists: `harness/tests/tools/bench_engine.py` is the repo's instrument, but it loads the
 engine through `torch_tensorrt`, which pins an exact torch version. When the only torch available is
 a different patch release, the tool refuses and the plan cannot be timed at all. This is the same
 measurement with the same protocol - CUDA events around N calls after warmup, one GPU job at a time,

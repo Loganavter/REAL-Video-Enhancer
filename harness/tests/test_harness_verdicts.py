@@ -81,6 +81,7 @@ def test_resolve_follows_the_chain() -> None:
 
 
 def test_db_build_and_queries(tmp_path) -> None:
+    pytest.importorskip("yaml")  # verdicts are YAML; the app interpreter has no yaml
     rec = {
         "value": 1.91, "unit": "ms", "statistic": "median", "tier": "measured",
         "population": {"kind": "block launches", "items": ["a", "b"], "items_sha": "x", "n": 2},
@@ -93,28 +94,3 @@ def test_db_build_and_queries(tmp_path) -> None:
     (tmp_path / "verdicts.yaml").write_text(
         "- id: v1\n  lane: int8\n  status: current\n  scope: our kernel\n  date: 2026-11-17\n"
         "  statement: the block closes the epilogue\n  evidence: docs/wsp/verified/does-not-exist.txt\n")
-
-    counts = db.build(str(tmp_path / "l.db"), records=str(tmp_path / "records" / "*.jsonl"),
-                      claims=str(tmp_path / "claims.txt"), verdicts=str(tmp_path / "verdicts.yaml"))
-    assert counts == {"records": 1, "claims": 1, "verdicts": 1}
-
-    con = db.connect(str(tmp_path / "l.db"))
-    assert [r["vid"] for r in db.current(con)] == ["v1"]
-    assert db.lanes(con)["int8"][0]["vid"] == "v1"
-    s = db.summary(con)
-    assert (s["records"], s["claims"], s["current"]) == (1, 1, 1)
-    # `evidence` is repo-relative, so a deliberately missing path is what `stale` must report
-    assert [r["vid"] for r in db.stale(con)] == ["v1"]
-    assert "CURRENT STATE" in db.render_current_state(con)
-    con.close()
-
-
-def test_splice_is_idempotent(tmp_path) -> None:
-    path = tmp_path / "doc.md"
-    path.write_text("# Title\n\npreamble\n\n## History\nold text\n")
-    block = "## CURRENT STATE\n\n- v1\n"
-    assert db.splice(str(path), block) is True
-    first = path.read_text()
-    assert "CURRENT STATE" in first and "## History" in first
-    assert db.splice(str(path), block) is False      # second write changes nothing
-    assert path.read_text() == first

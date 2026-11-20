@@ -828,7 +828,7 @@ class Int8Body:
             _e3.record()
             # The input's memory format is worth 2.5x for this 64 -> 12 layer: 5.296 ms contiguous NCHW
             # against 2.098 through a channels_last view, measured in isolation
-            # (scripts/tail_conv_probe.py), and C_out 12 -> 16 changes nothing, so it is the VIEW and not
+            # (harness/scripts/tail_conv_probe.py), and C_out 12 -> 16 changes nothing, so it is the VIEW and not
             # tensor-core tile fill. Converting the WEIGHTS instead also speeds the conv up but moved the
             # shuffle and residual from 0.40 + 0.93 to 0.82 + 2.13 ms, so it is not the lever it looks like.
             # RVE_TAIL_NHWC=0 restores the old contiguous path for an A/B.

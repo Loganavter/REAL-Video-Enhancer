@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "harness" / "scripts"))
 
 from harness import (  # noqa: E402
     Bar, Claim, Population, Record, RecordError, ResultsTable, Scope, Store, aa_gate, below,

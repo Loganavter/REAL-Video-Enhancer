@@ -14,7 +14,7 @@ one-liner that sorted the frames to find the worst. Two ways that goes wrong sil
 
 Usage::
 
-    python3 backend/tests/tools/psnr_report.py REFERENCE.mkv CANDIDATE.mkv [options]
+    python3 harness/tests/tools/psnr_report.py REFERENCE.mkv CANDIDATE.mkv [options]
 
 Exit codes: ``0`` the comparison ran and the mean is at or above ``--fail-under`` (or no
 threshold was given); ``1`` the comparison ran and the mean is below it; ``2`` the
