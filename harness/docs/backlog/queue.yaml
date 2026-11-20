@@ -4856,8 +4856,12 @@ tasks:
     op. (d) DONE at 4K geometry: 1x3x2160x3840, fp16 205.3-206.1 ms, int8 165.93 -> 124.65 ms (1.331x, against
     1.341x at 1080p; 1.650x over fp16), layers 74/18 PWN -> 91/3, 0/16 frames over the bar (0.00012% -> 0.00030%).
     CAVEAT on that row: the 4K input is the 1080p BD frames upscaled 2x with lanczos because the library has no
-    native 4K cut, so it tests geometry and fusion, not the 4K picture. Still owed: the app render pair at 4K,
-    where the app builds tiled engines and the body is not wired in.
+    native 4K cut, so it tests geometry and fusion, not the 4K picture. DROPPED as a target 2026-11-21
+    (owner call, and correct): an app render pair at 4K means upscaling 4K source to 8K, which nobody
+    renders, on a configuration where the int8 body is not wired in (the tiled path) - it would describe a
+    build that does not ship. The app-level proof stands where the product lives: 1080p, 1.251x with 0/52
+    frames over the bar (PF013/PF014/PF015), and the 4K ENGINE row stays a geometry-and-fusion measurement
+    on lanczos-upscaled frames, which is how it is already labelled.
   note: >-
     The layer count is not the predictor (95 layers beat 78; 98 lose to 25) - the predictor is how many passes
     leave int8, i.e. the PWN/myelin census, not the layer total. That correction belongs next to the "fusion
