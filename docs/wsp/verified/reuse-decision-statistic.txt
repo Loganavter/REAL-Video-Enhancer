@@ -249,6 +249,31 @@ correction's algebra.
 @claim RU025 0.344 % "reused frames [55a222f0b8bdd68b] n=130" measured
 @claim RU026 0.838 x "reused frames [55a222f0b8bdd68b] n=130" measured
 
+
+## The Palantir error DAG as a predictor: 0.776 on its own clip, 0.180 held out
+
+Palantir predicts the SR error of a patch as `TC + sum(w * err_ref)`, with the texture term (`TC`) estimated from
+the LR video alone - a predictor that needs no network run, which is what a certificate would need. Built in
+`scripts/reuse_dag.py` with `TC` = block mean of `|upsample(downsample(LR)) - LR|`, one flow-mapped reference block
+per block (their three-reference case does not exist in our material) and rendered frames treated as anchors
+(`err = 0`):
+
+| clip | reused | positives | AUC of the predicted error |
+|---|---|---|---|
+| 1040 s | 130 | 37 | 0.776 |
+| 960 s, held out | 123 | 7 | **0.180** |
+
+So the predictor is worse than the pairwise statistic on the first clip (0.776 against 0.991) and, on the held-out
+one, **inverted**: the reuses that damage the picture are predicted as *cheap*, because the frames that break are
+calm and low-texture with small coherent motion - exactly the case a texture-complexity term calls easy.
+
+Caveats on the approximation: one reference instead of three, DIS flow instead of codec motion vectors, `TC` from
+an 8-bit luma round trip rather than the codec's own residual. Any of those could matter, but none of them is
+needed to explain the sign: a predictor built on texture complexity is, on this material, pointed the wrong way.
+
+@claim RU027 0.776 AUC "reused frames [b7010cf3b0acf799] n=130" measured
+@claim RU028 0.180 AUC "reused frames [8634db61097bc953] n=123" measured
+
 ## The artifact the acceptance statistic cannot see: frozen grain
 
 The 0.1% share judges a frame against the ungated render; a reused frame carries the *reference's* noise, so
