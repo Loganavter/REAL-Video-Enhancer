@@ -78,7 +78,7 @@ Cumulative on the shipped default, all measured in interleaved A/Bs this session
   scale, or no residual) would need its own kernel: the guard declines anything that is not `PixelShuffle(r)`
   with `3*r*r` channels.
 - Byte-identity is a statement about THIS build: it says the fold changed nothing, not that the path is right.
-- Suite: `pytest backend/tests` is re-run after the commit; the harness checks are green.
+- Suite: `pytest harness/tests` is re-run after the commit; the harness checks are green.
 
 ## Reproduce
 

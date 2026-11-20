@@ -79,7 +79,7 @@ skipped when the head is fused, because there is no separate pass left to time.
 - The 26 FLOP/byte argument is from `int8-head-conv.txt`; this file does not re-derive it.
 - Timing is null sink, reuse off; the NVENC arm is not measured here, and the ffv1 renders read ~58.6 ms/frame
   in both arms because the encoder, not the model, owns that loop.
-- Suite: `pytest backend/tests` reads 409 passed, 1 failed - `ModuleNotFoundError: yaml` in
+- Suite: `pytest harness/tests` reads 409 passed, 1 failed - `ModuleNotFoundError: yaml` in
   `harness/db.py` under the app's portable interpreter. No file of this change is on that path.
 
 ## Reproduce

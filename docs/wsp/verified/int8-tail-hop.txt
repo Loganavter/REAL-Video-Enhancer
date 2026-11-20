@@ -89,7 +89,7 @@ warning and served by cuDNN. Nothing here changes the body's own coverage bounda
   and the peaks quoted here are deltas between two int8 configurations, not the int8 path's deviation from
   the model (that one is 15-17 on the two frames above).
 - Timing is null sink, reuse off; the NVENC arm is not measured here.
-- Suite: `pytest backend/tests` reads 409 passed, 1 failed - the failure is `ModuleNotFoundError: yaml` in
+- Suite: `pytest harness/tests` reads 409 passed, 1 failed - the failure is `ModuleNotFoundError: yaml` in
   `harness/db.py` under the app's portable interpreter, which has no PyYAML; no file of this change
   is on that import path.
 

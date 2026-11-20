@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-WAIT = Path(__file__).resolve().parents[2] / "scripts" / "wait_for.py"
+WAIT = Path(__file__).resolve().parents[2] / "harness" / "scripts" / "wait_for.py"
 
 
 def run(*args: str, timeout: float = 20.0) -> subprocess.CompletedProcess:

@@ -15,6 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+pytest.importorskip("torch")  # torch lives in the app's interpreter, not the system one
 from src import FFmpegBuffers as FB  # noqa: E402
 
 

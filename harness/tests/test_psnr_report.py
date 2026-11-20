@@ -1,4 +1,4 @@
-"""Tests for ``backend/tests/tools/psnr_report.py``.
+"""Tests for ``harness/tests/tools/psnr_report.py``.
 
 The tool exists to stop two silent measurement bugs (a comparison that crossed an unstated
 colour conversion, and an average over files with different frame counts), so the tests are

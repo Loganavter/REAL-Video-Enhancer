@@ -13,7 +13,7 @@ Mechanical checks used below (all reproducible in the cell, no GPU, no network):
 - `claims-bars.json` at `07d63c36` (the commit that closed `rve-bars-populations`) → **8 bars**
   (10 now; two were added by later items).
 - `docs/wsp/lean/Statistic.lean`: 87 lines, zero `sorry`.
-- `backend/tests/test_harness_evidence.py` + `test_harness_redteam.py` at `1f908c45`: 48 + 14 = 62.
+- `harness/tests/test_harness_evidence.py` + `test_harness_redteam.py` at `1f908c45`: 48 + 14 = 62.
 
 Those checks are in the report because each one *looked* like a contradiction and is not.
 That distinction is the whole value of the exercise.

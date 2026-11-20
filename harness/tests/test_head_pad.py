@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+pytest.importorskip("torch")  # torch lives in the app's interpreter, not the system one
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

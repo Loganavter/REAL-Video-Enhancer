@@ -87,7 +87,7 @@ channel of the edge LR pixel), while ``conv_b`` replicate-pads in *LR* space and
 therefore reads the same sub-pixel of the edge LR pixel.  ``down`` is unaffected
 (the residual skip has no sub-pixel dimension), and the deviation is confined to
 the ring where a tap window leaves the frame - 2 output pixels for 4->2.  It is
-measured and printed by ``backend/tests/test_fused_tail.py``; on white-noise
+measured and printed by ``harness/tests/test_fused_tail.py``; on white-noise
 features it is ~4e-2, on smooth features less.
 
 Both conventions are defensible (``F.interpolate`` clamps, ``cv2.INTER_AREA``

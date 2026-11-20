@@ -50,7 +50,7 @@ nothing reads.
   only; `auto` still certifies. The message that said "fp16 engine runs" now fires only when the render is
   actually tiled (`_int8_body_serves_this_render()`), and the "the probe said X" line is suppressed when no
   verdict was taken.
-- `backend/tests/test_int8_probe_modes.py`: pins the seam (no percentage in calibration-only output, the
+- `harness/tests/test_int8_probe_modes.py`: pins the seam (no percentage in calibration-only output, the
   `certify` default, the tiled/whole-frame test). Suite: 403 passed, 1 failed - `test_db_build_and_queries`,
   which fails on a missing PyYAML in this interpreter and failed identically before the change.
 

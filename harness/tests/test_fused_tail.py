@@ -43,6 +43,7 @@ BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+pytest.importorskip("torch")  # torch lives in the app's interpreter, not the system one
 from src.pytorch import FusedTail as FT  # noqa: E402
 
 TOL = 1.0 / 255.0          # acceptance tolerance from the task spec

@@ -5,14 +5,14 @@ Every number in ``docs/MODEL.md`` and ``docs/RESEARCH-LEDGER.md`` was taken with
 throwaway script in /tmp. This file is the same measurement, kept in the repository, so a
 number can be re-taken instead of re-derived from prose::
 
-    python3 backend/tests/tools/bench_engine.py --engine models/<name>.engine \\
+    python3 harness/tests/tools/bench_engine.py --engine models/<name>.engine \\
         --width 1920 --height 1080 --tiling full --repeat 3
 
 Nothing here imports ``backend/src`` on purpose: a machine with a TensorRT card and no app
 installed must still be able to re-take the numbers. ``torch``/``torch_tensorrt``/
 ``tensorrt`` are imported inside the functions that need them, so a missing one is a
 one-line error rather than a traceback (and so the geometry/formatting half is importable
-and testable where no CUDA exists - see ``backend/tests/test_bench_tool.py``).
+and testable where no CUDA exists - see ``harness/tests/test_bench_tool.py``).
 
 Measurement protocol, as recorded in ``docs/MODEL.md`` §8 and the "Measurement protocol"
 section of the research ledger:

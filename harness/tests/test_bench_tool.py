@@ -1,11 +1,11 @@
-"""Tests for ``backend/tests/tools/bench_engine.py`` - the half that needs no GPU.
+"""Tests for ``harness/tests/tools/bench_engine.py`` - the half that needs no GPU.
 
 The harness is split on purpose: ``parse_args``, ``derive_tflops``,
 ``tflops_per_second``, ``format_summary``, ``format_tactic_table`` and the engine-file-name
 helpers take numbers and strings; only ``load_engine_module``,
 ``build_engine_module``, ``time_module`` and ``dump_tactics`` touch a device. That split
 is what lets this file exist in a cell with no torch, no CUDA and no ffmpeg - the same
-reason ``backend/tests/test_tiled_upscale.py`` keeps its geometry layer torch-free.
+reason ``harness/tests/test_tiled_upscale.py`` keeps its geometry layer torch-free.
 
 Nothing in this file starts a process that touches the GPU: importing the tool must not
 even import torch (asserted in a clean interpreter, below).
@@ -27,7 +27,7 @@ TOOL_PATH = Path(__file__).resolve().parent / "tools" / "bench_engine.py"
 
 
 def _load_tool():
-    """Import the CLI as a module (``backend/tests/tools`` is not a package)."""
+    """Import the CLI as a module (``harness/tests/tools`` is not a package)."""
     spec = importlib.util.spec_from_file_location("bench_engine_tool", TOOL_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

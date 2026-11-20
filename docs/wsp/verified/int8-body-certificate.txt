@@ -39,7 +39,7 @@ The threshold sits between the two clusters: the worst **valid** reading on reco
 deliberately broken grid margin x1.5, `int8-scales-bd.txt`), and the smallest **bug** reading is the
 docstring's 3.53% - so 1.0% gives ~3.5x margin either way, with the smaller cluster's edge on the record and
 the larger one's on the docstring. `Int8Body.sanity_ok(share, bar)` is a pure function so the separation is pinned
-without a GPU, and `backend/tests/test_int8_probe_modes.py` asserts both clusters (0.00000, 0.00442,
+without a GPU, and `harness/tests/test_int8_probe_modes.py` asserts both clusters (0.00000, 0.00442,
 0.01917, 0.28825 pass; 3.53, 29.5, 100 fail).
 
 Evidence it runs: BD Violet, int8 forced, reuse off, 2026-11-18
