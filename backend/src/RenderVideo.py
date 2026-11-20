@@ -155,6 +155,10 @@ class Render:
         # reuse collapsed to 1.1% (vs 46.8% with the veto off).
         temporal_reuse_pixel_veto: float | None = 0.0,
         temporal_reuse_auto: bool = True,
+        # The gate's translation estimate, applied to the cached picture before the residual correction.
+        # Without it a reuse keeps the previous frame's geometry, i.e. the drawing jumps by the scan's
+        # wobble (0.1-0.5 px here) - small, but the one thing a reuse must not do on line art.
+        temporal_reuse_warp: bool = True,
         # the correction the reused frame gets. Without it the gate re-emits the reference's
         # picture verbatim, which loses everything that changed (measured 37/130 over the bar);
         # with it the frequency-split residual takes that to 0/130 on the calibration cut.
@@ -179,6 +183,7 @@ class Render:
         # filter has to come from the configuration, not from the gate
         self.temporalReuseStatistic = temporal_reuse_statistic
         self.temporalReuseMaxChain = temporal_reuse_max_chain
+        self.temporalReuseWarp = bool(temporal_reuse_warp)
         self.ffmpegPath = ffmpeg_path
         if quality_preset not in ("best", "fast"):
             raise ValueError(f"quality_preset must be 'best' or 'fast', got {quality_preset!r}")
@@ -470,7 +475,9 @@ class Render:
             # which is never exceeded, so every frame is reused and the defect comes back. Measured
             # 2026-11-18: threshold 0.07 overwritten by 3.0, reuse 89/122. Refuse the combination
             # instead of converting silently.
-            if temporal_reuse_auto and str(temporal_reuse_statistic) != "mean_abs":
+            # `coarse` is in the same unit as `mean_abs` (8-bit levels on a block grid), so the tuner's
+            # write is legal there; `channel_max_share` is in percent and is the only ratio statistic.
+            if temporal_reuse_auto and str(temporal_reuse_statistic) not in ("mean_abs", "coarse"):
                 log(f"auto gate: DISABLED - it tunes a threshold in 8-bit levels and the gate is "
                     f"measuring {temporal_reuse_statistic} (a share); writing one into the other "
                     f"fails open. Pass --no_temporal_reuse_auto and a threshold in the statistic's "
@@ -501,7 +508,18 @@ class Render:
                     # "price of quality" in the ledger is that mismatch; when no samples arrive
                     # (int8 packed payload) `_uses_acceptance` still falls back to the proxy.
                     certify_on="acceptance",
+                    # The noise-floor guard's premise - a 32 px block mean cannot separate grain from
+                    # motion - is what the coarse statistic removes by construction. With it on, the
+                    # coarse statistic's floor (a low-pass level, measured ~3 on the denoised Pink
+                    # Panther) would read as "grainy material" against a limit measured at the pixel
+                    # scale, and refuse material the acceptance certifier bounds at the same scale the
+                    # decision is taken at. The guard stays for mean_abs, where it was calibrated.
+                    noise_floor_refuse=(None if str(temporal_reuse_statistic) == "coarse" else 1.5),
                 )
+                if str(temporal_reuse_statistic) == "coarse":
+                    log("auto gate: the noise-floor guard is off for the coarse statistic (its premise is "
+                        "the grain the low-pass removes); the acceptance certifier still bounds the picture, "
+                        "at the same scale as the decision")
                 log("auto gate tuning: the threshold will be chosen from the first rendered "
                     "frames (LR delta vs the real HR delta they cause)")
 
@@ -711,11 +729,87 @@ class Render:
         """The body is wired into the whole-frame path; a created gate means the render is tiled."""
         return getattr(self, "temporalReuse", None) is None
 
-    def _calibrate_gate(self, hr_frame):
+    def _accept_lowpass(self, rgb8, sigma):
+        """The acceptance statistic's own coarse scale: the same low-pass the gate's decision is taken at.
+
+        ``rgb8`` is stride-2 of the HR output, so ``sigma`` arrives already divided for that grid. The kernel is
+        cached per (sigma, device): it is rebuilt at most once per calibration, but a 4K frame at 3 channels is
+        12 MB and the padding is the allocation that matters.
+        """
+        import torch.nn.functional as F
+        key = (round(float(sigma), 3), str(rgb8.device))
+        cached = getattr(self, "_accept_kernels", None)
+        if cached is None:
+            cached = self._accept_kernels = {}
+        if key not in cached:
+            radius = max(1, int(3.0 * sigma + 0.5))
+            x = torch.arange(-radius, radius + 1, dtype=torch.float32, device=rgb8.device)
+            k = torch.exp(-(x * x) / (2.0 * sigma * sigma))
+            cached[key] = ((k / k.sum()), radius)
+        kernel, radius = cached[key]
+        channels = int(rgb8.shape[1])
+        horizontal = kernel.view(1, 1, 1, -1).expand(channels, 1, 1, -1)
+        vertical = kernel.view(1, 1, -1, 1).expand(channels, 1, -1, 1)
+        out = rgb8.float()
+        out = F.conv2d(F.pad(out, (radius, radius, 0, 0), mode="replicate"), horizontal, groups=channels)
+        out = F.conv2d(F.pad(out, (0, 0, radius, radius), mode="replicate"), vertical, groups=channels)
+        return out.round().clamp_(0, 255)
+
+    def _lr_history(self, lr_tensor, depth):
+        """The last ``depth`` low-resolution frames, for pricing a reuse's residual (calibration only).
+
+        Bounded on purpose: a 4K LR frame is 50 MB in fp16 and five of them would sit on the card beside the
+        engine, so the budget decides how deep the acceptance certifier can look. With fewer frames than the
+        chain allows, the deeper depths simply get no samples and the tuner certifies only what it could price -
+        the honest degradation, and it is logged.
+        """
+        budget = int(getattr(self, "_lr_history_budget", 64 * 1024 * 1024))
+        history = getattr(self, "_lr_hist", None)
+        if history is None:
+            history = self._lr_hist = []
+        if lr_tensor is not None and lr_tensor.dim() == 4:
+            # a clone: the reader's input buffer is reused for the next frame
+            history.insert(0, lr_tensor.detach().clone())
+        keep = 1
+        used = 0
+        for frame in history:
+            used += frame.numel() * frame.element_size()
+            if used > budget:
+                break
+            keep += 1
+        keep = min(keep, max(1, int(depth) + 1), len(history))
+        if len(history) > keep:
+            del history[keep:]
+            if not getattr(self, "_lr_history_trimmed", False):
+                self._lr_history_trimmed = True
+                log(f"auto gate: the acceptance certifier keeps {keep - 1} LR frames "
+                    f"({budget // (1024 * 1024)} MB budget), so it can price reuses up to "
+                    f"{keep - 1} frames deep; deeper chains are not certified on this resolution")
+        return history
+
+    def _accept_shift(self, rgb8, dx, dy):
+        """Move a sample by ``(dx, dy)`` grid pixels: the geometry a reuse would apply.
+
+        Takes either an 8-bit levels tensor (the HR output) or an LR frame in [0, 1], so it must NOT round: an
+        LR frame rounded to integers is a binary picture, and the residual taken against it read as a 99.6%
+        difference on every depth the first time this ran.
+        """
+        import torch.nn.functional as F
+        if abs(dx) < 1e-3 and abs(dy) < 1e-3:
+            return rgb8
+        h, w = int(rgb8.shape[-2]), int(rgb8.shape[-1])
+        ys = torch.arange(h, dtype=torch.float32, device=rgb8.device) - dy
+        xs = torch.arange(w, dtype=torch.float32, device=rgb8.device) - dx
+        gy, gx = torch.meshgrid(ys, xs, indexing="ij")
+        grid = torch.stack(((gx / max(1, w - 1)) * 2.0 - 1.0,
+                            (gy / max(1, h - 1)) * 2.0 - 1.0), dim=-1).unsqueeze(0)
+        return F.grid_sample(rgb8.float(), grid, mode="bilinear", padding_mode="border",
+                             align_corners=True)
+
+    def _calibrate_gate(self, hr_frame, lr_tensor=None):
         """Feed the auto tuner once per rendered frame: the gate's LR delta is free (it was
         just computed) and the HR delta costs one 1/8 luma pool of the output."""
-        import torch.nn.functional as F
-        # no clone: the frame already owns the tensor and this runs before it is handed on
+        import torch.nn.functional as F        # no clone: the frame already owns the tensor and this runs before it is handed on
         tensor = getattr(hr_frame, "_tensor", None)
         block = 32 * max(1, int(self.modelScale or 1))
         # stride-2 subsample first: the statistic is a block mean, so halving the grid changes
@@ -757,6 +851,9 @@ class Render:
         # which is exactly the class of mistake this whole investigation is about. Stride-2 RGB at
         # 8 bits is 6 MB per 4K frame and four of them fit in the gate's own budget.
         accept = []
+        if not hasattr(self, "_accept_pixel"):
+            self._accept_pixel = []
+            self._accept_emitted = []
         frames = getattr(self, "_hr_rgb8", None)
         if frames is None:
             frames = self._hr_rgb8 = []
@@ -769,9 +866,56 @@ class Render:
         rgb8 = None
         if rgb_capable:
             rgb8 = (tensor[:, :, ::2, ::2].clamp(0.0, 1.0) * 255.0).round().to(torch.uint8)
-            for past in reversed(frames[-max(depth, 1):]):
-                delta = (rgb8.to(torch.int16) - past.to(torch.int16)).abs().max(dim=1).values
+            coarse = str(getattr(self, "temporalReuseStatistic", "")) == "coarse"
+            # At the coarse statistic the acceptance statistic is taken at the SAME scale as the decision.
+            # Otherwise the certifier counts the scan's registration and the dust dots as damage - the very
+            # difference the decision was built to ignore - and no threshold can ever pass: measured on the
+            # denoised Pink Panther, a reuse the gate accepted at the coarse scale reads 1.5% of pixels at the
+            # pixel scale of which 1.1% is dust dots, against a 0.1% bar.
+            sigma = (getattr(self.temporalReuse, "coarse_sigma", 3.0) * float(self.modelScale or 1)) / 2.0
+            # What a reuse at distance d actually EMITS, not what the stale frame costs: the cached output
+            # moved by the translation the gate measured for that distance, plus the LR residual that the
+            # corrector adds (upscaled the way it does it). Both halves matter and they are separable:
+            # measured on the denoised Pink Panther against the fresh model output at the coarse scale, the
+            # stale frame reads 0.343%, the moved one 0.181%, and moved+residual 0.000% (5 consecutive pairs
+            # of a real render pair). Without this the certifier prices the verbatim fallback and refuses
+            # material the emission handles - 0.28-0.40% against a 0.1% bar at depth 1.
+            shifts = getattr(self, "_hr_shift_steps", None)
+            if shifts is None:
+                shifts = self._hr_shift_steps = []
+            shift = tuple(getattr(self.temporalReuse, "last_shift_step", (0.0, 0.0)) or (0.0, 0.0))
+            shifts.append((float(shift[0]), float(shift[1])))
+            if len(shifts) > max(1, depth) + 1:
+                del shifts[:-(max(1, depth) + 1)]
+            lr_window = self._lr_history(lr_tensor, depth)
+            # LR pixels -> the stride-2 acceptance grid of the HR output
+            to_grid = float(self.modelScale or 1) / 2.0
+            for distance, past in enumerate(reversed(frames[-max(depth, 1):]), start=1):
+                pixel_delta = (rgb8.to(torch.int16) - past.to(torch.int16)).abs().max(dim=1).values
+                pixel_share = float((pixel_delta > 8).float().mean()) * 100.0
+                self._accept_pixel.append(pixel_share)
+                if coarse:
+                    accumulated = (sum(s[0] for s in shifts[-distance:]),
+                                   sum(s[1] for s in shifts[-distance:]))
+                    moved = self._accept_shift(past, accumulated[0] * to_grid, accumulated[1] * to_grid)
+                    base_lr = lr_window[distance] if len(lr_window) > distance else None
+                    if base_lr is not None:
+                        aligned = self._accept_shift(base_lr, accumulated[0], accumulated[1])
+                        residual = (lr_tensor - aligned).float()
+                        if abs(to_grid - 1.0) > 1e-6:
+                            residual = torch.nn.functional.interpolate(
+                                residual, scale_factor=to_grid, mode="nearest")
+                        moved = moved + residual * 255.0
+                    delta = (self._accept_lowpass(rgb8, sigma).to(torch.int16)
+                             - self._accept_lowpass(moved.clamp(0, 255), sigma).to(torch.int16)).abs().max(dim=1).values
+                else:
+                    delta = pixel_delta
                 accept.append(float((delta > 8).float().mean()) * 100.0)
+                if coarse and moved is not None:
+                    # the number the OLD bar would judge, on the emission rather than on the stale frame:
+                    # dust dots plus whatever registration the warp left. Reported, never certified.
+                    emitted = float(((moved - rgb8).abs().max(dim=1).values > 8).float().mean()) * 100.0
+                    self._accept_emitted.append(emitted)
         elif not getattr(self, "_calib_rgb_skipped", False):
             log("auto gate: the output frame is a packed yuv420p payload, so the acceptance estimate (share of "
                 "pixels >8 levels in RGB) is not computed on it; the luma grids still certify the threshold")
@@ -808,6 +952,19 @@ class Render:
             if self.autoTuner.chosen_chain:
                 self.temporalReuse.max_chain = int(self.autoTuner.chosen_chain)
             log(self.autoTuner.stats())
+            # Row (c) of rve-reuse-structural-gate: the pixel-scale number is reported as what it is - dust
+            # dots and the scan's registration - beside the coarse one that decided. It is not a bar.
+            if self._accept_pixel and str(getattr(self, "temporalReuseStatistic", "")) == "coarse":
+                stale = sorted(self._accept_pixel)
+                total = len(stale)
+                emitted = sorted(getattr(self, "_accept_emitted", []))
+                tail = ""
+                if emitted:
+                    tail = (f"; the EMISSION itself reads {emitted[len(emitted) // 2]:.3f}% median, "
+                            f"{emitted[-1]:.3f}% worst")
+                log(f"auto gate: at the PIXEL scale the stale frame reads {stale[total // 2]:.3f}% of pixels "
+                    f"above 8 levels (worst {stale[-1]:.3f}% over {total} samples){tail} - dust dots and the "
+                    f"scan's registration, which the coarse certification is built to ignore")
 
     def _reuse_frame(self, lr_tensor):
         """The frame a reuse emits: the last rendered frame plus the correction for what changed.
@@ -818,6 +975,15 @@ class Render:
         cached = self._lastRenderedFrame
         if self.temporalCorrection is None or lr_tensor is None:
             return cached
+        # the gate's geometry, applied before the photometric residual: the cached picture is moved onto this
+        # frame first, so the residual is not asked to undo a sub-pixel wobble it can only approximate (and
+        # so the drawing does not stay where the previous frame put it).
+        shift = getattr(self.temporalReuse, "last_shift_step", (0.0, 0.0))
+        if self.temporalReuseWarp and shift and (abs(shift[0]) + abs(shift[1]) > 0.0):
+            try:
+                self.temporalCorrection.align(float(shift[0]), float(shift[1]))
+            except Exception as exc:      # geometry must never break a render either
+                log(f"reuse alignment failed ({exc}); this reuse keeps the previous geometry")
         try:
             corrected = self.temporalCorrection.correct(lr_tensor)
         except Exception as exc:
@@ -1009,7 +1175,14 @@ class Render:
                                 log(f"reuse correction: seeding failed ({_corr_exc}); reuses emit verbatim")
                                 self.temporalCorrection = None
                         if self.autoTuner is not None and not self.autoTuner.ready:
-                            self._calibrate_gate(frame)
+                            try:
+                                self._calibrate_gate(frame, frame_tensor)
+                            except Exception as _calib_exc:
+                                # a calibration failure costs the tuning, never the render: the thread died here
+                                # once and the writer waited for frames that would never come
+                                log(f"auto gate: calibration failed ({_calib_exc}); keeping the configured "
+                                    f"threshold for the rest of this render")
+                                self.autoTuner = None
                 
                 
                 

@@ -578,9 +578,13 @@ class HandleApplication:
             help="What the gate measures. mean_abs (default): the worst 32px block mean of |luma "
                  "delta|, threshold in 8-bit levels. channel_max_share: the percentage of pixels "
                  "whose worst CHANNEL moved by more than 8 levels - the quantity the acceptance bar "
-                 "counts - threshold in percent. The share mode ignores the auto tuner (which works "
-                 "in levels), so pair it with --no_temporal_reuse_auto.",
-            choices=("mean_abs", "channel_max_share"),
+                 "counts - threshold in percent (this mode ignores the auto tuner, which works in "
+                 "levels). coarse: the same block statistic taken on a 3 px low-pass with the "
+                 "estimated translation compensated, then the minimum of the warped and un-warped "
+                 "comparison - the same threshold unit as mean_abs, and the mode that measures the "
+                 "drawing instead of the scan's registration (see harness/docs/wsp/verified/"
+                 "reuse-structural-gate.txt). It also moves the reused frame by the estimate.",
+            choices=("mean_abs", "channel_max_share", "coarse"),
             default="mean_abs",
         )
         parser.add_argument(

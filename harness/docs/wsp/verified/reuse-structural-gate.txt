@@ -1,0 +1,151 @@
+# Reuse decided on the drawing: a coarse statistic, a warped emission, and 63.8% of a calm window reused
+
+Measured 2026-11-20/21 (local), the app's own renderer (TensorRT, 2x Futsuu Anime, 1440x1080 -> 2880x2160, ffv1
+lossless sink). Queue row: `rve-reuse-structural-gate-2026-11-20`. Evidence trail that led here:
+`harness/docs/wsp/FINDINGS-reuse-boiling-material-2026-11-20.md`.
+
+The row's premise, from that trail: the shipped statistic (max over 32 px blocks of the mean |difference| at full
+resolution) qualifies 6.7% of consecutive pairs on calm Pink Panther material, and a 2 px low-pass plus a
+translation estimate qualifies 47.8% - because a 0.5 px shift of a 1-2 px black line moves edge pixels by tens of
+levels. So the gate was measuring the registration of the scan, not whether the cel changed.
+
+## What was built
+
+**Decision** (`summary statistic = "coarse"`, `backend/src/utils/TemporalReuse.py`): luma at half resolution, a
+3 px Gaussian low-pass (in LR pixels), FFT phase correlation against the reference (Hann-windowed, sub-pixel by a
+parabolic fit, refused below a response floor or above a shift limit), one bilinear warp of the reference, then the
+same max-over-32-px-blocks block-mean statistic. The decision takes the **minimum of the warped and the un-warped
+comparison**, so the registration estimate can only lower the statistic - a biased or refused estimate degrades to
+the shipped geometry instead of inventing damage.
+
+**Emission** (`--temporal_reuse_warp`, `TemporalCorrection.align`): the cached HR picture and its LR frame are moved
+by the gate's own estimate before the residual correction, so the residual is not asked to undo a sub-pixel wobble
+and the drawing does not stay where the previous frame put it. The shift applied is the *increment* against the
+previous frame, not the shift from the reference (a chain serves a frame from up to `max_chain` frames back).
+
+**Certification** (`RenderVideo._calibrate_gate`): the acceptance statistic is taken at the SAME coarse scale as the
+decision, and it prices the **emission** (base moved by the accumulated shift, plus the LR residual the corrector
+adds) rather than the stale frame. The pixel-scale share is computed and logged beside it, as dust.
+
+## Measurements
+
+### The statistic, on the gate's own population (LR input, native 24 fps)
+
+`harness/scripts/reuse_structural_probe.py` runs BOTH state machines over the same decoded frames - reference
+keeping, chain cap 4, scene cut - because a share of PAIRS is not a share of frames.
+
+| window (denoised `Untitled78.mov`) | shipped, threshold 4 / 5 | coarse, threshold 2 / 3 / 4 |
+|---|---|---|
+| calm, t=120, 72 frames | 12.5% / 23.6% | **30.6% / 58.3% / 65.3%** |
+| fast motion, t=280, 72 frames | 4.2% / 4.2% | 5.6% / 20.8% / 31.9% |
+
+The statistic separates the two content classes (5.5x at threshold 2) where the shipped one does not (both 4.2%).
+Registration was refused on 0 of 71 comparisons on the calm window.
+
+### The render pair (3.36 s, 80 frames, calm window at t=120)
+
+`on_coarse.mkv` (threshold 4.0, chain 4, correction + warp) against `off1.mkv` (the same build, `--no_temporal_reuse`):
+
+| | |
+|---|---|
+| frames reused | **51/80 = 63.8%**, depth histogram `{1: 29, 2: 8, 3: 7, 4: 7}`, 0 scene cuts, 0 vetoes |
+| the gate's own threshold | chosen by the tuner on 16 calibration frames: **4.0**, chain 4, all depths certified at worst share 0.00 against the 0.1% bar |
+| **coarse scale** (6 px at HR, sigma 3 LR px), all 80 frames | **worst 0.030%, median 0.000%, 0 of 80 frames over 0.1%** |
+| pixel scale (the shipped bar's instrument) | worst 8.15%, median 0.867%, 41 of 80 frames over 0.1% |
+| of that, dust dots (components <= 64 px) | median 0.766%, worst 2.076% |
+| frames unchanged | 39 of 80 (not reused) |
+
+So at the scale the decision is taken at, the reused frames are inside the acceptance bar with a 3x margin, and the
+pixel-scale number that fails the old bar is 90% dust-dot area plus the scan's registration - the two things the
+owner said need not be preserved ("после денойза зерна нет, есть точки то есть то нет, и кадр подрагивает из-за
+скана"). That decision is what moves the certifier to the coarse scale; the pixel number is reported, never used
+as a bar for this statistic.
+
+### Cost (`harness/scripts/reuse_coarse_cost.py`, 1440x1080, medians of 30 rounds after 5 warm-ups)
+
+| | |
+|---|---|
+| `is_duplicate`, shipped `mean_abs` | 1.06 ms |
+| `is_duplicate`, `coarse` | **1.49 ms** (+0.43) |
+| emission warp at 2880x2160x3 | **0.81 ms** |
+| per reused frame | **2.30 ms** against ~39 ms of model call |
+
+The row's target was <= 2 ms; the measured 2.30 is above it and is reported as such. The falsifier ("registration +
+warp costs more than the frames it saves") is not close: at 63.8% reuse the saving is ~25 ms/frame average.
+
+### Controls
+
+* **Identity**: a frame against itself reads exactly 0.000 in both statistics and registers a shift of 0.
+* **A/A**: two ungated renders of the same cut (`off1`, `off2`) decode to identical frames (80/80). The container
+  bytes differ (timestamps), the pictures do not - so a `config` comparison is measuring the gate, not the encoder.
+* **A synthetic sub-pixel shift on real line art**: 0.35 px reads 7.34-8.82 in the shipped statistic and 1.2-1.8 in
+  the coarse one, and a +12-level area change still reads 12.0 (a statistic that accepts everything is not a
+  statistic).
+* **The emission decomposition** (5 consecutive pairs of a real render pair, coarse / pixel): stale frame
+  0.343% / 4.70%, moved 0.181% / 3.86%, **moved + residual 0.000% / 2.85%**. That is why the certifier had to price
+  the emission: on the stale frame it read 0.40% and refused material the emission handles.
+
+## The three bugs this cost, all found by measurement rather than by reading
+
+1. `grid_sample` reads the INPUT at the grid's coordinates, so an offset of +d moves the content by **-d**. Both
+   warps had the sign backwards; a dot moved by +3 landed at -3, and a synthetic shift *increased* the statistic.
+2. The sub-pixel parabola was written `(right - left)` on the x axis and `(down - up)` on the y one - one of the two
+   is the wrong direction, and a +0.4 px move read back as -0.2 px. Pinned now by `test_coarse_registration_...`.
+3. The emission warp subtracted the shift twice (once in `arange`, once in the grid), moving the picture by twice
+   the estimate. Caught by a dot test after the render pair had already been measured - the reported numbers are
+   from the fixed build.
+
+## Falsifier
+
+Not triggered. The coarse statistic lifts the reusable share on calm windows to 63.8% (target >= 30%) with the
+coarse-scale damage at 0.030% (bar 0.1%), and registration + warp cost 2.30 ms against a ~39 ms model call.
+
+## Reproduce
+
+```bash
+PY=/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/python/python/bin/python3
+B=/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2
+CUT=/home/jorj/2Tb/remastering/Untitled78.mov          # 078 Pink Plasma, denoised
+
+# 1. the statistic on the gate's population, both content classes, with its controls
+$PY harness/scripts/reuse_structural_probe.py "$CUT" --start 120 --frames 72
+$PY harness/scripts/reuse_structural_probe.py "$CUT" --start 280 --frames 72
+
+# 2. the render pair (a 3.36 s provable cut: -c copy, so the frame sequence is the source's)
+bin/ffmpeg -v error -y -ss 120 -t 3 -i "$CUT" -c copy /tmp/cut120.mkv
+cd backend && $PY rve-backend.py --input /tmp/cut120.mkv --output /tmp/on.mkv --ffmpeg_path $B/bin/ffmpeg \
+  --backend tensorrt --upscale_model "$B/custom_models/2x-Futsuu-Anime(1).pth" \
+  --temporal_reuse --temporal_reuse_statistic coarse --quality_preset best \
+  --custom_encoder "-c:v ffv1 -pix_fmt yuv444p" --overwrite
+cd backend && $PY rve-backend.py --input /tmp/cut120.mkv --output /tmp/off.mkv --ffmpeg_path $B/bin/ffmpeg \
+  --backend tensorrt --upscale_model "$B/custom_models/2x-Futsuu-Anime(1).pth" \
+  --no_temporal_reuse --custom_encoder "-c:v ffv1 -pix_fmt yuv444p" --overwrite
+
+# 3. the acceptance table at both scales, and the shipped instrument for comparison
+$PY harness/scripts/reuse_structural_probe.py --render-pair /tmp/on.mkv /tmp/off.mkv
+$PY harness/scripts/gate_sweep.py /tmp/on.mkv /tmp/off.mkv --out /tmp/damage.json --reference-kind config
+
+# 4. the cost
+$PY harness/scripts/reuse_coarse_cost.py
+
+# 5. the gate's own units
+$PY -m pytest harness/tests/test_reference_gate.py -q -p no:cacheprovider -o addopts="" -k coarse
+```
+
+Clean runs of this note's commands: `harness/tests` 471 passed / 6 skipped, `backend/tests` 12 passed.
+
+## What this does NOT cover
+
+* **One clip, one model, one scale.** 078 Pink Plasma, calm window only (t=120-123.4 s), 2x Futsuu Anime at 1080p.
+  The fast-motion refusal is measured on the LR simulation (5.6% at threshold 2), not on a render.
+* **Dust is counted by area**, not by visibility: a dot's area and count, not whether a viewer notices it. The
+  owner's decision that dust need not be preserved is what makes the coarse bar legitimate here; it is not a
+  measurement of how the result looks.
+* **The pixel-scale bar still applies to every other statistic.** `mean_abs` and `channel_max_share` are untouched
+  and still certify at the pixel scale.
+* **The chain's geometry is accumulated from per-frame estimates**, whose bias is ~40% low on broad peaks; the
+  warp is what the statistic certified, not an exact registration.
+* **Rotation and scale of the scan are not modelled** - translation only.
+* **Memory bound**: the acceptance certifier keeps the last `depth+1` LR frames within a 64 MB budget, so on 4K
+  input it prices only depth 1 and logs that; deeper chains are not certified there.
+* **4x models** pay ~5.9 ms for the emission warp (measured), which is not covered by the 2.30 ms figure.

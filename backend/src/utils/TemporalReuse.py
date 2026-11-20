@@ -159,6 +159,18 @@ REFERENCE_SCENE_CUT = 32.0      # global level jump that drops the reference
 REFERENCE_LUMA_TAPS = (1, 2, 1)  # R/G/B weights, normalized to sum 1
 REFERENCE_BLOCK_BASE = 32       # block side at 1080p (scales with the frame height)
 REFERENCE_BLOCK_REFERENCE_HEIGHT = 1080
+# The coarse scale, in LOW-RESOLUTION pixels. Not a preference: a 1-2 px black line moved by half a pixel
+# changes by tens of levels at full resolution, and a 32 px block mean is not enough to hide it. Measured on the
+# denoised Pink Panther (1440x1080, calm window at t=120): a 0.35 px synthetic shift reads 7.3-8.8 in the shipped
+# statistic and 1.2-1.8 after a 3 px low-pass with the translation compensated, on the same frame and the same
+# block size (harness/scripts/reuse_structural_probe.py --sigma). The scale is where the drawing is stable against
+# the scan's own registration error, which is what the statistic has to see.
+COARSE_SIGMA = 3.0
+COARSE_REGISTER_DIVISOR = 1     # registration grid: the statistic grid itself (half resolution). Measured:
+                                # downscaling again is not faster (FFT at 270x360 vs 540x720 both ~0.33 ms) and loses
+                                # accuracy on larger shifts (9.15 -> 4.10 levels against 9.15 -> 2.59)
+COARSE_MIN_RESPONSE = 0.2       # below this the correlation has no peak (a flat frame) and the shift is refused
+COARSE_MAX_SHIFT_FRAC = 0.06    # a shift beyond this fraction of the frame is a cut or a bad estimate
 
 
 def scaled_block(height: int) -> int:
@@ -251,7 +263,8 @@ class ReferenceFrameGate:
                  max_chain: int = REFERENCE_MAX_CHAIN,
                  luma_taps: Sequence[float] = REFERENCE_LUMA_TAPS,
                  scene_threshold: float = REFERENCE_SCENE_CUT,
-                 pixel_veto: Optional[float] = REFERENCE_PIXEL_VETO) -> None:
+                 pixel_veto: Optional[float] = REFERENCE_PIXEL_VETO,
+                 coarse_sigma: float = COARSE_SIGMA) -> None:
         if block is not None and block <= 0:
             raise ValueError(f"block must be positive (None = scale with the frame), "
                              f"got {block}")
@@ -277,10 +290,15 @@ class ReferenceFrameGate:
         #   share (70.2%): 0.004% of HR pixels above 8 levels for block_mean, 0.000% for
         #   mean_abs, and mean_abs stays at 0.004% up to threshold 8 where block_mean reaches
         #   0.460%.
-        if statistic not in ("block_mean", "mean_abs", "channel_max_share"):
-            raise ValueError(f"statistic must be 'block_mean', 'mean_abs' or 'channel_max_share', "
-                             f"got {statistic!r}")
+        if statistic not in ("block_mean", "mean_abs", "channel_max_share", "coarse"):
+            raise ValueError(f"statistic must be 'block_mean', 'mean_abs', 'channel_max_share' or "
+                             f"'coarse', got {statistic!r}")
         self.statistic = statistic
+        # The coarse statistic's scale, in LR pixels. Named here rather than only in the module constants so a
+        # caller can measure another scale without editing the file.
+        self.coarse_sigma = float(coarse_sigma)
+        if self.coarse_sigma <= 0:
+            raise ValueError(f"coarse_sigma must be > 0, got {coarse_sigma}")
         # The acceptance bar counts pixels whose worst channel is more than 8 levels off, so the
         # channel-max statistic is the same quantity the bar measures. `share_level` is that 8; the
         # threshold, in this mode, is a PERCENT of pixels (0.07 means 0.07%), not a level.
@@ -292,7 +310,16 @@ class ReferenceFrameGate:
         self.max_block_mean = None if max_block_mean is None else float(max_block_mean)
         self._ref_rgb = None
         self._ref_luma = None           # its full-res luma (needed by mean_abs and by the veto)
+        self._ref_blur = None           # the coarse statistic's reference: half-res luma, low-passed
         self._chain = 0                 # consecutive frames served from the reference
+        # Geometry of the last observed frame against the current reference, in FULL-RESOLUTION LR pixels,
+        # and the increment against the previous frame's shift on that same reference. The increment is what a
+        # reuse has to move the cached HR frame by: the gate's reference can be four frames old, so the shift
+        # from the reference is not the shift from the frame the cached output came from.
+        self.last_shift: Tuple[float, float] = (0.0, 0.0)
+        self.last_shift_step: Tuple[float, float] = (0.0, 0.0)
+        self._shift_prev: Tuple[float, float] = (0.0, 0.0)
+        self.registration_refusals = 0
         # Whether the frame just observed dropped the reference as a scene cut. The gate resets
         # its own history there, and the auto tuner has to reset its HR history at the same
         # frames: otherwise its "two frames back" delta compares across the cut, which is
@@ -319,7 +346,11 @@ class ReferenceFrameGate:
         self._ref_mean = 0.0
         self._ref_luma = None
         self._ref_rgb = None
+        self._ref_blur = None
         self._chain = 0
+        self.last_shift = (0.0, 0.0)
+        self.last_shift_step = (0.0, 0.0)
+        self._shift_prev = (0.0, 0.0)
         self.resets += 1
 
     @property
@@ -341,10 +372,12 @@ class ReferenceFrameGate:
 
     def stats(self) -> str:
         pct = 100.0 * self.reused / self.processed if self.processed else 0.0
+        scale = (f" on a {self.coarse_sigma:g} px low-pass with the translation compensated"
+                 if self.statistic == "coarse" else "")
         return (f"reference reuse: {self.reused}/{self.processed} frames reused ({pct:.1f}%), "
                 f"{self.scene_cuts} scene cuts, {self.vetoes} pixel vetoes, "
                 f"threshold={self.threshold}/255 over "
-                f"{self.block or 'scaled'}px blocks, "
+                f"{self.block or 'scaled'}px blocks ({self.statistic}{scale}), "
                 f"max chain={self.max_chain or 'unbounded'}, "
                 f"pixel veto={self.pixel_veto if self.pixel_veto is not None else 'off'}; "
                 f"depth histogram {dict(sorted(self.depth_counts.items()))}")
@@ -395,7 +428,172 @@ class ReferenceFrameGate:
         """``(1, C, H, W)`` in [0, 1] -> ``(1, 1, ceil(H/b), ceil(W/b))`` in 8-bit levels."""
         return self.blocks_of(self.luma(frame_tensor))
 
-    def observe(self, blocks, luma=None, decision=None, share=None, rgb=None) -> bool:
+    # -- coarse statistic (compare the drawing, not the scan's registration) --------------
+    def _gauss_kernel(self, sigma: float, device, dtype):
+        """1-D Gaussian kernel of ``sigma`` pixels, cached per (sigma, device, dtype)."""
+        key = ("gauss", round(sigma, 4), str(device), str(dtype))
+        kernel = self._weights.get(key)
+        if kernel is None:
+            radius = max(1, int(3.0 * sigma + 0.5))
+            x = torch.arange(-radius, radius + 1, dtype=torch.float32, device=device)
+            k = torch.exp(-(x * x) / (2.0 * sigma * sigma))
+            kernel = (k / k.sum()).to(dtype).view(1, 1, 1, -1)
+            self._weights[key] = kernel
+        return kernel
+
+    @_no_grad
+    def _lowpass(self, x, sigma: float) -> "torch.Tensor":
+        """Separable Gaussian on ``(1, 1, h, w)``, replicate borders (the frame edge is not a feature)."""
+        _require_torch()
+        k = self._gauss_kernel(sigma, x.device, x.dtype)
+        radius = (k.shape[-1] - 1) // 2
+        xp = F.pad(x, (radius, radius, 0, 0), mode="replicate")
+        xp = F.conv2d(xp, k)
+        xp = F.pad(xp, (0, 0, radius, radius), mode="replicate")
+        return F.conv2d(xp, k.view(1, 1, -1, 1))
+
+    def _hann(self, h: int, w: int, device, dtype) -> "torch.Tensor":
+        """Separable Hann window for the correlation, cached per shape (a border step is not registration)."""
+        key = ("hann", h, w, str(device), str(dtype))
+        window = self._weights.get(key)
+        if window is None:
+            wy = torch.hann_window(h, periodic=False, dtype=torch.float32, device=device).view(h, 1)
+            wx = torch.hann_window(w, periodic=False, dtype=torch.float32, device=device).view(1, w)
+            window = (wy * wx).to(dtype).view(1, 1, h, w)
+            self._weights[key] = window
+        return window
+
+    def _base_grid(self, h: int, w: int, device, dtype) -> "torch.Tensor":
+        key = ("grid", h, w, str(device), str(dtype))
+        grid = self._weights.get(key)
+        if grid is None:
+            ys = torch.arange(h, dtype=torch.float32, device=device)
+            xs = torch.arange(w, dtype=torch.float32, device=device)
+            gy, gx = torch.meshgrid(ys, xs, indexing="ij")
+            grid = torch.stack(((gx / max(1, w - 1)) * 2.0 - 1.0,
+                                (gy / max(1, h - 1)) * 2.0 - 1.0), dim=-1).unsqueeze(0)
+            grid = grid.to(dtype)
+            self._weights[key] = grid
+        return grid
+
+    @_no_grad
+    def _shift_tensor(self, x, dx: float, dy: float) -> "torch.Tensor":
+        """``(1, C, h, w)`` -> the same picture with its content moved by ``(dx, dy)`` pixels.
+
+        A single bilinear resample with replicated borders: no wraparound, so a frame edge cannot leak onto the
+        opposite side and hand the max-over-blocks statistic a spike that is not in the picture.
+        """
+        _require_torch()
+        if abs(dx) < 1e-4 and abs(dy) < 1e-4:
+            return x
+        h, w = int(x.shape[-2]), int(x.shape[-1])
+        grid = self._base_grid(h, w, x.device, x.dtype).clone()
+        # grid_sample reads INPUT at the grid's coordinates, so an offset of +d moves the CONTENT by -d.
+        # Measured: without this sign the reference was warped away from the frame it was being aligned to.
+        grid[..., 0] -= 2.0 * dx / max(1, w - 1)
+        grid[..., 1] -= 2.0 * dy / max(1, h - 1)
+        return F.grid_sample(x, grid, mode="bilinear", padding_mode="border", align_corners=True)
+
+    @_no_grad
+    def _register(self, ref_small, cur_small) -> Tuple[float, float, float, bool]:
+        """Translation putting ``cur`` on top of ``ref``: ``(dx, dy, response, trusted)``.
+
+        Phase correlation on the low-passed luma, at 1/``COARSE_REGISTER_DIVISOR`` of the statistic grid. The
+        shift is returned in FULL-RESOLUTION luma pixels, and the sub-pixel part comes from a parabolic fit on
+        the correlation peak - the estimator is biased low on broad peaks (measured 0.37 px read as 0.21), which
+        is why the caller never trusts it alone: :meth:`coarse_decision` keeps whichever comparison is cheaper,
+        warped or not, so a bad estimate degrades to the un-warped number instead of inventing damage.
+
+        Two refusals, both from a measured failure: a uniform frame has no peak and the estimator answers with
+        half the picture (120 px on a flat field, response 0.02), and a shift beyond
+        ``COARSE_MAX_SHIFT_FRAC`` of the frame is a cut, not registration.
+        """
+        _require_torch()
+        ref = F.avg_pool2d(ref_small, COARSE_REGISTER_DIVISOR)
+        cur = F.avg_pool2d(cur_small, COARSE_REGISTER_DIVISOR)
+        hh, ww = int(ref.shape[-2]), int(ref.shape[-1])
+        if hh < 4 or ww < 4:
+            return 0.0, 0.0, 0.0, False
+        window = self._hann(hh, ww, ref.device, ref.dtype)
+        spectrum = torch.fft.rfft2(ref * window) * torch.conj(torch.fft.rfft2(cur * window))
+        spectrum = spectrum / (spectrum.abs() + 1e-8)
+        corr = torch.fft.irfft2(spectrum, s=(hh, ww))
+        flat = int(corr.flatten().argmax())
+        iy, ix = divmod(flat, ww)
+        # 3x3 neighbourhood on the wrapped surface, then a parabola through each axis
+        rows = torch.tensor([(iy - 1) % hh, iy, (iy + 1) % hh], device=corr.device)
+        cols = torch.tensor([(ix - 1) % ww, ix, (ix + 1) % ww], device=corr.device)
+        patch = corr[0, 0][rows][:, cols].float()
+        centre, up, down = float(patch[1, 1]), float(patch[2, 1]), float(patch[0, 1])
+        left, right = float(patch[1, 0]), float(patch[1, 2])
+        den_y = up - 2.0 * centre + down
+        den_x = right - 2.0 * centre + left
+        # Parabola through (left, centre, right): peak at t = 0.5*(c[t-1] - c[t+1]) / (c[t+1] - 2c[t] + c[t-1]).
+        # Written the other way round it returns -t, which measured as a sub-pixel shift read back with the
+        # wrong sign (-0.20 for a +0.40 px move) while larger moves still read roughly right.
+        frac_y = 0.0 if abs(den_y) < 1e-12 else 0.5 * (down - up) / den_y
+        frac_x = 0.0 if abs(den_x) < 1e-12 else 0.5 * (left - right) / den_x
+        frac_y = max(-0.5, min(0.5, frac_y))
+        frac_x = max(-0.5, min(0.5, frac_x))
+        sy, sx = iy + frac_y, ix + frac_x
+        if sx > ww / 2.0:
+            sx -= ww
+        if sy > hh / 2.0:
+            sy -= hh
+        # grid units -> statistic-grid pixels -> full-resolution luma pixels
+        scale = float(COARSE_REGISTER_DIVISOR * 2)
+        dx, dy = -sx * scale, -sy * scale
+        response = centre
+        limit = COARSE_MAX_SHIFT_FRAC * max(ref_small.shape[-2], ref_small.shape[-1])
+        trusted = (response >= COARSE_MIN_RESPONSE and abs(dx) <= limit and abs(dy) <= limit)
+        if not trusted:
+            return 0.0, 0.0, response, False
+        return dx, dy, response, True
+
+    def _blocks_half(self, grid) -> "torch.Tensor":
+        """Block means of the half-resolution grid, with the block covering the same FRACTION of the picture.
+
+        ``block_for(H)`` is defined on the full frame (32 px at 1080p); the half grid needs half of it, so the
+        number of blocks per frame - and with it the max-over-blocks statistic - is unchanged by the scale.
+        """
+        _require_torch()
+        block = max(1, self.block_for(int(grid.shape[-2]) * 2) // 2)
+        return F.avg_pool2d(grid, block, ceil_mode=True) * 255.0
+
+    @_no_grad
+    def coarse_decision(self, luma) -> Tuple[Optional["torch.Tensor"], "torch.Tensor", "torch.Tensor"]:
+        """The coarse error field against the reference: ``(decision, block grid, blurred grid)``.
+
+        ``decision`` is ``None`` while there is no reference (the first frame after a reset), so the caller's
+        state machine treats it exactly like the first frame of a ``mean_abs`` run.
+
+        The decision keeps the MINIMUM of two comparisons - with the measured translation compensated and
+        without it. The registration is a biased estimator at this scale, and an estimate that made the
+        statistic bigger would refuse frames the un-warped comparison accepts; taking the minimum means the
+        estimate can only ever help, and ``registration_refusals`` counts the frames where it was not used.
+        """
+        _require_torch()
+        if luma.dim() != 4:
+            raise ValueError(f"expected a (1, 1, H, W) luma, got {tuple(luma.shape)}")
+        half = F.avg_pool2d(luma, 2)
+        blurred = self._lowpass(half, self.coarse_sigma / 2.0)
+        levels = self._blocks_half(blurred)
+        self.last_shift = (0.0, 0.0)
+        decision = None
+        if self._ref_blur is not None and tuple(self._ref_blur.shape) == tuple(blurred.shape):
+            dx, dy, _response, trusted = self._register(self._ref_blur, blurred)
+            if trusted:
+                self.last_shift = (dx, dy)
+                aligned = self._shift_tensor(self._ref_blur, dx / 2.0, dy / 2.0)
+                warped = self._blocks_half((aligned - blurred).abs())
+                plain = self._blocks_half((self._ref_blur - blurred).abs())
+                decision = warped if float(warped.max()) <= float(plain.max()) else plain
+            else:
+                self.registration_refusals += 1
+                decision = self._blocks_half((self._ref_blur - blurred).abs())
+        return decision, levels, blurred
+
+    def observe(self, blocks, luma=None, decision=None, share=None, rgb=None, blur=None) -> bool:
         """The decision and the state update, given a block grid (torch or numpy).
 
         Kept separate from :meth:`blocks` so the state machine - reference keeping, chain
@@ -452,6 +650,9 @@ class ReferenceFrameGate:
             self._chain += 1
             self.reused += 1
             self.depth_counts[self._chain] = self.depth_counts.get(self._chain, 0) + 1
+            # what a reuse has to move: the increment against the previous frame's shift on the SAME reference
+            step = (self.last_shift[0] - self._shift_prev[0], self.last_shift[1] - self._shift_prev[1])
+            self._shift_prev = self.last_shift
             if os.environ.get("RVE_DEBUG_DEPTH"):
                 import logging as _lg
                 _lg.getLogger("RVE").warning("reuse frame=%d depth=%d share=%.5f",
@@ -460,10 +661,16 @@ class ReferenceFrameGate:
             if scene_cut:
                 self.scene_cuts += 1
             self.last_scene_cut = bool(scene_cut)
+            step = (0.0, 0.0)
+            self._shift_prev = (0.0, 0.0)
+        self.last_shift_step = step
+        if not reuse:
             self._ref = blocks
             self._ref_mean = mean
             self._ref_luma = luma if (self.pixel_veto is not None
                                       or self.statistic == "mean_abs") else None
+            if self.statistic == "coarse":
+                self._ref_blur = blur
             if self.statistic == "channel_max_share":
                 self._ref_rgb = rgb.detach().clone() if rgb is not None else None
             self._chain = 0
@@ -475,8 +682,11 @@ class ReferenceFrameGate:
         levels = self.blocks_of(luma)
         decision = None
         share = None
+        blur = None
         ref = self._ref_luma
-        if self.statistic == "channel_max_share":
+        if self.statistic == "coarse":
+            decision, levels, blur = self.coarse_decision(luma)
+        elif self.statistic == "channel_max_share":
             ref_rgb = self._ref_rgb
             if ref_rgb is not None and tuple(ref_rgb.shape) == tuple(frame_tensor.shape):
                 # |I - ref| per channel, then the worst channel per pixel: the quantity the bar
@@ -494,7 +704,8 @@ class ReferenceFrameGate:
             # box(|I - ref|): one subtraction, one abs, one pool over the frame
             decision = self.blocks_of((luma - ref).abs())
         return self.observe(levels, luma, decision, share=share,
-                            rgb=frame_tensor if self.statistic == "channel_max_share" else None)
+                            rgb=frame_tensor if self.statistic == "channel_max_share" else None,
+                            blur=blur)
 
     def delta(self, frame_tensor) -> float:
         """Worst block-mean delta of ``frame_tensor`` against the current reference.
@@ -552,7 +763,13 @@ class AutoGateTuner:
                  candidates=(2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0),
                  clamp=(2.0, 4.0), noise_floor_quiet: float = 0.35,
                  fallback: str = "strictest", chain_budget: float = 12.0,
-                 noise_floor_refuse: float = 1.5,
+                 # None disables the guard. It exists because on grainy material a 32 px block mean cannot
+                 # separate "the grain changed" from "something moved one pixel", and lowering the threshold
+                 # only costs reuse. The coarse statistic removes grain by construction, so the guard's premise
+                 # is gone there and it would refuse a floor that is a low-pass level, not a noise level
+                 # (measured on the denoised Pink Panther: a floor of ~3 against the 1.5 limit). The picture is
+                 # still bounded by the acceptance certifier, at the same scale as the decision.
+                 noise_floor_refuse: float | None = 1.5,
                  chain_policy: str = "certified",
                  accept_bar: float = 0.1,
                  calibration_window: int = 0,
@@ -606,7 +823,7 @@ class AutoGateTuner:
         # Known boundary, not a proof. Above it the gate refuses instead of tuning: on grainy
         # material a 32 px block mean cannot tell "the grain changed" from "something moved one
         # pixel", and lowering the threshold only costs reuse.
-        self.noise_floor_refuse = float(noise_floor_refuse)
+        self.noise_floor_refuse = None if noise_floor_refuse is None else float(noise_floor_refuse)
         # The number acceptance is actually judged by: per cent of pixels more than 8 levels off in
         # any RGB channel, on the worst frame of the sample. When the caller supplies it (the app
         # does), the depth and the threshold are certified against THIS, not against a block-mean
@@ -790,7 +1007,7 @@ class AutoGateTuner:
             for depth, cand, p90 in certified:
                 print(f"[tuner] depth {depth}: threshold {cand}, p90 {p90:.2f}", file=sys.stderr)
 
-        if self._noise_floor() > self.noise_floor_refuse:
+        if self.noise_floor_refuse is not None and self._noise_floor() > self.noise_floor_refuse:
             self.settled = True
             self.chosen = None
             self.veto = None
@@ -845,7 +1062,7 @@ class AutoGateTuner:
             return (f"auto gate: calibrating ({len(self._window)}/{self.calibration_window} frames "
                     f"observed, keeping the {self.min_pairs} most marginal)")
         if self.chosen is None:
-            if self._noise_floor() > self.noise_floor_refuse:
+            if self.noise_floor_refuse is not None and self._noise_floor() > self.noise_floor_refuse:
                 return (f"auto gate: noise floor {self._noise_floor():.2f} is above the "
                         f"{self.noise_floor_refuse:.1f} limit for this material, so reuse is OFF "
                         f"- at this noise the measured worst frame is 0.105-0.470% of pixels "
