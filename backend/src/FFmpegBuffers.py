@@ -262,7 +262,6 @@ class FFmpegWrite(Buffer):
         # guessing from a wall-clock difference that also contains startup and flush.
         self.write_stats = {"frames": 0, "bytes": 0, "write_ms": 0.0, "wait_ms": 0.0,
                             "max_write_ms": 0.0, "queue_max": 0}
-        self.previewFrame = None
         self.framesRendered: int = 1
         self.writeProcess = None
         self.color_space = color_space

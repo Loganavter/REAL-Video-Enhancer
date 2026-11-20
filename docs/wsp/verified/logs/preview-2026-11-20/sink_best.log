@@ -1,0 +1,10 @@
+preview sink: /preview_rec_best 640x360 (1382415 bytes, 1.38 MB)
+attached 120.0 s, consumed 67 frames (0.56 fps), 46.31 MB copied
+formats: rgb888 67, sampled yuv420 0
+reader copy: median 0.068 ms, max 1.430 ms per frame
+interval between frames: median 100 ms, max 105 ms
+uncovered scope: geometry/format only - this instrument does not judge the picture, and a zero frame count means the producer never saw `wanted`.
+/usr/lib/python3.14/multiprocessing/resource_tracker.py:475: UserWarning: resource_tracker: There appear to be 1 leaked shared_memory objects to clean up at shutdown: {'//preview_rec_best'}
+  warnings.warn(
+/usr/lib/python3.14/multiprocessing/resource_tracker.py:491: UserWarning: resource_tracker: '//preview_rec_best': [Errno 2] No such file or directory: '//preview_rec_best'
+  warnings.warn('resource_tracker: %r: %s' % (name, e))

@@ -2,6 +2,7 @@ import sys
 import os
 import subprocess
 import requests
+import struct
 import time
 import numpy as np
 from multiprocessing import shared_memory
@@ -232,10 +233,24 @@ class NotificationOverlay(QWidget):
 
 class UpdateGUIThread(QThread):
     """
-    Gets the latest bytes outputed from the shared memory and returns them in QImage format for display
+    Reads the preview thumbnail the renderer publishes and hands it to the GUI as a QImage.
+
+    The block is small (a 640x360 thumbnail is 0.69 MB, a 4K frame is 24.9 MB), carries a
+    header that says what the pixels are, and has two slots so a reader never sees half of
+    one frame and half of the next. The `wanted` byte is the other half of the bargain: the
+    renderer builds a thumbnail only after this thread consumed the previous one, so a
+    viewer at 5 Hz cannot make the render loop pay 30 times a second.
     """
 
     latestPreviewPixmap = Signal(QtGui.QImage)
+
+    # Mirrors HEADER in backend/src/utils/PreviewChannel.py: two processes, two trees, one
+    # layout. Kept as a literal here so the GUI never imports backend code.
+    PREVIEW_HEADER = struct.Struct("<IHHBBBI")
+    PREVIEW_FMT_RGB888 = 1
+    PREVIEW_FMT_YUV420 = 2
+    PREVIEW_OFF_WANTED = 9
+    PREVIEW_POLL_SECONDS = 0.1
 
     def __init__(self, parent, imagePreviewSharedMemoryID):
         super().__init__()
@@ -244,20 +259,38 @@ class UpdateGUIThread(QThread):
         self._stop_flag = False  # Boolean flag to control stopping
         self._mutex = QMutex()  # Atomic flag to control stopping
         self.imagePreviewSharedMemoryID = imagePreviewSharedMemoryID
-        self.outputVideoHeight = None
-        self.outputVideoWidth = None
-    def setOutputVideoRes(self, width, height):
-        self.outputVideoHeight = height
-        self.outputVideoWidth = width
-    
-    def createNewSharedMemory(self, channels: int):
-        self.channels = channels
-        if self.outputVideoHeight and self.outputVideoWidth:
+        self.previewWidth = 0
+        self.previewHeight = 0
+
+    def createNewSharedMemory(self, width: int, height: int):
+        """Allocate the thumbnail block: header + two slots of `width` x `height` RGB888."""
+        if self.shm is not None:
+            # a queued render re-creates the block; close the old mapping instead of leaking it
+            try:
+                self.shm.close()
+            finally:
+                self.shm = None
+        self.previewWidth = int(width)
+        self.previewHeight = int(height)
+        size = (
+            self.PREVIEW_HEADER.size
+            + 2 * self.previewWidth * self.previewHeight * 3
+        )
+        try:
             self.shm = shared_memory.SharedMemory(
-                name=self.imagePreviewSharedMemoryID, create=True, size = self.channels * self.outputVideoHeight * self.outputVideoWidth
+                name=self.imagePreviewSharedMemoryID, create=True, size=size
             )
-        else:
-            raise ValueError("Output video resolution not set.")
+        except FileExistsError:
+            # a crashed run leaves the block behind (POSIX keeps it until unlinked), and a
+            # restarted session can be handed the same name: drop the stale block, then
+            # allocate ours. Attaching to the old one would keep its size and header.
+            stale = shared_memory.SharedMemory(name=self.imagePreviewSharedMemoryID)
+            stale.close()
+            stale.unlink()
+            self.shm = shared_memory.SharedMemory(
+                name=self.imagePreviewSharedMemoryID, create=True, size=size
+            )
+        self.shm.buf[self.PREVIEW_OFF_WANTED] = 1  # ask for the first frame
 
     def deleteSharedMemory(self):
         try:
@@ -269,62 +302,66 @@ class UpdateGUIThread(QThread):
             pass
 
     def run(self):
+        last_seq = 0
         while True:
             with QMutexLocker(self._mutex):
                 if self._stop_flag:
                     self.deleteSharedMemory()
                     break
             try:
-                if self.outputVideoHeight and self.outputVideoWidth and self.shm is not None:
-                    
-                    image_bytes = self.shm.buf[
-                        : self.outputVideoHeight * self.outputVideoWidth * self.channels
-                    ].tobytes()
-
-                    expected_size = self.outputVideoHeight * self.outputVideoWidth * self.channels
-
-                    if len(image_bytes) < expected_size:
-
-
-                        image_bytes += b"\x00" * (expected_size - len(image_bytes))
-
-
-                    # Convert image bytes back to numpy array
-
-
-                    image_array = np.frombuffer(image_bytes, dtype=np.uint8 if self.channels == 3 else np.uint16).reshape(
-
-
-                        (self.outputVideoHeight, self.outputVideoWidth, 3)
-
-
+                if self.shm is not None:
+                    seq, width, height, fmt, _wanted, _flags, _reserved = (
+                        self.PREVIEW_HEADER.unpack_from(self.shm.buf, 0)
                     )
-                    if self.channels == 6:
-                        # Convert HDR to SDR
-                        image_array = (image_array >> 8).astype(np.uint8)
-                        
-                    pixmap = self.convert_cv_qt(image_array)
-
-
-                    self.latestPreviewPixmap.emit(pixmap)
-
+                    if seq != last_seq and width and height and fmt in (
+                        self.PREVIEW_FMT_RGB888, self.PREVIEW_FMT_YUV420
+                    ):
+                        last_seq = seq
+                        offset = (
+                            self.PREVIEW_HEADER.size
+                            + (seq & 1) * width * height * 3
+                        )
+                        length = self._payload_length(fmt, width, height)
+                        # bytes(): own the pixels, so the QImage cannot end up pointing at
+                        # a slot the renderer is already overwriting (the old reader built
+                        # a QImage over a numpy buffer that died on return)
+                        pixels = bytes(self.shm.buf[offset:offset + length])
+                        self.latestPreviewPixmap.emit(
+                            self._to_image(pixels, width, height, fmt)
+                        )
+                        self.shm.buf[self.PREVIEW_OFF_WANTED] = 1
             except Exception as e:
                 log(f"Error in UpdateGUIThread: {e}")
-                
-            time.sleep(0.2)
 
-    def convert_cv_qt(self, cv_img):
-        """Convert from an opencv image to QPixmap"""
-        # rgb_image = cv2.resize(cv_img, (1280, 720)) #Cound resize image if need be
-        bytes_per_line = 3 * self.outputVideoWidth
-        convert_to_Qt_format = QtGui.QImage(
-            cv_img.data,
-            self.outputVideoWidth,
-            self.outputVideoHeight,
-            bytes_per_line,
-            QtGui.QImage.Format_RGB888
-        )
-        return convert_to_Qt_format
+            time.sleep(self.PREVIEW_POLL_SECONDS)
+
+    @staticmethod
+    def _payload_length(fmt, width, height):
+        if fmt == UpdateGUIThread.PREVIEW_FMT_RGB888:
+            return width * height * 3
+        return width * height + 2 * ((width + 1) // 2) * ((height + 1) // 2)
+
+    @staticmethod
+    def _to_image(pixels, width, height, fmt):
+        """QImage from the block's payload; the colour matrix lives here, not in the render loop."""
+        if fmt == UpdateGUIThread.PREVIEW_FMT_RGB888:
+            return QtGui.QImage(
+                pixels, width, height, width * 3, QtGui.QImage.Format_RGB888
+            ).copy()
+        n = width * height
+        ch, cw = (height + 1) // 2, (width + 1) // 2
+        y = np.frombuffer(pixels[:n], np.uint8).reshape(height, width).astype(np.float32) - 16.0
+        u = np.frombuffer(pixels[n:n + ch * cw], np.uint8).reshape(ch, cw).astype(np.float32) - 128.0
+        v = np.frombuffer(pixels[n + ch * cw:n + 2 * ch * cw], np.uint8).reshape(ch, cw).astype(np.float32) - 128.0
+        u = np.repeat(np.repeat(u, 2, axis=0), 2, axis=1)[:height, :width]
+        v = np.repeat(np.repeat(v, 2, axis=0), 2, axis=1)[:height, :width]
+        r = np.clip(1.164 * y + 1.793 * v, 0.0, 255.0)
+        g = np.clip(1.164 * y - 0.213 * u - 0.533 * v, 0.0, 255.0)
+        b = np.clip(1.164 * y + 2.112 * u, 0.0, 255.0)
+        rgb = np.dstack((r, g, b)).astype(np.uint8)
+        return QtGui.QImage(
+            rgb.data, width, height, width * 3, QtGui.QImage.Format_RGB888
+        ).copy()
 
     def stop(self):
         

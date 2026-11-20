@@ -1,0 +1,9 @@
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: float16
+Initialized Frame PyTorch utils
+rgb_planes: median 0.061 p90 0.070 max 24.004 ms over 60 calls
+payload_gather: median 0.063 p90 0.083 max 0.154 ms over 60 calls

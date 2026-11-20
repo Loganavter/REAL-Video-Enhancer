@@ -26,6 +26,8 @@ from ..constants import (
     CUSTOM_MODELS_PATH,
     IMAGE_SHARED_MEMORY_ID,
     PAUSED_STATE_SHARED_MEMORY_ID,
+    PREVIEW_WIDTH,
+    PREVIEW_HEIGHT,
     INPUT_TEXT_FILE,
     FFMPEG_PATH,
     CWD,
@@ -291,11 +293,10 @@ class ProcessTab:
             self.isPreview = renderOptions.isPreview
             self.currentRenderOptions = renderOptions
 
-            self.workerThread.setOutputVideoRes(
-                renderOptions.videoWidth * renderOptions.overrideUpscaleScale,
-                renderOptions.videoHeight * renderOptions.overrideUpscaleScale,
-            )
-            self.workerThread.createNewSharedMemory(channels=6 if renderOptions.hdrMode else 3)
+            # The preview block is a fixed-size thumbnail now, not the output frame: its
+            # geometry comes from one constant on both sides, so it is allocated before the
+            # backend starts and never depends on the output resolution.
+            self.workerThread.createNewSharedMemory(PREVIEW_WIDTH, PREVIEW_HEIGHT)
             self.max_value = renderOptions.videoFrameCount * renderOptions.interpolateTimes
             command = self.build_command(renderOptions)
             log(str(command))
@@ -495,14 +496,10 @@ class ProcessTab:
                 self.parent.ETA.setVisible(False)
             self.parent.STATUS.setText(f"Status: {self.status}")
         if not qimage.isNull():
-            label_width = self.parent.previewLabel.width()
-            label_height = self.parent.previewLabel.height()
-
-            p = qimage.scaled(
-                label_width, label_height, Qt.AspectRatioMode.KeepAspectRatio
-            )  # type: ignore
-            pixmap = QtGui.QPixmap.fromImage(p)
-
+            # The backend already shrank the frame to the label's budget (PREVIEW_WIDTH x
+            # PREVIEW_HEIGHT), so there is no 4K scale here any more: it made the GUI
+            # thread point-sample 8.3 Mpx down to ~600 px on every update.
+            pixmap = QtGui.QPixmap.fromImage(qimage)
             roundedPixmap = self.getRoundedPixmap(pixmap, corner_radius=10)
             self.parent.previewLabel.setPixmap(roundedPixmap)
 
@@ -647,6 +644,8 @@ class ProcessTab:
             command += [
                 "--preview_shared_memory_id",
                 f"{IMAGE_SHARED_MEMORY_ID}",
+                "--preview_size",
+                f"{PREVIEW_WIDTH}x{PREVIEW_HEIGHT}",
             ]
 
         if self.settings.settings["scene_change_detection_enabled"] == "False":
