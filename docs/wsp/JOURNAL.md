@@ -4,7 +4,18 @@ Every measurement and every decision that changes a quoted number, newest first.
 the commit, the card and the library versions it was taken on: a number without those describes a
 build that may no longer exist (`harness/provenance.py`).
 
-Entries: 1
+Entries: 2
+
+## 2026-11-20T12:31:44+03:00 - 0feb0d1c0587 (dirty tree) - NVIDIA GeForce RTX 4060 Ti (cc 8.9)
+*triton 3.6.0*
+
+The 4x path measured, which the unit tests could only algebraically: gate reuses 27/41 at threshold 5 on the
+4x animevideov3; with the correction the worst frame is 0.05626% and the MEDIAN is 0.00000% (verbatim 0.05389%
+and 0.00407%), both under the bar. Cost at 4320p is the finding: 40.0 ms/frame corrected against 24.9 verbatim
+and 55.9 ungated, i.e. 1.40x instead of 2.25x, because a corrected frame is new and has to be converted for
+the writer while verbatim re-emitted the cached bytes.
+
+Records: RU061, RU062, RU063, RU064, RU065
 
 ## 2026-11-20T12:11:59+03:00 - 6f8641157076 (dirty tree) - NVIDIA GeForce RTX 4060 Ti (cc 8.9)
 *triton 3.6.0*
