@@ -778,4 +778,10 @@
   note: 'What this does NOT change: reuse-gate-shelved''s product decision (the gate is off by default), and the
     acceptance statistic (the 0.1% share is still the criterion; the border band is a real part of the picture,
     not an artefact). What it adds: the remaining failure class has a measured cause and no measured fix, so
-    future work on it starts from this record rather than from the flow/motion-vector hypothesis.'
+    future work on it starts from this record rather than from the flow/motion-vector hypothesis. The second
+    prior-art sweep (docs/wsp/PRIOR-ART-reuse-detail-2026-11-20.md) says the same thing from outside: the graphics
+    line''s best answer (variance clipping, k-DOP, 2024) documents that it cannot detect stale history whose colour
+    lies inside the local gamut, and measured on our four failing frames variance clipping moves them by at most
+    0.003% while taking passing frames from 0.007% to 0.30%; the VSR line''s efficient systems (RLSP 2019,
+    RelayVSR 2026) all keep a network pass on every frame and carry the detail in the state, and their own sweep
+    shows quality falling monotonically with the reuse interval.'
