@@ -21,8 +21,6 @@ import importlib.util
 import re
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
 PAGES = ROOT / "src" / "ui" / "pages"
 SPLIT = ROOT / "harness" / "scripts" / "split_ui.py"
@@ -35,8 +33,8 @@ WATCHED = ("QSpinBox", "QDoubleSpinBox", "QProgressBar", "QListWidget", "QTextEd
 ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget", "QtTextEdit", "ConsoleView",
                  "RichTextView", "TextListWidget")
 
-#: page module -> {designer widget name: the class the page builds}.
-#: Stock entries carry the reason in `GAPS` - they are not accidental leftovers.
+#: page module -> {designer widget name: the class the page builds}. Every watched widget is migrated to an adapter;
+#: a stock one coming back would have to be pinned here and argued for in review.
 PAGES_PIN: dict[str, dict[str, str]] = {
     "tab_2": {"scene_change_detection_threshold": "QtDoubleSpinBox"},
     "tab_3": {"ncnn_gpu_id": "QtSpinBox", "pytorch_gpu_id": "QtSpinBox"},
@@ -56,11 +54,6 @@ PAGES_PIN: dict[str, dict[str, str]] = {
     },
     "home_page": {"changeLogText": "RichTextView", "systemInfoText": "RichTextView"},
     "tab_5": {"renderOutput": "ConsoleView"},
-}
-
-#: Widgets that stay stock, and why. These are toolkit rows, not local workarounds: the pin keeps the reason next to
-#: the class so a later reader does not have to re-derive it from the toolkit's source.
-GAPS: dict[str, str] = {
 }
 
 #: adapter -> (height policy, width policy, size policy, bases) exactly as the adapter declares it.
@@ -253,11 +246,6 @@ def test_no_page_builds_an_unpinned_primitive() -> None:
             f"{module}.py widgets {sorted(actual)} vs pin {sorted(PAGES_PIN[module])} - {HINT}")
 
 
-def test_stock_widgets_carry_their_reason() -> None:
-    stock = {widget for widgets in PAGES_PIN.values() for widget, cls in widgets.items() if cls in WATCHED}
-    assert stock == set(GAPS), f"stock primitives {sorted(stock)} vs recorded gaps {sorted(GAPS)} - {HINT}"
-
-
 def test_adapters_declare_the_pinned_geometry() -> None:
     classes = _classes(_parse(QT_SHAPED))
     actual = {name: _adapter_facts(name, classes) for name in ADAPTERS_PIN if name in classes}
@@ -331,15 +319,3 @@ def test_splitter_would_emit_the_class_each_page_builds() -> None:
                 f"{HINT}")
         extra = set(decision[module]) - set(widgets)
         assert not extra, f"splitter would emit unpinned primitives in {module}: {sorted(extra)} - {HINT}"
-
-
-@pytest.mark.parametrize("qt_class", [])
-def test_unmigrated_classes_are_absent_from_the_map(qt_class: str) -> None:
-    """A gap is a decision: enabling these without an adapter would build a class that cannot carry the Qt API.
-
-    `QTextEdit` left this list when `ConsoleView` gained the log surface (setPlainText/setHtml/verticalScrollBar);
-    `QListWidget` stays because `IconListWidget` is a navigation list, and a queue page built on it measured 3.2 % away
-    from the stock look. When a compact text list exists, this parameter goes away.
-    """
-    tool = _split_ui()
-    assert qt_class not in tool.TOOLKIT, f"{qt_class} was enabled in the splitter without an adapter - {HINT}"

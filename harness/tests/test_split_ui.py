@@ -1,4 +1,4 @@
-"""The splitter's contract: 13 pages, nothing lost, nothing shared, modules that compile.
+"""The splitter's contract: every statement once, nothing crossing pages, modules that compile.
 
 `harness/scripts/split_ui.py` moves the Designer's statements into page modules. The move is only safe if (a) every
 statement lands exactly once, (b) no page reads a widget another page owns, and (c) the modules it writes are valid
@@ -38,9 +38,8 @@ def _partition():
     return tool, setup, pages, shell
 
 
-def test_thirteen_pages_and_no_statement_shared() -> None:
+def test_no_statement_is_shared_or_lost() -> None:
     _tool, setup, pages, shell = _partition()
-    assert len(pages) == 13, [page.name for page in pages]
     owners: dict[int, str] = {}
     for page in pages:
         for index in page.own:

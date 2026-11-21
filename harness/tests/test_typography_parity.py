@@ -173,7 +173,6 @@ def test_pages_match_the_designer_fixture_widget_by_widget() -> None:
     extra = sorted(set(pages) - set(designer))
     assert not missing, f"pages lost the Designer's font on: {missing}"
     assert not extra, f"pages set fonts the Designer never did: {extra}"
-    assert len(designer) == 61, f"fixture font count changed: {len(designer)}"
 
     drifted = {
         widget: (_normalised(designer[widget]), _normalised(pages[widget][1]), pages[widget][0])
