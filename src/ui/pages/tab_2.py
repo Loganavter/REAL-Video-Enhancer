@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
 import resources_rc
 import resources_rc
 from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtLabel, QtLineEdit
+from src.ui.typography import apply, BODY_PT
 
 
 class Tab2Page:
@@ -33,8 +34,6 @@ class Tab2Page:
 
     def build(self):
         """Build the widget tree and return the page root."""
-        font4 = QFont()
-        font4.setPointSize(12)
         self.tab_2 = QWidget()
         self.tab_2.setObjectName(u"tab_2")
         self.verticalLayout_17 = QVBoxLayout(self.tab_2)
@@ -61,7 +60,7 @@ class Tab2Page:
         self.horizontalLayout_19.setContentsMargins(0, 0, 0, 0)
         self.encoderLabel_3 = QtLabel(self.outputFileLocationContianer)
         self.encoderLabel_3.setObjectName(u"encoderLabel_3")
-        self.encoderLabel_3.setFont(font4)
+        apply(self.encoderLabel_3, BODY_PT)
         self.horizontalLayout_19.addWidget(self.encoderLabel_3)
         self.horizontalSpacer_11 = QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_19.addItem(self.horizontalSpacer_11)
@@ -81,7 +80,7 @@ class Tab2Page:
         self.horizontalLayout_17.setContentsMargins(0, 0, 0, 0)
         self.label_20 = QtLabel(self.sceneChangeDetectionSettingContainer)
         self.label_20.setObjectName(u"label_20")
-        self.label_20.setFont(font4)
+        apply(self.label_20, BODY_PT)
         self.horizontalLayout_17.addWidget(self.label_20)
         self.horizontalSpacer_3 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_17.addItem(self.horizontalSpacer_3)
@@ -103,7 +102,7 @@ class Tab2Page:
         self.horizontalLayout_27.setContentsMargins(0, 0, 0, 0)
         self.label_37 = QtLabel(self.widget_12)
         self.label_37.setObjectName(u"label_37")
-        self.label_37.setFont(font4)
+        apply(self.label_37, BODY_PT)
         self.horizontalLayout_27.addWidget(self.label_37)
         self.horizontalSpacer_13 = QSpacerItem(305, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_27.addItem(self.horizontalSpacer_13)
@@ -129,7 +128,7 @@ class Tab2Page:
         self.horizontalLayout_14.setContentsMargins(0, 0, 0, 0)
         self.label_30 = QtLabel(self.widget_7)
         self.label_30.setObjectName(u"label_30")
-        self.label_30.setFont(font4)
+        apply(self.label_30, BODY_PT)
         self.horizontalLayout_14.addWidget(self.label_30)
         self.horizontalSpacer_6 = QSpacerItem(305, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_14.addItem(self.horizontalSpacer_6)
@@ -155,7 +154,7 @@ class Tab2Page:
         self.horizontalLayout_25.setContentsMargins(0, 0, 0, 0)
         self.label_48 = QtLabel(self.widget_9)
         self.label_48.setObjectName(u"label_48")
-        self.label_48.setFont(font4)
+        apply(self.label_48, BODY_PT)
         self.horizontalLayout_25.addWidget(self.label_48)
         self.horizontalSpacer_10 = QSpacerItem(468, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_25.addItem(self.horizontalSpacer_10)

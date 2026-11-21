@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
+from src.ui.typography import apply, SMALL_PT
 
 
 class Tab5Page:
@@ -43,9 +44,7 @@ class Tab5Page:
         sizePolicy10.setVerticalStretch(0)
         sizePolicy10.setHeightForWidth(self.renderOutput.sizePolicy().hasHeightForWidth())
         self.renderOutput.setSizePolicy(sizePolicy10)
-        font6 = QFont()
-        font6.setPointSize(13)
-        self.renderOutput.setFont(font6)
+        apply(self.renderOutput, SMALL_PT)
         self.renderOutput.setStyleSheet(u"*:disabled{\n"
 " \n"
 "	color:white;\n"

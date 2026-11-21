@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
 import resources_rc
 import resources_rc
 from src.ui.widgets.qt_shaped import QtButton, QtComboBox, QtLabel
+from src.ui.typography import apply, BODY_PT, DISPLAY_PT
 
 
 class DownloadPagePage:
@@ -39,8 +40,6 @@ class DownloadPagePage:
         sizePolicy5 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         sizePolicy5.setHorizontalStretch(0)
         sizePolicy5.setVerticalStretch(0)
-        font4 = QFont()
-        font4.setPointSize(12)
         # splitter: skipped 'sizePolicy.setHeightForWidth(MainWindow.sizePolicy().hasHeightForWidth())' (['MainWindow'] live outside this page)
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.processContainer.sizePolicy().hasHeightForWidth())' (['processContainer'] live outside this page)
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.interpolationMultiplierSpinBox.sizePolicy().hasHeightForWidth())' (['interpolationMultiplierSpinBox'] live outside this page)
@@ -102,7 +101,7 @@ class DownloadPagePage:
         self.gridLayout_8.setObjectName(u"gridLayout_8")
         self.encoderLabel_4 = QtLabel(self.widget_10)
         self.encoderLabel_4.setObjectName(u"encoderLabel_4")
-        self.encoderLabel_4.setFont(font4)
+        apply(self.encoderLabel_4, BODY_PT)
         self.gridLayout_8.addWidget(self.encoderLabel_4, 0, 0, 1, 1)
         self.horizontalSpacer_12 = QSpacerItem(20, 20, QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Minimum)
         self.gridLayout_8.addItem(self.horizontalSpacer_12, 0, 1, 1, 1)
@@ -149,16 +148,11 @@ class DownloadPagePage:
         self.verticalLayout_11.addWidget(self.widget_31)
         self.label_4 = QtLabel(self.backendSelectContainer)
         self.label_4.setObjectName(u"label_4")
-        font7 = QFont()
-        font7.setPointSize(25)
-        font7.setUnderline(True)
-        self.label_4.setFont(font7)
+        apply(self.label_4, DISPLAY_PT, underline=True)
         self.verticalLayout_11.addWidget(self.label_4)
         self.low_storage_label = QtLabel(self.backendSelectContainer)
         self.low_storage_label.setObjectName(u"low_storage_label")
-        font8 = QFont()
-        font8.setBold(True)
-        self.low_storage_label.setFont(font8)
+        apply(self.low_storage_label, None, bold=True)
         self.low_storage_label.setStyleSheet(u"QLabel {\n"
 "color: red;\n"
 "}")

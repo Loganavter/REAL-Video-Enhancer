@@ -29,6 +29,7 @@ from src.ui.pages.render_queue_tab import RenderQueueTabPage
 from src.ui.pages.advanced_settings import AdvancedSettingsPage
 from src.ui.pages.tab_5 import Tab5Page
 from src.ui.widgets.qt_shaped import QtButton, QtLabel
+from src.ui.typography import apply, CAPTION_PT
 
 
 class ProcPagePage:
@@ -256,9 +257,7 @@ class ProcPagePage:
         self.horizontalLayout_48.setContentsMargins(0, 0, 0, 0)
         self.renderPreviewBtn = QtButton(self.widget_14)
         self.renderPreviewBtn.setObjectName(u"renderPreviewBtn")
-        font2 = QFont()
-        font2.setBold(False)
-        self.renderPreviewBtn.setFont(font2)
+        apply(self.renderPreviewBtn, None)
         self.renderPreviewBtn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.horizontalLayout_48.addWidget(self.renderPreviewBtn)
         self.label_63 = QLabel(self.widget_14)
@@ -278,23 +277,21 @@ class ProcPagePage:
         self.verticalLayout_34.setObjectName(u"verticalLayout_34")
         self.ETA = QtLabel(self.processInfoContainer)
         self.ETA.setObjectName(u"ETA")
-        font3 = QFont()
-        font3.setPointSize(10)
-        self.ETA.setFont(font3)
+        apply(self.ETA, CAPTION_PT)
         self.ETA.setStyleSheet(u"QLabel{\n"
 "background-color: #1f232a\n"
 "}")
         self.verticalLayout_34.addWidget(self.ETA)
         self.FPS = QtLabel(self.processInfoContainer)
         self.FPS.setObjectName(u"FPS")
-        self.FPS.setFont(font3)
+        apply(self.FPS, CAPTION_PT)
         self.FPS.setStyleSheet(u"QLabel{\n"
 "background-color: #1f232a\n"
 "}")
         self.verticalLayout_34.addWidget(self.FPS)
         self.STATUS = QtLabel(self.processInfoContainer)
         self.STATUS.setObjectName(u"STATUS")
-        self.STATUS.setFont(font3)
+        apply(self.STATUS, CAPTION_PT)
         self.STATUS.setStyleSheet(u"QLabel{\n"
 "background-color: #1f232a\n"
 "}")
