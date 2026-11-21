@@ -1,0 +1,156 @@
+{
+ "pages": {
+  "nav0.png": {
+   "mean": 0.324,
+   "over8_pct": 0.168,
+   "max": 233,
+   "worst_bands": [
+    320,
+    340,
+    360,
+    380
+   ]
+  },
+  "nav1.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2-tab0.png": {
+   "mean": 0.807,
+   "over8_pct": 0.393,
+   "max": 233,
+   "worst_bands": [
+    440,
+    80,
+    100,
+    120
+   ]
+  },
+  "nav2-tab1.png": {
+   "mean": 1.539,
+   "over8_pct": 0.748,
+   "max": 233,
+   "worst_bands": [
+    160,
+    80,
+    500,
+    100
+   ]
+  },
+  "nav2-tab2.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2-tab3.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2-tab4.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2.png": {
+   "mean": 0.807,
+   "over8_pct": 0.393,
+   "max": 233,
+   "worst_bands": [
+    440,
+    80,
+    100,
+    120
+   ]
+  },
+  "nav3-tab0.png": {
+   "mean": 2.932,
+   "over8_pct": 3.137,
+   "max": 233,
+   "worst_bands": [
+    120,
+    320,
+    220,
+    420
+   ]
+  },
+  "nav3-tab1.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav3-tab2.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav3.png": {
+   "mean": 2.932,
+   "over8_pct": 3.137,
+   "max": 233,
+   "worst_bands": [
+    120,
+    320,
+    220,
+    420
+   ]
+  },
+  "nav4.png": {
+   "mean": 0.001,
+   "over8_pct": 0.0,
+   "max": 4,
+   "worst_bands": [
+    60,
+    40,
+    0,
+    20
+   ]
+  }
+ },
+ "budget": 0.05,
+ "failed": [
+  "nav0.png",
+  "nav2-tab0.png",
+  "nav2-tab1.png",
+  "nav2.png",
+  "nav3-tab0.png",
+  "nav3.png"
+ ]
+}
