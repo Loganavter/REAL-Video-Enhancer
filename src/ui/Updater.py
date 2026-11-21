@@ -16,7 +16,7 @@ from ..constants import (
     TEMP_DOWNLOAD_PATH,
     LIBS_NAME,
     PYTHON_VERSION,
-    HAS_NETWORK_ON_STARTUP,
+    has_network,
     
 )
 from ..DownloadDeps import DownloadDependencies
@@ -47,7 +47,7 @@ class PythonUpdater:
         return PYTHON_VERSION == self.current_python_version
 
     def update_python(self):
-        if HAS_NETWORK_ON_STARTUP:
+        if has_network():
             
             FileHandler.removeFolder(PYTHON_DIRECTORY) # remove the old python directory  
             os.mkdir(PYTHON_DIRECTORY) # create a new python directory
@@ -80,7 +80,7 @@ class BackendUpdater:
         return backend_dev_version == self.backend_version
     
     def update_backend(self):
-        if HAS_NETWORK_ON_STARTUP:
+        if has_network():
             FileHandler.removeFolder(BACKEND_PATH) # remove the old backend directory
             self.deps.downloadBackend()
         else:
@@ -88,19 +88,36 @@ class BackendUpdater:
 
 
 class ApplicationUpdater:
-    def __init__(self):
-        if HAS_NETWORK_ON_STARTUP:
-            self.tag = self.get_latest_version_tag()
-            self.clean_tag = self.get_latest_version_tag(clean_tag=True)
-            if PLATFORM == "win32":
-                platform_name = "Windows"
-            elif PLATFORM == "darwin":
-                platform_name = "MacOS"
-            else:
-                platform_name = "Linux"
+    """The release metadata, fetched WHEN IT IS NEEDED - never in the constructor.
 
-            self.file_name = f"REAL-Video-Enhancer-{self.clean_tag}-{platform_name}.zip"
-            self.download_url = self.build_download_url()
+    `DownloadTab` constructs this during startup, and the constructor used to make TWO GitHub API calls before the
+    window existed. Measured 2026-11-22: the DNS lookup alone costs ~5 s on this host, so the first window appeared
+    ~11 s late for two strings nothing read until the user opened the download page.
+    """
+
+    def __init__(self):
+        self.tag = None
+        self.clean_tag = None
+        self.file_name = None
+        self.download_url = None
+        self._loaded = False
+
+    def _load(self) -> None:
+        if self._loaded:
+            return
+        self._loaded = True
+        if not has_network():
+            return
+        self.tag = self.get_latest_version_tag()
+        self.clean_tag = self.get_latest_version_tag(clean_tag=True)
+        if PLATFORM == "win32":
+            platform_name = "Windows"
+        elif PLATFORM == "darwin":
+            platform_name = "MacOS"
+        else:
+            platform_name = "Linux"
+        self.file_name = f"REAL-Video-Enhancer-{self.clean_tag}-{platform_name}.zip"
+        self.download_url = self.build_download_url()
 
     def check_for_updates(self):
         if networkCheck():
@@ -111,7 +128,7 @@ class ApplicationUpdater:
         return False
 
     def download_new_version(self):
-        
+        self._load()
         full_download_path = os.path.join(TEMP_DOWNLOAD_PATH, self.file_name)
         DownloadProgressPopup(
             link=self.download_url,

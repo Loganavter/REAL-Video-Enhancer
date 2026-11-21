@@ -59,7 +59,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
 )
 from multiprocessing import Process
-from ..constants import HAS_NETWORK_ON_STARTUP, PLATFORM
+from ..constants import PLATFORM, has_network
 from ..Util import log, networkCheck, subprocess_popen_without_terminal
 
 # W5: the seven popups are toolkit-backed. Their bodies live in `src/ui/dialogs/toolkit_dialogs.py`; this is the
@@ -319,7 +319,7 @@ def NetworkCheckPopup(hostname="https://raw.githubusercontent.com") -> bool:
     return True
 
 def needs_network_else_exit():
-    if not HAS_NETWORK_ON_STARTUP:
+    if not has_network():
         RegularQTPopup("Network is required for this action!\nPlease connect to a network.")
         os._exit(1)
 

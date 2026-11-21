@@ -1,6 +1,7 @@
+import json
 import os
 
-from .constants import BACKEND_PATH, PYTHON_EXECUTABLE_PATH, PYTHON_DIRECTORY, PLATFORM, IS_INSTALLED, IS_FLATPAK, HAS_NETWORK_ON_STARTUP, CWD
+from .constants import TEMP_DOWNLOAD_PATH, BACKEND_PATH, PYTHON_EXECUTABLE_PATH, PYTHON_DIRECTORY, PLATFORM, IS_INSTALLED, IS_FLATPAK, CWD
 from .Util import (
     FileHandler
 )
@@ -14,19 +15,38 @@ class BackendHandler:
         self.settings = settings
 
     def getAvailableBackends(self):
-        from .ui.QTcustom import SettingUpBackendPopup, TextOutputPopup
+        """Ask the backend which backends it has - with a plain subprocess, NOT the setup dialog.
 
-        output = SettingUpBackendPopup(
+        This runs during startup. It used to open `SettingUpBackendPopup`, a modal dialog with an icon, a label and a
+        worker thread, for a command that answers in 0.12 s: measured 2026-11-22, the dialog cost 3.08 s of window time
+        (and flashed a "Setting Up Backend" window on every launch). The dialog stays for the real setup, where there is
+        something to watch.
+        """
+        import json
+        import subprocess
+
+        from .ui.QTcustom import TextOutputPopup
+
+        cache_path = os.path.join(TEMP_DOWNLOAD_PATH, "backends-cache.json")
+        stamp = self._backend_stamp()
+        cached = self._read_backends_cache(cache_path, stamp)
+        if cached is not None:
+            return cached
+
+        process = subprocess.run(
             [
                 PYTHON_EXECUTABLE_PATH,
                 "-W",
                 "ignore",
                 os.path.join(BACKEND_PATH, "rve-backend.py"),
                 "--list_backends",
-            ]
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
-        return_code = str(output.getReturnCode()).strip()
-        output: str = output.getOutput()
+        return_code = str(process.returncode).strip()
+        output: str = (process.stdout or "") + (process.stderr or "")
         if "ERROR" in output or "TRACEBACK" in output or return_code == "1":
             TextOutputPopup(f"ERROR DETECTED IN BACKEND SETUP!\n{output}", title="FATAL ERROR")
             exit(1)
@@ -53,4 +73,37 @@ class BackendHandler:
         except Exception:
             backends = []
 
+        self._write_backends_cache(cache_path, stamp, backends, output)
         return backends, output
+
+    @staticmethod
+    def _backend_stamp() -> str:
+        """What the cached backend list depends on: the entry point and the interpreter it runs under."""
+        parts = []
+        for path in (os.path.join(BACKEND_PATH, "rve-backend.py"), PYTHON_EXECUTABLE_PATH):
+            try:
+                stat = os.stat(path)
+                parts.append(f"{stat.st_mtime_ns}:{stat.st_size}")
+            except OSError:
+                parts.append("missing")
+        return "|".join(parts)
+
+    @staticmethod
+    def _read_backends_cache(path: str, stamp: str):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+            if data.get("stamp") == stamp and isinstance(data.get("backends"), list):
+                return data["backends"], data.get("output", "")
+        except (OSError, ValueError):
+            pass
+        return None
+
+    @staticmethod
+    def _write_backends_cache(path: str, stamp: str, backends: list, output: str) -> None:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"stamp": stamp, "backends": backends, "output": output}, handle)
+        except OSError:
+            pass

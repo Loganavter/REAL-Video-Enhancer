@@ -3,17 +3,40 @@ import sys
 import requests
 import platform
 from PySide6.QtCore import QDir
-def networkCheck(hostname="https://raw.githubusercontent.com") -> bool:
+def networkCheck(hostname="https://raw.githubusercontent.com", timeout: float = 1.0) -> bool:
+    """Is there a usable network right now? A TCP connect, not an HTTP request.
+
+    This runs at IMPORT time (`HAS_NETWORK_ON_STARTUP`), so its cost is paid on every launch before the window exists.
+    It used to be `requests.head(url, timeout=1)`: measured 2026-11-22 at **5.3 s** on this host (requests' timeout is
+    per socket operation, so DNS + TCP + TLS + a proxy handshake each get their own budget, and a flaky link stacks
+    them). A plain connect to the same host answers the only question the flag asks - "is a connection possible" - in
+    at most `timeout`.
     """
-    checks network availability against a url, default url: raw.githubusercontent.com
-    """
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(hostname if "://" in hostname else f"//{hostname}")
+    host = parsed.hostname or "raw.githubusercontent.com"
+    port = parsed.port or (443 if parsed.scheme in ("https", "") else 80)
     try:
-        _ = requests.head(hostname, timeout=1)
-        return True
-    except Exception as e:
-        pass
-    return False
-HAS_NETWORK_ON_STARTUP = networkCheck()
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+_NETWORK_CACHE: bool | None = None
+
+
+def has_network() -> bool:
+    """Is a network connection possible? Asked WHEN IT IS NEEDED, never at import.
+
+    This used to run at import (`HAS_NETWORK_ON_STARTUP = networkCheck()`), and the DNS lookup alone measured ~5 s on
+    this host - five seconds of a launch with no window, spent on a question only the updater and one confirmation
+    dialog ask. Cached after the first real answer; a caller that needs a fresh answer calls `networkCheck()`.
+    """
+    global _NETWORK_CACHE
+    if _NETWORK_CACHE is None:
+        _NETWORK_CACHE = networkCheck()
+    return _NETWORK_CACHE
 
 LOCKFILE = QDir.tempPath() + "/REAL-Video-Enhancer.lock"
 

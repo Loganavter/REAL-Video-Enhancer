@@ -993,6 +993,15 @@ class MainWindow(QMainWindow):
 
 
 def main(file_to_open=None):
+    import time as _time
+
+    _t0 = _time.perf_counter()
+    _timing = bool(os.environ.get("RVE_STARTUP_TIMING"))
+
+    def _stamp(label: str) -> None:
+        if _timing:
+            print(f"startup {_time.perf_counter() - _t0:6.2f}s  {label}", flush=True)
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     # Before the theme: `toolkit_theme.install` imports the toolkit, and without the path it would "fail" into RVE's
@@ -1007,6 +1016,7 @@ def main(file_to_open=None):
     # before. Installing the theme here, before the window exists, is deliberate: every widget is then built against
     # the palette it will keep - the previous placement (after `setupUi`) lost the race against
     # `MainWindow.setPalette(standardPalette())` and left half the tree on Fusion defaults.
+    _stamp("QApplication ready")
     theme_installed = False
     try:
         from src.ui import toolkit_theme
@@ -1029,11 +1039,14 @@ def main(file_to_open=None):
             sys.exit(0)"""
 
     # setting the pallette
+    _stamp("theme installed")
     window = MainWindow(file_to_open=file_to_open)
+    _stamp("MainWindow built")
 
     if "--fullscreen" in sys.argv:
         window.showFullScreen()
     window.show()
+    _stamp("window shown")
     sys.exit(app.exec())
 
 

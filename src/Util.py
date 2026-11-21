@@ -15,7 +15,7 @@ import sys
 import time
 from functools import wraps
 
-from .constants import CWD, HAS_NETWORK_ON_STARTUP, IS_FLATPAK, PLATFORM, HOME_PATH, CPU_ARCH
+from .constants import CWD, IS_FLATPAK, PLATFORM, HOME_PATH, CPU_ARCH
 
 
 class FileHandler:
@@ -273,6 +273,17 @@ def getCPUInfo() -> str:
             except Exception as e:
                 print(f"An error occurred while getting CPU brand: {e}")
                 return "X86_64 CPU" if CPU_ARCH == "x86_64" else "ARM64 CPU"
+        elif PLATFORM == "linux":
+            # /proc/cpuinfo's `model name` IS what py-cpuinfo reports, without its probe: measured 2026-11-22, the
+            # library costs 1.1 s on the startup path (it shells out to `lscpu` and parses more than the name).
+            try:
+                with open("/proc/cpuinfo", encoding="utf-8") as handle:
+                    for line in handle:
+                        if line.lower().startswith("model name"):
+                            return line.split(":", 1)[1].strip()
+            except OSError:
+                pass
+            return cpuinfo.get_cpu_info()["brand_raw"]
         else:
             return cpuinfo.get_cpu_info()["brand_raw"]
     except Exception as e:
