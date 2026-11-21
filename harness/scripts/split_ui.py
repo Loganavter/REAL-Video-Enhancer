@@ -507,6 +507,13 @@ class MainWindowShell:
 {retr}'''
 
 
+#: The pages are hand-maintained since 2026-11-22: every one of them now builds toolkit widgets directly, with
+#: constructor arguments this generator does not emit, and the compatibility layer it imported is deleted. A
+#: regeneration would overwrite the migrated pages and re-create the layer, so `--write` refuses unless the caller
+#: states that they know (the generator stays for `--report` and as the record of how the pages were produced).
+RETIRED = True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     default_source = "mainwindow.py"
@@ -515,10 +522,15 @@ def main() -> int:
             os.path.abspath(__file__)))), "harness", "fixtures", "designer_mainwindow.py")
     ap.add_argument("--source", default=default_source)
     ap.add_argument("--report", action="store_true")
+    ap.add_argument("--allow-retired", action="store_true",
+                    help="acknowledge that --write overwrites the hand-maintained pages")
     ap.add_argument("--write", default="")
     ap.add_argument("--toolkit", action="store_true",
                     help="migrate the classes whose toolkit counterpart has the Qt API (W4); default is stock Qt")
     args = ap.parse_args()
+    if args.write and not args.allow_retired:
+        ap.error("--write is retired: since 2026-11-22 the pages build toolkit widgets directly and a regeneration "
+                 "would restore the deleted compatibility layer (see RETIRED in this module)")
 
     lines, setup, retranslate, locals_defined = load(args.source)
     pages, shell = build_partition(setup)

@@ -25,8 +25,17 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-TOOLKIT_ALIASES = {"QtLabel": "QLabel", "QtButton": "QPushButton", "QtCheckBox": "QCheckBox",
-                   "QtComboBox": "QComboBox", "QtLineEdit": "QLineEdit"}
+TOOLKIT_ALIASES = {
+    # adapters (the layer is gone; kept so a stale branch still compares)
+    "QtLabel": "QLabel", "QtButton": "QPushButton", "QtCheckBox": "QCheckBox",
+    "QtComboBox": "QComboBox", "QtLineEdit": "QLineEdit",
+    "QtSpinBox": "QSpinBox", "QtDoubleSpinBox": "QDoubleSpinBox", "QtProgressBar": "QProgressBar",
+    # toolkit classes a migrated page builds directly
+    "Text": "QLabel", "Button": "QPushButton", "CheckBox": "QCheckBox", "ComboBox": "QComboBox",
+    "CustomLineEdit": "QLineEdit", "Stepper": "QSpinBox", "DoubleSpinBox": "QDoubleSpinBox",
+    "ToastProgressBar": "QProgressBar", "RichTextView": "QTextEdit", "ConsoleView": "QTextEdit",
+    "TextListWidget": "QListWidget", "ImageLabel": "QLabel",
+}
 INTERNAL_SUBSTRINGS = ("qt_scrollarea", "qt_tabwidget")
 
 

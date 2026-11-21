@@ -28,8 +28,17 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 # page widget name -> module in src/ui/pages
-TOOLKIT_ALIASES = {"QtLabel": "QLabel", "QtButton": "QPushButton", "QtCheckBox": "QCheckBox",
-                   "QtComboBox": "QComboBox", "QtLineEdit": "QLineEdit"}
+TOOLKIT_ALIASES = {
+    # adapters (the layer is gone; kept so a stale branch still compares)
+    "QtLabel": "QLabel", "QtButton": "QPushButton", "QtCheckBox": "QCheckBox",
+    "QtComboBox": "QComboBox", "QtLineEdit": "QLineEdit",
+    "QtSpinBox": "QSpinBox", "QtDoubleSpinBox": "QDoubleSpinBox", "QtProgressBar": "QProgressBar",
+    # toolkit classes a migrated page builds directly
+    "Text": "QLabel", "Button": "QPushButton", "CheckBox": "QCheckBox", "ComboBox": "QComboBox",
+    "CustomLineEdit": "QLineEdit", "Stepper": "QSpinBox", "DoubleSpinBox": "QDoubleSpinBox",
+    "ToastProgressBar": "QProgressBar", "RichTextView": "QTextEdit", "ConsoleView": "QTextEdit",
+    "TextListWidget": "QListWidget", "ImageLabel": "QLabel",
+}
 
 PAGES = {
     "homePage": "home_page",
@@ -71,7 +80,8 @@ def _migrated_names() -> set[str]:
         names: set[str] = set()
         for module in PAGES.values():
             path = os.path.join(_ROOT, "src", "ui", "pages", f"{module}.py")
-            names |= set(re.findall(r"self\.(\w+) = Qt\w+\(", open(path, encoding="utf-8").read()))
+            names |= set(re.findall(r"self\.(\w+) = (?:Qt\w+|Text|Button|CheckBox|ComboBox|CustomLineEdit|Stepper|DoubleSpinBox"
+                        r"|ToastProgressBar)\(", open(path, encoding="utf-8").read()))
         _MIGRATED = names
     return _MIGRATED
 

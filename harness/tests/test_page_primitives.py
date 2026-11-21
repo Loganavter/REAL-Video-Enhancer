@@ -24,7 +24,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PAGES = ROOT / "src" / "ui" / "pages"
 SPLIT = ROOT / "harness" / "scripts" / "split_ui.py"
-QT_SHAPED = ROOT / "src" / "ui" / "widgets" / "qt_shaped.py"
 DESIGNER = ROOT / "harness" / "fixtures" / "designer_mainwindow.py"
 
 #: The Qt classes this pin owns (W4d), and the adapter that replaces them where one exists.
@@ -82,32 +81,8 @@ PAGES_PIN: dict[str, dict[str, str]] = {
     "tab_5": {"renderOutput": "ConsoleView"},
 }
 
-#: adapter -> (height policy, width policy, size policy, bases) exactly as the adapter declares it.
-ADAPTERS_PIN: dict[str, tuple[str, str, str, str]] = {
-    "QtSpinBox": ("HEIGHT=29", "stock-oracle:QSpinBox", "Minimum/Fixed", "_QtSpinShape, Stepper"),
-    "QtDoubleSpinBox": ("HEIGHT=29", "stock-oracle:QDoubleSpinBox", "Minimum/Fixed",
-                        "_QtSpinShape, StepButtonsMixin, DoubleSpinBox"),
-    "QtProgressBar": ("HEIGHT=25", "WIDTH=91", "Expanding/Fixed", "ToastProgressBar"),
-}
 
-#: The control shapes layer A closed, pinned the same way. The two oracles say *how* the size is decided: a stock
-#: `QCheckBox`/`QComboBox` with the same font, text/items and RVE's QSS, never a formula. A change here without the
-#: matching measurement in `DONE.md`/the adapter's docstring is the regression this pin exists for.
-SHAPES_PIN: dict[str, tuple[str, str, str, str]] = {
-    "QtCheckBox": ("toolkit", "stock-oracle:QCheckBox", "Minimum/Fixed", "CheckBox"),
-    "QtComboBox": ("toolkit", "stock-oracle:QComboBox", "Preferred/Fixed", "ComboBox"),
-    "QtButton": ("toolkit", "toolkit", "Minimum/Fixed", "Button"),
-}
 
-#: the shared mixin's stated geometry (RVE's QSS: `padding:5px 10px`, `border-radius:10px`, a 20 px arrow column).
-SHAPE_CONSTANTS = {
-    "HEIGHT": 29,
-    "RADIUS": 10,
-    "H_PADDING": 10,
-    "STEP_BUTTON_WIDTH": 20,
-    "STEP_BUTTON_GAP": 0,
-    "STEP_ARROW_SIZE": 10,
-}
 
 #: The splitter's map: the value controls and the log pane are enabled; `QListWidget` is not (the toolkit has no
 #: compact text list - `IconListWidget` is a navigation list, measured at 3.2 % on the queue page).
@@ -288,56 +263,6 @@ def test_no_page_builds_an_unpinned_primitive() -> None:
         assert module in PAGES_PIN, f"{module}.py builds {sorted(actual)} but has no pin - {HINT}"
         assert actual.keys() == PAGES_PIN[module].keys(), (
             f"{module}.py widgets {sorted(actual)} vs pin {sorted(PAGES_PIN[module])} - {HINT}")
-
-
-def test_adapters_declare_the_pinned_geometry() -> None:
-    classes = _classes(_parse(QT_SHAPED))
-    actual = {name: _adapter_facts(name, classes) for name in ADAPTERS_PIN if name in classes}
-    assert actual == ADAPTERS_PIN, f"adapter geometry changed: {actual} - {HINT}"
-
-
-def test_shaped_adapters_declare_the_pinned_geometry() -> None:
-    """Layer A's control shapes: the checkbox and combo keep a stock oracle, the button keeps the caller's policy.
-
-    The number behind the pin (measured on the Designer build, Fusion, RVE QSS):
-    `QtCheckBox` empty unchecked 22x16 / checked 26x20, `Reuse unchanged frames` checked 170x20, `By cel ...`
-    unchecked 263x17; `QtComboBox` tile list 59x29 and quality preset 104x29. The old checkbox formula stated a flat
-    22x16, so every CHECKED box - the ones this page's rows actually hold - moved when the adapter replaced it.
-    """
-    classes = _classes(_parse(QT_SHAPED))
-    actual = {name: _adapter_facts(name, classes) for name in SHAPES_PIN if name in classes}
-    assert actual == SHAPES_PIN, f"control-shape geometry changed: {actual} - {HINT}"
-
-
-def test_every_adapter_named_by_a_page_exists_and_is_pinned() -> None:
-    classes = _classes(_parse(QT_SHAPED))
-    used = {cls for widgets in PAGES_PIN.values() for cls in widgets.values() if cls.startswith("Qt")}
-    assert used == set(ADAPTERS_PIN), f"pages use {sorted(used)}, adapters pinned {sorted(ADAPTERS_PIN)} - {HINT}"
-    assert used <= set(classes), f"missing adapter classes in qt_shaped.py: {sorted(used - set(classes))}"
-
-
-def test_spin_box_geometry_constants_are_rve_numbers() -> None:
-    classes = _classes(_parse(QT_SHAPED))
-    shape = classes.get("_QtSpinShape")
-    assert shape is not None, "the shared spin-box shape mixin is gone - " + HINT
-    actual = {name: _constant([shape], name) for name in SHAPE_CONSTANTS}
-    assert actual == SHAPE_CONSTANTS, (
-        f"spin-box constants {actual} vs {SHAPE_CONSTANTS} (the live rows are 29 px, radius 10, padding 10, a 20 px "
-        f"arrow column) - {HINT}")
-
-
-def test_spin_boxes_keep_qt_text_alignment() -> None:
-    """`QAbstractSpinBox` aligns left (`QSpinBox().alignment()` measured); the toolkit field defaults to centre."""
-    source = QT_SHAPED.read_text(encoding="utf-8")
-    assert "AlignLeft | Qt.AlignmentFlag.AlignVCenter" in source, (
-        "the Qt spin-box alignment constant is gone - the toolkit would centre every value - " + HINT)
-    classes = _classes(_parse(QT_SHAPED))
-    for name in ("QtSpinBox", "QtDoubleSpinBox"):
-        constructors = [node for node in classes[name].body
-                        if isinstance(node, ast.FunctionDef) and node.name == "__init__"]
-        assert constructors, f"{name} has no __init__ left - {HINT}"
-        assert "alignment=_qt_alignment()" in ast.unparse(constructors[0]), (
-            f"{name} no longer passes Qt's alignment - {HINT}")
 
 
 # ----------------------------------------------------------------------------------------------------------------

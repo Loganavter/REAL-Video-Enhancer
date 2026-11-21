@@ -264,7 +264,7 @@ def _tk_button(text: str, parent: QWidget) -> "Button":
     """A toolkit dialog button with RVE's padding/radius and no fixed 36 px control box.
 
     ``Button`` gives every instance a 36x36 minimum *and* maximum; clearing both lets the dialog layout size it, which
-    is the same adjustment ``QtButton`` makes on the pages (see ``src/ui/widgets/qt_shaped.py``).
+    is the same adjustment the toolkit's ``Button`` makes on the pages (``content_padding`` + corner radius).
     """
     button = Button(
         icon=None,
