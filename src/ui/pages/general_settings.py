@@ -26,6 +26,12 @@ import resources_rc
 from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
+# Layer B (2026-11-21): the two widget classes this page no longer builds stock. `SurfaceScrollArea(surface_token=None)`
+# is the stock `QScrollArea` without a surface of its own - the body is painted by `procPage`'s
+# `QWidget{background-color:#16191d}` rule - and `content_inset=1` keeps the stock StyledPanel frame's 1 px inset.
+# `ImageLabel` is the pixmap counterpart of `QLabel`; the alignment is stated because Qt's default is left+vcenter.
+from sli_ui_toolkit.widgets import ImageLabel, SurfaceScrollArea
+
 
 class GeneralSettingsPage:
     """`generalSettings` - placed by its parent with `addTab`."""
@@ -81,7 +87,7 @@ class GeneralSettingsPage:
         self.horizontalLayout_13 = QHBoxLayout(self.widget_5)
         self.horizontalLayout_13.setObjectName(u"horizontalLayout_13")
         self.horizontalLayout_13.setContentsMargins(0, 0, 0, 0)
-        self.scrollArea_4 = QScrollArea(self.widget_5)
+        self.scrollArea_4 = SurfaceScrollArea(self.widget_5, surface_token=None, content_inset=1)
         self.scrollArea_4.setObjectName(u"scrollArea_4")
         sizePolicy2.setHeightForWidth(self.scrollArea_4.sizePolicy().hasHeightForWidth())
         self.scrollArea_4.setSizePolicy(sizePolicy2)
@@ -202,6 +208,9 @@ class GeneralSettingsPage:
         self.horizontalLayout_56.addWidget(self.label_76)
         self.horizontalSpacer_21 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_56.addItem(self.horizontalSpacer_21)
+        # Stays stock: `QtCheckBox.setTristate` raises `NotImplementedError` (the toolkit box has two states), and the
+        # adapter's own contract is that a tristate box stays a `QCheckBox` rather than fake the third state. The call
+        # here is `setTristate(False)`, but the class cannot answer it either way - named in DONE.md as a toolkit gap.
         self.interpolateCheckBox = QCheckBox(self.widget_37)
         self.interpolateCheckBox.setObjectName(u"interpolateCheckBox")
         self.interpolateCheckBox.setTristate(False)
@@ -264,7 +273,8 @@ class GeneralSettingsPage:
         self.horizontalLayout_31.addWidget(self.label_36)
         self.horizontalSpacer_16 = QSpacerItem(226, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_31.addItem(self.horizontalSpacer_16)
-        self.label_39 = QLabel(self.sloMoModeContainer)
+        self.label_39 = ImageLabel(self.sloMoModeContainer,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_39.setObjectName(u"label_39")
         self.label_39.setMaximumSize(QSize(25, 25))
         self.label_39.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -436,7 +446,8 @@ class GeneralSettingsPage:
         self.label_72.setObjectName(u"label_72")
         apply(self.label_72, BODY_PT)
         self.horizontalLayout_50.addWidget(self.label_72)
-        self.label_73 = QLabel(self.widget_42)
+        self.label_73 = ImageLabel(self.widget_42,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_73.setObjectName(u"label_73")
         self.label_73.setMaximumSize(QSize(25, 25))
         self.label_73.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -472,7 +483,8 @@ class GeneralSettingsPage:
         self.horizontalLayout_qualityPresetRow.addWidget(self.qualityPresetLabel)
         self.horizontalSpacer_qualityPreset = QSpacerItem(237, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_qualityPresetRow.addItem(self.horizontalSpacer_qualityPreset)
-        self.qualityPresetInfoLabel = QLabel(self.qualityPresetRow)
+        self.qualityPresetInfoLabel = ImageLabel(self.qualityPresetRow,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.qualityPresetInfoLabel.setObjectName(u"qualityPresetInfoLabel")
         self.qualityPresetInfoLabel.setMaximumSize(QSize(25, 25))
         self.qualityPresetInfoLabel.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -521,6 +533,9 @@ class GeneralSettingsPage:
         self.widget_26.setMaximumSize(QSize(42344, 200))
         self.horizontalLayout_22 = QHBoxLayout(self.widget_26)
         self.horizontalLayout_22.setObjectName(u"horizontalLayout_22")
+        # Stays stock: this panel's content is HTML (`setHtml`) and it scrolls its own content; `Text(mode="document")`
+        # has no `setHtml` and never scrolls, and `ConsoleView` is not exported by `sli_ui_toolkit.widgets`. Named as a
+        # toolkit gap in DONE.md, per the layer-B rule for a missing method.
         self.inputVideoInfoTextEdit = QTextEdit(self.widget_26)
         self.inputVideoInfoTextEdit.setObjectName(u"inputVideoInfoTextEdit")
         self.inputVideoInfoTextEdit.setEnabled(False)
@@ -575,7 +590,6 @@ class GeneralSettingsPage:
         self.label_11.setText(QCoreApplication.translate("MainWindow", u"Interpolation Multiplier", None))
         self.label_36.setText(QCoreApplication.translate("MainWindow", u"SloMo Mode", None))
         self.label_39.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Increase video length instead of framerate when interpolating.</p><p>Audio and Subtitles will not be transfered to output video.</p></body></html>", None))
-        self.label_39.setText("")
         self.sloMoModeCheckBox.setText("")
         self.label_86.setText(QCoreApplication.translate("MainWindow", u"Decompress", None))
         self.decompressCheckBox.setText("")
@@ -591,9 +605,7 @@ class GeneralSettingsPage:
         self.label_7.setText(QCoreApplication.translate("MainWindow", u"Upscale Model", None))
         self.label_72.setText(QCoreApplication.translate("MainWindow", u"Upscale Scale", None))
         self.label_73.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Upscale Scale:</span></p><p><span style=\" font-weight:700;\">   - </span>Custom output scale no matter the model. Will run AI on video frame once, and scale the image to match the multiplier. Useful for 4x models.</p></body></html>", None))
-        self.label_73.setText("")
         self.qualityPresetLabel.setText(QCoreApplication.translate("MainWindow", u"Quality Preset", None))
-        self.qualityPresetInfoLabel.setText("")
         self.qualityPresetComboBox.setItemText(0, QCoreApplication.translate("MainWindow", u"Best quality", None))
         self.qualityPresetComboBox.setItemText(1, QCoreApplication.translate("MainWindow", u"Fast", None))
         self.frameReuse.setText(QCoreApplication.translate("MainWindow", u"Reuse unchanged frames", None))
