@@ -23,9 +23,6 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-# A pixmap `QLabel` migrates to the toolkit's image label, which carries `setPixmap`/`setScaledContents` itself - no
-# adapter is needed (`src/ui/widgets/qt_shaped.py` holds the shapes that need translation; this one drops in).
-from sli_ui_toolkit.widgets import ImageLabel, SurfaceScrollArea
 from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
@@ -47,9 +44,7 @@ class Tab2Page:
         self.verticalLayout_19.setSpacing(0)
         self.verticalLayout_19.setObjectName(u"verticalLayout_19")
         self.verticalLayout_19.setContentsMargins(0, 0, 0, 0)
-        # The page body scrolls in the toolkit's area: RVE's `QScrollArea{background:transparent}` becomes
-        # `surface_token=None` (no token fill, the page's own surface shows through). `setWidgetResizable` is inherited.
-        self.scrollArea_3 = SurfaceScrollArea(self.VideoSettingsContainer, surface_token=None)
+        self.scrollArea_3 = QScrollArea(self.VideoSettingsContainer)
         self.scrollArea_3.setObjectName(u"scrollArea_3")
         self.scrollArea_3.setWidgetResizable(True)
         self.scrollAreaWidgetContents_3 = QWidget()
@@ -89,7 +84,7 @@ class Tab2Page:
         self.horizontalLayout_17.addWidget(self.label_20)
         self.horizontalSpacer_3 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_17.addItem(self.horizontalSpacer_3)
-        self.label_24 = ImageLabel(self.sceneChangeDetectionSettingContainer)
+        self.label_24 = QLabel(self.sceneChangeDetectionSettingContainer)
         self.label_24.setObjectName(u"label_24")
         self.label_24.setMaximumSize(QSize(25, 25))
         self.label_24.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -111,7 +106,7 @@ class Tab2Page:
         self.horizontalLayout_27.addWidget(self.label_37)
         self.horizontalSpacer_13 = QSpacerItem(305, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_27.addItem(self.horizontalSpacer_13)
-        self.label_38 = ImageLabel(self.widget_12)
+        self.label_38 = QLabel(self.widget_12)
         self.label_38.setObjectName(u"label_38")
         self.label_38.setMaximumSize(QSize(25, 25))
         self.label_38.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -137,7 +132,7 @@ class Tab2Page:
         self.horizontalLayout_14.addWidget(self.label_30)
         self.horizontalSpacer_6 = QSpacerItem(305, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_14.addItem(self.horizontalSpacer_6)
-        self.label_31 = ImageLabel(self.widget_7)
+        self.label_31 = QLabel(self.widget_7)
         self.label_31.setObjectName(u"label_31")
         self.label_31.setMaximumSize(QSize(25, 25))
         self.label_31.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -163,7 +158,7 @@ class Tab2Page:
         self.horizontalLayout_25.addWidget(self.label_48)
         self.horizontalSpacer_10 = QSpacerItem(468, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_25.addItem(self.horizontalSpacer_10)
-        self.label_47 = ImageLabel(self.widget_9)
+        self.label_47 = QLabel(self.widget_9)
         self.label_47.setObjectName(u"label_47")
         self.label_47.setMaximumSize(QSize(25, 25))
         self.label_47.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -184,15 +179,19 @@ class Tab2Page:
         self.select_output_folder_location_btn.setText(QCoreApplication.translate("MainWindow", u"Select Output Folder", None))
         self.label_20.setText(QCoreApplication.translate("MainWindow", u"Scene Change Detection Enabled", None))
         self.label_24.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Scene Change Detection Enabled:</span></p><p>- Enabled: Attempts to detect when scenes change in a video. </p><p>   When running an interpolation, it will avoide interpolating over these scene changes.</p></body></html>", None))
+        self.label_24.setText("")
         self.scene_change_detection_enabled.setText("")
         self.label_37.setText(QCoreApplication.translate("MainWindow", u"Scene Change Detection Method", None))
         self.label_38.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Scene Change Detection Method</span></p><p>- mean: fastest, least accurate</p><p>- mean (segmented): fast, prone to overdetection</p><p>- pyscenedetect: slow, accuate <span style=\" font-weight:700;\">(Recommended)</span></p></body></html>", None))
+        self.label_38.setText("")
         self.scene_change_detection_method.setItemText(0, QCoreApplication.translate("MainWindow", u"mean", None))
         self.scene_change_detection_method.setItemText(1, QCoreApplication.translate("MainWindow", u"mean_segmented", None))
         self.scene_change_detection_method.setItemText(2, QCoreApplication.translate("MainWindow", u"sudo_scene_detect", None))
         self.scene_change_detection_method.setItemText(3, QCoreApplication.translate("MainWindow", u"pyscenedetect", None))
         self.label_30.setText(QCoreApplication.translate("MainWindow", u"Scene Change Detection Threshold", None))
         self.label_31.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Scene Change Detection Threshold</span></p><p> - Lower number: <span style=\" font-weight:700;\">higher</span> chance of detecting scene changes, with risk of <span style=\" font-weight:700;\">overdetection</span>.</p><p> - Higher number: <span style=\" font-weight:700;\">lower </span>chance of detecting scene changes, with risk of <span style=\" font-weight:700;\">underdetection.</span></p><p>   - <span style=\" font-weight:700;\">Recommended: </span>2-3 for real life, 4 for animation.</p></body></html>", None))
+        self.label_31.setText("")
         self.label_48.setText(QCoreApplication.translate("MainWindow", u"Auto Border Cropping", None))
         self.label_47.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Audo Border Cropping:</span></p><p>- Will automatically remove black bars if they are present throughout a video, can increase performance.</p></body></html>", None))
+        self.label_47.setText("")
         self.auto_border_cropping.setText("")
