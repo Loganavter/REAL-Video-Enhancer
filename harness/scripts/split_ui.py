@@ -37,6 +37,8 @@ PAGE_CONTAINERS = {"stackedWidget"}
 #: regeneration keeps such a widget stock instead of building an adapter that would fail at runtime.
 TOOLKIT = {
     "QLabel": ("QtLabel", {"setPixmap", "setScaledContents"}),
+    # `QtButton` takes `toggle=True` at construction; `setCheckable(True)` is emitted as that keyword (see
+    # `_toggle_call`). `setAutoExclusive`/`setAutoRepeat` have no toolkit counterpart, so such buttons stay stock.
     "QPushButton": ("QtButton", {"setAutoExclusive", "setAutoRepeat"}),
     "QCheckBox": ("QtCheckBox", {"setTristate"}),
     "QComboBox": ("QtComboBox", set()),
@@ -292,6 +294,19 @@ def _toolkit_class(qt_class: str, widget: str, calls: dict[str, set[str]]) -> st
     return None if (used & blocking) else adapter
 
 
+def _toggle_call(text: str, widget: str, adapter: str, calls: dict[str, set[str]]) -> str:
+    """`QtButton(self.parent)` -> `QtButton(self.parent, toggle=True)` for a checkable page button.
+
+    `Button`'s toggle mode is a constructor flag (`Button(toggle=True)`), and `QtButton` cannot turn it on after the
+    fact. The splitter sees the Designer's `setCheckable(True)` in the same page, so the flag is stated where the
+    widget is built - the only place the toolkit accepts it. A button with auto-exclusive semantics is not here: the
+    splitter keeps those stock (`setAutoExclusive` is in the blocking set), because `Button` has no button group.
+    """
+    if adapter != "QtButton" or "setCheckable(True)" not in calls.get(widget, set()):
+        return text
+    return re.sub(rf"(self\.{re.escape(widget)} = {adapter}\([^()]*)\)", r"\1, toggle=True)", text, count=1)
+
+
 def module_for(page: Page, setup: list[Stmt], retranslate: list[Stmt], locals_defined: dict[str, int],
                header: str, toolkit: bool = False) -> str:
     child_at = {child.place: child for child in page.children}
@@ -327,6 +342,7 @@ def module_for(page: Page, setup: list[Stmt], retranslate: list[Stmt], locals_de
                     substituted[adapter] = adapter
                     text = re.sub(rf"(self\.{re.escape(widget)} = ){re.escape(qt_class)}\(",
                                   rf"\g<1>{adapter}(", text, count=1)
+                    text = _toggle_call(text, widget, adapter, calls)
         body.append(text)
     if page.retranslate:
         body.append("        self.retranslate()")
