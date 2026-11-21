@@ -93,7 +93,62 @@ def install(window) -> None:
             handle(wanted)
         QTimer.singleShot(120, poll)
 
+    def probe(spec: str) -> None:
+        """Name the painter at a point: `probe:<objectName>@<window_x>,<window_y>`.
+
+        The point is in WINDOW coordinates and is mapped into the widget here, because a widget's live origin cannot be
+        reproduced offscreen (measured: `generalSettings` is 480x539 and a window point that looks "inside" maps outside
+        it in a differently sized build). The answer is `childAt`'s chain - the only form that names a painter, since a
+        custom `paintEvent` widget carries no fill attribute to query - plus each step's own pixel.
+        """
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QWidget
+
+        target, _, coords = spec.partition("@")
+        target = target.strip()
+        root_widget = window.findChild(QWidget, target)
+        report = {"stamp": _stamp(), "kind": "probe", "target": target, "point": coords.strip() or None,
+                  "error": None, "chain": []}
+        if root_widget is None:
+            report["error"] = "widget not found"
+            _finish(report)
+            return
+        if not coords.strip():
+            report["error"] = "no point given (expected name@x,y in window coordinates)"
+            _finish(report)
+            return
+        try:
+            wx, wy = (int(v) for v in coords.split(","))
+        except ValueError:
+            report["error"] = "point is not x,y"
+            _finish(report)
+            return
+        node = root_widget
+        local = root_widget.mapFrom(window, QPoint(wx, wy))
+        report["local_point"] = [local.x(), local.y()]
+        report["target_size"] = [root_widget.width(), root_widget.height()]
+        point = local
+        while True:
+            child = node.childAt(point.x(), point.y())
+            if child is None:
+                break
+            step = child.mapFrom(node, point)
+            image = child.grab().toImage()
+            pixel = None
+            if 0 <= step.x() < image.width() and 0 <= step.y() < image.height():
+                pixel = list(image.pixelColor(step.x(), step.y()).getRgb())
+            report["chain"].append({"class": type(child).__name__, "name": child.objectName(),
+                                    "geometry": [child.x(), child.y(), child.width(), child.height()],
+                                    "local": [step.x(), step.y()], "pixel": pixel})
+            node = child
+            point = step
+        _finish(report)
+        print(f"capture-server: probe {target}@({wx},{wy}) -> {len(report['chain'])} step(s)", flush=True)
+
     def handle(wanted: str) -> None:
+        if wanted.startswith("probe:"):
+            probe(wanted[len("probe:"):])
+            return
         if wanted == "stack":
             # Every thread's Python stack, written next to the server's other answers. The render runs in a worker, and
             # a stuck first frame needs the call it is stuck IN, not an inference from a progress bar.
