@@ -21,13 +21,14 @@ from the glue's point of view.
 from __future__ import annotations
 
 from PySide6.QtCore import QCoreApplication, QMetaObject, QSize, Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPalette
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSpacerItem,
     QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 import resources_rc
 
 from sli_ui_toolkit.widgets import SurfacePanel
 
+from src.ui import toolkit_theme
 from src.ui.pages.home_page import HomePagePage
 from src.ui.pages.more_page import MorePagePage
 from src.ui.pages.proc_page import ProcPagePage
@@ -104,6 +105,15 @@ class MainWindowShell:
         # left and made it 20 px wider (measured against a capture of the same tree before the sheet went). The inset
         # belongs to the container, so it is stated here and nowhere else.
         self.stackedWidget.setContentsMargins(PAGE_INSET_H, PAGE_INSET_V, PAGE_INSET_H, PAGE_INSET_V)
+        # The gutter has to be the page colour, or it reads as a 10 px lighter frame: the deleted sheet also painted the
+        # stack (`QStackedWidget{background-color:#16191d}`), and without it the palette's Window role shows through
+        # (measured: a 10x670 and a 1044x5 band, 2.9 % of the page, all of it that frame).
+        _gutter = toolkit_theme.token_color("surface.page")
+        if _gutter is not None:
+            self.stackedWidget.setAutoFillBackground(True)
+            _gutter_palette = self.stackedWidget.palette()
+            _gutter_palette.setColor(QPalette.ColorRole.Window, _gutter)
+            self.stackedWidget.setPalette(_gutter_palette)
         self.homePage_page = HomePagePage()
         self.homePage = self.homePage_page.build()
         self.stackedWidget.addWidget(self.homePage)

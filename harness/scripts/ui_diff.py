@@ -114,7 +114,8 @@ def main() -> int:
     widgets_all = []
     page_rows = []
     tree_rows = []
-    missing_pages = []
+    missing_pages: list[str] = []
+    uncompared: list[str] = []
     for name in pages:
         stock_path = os.path.join(args.stock_dumps, name)
         new_path = os.path.join(args.new_dumps, name)
@@ -125,8 +126,15 @@ def main() -> int:
         new_tree = load(new_path)
         if args.prune_under:
             prune_under(stock_tree, set(args.prune_under))
-        stock_img = _image(os.path.join(args.stock_png, name.replace(".json", ".png"))) if args.stock_png else None
-        new_img = _image(os.path.join(args.new_png, name.replace(".json", ".png"))) if args.new_png else None
+        # A capture writes the dump and the PNG into ONE directory, so an omitted `--*-png` means "next to the dumps",
+        # not "no pixels". Treating a missing directory as None made the page table print `nan` and still report
+        # "inside the budget" - a green verdict on a comparison that never ran (measured 2026-11-22).
+        stock_png = args.stock_png or args.stock_dumps
+        new_png = args.new_png or args.new_dumps
+        stock_img = _image(os.path.join(stock_png, name.replace(".json", ".png")))
+        new_img = _image(os.path.join(new_png, name.replace(".json", ".png")))
+        if stock_img is None or new_img is None:
+            uncompared.append(name)
         page_root = current_page_root(stock_tree)
         rows = widget_deltas(name, stock_tree, new_tree, stock_img, new_img, aliases, args.ignore_text)
         if page_root:
@@ -140,6 +148,8 @@ def main() -> int:
             names = {part.strip() for part in args.mask_widgets.split(",") if part.strip()}
             mask_rects = _rects_for(new_tree, names) + _rects_for(stock_tree, names)
         summary = _page_pixels(stock_img, new_img, mask_rects)
+        if summary.get("shape_mismatch") and name not in uncompared:
+            uncompared.append(name)
         summary["page"] = name
         page_rows.append(summary)
         tree_rows.append(page_deltas(name, stock_tree, new_tree, aliases))
@@ -161,12 +171,14 @@ def main() -> int:
     if args.views in {"pages", "both"}:
         print(format_page_table(page_rows))
         over = [row for row in page_rows if row.get("over8_pct", 100.0) > args.budget_page]
-        print(f"\n{len(page_rows) - len(over)} of {len(page_rows)} pages inside the {args.budget_page}% budget"
-              + (f"; over: {', '.join(row['page'] for row in over)}" if over else ""))
+        compared = [row for row in page_rows if row.get("page") not in uncompared]
+        print(f"\n{len(compared) - len(over)} of {len(page_rows)} pages inside the {args.budget_page}% budget"
+              + (f"; over: {', '.join(row['page'] for row in over)}" if over else "")
+              + (f"; NOT COMPARED (no image): {', '.join(uncompared)}" if uncompared else ""))
         print("\ntree: " + "  ".join(
             f"{row['page'][:-5]} nodes {row['nodes'][0]}/{row['nodes'][1]} geom {row['geometry']} "
             f"icon {row['icon']}" for row in tree_rows[:4]) + ("" if len(tree_rows) <= 4 else "  ..."))
-        if over or missing_pages:
+        if over or missing_pages or uncompared:
             exit_code = 1
     if missing_pages:
         print(f"\nmissing in the new run: {', '.join(missing_pages)}")

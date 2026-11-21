@@ -172,6 +172,21 @@ def _hexargb(value: str) -> str:
     return color.name(QColor.NameFormat.HexArgb).lower()
 
 
+def token_color(name: str) -> QColor | None:
+    """A toolkit token as a `QColor`, or `None` when the palette does not define it.
+
+    For the few containers that are plain `QWidget`s with no toolkit counterpart (a `QStackedWidget` painting the gutter
+    around its pages): reading the token keeps the colour theme-owned instead of a hex in the shell.
+    """
+    from sli_ui_toolkit.theme import ThemeManager
+
+    try:
+        value = ThemeManager.get_instance().try_get_color(name)
+    except Exception:
+        return None
+    return QColor(value) if value is not None and value.isValid() else None
+
+
 def palette() -> dict[str, QColor]:
     """FLUENT_DARK with RVE's values on top - complete on purpose, so no toolkit token is left unpainted."""
     from sli_ui_toolkit.palettes import FLUENT_DARK
