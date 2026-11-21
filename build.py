@@ -19,23 +19,12 @@ print(f"OUTPUT_FOLDER: {OUTPUT_FOLDER}")
 
 
 def set_mainwindow_size():
-    import xml.etree.ElementTree as ET
+    """Kept as a name for build scripts that still call it: there is no .ui to resize any more.
 
-    def set_mainwindow_size_zero(path="testRVEInterface.ui"):
-        tree = ET.parse(path)
-        root = tree.getroot()
-
-        geometry = root.find('.//property[@name="geometry"]/rect')
-        if geometry is not None:
-            width = geometry.find("width")
-            height = geometry.find("height")
-            if width is not None:
-                width.text = "1000"
-            if height is not None:
-                height.text = "700"
-            tree.write(path)
-
-    set_mainwindow_size_zero()
+    The interface is assembled in code since W3 of plan-rve-ui-on-toolkit (`src/ui/shell/window.py`, `src/ui/pages/`),
+    and the Designer file that this used to patch was deleted with it.
+    """
+    return None
 
 
 def download_file(url, destination):
@@ -153,16 +142,8 @@ class BuildManager:
         ...
     
     def build_gui(self):
-        print("Building GUI")
-        #set_mainwindow_size()
-        if PLATFORM == "darwin" or PLATFORM == "linux":
-            os.system(
-                f"{self.python_manager.get_venv_site_packages()}/PySide6/Qt/libexec/uic -g python testRVEInterface.ui > mainwindow.py"
-            )
-        if PLATFORM == "win32":
-            os.system(
-                r".\venv\Lib\site-packages\PySide6\uic.exe -g python testRVEInterface.ui > mainwindow.py"
-            )
+        """Nothing to compile: the interface is Python (W3 of plan-rve-ui-on-toolkit)."""
+        print("Building GUI: skipped, the interface is code (src/ui/pages, src/ui/shell)")
     
     def build_resources(self):
         print("Building resources.rc")

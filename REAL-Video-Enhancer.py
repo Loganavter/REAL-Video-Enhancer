@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QIcon
 
-from mainwindow import Ui_MainWindow
 from PySide6 import QtSvg  # Import the QtSvg module so svg icons can be used on windows
 from src.version import version
 from src.ModelHandler import getModels, getModelDisplayName
@@ -61,10 +60,11 @@ svg = (
 )  # utilize the imported QtSvg module to render svg icons on windows
 
 
-class MainWindow(QMainWindow, Ui_MainWindow):
+class MainWindow(QMainWindow):
     """Main window class for the REAL Video Enhancer application.
 
-    This class extends the QMainWindow and Ui_MainWindow classes to create the main window of the application.
+    This class extends QMainWindow; the interface itself is assembled by `src/ui/shell/window.py` (W3 of
+    plan-rve-ui-on-toolkit: pages are code modules, the Designer file is gone).
     It sets up the user interface, connects buttons to switch menus, and handles various functionalities such as rendering, file selection, and backend setup.
 
     Attributes:
@@ -116,9 +116,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # setup application
         FileHandler.createDirectory(TEMP_DOWNLOAD_PATH)
 
-        # Set up the user interface from Designer.
+        # Assemble the interface: the shell builds the chrome and the five nav pages, and exposes every widget as an
+        # attribute of this window - the surface the glue below already binds (`self.label_20`, `self.stackedWidget`).
         start_time = time.time()
-        self.setupUi(self)
+        from src.ui.shell.window import MainWindowShell
+        self.shell = MainWindowShell()
+        self.shell.build(self)
         end_time = time.time()
         log("Setup ui time: " + str(end_time - start_time))
         # P0 of plan-rve-ui-on-toolkit: put toolkit widgets into the live window and look at the result.
@@ -135,14 +138,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 layout_dump.install(self)
         except Exception as _dump_exc:
             log(f"layout dump failed: {_dump_exc}")
-        try:
-            from src.ui import toolkit_spike, toolkit_swap
-            if toolkit_swap.enabled():
-                log("toolkit P1: " + str(toolkit_swap.migrate_page(self)))
-            if toolkit_spike.enabled():
-                log("toolkit spike: replaced " + ", ".join(toolkit_spike.install(self)))
-        except Exception as _spike_exc:      # a migration step must never stop the app from starting
-            log(f"toolkit migration failed: {_spike_exc}")
+        # The v2 runtime swap (`toolkit_swap.py`, `toolkit_spike.py`) is gone with W3: pages are built by their own
+        # modules now, so a migration is an edit in a page module, not a splice into a live Designer tree.
         #self.VideoPreview.setVisible(False)
 
         # remove false hope

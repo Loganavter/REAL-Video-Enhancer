@@ -4,7 +4,7 @@
 # Why a script and not just `python3 REAL-Video-Enhancer.py`: the front end needs PySide6 and the backend needs the
 # bundled interpreter (torch, TensorRT, the models). Those live in the portable runtime, not in this repository, and
 # `src/constants.py` finds the backend next to this launcher — so the three things the tree needs (python/, bin/,
-# custom_models, plus the generated mainwindow.py/resources_rc.py) are linked or generated here, once, instead of
+# custom_models, plus the generated resources_rc.py) are linked or generated here, once, instead of
 # being remembered.
 #
 #   RVE_RUNTIME=/path/to/portable/app ./run.sh          # a different runtime
@@ -32,11 +32,8 @@ for part in python bin custom_models; do
     fi
 done
 
-# generated from the .ui/.qrc; the app's own uic/rcc, because the system pyside6-uic is not always usable
-if [ ! -f "$ROOT/mainwindow.py" ] && [ -x "$RUNTIME/venv/bin/pyside6-uic" ]; then
-    "$RUNTIME/venv/bin/pyside6-uic" -g python "$ROOT/testRVEInterface.ui" > "$ROOT/mainwindow.py"
-    echo "run.sh: generated mainwindow.py"
-fi
+# generated assets: only the icons/resources are compiled now. The interface used to be compiled from
+# `testRVEInterface.ui` here; since W3 of plan-rve-ui-on-toolkit it is code (`src/ui/pages`, `src/ui/shell`).
 if [ ! -f "$ROOT/resources_rc.py" ] && [ -x "$RUNTIME/venv/bin/pyside6-rcc" ]; then
     "$RUNTIME/venv/bin/pyside6-rcc" -g python "$ROOT/resources.qrc" > "$ROOT/resources_rc.py"
     echo "run.sh: generated resources_rc.py"

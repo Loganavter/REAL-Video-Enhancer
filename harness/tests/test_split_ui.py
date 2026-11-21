@@ -16,6 +16,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SPLIT = ROOT / "harness" / "scripts" / "split_ui.py"
+# `mainwindow.py` was the Designer's compiled output; it was deleted with the .ui in W3, so the fixture keeps the
+# splitter's contract testable (and the split auditable) without the generated file living in the tree.
+DESIGNER = ROOT / "mainwindow.py"
+if not DESIGNER.exists():
+    DESIGNER = ROOT / "harness" / "fixtures" / "designer_mainwindow.py"
 
 
 def _module():
@@ -28,7 +33,7 @@ def _module():
 
 def _partition():
     tool = _module()
-    lines, setup, retranslate, locals_defined = tool.load(str(ROOT / "mainwindow.py"))
+    lines, setup, retranslate, locals_defined = tool.load(str(DESIGNER))
     pages, shell = tool.build_partition(setup)
     return tool, setup, pages, shell
 
@@ -70,9 +75,8 @@ def test_nested_pages_are_children_of_their_container() -> None:
 def test_generated_modules_compile() -> None:
     tool, setup, pages, shell = _partition()
     tool._migrate_page_defaults(pages, shell, setup)
-    lines, source = open(ROOT / "mainwindow.py", encoding="utf-8").read(), None
     with tempfile.TemporaryDirectory() as tmp:
-        header = tool._header(open(ROOT / "mainwindow.py", encoding="utf-8").read())
+        header = tool._header(DESIGNER.read_text(encoding="utf-8"))
         for page in pages:
             text = tool.module_for(page, setup, [], {}, header)
             path = os.path.join(tmp, f"{tool._snake(page.name)}.py")
