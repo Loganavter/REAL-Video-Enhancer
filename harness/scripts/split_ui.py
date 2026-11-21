@@ -57,6 +57,13 @@ TOOLKIT = {
     # label/format/orientation switches have no counterpart (the toolkit bar paints no text).
     # A log/read-only pane is the toolkit's painted console; it carries setPlainText/setHtml/verticalScrollBar. Qt's
     # editor-only calls have no counterpart, so a pane that uses them stays stock.
+    # A queue of names is the compact flat list, not the navigation list (`IconListWidget` cost a migrated page 3.2 %).
+    # Qt's list API that the flat list does not carry keeps such a list stock.
+    "QListWidget": ("TextListWidget", {
+        "setSelectionMode", "setDragDropMode", "setDragEnabled", "setAcceptDrops", "setDefaultDropAction",
+        "setEditTriggers", "setViewMode", "setIconSize", "setUniformItemSizes", "setAlternatingRowColors",
+        "setWordWrap", "setSpacing", "setVerticalScrollBarPolicy", "setHorizontalScrollBarPolicy", "setItemWidget",
+    }),
     "QTextEdit": ("ConsoleView", {
         "setLineWrapMode",
         "setAcceptRichText", "setUndoRedoEnabled", "setTextInteractionFlags", "setPlaceholderText",
@@ -340,6 +347,7 @@ def module_for(page: Page, setup: list[Stmt], retranslate: list[Stmt], locals_de
     # verbatim, and only the splitter's own lines are indented to match.
     calls = _widget_calls(page, setup) if toolkit else {}
     substituted: dict[str, str] = {}      # Qt class -> adapter, for the import block
+    adapted: dict[str, str] = {}          # widget name -> adapter, so its stylesheet can be dropped
     body: list[str] = []
     for index in _hoisted_locals(page, setup, locals_defined):
         body.append(setup[index].text)
@@ -356,6 +364,14 @@ def module_for(page: Page, setup: list[Stmt], retranslate: list[Stmt], locals_de
             continue
         text = setup[index].text
         if toolkit:
+            # A stylesheet on a widget that became a toolkit control is dead code: the painter ignores QSS. Dropping the
+            # statement here is what keeps a regenerated page free of QSS the gate would flag (the hand-migrated pages
+            # delete these lines; a regeneration must not put them back).
+            sheet = re.match(r"\s*self\.(\w+)\.setStyleSheet\(", text)
+            if sheet and sheet.group(1) in adapted:
+                body.append(f"        # splitter: dropped the stylesheet of {sheet.group(1)} (a toolkit widget paints "
+                            f"itself, QSS would be ignored)")
+                continue
             shape = _class_and_name(text)
             if shape:
                 qt_class, widget = shape
@@ -365,6 +381,7 @@ def module_for(page: Page, setup: list[Stmt], retranslate: list[Stmt], locals_de
                     # (stays stock) and a `QLabel` that paints text (migrated). The adapter is named at the call site
                     # so the module says which widgets are migrated.
                     substituted[adapter] = adapter
+                    adapted[widget] = adapter
                     text = re.sub(rf"(self\.{re.escape(widget)} = ){re.escape(qt_class)}\(",
                                   rf"\g<1>{adapter}(", text, count=1)
                     text = _toggle_call(text, widget, adapter, calls)

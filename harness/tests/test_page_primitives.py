@@ -33,7 +33,7 @@ DESIGNER = ROOT / "harness" / "fixtures" / "designer_mainwindow.py"
 WATCHED = ("QSpinBox", "QDoubleSpinBox", "QProgressBar", "QListWidget", "QTextEdit")
 #: Replacement classes: the `Qt*` adapters from `qt_shaped.py`, plus toolkit classes a page constructs directly.
 ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget", "QtTextEdit", "ConsoleView",
-                 "RichTextView")
+                 "RichTextView", "TextListWidget")
 
 #: page module -> {designer widget name: the class the page builds}.
 #: Stock entries carry the reason in `GAPS` - they are not accidental leftovers.
@@ -51,8 +51,8 @@ PAGES_PIN: dict[str, dict[str, str]] = {
         "progressBar": "QtProgressBar",
     },
     "render_queue_tab": {
-        "renderQueueListWidget": "QListWidget",
-        "OutputFilesListWidget": "QListWidget",
+        "renderQueueListWidget": "TextListWidget",
+        "OutputFilesListWidget": "TextListWidget",
     },
     "home_page": {"changeLogText": "RichTextView", "systemInfoText": "RichTextView"},
     "tab_5": {"renderOutput": "ConsoleView"},
@@ -61,9 +61,6 @@ PAGES_PIN: dict[str, dict[str, str]] = {
 #: Widgets that stay stock, and why. These are toolkit rows, not local workarounds: the pin keeps the reason next to
 #: the class so a later reader does not have to re-derive it from the toolkit's source.
 GAPS: dict[str, str] = {
-    "renderQueueListWidget": "IconListWidget is a nav list (per-row Button, 44 px rows, 8 px host spacing) and has no "
-                             "insertItem/takeItem, which RenderQueue reorders the queue with",
-    "OutputFilesListWidget": "same nav list - no compact text row, no addItem/insertItem",
 }
 
 #: adapter -> (height policy, width policy, size policy, bases) exactly as the adapter declares it.
@@ -112,6 +109,10 @@ TOOLKIT_PIN: dict[str, frozenset[str]] = {
     "QTextEdit": frozenset({"setLineWrapMode", "setAcceptRichText", "setUndoRedoEnabled", "setTextInteractionFlags",
                             "setPlaceholderText", "setTabStopDistance", "setWordWrapMode", "setCurrentCharFormat",
                             "mergeCurrentCharFormat"}),
+    "QListWidget": frozenset({"setSelectionMode", "setDragDropMode", "setDragEnabled", "setAcceptDrops",
+                              "setDefaultDropAction", "setEditTriggers", "setViewMode", "setIconSize",
+                              "setUniformItemSizes", "setAlternatingRowColors", "setWordWrap", "setSpacing",
+                              "setVerticalScrollBarPolicy", "setHorizontalScrollBarPolicy", "setItemWidget"}),
 }
 
 HINT = "update the pin in harness/tests/test_page_primitives.py if the change is intended"
@@ -332,7 +333,7 @@ def test_splitter_would_emit_the_class_each_page_builds() -> None:
         assert not extra, f"splitter would emit unpinned primitives in {module}: {sorted(extra)} - {HINT}"
 
 
-@pytest.mark.parametrize("qt_class", ["QListWidget"])
+@pytest.mark.parametrize("qt_class", [])
 def test_unmigrated_classes_are_absent_from_the_map(qt_class: str) -> None:
     """A gap is a decision: enabling these without an adapter would build a class that cannot carry the Qt API.
 

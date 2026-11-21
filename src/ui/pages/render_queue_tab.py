@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
 import resources_rc
 import resources_rc
 
-from sli_ui_toolkit.widgets import SurfacePanel
+from sli_ui_toolkit.widgets import SurfacePanel, TextListWidget
 from src.ui.widgets.qt_shaped import QtButton, QtLabel
 
 
@@ -75,16 +75,16 @@ class RenderQueueTabPage:
         self.horizontalLayout_38 = QHBoxLayout(self.widget_22)
         self.horizontalLayout_38.setObjectName(u"horizontalLayout_38")
         self.horizontalLayout_38.setContentsMargins(0, 0, 0, 0)
-        self.renderQueueListWidget = QListWidget(self.widget_22)
+        # Layer B: the toolkit's compact flat list (text rows, one selection band, no per-row plate), on the token the
+        # deleted rule carried.
+        self.renderQueueListWidget = TextListWidget(self.widget_22, row_height=20, radius=10,
+            surface_token="dialog.background")
         self.renderQueueListWidget.setObjectName(u"renderQueueListWidget")
         sizePolicy.setHeightForWidth(self.renderQueueListWidget.sizePolicy().hasHeightForWidth())
         self.renderQueueListWidget.setSizePolicy(sizePolicy)
         self.renderQueueListWidget.setMinimumSize(QSize(0, 0))
         self.renderQueueListWidget.setMaximumSize(QSize(335, 16777215))
-        self.renderQueueListWidget.setStyleSheet(u"QListWidget{\n"
-"background-color:#1f232a;\n"
-"border-radius:10px;\n"
-"}")
+
         self.renderQueueListWidget.setProperty(u"showDropIndicator", True)
         self.horizontalLayout_38.addWidget(self.renderQueueListWidget)
         self.widget_23 = QWidget(self.widget_22)
@@ -105,16 +105,14 @@ class RenderQueueTabPage:
         self.gridLayout_4 = QGridLayout()
         self.gridLayout_4.setSpacing(0)
         self.gridLayout_4.setObjectName(u"gridLayout_4")
-        self.OutputFilesListWidget = QListWidget(self.renderQueueTab)
+        self.OutputFilesListWidget = TextListWidget(self.renderQueueTab, row_height=20, radius=10,
+            surface_token="dialog.background")
         self.OutputFilesListWidget.setObjectName(u"OutputFilesListWidget")
         sizePolicy5.setHeightForWidth(self.OutputFilesListWidget.sizePolicy().hasHeightForWidth())
         self.OutputFilesListWidget.setSizePolicy(sizePolicy5)
         self.OutputFilesListWidget.setMinimumSize(QSize(0, 0))
         self.OutputFilesListWidget.setMaximumSize(QSize(16777215, 16777215))
-        self.OutputFilesListWidget.setStyleSheet(u"QListWidget{\n"
-"background-color:#1f232a;\n"
-"border-radius:10px;\n"
-"}")
+
         self.gridLayout_4.addWidget(self.OutputFilesListWidget, 1, 0, 1, 1)
         self.label_51 = QtLabel(self.renderQueueTab)
         self.label_51.setObjectName(u"label_51")

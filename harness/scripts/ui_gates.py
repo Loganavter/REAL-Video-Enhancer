@@ -154,7 +154,7 @@ KNOWN: dict[str, frozenset[str]] = {
         "src/ui/pages/proc_page.py:272",
         "src/ui/pages/proc_page.py:283",
         "src/ui/pages/proc_page.py:287",
-        "src/ui/pages/render_queue_tab.py:83",
+        "src/ui/pages/render_queue_tab.py:86",
         "src/ui/pages/settings_page.py:52",
         "src/ui/pages/settings_page.py:56",
         "src/ui/pages/tab_2.py:117",
@@ -198,10 +198,7 @@ KNOWN: dict[str, frozenset[str]] = {
         "src/ui/shell/window.py:61",
         "src/ui/shell/window.py:67",
     }),
-    "stock-widget": frozenset({
-        "src/ui/pages/render_queue_tab.py:108",
-        "src/ui/pages/render_queue_tab.py:78",
-    }),
+    "stock-widget": frozenset(),
     "theme-read-at-build": frozenset(),
 }
 
