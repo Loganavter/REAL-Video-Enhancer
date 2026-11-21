@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import QtComboBox, QtLabel, QtLineEdit
+from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtComboBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 
 # Layer B (2026-11-21): the eight info icons are pixmap-only labels, so their toolkit counterpart is `ImageLabel`
@@ -64,7 +64,7 @@ class Tab6Page:
         self.verticalLayout_15.setObjectName(u"verticalLayout_15")
         # Layer B: a stock QScrollArea has a StyledPanel frame (content = area - 2 px) and, on this page, no
         # page QSS rule over it, so the stock geometry is `content_inset=1` and no reserved scrollbar gutter.
-        self.scrollArea_7 = OverlayScrollArea(self.widget_6, content_inset=1, reserve_scrollbar_space=False)
+        self.scrollArea_7 = OverlayScrollArea(self.widget_6, content_inset=1, scrollbar_width=STOCK_SCROLLBAR_WIDTH)
         self.scrollArea_7.setObjectName(u"scrollArea_7")
         self.scrollArea_7.setWidgetResizable(True)
         self.encoderSettings = QWidget()

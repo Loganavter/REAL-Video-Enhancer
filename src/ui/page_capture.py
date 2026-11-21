@@ -189,12 +189,33 @@ def _stabilise_state(window) -> None:
     """
     if os.environ.get("RVE_UI_STABLE_STATE", "1") != "1":
         return
-    from PySide6.QtWidgets import QComboBox
+    # The combo is not necessarily a `QComboBox`: a migrated page builds the toolkit's `ComboBox` (a `Button` subclass),
+    # and an `isinstance` check silently skipped it - the encoder stayed on whatever the probe picked while the stock
+    # build was pinned, which is a state difference the page table then charged to the migration.
+    def _is_combo(candidate) -> bool:
+        return all(hasattr(candidate, name) for name in ("count", "itemText", "currentIndex", "setCurrentIndex"))
 
-    for name in ("encoder", "upscaleModelComboBox"):
+    # Pin by TEXT where the text is the interface: the encoder list is built from what the machine reports, so index 0
+    # is a different encoder in two builds (stock `libx264`, ours `x265_nvenc`) and the page then differs in the command
+    # line it shows - a state difference, not a UI one.
+    wanted = {"encoder": "libx264", "upscaleModelComboBox": None}
+    for name, preferred in wanted.items():
         combo = getattr(window, name, None)
-        if isinstance(combo, QComboBox) and combo.count() > 0 and combo.currentIndex() != 0:
-            combo.setCurrentIndex(0)
+        if not _is_combo(combo) or combo.count() == 0:
+            continue
+        target = 0
+        if preferred:
+            for index in range(combo.count()):
+                if combo.itemText(index) == preferred:
+                    target = index
+                    break
+        if os.environ.get("RVE_UI_STABLE_DEBUG"):
+            print(f"stabilise: {name} items={[combo.itemText(i) for i in range(combo.count())][:12]} "
+                  f"current={combo.currentText()!r} target={target}", flush=True)
+        if combo.currentIndex() != target:
+            combo.setCurrentIndex(target)
+            if os.environ.get("RVE_UI_STABLE_DEBUG"):
+                print(f"stabilise: {name} -> {combo.currentText()!r}", flush=True)
 
 
 def stabilise(window) -> None:
