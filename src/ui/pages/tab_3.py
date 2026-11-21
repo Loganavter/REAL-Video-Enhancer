@@ -7,16 +7,43 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QSize)
+from PySide6.QtCore import (QCoreApplication, QSize, Qt)
 from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
-# A pixmap `QLabel` migrates to the toolkit's image label, which carries `setPixmap`/`setScaledContents`
-# itself - no adapter is needed (`src/ui/widgets/qt_shaped.py` holds the shapes that need translation).
-from sli_ui_toolkit.widgets import SurfacePanel
-from src.ui.widgets.qt_shaped import QtCheckBox, QtComboBox, QtLabel, QtSpinBox
+# The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `ComboBox` for a `QComboBox`,
+# `CheckBox` for a `QCheckBox` and `Stepper` for a `QSpinBox` (the toolkit `SpinBox` plus the step gutter RVE's
+# `::up-button`/`::down-button` rules drew). Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.widgets import CheckBox, ComboBox, Stepper, SurfacePanel, Text
 from src.ui.typography import apply, BODY_PT
+
+#: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
+#: defaults to centre, which would move every value to the middle of its box.
+SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+
+def _row_checkbox(parent) -> CheckBox:
+    """A toolkit `CheckBox` shaped for an RVE settings row.
+
+    Two statements the row needs and the toolkit control does not carry as constructor arguments:
+
+    * **the row size.** `CheckBox` builds on `Button`'s standalone control size, so an empty box is a fixed 36x36
+      square (measured offscreen: `minimumSize() == maximumSize() == 36x36`, hint 24x30). RVE's row box is the
+      indicator plus its label - the row's own height decides - so the square is released here.
+    * **Qt's signal spelling.** RVE's glue binds `stateChanged(int)` (`src/ui/SettingsTab.py` writes the setting from
+      it). The toolkit declares `stateChanged`, but emits it from `setCheckState` only: a plain two-state click or
+      `setChecked` emits `toggled(bool)` alone (measured), so without this line a click would never be persisted.
+
+    Both belong in the toolkit's `CheckBox` (a `size=` for a row shape, `stateChanged` on every state change); until
+    it grows them they are stated once here instead of once per widget.
+    """
+    box = CheckBox(parent=parent)
+    box.setMinimumSize(0, 0)
+    box.setMaximumSize(16777215, 16777215)
+    box.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    box.toggled.connect(lambda checked: box.stateChanged.emit(2 if checked else 0))
+    return box
 
 
 class Tab3Page:
@@ -37,11 +64,11 @@ class Tab3Page:
         self.precisionSettingsContainer = QHBoxLayout()
         self.precisionSettingsContainer.setSpacing(10)
         self.precisionSettingsContainer.setObjectName(u"precisionSettingsContainer")
-        self.label_3 = QtLabel(self.renderSettingsContainer)
+        self.label_3 = Text(parent=self.renderSettingsContainer)
         self.label_3.setObjectName(u"label_3")
         apply(self.label_3, BODY_PT)
         self.precisionSettingsContainer.addWidget(self.label_3)
-        self.precision = QtComboBox(self.renderSettingsContainer)
+        self.precision = ComboBox(self.renderSettingsContainer)
         self.precision.addItem("")
         self.precision.addItem("")
         self.precision.addItem("")
@@ -51,11 +78,11 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer = QHBoxLayout()
         self.tensorRTOptLevelSettingsContainer.setSpacing(10)
         self.tensorRTOptLevelSettingsContainer.setObjectName(u"tensorRTOptLevelSettingsContainer")
-        self.label_15 = QtLabel(self.renderSettingsContainer)
+        self.label_15 = Text(parent=self.renderSettingsContainer)
         self.label_15.setObjectName(u"label_15")
         apply(self.label_15, BODY_PT)
         self.tensorRTOptLevelSettingsContainer.addWidget(self.label_15)
-        self.tensorrt_optimization_level = QtComboBox(self.renderSettingsContainer)
+        self.tensorrt_optimization_level = ComboBox(self.renderSettingsContainer)
         self.tensorrt_optimization_level.addItem("")
         self.tensorrt_optimization_level.addItem("")
         self.tensorrt_optimization_level.addItem("")
@@ -67,13 +94,13 @@ class Tab3Page:
         self.horizontalLayout_67 = QHBoxLayout()
         self.horizontalLayout_67.setSpacing(10)
         self.horizontalLayout_67.setObjectName(u"horizontalLayout_67")
-        self.label_88 = QtLabel(self.renderSettingsContainer)
+        self.label_88 = Text(parent=self.renderSettingsContainer)
         self.label_88.setObjectName(u"label_88")
         apply(self.label_88, BODY_PT)
         self.horizontalLayout_67.addWidget(self.label_88)
         self.horizontalSpacer_34 = QSpacerItem(488, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_67.addItem(self.horizontalSpacer_34)
-        self.auto_hdr_mode = QtCheckBox(self.renderSettingsContainer)
+        self.auto_hdr_mode = _row_checkbox(self.renderSettingsContainer)
         self.auto_hdr_mode.setObjectName(u"auto_hdr_mode")
         sizePolicy12 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         sizePolicy12.setHorizontalStretch(0)
@@ -85,13 +112,13 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer_3 = QHBoxLayout()
         self.tensorRTOptLevelSettingsContainer_3.setSpacing(10)
         self.tensorRTOptLevelSettingsContainer_3.setObjectName(u"tensorRTOptLevelSettingsContainer_3")
-        self.label_84 = QtLabel(self.renderSettingsContainer)
+        self.label_84 = Text(parent=self.renderSettingsContainer)
         self.label_84.setObjectName(u"label_84")
         apply(self.label_84, BODY_PT)
         self.tensorRTOptLevelSettingsContainer_3.addWidget(self.label_84)
         self.horizontalSpacer_31 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.tensorRTOptLevelSettingsContainer_3.addItem(self.horizontalSpacer_31)
-        self.dynamic_tensorrt_engine = QtCheckBox(self.renderSettingsContainer)
+        self.dynamic_tensorrt_engine = _row_checkbox(self.renderSettingsContainer)
         self.dynamic_tensorrt_engine.setObjectName(u"dynamic_tensorrt_engine")
         sizePolicy12.setHeightForWidth(self.dynamic_tensorrt_engine.sizePolicy().hasHeightForWidth())
         self.dynamic_tensorrt_engine.setSizePolicy(sizePolicy12)
@@ -100,24 +127,27 @@ class Tab3Page:
         self.precisionSettingsContainer_2 = QHBoxLayout()
         self.precisionSettingsContainer_2.setSpacing(10)
         self.precisionSettingsContainer_2.setObjectName(u"precisionSettingsContainer_2")
-        self.label_22 = QtLabel(self.renderSettingsContainer)
+        self.label_22 = Text(parent=self.renderSettingsContainer)
         self.label_22.setObjectName(u"label_22")
         apply(self.label_22, BODY_PT)
         self.precisionSettingsContainer_2.addWidget(self.label_22)
         self.horizontalSpacer_15 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.precisionSettingsContainer_2.addItem(self.horizontalSpacer_15)
-        self.uhd_mode = QtCheckBox(self.renderSettingsContainer)
+        self.uhd_mode = _row_checkbox(self.renderSettingsContainer)
         self.uhd_mode.setObjectName(u"uhd_mode")
         self.precisionSettingsContainer_2.addWidget(self.uhd_mode)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_2)
         self.precisionSettingsContainer_4 = QHBoxLayout()
         self.precisionSettingsContainer_4.setSpacing(10)
         self.precisionSettingsContainer_4.setObjectName(u"precisionSettingsContainer_4")
-        self.label_45 = QtLabel(self.renderSettingsContainer)
+        self.label_45 = Text(parent=self.renderSettingsContainer)
         self.label_45.setObjectName(u"label_45")
         apply(self.label_45, BODY_PT)
         self.precisionSettingsContainer_4.addWidget(self.label_45)
-        self.ncnn_gpu_id = QtSpinBox(self.renderSettingsContainer)
+        # `alignment=` is Qt's spin-box alignment (`QAbstractSpinBox` is left-aligned); the toolkit field defaults to
+        # centre and would move the value into the middle of its box. `Stepper` states its own row height (32 px) and
+        # step gutter (22 px) where the adapter pinned 29 px and 20 px - toolkit metrics, reported in DONE.md.
+        self.ncnn_gpu_id = Stepper(self.renderSettingsContainer, alignment=SPIN_ALIGNMENT)
         self.ncnn_gpu_id.setObjectName(u"ncnn_gpu_id")
         self.ncnn_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_4.addWidget(self.ncnn_gpu_id)
@@ -125,11 +155,11 @@ class Tab3Page:
         self.precisionSettingsContainer_3 = QHBoxLayout()
         self.precisionSettingsContainer_3.setSpacing(10)
         self.precisionSettingsContainer_3.setObjectName(u"precisionSettingsContainer_3")
-        self.label_43 = QtLabel(self.renderSettingsContainer)
+        self.label_43 = Text(parent=self.renderSettingsContainer)
         self.label_43.setObjectName(u"label_43")
         apply(self.label_43, BODY_PT)
         self.precisionSettingsContainer_3.addWidget(self.label_43)
-        self.pytorch_gpu_id = QtSpinBox(self.renderSettingsContainer)
+        self.pytorch_gpu_id = Stepper(self.renderSettingsContainer, alignment=SPIN_ALIGNMENT)
         self.pytorch_gpu_id.setObjectName(u"pytorch_gpu_id")
         self.pytorch_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_3.addWidget(self.pytorch_gpu_id)
