@@ -101,6 +101,11 @@ STOCK_SCROLLBAR_WIDTH = 8
 #: reproduces it. Named here so the page has no bare pixel literal for the gate to record as new debt.
 SEPARATOR_HEIGHT = 3
 
+#: The render queue's button column (`widget_23`) is 200 px wide in the Designer build: the stock list asked for 256 px
+#: and the remaining 200 px of the 462 px row went to the column. A toolkit list that asks for a different share moves
+#: that split (measured: 335 px list, 121 px column), so the column states its width instead of inheriting one.
+QUEUE_BUTTON_COLUMN_WIDTH = 200
+
 class QtLabel(Text):
     """`QLabel`'s shape over `Text`.
 
