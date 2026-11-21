@@ -30,7 +30,7 @@ from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 # (Qt-shaped already: `setPixmap`/`setScaledContents`). A `QLabel` paints a pixmap-only label at the default
 # `AlignLeft|AlignVCenter` and `ImageLabel` centres, so the alignment is stated at construction to keep the icon
 # where the Designer put it (same statement as the Home page's logo).
-from sli_ui_toolkit.widgets import ImageLabel
+from sli_ui_toolkit.widgets import ImageLabel, OverlayScrollArea
 
 
 class Tab6Page:
@@ -62,7 +62,9 @@ class Tab6Page:
         self.widget_6.setObjectName(u"widget_6")
         self.verticalLayout_15 = QVBoxLayout(self.widget_6)
         self.verticalLayout_15.setObjectName(u"verticalLayout_15")
-        self.scrollArea_7 = QScrollArea(self.widget_6)
+        # Layer B: a stock QScrollArea has a StyledPanel frame (content = area - 2 px) and, on this page, no
+        # page QSS rule over it, so the stock geometry is `content_inset=1` and no reserved scrollbar gutter.
+        self.scrollArea_7 = OverlayScrollArea(self.widget_6, content_inset=1, reserve_scrollbar_space=False)
         self.scrollArea_7.setObjectName(u"scrollArea_7")
         self.scrollArea_7.setWidgetResizable(True)
         self.encoderSettings = QWidget()
@@ -97,7 +99,8 @@ class Tab6Page:
         self.widget_32.setObjectName(u"widget_32")
         self.horizontalLayout_51 = QHBoxLayout(self.widget_32)
         self.horizontalLayout_51.setObjectName(u"horizontalLayout_51")
-        self.scrollArea_6 = QScrollArea(self.widget_32)
+        # same stock geometry as `scrollArea_7` (framed, no page rule, no reserved bar)
+        self.scrollArea_6 = OverlayScrollArea(self.widget_32, content_inset=1, reserve_scrollbar_space=False)
         self.scrollArea_6.setObjectName(u"scrollArea_6")
         sizePolicy7.setHeightForWidth(self.scrollArea_6.sizePolicy().hasHeightForWidth())
         self.scrollArea_6.setSizePolicy(sizePolicy7)
