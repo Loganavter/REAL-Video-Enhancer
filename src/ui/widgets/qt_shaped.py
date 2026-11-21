@@ -462,9 +462,11 @@ class QtCheckBox(CheckBox):
         return self.sizeHint()
 
     def setTristate(self, on: bool) -> None:     # noqa: N802
-        # The toolkit box has two states; RVE has one tristate checkbox. Recorded rather than faked, and the splitter
-        # keeps tristate boxes stock so no behaviour changes silently.
-        raise NotImplementedError("CheckBox has no tristate - tristate boxes stay QCheckBox")
+        # `setTristate(False)` asks for the state this widget already has - a Designer `QCheckBox` emits it for every
+        # box unless the .ui said tristate. Refusing it kept a plain two-state box stock for no reason (measured on the
+        # interpolate checkbox). Asking for the third state is still a real gap and still raises.
+        if on:
+            raise NotImplementedError("CheckBox has no tristate - a tristate box stays QCheckBox")
 
 
 class QtComboBox(ComboBox):

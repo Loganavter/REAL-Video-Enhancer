@@ -211,10 +211,8 @@ class GeneralSettingsPage:
         self.horizontalLayout_56.addWidget(self.label_76)
         self.horizontalSpacer_21 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_56.addItem(self.horizontalSpacer_21)
-        # Stays stock: `QtCheckBox.setTristate` raises `NotImplementedError` (the toolkit box has two states), and the
-        # adapter's own contract is that a tristate box stays a `QCheckBox` rather than fake the third state. The call
-        # here is `setTristate(False)`, but the class cannot answer it either way - named in DONE.md as a toolkit gap.
-        self.interpolateCheckBox = QCheckBox(self.widget_37)
+        # A two-state box: the Designer's `setTristate(False)` below states exactly what the toolkit box is.
+        self.interpolateCheckBox = QtCheckBox(self.widget_37)
         self.interpolateCheckBox.setObjectName(u"interpolateCheckBox")
         self.interpolateCheckBox.setTristate(False)
         self.horizontalLayout_56.addWidget(self.interpolateCheckBox)
