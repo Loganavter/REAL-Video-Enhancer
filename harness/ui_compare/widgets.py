@@ -82,6 +82,20 @@ def _colours(node: dict) -> dict[str, str]:
             if key in {"Button", "Base", "Window", "Text"}}
 
 
+def _origin(flat: dict, path: str) -> tuple[int, int]:
+    """Screen offset of a widget's parent chain (the dump's geometry is parent-local)."""
+    x = y = 0
+    parts = path.split("/")
+    for index in range(1, len(parts)):
+        ancestor = flat.get("/".join(parts[:index]))
+        if ancestor is None:
+            continue
+        geometry = ancestor.get("geometry") or (0, 0, 0, 0)
+        x += geometry[0]
+        y += geometry[1]
+    return x, y
+
+
 def widget_deltas(page: str, stock_tree: dict, new_tree: dict, stock_img, new_img,
                   aliases: dict[str, str] | None = None, ignore_text: list[str] | None = None) -> list[WidgetDelta]:
     ignore_text = ignore_text or []
@@ -90,7 +104,11 @@ def widget_deltas(page: str, stock_tree: dict, new_tree: dict, stock_img, new_im
     rows: list[WidgetDelta] = []
     for path in sorted(set(left) & set(right)):
         a, b = left[path], right[path]
-        rect_a, rect_b = abs_rect(a), abs_rect(b)
+        # The dump stores PARENT-LOCAL geometry, so a widget's screen rect is the sum of its ancestors' offsets. Reading
+        # it as absolute put every crop in the wrong place: a container mid-page reported 100 % ink between two builds
+        # whose centre pixel is identical, and a pane reported its text "clipped" while the label was intact.
+        rect_a = abs_rect(a, *_origin(left, path))
+        rect_b = abs_rect(b, *_origin(right, path))
         # A collapsed widget (0-4 px in either axis) has no ink to compare; cropping it produced "100% different"
         # rows for things like a 33x0 button the Designer never laid out.
         if rect_a[2] < 4 or rect_a[3] < 4:
