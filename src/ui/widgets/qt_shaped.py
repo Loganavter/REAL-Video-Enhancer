@@ -11,9 +11,17 @@ Font translation is the one piece with a measurement behind it: the Designer's l
 which is the resolved size `Text` needs. Passing the point size straight through is what made every caption render at
 the variant's 12 px in the v2 spike.
 
-Not every class is here: `QSpinBox`/`QDoubleSpinBox` stay stock because the toolkit's `SpinBox`/`DoubleSpinBox` expose
-no range API (`setMinimum`/`setMaximum`/`setSingleStep` are absent), and pixmap labels stay `QLabel` because `Text`
-paints text only. Both are toolkit rows, not local workarounds.
+Two classes are deliberately NOT here, and each is a toolkit row rather than a local workaround:
+
+* `QListWidget` - the toolkit has no compact text list. `IconListWidget` is a nav list: one `Button` per row (hover
+  and pressed plates), `row_height` 44 by default, 8 px between rows and 8 px of host margin (measured on
+  `IconListWidget.__init__`), and it has no `insertItem`/`takeItem` - `RenderQueue` reorders the queue with exactly
+  those two calls (`src/ui/RenderQueue.py`). Pinning a 20 px text row with a nav row would not reproduce the look.
+* `QTextEdit` - `Text(mode="document")` renders markdown but never scrolls (the host composes the scroll area), and
+  `ConsoleView` is a console (radius 6, padding 6, a floating scrollbar) with no markdown. RVE's four text edits are a
+  scrollable markdown changelog, two static info panels and the render log; none has a one-widget counterpart.
+
+Pixmap labels stay `QLabel` too, because `Text` paints text only.
 """
 
 from __future__ import annotations
@@ -23,7 +31,20 @@ from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetrics
 
-from sli_ui_toolkit.widgets import Button, CheckBox, ComboBox, CustomLineEdit, Text
+from sli_ui_toolkit.widgets import (
+    Button,
+    CheckBox,
+    ComboBox,
+    CustomLineEdit,
+    DoubleSpinBox,
+    Stepper,
+    Text,
+    ToastProgressBar,
+)
+# Not exported from `sli_ui_toolkit.widgets`: the step-button gutter is documented as a host mixin
+# ("A host widget mixes this in and implements two hooks", `_step_buttons.py`), and `Stepper` composes it the same
+# way. A toolkit row is to export it; importing the module it lives in is the honest use of the documented hook.
+from sli_ui_toolkit.ui.widgets.atomic._step_buttons import StepButtonsMixin
 
 
 def _constraints(widget) -> tuple:
@@ -406,6 +427,328 @@ class QtLineEdit(CustomLineEdit):
     def __init__(self, parent=None, **kwargs) -> None:
         super().__init__(parent, **kwargs)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+
+def _token(name: str) -> QColor | None:
+    """A toolkit token as a `QColor`, or `None` when the palette does not define it."""
+    from sli_ui_toolkit.theme import ThemeManager
+
+    try:
+        value = ThemeManager.get_instance().try_get_color(name)
+    except Exception:
+        return None
+    return QColor(value) if value is not None and value.isValid() else None
+
+
+#: RVE's spin-box rules, verbatim (`settings_page.py`, `proc_page.py`): the oracle below must be measured under the
+#: same QSS the stock widget had, otherwise its padding and its 20 px arrow column are missing from the hint (measured
+#: on the combo: 70 vs the Designer's 78 px).
+_ARROW_RULES = (
+    "{klass}::up-arrow{{image:url(:/icons/icons/arrow-up.svg);}}"
+    "{klass}::down-arrow{{image:url(:/icons/icons/arrow-down.svg);}}"
+    "{klass}::up-button{{width:20px;height:15px;}}"
+    "{klass}::down-button{{width:20px;height:15px;}}"
+)
+_SPIN_QSS = ("QSpinBox{background-color:#2c313c;padding:5px 10px;border-radius:10px;color:white;}"
+             + _ARROW_RULES.format(klass="QSpinBox"))
+_DOUBLE_SPIN_QSS = ("QDoubleSpinBox{background-color:#2c313c;padding:5px 10px;border-radius:10px;color:white;}"
+                    + _ARROW_RULES.format(klass="QDoubleSpinBox"))
+
+
+#: `QAbstractSpinBox`'s own text alignment (`QSpinBox().alignment()` = AlignLeft|AlignVCenter, measured). The
+#: toolkit's field defaults to AlignCenter, which would move every value to the middle of its field.
+_QT_ALIGNMENT = None
+
+
+def _qt_alignment():
+    """Qt's spin-box alignment, resolved lazily so this module still imports without a QApplication."""
+    global _QT_ALIGNMENT
+    if _QT_ALIGNMENT is None:
+        from PySide6.QtCore import Qt
+
+        _QT_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    return _QT_ALIGNMENT
+
+
+class _QtSpinShape:
+    """The `QAbstractSpinBox` shape both spin-box adapters share.
+
+    Three measured facts decide it:
+
+    * **The step buttons are part of the control.** RVE's page QSS styles `::up-button`/`::down-button`, so the
+      counterpart is the toolkit's `Stepper` (a `SpinBox` with the ▲/▼ gutter), not a bare `SpinBox` - migrating to
+      the bare field would silently drop the affordance. The gutter is stated at RVE's own width (20 px, no gap, a
+      10 px glyph) instead of the toolkit's 44 px default, because two of RVE's boxes are pinned to 75 px wide.
+    * **Qt owns the geometry, the toolkit pins its own.** `SpinBox.__init__`/`Stepper.__init__` call
+      `setMinimumWidth(content_width)` and `SpinBox.on_scale_changed` re-applies `setFixedHeight(32)`. An explicit
+      minimum above the Designer's `setMaximumSize(75, 30)` makes Qt **ignore the maximum** (`qSmartMinSize`
+      bounds the hint by the maximum, then an explicit minimum overrides it) - the same class of defect that cost the
+      combo 107 px. So the toolkit's pins are released, the Designer's own statements then apply, and the hint is
+      the stock class's.
+    * **The width is an oracle, the height a stated constant.** A stock `QSpinBox` under RVE's QSS hints 32 px tall;
+      its width depends on the range and the decimals, so it is measured from a live stock widget with the same font
+      and range (`QtComboBox` is the precedent), cached, and invalidated whenever the hint can move.
+    """
+
+    #: RVE's `QSpinBox{padding:5px 10px; border-radius:10px}` on the toolkit's own constants.
+    RADIUS = 10
+    H_PADDING = 10
+    #: Measured: a stock spin box under RVE's QSS hints 32 px tall (a 20 px field with 5 px padding above and below).
+    #: The toolkit pins the same 32 px, so the number is stated rather than inherited.
+    HEIGHT = 32
+    #: RVE's stepper column: `::up-button`/`::down-button{width:20px; height:15px}`.
+    STEP_BUTTON_WIDTH = 20
+    STEP_BUTTON_GAP = 0
+    STEP_ARROW_SIZE = 10
+
+    RVE_QSS = ""
+    _stock_hint: QSize | None = None
+    _designer_max_height = 16777215
+    _designer_min_width = 0
+
+    # -- construction shared by both adapters ------------------------------------------------------------
+
+    def _init_shape(self, minimum, maximum) -> None:
+        self._stock_hint = None
+        self.setRange(minimum, maximum)
+        # The toolkit's content-width pin is not the Designer's width; the Designer's own `setMinimumSize` /
+        # `setMaximumSize` statements run after this constructor and are the authority.
+        self._release_width_pin()
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
+        # QAbstractSpinBox's own policy (measured on the stock class): as wide as its hint, exactly as tall.
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+
+    def _release_width_pin(self) -> None:
+        # `setMinimumWidth(0)` restores the toolkit's floor, except where the Designer stated one of its own.
+        self.setMinimumWidth(self._designer_min_width)
+
+    def setMinimumSize(self, *args) -> None:                 # noqa: N802
+        # The Designer's `setMinimumSize(QSize(75, 30))` runs before `setMinimum`/`setMaximum` on two boxes; a range
+        # change releases the toolkit's content-width pin, so the Designer's width has to be remembered here.
+        size = args[0] if len(args) == 1 else QSize(args[0], args[1])
+        self._designer_min_width = size.width()
+        super().setMinimumSize(*args)
+
+    def _stock_oracle(self):           # pragma: no cover - each adapter names the stock class it replaces
+        raise NotImplementedError
+
+    def _stock_metrics(self) -> QSize:
+        if self._stock_hint is None:
+            oracle = self._stock_oracle()
+            try:
+                self._stock_hint = oracle.sizeHint()
+            finally:
+                oracle.deleteLater()
+        return self._stock_hint
+
+    def _invalidate(self) -> None:
+        self._stock_hint = None
+        # A cached hint the layout never hears about is the bug that cost the combo 107 px.
+        self.updateGeometry()
+
+    # -- Qt's range API over the toolkit's ------------------------------------------------------------------
+
+    def setRange(self, minimum, maximum) -> None:            # noqa: N802
+        super().setRange(minimum, maximum)
+        # `SpinBox.setRange` calls `setMinimumWidth(minimumSizeHint().width())`; that minimum is the toolkit's
+        # content width (text + a 40 px gutter), not the Designer's. See the class docstring.
+        self._release_width_pin()
+        self._invalidate()
+
+    def setMinimum(self, value) -> None:                     # noqa: N802
+        self.setRange(value, self._maximum)
+
+    def setMaximum(self, value) -> None:                     # noqa: N802
+        self.setRange(self._minimum, value)
+
+    def setButtonSymbols(self, symbols) -> None:             # noqa: N802
+        """`QAbstractSpinBox::ButtonSymbols` over the stepper's visibility.
+
+        RVE's boxes ask for `UpDownArrows` (the Qt default). `NoButtons` is the toolkit's own
+        `setStepButtonsVisible(False)`; `PlusMinus` has no counterpart and is a splitter blocker.
+        """
+        from PySide6.QtWidgets import QAbstractSpinBox
+
+        kind = QAbstractSpinBox.ButtonSymbols
+        if symbols == kind.UpDownArrows:
+            self.setStepButtonsVisible(True)
+        elif symbols == kind.NoButtons:
+            self.setStepButtonsVisible(False)
+        else:
+            raise NotImplementedError("Stepper draws ▲/▼ only - PlusMinus spin boxes stay QSpinBox")
+
+    # -- geometry -------------------------------------------------------------------------------------------
+
+    def setMaximumSize(self, *args) -> None:                 # noqa: N802
+        # Remember the Designer's height ceiling: a later scale pass re-pins `setFixedHeight(32)` and would make
+        # Qt ignore it (see the class docstring).
+        size = args[0] if len(args) == 1 else QSize(args[0], args[1])
+        self._designer_max_height = size.height()
+        super().setMaximumSize(*args)
+
+    def on_scale_changed(self, *_args) -> None:
+        super().on_scale_changed(*_args)
+        # `SpinBox.on_scale_changed` re-pins `setFixedHeight(scaled_px(32))`; RVE's Designer states the height.
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(self._designer_max_height)
+        if hasattr(self, "_sync_text_margins"):
+            self._sync_text_margins()
+        if hasattr(self, "_sync_step_buttons"):
+            self._sync_step_buttons()
+        self.updateGeometry()
+
+    def setFont(self, font: QFont) -> None:                  # noqa: N802
+        super().setFont(font)
+        self._invalidate()
+
+    def sizeHint(self) -> QSize:                             # noqa: N802
+        return QSize(self._stock_metrics().width(), self.HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:                      # noqa: N802
+        return self.sizeHint()
+
+
+class QtSpinBox(_QtSpinShape, Stepper):
+    """`QSpinBox`'s shape over `Stepper` (`SpinBox` plus the ▲/▼ gutter).
+
+    The value surface RVE binds is Qt's: `setRange`/`setMinimum`/`setMaximum`/`setValue`/`value`, plus
+    `text()`/`textChanged` (which `SettingsTab` binds for the GPU ids - `CustomLineEdit` is the field those come from).
+    """
+
+    RVE_QSS = _SPIN_QSS
+    #: Qt's default range, not `SpinBox`'s 0..100: the Designer sets a minimum and leaves the maximum to the class.
+    QT_DEFAULT_RANGE = (0, 99)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent, alignment=_qt_alignment())
+        self._init_shape(*self.QT_DEFAULT_RANGE)
+
+    def _stock_oracle(self):
+        from PySide6.QtWidgets import QSpinBox
+
+        oracle = QSpinBox()
+        oracle.setStyleSheet(self.RVE_QSS)
+        oracle.setFont(self.font())
+        oracle.setRange(int(self._minimum), int(self._maximum))
+        oracle.setValue(int(self._value))
+        return oracle
+
+
+class QtDoubleSpinBox(_QtSpinShape, StepButtonsMixin, DoubleSpinBox):
+    """`QDoubleSpinBox`'s shape over the toolkit's `DoubleSpinBox` plus the same step gutter.
+
+    `DoubleSpinBox` has no stepper class of its own; `StepButtonsMixin` is the toolkit's documented host hook for
+    exactly this composition (the one `Stepper` uses), so the double gets the same ▲/▼ without a second control.
+
+    One semantic difference is closed here, not inherited: `DoubleSpinBox.setValue` **snaps** to `singleStep`
+    (`round((value - minimum) / step)`), so RVE's stored `scene_change_detection_threshold,3.5` came back as `3.0`
+    at the default step of 1 - the exact "field shows the wrong value" defect this migration was told not to
+    reintroduce. Qt's `QDoubleSpinBox.setValue` clamps and rounds to `decimals`; so does this.
+    """
+
+    RVE_QSS = _DOUBLE_SPIN_QSS
+    #: Qt's default range for `QDoubleSpinBox` (the toolkit defaults to 0..100).
+    QT_DEFAULT_RANGE = (0.0, 99.99)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent, alignment=_qt_alignment())
+        self._init_step_gutter(True)
+        self._init_shape(*self.QT_DEFAULT_RANGE)
+
+    # -- the step gutter (both hooks `StepButtonsMixin` asks a host for) --------------------------------------
+
+    def _step(self, delta: int) -> None:
+        self.setValue(self.value() + float(delta) * (self.singleStep() or 1.0))
+
+    def _sync_text_margins(self) -> None:
+        gutter = self._step_gutter_width()
+        self.setTextMargins(self.H_PADDING, 0, gutter + 6 if gutter else self.H_PADDING, 0)
+
+    def _update_content_width(self) -> None:
+        """The toolkit pins `setMinimumWidth(content_width)` here; the Designer's width is the authority."""
+
+    # -- Qt's value semantics (no snapping) ------------------------------------------------------------------
+
+    def setValue(self, value) -> None:                       # noqa: N802
+        self._apply_value(float(value))
+
+    def _apply_value(self, value: float) -> None:
+        clamped = min(max(float(value), self._minimum), self._maximum)
+        clamped = round(clamped, self._decimals)
+        if abs(clamped - self._value) > 1e-12:
+            self._value = clamped
+            self.valueChanged.emit(self._value)
+        text = self._format(clamped)
+        if self.text() != text:
+            self.setText(text)
+        self.updateGeometry()
+
+    def setDecimals(self, decimals: int) -> None:            # noqa: N802
+        super().setDecimals(decimals)
+        # Qt rounds the value to the new display precision; `DoubleSpinBox.setDecimals` only reformats the text.
+        self._apply_value(self._value)
+        self._invalidate()
+
+    def _stock_oracle(self):
+        from PySide6.QtWidgets import QDoubleSpinBox
+
+        oracle = QDoubleSpinBox()
+        oracle.setStyleSheet(self.RVE_QSS)
+        oracle.setFont(self.font())
+        oracle.setDecimals(self._decimals)
+        oracle.setRange(self._minimum, self._maximum)
+        oracle.setValue(self._value)
+        return oracle
+
+
+class QtProgressBar(ToastProgressBar):
+    """`QProgressBar`'s shape over `ToastProgressBar`.
+
+    RVE's bar is a `#2c313c` track, a white chunk, radius 10 and no text, in an Expanding/Fixed row. The toolkit's
+    only progress control paints a rounded track and fill, so the adapter points its two colour hooks at the tokens
+    RVE's `QProgressBar` rules were already mapped to (`toolkit_theme.LOOK`: `slider.track.background` and `accent`)
+    instead of the toast tokens. `setTextVisible(False)` is the only call the widget does not have - the toolkit bar
+    paints no text at all, so `False` is the state it is already in; `True` is a splitter blocker.
+
+    Deviation carried for the live proof: the toolkit rounds the ends by height/2 (a 12.5 px pill on a 25 px bar),
+    RVE's QSS says 10 px, so the two end caps differ by ~2.5 px.
+    """
+
+    #: Measured under RVE's `QProgressBar` QSS: a stock bar hints 91x25 (Expanding/Fixed, so the width is the row's
+    #: and 25 px is what the row was laid out against).
+    WIDTH = 91
+    HEIGHT = 25
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent, height=self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def sizeHint(self) -> QSize:                             # noqa: N802
+        return QSize(self.WIDTH, self.HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:                      # noqa: N802
+        return self.sizeHint()
+
+    def setTextVisible(self, visible: bool) -> None:         # noqa: N802
+        if visible:
+            raise NotImplementedError("ToastProgressBar paints no text - a text progress bar stays QProgressBar")
+
+    def setMinimum(self, minimum: int) -> None:              # noqa: N802
+        self.setRange(int(minimum), self.maximum())
+
+    def setMaximum(self, maximum: int) -> None:              # noqa: N802
+        self.setRange(self.minimum(), int(maximum))
+
+    def text(self) -> str:
+        """Qt's accessor; the toolkit bar has no label to report."""
+        return ""
+
+    def _track_color(self) -> QColor:
+        return _token("slider.track.background") or super()._track_color()
+
+    def _fill_color(self) -> QColor:
+        return _token("accent") or super()._fill_color()
 
 
 def _left():

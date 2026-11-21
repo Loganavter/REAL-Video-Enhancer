@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtLabel, QtLineEdit
+from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
 
@@ -241,7 +241,7 @@ class GeneralSettingsPage:
         self.label_11.setObjectName(u"label_11")
         apply(self.label_11, BODY_PT)
         self.horizontalLayout_55.addWidget(self.label_11)
-        self.interpolationMultiplierSpinBox = QDoubleSpinBox(self.interpolationContainer2)
+        self.interpolationMultiplierSpinBox = QtDoubleSpinBox(self.interpolationContainer2)
         self.interpolationMultiplierSpinBox.setObjectName(u"interpolationMultiplierSpinBox")
         sizePolicy5.setHeightForWidth(self.interpolationMultiplierSpinBox.sizePolicy().hasHeightForWidth())
         self.interpolationMultiplierSpinBox.setSizePolicy(sizePolicy5)
@@ -442,7 +442,7 @@ class GeneralSettingsPage:
         self.label_73.setPixmap(QPixmap(u":/icons/icons/info.svg"))
         self.label_73.setScaledContents(True)
         self.horizontalLayout_50.addWidget(self.label_73)
-        self.upscaleScaleSpinBox = QDoubleSpinBox(self.widget_42)
+        self.upscaleScaleSpinBox = QtDoubleSpinBox(self.widget_42)
         self.upscaleScaleSpinBox.setObjectName(u"upscaleScaleSpinBox")
         sizePolicy5.setHeightForWidth(self.upscaleScaleSpinBox.sizePolicy().hasHeightForWidth())
         self.upscaleScaleSpinBox.setSizePolicy(sizePolicy5)

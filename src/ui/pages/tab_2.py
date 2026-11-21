@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtLabel, QtLineEdit
+from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
 
@@ -138,7 +138,7 @@ class Tab2Page:
         self.label_31.setPixmap(QPixmap(u":/icons/icons/info.svg"))
         self.label_31.setScaledContents(True)
         self.horizontalLayout_14.addWidget(self.label_31)
-        self.scene_change_detection_threshold = QDoubleSpinBox(self.widget_7)
+        self.scene_change_detection_threshold = QtDoubleSpinBox(self.widget_7)
         self.scene_change_detection_threshold.setObjectName(u"scene_change_detection_threshold")
         self.scene_change_detection_threshold.setMinimumSize(QSize(75, 30))
         self.scene_change_detection_threshold.setDecimals(1)
