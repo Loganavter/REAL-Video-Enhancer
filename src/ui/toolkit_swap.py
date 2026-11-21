@@ -111,6 +111,27 @@ def _wanted() -> set[str] | None:
     return {part.strip().lower() for part in raw.split(",")} if raw else None
 
 
+def _trace_threshold(window) -> None:
+    """Trace mode: who changes the scene-detection threshold, with the stack that did it."""
+    import os
+    if os.environ.get("RVE_TOOLKIT_TRACE") != "1":
+        return
+    import traceback
+    from backend.src.utils.Util import log
+
+    spin = getattr(window, "scene_change_detection_threshold", None)
+    if spin is None:
+        log("trace: no scene_change_detection_threshold on the window")
+        return
+    log(f"trace: threshold at swap time = {spin.value()}")
+
+    def on_change(value):
+        stack = "".join(traceback.format_stack(limit=6)[:-1])
+        log(f"trace: threshold -> {value}\n{stack}")
+
+    spin.valueChanged.connect(on_change)
+
+
 def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
     """Replace the page's stock primitives with toolkit widgets. Returns the count per class."""
     from sli_ui_toolkit.widgets import Button, ComboBox, CustomLineEdit, Text
@@ -126,17 +147,23 @@ def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
     def bump(key: str) -> None:
         counts[key] = counts.get(key, 0) + 1
 
+    _trace_threshold(window)
     wanted = _wanted()
-    # Excluded by default, with the measured reason: swapping the output-path QLineEdit for CustomLineEdit makes the
-    # scene-detection threshold field render 1.0 instead of 3.5 (settings.txt holds 3.5 and the glue's setValue runs;
-    # bisect: stock 3.5, labels-only 3.5, labels+buttons+line-edit 1.0). The path is `SettingsTab.connects
-    # output_folder_location.textChanged -> writeOutputFolder`, which validates the directory and re-sets the field -
-    # the interaction is not understood yet, and a page that shows the wrong threshold is worse than a page with one
-    # stock field. Remove QLineEdit from this set once that path is traced.
-    EXCLUDED = {QLineEdit}
+    # EXCLUDED, with what the trace actually measured (RVE_TOOLKIT_TRACE=1):
+    #  * the threshold widget's own history is clean: 1.0 from the .ui, then 3.5 at SettingsTab.connectSettingText:437
+    #    and never changed again - the swap does not touch its value;
+    #  * `output_folder_location.textChanged` fires once with the right path, and writeOutputFolder does not run in
+    #    the default flow;
+    #  * BUT with the line edit swapped the page INTERMITTENTLY renders the threshold as 1.0: stock build 3 runs ->
+    #    identical to the baseline (0.00); migrated build -> 1.0 in some runs, 3.5 in another with the same class set.
+    # So the failing runs are showing a DIFFERENT spin box than the one the glue writes to (the trace proves the
+    # captured one receives 3.5), which is a swap/geometry problem, not the value. Until that is pinned the field
+    # stays stock: the verified configuration is 4 classes, mean 3.28 / 3.51%, threshold correct.
+    EXCLUDED: set[type] = {QLineEdit}
 
     def allowed(cls: type) -> bool:
-        if cls in EXCLUDED:
+        import os as _os
+        if cls in EXCLUDED and _os.environ.get("RVE_TOOLKIT_TRACE") != "1":
             return False
         return wanted is None or cls.__name__.lower() in wanted
 
@@ -173,8 +200,17 @@ def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
             widget.clicked.connect(target.click)
             bump("QPushButton->Button")
         elif isinstance(widget, QLineEdit) and allowed(QLineEdit):
+            import os as _os
+            if _os.environ.get("RVE_TOOLKIT_TRACE") == "1":
+                from backend.src.utils.Util import log as _log
+                widget.textChanged.connect(lambda text, n=widget.objectName(): _log(f"trace: stock {n} textChanged -> {text!r}"))
             target = CustomLineEdit(parent=widget.parentWidget())
             target.setText(widget.text())
+            import os as _os
+            if _os.environ.get("RVE_TOOLKIT_TRACE") == "1":
+                from backend.src.utils.Util import log as _log
+                from sli_ui_toolkit.widgets import CustomLineEdit as _CLE
+                target.textChanged.connect(lambda text, n=widget.objectName(): _log(f"trace: toolkit {n} textChanged -> {text!r}"))
             _copy_common(widget, target)
             _replace(widget, target, window)
             bump("QLineEdit->CustomLineEdit")
