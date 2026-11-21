@@ -30,7 +30,7 @@ from src.ui.typography import apply, BODY_PT
 # is the stock `QScrollArea` without a surface of its own - the body is painted by `procPage`'s
 # `QWidget{background-color:#16191d}` rule - and `content_inset=1` keeps the stock StyledPanel frame's 1 px inset.
 # `ImageLabel` is the pixmap counterpart of `QLabel`; the alignment is stated because Qt's default is left+vcenter.
-from sli_ui_toolkit.widgets import ImageLabel, SurfaceScrollArea
+from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel, SurfaceScrollArea
 
 
 class GeneralSettingsPage:
@@ -71,7 +71,7 @@ class GeneralSettingsPage:
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.uninstallTensorRTBtn.sizePolicy().hasHeightForWidth())' (['uninstallTensorRTBtn'] live outside this page)
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.downloadDirectMLBtn.sizePolicy().hasHeightForWidth())' (['downloadDirectMLBtn'] live outside this page)
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.uninstallDirectMLBtn.sizePolicy().hasHeightForWidth())' (['uninstallDirectMLBtn'] live outside this page)
-        self.generalSettings = QWidget()
+        self.generalSettings = SurfacePanel(background_token="surface.page")
         self.generalSettings.setObjectName(u"generalSettings")
         sizePolicy3.setHeightForWidth(self.generalSettings.sizePolicy().hasHeightForWidth())
         self.generalSettings.setSizePolicy(sizePolicy3)

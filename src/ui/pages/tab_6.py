@@ -30,7 +30,7 @@ from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 # (Qt-shaped already: `setPixmap`/`setScaledContents`). A `QLabel` paints a pixmap-only label at the default
 # `AlignLeft|AlignVCenter` and `ImageLabel` centres, so the alignment is stated at construction to keep the icon
 # where the Designer put it (same statement as the Home page's logo).
-from sli_ui_toolkit.widgets import ImageLabel, OverlayScrollArea
+from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel, OverlayScrollArea
 
 
 class Tab6Page:
@@ -54,7 +54,7 @@ class Tab6Page:
         # splitter: skipped 'sizePolicy2.setHeightForWidth(self.upscaleContainer.sizePolicy().hasHeightForWidth())' (['upscaleContainer'] live outside this page)
         # splitter: skipped 'sizePolicy2.setHeightForWidth(self.interpolateContainer_2.sizePolicy().hasHeightForWidth())' (['interpolateContainer_2'] live outside this page)
         # splitter: skipped 'sizePolicy7.setHeightForWidth(self.progressBar.sizePolicy().hasHeightForWidth())' (['progressBar'] live outside this page)
-        self.tab_6 = QWidget()
+        self.tab_6 = SurfacePanel(background_token="surface.page")
         self.tab_6.setObjectName(u"tab_6")
         self.horizontalLayout_43 = QHBoxLayout(self.tab_6)
         self.horizontalLayout_43.setObjectName(u"horizontalLayout_43")

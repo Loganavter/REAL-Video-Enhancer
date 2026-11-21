@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
+
+from sli_ui_toolkit.widgets import SurfacePanel
 from src.ui.widgets.qt_shaped import QtButton, QtLabel
 
 
@@ -61,7 +63,7 @@ class RenderQueueTabPage:
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.uninstallTensorRTBtn.sizePolicy().hasHeightForWidth())' (['uninstallTensorRTBtn'] live outside this page)
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.downloadDirectMLBtn.sizePolicy().hasHeightForWidth())' (['downloadDirectMLBtn'] live outside this page)
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.uninstallDirectMLBtn.sizePolicy().hasHeightForWidth())' (['uninstallDirectMLBtn'] live outside this page)
-        self.renderQueueTab = QWidget()
+        self.renderQueueTab = SurfacePanel(background_token="surface.page")
         self.renderQueueTab.setObjectName(u"renderQueueTab")
         sizePolicy1.setHeightForWidth(self.renderQueueTab.sizePolicy().hasHeightForWidth())
         self.renderQueueTab.setSizePolicy(sizePolicy1)

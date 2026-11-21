@@ -25,7 +25,7 @@ import resources_rc
 import resources_rc
 # A pixmap `QLabel` migrates to the toolkit's image label, which carries `setPixmap`/`setScaledContents` itself - no
 # adapter is needed (`src/ui/widgets/qt_shaped.py` holds the shapes that need translation; this one drops in).
-from sli_ui_toolkit.widgets import ImageLabel, SurfaceScrollArea
+from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel, SurfaceScrollArea
 from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
@@ -37,7 +37,7 @@ class Tab2Page:
 
     def build(self):
         """Build the widget tree and return the page root."""
-        self.tab_2 = QWidget()
+        self.tab_2 = SurfacePanel(background_token="surface.page")
         self.tab_2.setObjectName(u"tab_2")
         self.verticalLayout_17 = QVBoxLayout(self.tab_2)
         self.verticalLayout_17.setObjectName(u"verticalLayout_17")

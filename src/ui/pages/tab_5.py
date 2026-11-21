@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 
-from sli_ui_toolkit.widgets import ConsoleView
+from sli_ui_toolkit.widgets import SurfacePanel, ConsoleView
 import resources_rc
 from src.ui.typography import apply, SMALL_PT
 
@@ -35,7 +35,7 @@ class Tab5Page:
 
     def build(self):
         """Build the widget tree and return the page root."""
-        self.tab_5 = QWidget()
+        self.tab_5 = SurfacePanel(background_token="surface.page")
         self.tab_5.setObjectName(u"tab_5")
         self.horizontalLayout_10 = QHBoxLayout(self.tab_5)
         self.horizontalLayout_10.setObjectName(u"horizontalLayout_10")

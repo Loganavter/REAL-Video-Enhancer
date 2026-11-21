@@ -30,7 +30,7 @@ from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 # (Qt-shaped already: `setPixmap`/`setScaledContents`/`setText`). The Designer's `QLabel` paints a pixmap-only label at
 # `AlignLeft|AlignVCenter`; `ImageLabel` defaults to centre, so the alignment is stated to keep the logo where it is
 # (measured offscreen: identical pixels at this alignment, mean 0.00 against the stock label).
-from sli_ui_toolkit.widgets import ImageLabel
+from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel
 
 
 class HomePagePage:
@@ -40,7 +40,7 @@ class HomePagePage:
 
     def build(self):
         """Build the widget tree and return the page root."""
-        self.homePage = QWidget()
+        self.homePage = SurfacePanel(background_token="surface.page")
         self.homePage.setObjectName(u"homePage")
         self.homePage.setStyleSheet(u"QWidget{\n"
 "background-color:#16191d\n"

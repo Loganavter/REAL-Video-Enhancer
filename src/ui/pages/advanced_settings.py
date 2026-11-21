@@ -31,7 +31,7 @@ from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 # `SurfaceScrollArea(surface_token=None)` is the stock `QScrollArea`'s geometry without a surface of its own: this
 # page's body is painted by `procPage`'s `QWidget{background-color:#16191d}` rule, and `content_inset=1` keeps the
 # stock StyledPanel frame's 1 px inset on each side.
-from sli_ui_toolkit.widgets import ImageLabel, SurfaceScrollArea
+from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel, SurfaceScrollArea
 
 
 class AdvancedSettingsPage:
@@ -55,7 +55,7 @@ class AdvancedSettingsPage:
         # splitter: skipped 'sizePolicy2.setHeightForWidth(self.scrollArea_4.sizePolicy().hasHeightForWidth())' (['scrollArea_4'] live outside this page)
         # splitter: skipped 'sizePolicy3.setHeightForWidth(self.inputVideoInfoTextEdit.sizePolicy().hasHeightForWidth())' (['inputVideoInfoTextEdit'] live outside this page)
         # splitter: skipped 'sizePolicy2.setHeightForWidth(self.widget_34.sizePolicy().hasHeightForWidth())' (['widget_34'] live outside this page)
-        self.advancedSettings = QWidget()
+        self.advancedSettings = SurfacePanel(background_token="surface.page")
         self.advancedSettings.setObjectName(u"advancedSettings")
         sizePolicy3.setHeightForWidth(self.advancedSettings.sizePolicy().hasHeightForWidth())
         self.advancedSettings.setSizePolicy(sizePolicy3)

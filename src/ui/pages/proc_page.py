@@ -35,7 +35,7 @@ from src.ui.typography import apply, CAPTION_PT
 # with the stock `QTabWidget`'s strip geometry (the Designer's 22 px strip, no pane radius or inset, a 4 px tab corner);
 # `ImageLabel` is the pixmap counterpart of `QLabel` (parent first, and the alignment is stated because Qt's default is
 # left+vcenter, not the centre the preview label asks for).
-from sli_ui_toolkit.widgets import ImageLabel, TopTabHost
+from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel, TopTabHost
 
 
 class ProcPagePage:
@@ -55,147 +55,31 @@ class ProcPagePage:
         # splitter: skipped 'sizePolicy7.setHeightForWidth(self.inputFileText.sizePolicy().hasHeightForWidth())' (['inputFileText'] live outside this page)
         # splitter: skipped 'sizePolicy7.setHeightForWidth(self.scrollArea_6.sizePolicy().hasHeightForWidth())' (['scrollArea_6'] live outside this page)
         # splitter: skipped 'sizePolicy1.setHeightForWidth(self.renderQueueTab.sizePolicy().hasHeightForWidth())' (['renderQueueTab'] live outside this page)
-        self.procPage = QWidget()
+        self.procPage = SurfacePanel(background_token="surface.page")
         self.procPage.setObjectName(u"procPage")
-        self.procPage.setStyleSheet(u"QWidget{\n"
-"background-color:#16191d\n"
-"\n"
-"}\n"
-"QLineEdit{\n"
-"background-color:#2c313c;\n"
-"border-radius: 10px;\n"
-"}\n"
-"\n"
-"QTextEdit{\n"
+        # Layer C: the page body paints itself (`surface.page`); every control rule this sheet carried styled a widget
+        # that is now a toolkit control painting from tokens. The one rule kept is the read-only rich-text panel on
+        # the General tab, which is still a stock `QTextEdit` (a toolkit row: no rich-text pane with a scroll host).
+        self.procPage.setStyleSheet(u"QTextEdit{\n"
 "background-color:#2c313c;\n"
 "border-radius: 10px;\n"
 "padding:5px 10px;\n"
-"}\n"
-"\n"
-"QPushButton{\n"
-"    background-color:#2c313c;\n"
-"	text-align:left;\n"
-"	padding:5px 10px;\n"
-"	border-radius: 10px;\n"
-"}\n"
-"QPushButton:checked{\n"
-"	background-color:#676e7b;\n"
-"}\n"
-"QPushButton:hover{\n"
-"	background-color:#343b47;\n"
-"}\n"
-"\n"
-"QComboBox{\n"
-"background-color:#2c313c;\n"
-"	text-align:left;\n"
-"	padding:5px 10px;\n"
-"	border-radius: 10px;\n"
-"color:white;\n"
-"}\n"
-"\n"
-"QProgressBar{\n"
-"    background-color:#2c313c;\n"
-"	border-radius: 10px;\n"
-"\n"
-"}\n"
-" QProgressBar::chunk {\n"
-"     background-color:white;\n"
-"	text-align:left;\n"
-"	border-radius: 10px;\n"
-"	\n"
-" }\n"
-"\n"
-"QDoubleSpinBox{\n"
-"	background-color:#2c313c;\n"
-"	padding:5px 10px;\n"
-"	border-radius: 10px;\n"
-"	color:white;\n"
-"}\n"
-"QDoubleSpinBox::up-arrow {\n"
-"       \n"
-"		image"
-                        ": url(:/icons/icons/arrow-up.svg); \n"
-"    }\n"
-"QDoubleSpinBox::down-arrow {\n"
-"\n"
-"        image: url(:/icons/icons/arrow-down.svg); \n"
-"		\n"
-"    }\n"
-"QDoubleSpinBox::up-button {\n"
-"        width: 20px;\n"
-"        height: 15px;\n"
-"    }\n"
-"QDoubleSpinBox::down-button {\n"
-"        width: 20px;\n"
-"        height: 15px;\n"
-"    }\n"
-"QSpinBox{\n"
-"	background-color:#2c313c;\n"
-"	padding:5px 10px;\n"
-"	border-radius: 10px;\n"
-"	color:white;\n"
-"}\n"
-"QSpinBox::up-arrow {\n"
-"       \n"
-"		image: url(:/icons/icons/arrow-up.svg); \n"
-"    }\n"
-"QSpinBox::down-arrow {\n"
-"\n"
-"        image: url(:/icons/icons/arrow-down.svg); \n"
-"		\n"
-"    }\n"
-"QSpinBox::up-button {\n"
-"        width: 20px;\n"
-"        height: 15px;\n"
-"    }\n"
-"QSpinBox::down-button {\n"
-"        width: 20px;\n"
-"        height: 15px;\n"
-"    }\n"
-"\n"
-"\n"
-"\n"
-"QListWidget{\n"
-"background-color:#16191d\n"
-"\n"
-"}\n"
-"")
+"}")
         self.gridLayout_3 = QGridLayout(self.procPage)
         self.gridLayout_3.setObjectName(u"gridLayout_3")
-        self.processInfoContainer = QWidget(self.procPage)
+        self.processInfoContainer = SurfacePanel(self.procPage, background_token="dialog.background", radius=10)
         self.processInfoContainer.setObjectName(u"processInfoContainer")
         sizePolicy3 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Expanding)
         sizePolicy3.setHorizontalStretch(0)
         sizePolicy3.setVerticalStretch(0)
         sizePolicy3.setHeightForWidth(self.processInfoContainer.sizePolicy().hasHeightForWidth())
         self.processInfoContainer.setSizePolicy(sizePolicy3)
-        self.processInfoContainer.setStyleSheet(u"#processInfoContainer{\n"
-"background-color:#1f232a;\n"
-"border-radius:10px;\n"
-"}\n"
-"#infoSubContainer{\n"
-"background-color:#1f232a\n"
-"\n"
-"}\n"
-"#previewSubContainer{\n"
-"background-color:#1f232a\n"
-"}\n"
-"#renderOutput{\n"
-"background-color:#343b47;\n"
-"border-radius: 10px;\n"
-"\n"
-"}\n"
-"#previewLabel{\n"
-"background-color:#343b47;\n"
-"border-radius: 10px;\n"
-"\n"
-"\n"
-"}")
+        # The pane's own surface (a token, not an id rule): `dialog.background` is the #1f232a the rule carried.
         self.verticalLayout_5 = QVBoxLayout(self.processInfoContainer)
         self.verticalLayout_5.setSpacing(9)
         self.verticalLayout_5.setObjectName(u"verticalLayout_5")
         self.verticalLayout_5.setContentsMargins(9, 9, 9, 9)
-        self.previewSubContainer = QWidget(self.processInfoContainer)
+        self.previewSubContainer = SurfacePanel(self.processInfoContainer, background_token="dialog.background")
         self.previewSubContainer.setObjectName(u"previewSubContainer")
         self.verticalLayout_8 = QVBoxLayout(self.previewSubContainer)
         self.verticalLayout_8.setSpacing(0)
@@ -227,13 +111,7 @@ class ProcPagePage:
         self.RenderedPreviewControlsContainer = QWidget(self.processInfoContainer)
         self.RenderedPreviewControlsContainer.setObjectName(u"RenderedPreviewControlsContainer")
         self.RenderedPreviewControlsContainer.setEnabled(True)
-        self.RenderedPreviewControlsContainer.setStyleSheet(u"QWidget{\n"
-"border-radius: 10\n"
-"}\n"
-"\n"
-"*:disabled{\n"
-"	color:gray;\n"
-"}")
+
         self.horizontalLayout_47 = QHBoxLayout(self.RenderedPreviewControlsContainer)
         self.horizontalLayout_47.setObjectName(u"horizontalLayout_47")
         self.widget_30 = QWidget(self.RenderedPreviewControlsContainer)
@@ -283,23 +161,17 @@ class ProcPagePage:
         self.ETA = QtLabel(self.processInfoContainer)
         self.ETA.setObjectName(u"ETA")
         apply(self.ETA, CAPTION_PT)
-        self.ETA.setStyleSheet(u"QLabel{\n"
-"background-color: #1f232a\n"
-"}")
+
         self.verticalLayout_34.addWidget(self.ETA)
         self.FPS = QtLabel(self.processInfoContainer)
         self.FPS.setObjectName(u"FPS")
         apply(self.FPS, CAPTION_PT)
-        self.FPS.setStyleSheet(u"QLabel{\n"
-"background-color: #1f232a\n"
-"}")
+
         self.verticalLayout_34.addWidget(self.FPS)
         self.STATUS = QtLabel(self.processInfoContainer)
         self.STATUS.setObjectName(u"STATUS")
         apply(self.STATUS, CAPTION_PT)
-        self.STATUS.setStyleSheet(u"QLabel{\n"
-"background-color: #1f232a\n"
-"}")
+
         self.verticalLayout_34.addWidget(self.STATUS)
         self.verticalLayout_5.addLayout(self.verticalLayout_34)
         self.gridLayout_3.addWidget(self.processInfoContainer, 0, 2, 1, 1)
@@ -319,7 +191,7 @@ class ProcPagePage:
         self.verticalLayout_7.setSpacing(0)
         self.verticalLayout_7.setObjectName(u"verticalLayout_7")
         self.verticalLayout_7.setContentsMargins(0, 10, 0, 0)
-        self.bottomMenuSubContainer = QWidget(self.processContainer)
+        self.bottomMenuSubContainer = SurfacePanel(self.processContainer, background_token="dialog.background")
         self.bottomMenuSubContainer.setObjectName(u"bottomMenuSubContainer")
         sizePolicy6 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Preferred)
         sizePolicy6.setHorizontalStretch(0)
@@ -328,13 +200,7 @@ class ProcPagePage:
         self.bottomMenuSubContainer.setSizePolicy(sizePolicy6)
         self.bottomMenuSubContainer.setMinimumSize(QSize(0, 0))
         self.bottomMenuSubContainer.setMaximumSize(QSize(500, 16777215))
-        self.bottomMenuSubContainer.setStyleSheet(u"#bottomMenuSubContainer{\n"
-"background-color:#1f232a\n"
-"}\n"
-"#progressBar{\n"
-"background-color:#343b47\n"
-"}\n"
-"")
+
         self.verticalLayout_21 = QVBoxLayout(self.bottomMenuSubContainer)
         self.verticalLayout_21.setSpacing(0)
         self.verticalLayout_21.setObjectName(u"verticalLayout_21")
