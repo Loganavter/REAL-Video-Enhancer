@@ -1047,7 +1047,16 @@ def main(file_to_open=None):
     if "--fullscreen" in sys.argv:
         window.showFullScreen()
     window.show()
-    _stamp("window shown")
+    # Drain the event loop before handing control to app.exec(). `show()` only QUEUES the map and the first paint, and
+    # the toolkit settles its controls on 0-timers (style/scale application, text layout, deferred re-layout): without
+    # these turns the first frame the window manager presents is the pre-settle one - measured as a dark page until the
+    # first input. The reference host drains four turns for the same reason (its lifecycle paints and flushes frame 1
+    # before releasing deferred work).
+    for _ in range(4):
+        app.processEvents()
+    window.repaint()
+    app.processEvents()
+    _stamp("first frame drained")
     sys.exit(app.exec())
 
 
