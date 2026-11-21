@@ -29,14 +29,15 @@ DESIGNER = ROOT / "harness" / "fixtures" / "designer_mainwindow.py"
 
 #: The Qt classes this pin owns (W4d), and the adapter that replaces them where one exists.
 WATCHED = ("QSpinBox", "QDoubleSpinBox", "QProgressBar", "QListWidget", "QTextEdit")
-#: Replacement classes: the `Qt*` adapters from `qt_shaped.py`, plus toolkit classes a page constructs directly.
+#: Replacement classes: the `Qt*` adapters from `qt_shaped.py`, plus toolkit classes a page constructs directly (a page
+#: that migrates off the compatibility layer names the toolkit class itself, e.g. `DoubleSpinBox`).
 ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget", "QtTextEdit", "ConsoleView",
-                 "RichTextView", "TextListWidget")
+                 "RichTextView", "TextListWidget", "DoubleSpinBox")
 
 #: page module -> {designer widget name: the class the page builds}. Every watched widget is migrated to an adapter;
 #: a stock one coming back would have to be pinned here and argued for in review.
 PAGES_PIN: dict[str, dict[str, str]] = {
-    "tab_2": {"scene_change_detection_threshold": "QtDoubleSpinBox"},
+    "tab_2": {"scene_change_detection_threshold": "DoubleSpinBox"},
     "tab_3": {"ncnn_gpu_id": "QtSpinBox", "pytorch_gpu_id": "QtSpinBox"},
     "general_settings": {
         "interpolationMultiplierSpinBox": "QtDoubleSpinBox",

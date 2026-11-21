@@ -12,11 +12,33 @@ from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayou
     QWidget)
 import resources_rc
 import resources_rc
-# A pixmap `QLabel` migrates to the toolkit's image label, which carries `setPixmap`/`setScaledContents`
-# itself - no adapter is needed (`src/ui/widgets/qt_shaped.py` holds the shapes that need translation).
-from sli_ui_toolkit.widgets import SurfacePanel
-from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtLabel
+# The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CheckBox` where it had a
+# `QCheckBox`, `Button` where it had a `QPushButton`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.widgets import Button, CheckBox, SurfacePanel, Text
 from src.ui.typography import apply, BODY_PT
+
+
+def _row_checkbox(parent) -> CheckBox:
+    """A toolkit `CheckBox` shaped for an RVE settings row.
+
+    Two statements the row needs and the toolkit control does not carry as constructor arguments:
+
+    * **the row size.** `CheckBox` builds on `Button`'s standalone control size, so an empty box is a fixed 36x36
+      square (measured offscreen: `minimumSize() == maximumSize() == 36x36`, hint 24x30). RVE's row box is the
+      indicator plus its label - the row's own height decides - so the square is released here.
+    * **Qt's signal spelling.** RVE's glue binds `stateChanged(int)` (`src/ui/SettingsTab.py` writes the setting from
+      it). The toolkit declares `stateChanged`, but emits it from `setCheckState` only: a plain two-state click or
+      `setChecked` emits `toggled(bool)` alone (measured), so without this line a click would never be persisted.
+
+    Both belong in the toolkit's `CheckBox` (a `size=` for a row shape, `stateChanged` on every state change); until
+    it grows them they are stated once here instead of once per widget.
+    """
+    box = CheckBox(parent=parent)
+    box.setMinimumSize(0, 0)
+    box.setMaximumSize(16777215, 16777215)
+    box.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    box.toggled.connect(lambda checked: box.stateChanged.emit(2 if checked else 0))
+    return box
 
 
 class Tab4Page:
@@ -41,13 +63,13 @@ class Tab4Page:
         self.horizontalLayout_21.setSpacing(0)
         self.horizontalLayout_21.setObjectName(u"horizontalLayout_21")
         self.horizontalLayout_21.setContentsMargins(0, 0, 0, 0)
-        self.label_19 = QtLabel(self.previewEnabledContainer)
+        self.label_19 = Text(parent=self.previewEnabledContainer)
         self.label_19.setObjectName(u"label_19")
         apply(self.label_19, BODY_PT)
         self.horizontalLayout_21.addWidget(self.label_19)
         self.horizontalSpacer_2 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_21.addItem(self.horizontalSpacer_2)
-        self.preview_enabled = QtCheckBox(self.previewEnabledContainer)
+        self.preview_enabled = _row_checkbox(self.previewEnabledContainer)
         self.preview_enabled.setObjectName(u"preview_enabled")
         self.horizontalLayout_21.addWidget(self.preview_enabled)
         self.verticalLayout_20.addWidget(self.previewEnabledContainer)
@@ -57,13 +79,13 @@ class Tab4Page:
         self.horizontalLayout_12.setSpacing(10)
         self.horizontalLayout_12.setObjectName(u"horizontalLayout_12")
         self.horizontalLayout_12.setContentsMargins(0, 0, 0, 0)
-        self.label_23 = QtLabel(self.discordRPCSettingsContainer)
+        self.label_23 = Text(parent=self.discordRPCSettingsContainer)
         self.label_23.setObjectName(u"label_23")
         apply(self.label_23, BODY_PT)
         self.horizontalLayout_12.addWidget(self.label_23)
         self.horizontalSpacer_5 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_12.addItem(self.horizontalSpacer_5)
-        self.discord_rich_presence = QtCheckBox(self.discordRPCSettingsContainer)
+        self.discord_rich_presence = _row_checkbox(self.discordRPCSettingsContainer)
         self.discord_rich_presence.setObjectName(u"discord_rich_presence")
         self.horizontalLayout_12.addWidget(self.discord_rich_presence)
         self.verticalLayout_20.addWidget(self.discordRPCSettingsContainer)
@@ -72,8 +94,14 @@ class Tab4Page:
         self.verticalLayout_35 = QVBoxLayout(self.widget_29)
         self.verticalLayout_35.setObjectName(u"verticalLayout_35")
         self.verticalLayout_35.setContentsMargins(0, 0, 0, 0)
-        self.openRVEFolderBtn = QtButton(self.widget_29)
+        self.openRVEFolderBtn = Button(parent=self.widget_29, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.openRVEFolderBtn.setObjectName(u"openRVEFolderBtn")
+        # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
+        # fill the cell, which turns a row button into a slab when the page is taller than its contents. `size=(0, 0)`
+        # above drops the standalone 36x36 control size; this states the row's share.
+        self.openRVEFolderBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.openRVEFolderBtn.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.verticalLayout_35.addWidget(self.openRVEFolderBtn)
         self.verticalLayout_20.addWidget(self.widget_29)
