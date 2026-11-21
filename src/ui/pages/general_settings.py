@@ -7,20 +7,10 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplication, QCheckBox,
-    QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QScrollBar, QSizePolicy, QSpacerItem,
-    QSpinBox, QStackedWidget, QTabWidget, QTextEdit,
-    QVBoxLayout, QWidget)
+from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QHBoxLayout, QSizePolicy,
+    QSpacerItem, QTextEdit, QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
 from src.ui.widgets.qt_shaped import RVE_CONTROL_FONT_PX, SEPARATOR_HEIGHT, STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
@@ -30,7 +20,7 @@ from src.ui.typography import apply, BODY_PT
 # is the stock `QScrollArea` without a surface of its own - the body is painted by `procPage`'s
 # `QWidget{background-color:#16191d}` rule - and `content_inset=1` keeps the stock StyledPanel frame's 1 px inset.
 # `ImageLabel` is the pixmap counterpart of `QLabel`; the alignment is stated because Qt's default is left+vcenter.
-from sli_ui_toolkit.widgets import RichTextView, SurfacePanel, ImageLabel, SurfaceScrollArea
+from sli_ui_toolkit.widgets import RichTextView, SurfacePanel, SurfaceScrollArea
 
 
 class GeneralSettingsPage:

@@ -7,19 +7,9 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplication, QCheckBox,
-    QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QScrollBar, QSizePolicy, QSpacerItem,
-    QSpinBox, QStackedWidget, QTabWidget, QTextEdit,
+from PySide6.QtCore import (QCoreApplication, QRect, QSize)
+from PySide6.QtGui import (QColor, QIcon)
+from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QSpacerItem,
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
@@ -31,7 +21,7 @@ from src.ui.typography import apply, BODY_PT, DISPLAY_PT
 # and `SurfaceScrollArea` always paints a token plate (`surface.background` #2c313c or, with `surface_token=None`,
 # the palette's #1f232a; measured offscreen). `ImageLabel` is the pixmap counterpart, Qt-shaped already
 # (`setPixmap`/`setScaledContents`/`setText`), and paint-identical to `QLabel` at the Designer's default alignment.
-from sli_ui_toolkit.widgets import ImageLabel, OverlayScrollArea, SurfacePanel
+from sli_ui_toolkit.widgets import OverlayScrollArea, SurfacePanel
 
 
 class DownloadPagePage:

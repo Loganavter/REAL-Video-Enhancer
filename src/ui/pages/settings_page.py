@@ -7,20 +7,9 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplication, QCheckBox,
-    QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QScrollBar, QSizePolicy, QSpacerItem,
-    QSpinBox, QStackedWidget, QTabWidget, QTextEdit,
-    QVBoxLayout, QWidget)
+from PySide6.QtCore import (QCoreApplication, QRect, QSize)
+from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
+    QWidget)
 import resources_rc
 import resources_rc
 # The page body is a toolkit scroll area and its tab strip the toolkit's tab host: a stock `QScrollArea`/`QTabWidget`

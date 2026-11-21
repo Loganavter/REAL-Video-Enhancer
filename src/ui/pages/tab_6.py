@@ -7,20 +7,9 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplication, QCheckBox,
-    QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QScrollBar, QSizePolicy, QSpacerItem,
-    QSpinBox, QStackedWidget, QTabWidget, QTextEdit,
-    QVBoxLayout, QWidget)
+from PySide6.QtCore import (QCoreApplication, QRect, QSize)
+from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
+    QWidget)
 import resources_rc
 import resources_rc
 from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtComboBox, QtLabel, QtLineEdit
@@ -30,7 +19,7 @@ from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 # (Qt-shaped already: `setPixmap`/`setScaledContents`). A `QLabel` paints a pixmap-only label at the default
 # `AlignLeft|AlignVCenter` and `ImageLabel` centres, so the alignment is stated at construction to keep the icon
 # where the Designer put it (same statement as the Home page's logo).
-from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel, OverlayScrollArea
+from sli_ui_toolkit.widgets import SurfacePanel, OverlayScrollArea
 
 
 class Tab6Page:
