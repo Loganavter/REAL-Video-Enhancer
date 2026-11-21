@@ -12,15 +12,38 @@ from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayou
     QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtCheckBox, QtComboBox, QtLabel
+# The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CheckBox` where it had a
+# `QCheckBox`, `ComboBox` where it had a `QComboBox`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.widgets import CheckBox, ComboBox, SurfacePanel, SurfaceScrollArea, Text
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 
-# Layer B (2026-11-21): the two widget classes this page no longer builds stock. `ImageLabel` is the pixmap
-# counterpart of `QLabel` (it takes the parent first, so the Designer's statement order survives), and
-# `SurfaceScrollArea(surface_token=None)` is the stock `QScrollArea`'s geometry without a surface of its own: this
-# page's body is painted by `procPage`'s `QWidget{background-color:#16191d}` rule, and `content_inset=1` keeps the
-# stock StyledPanel frame's 1 px inset on each side.
-from sli_ui_toolkit.widgets import SurfacePanel, SurfaceScrollArea
+#: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
+#: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
+#: to come from the compatibility layer (`STOCK_SCROLLBAR_WIDTH`), which this page no longer imports.
+STOCK_SCROLLBAR_WIDTH = 8
+
+
+def _row_checkbox(parent) -> CheckBox:
+    """A toolkit `CheckBox` shaped for an RVE settings row.
+
+    Two statements the row needs and the toolkit control does not carry as constructor arguments:
+
+    * **the row size.** `CheckBox` builds on `Button`'s standalone control size, so an empty box is a fixed 36x36
+      square (measured offscreen: `minimumSize() == maximumSize() == 36x36`, hint 24x30). RVE's row box is the
+      indicator plus its label - the row's own height decides - so the square is released here.
+    * **Qt's signal spelling.** RVE's glue binds `stateChanged(int)` (`src/ui/ProcessTab.py` writes the tiling switch
+      from it). The toolkit declares `stateChanged`, but emits it from `setCheckState` only: a plain two-state click
+      or `setChecked` emits `toggled(bool)` alone (measured), so without this line a click would never be persisted.
+
+    Both belong in the toolkit's `CheckBox` (a `size=` for a row shape, `stateChanged` on every state change); until
+    it grows them they are stated once here instead of once per widget.
+    """
+    box = CheckBox(parent=parent)
+    box.setMinimumSize(0, 0)
+    box.setMaximumSize(16777215, 16777215)
+    box.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    box.toggled.connect(lambda checked: box.stateChanged.emit(2 if checked else 0))
+    return box
 
 
 class AdvancedSettingsPage:
@@ -51,6 +74,9 @@ class AdvancedSettingsPage:
         self.advancedSettings.setMaximumSize(QSize(16777215, 16777215))
         self.verticalLayout_29 = QVBoxLayout(self.advancedSettings)
         self.verticalLayout_29.setObjectName(u"verticalLayout_29")
+        # `SurfaceScrollArea(surface_token=None)` is the stock `QScrollArea`'s geometry without a surface of its own:
+        # this page's body is painted by `procPage`'s `QWidget{background-color:#16191d}` rule, and `content_inset=1`
+        # keeps the stock StyledPanel frame's 1 px inset on each side.
         self.scrollArea_5 = SurfaceScrollArea(self.advancedSettings, surface_token=None, content_inset=1,
             scrollbar_width=STOCK_SCROLLBAR_WIDTH)
         self.scrollArea_5.setObjectName(u"scrollArea_5")
@@ -76,7 +102,7 @@ class AdvancedSettingsPage:
         self.verticalLayout_31.setSpacing(6)
         self.verticalLayout_31.setObjectName(u"verticalLayout_31")
         self.verticalLayout_31.setContentsMargins(0, 0, 0, 0)
-        self.label_41 = QtLabel(self.generalContainer)
+        self.label_41 = Text(parent=self.generalContainer)
         self.label_41.setObjectName(u"label_41")
         apply(self.label_41, GROUP_TITLE_PT, underline=True)
         self.verticalLayout_31.addWidget(self.label_41)
@@ -86,15 +112,16 @@ class AdvancedSettingsPage:
         self.horizontalLayout_42.setSpacing(6)
         self.horizontalLayout_42.setObjectName(u"horizontalLayout_42")
         self.horizontalLayout_42.setContentsMargins(9, 9, 9, 9)
-        self.label_18 = QtLabel(self.benchmarkModeContainer)
+        self.label_18 = Text(parent=self.benchmarkModeContainer)
         self.label_18.setObjectName(u"label_18")
         apply(self.label_18, BODY_PT)
         self.horizontalLayout_42.addWidget(self.label_18)
         self.horizontalSpacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_42.addItem(self.horizontalSpacer)
-        self.benchmarkModeCheckBox = QtCheckBox(self.benchmarkModeContainer)
+        self.benchmarkModeCheckBox = _row_checkbox(self.benchmarkModeContainer)
         self.benchmarkModeCheckBox.setObjectName(u"benchmarkModeCheckBox")
-        self.benchmarkModeCheckBox.setStyleSheet(u"")
+        # The Designer's `setStyleSheet(u"")` states no rule; a toolkit check box paints itself, so it is dropped
+        # rather than kept as dead text.
         self.horizontalLayout_42.addWidget(self.benchmarkModeCheckBox)
         self.verticalLayout_31.addWidget(self.benchmarkModeContainer)
         self.verticalLayout_33.addWidget(self.generalContainer, 0, Qt.AlignmentFlag.AlignTop)
@@ -107,7 +134,7 @@ class AdvancedSettingsPage:
         self.verticalLayout_16.setSpacing(0)
         self.verticalLayout_16.setObjectName(u"verticalLayout_16")
         self.verticalLayout_16.setContentsMargins(0, 0, 0, 0)
-        self.label_40 = QtLabel(self.upscaleContainer)
+        self.label_40 = Text(parent=self.upscaleContainer)
         self.label_40.setObjectName(u"label_40")
         apply(self.label_40, GROUP_TITLE_PT, underline=True)
         self.verticalLayout_16.addWidget(self.label_40)
@@ -117,13 +144,13 @@ class AdvancedSettingsPage:
         self.horizontalLayout_16.setSpacing(6)
         self.horizontalLayout_16.setObjectName(u"horizontalLayout_16")
         self.horizontalLayout_16.setContentsMargins(9, 0, 9, 9)
-        self.label_33 = QtLabel(self.tilingContainer)
+        self.label_33 = Text(parent=self.tilingContainer)
         self.label_33.setObjectName(u"label_33")
         apply(self.label_33, BODY_PT)
         self.horizontalLayout_16.addWidget(self.label_33)
         self.horizontalSpacer_8 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_16.addItem(self.horizontalSpacer_8)
-        self.tilingCheckBox = QtCheckBox(self.tilingContainer)
+        self.tilingCheckBox = _row_checkbox(self.tilingContainer)
         self.tilingCheckBox.setObjectName(u"tilingCheckBox")
         self.horizontalLayout_16.addWidget(self.tilingCheckBox)
         self.verticalLayout_16.addWidget(self.tilingContainer)
@@ -133,13 +160,13 @@ class AdvancedSettingsPage:
         self.horizontalLayout_18.setSpacing(6)
         self.horizontalLayout_18.setObjectName(u"horizontalLayout_18")
         self.horizontalLayout_18.setContentsMargins(9, 0, 9, 0)
-        self.label_32 = QtLabel(self.tileSizeContainer)
+        self.label_32 = Text(parent=self.tileSizeContainer)
         self.label_32.setObjectName(u"label_32")
         apply(self.label_32, BODY_PT)
         self.horizontalLayout_18.addWidget(self.label_32)
         self.horizontalSpacer_7 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_18.addItem(self.horizontalSpacer_7)
-        self.tileSizeComboBox = QtComboBox(self.tileSizeContainer)
+        self.tileSizeComboBox = ComboBox(self.tileSizeContainer)
         self.tileSizeComboBox.addItem("")
         self.tileSizeComboBox.addItem("")
         self.tileSizeComboBox.addItem("")
@@ -157,7 +184,7 @@ class AdvancedSettingsPage:
         self.interpolateContainer.setSpacing(0)
         self.interpolateContainer.setObjectName(u"interpolateContainer")
         self.interpolateContainer.setContentsMargins(0, 0, 0, 0)
-        self.label_42 = QtLabel(self.interpolateContainer_2)
+        self.label_42 = Text(parent=self.interpolateContainer_2)
         self.label_42.setObjectName(u"label_42")
         apply(self.label_42, GROUP_TITLE_PT, underline=True)
         self.interpolateContainer.addWidget(self.label_42)
@@ -165,13 +192,13 @@ class AdvancedSettingsPage:
         self.sloMoModeContainer_5.setObjectName(u"sloMoModeContainer_5")
         self.horizontalLayout_53 = QHBoxLayout(self.sloMoModeContainer_5)
         self.horizontalLayout_53.setObjectName(u"horizontalLayout_53")
-        self.label_70 = QtLabel(self.sloMoModeContainer_5)
+        self.label_70 = Text(parent=self.sloMoModeContainer_5)
         self.label_70.setObjectName(u"label_70")
         apply(self.label_70, BODY_PT)
         self.horizontalLayout_53.addWidget(self.label_70)
         self.horizontalSpacer_26 = QSpacerItem(226, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_53.addItem(self.horizontalSpacer_26)
-        self.dynamicScaledOpticalFlowCheckBox = QtCheckBox(self.sloMoModeContainer_5)
+        self.dynamicScaledOpticalFlowCheckBox = _row_checkbox(self.sloMoModeContainer_5)
         self.dynamicScaledOpticalFlowCheckBox.setObjectName(u"dynamicScaledOpticalFlowCheckBox")
         self.horizontalLayout_53.addWidget(self.dynamicScaledOpticalFlowCheckBox)
         self.interpolateContainer.addWidget(self.sloMoModeContainer_5)
@@ -179,13 +206,13 @@ class AdvancedSettingsPage:
         self.sloMoModeContainer_4.setObjectName(u"sloMoModeContainer_4")
         self.horizontalLayout_52 = QHBoxLayout(self.sloMoModeContainer_4)
         self.horizontalLayout_52.setObjectName(u"horizontalLayout_52")
-        self.label_68 = QtLabel(self.sloMoModeContainer_4)
+        self.label_68 = Text(parent=self.sloMoModeContainer_4)
         self.label_68.setObjectName(u"label_68")
         apply(self.label_68, BODY_PT)
         self.horizontalLayout_52.addWidget(self.label_68)
         self.horizontalSpacer_25 = QSpacerItem(226, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_52.addItem(self.horizontalSpacer_25)
-        self.ensembleCheckBox = QtCheckBox(self.sloMoModeContainer_4)
+        self.ensembleCheckBox = _row_checkbox(self.sloMoModeContainer_4)
         self.ensembleCheckBox.setObjectName(u"ensembleCheckBox")
         self.horizontalLayout_52.addWidget(self.ensembleCheckBox)
         self.interpolateContainer.addWidget(self.sloMoModeContainer_4)
