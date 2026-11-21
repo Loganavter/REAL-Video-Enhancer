@@ -35,6 +35,12 @@ from src.ui.pages.settings_page import SettingsPagePage
 from src.ui.pages.download_page import DownloadPagePage
 from src.ui.widgets.qt_shaped import QtButton
 
+#: The page gutter the deleted window stylesheet applied (`QStackedWidget{padding:5px 10px}`). It was the only
+#: geometry in that sheet; deleting the sheet without moving the number moved every page 10 px left, 5 px up and made
+#: it 20 px wider (measured against a capture of the same tree before the sheet went).
+PAGE_INSET_H = 10
+PAGE_INSET_V = 5
+
 
 def expose(window, page) -> None:
     """Put a page's (and its descendants') widgets on the window - the surface RVE's glue already binds."""
@@ -93,6 +99,11 @@ class MainWindowShell:
         self.horizontalLayout_3.setContentsMargins(0, 0, 0, 0)
         self.stackedWidget = QStackedWidget(self.mainWindowContainer)
         self.stackedWidget.setObjectName(u"stackedWidget")
+        # The gutter around every page used to come from the window stylesheet (`QStackedWidget{padding:5px 10px}`),
+        # which styled COLOUR and INSET in one place; deleting the sheet without moving this moved every page 10 px
+        # left and made it 20 px wider (measured against a capture of the same tree before the sheet went). The inset
+        # belongs to the container, so it is stated here and nowhere else.
+        self.stackedWidget.setContentsMargins(PAGE_INSET_H, PAGE_INSET_V, PAGE_INSET_H, PAGE_INSET_V)
         self.homePage_page = HomePagePage()
         self.homePage = self.homePage_page.build()
         self.stackedWidget.addWidget(self.homePage)
