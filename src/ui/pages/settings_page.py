@@ -16,6 +16,7 @@ import resources_rc
 # paints through the widget style (so the page QSS styled them) while these paint themselves and read theme tokens.
 # `Button` is the toolkit's `QPushButton`; the page imports no compatibility adapter.
 from sli_ui_toolkit.widgets import Button, SurfacePanel, SurfaceScrollArea, TopTabHost
+from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
 from src.ui.pages.tab_2 import Tab2Page
 from src.ui.pages.tab_3 import Tab3Page
 from src.ui.pages.tab_4 import Tab4Page
@@ -53,9 +54,11 @@ class SettingsPagePage:
         # Designer's tab is `padding: 6px` around a 12 pt line, i.e. 29 px tall, and its pane is a square transparent
         # box (`QTabWidget::pane { background: transparent }`, no radius), so `pane_radius=0` instead of the toolkit's
         # rounded 10 px pane (which would also inset the content by 10 px a side).
-        # GAP: the per-tab radius (`border-radius: 4px`) is `TopTabBar`'s own constructor argument and `TopTabHost`
-        # does not forward it - the tabs keep the toolkit's 10 px corner until the toolkit offers `tab_radius=`.
-        self.tabWidget = TopTabHost(self.scrollAreaWidgetContents, tab_height=22, pane_radius=0, pane_inset=(10, 5, 10, 5), chrome_inset=0, tab_radius=4, pane_fill_token=None)
+        # The same strip as the process page: one style and one button factory live in `src/ui/widgets/tab_strip.py`,
+        # so the two cannot drift into two looks again.
+        self.tabWidget = TopTabHost(self.scrollAreaWidgetContents, tab_height=TAB_HEIGHT, pane_radius=0,
+                                   pane_inset=(10, 5, 10, 5), chrome_inset=0, tab_radius=8,
+                                   pane_fill_token=None, tab_factory=tab_button, tab_style=tab_style())
         self.tabWidget.setObjectName(u"tabWidget")
         self.tab_2_page = Tab2Page()
         self.tab_2 = self.tab_2_page.build()

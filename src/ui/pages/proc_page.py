@@ -19,6 +19,7 @@ from src.ui.pages.render_queue_tab import RenderQueueTabPage
 from src.ui.pages.advanced_settings import AdvancedSettingsPage
 from src.ui.pages.tab_5 import Tab5Page
 from src.ui.typography import apply, CAPTION_PT
+from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
 
 # Layer B (2026-11-21): the three widget classes this page no longer builds stock. `TopTabHost` is the tab host, built
 # with the stock `QTabWidget`'s strip geometry (the Designer's 22 px strip, no pane radius or inset, a 4 px tab corner);
@@ -34,25 +35,6 @@ from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, Minimalis
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
 SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-
-
-def _process_tab_button(text: str, tab_height: int, style):
-    """The process strip's tab button, built by the PAGE - the host half of `TopTabHost(tab_factory=...)`.
-
-    A plain toolkit `Button` at 6 px less than the strip height: the plate is a normal rounded button, its checked
-    state is the button's own, and the leftover 6 px plus the style's gap is the air under the strip. Before the factory
-    existed the strip built its own button and the only way to move the plate was a knob inside the widget.
-    """
-    tab = Button(
-        text=text or " ",
-        toggle=True,
-        variant="surface",
-        size=(0, max(1, tab_height - 6)),
-        corner_radius=8,
-        content_padding=(10, 2, 10, 2),
-    )
-    tab.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-    return tab
 
 
 class ProcPagePage:
@@ -234,11 +216,9 @@ class ProcPagePage:
         self.verticalLayout_24.setContentsMargins(0, 0, 0, 0)
         # The original interface's tabs are BUTTONS standing apart from the content: no folder outline, no join cover,
         # a plate on the selected one and a gap under the strip. `TabStyle` is the toolkit's styling surface for that.
-        self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=28, pane_radius=0, pane_inset=(10, 5, 10, 5),
-            tab_factory=_process_tab_button,
-            tab_style=TabStyle(flat=True, border=False, gap=8, min_width=88, padding=10, spacing=4, radius=8,
-                               scroll_policy=Qt.ScrollBarPolicy.ScrollBarAsNeeded, reserve_scroll_row=True,
-                               selected_token="button.dialog.default.background.pressed"),
+        self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=TAB_HEIGHT, pane_radius=0, pane_inset=(10, 5, 10, 5),
+            tab_factory=tab_button,
+            tab_style=tab_style(),
             chrome_inset=0, tab_radius=4, pane_fill_token=None)
         self.processSettingsContainer.setObjectName(u"processSettingsContainer")
         sizePolicy3.setHeightForWidth(self.processSettingsContainer.sizePolicy().hasHeightForWidth())
