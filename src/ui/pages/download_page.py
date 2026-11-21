@@ -147,14 +147,6 @@ class DownloadPagePage:
         self.horizontalLayout_46.setObjectName(u"horizontalLayout_46")
         self.gridLayout_9 = QGridLayout()
         self.gridLayout_9.setObjectName(u"gridLayout_9")
-        self.label_64 = ImageLabel(self.scrollAreaWidgetContents_2,
-            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
-        self.label_64.setObjectName(u"label_64")
-        self.label_64.setMaximumSize(QSize(25, 25))
-        self.label_64.setToolTipDuration(0)
-        self.label_64.setPixmap(QPixmap(u":/icons/icons/info.svg"))
-        self.label_64.setScaledContents(True)
-        self.gridLayout_9.addWidget(self.label_64, 1, 1, 1, 1)
         self.label_65 = QtLabel(self.scrollAreaWidgetContents_2)
         self.label_65.setObjectName(u"label_65")
         self.gridLayout_9.addWidget(self.label_65, 1, 0, 1, 1)
@@ -167,14 +159,6 @@ class DownloadPagePage:
         self.pytorch_backend.addItem("")
         self.pytorch_backend.setObjectName(u"pytorch_backend")
         self.gridLayout_9.addWidget(self.pytorch_backend, 3, 2, 1, 1)
-        self.label_66 = ImageLabel(self.scrollAreaWidgetContents_2,
-            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
-        self.label_66.setObjectName(u"label_66")
-        self.label_66.setMaximumSize(QSize(25, 25))
-        self.label_66.setToolTipDuration(0)
-        self.label_66.setPixmap(QPixmap(u":/icons/icons/info.svg"))
-        self.label_66.setScaledContents(True)
-        self.gridLayout_9.addWidget(self.label_66, 3, 1, 1, 1)
         self.pytorch_version = QtComboBox(self.scrollAreaWidgetContents_2)
         self.pytorch_version.setObjectName(u"pytorch_version")
         self.gridLayout_9.addWidget(self.pytorch_version, 1, 2, 1, 1)
@@ -315,7 +299,6 @@ class DownloadPagePage:
         self.label_67.setText(QCoreApplication.translate("MainWindow", u"Uninstall App", None))
         self.label_4.setText(QCoreApplication.translate("MainWindow", u"Backends", None))
         self.low_storage_label.setText(QCoreApplication.translate("MainWindow", u"Your PC does not have enough storage for PyTorch/TensorRT. Please free up at least 15gb.", None))
-        self.label_64.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">PyTorch Version</span></p><p>- This is the version downloaded</p><p>- 2.6: Supports older CUDA enabled GPUs</p><p>- 2.8: Supports all RTX cards, faster and recomended.</p><p>- 2.9: Experimental.</p></body></html>", None))
         # `setText("")` is gone with the stock label: an `ImageLabel` has no text channel and says so on stderr
         # ("ImageLabel ignores setText(''): a pixmap label has no text"); "no text" is already the default.
         self.label_65.setText(QCoreApplication.translate("MainWindow", u"PyTorch Version", None))
@@ -323,7 +306,6 @@ class DownloadPagePage:
         self.pytorch_backend.setItemText(0, QCoreApplication.translate("MainWindow", u"CUDA", None))
         self.pytorch_backend.setItemText(1, QCoreApplication.translate("MainWindow", u"ROCm", None))
         self.pytorch_backend.setItemText(2, QCoreApplication.translate("MainWindow", u"xpu", None))
-        self.label_66.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">PyTorch Backend</span></p><p>- CUDA: NVIDIA GPUs 10 series and up</p><p>- ROCm: AMD (Linux Only) 7000 series(maybe) and up</p><p>- xpu: Intel: idk fam, dunno if this even works lowkey</p><p>- MPS: Apple Mac M series SOCs only.</p></body></html>", None))
         # same as label_64: an ImageLabel has no text channel, so the Designer's empty `setText` has no work
         self.downloadRecommendedBtn.setText("")
         self.label_25.setText(QCoreApplication.translate("MainWindow", u"Install Recommended Dependencies", None))
