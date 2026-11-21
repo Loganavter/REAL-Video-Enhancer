@@ -1,7 +1,7 @@
 import json
 import os
 
-from .constants import TEMP_DOWNLOAD_PATH, BACKEND_PATH, PYTHON_EXECUTABLE_PATH, PYTHON_DIRECTORY, PLATFORM, IS_INSTALLED, IS_FLATPAK, CWD
+from .constants import BACKEND_PATH, PYTHON_EXECUTABLE_PATH, PYTHON_DIRECTORY, PLATFORM, IS_INSTALLED, IS_FLATPAK, CWD
 from .Util import (
     FileHandler
 )
@@ -27,7 +27,10 @@ class BackendHandler:
 
         from .ui.QTcustom import TextOutputPopup
 
-        cache_path = os.path.join(TEMP_DOWNLOAD_PATH, "backends-cache.json")
+        # NOT under TEMP_DOWNLOAD_PATH: the app wipes that folder on startup (REAL-Video-Enhancer.py), which made the
+        # cache cold on every launch - measured as a 3.3 s window for a list that had not changed.
+        cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "REAL-Video-Enhancer")
+        cache_path = os.path.join(cache_dir, "backends.json")
         stamp = self._backend_stamp()
         cached = self._read_backends_cache(cache_path, stamp)
         if cached is not None:
