@@ -81,6 +81,32 @@ def _number_of(widget: QWidget) -> dict:
     return state
 
 
+def _icon_of(widget: QWidget) -> tuple[bool, list[int]]:
+    """Whether a control actually has a pixmap icon, and how big it asks to draw it.
+
+    The dump recorded text and geometry only, so a button that lost its icon (a migration that rebuilt the content)
+    looked identical to the stock one in every table the harness had. That is exactly the regression the owner
+    reported, and it was invisible by construction.
+    """
+    icon = None
+    getter = getattr(widget, "icon", None)
+    if callable(getter):
+        try:
+            icon = getter()
+        except Exception:
+            icon = None
+    has = bool(icon is not None and not icon.isNull())
+    if not has:
+        has = bool(getattr(widget, "_has_icon", False))
+    if not has:
+        return False, [0, 0]
+    size = getattr(widget, "iconSize", None)
+    icon_size = size() if callable(size) else getattr(widget, "_icon_box", None)
+    if icon_size is None:
+        return True, [0, 0]
+    return True, [int(icon_size.width()), int(icon_size.height())]
+
+
 def _node(widget: QWidget) -> dict:
     node: dict = {
         "class": type(widget).__name__,
@@ -97,6 +123,24 @@ def _node(widget: QWidget) -> dict:
     if text:
         node["text"] = text
     node.update(_number_of(widget))
+    has_icon, icon_size = _icon_of(widget)
+    if has_icon:
+        node["icon"] = True
+        node["icon_size"] = icon_size
+    try:
+        from PySide6.QtGui import QFontInfo
+
+        node["font_px"] = int(QFontInfo(widget.font()).pixelSize())
+    except Exception:
+        pass
+    try:
+        palette = widget.palette()
+        node["colors"] = {
+            role: palette.color(getattr(palette.ColorRole, role)).name()
+            for role in ("Button", "Base", "Window", "Text")
+        }
+    except Exception:
+        pass
     children = [child for child in widget.children() if isinstance(child, QWidget)]
     if children:
         node["children"] = [_node(child) for child in children]

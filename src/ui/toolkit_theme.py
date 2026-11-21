@@ -52,6 +52,7 @@ LOOK: dict[str, tuple[str, str]] = {
     "QPushButton{background-color} (surface variant)": ("button.dialog.default.background", "#2c313c"),
     "QPushButton:hover{background-color} (surface variant)": ("button.dialog.default.background.hover", "#343b47"),
     "QPushButton:pressed{background-color} (surface variant)": ("button.dialog.default.background.pressed", "#676e7b"),
+    "QPushButton:disabled{background-color} (surface variant)": ("button.dialog.default.background.disabled", "#676e7b"),
     "QPushButton:hover{background-color}": ("dialog.button.hover", "#343b47"),
     "QPushButton:checked / :disabled{background-color}": ("button.toggle.background.checked", "#676e7b"),
     "QPlainTextEdit / QTextEdit{background-color}": ("surface.list", "#2c313c"),

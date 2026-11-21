@@ -23,7 +23,7 @@ from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetrics
 
-from sli_ui_toolkit.widgets import Button, ButtonRow, CheckBox, ComboBox, CustomLineEdit, Text
+from sli_ui_toolkit.widgets import Button, CheckBox, ComboBox, CustomLineEdit, Text
 
 
 def _constraints(widget) -> tuple:
@@ -138,15 +138,13 @@ class QtButton(Button):
         # and as little vertically as the Designer's pinned heights allow (the toolkit reserves a full line, so 5 px
         # above and below a 30 px button clips the glyphs).
         super().__init__(None, text=text, parent=parent, variant="surface", content_align=_LEFT,
-                         content_padding=(10, 5, 10, 0), corner_radius=10,
+                         content_padding=(10, 5, 10, 5), corner_radius=10,
                          border_color=QColor(0, 0, 0, 0))
         self._has_icon = False
         self._icon_box = QSize(0, 0)
-        # A button's text is painted with the toolkit's default UI font unless a ROW says otherwise: `setFont` alone
-        # left RVE's 12 pt labels rendering at 12 px, half the Designer's size (measured: ink 9 px tall against 15).
-        # The row is the documented way to state a pixel size, so the adapter keeps one row in sync with `setText`.
-        self._rve_font = QFont(self.font())
-        self._apply_rve_row()
+        # No `rows=`: the default content path paints the widget's own font (`paint_font(widget)` reads `font()`) AND
+        # draws the icon, whereas a hand-built row has no icon slot at all - building rows dropped the "+" on RVE's
+        # add-to-queue button (measured). `setFont` is therefore enough; it just needs the constraints preserved.
         # The toolkit's Button base gives every instance a 36x36 minimum AND maximum (its own default control size).
         # The minimum turned RVE's 22x16 checkbox into a 36x36 square; the maximum clamped every text button to 36 px
         # wide, which is what made labels look cut off. Both are cleared here; the Designer's own
@@ -173,14 +171,11 @@ class QtButton(Button):
         # had set is re-imposed after the pass, and the row is rebuilt so the text keeps the button's font size.
         saved = _constraints(self)
         Button.setText(self, text)
-        self._apply_rve_row()
         _restore_constraints(self, saved)
 
     def setFont(self, font: QFont) -> None:      # noqa: N802
         saved = _constraints(self)
-        self._rve_font = QFont(font)
         Button.setFont(self, font)
-        self._apply_rve_row()
         _restore_constraints(self, saved)
 
     def setIcon(self, icon) -> None:             # noqa: N802
@@ -197,15 +192,6 @@ class QtButton(Button):
         """The toolkit keeps the label in `_text` and exposes no getter; Qt's name is part of the shape RVE expects."""
         return getattr(self, "_text", "") or ""
 
-    def _apply_rve_row(self) -> None:
-        # `Button.setFont` does not feed the painter (the paint font comes from `ui_font(widget)` but the row's own size
-        # wins), so the adapter keeps the Qt font it was given and states the pixel size on the row.
-        size = QFontInfo(getattr(self, "_rve_font", self.font())).pixelSize()
-        # `ButtonRow.ratio` defaults to 0.5: a single-row button then gets HALF the content height and the text is cut
-        # through the middle (measured on every RVE button). One row owns the whole height, as BlinkTable's call sites
-        # state explicitly (`ratio=1.0`).
-        self.setRows([ButtonRow(text=self.text(), size=size or None, h_align=None, ratio=1.0)])
-
     def sizeHint(self) -> QSize:                 # noqa: N802
         # Same QSS semantics as the combo: `padding: 5px 10px` around the content, and QPushButton's 27 px row for a
         # 12 px font (measured). An icon-only button is the icon plus the padding - RVE's nav buttons are 55x45 for a
@@ -213,15 +199,20 @@ class QtButton(Button):
         has_icon = self._has_icon
         icon_size = self._icon_box
         text = self.text()
+        fm = QFontMetrics(self.font())
+        # QSS `padding: 5px 10px` around the content. The content is a line of text and/or an icon, so the height is the
+        # taller of the two plus five - RVE's add-to-queue button carries a 28 px "+" and is 35 px tall, where a text
+        # row alone would give 27 (measured against the Designer build).
+        # QSS `padding: 5px 10px` is 10 px of vertical box around the content: RVE's stock button is 27 px tall for a
+        # 17 px line, i.e. line + 10 - not line + 5, which is what a mis-calibrated hint produced (22 px) and why the
+        # label was clipped through the bottom.
+        content_h = max(fm.lineSpacing(), icon_size.height() if has_icon else 0)
         if not text:
             if has_icon:
-                return QSize(icon_size.width() + 20, icon_size.height() + 5)
+                return QSize(icon_size.width() + 20, content_h + 10)
             return super().sizeHint()
-        fm = QFontMetrics(self.font())
         icon_room = (icon_size.width() + 6) if has_icon else 0
-        # QSS `padding: 5px 10px`: the height is the line plus five pixels, which is exactly the 27 px row RVE's
-        # buttons occupy for a 12 pt font (measured against the Designer build).
-        return QSize(fm.horizontalAdvance(text) + 20 + icon_room, fm.lineSpacing() + 5)
+        return QSize(fm.horizontalAdvance(text) + 20 + icon_room, content_h + 10)
 
     def minimumSizeHint(self) -> QSize:          # noqa: N802
         return self.sizeHint()
@@ -334,11 +325,16 @@ class QtComboBox(ComboBox):
         super().setFont(font)
         self._stock_hint = None
 
+    #: RVE's combo rule, verbatim - the oracle below must be measured under the same QSS the stock widget had,
+    #: otherwise its padding and arrow are missing from the hint (measured: 70 vs the Designer's 78 px).
+    RVE_QSS = "QComboBox{background-color:#2c313c; text-align:left; padding:5px 10px; border-radius:10px; color:white;}"
+
     def _stock_metrics(self):
         if self._stock_hint is None:
             from PySide6.QtWidgets import QComboBox
 
             oracle = QComboBox()
+            oracle.setStyleSheet(self.RVE_QSS)
             oracle.setFont(self.font())
             for index in range(self.count()):
                 oracle.addItem(self.itemText(index))
@@ -348,9 +344,7 @@ class QtComboBox(ComboBox):
     def sizeHint(self) -> QSize:                          # noqa: N802
         # RVE's combo: `QComboBox{padding:5px 10px}`, so a field is its longest item plus 20 px, never under 80, and
         # 29 px tall (5+5 padding + 17 px of 12 px text + 2 border - measured on the Designer build).
-        fm = QFontMetrics(self.font())
-        widest = max((fm.horizontalAdvance(self.itemText(i)) for i in range(self.count())), default=0)
-        return QSize(max(80, widest + 20), 29)
+        return self._stock_metrics()
 
     def minimumSizeHint(self) -> QSize:                   # noqa: N802
         return self.sizeHint()

@@ -68,6 +68,21 @@ def install(window) -> None:
         return
     _STEPS[:] = steps_list
 
+    def warm(index: int) -> None:
+        """Make every page current once before anything is captured or dumped.
+
+        A page's children keep their construction-time geometry until the page has been current at least once, so a
+        single pass writes dumps where the *later* pages are 100x30 boxes - which the comparison then reports as
+        "visible False -> True" and a whole-page geometry difference that does not exist (measured).
+        """
+        if index >= len(steps_list):
+            QTimer.singleShot(0, lambda: capture(0))
+            return
+        _name, action = steps_list[index]
+        action()
+        QApplication.processEvents()
+        QTimer.singleShot(per_page, lambda: warm(index + 1))
+
     def capture(n: int) -> None:
         from PySide6.QtWidgets import QApplication
 
@@ -95,7 +110,7 @@ def install(window) -> None:
             print(f"capture: layout dump for {name} failed: {exc}", flush=True)
         QTimer.singleShot(0, lambda: capture(n + 1))
 
-    QTimer.singleShot(delay, lambda: capture(0))
+    QTimer.singleShot(delay, lambda: warm(0))
 
 
 def stabilise(window) -> None:
