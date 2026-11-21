@@ -58,6 +58,9 @@ def main() -> int:
     ap.add_argument("--views", choices=["widgets", "pages", "both"], default="both")
     ap.add_argument("--budget-widget", type=float, default=2.0, help="per-widget ink budget, %% of the widget")
     ap.add_argument("--budget-page", type=float, default=0.05, help="per-page pixel budget, %% of the page")
+    ap.add_argument("--pages", default="",
+                    help="comma-separated page stems to compare (default: every page in the stock dumps). Useful with "
+                         "the live capture server, which only re-captures the pages a change touched")
     ap.add_argument("--limit", type=int, default=25)
     ap.add_argument("--class-alias", action="append", default=[], metavar="NEW=OLD")
     ap.add_argument("--prune-under", action="append", default=[], metavar="NAME")
@@ -74,6 +77,9 @@ def main() -> int:
 
     aliases = parse_aliases(args.class_alias)
     pages = sorted(os.path.basename(path) for path in glob.glob(os.path.join(args.stock_dumps, "*.json")))
+    if args.pages:
+        wanted = {part.strip() for part in args.pages.split(",") if part.strip()}
+        pages = [page for page in pages if page.replace(".json", "") in wanted]
     if not pages:
         raise SystemExit(f"no dumps in {args.stock_dumps}")
 

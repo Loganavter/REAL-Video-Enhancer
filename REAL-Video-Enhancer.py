@@ -129,8 +129,11 @@ class MainWindow(QMainWindow):
         # P0 of plan-rve-ui-on-toolkit: put toolkit widgets into the live window and look at the result.
         # Off by default; RVE_TOOLKIT_SPIKE=1 is a measurement, not a migration.
         try:
-            from src.ui import layout_dump, page_capture
-            if page_capture.enabled():
+            from src.ui import capture_server, layout_dump, page_capture
+            if capture_server.enabled():
+                # Long-lived: boot once, answer snapshot requests from disk (harness/scripts/ui_live.py drives it).
+                capture_server.install(self)
+            elif page_capture.enabled():
                 # The capture walker writes the layout dump too when one was asked for (one walk, both artefacts).
                 page_capture.install(self)
             elif layout_dump.enabled():

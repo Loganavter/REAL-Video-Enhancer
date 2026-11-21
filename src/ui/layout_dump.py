@@ -201,9 +201,9 @@ def install(window) -> None:
     QTimer.singleShot(delay, lambda: warm_up(0))
 
 
-def write_page(window, name: str) -> None:
-    """Write one page's dump into `RVE_UI_LAYOUT_DUMP`. Shared with the capture walker (one walk, both artefacts)."""
-    out_dir = os.environ.get("RVE_UI_LAYOUT_DUMP", "")
+def write_page(window, name: str, out_dir: str | None = None) -> None:
+    """Write one page's dump into `out_dir` (or `RVE_UI_LAYOUT_DUMP`). Shared with the capture walker and server."""
+    out_dir = out_dir or os.environ.get("RVE_UI_LAYOUT_DUMP", "")
     if not out_dir:
         return
     os.makedirs(out_dir, exist_ok=True)
