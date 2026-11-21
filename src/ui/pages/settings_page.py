@@ -23,6 +23,9 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
+# The page body is a toolkit scroll area and its tab strip the toolkit's tab host: a stock `QScrollArea`/`QTabWidget`
+# paints through the widget style (so the page QSS styled them) while these paint themselves and read theme tokens.
+from sli_ui_toolkit.widgets import SurfaceScrollArea, TopTabHost
 from src.ui.pages.tab_2 import Tab2Page
 from src.ui.pages.tab_3 import Tab3Page
 from src.ui.pages.tab_4 import Tab4Page
@@ -200,7 +203,7 @@ class SettingsPagePage:
 "            }")
         self.verticalLayout_14 = QVBoxLayout(self.settingsPage)
         self.verticalLayout_14.setObjectName(u"verticalLayout_14")
-        self.scrollArea = QScrollArea(self.settingsPage)
+        self.scrollArea = SurfaceScrollArea(self.settingsPage, surface_token=None)
         self.scrollArea.setObjectName(u"scrollArea")
         self.scrollArea.setMaximumSize(QSize(16777215, 112312))
         self.scrollArea.setWidgetResizable(True)
@@ -209,7 +212,13 @@ class SettingsPagePage:
         self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 1026, 652))
         self.verticalLayout_18 = QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_18.setObjectName(u"verticalLayout_18")
-        self.tabWidget = QTabWidget(self.scrollAreaWidgetContents)
+        # RVE's `QTabBar::tab` rule, stated as the host's own constants instead of QSS the painter would ignore: the
+        # Designer's tab is `padding: 6px` around a 12 pt line, i.e. 29 px tall, and its pane is a square transparent
+        # box (`QTabWidget::pane { background: transparent }`, no radius), so `pane_radius=0` instead of the toolkit's
+        # rounded 10 px pane (which would also inset the content by 10 px a side).
+        # GAP: the per-tab radius (`border-radius: 4px`) is `TopTabBar`'s own constructor argument and `TopTabHost`
+        # does not forward it - the tabs keep the toolkit's 10 px corner until the toolkit offers `tab_radius=`.
+        self.tabWidget = TopTabHost(self.scrollAreaWidgetContents, tab_height=29, pane_radius=0)
         self.tabWidget.setObjectName(u"tabWidget")
         self.tab_2_page = Tab2Page()
         self.tab_2 = self.tab_2_page.build()

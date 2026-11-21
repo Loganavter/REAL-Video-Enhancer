@@ -23,6 +23,9 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
+# A pixmap `QLabel` migrates to the toolkit's image label, which carries `setPixmap`/`setScaledContents`
+# itself - no adapter is needed (`src/ui/widgets/qt_shaped.py` holds the shapes that need translation).
+from sli_ui_toolkit.widgets import ImageLabel
 from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtLabel
 from src.ui.typography import apply, BODY_PT
 
@@ -71,7 +74,7 @@ class Tab4Page:
         self.horizontalLayout_12.addWidget(self.label_23)
         self.horizontalSpacer_5 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_12.addItem(self.horizontalSpacer_5)
-        self.label_29 = QLabel(self.discordRPCSettingsContainer)
+        self.label_29 = ImageLabel(self.discordRPCSettingsContainer)
         self.label_29.setObjectName(u"label_29")
         self.label_29.setMaximumSize(QSize(25, 25))
         self.label_29.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -100,6 +103,5 @@ class Tab4Page:
         self.preview_enabled.setText("")
         self.label_23.setText(QCoreApplication.translate("MainWindow", u"Discord Rich Presence", None))
         self.label_29.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Show REAL Video Enhancer in discord.</p></body></html>", None))
-        self.label_29.setText("")
         self.discord_rich_presence.setText("")
         self.openRVEFolderBtn.setText(QCoreApplication.translate("MainWindow", u"Open RVE Folder", None))
