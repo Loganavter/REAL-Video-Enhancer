@@ -26,6 +26,12 @@ import resources_rc
 from src.ui.widgets.qt_shaped import QtButton, QtLabel
 from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 
+# Layer B3 (2026-11-21): the logo is the page's only stock pixmap label, and `ImageLabel` is its toolkit counterpart
+# (Qt-shaped already: `setPixmap`/`setScaledContents`/`setText`). The Designer's `QLabel` paints a pixmap-only label at
+# `AlignLeft|AlignVCenter`; `ImageLabel` defaults to centre, so the alignment is stated to keep the logo where it is
+# (measured offscreen: identical pixels at this alignment, mean 0.00 against the stock label).
+from sli_ui_toolkit.widgets import ImageLabel
+
 
 class HomePagePage:
     """`homePage` - placed by its parent with `addWidget`."""
@@ -102,7 +108,8 @@ class HomePagePage:
         self.widget_8.setObjectName(u"widget_8")
         self.gridLayout_7 = QGridLayout(self.widget_8)
         self.gridLayout_7.setObjectName(u"gridLayout_7")
-        self.label_2 = QLabel(self.widget_8)
+        self.label_2 = ImageLabel(self.widget_8,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_2.setObjectName(u"label_2")
         self.label_2.setPixmap(QPixmap(u":/icons/icons/logo-v2.svg"))
         self.label_2.setScaledContents(False)
@@ -139,7 +146,7 @@ class HomePagePage:
         self.kofiBtn.setText("")
         self.label_16.setText(QCoreApplication.translate("MainWindow", u"GitHub Page", None))
         self.githubBtn.setText("")
-        self.label_2.setText("")
+        # `setText("")` is gone with the stock label: an ImageLabel has no text channel ("no text" is its default)
         self.label.setText(QCoreApplication.translate("MainWindow", u"REAL Video Enhancer", None))
         self.changeLogText.setHtml(QCoreApplication.translate("MainWindow", u"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
 "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
