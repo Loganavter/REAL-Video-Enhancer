@@ -296,9 +296,12 @@ class MainWindow(QMainWindow):
         self.downloadTab.hideUninstallButtons()
         self.downloadTab.showUninstallButton(self.backends)
 
-        # Startup Animation
+        # No startup fade: the window used to get a QGraphicsOpacityEffect here, BEFORE it was shown. The animation
+        # only advances while an event loop runs, and `show()`/`app.exec()` come later - so the first frames were
+        # rendered through an offscreen opacity surface that had not been painted yet: a dark window until the first
+        # input (owner report 2026-11-22). A window effect is worse than no animation: it changes how EVERYTHING below
+        # is painted. Page switches are instant for the same reason (see the switchTo* methods).
         self.animationHandler = AnimationHandler()
-        self.animationHandler.fadeInAnimation(self)
 
         if not self.anyBackendsInstalled:
             RegularQTPopup("Welcome to REAL Video Enhancer!\nPlease install at least one backend to get started.")
@@ -365,22 +368,18 @@ class MainWindow(QMainWindow):
     def switchToHomePage(self):
         self.stackedWidget.setCurrentWidget(self.homePage)
         self.setButtonsUnchecked(self.homeBtn)
-        self.animationHandler.fadeInAnimation(self.stackedWidget)
 
     def switchToProcessingPage(self):
         self.stackedWidget.setCurrentWidget(self.procPage)
         self.setButtonsUnchecked(self.processBtn)
-        self.animationHandler.fadeInAnimation(self.stackedWidget)
 
     def switchToSettingsPage(self):
         self.stackedWidget.setCurrentWidget(self.settingsPage)
         self.setButtonsUnchecked(self.settingsBtn)
-        self.animationHandler.fadeInAnimation(self.stackedWidget)
 
     def switchToDownloadPage(self):
         self.stackedWidget.setCurrentWidget(self.downloadPage)
         self.setButtonsUnchecked(self.downloadBtn)
-        self.animationHandler.fadeInAnimation(self.stackedWidget)
 
     def updateVideoGUIText(self):
         self.settings.readSettings()
@@ -1044,6 +1043,12 @@ def main(file_to_open=None):
     window = MainWindow(file_to_open=file_to_open)
     _stamp("MainWindow built")
 
+    # Paint the whole tree ONCE offscreen before the window is mapped: this warms the toolkit's text layout, style
+    # application and the deferred re-layout, so the frame the window manager presents is already complete. Cheap
+    # (one full render) and it does not depend on guessing how many event-loop turns a WM needs.
+    window.ensurePolished()
+    window.grab()
+    _stamp("first frame warmed")
     if "--fullscreen" in sys.argv:
         window.showFullScreen()
     window.show()

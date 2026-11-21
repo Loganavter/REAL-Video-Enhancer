@@ -6,13 +6,14 @@ interface appears only when you click it").
 """
 from __future__ import annotations
 
+import sys
 import time
 
 import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget  # noqa: E402
 
 from src.ui.AnimationHandler import AnimationHandler  # noqa: E402
 
@@ -47,4 +48,20 @@ def test_a_fade_removes_its_effect_when_it_finishes():
     assert _wait_until(lambda: widget.graphicsEffect() is None), (
         "the opacity effect outlived the fade-out"
     )
+    app.processEvents()
+
+
+def test_the_window_and_its_page_stack_carry_no_graphics_effect():
+    """The window used to get an opacity effect BEFORE show(); its first frames were an unpainted offscreen surface."""
+    app = QApplication.instance() or QApplication([])
+    import types
+
+    if "resources_rc" not in sys.modules:
+        sys.modules["resources_rc"] = types.ModuleType("resources_rc")
+    from src.ui.shell.window import MainWindowShell
+
+    window = QMainWindow()
+    MainWindowShell().build(window)
+    assert window.graphicsEffect() is None, "the window must not be painted through an opacity surface"
+    assert window.stackedWidget.graphicsEffect() is None, "the page stack must paint directly"
     app.processEvents()
