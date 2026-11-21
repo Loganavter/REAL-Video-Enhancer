@@ -7,14 +7,15 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QSize)
+from PySide6.QtCore import (QCoreApplication, QSize, Qt)
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
 
-from sli_ui_toolkit.widgets import SurfacePanel, TextListWidget
-from src.ui.widgets.qt_shaped import QtButton, QtLabel
+# The page builds the toolkit's own controls: `Button` where the Designer had a `QPushButton`, `Text` where it had a
+# `QLabel`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.widgets import Button, SurfacePanel, Text, TextListWidget
 
 
 class RenderQueueTabPage:
@@ -80,14 +81,26 @@ class RenderQueueTabPage:
         self.widget_23.setObjectName(u"widget_23")
         self.verticalLayout_28 = QVBoxLayout(self.widget_23)
         self.verticalLayout_28.setObjectName(u"verticalLayout_28")
-        self.RemoveFromRenderQueue = QtButton(self.widget_23)
+        # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
+        # fill the cell, which turns a row button into a slab when the column is taller than its three buttons.
+        # `size=(0, 0)` drops the standalone 36x36 control size; the policy states the row's share.
+        self.RemoveFromRenderQueue = Button(parent=self.widget_23, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.RemoveFromRenderQueue.setObjectName(u"RemoveFromRenderQueue")
+        self.RemoveFromRenderQueue.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.verticalLayout_28.addWidget(self.RemoveFromRenderQueue)
-        self.MoveUpRenderQueue = QtButton(self.widget_23)
+        self.MoveUpRenderQueue = Button(parent=self.widget_23, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.MoveUpRenderQueue.setObjectName(u"MoveUpRenderQueue")
+        self.MoveUpRenderQueue.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.verticalLayout_28.addWidget(self.MoveUpRenderQueue)
-        self.MoveDownRenderQueue = QtButton(self.widget_23)
+        self.MoveDownRenderQueue = Button(parent=self.widget_23, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.MoveDownRenderQueue.setObjectName(u"MoveDownRenderQueue")
+        self.MoveDownRenderQueue.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.verticalLayout_28.addWidget(self.MoveDownRenderQueue)
         self.horizontalLayout_38.addWidget(self.widget_23)
         self.verticalLayout_27.addWidget(self.widget_22)
@@ -103,7 +116,7 @@ class RenderQueueTabPage:
         self.OutputFilesListWidget.setMaximumSize(QSize(16777215, 16777215))
 
         self.gridLayout_4.addWidget(self.OutputFilesListWidget, 1, 0, 1, 1)
-        self.label_51 = QtLabel(self.renderQueueTab)
+        self.label_51 = Text(parent=self.renderQueueTab)
         self.label_51.setObjectName(u"label_51")
         self.gridLayout_4.addWidget(self.label_51, 0, 0, 1, 1)
         self.verticalLayout_27.addLayout(self.gridLayout_4)

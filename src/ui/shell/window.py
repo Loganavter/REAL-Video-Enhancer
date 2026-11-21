@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSpacerItem,
     QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 import resources_rc
 
-from sli_ui_toolkit.widgets import SurfacePanel
+from sli_ui_toolkit.widgets import Button, SurfacePanel
 
 from src.ui import toolkit_theme
 from src.ui.pages.home_page import HomePagePage
@@ -34,7 +34,6 @@ from src.ui.pages.more_page import MorePagePage
 from src.ui.pages.proc_page import ProcPagePage
 from src.ui.pages.settings_page import SettingsPagePage
 from src.ui.pages.download_page import DownloadPagePage
-from src.ui.widgets.qt_shaped import QtButton
 
 #: The page gutter the deleted window stylesheet applied (`QStackedWidget{padding:5px 10px}`). It was the only
 #: geometry in that sheet; deleting the sheet without moving the number moved every page 10 px left, 5 px up and made
@@ -151,32 +150,39 @@ class MainWindowShell:
         self.verticalLayout_6.setSpacing(9)
         self.verticalLayout_6.setObjectName(u"verticalLayout_6")
         self.verticalLayout_6.setContentsMargins(9, 9, 9, 9)
-        # The four nav buttons are toolkit `Button`s with the toggle state machine built in (`QtButton(parent,
-        # toggle=True)` - the toolkit's toggle mode is constructor-only). The look they carry is the deleted QSS's
-        # `QPushButton` rule expressed as widget properties: `QtButton` is the `surface` variant, so its plate reads
-        # `button.dialog.default.background` (#2c313c), hover `...background.hover` (#343b47) and disabled
-        # `...background.disabled` (#676e7b). The surface family has no `checked` token, so the painter falls back to
-        # `button.dialog.default.background.pressed`, which RVE maps to #676e7b - the QSS's `:checked` colour; radius
-        # 10, `padding:5px 10px` and left-aligned content are `QtButton`'s own defaults.
-        self.homeBtn = QtButton(self.verticalWidget_2, toggle=True)
+        # The four nav buttons are toolkit `Button`s with the toggle state machine built in (`toggle=True` - the
+        # toolkit's toggle mode is constructor-only). The look they carry is the deleted QSS's `QPushButton` rule
+        # expressed as widget properties: the `surface` variant's plate reads `button.dialog.default.background`
+        # (#2c313c), hover `...background.hover` (#343b47) and disabled `...background.disabled` (#676e7b). The surface
+        # family has no `checked` token, so the painter falls back to `button.dialog.default.background.pressed`, which
+        # RVE maps to #676e7b - the QSS's `:checked` colour; radius 10, `padding:5px 10px` and left-aligned content are
+        # the toolkit button's own defaults. `size=(0, 0)` drops the standalone 36x36 control size, and
+        # Minimum/Fixed is QPushButton's own policy (as wide as it needs, exactly as tall as its hint) - the toolkit
+        # button would otherwise split the rail's spare height between the two top buttons. The Designer's
+        # `setCheckable(True)` is the constructor's `toggle=True`, since `Button` has no such setter.
+        self.homeBtn = Button(parent=self.verticalWidget_2, text="", variant="surface", toggle=True,
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.homeBtn.setObjectName(u"homeBtn")
         self.homeBtn.setMinimumSize(QSize(31, 0))
         self.homeBtn.setMaximumSize(QSize(55, 16777215))
+        self.homeBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         icon8 = QIcon()
         icon8.addFile(u":/icons/icons/home.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.homeBtn.setIcon(icon8)
         self.homeBtn.setIconSize(QSize(35, 35))
-        self.homeBtn.setCheckable(True)
         self.homeBtn.setChecked(True)
         self.verticalLayout_6.addWidget(self.homeBtn)
-        self.processBtn = QtButton(self.verticalWidget_2, toggle=True)
+        self.processBtn = Button(parent=self.verticalWidget_2, text="", variant="surface", toggle=True,
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.processBtn.setObjectName(u"processBtn")
         self.processBtn.setMaximumSize(QSize(55, 16777215))
+        self.processBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         icon9 = QIcon()
         icon9.addFile(u":/icons/icons/cpu.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.processBtn.setIcon(icon9)
         self.processBtn.setIconSize(QSize(35, 35))
-        self.processBtn.setCheckable(True)
         self.verticalLayout_6.addWidget(self.processBtn)
         self.verticalLayout_3.addWidget(self.verticalWidget_2)
         self.verticalWidget = QWidget(self.leftMenuSubContainer)
@@ -187,7 +193,9 @@ class MainWindowShell:
         self.verticalLayout_4.setContentsMargins(-1, -1, 9, -1)
         self.verticalSpacer_5 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         self.verticalLayout_4.addItem(self.verticalSpacer_5)
-        self.settingsBtn = QtButton(self.verticalWidget, toggle=True)
+        self.settingsBtn = Button(parent=self.verticalWidget, text="", variant="surface", toggle=True,
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.settingsBtn.setObjectName(u"settingsBtn")
         sizePolicy12.setHeightForWidth(self.settingsBtn.sizePolicy().hasHeightForWidth())
         self.settingsBtn.setSizePolicy(sizePolicy12)
@@ -197,14 +205,15 @@ class MainWindowShell:
         icon10.addFile(u":/icons/icons/settings.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.settingsBtn.setIcon(icon10)
         self.settingsBtn.setIconSize(QSize(35, 35))
-        self.settingsBtn.setCheckable(True)
         self.verticalLayout_4.addWidget(self.settingsBtn)
-        self.downloadBtn = QtButton(self.verticalWidget, toggle=True)
+        self.downloadBtn = Button(parent=self.verticalWidget, text="", variant="surface", toggle=True,
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.downloadBtn.setObjectName(u"downloadBtn")
         self.downloadBtn.setMaximumSize(QSize(55, 16777215))
+        self.downloadBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.downloadBtn.setIcon(icon7)
         self.downloadBtn.setIconSize(QSize(35, 35))
-        self.downloadBtn.setCheckable(True)
         self.verticalLayout_4.addWidget(self.downloadBtn)
         self.verticalLayout_3.addWidget(self.verticalWidget)
         self.verticalLayout.addWidget(self.leftMenuSubContainer)
