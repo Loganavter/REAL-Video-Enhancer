@@ -29,7 +29,7 @@ from sli_ui_toolkit.widgets import SurfaceScrollArea, TopTabHost
 from src.ui.pages.tab_2 import Tab2Page
 from src.ui.pages.tab_3 import Tab3Page
 from src.ui.pages.tab_4 import Tab4Page
-from src.ui.widgets.qt_shaped import QtButton
+from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtButton
 
 
 class SettingsPagePage:
@@ -203,7 +203,8 @@ class SettingsPagePage:
 "            }")
         self.verticalLayout_14 = QVBoxLayout(self.settingsPage)
         self.verticalLayout_14.setObjectName(u"verticalLayout_14")
-        self.scrollArea = SurfaceScrollArea(self.settingsPage, surface_token=None, content_inset=1)
+        self.scrollArea = SurfaceScrollArea(self.settingsPage, surface_token=None, content_inset=1,
+            scrollbar_width=STOCK_SCROLLBAR_WIDTH)
         self.scrollArea.setObjectName(u"scrollArea")
         self.scrollArea.setMaximumSize(QSize(16777215, 112312))
         self.scrollArea.setWidgetResizable(True)

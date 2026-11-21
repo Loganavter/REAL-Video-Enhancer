@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import QtCheckBox, QtComboBox, QtLabel
+from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtCheckBox, QtComboBox, QtLabel
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 
 # Layer B (2026-11-21): the two widget classes this page no longer builds stock. `ImageLabel` is the pixmap
@@ -62,7 +62,8 @@ class AdvancedSettingsPage:
         self.advancedSettings.setMaximumSize(QSize(16777215, 16777215))
         self.verticalLayout_29 = QVBoxLayout(self.advancedSettings)
         self.verticalLayout_29.setObjectName(u"verticalLayout_29")
-        self.scrollArea_5 = SurfaceScrollArea(self.advancedSettings, surface_token=None, content_inset=1)
+        self.scrollArea_5 = SurfaceScrollArea(self.advancedSettings, surface_token=None, content_inset=1,
+            scrollbar_width=STOCK_SCROLLBAR_WIDTH)
         self.scrollArea_5.setObjectName(u"scrollArea_5")
         sizePolicy3.setHeightForWidth(self.scrollArea_5.sizePolicy().hasHeightForWidth())
         self.scrollArea_5.setSizePolicy(sizePolicy3)

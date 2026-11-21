@@ -106,8 +106,7 @@ class Tab6Page:
         self.scrollArea_6.setSizePolicy(sizePolicy7)
         self.scrollArea_6.setMinimumSize(QSize(0, 50))
         self.scrollArea_6.setMaximumSize(QSize(16777215, 50))
-        self.scrollArea_6.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scrollArea_6.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # The overlay area owns both affordances; a native bar would sit on top of its own and steal viewport space.
         self.scrollArea_6.setWidgetResizable(True)
         self.scrollAreaWidgetContents_6 = QWidget()
         self.scrollAreaWidgetContents_6.setObjectName(u"scrollAreaWidgetContents_6")

@@ -80,6 +80,11 @@ def _oracle_style_sheet(widget, base: str) -> str:
     return "\n".join(sheets)
 
 
+#: The stock vertical scrollbar's width, from the window's QSS (`QScrollBar:vertical{width:8}`). A converted scroll
+#: area that RESERVES a bar must reserve this, not the toolkit's default 10: measured on the general-settings page,
+#: the 2 px difference narrowed every row and moved the page 1.2 %.
+STOCK_SCROLLBAR_WIDTH = 8
+
 class QtLabel(Text):
     """`QLabel`'s shape over `Text`.
 

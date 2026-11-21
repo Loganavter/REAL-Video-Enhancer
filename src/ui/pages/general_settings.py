@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
+from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
 # Layer B (2026-11-21): the two widget classes this page no longer builds stock. `SurfaceScrollArea(surface_token=None)`
@@ -87,13 +87,16 @@ class GeneralSettingsPage:
         self.horizontalLayout_13 = QHBoxLayout(self.widget_5)
         self.horizontalLayout_13.setObjectName(u"horizontalLayout_13")
         self.horizontalLayout_13.setContentsMargins(0, 0, 0, 0)
-        self.scrollArea_4 = SurfaceScrollArea(self.widget_5, surface_token=None, content_inset=1)
+        self.scrollArea_4 = SurfaceScrollArea(self.widget_5, surface_token=None, content_inset=1,
+            scrollbar_width=STOCK_SCROLLBAR_WIDTH)
         self.scrollArea_4.setObjectName(u"scrollArea_4")
         sizePolicy2.setHeightForWidth(self.scrollArea_4.sizePolicy().hasHeightForWidth())
         self.scrollArea_4.setSizePolicy(sizePolicy2)
         self.scrollArea_4.setMaximumSize(QSize(16777215, 16777215))
         apply(self.scrollArea_4, BODY_PT)
-        self.scrollArea_4.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # No native scrollbar policy on a toolkit scroll area: it owns an overlay bar that appears on overflow, and a
+        # native bar on top of it took another 14 px out of the viewport (measured: 456 px where the stock viewport was
+        # 470, which narrowed every row of this page).
         self.scrollArea_4.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         self.scrollArea_4.setWidgetResizable(True)
         self.scrollAreaWidgetContents_4 = QWidget()

@@ -26,7 +26,7 @@ import resources_rc
 # A pixmap `QLabel` migrates to the toolkit's image label, which carries `setPixmap`/`setScaledContents` itself - no
 # adapter is needed (`src/ui/widgets/qt_shaped.py` holds the shapes that need translation; this one drops in).
 from sli_ui_toolkit.widgets import ImageLabel, SurfaceScrollArea
-from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
+from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
 
@@ -49,7 +49,8 @@ class Tab2Page:
         self.verticalLayout_19.setContentsMargins(0, 0, 0, 0)
         # The page body scrolls in the toolkit's area: RVE's `QScrollArea{background:transparent}` becomes
         # `surface_token=None` (no token fill, the page's own surface shows through). `setWidgetResizable` is inherited.
-        self.scrollArea_3 = SurfaceScrollArea(self.VideoSettingsContainer, surface_token=None)
+        self.scrollArea_3 = SurfaceScrollArea(self.VideoSettingsContainer, surface_token=None, content_inset=1,
+            scrollbar_width=STOCK_SCROLLBAR_WIDTH)
         self.scrollArea_3.setObjectName(u"scrollArea_3")
         self.scrollArea_3.setWidgetResizable(True)
         self.scrollAreaWidgetContents_3 = QWidget()
