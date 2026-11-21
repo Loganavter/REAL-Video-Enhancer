@@ -37,7 +37,7 @@ class Tab5Page:
         self.tab_5.setObjectName(u"tab_5")
         self.horizontalLayout_10 = QHBoxLayout(self.tab_5)
         self.horizontalLayout_10.setObjectName(u"horizontalLayout_10")
-        self.renderOutput = QTextEdit(self.tab_5)
+        self.renderOutput = QTextEdit(self.tab_5)  # stays stock (layer-B gap): ProcessTab calls `setPlainText` then `verticalScrollBar().setValue(maximum())`; ConsoleView exposes set_lines/scroll_to_bottom only
         self.renderOutput.setObjectName(u"renderOutput")
         sizePolicy10 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         sizePolicy10.setHorizontalStretch(0)
