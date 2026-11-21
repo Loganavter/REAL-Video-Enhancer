@@ -157,13 +157,15 @@ TOKENS: dict[str, str] = _build_tokens()
 
 
 def enabled() -> bool:
-    """The theme is always on - toolkit widgets paint from tokens and RVE's pages are built with them.
+    """The theme is NOT optional any more - it always installs.
 
-    `RVE_TOOLKIT_THEME=off` is the escape hatch for an A/B against the stock look (and for a bisect when a colour is
-    questioned): with the theme off, the app builds the pages but toolkit widgets have no palette to read.
+    `RVE_TOOLKIT_THEME=off` used to skip the install for an A/B against the stock look. Every page is built on toolkit
+    widgets now, and those paint from TOKENS: with the theme off, a `SurfacePanel` has no colour and paints nothing, so
+    a compositing WM shows the DESKTOP through the page (measured 2026-11-22 on the owner's screen), stock controls paint
+    black, and dialogs fall back to the light Fusion palette. There is no half-themed state left to choose, so the
+    switch is gone; the env var is ignored.
     """
-    import os
-    return os.environ.get("RVE_TOOLKIT_THEME", "").lower() not in {"0", "off", "false", "no"}
+    return True
 
 
 def _hexargb(value: str) -> str:

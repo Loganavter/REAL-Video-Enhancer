@@ -1025,7 +1025,12 @@ def main(file_to_open=None):
                 log("toolkit theme: " + line)
             theme_installed = True
     except Exception as _theme_exc:
-        log(f"toolkit theme failed: {_theme_exc}")
+        # No theme = no tokens = panels that paint nothing (a compositor shows the desktop through them) and stock
+        # controls painted black. Fail visibly instead of handing out a ghost window.
+        import traceback
+
+        log("toolkit theme failed:\n" + traceback.format_exc())
+        raise
     if not theme_installed:
         # The theme is off: apply RVE's own palette, which now lives with the token table it mirrors
         # (`toolkit_theme.qt_palette()`) rather than in the deleted `src/ui/QTstyle.py`.

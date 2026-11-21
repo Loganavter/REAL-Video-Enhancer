@@ -74,7 +74,8 @@ def boot(display: str, wait: float, extra_env: dict[str, str]) -> int:
         except (OSError, ValueError):
             pass
 
-    xvfb = subprocess.Popen(["Xvfb", display, "-screen", "0", "1600x1000x24"],
+    geometry = os.environ.get("RVE_XVFB_GEOMETRY", "1600x1000")
+    xvfb = subprocess.Popen(["Xvfb", display, "-screen", "0", f"{geometry}x24"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     with open(paths["xvfb_pid"], "w") as handle:
         handle.write(str(xvfb.pid))

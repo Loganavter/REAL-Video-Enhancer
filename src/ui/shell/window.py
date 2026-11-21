@@ -221,6 +221,15 @@ class MainWindowShell:
         window.setCentralWidget(self.centralwidget)
         self.stackedWidget.setCurrentIndex(2)
         QMetaObject.connectSlotsByName(window)
+        # The window paints the page colour itself. Every surface inside is token-painted, and a surface that fails to
+        # paint (a missing token, a widget built before the theme) then shows the DESKTOP through a compositing WM -
+        # observed 2026-11-22 on the owner's screen as a ghost window. An opaque backdrop makes that impossible.
+        _backdrop = toolkit_theme.token_color("surface.page")
+        if _backdrop is not None:
+            window.setAutoFillBackground(True)
+            _window_palette = window.palette()
+            _window_palette.setColor(QPalette.ColorRole.Window, _backdrop)
+            window.setPalette(_window_palette)
         expose(window, self)
         # One place for the control type size: a page's 12 pt container font would otherwise cascade 16 px into every
         # toolkit control (the deleted adapter stated 12 px per control; this states it per window).
