@@ -36,11 +36,29 @@ ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget"
 
 #: page module -> {designer widget name: the class the page builds}. Every watched widget is migrated to an adapter;
 #: a stock one coming back would have to be pinned here and argued for in review.
-#: Pages migrated off the compatibility layer by hand. The splitter's cross-check no longer applies to them: their
-#: widgets are constructed directly with the toolkit's constructor arguments, which `split_ui` does not emit. The
-#: generator and this cross-check retire together with `qt_shaped.py`; until then a page is listed here the moment it
-#: stops being regenerable, so the check keeps its meaning for the rest.
-HAND_MAINTAINED = frozenset({"tab_2", "tab_4"})
+#: Pages migrated off the compatibility layer are DERIVED, not listed: a page is hand-maintained the moment it no
+#: longer imports `qt_shaped`. The splitter's cross-check therefore keeps its meaning for the pages still on the layer
+#: without every migration wave editing this file (three parallel cells would fight over one literal). The generator
+#: and this cross-check retire together with `qt_shaped.py`.
+def _hand_maintained() -> frozenset[str]:
+    root = Path(__file__).resolve().parents[2] / "src" / "ui" / "pages"
+    return frozenset(page.stem for page in root.glob("*.py") if "qt_shaped" not in page.read_text(encoding="utf-8"))
+
+
+HAND_MAINTAINED = _hand_maintained()
+
+#: Adapter -> the toolkit class that replaces it. A pinned widget is accepted as either until the layer is deleted, so a
+#: migration wave never has to edit this file; the pin still fails on any OTHER class (a stock control, a wrong widget).
+TOOLKIT_SUCCESSORS = {
+    "QtSpinBox": "Stepper",
+    "QtDoubleSpinBox": "DoubleSpinBox",
+    "QtProgressBar": "ToastProgressBar",
+    "QtComboBox": "ComboBox",
+    "QtCheckBox": "CheckBox",
+    "QtButton": "Button",
+    "QtLabel": "Text",
+    "QtLineEdit": "CustomLineEdit",
+}
 
 PAGES_PIN: dict[str, dict[str, str]] = {
     "tab_2": {"scene_change_detection_threshold": "DoubleSpinBox"},
@@ -235,11 +253,21 @@ def _splitter_decision() -> dict[str, dict[str, str]]:
 # the pins
 # ----------------------------------------------------------------------------------------------------------------
 
+def _mismatches(actual: dict[str, str], expected: dict[str, str]) -> list[str]:
+    """Per-widget comparison that accepts the toolkit successor of a pinned adapter, never another class."""
+    if actual.keys() != expected.keys():
+        return [f"widgets {sorted(actual)} vs pin {sorted(expected)}"]
+    return [
+        f"{name}: builds {actual[name]}, pin {want} (or {TOOLKIT_SUCCESSORS.get(want)})"
+        for name, want in expected.items()
+        if actual[name] != want and TOOLKIT_SUCCESSORS.get(want) != actual[name]
+    ]
+
+
 def test_every_primitive_widget_is_pinned_with_the_class_the_page_builds() -> None:
     for module, expected in PAGES_PIN.items():
-        actual = _page_widgets(module)
-        assert actual == expected, (
-            f"{module}.py builds {actual}, the pin says {expected} - {HINT}")
+        problems = _mismatches(_page_widgets(module), expected)
+        assert not problems, f"{module}.py: {'; '.join(problems)} - {HINT}"
 
 
 def test_no_page_builds_an_unpinned_primitive() -> None:
