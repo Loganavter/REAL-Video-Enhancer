@@ -43,12 +43,33 @@ def steps(window) -> list[tuple[str, object]]:
     for index in range(stack.count()):
         page = stack.widget(index)
         found.append((f"nav{index}", lambda i=index: stack.setCurrentIndex(i)))
-        tabs = page.findChild(QTabWidget) if page is not None else None
+        tabs = _tab_host(page)
         if tabs is not None and tabs.count() > 1:
             for tab_index in range(tabs.count()):
                 found.append((f"nav{index}-tab{tab_index}",
                               lambda t=tabs, j=tab_index: t.setCurrentIndex(j)))
     return found
+
+
+def _tab_host(page):
+    """The page's tab container: the stock `QTabWidget`, or the toolkit `TopTabHost` that replaced it.
+
+    A migrated page has no `QTabWidget` left, and `findChild(QTabWidget)` then reports nothing - which silently
+    dropped every `nav3-tabN` stem from the walk and made a tab-host conversion unmeasurable (measured on the settings
+    page: the capture wrote `nav3` only, and the tab comparison ran against a page it never captured).
+    """
+    from PySide6.QtWidgets import QTabWidget, QWidget
+
+    tabs = page.findChild(QTabWidget) if page is not None else None
+    if tabs is not None:
+        return tabs
+    if page is None:
+        return None
+    # The toolkit host keeps the Designer's object name (`tabWidget`), so it is found by name, not by class.
+    host = page.findChild(QWidget, "tabWidget")
+    if host is not None and hasattr(host, "count") and hasattr(host, "setCurrentIndex"):
+        return host
+    return None
 
 
 def install(window) -> None:

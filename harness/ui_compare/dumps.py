@@ -114,7 +114,10 @@ def current_page_root(tree: dict) -> str | None:
     page = find(root, page_name) or {}
     tabs = find(page, "tabWidget") or find(page, "processSettingsContainer")
     if tabs is not None:
-        holder = find(tabs, "qt_tabwidget_stackedwidget") or tabs
+        # The toolkit's `TopTabHost` keeps its pages in a `QStackedWidget` named `TopTabStack` next to the tab strip;
+        # without this branch the strip itself (`TopTabBar`, the first visible child) would be reported as the page,
+        # and every widget comparison against a stock dump paired nothing (measured after a tab-host migration).
+        holder = find(tabs, "qt_tabwidget_stackedwidget") or find(tabs, "TopTabStack") or tabs
         tab_name = visible_page(holder)
         if tab_name:
             return tab_name

@@ -39,14 +39,37 @@ def _image(path: str):
     return image
 
 
-def _page_pixels(stock_img, new_img) -> dict:
+def _page_pixels(stock_img, new_img, mask_rects=()) -> dict:
     import numpy as np
 
     if stock_img is None or new_img is None or stock_img.shape != new_img.shape:
         return {"mean": float("nan"), "over8_pct": float("nan"), "max": 0, "shape_mismatch": True}
-    diff = np.abs(stock_img.astype(np.int16) - new_img.astype(np.int16)).max(axis=2)
+    stock = stock_img
+    new = new_img
+    if mask_rects:
+        # Panes whose CONTENT is environment, not chrome (the release notes render the bundled CHANGELOG.md through
+        # markdown, the system-info pane prints the host's runtime). The structural dump already freezes them
+        # (RVE_UI_STABLE_TEXT); without the same mask here the pixel gate reports the same file rendered from a
+        # different bundle as a chrome regression - measured: nav0 3.12 % where every row above the pane was identical.
+        stock = stock_img.copy()
+        new = new_img.copy()
+        for x, y, w, h in mask_rects:
+            stock[max(0, y):y + h, max(0, x):x + w] = 0
+            new[max(0, y):y + h, max(0, x):x + w] = 0
+    diff = np.abs(stock.astype(np.int16) - new.astype(np.int16)).max(axis=2)
     return {"mean": round(float(diff.mean()), 3), "over8_pct": round(float((diff > 8).mean()) * 100.0, 3),
             "max": int(diff.max())}
+
+
+def _rects_for(tree: dict, names: set[str]) -> list[tuple[int, int, int, int]]:
+    """Widget rectangles by object name, in page coordinates (the dump's geometry space)."""
+    rects = []
+    for path, node in flatten(tree).items():
+        if path.rsplit("/", 1)[-1] in names:
+            geometry = node.get("geometry")
+            if geometry and len(geometry) == 4:
+                rects.append(tuple(int(value) for value in geometry))
+    return rects
 
 
 def main() -> int:
@@ -66,6 +89,10 @@ def main() -> int:
     ap.add_argument("--class-alias", action="append", default=[], metavar="NEW=OLD")
     ap.add_argument("--prune-under", action="append", default=[], metavar="NAME")
     ap.add_argument("--ignore-text", action="append", default=[])
+    ap.add_argument("--mask-widgets", default="",
+                    help="comma-separated object names whose CONTENT is environment, not chrome (release notes, "
+                         "system info): their rectangles are blanked in both images for the page metric, the same "
+                         "freeze RVE_UI_STABLE_TEXT applies to the structural side")
     ap.add_argument("--include-hidden", action="store_true",
                     help="compare widgets that are hidden on either side; by default only widgets visible in BOTH "
                          "builds count, because a hidden widget keeps stale geometry and its page may simply not be "
@@ -108,7 +135,11 @@ def main() -> int:
         for row in rows:
             row.page = name
         widgets_all.extend(rows)
-        summary = _page_pixels(stock_img, new_img)
+        mask_rects = []
+        if args.mask_widgets:
+            names = {part.strip() for part in args.mask_widgets.split(",") if part.strip()}
+            mask_rects = _rects_for(new_tree, names) + _rects_for(stock_tree, names)
+        summary = _page_pixels(stock_img, new_img, mask_rects)
         summary["page"] = name
         page_rows.append(summary)
         tree_rows.append(page_deltas(name, stock_tree, new_tree, aliases))
