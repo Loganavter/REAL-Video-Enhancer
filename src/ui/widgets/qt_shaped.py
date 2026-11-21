@@ -48,6 +48,18 @@ from sli_ui_toolkit.widgets import (
 from sli_ui_toolkit.ui.widgets.atomic._step_buttons import StepButtonsMixin
 
 
+#: RVE's control text is 12 PIXELS (the Designer's QSS/`retranslate` sizing). A toolkit control paints with the UI font
+#: it is given, and an inherited font is the toolkit's own (16 px at the live scale) - measured as a 34 px combo field
+#: and 23 px checkbox rows in 29/18 px rows. Adapters state the host's size instead of inheriting it.
+RVE_CONTROL_FONT_PX = 12
+
+
+def _rve_control_font(widget) -> QFont:
+    font = QFont(widget.font())
+    font.setPixelSize(RVE_CONTROL_FONT_PX)
+    return font
+
+
 def _constraints(widget) -> tuple:
     return (widget.minimumSize(), widget.maximumSize(), widget.sizePolicy())
 
@@ -240,6 +252,7 @@ class QtButton(Button):
         # QPushButton's own policy: as wide as it needs, exactly as tall as its hint. The toolkit's button is happy to
         # fill the cell, which turned a 27 px button into a 96 px slab inside its row (measured on the settings page).
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.setFont(_rve_control_font(self))
 
     def setSizePolicy(self, horizontal, vertical=None) -> None:   # noqa: N802
         if isinstance(horizontal, QSizePolicy):
@@ -431,6 +444,7 @@ class QtCheckBox(CheckBox):
         self._stock_hint = None
         self.toggled.connect(lambda checked: self.stateChanged.emit(2 if checked else 0))
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.setFont(_rve_control_font(self))
         # The toolkit's Button base caps every instance at 36x36. Clearing only the MINIMUM left the maximum in place,
         # so a labelled checkbox was clipped to a 36 px strip with its text cut off (measured on the process page).
         self.setMinimumSize(0, 0)
@@ -537,6 +551,11 @@ class QtComboBox(ComboBox):
         # squeezes the label next to it to its hint (measured: the settings rows lost 240 px of label). A layout shares
         # spare width among the Preferred items, which is what the Designer's rows were laid out against.
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        # The field's font is the Designer's 12 PIXELS, stated here instead of inherited: the toolkit's button pipeline
+        # applies its own UI font (16 px at the live scale), and the stock oracle below measures under `self.font()`, so
+        # an inherited font made the field 34 px tall and 22 px too wide in a 29 px row (measured: 126x34 against the
+        # stock 104x29 on the quality-preset row).
+        self.setFont(_rve_control_font(self))
 
     def _invalidate(self) -> None:
         self._stock_hint = None
@@ -736,6 +755,7 @@ class _QtSpinShape:
         self.setMaximumHeight(16777215)
         # QAbstractSpinBox's own policy (measured on the stock class): as wide as its hint, exactly as tall.
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.setFont(_rve_control_font(self))
 
     def _release_width_pin(self) -> None:
         # `setMinimumWidth(0)` restores the toolkit's floor, except where the Designer stated one of its own.

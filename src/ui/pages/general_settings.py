@@ -175,7 +175,7 @@ class GeneralSettingsPage:
         # a token-painted panel one pixel tall (the deleted rule painted the frame white, which is `dialog.border`).
         self.line = SurfacePanel(self.scrollAreaWidgetContents_4, background_token="dialog.border")
         self.line.setObjectName(u"line")
-        self.line.setFixedHeight(1)
+        self.line.setFixedHeight(3)   # the stock QFrame HLine is 3 px; 1 px shortened the whole tab by 2
         self.line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.verticalLayout_32.addWidget(self.line)
         self.widget_3 = QWidget(self.scrollAreaWidgetContents_4)
