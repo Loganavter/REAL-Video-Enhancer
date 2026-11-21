@@ -80,6 +80,9 @@ LOOK: dict[str, tuple[str, str]] = {
     "QCheckBox::indicator::checked{image: check-square.svg}": ("checkbox.check", "#ffffff"),
     "QProgressBar::chunk{background-color}": ("accent", "#ffffff"),
     "QProgressBar{background-color}": ("slider.track.background", "#2c313c"),
+    # The Process page's own rule (`#progressBar{background-color:#343b47}`) - a PER-WIDGET override of the global bar
+    # colour. It was deleted with the page stylesheet and is stated as its own token so the widget can carry it.
+    "#progressBar{background-color}": ("progress.track.background", "#343b47"),
     "QPushButton::toolTip / menus{background-color}": ("tooltip.background", "#676e7b"),
     "QToolTip{color}": ("tooltip.text", "#ffffff"),
 }

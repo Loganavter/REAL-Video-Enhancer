@@ -287,7 +287,7 @@ class ProcPagePage:
         self.killRenderButton.setIconSize(QSize(40, 45))
         self.onRenderButtonsContiainer.addWidget(self.killRenderButton)
         self.horizontalLayout_32.addLayout(self.onRenderButtonsContiainer)
-        self.progressBar = QtProgressBar(self.widget_13)
+        self.progressBar = QtProgressBar(self.widget_13, track_token="progress.track.background")
         self.progressBar.setObjectName(u"progressBar")
         sizePolicy7.setHeightForWidth(self.progressBar.sizePolicy().hasHeightForWidth())
         self.progressBar.setSizePolicy(sizePolicy7)

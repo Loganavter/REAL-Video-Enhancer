@@ -967,8 +967,11 @@ class QtProgressBar(ToastProgressBar):
     WIDTH = 91
     HEIGHT = 25
 
-    def __init__(self, parent=None) -> None:
+    TRACK_TOKEN = "slider.track.background"
+
+    def __init__(self, parent=None, *, track_token: str | None = None) -> None:
         super().__init__(parent, height=self.HEIGHT)
+        self._track_token = track_token or self.TRACK_TOKEN
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def sizeHint(self) -> QSize:                             # noqa: N802
@@ -992,7 +995,7 @@ class QtProgressBar(ToastProgressBar):
         return ""
 
     def _track_color(self) -> QColor:
-        return _token("slider.track.background") or super()._track_color()
+        return _token(self._track_token) or super()._track_color()
 
     def _fill_color(self) -> QColor:
         return _token("accent") or super()._fill_color()

@@ -125,7 +125,14 @@ def widget_deltas(page: str, stock_tree: dict, new_tree: dict, stock_img, new_im
             if colours_a[key] != colours_b[key]:
                 row.colours[key] = (colours_a[key], colours_b[key])
         if stock_img is not None and new_img is not None:
-            row.ink_pct = ink_share(box_of(stock_img, rect_a), box_of(new_img, rect_a))
+            stock_box = box_of(stock_img, rect_a)
+            new_box = box_of(new_img, rect_b)
+            if stock_box is None or new_box is None:
+                # The widget is outside the captured window (scrolled out or below the fold). `ink_share` reports 100 %
+                # for a missing crop, which made every below-the-fold container the "worst" row; a widget that is not on
+                # screen is not evidence about the paint.
+                continue
+            row.ink_pct = ink_share(stock_box, new_box)
         rows.append(row)
     return rows
 
