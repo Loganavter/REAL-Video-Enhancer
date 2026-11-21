@@ -30,7 +30,7 @@ from src.ui.typography import apply, BODY_PT
 # is the stock `QScrollArea` without a surface of its own - the body is painted by `procPage`'s
 # `QWidget{background-color:#16191d}` rule - and `content_inset=1` keeps the stock StyledPanel frame's 1 px inset.
 # `ImageLabel` is the pixmap counterpart of `QLabel`; the alignment is stated because Qt's default is left+vcenter.
-from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel, SurfaceScrollArea
+from sli_ui_toolkit.widgets import RichTextView, SurfacePanel, ImageLabel, SurfaceScrollArea
 
 
 class GeneralSettingsPage:
@@ -171,12 +171,12 @@ class GeneralSettingsPage:
         self.outputFileText.setMinimumSize(QSize(0, 30))
         self.outputFileText.setMaximumSize(QSize(10000, 30))
         self.verticalLayout_32.addWidget(self.outputFileText)
-        self.line = QFrame(self.scrollAreaWidgetContents_4)
+        # A separator is one painted pixel: the toolkit's `Divider` is a button-region spec, not a widget, so the line is
+        # a token-painted panel one pixel tall (the deleted rule painted the frame white, which is `dialog.border`).
+        self.line = SurfacePanel(self.scrollAreaWidgetContents_4, background_token="dialog.border")
         self.line.setObjectName(u"line")
-        self.line.setAutoFillBackground(False)
-        self.line.setStyleSheet(u"background: white")
-        self.line.setFrameShape(QFrame.Shape.HLine)
-        self.line.setFrameShadow(QFrame.Shadow.Sunken)
+        self.line.setFixedHeight(1)
+        self.line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.verticalLayout_32.addWidget(self.line)
         self.widget_3 = QWidget(self.scrollAreaWidgetContents_4)
         self.widget_3.setObjectName(u"widget_3")
@@ -518,9 +518,7 @@ class GeneralSettingsPage:
         sizePolicy5.setHeightForWidth(self.addToRenderQueueButton.sizePolicy().hasHeightForWidth())
         self.addToRenderQueueButton.setSizePolicy(sizePolicy5)
         self.addToRenderQueueButton.setMaximumSize(QSize(200, 35))
-        self.addToRenderQueueButton.setStyleSheet(u"QPushButton{\n"
-"text-align: center;\n"
-"}")
+        # No stylesheet: a toolkit button paints itself; the deleted rule only repeated its own alignment.
         icon2 = QIcon()
         icon2.addFile(u":/icons/icons/plus-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.addToRenderQueueButton.setIcon(icon2)
@@ -534,10 +532,9 @@ class GeneralSettingsPage:
         self.widget_26.setMaximumSize(QSize(42344, 200))
         self.horizontalLayout_22 = QHBoxLayout(self.widget_26)
         self.horizontalLayout_22.setObjectName(u"horizontalLayout_22")
-        # Stays stock: this panel's content is HTML (`setHtml`) and it scrolls its own content; `Text(mode="document")`
-        # has no `setHtml` and never scrolls, and `ConsoleView` is not exported by `sli_ui_toolkit.widgets`. Named as a
-        # toolkit gap in DONE.md, per the layer-B rule for a missing method.
-        self.inputVideoInfoTextEdit = QTextEdit(self.widget_26)
+        # A read-only rich-text panel: the toolkit's `RichTextView` takes the host's `setText`/`setFontPointSize` calls
+        # and scrolls its own content (the plate is `surface.list`, the colour the deleted page rule carried).
+        self.inputVideoInfoTextEdit = RichTextView(self.widget_26, padding=(10, 5, 10, 5))
         self.inputVideoInfoTextEdit.setObjectName(u"inputVideoInfoTextEdit")
         self.inputVideoInfoTextEdit.setEnabled(False)
         sizePolicy3.setHeightForWidth(self.inputVideoInfoTextEdit.sizePolicy().hasHeightForWidth())
@@ -545,8 +542,8 @@ class GeneralSettingsPage:
         self.inputVideoInfoTextEdit.setMinimumSize(QSize(0, 190))
         self.inputVideoInfoTextEdit.setMaximumSize(QSize(100000, 180))
         self.inputVideoInfoTextEdit.setAccessibleDescription(u"")
-        self.inputVideoInfoTextEdit.setStyleSheet(u"\n"
-"QTextEdit:disabled{color:white;}")
+        # No stylesheet: the pane paints its own text and plate; the deleted rule only forced white on a disabled
+        # editor, which is the colour this pane's token already gives it.
         self.inputVideoInfoTextEdit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.inputVideoInfoTextEdit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.inputVideoInfoTextEdit.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)

@@ -294,16 +294,23 @@ def _widget_calls(page: Page, setup: list[Stmt]) -> dict[str, set[str]]:
 
 #: Widgets that stay stock even though their call set looks migratable - the HOST feeds them an API the replacement
 #: lacks, which a page-only scan cannot see. Regenerating without this would silently swap them for the wrong class.
-STOCK_WIDGETS: dict[str, str] = {
-    "changeLogText": "HomeTab renders markdown into it (setMarkdown) and it is longer than its panel: ConsoleView "
-                     "shows plain text, Text never scrolls",
-    "systemInfoText": "a read-only rich-text plate that carries its own QSS padding; Text has no plate property",
+STOCK_WIDGETS: dict[str, str] = {}
+
+#: A `QTextEdit` is one of two widgets and the page cannot say which: a log (console, line-oriented) or a rich-text pane
+#: (a plate, wrapping, markdown). The splitter takes the answer from the host's own usage, stated here per widget.
+WIDGET_ADAPTERS: dict[str, str] = {
+    "renderOutput": "ConsoleView",         # src/ui/ProcessTab.py feeds it setPlainText + a bottom pin
+    "changeLogText": "RichTextView",       # HomeTab renders markdown; the pane is taller than its panel
+    "systemInfoText": "RichTextView",      # a read-only information plate
+    "inputVideoInfoTextEdit": "RichTextView",  # a read-only HTML plate
 }
 
 
 def _toolkit_class(qt_class: str, widget: str, calls: dict[str, set[str]]) -> str | None:
     if widget in STOCK_WIDGETS:
         return None
+    if widget in WIDGET_ADAPTERS:
+        return WIDGET_ADAPTERS[widget]
     entry = TOOLKIT.get(qt_class)
     if entry is None:
         return None

@@ -30,7 +30,7 @@ from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 # (Qt-shaped already: `setPixmap`/`setScaledContents`/`setText`). The Designer's `QLabel` paints a pixmap-only label at
 # `AlignLeft|AlignVCenter`; `ImageLabel` defaults to centre, so the alignment is stated to keep the logo where it is
 # (measured offscreen: identical pixels at this alignment, mean 0.00 against the stock label).
-from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel
+from sli_ui_toolkit.widgets import RichTextView, SurfacePanel, ImageLabel
 
 
 class HomePagePage:
@@ -42,32 +42,9 @@ class HomePagePage:
         """Build the widget tree and return the page root."""
         self.homePage = SurfacePanel(background_token="surface.page")
         self.homePage.setObjectName(u"homePage")
-        self.homePage.setStyleSheet(u"QWidget{\n"
-"background-color:#16191d\n"
-"\n"
-"}\n"
-"QPushButton{\n"
-"    background-color:#2c313c;\n"
-"	text-align:left;\n"
-"	padding:5px 10px;\n"
-"	border-radius: 10px;\n"
-"    color: #fff;\n"
-"}\n"
-"QPushButton:checked{\n"
-"	background-color:#676e7b;\n"
-"}\n"
-"QPushButton:hover{\n"
-"	background-color:#343b47;\n"
-"}\n"
-"QPushButton::toolTip{\n"
-"background-color:#676e7b;\n"
-"}\n"
-"QTextEdit{\n"
-"background-color:#2c313c;\n"
-"border-radius: 10px;\n"
-"padding:5px 10px;\n"
-"}\n"
-"")
+        # Layer C: the page body paints itself; its buttons are toolkit plates. The two read-only panes are the
+        # toolkit's `RichTextView` (token plate, 10 px radius, padding 10/5) - the colour and padding the deleted
+        # `QTextEdit` rule carried.
         self.gridLayout_2 = QGridLayout(self.homePage)
         self.gridLayout_2.setObjectName(u"gridLayout_2")
         self.horizontalLayout_28 = QHBoxLayout()
@@ -126,11 +103,11 @@ class HomePagePage:
         self.gridLayout_2.addWidget(self.widget_8, 1, 0, 1, 1)
         self.horizontalLayout_30 = QHBoxLayout()
         self.horizontalLayout_30.setObjectName(u"horizontalLayout_30")
-        self.changeLogText = QTextEdit(self.homePage)
+        self.changeLogText = RichTextView(self.homePage)
         self.changeLogText.setObjectName(u"changeLogText")
         self.changeLogText.setReadOnly(True)
         self.horizontalLayout_30.addWidget(self.changeLogText)
-        self.systemInfoText = QTextEdit(self.homePage)
+        self.systemInfoText = RichTextView(self.homePage)
         self.systemInfoText.setObjectName(u"systemInfoText")
         apply(self.systemInfoText, GROUP_TITLE_PT)
         self.systemInfoText.setReadOnly(True)

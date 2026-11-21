@@ -60,11 +60,8 @@ class ProcPagePage:
         # Layer C: the page body paints itself (`surface.page`); every control rule this sheet carried styled a widget
         # that is now a toolkit control painting from tokens. The one rule kept is the read-only rich-text panel on
         # the General tab, which is still a stock `QTextEdit` (a toolkit row: no rich-text pane with a scroll host).
-        self.procPage.setStyleSheet(u"QTextEdit{\n"
-"background-color:#2c313c;\n"
-"border-radius: 10px;\n"
-"padding:5px 10px;\n"
-"}")
+        # No page stylesheet: every control on this page (and its tabs) paints itself from tokens. The read-only
+        # rich-text panes are the toolkit's `RichTextView`, which carries its own plate.
         self.gridLayout_3 = QGridLayout(self.procPage)
         self.gridLayout_3.setObjectName(u"gridLayout_3")
         self.processInfoContainer = SurfacePanel(self.procPage, background_token="dialog.background", radius=10)
@@ -183,10 +180,8 @@ class ProcPagePage:
         sizePolicy5.setHeightForWidth(self.processContainer.sizePolicy().hasHeightForWidth())
         self.processContainer.setSizePolicy(sizePolicy5)
         self.processContainer.setMaximumSize(QSize(500, 16777215))
-        self.processContainer.setStyleSheet(u"*:disabled{\n"
-" \n"
-"	color:gray;\n"
-"}")
+        # No stylesheet: a disabled toolkit control takes its colour from its token. The rule only tinted the two stock
+        # queue lists, which carry their own look until the toolkit grows a compact list.
         self.verticalLayout_7 = QVBoxLayout(self.processContainer)
         self.verticalLayout_7.setSpacing(0)
         self.verticalLayout_7.setObjectName(u"verticalLayout_7")

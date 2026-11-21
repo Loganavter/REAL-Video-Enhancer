@@ -32,7 +32,8 @@ DESIGNER = ROOT / "harness" / "fixtures" / "designer_mainwindow.py"
 #: The Qt classes this pin owns (W4d), and the adapter that replaces them where one exists.
 WATCHED = ("QSpinBox", "QDoubleSpinBox", "QProgressBar", "QListWidget", "QTextEdit")
 #: Replacement classes: the `Qt*` adapters from `qt_shaped.py`, plus toolkit classes a page constructs directly.
-ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget", "QtTextEdit", "ConsoleView")
+ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget", "QtTextEdit", "ConsoleView",
+                 "RichTextView")
 
 #: page module -> {designer widget name: the class the page builds}.
 #: Stock entries carry the reason in `GAPS` - they are not accidental leftovers.
@@ -42,7 +43,7 @@ PAGES_PIN: dict[str, dict[str, str]] = {
     "general_settings": {
         "interpolationMultiplierSpinBox": "QtDoubleSpinBox",
         "upscaleScaleSpinBox": "QtDoubleSpinBox",
-        "inputVideoInfoTextEdit": "QTextEdit",
+        "inputVideoInfoTextEdit": "RichTextView",
     },
     "proc_page": {
         "startTimeSpinBox": "QtDoubleSpinBox",
@@ -53,7 +54,7 @@ PAGES_PIN: dict[str, dict[str, str]] = {
         "renderQueueListWidget": "QListWidget",
         "OutputFilesListWidget": "QListWidget",
     },
-    "home_page": {"changeLogText": "QTextEdit", "systemInfoText": "QTextEdit"},
+    "home_page": {"changeLogText": "RichTextView", "systemInfoText": "RichTextView"},
     "tab_5": {"renderOutput": "ConsoleView"},
 }
 
@@ -63,10 +64,6 @@ GAPS: dict[str, str] = {
     "renderQueueListWidget": "IconListWidget is a nav list (per-row Button, 44 px rows, 8 px host spacing) and has no "
                              "insertItem/takeItem, which RenderQueue reorders the queue with",
     "OutputFilesListWidget": "same nav list - no compact text row, no addItem/insertItem",
-    "inputVideoInfoTextEdit": "Text(mode='document') has no HTML setter; this panel's content is HTML",
-    "changeLogText": "Text(mode='document') never scrolls and the changelog is longer than its panel; ConsoleView has "
-                     "no markdown",
-    "systemInfoText": "a plain read-only panel with the same QTextEdit QSS as the changelog it sits beside",
 }
 
 #: adapter -> (height policy, width policy, size policy, bases) exactly as the adapter declares it.

@@ -139,12 +139,28 @@ def install(window) -> None:
             _finish(result)
             print(f"capture-server: render {result}", flush=True)
 
+        def progress_sample() -> dict:
+            """What the UI says about the job right now - a timeout without this cannot tell a slow model load from a
+            frame loop that never advances, and the previous run's `finished: False` said only that."""
+            bar = getattr(window, "progressBar", None)
+            queue = getattr(window, "renderQueue", None)
+            sample = {
+                "bar": int(bar.value()) if bar is not None else None,
+                "bar_max": int(bar.maximum()) if bar is not None else None,
+                "queue": len(getattr(queue, "queue", []) or []) if queue is not None else None,
+                "start_enabled": bool(window.startRenderButton.isEnabled()),
+                "status": (getattr(window, "STATUS", None).text() if getattr(window, "STATUS", None) is not None else None),
+            }
+            return sample
+
         def wait_finish(ticks: int = 0) -> None:
+            if ticks % 50 == 0:                  # one sample every 5 s, so 15 per minute of a long model load
+                result.setdefault("trace", []).append({"t": round(time.time() - started_at, 1), **progress_sample()})
             if window.startRenderButton.isEnabled() and result["started"]:
                 result["finished"] = True
                 finish()
                 return
-            if ticks > 3000:                     # 3000 * 100 ms = 5 min
+            if ticks > 9000:                     # 9000 * 100 ms = 15 min
                 finish("timeout waiting for the render to finish")
                 return
             QTimer.singleShot(100, lambda: wait_finish(ticks + 1))
