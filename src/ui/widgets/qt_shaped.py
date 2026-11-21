@@ -415,7 +415,7 @@ class QtCheckBox(CheckBox):
     INDICATOR_SIZE = 16
     INDICATOR_RADIUS = 2
     SPACING = 6
-    PADDING_H = 3
+    PADDING_H = 2
     PADDING_V = 0
 
     """`QCheckBox`'s shape over `CheckBox` (Qt passes the parent first and sets the text later).
