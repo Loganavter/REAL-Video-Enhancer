@@ -167,7 +167,7 @@ class DownloadPagePage:
         # Layer B3: the stock area was transparent (`QScrollArea{background:transparent}` in the page rule) and its
         # scrollbar persistent; the overlay counterpart keeps the transparent surface (measured #16191d = the page)
         # and draws a 10 px overlay bar in a reserved gutter instead of the stock 14 px bar (viewport 368 vs 362 wide).
-        self.scrollArea_2 = OverlayScrollArea(self.backendSelectContainer)
+        self.scrollArea_2 = OverlayScrollArea(self.backendSelectContainer, content_inset=1, reserve_scrollbar_space=False)
         self.scrollArea_2.setObjectName(u"scrollArea_2")
         sizePolicy13 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         sizePolicy13.setHorizontalStretch(0)
