@@ -9,18 +9,56 @@ from __future__ import annotations
 
 from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QHBoxLayout, QSizePolicy,
+from PySide6.QtWidgets import (QAbstractScrollArea, QHBoxLayout, QSizePolicy,
     QSpacerItem, QTextEdit, QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import RVE_CONTROL_FONT_PX, SEPARATOR_HEIGHT, STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
+# The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CustomLineEdit` for a
+# `QLineEdit`, `Button` for a `QPushButton`, `CheckBox` for a `QCheckBox`, `ComboBox` for a `QComboBox` and
+# `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, RichTextView,
+    SurfacePanel, SurfaceScrollArea, Text)
 from src.ui.typography import apply, BODY_PT
 
-# Layer B (2026-11-21): the two widget classes this page no longer builds stock. `SurfaceScrollArea(surface_token=None)`
-# is the stock `QScrollArea` without a surface of its own - the body is painted by `procPage`'s
-# `QWidget{background-color:#16191d}` rule - and `content_inset=1` keeps the stock StyledPanel frame's 1 px inset.
-# `ImageLabel` is the pixmap counterpart of `QLabel`; the alignment is stated because Qt's default is left+vcenter.
-from sli_ui_toolkit.widgets import RichTextView, SurfacePanel, SurfaceScrollArea
+#: RVE's control text is 12 PIXELS (the Designer's sizing). The info pane's stock editor was 12 px, and
+#: `setFontPointSize` would convert through the screen DPI and render 16 px - the value used to come from the
+#: compatibility layer (`RVE_CONTROL_FONT_PX`), which this page no longer imports.
+RVE_CONTROL_FONT_PX = 12
+
+#: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
+#: not the toolkit's default 10: measured on these settings rows, the 2 px difference narrowed every row.
+STOCK_SCROLLBAR_WIDTH = 8
+
+#: The Designer's `QFrame` separator is a 3 px sunken line. The toolkit's `Divider` is a button-region spec, not a
+#: widget, so the line is a token-painted panel of that height (`SEPARATOR_HEIGHT` in the layer this page dropped).
+SEPARATOR_HEIGHT = 3
+
+#: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
+#: defaults to centre, which would move every value to the middle of its box.
+SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+
+def _row_checkbox(parent) -> CheckBox:
+    """A toolkit `CheckBox` shaped for an RVE settings row.
+
+    Two statements the row needs and the toolkit control does not carry as constructor arguments:
+
+    * **the row size.** `CheckBox` builds on `Button`'s standalone control size, so an empty box is a fixed 36x36
+      square (measured offscreen: `minimumSize() == maximumSize() == 36x36`, hint 24x30). RVE's row box is the
+      indicator plus its label - the row's own height decides - so the square is released here.
+    * **Qt's signal spelling.** RVE's glue binds `stateChanged(int)` (`src/ui/SettingsTab.py` writes the setting from
+      it). The toolkit declares `stateChanged`, but emits it from `setCheckState` only: a plain two-state click or
+      `setChecked` emits `toggled(bool)` alone (measured), so without this line a click would never be persisted.
+
+    Both belong in the toolkit's `CheckBox` (a `size=` for a row shape, `stateChanged` on every state change); until
+    it grows them they are stated once here instead of once per widget.
+    """
+    box = CheckBox(parent=parent)
+    box.setMinimumSize(0, 0)
+    box.setMaximumSize(16777215, 16777215)
+    box.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    box.toggled.connect(lambda checked: box.stateChanged.emit(2 if checked else 0))
+    return box
 
 
 class GeneralSettingsPage:
@@ -102,22 +140,36 @@ class GeneralSettingsPage:
         self.horizontalLayout_4.setSpacing(4)
         self.horizontalLayout_4.setObjectName(u"horizontalLayout_4")
         self.horizontalLayout_4.setContentsMargins(0, 0, 0, 0)
-        self.inputFileSelectButton = QtButton(self.inputFileContainer)
+        # The label is passed HERE, not only in `retranslate`: the toolkit's empty-label transition
+        # (`_apply_text_geometry`) raises the minimum height to 32 and unbounds the maximum, which would drop the
+        # Designer's 30 px row (the adapter restored those pins after every `setText`). A button born with its text
+        # takes no such pass, so the `setMinimumSize`/`setMaximumSize` statements below are what the layout sees.
+        self.inputFileSelectButton = Button(parent=self.inputFileContainer,
+            text=QCoreApplication.translate("MainWindow", u"Select Input File", None), variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.inputFileSelectButton.setObjectName(u"inputFileSelectButton")
         self.inputFileSelectButton.setMinimumSize(QSize(0, 30))
         self.inputFileSelectButton.setMaximumSize(QSize(16777215, 30))
         apply(self.inputFileSelectButton, BODY_PT)
-        self.inputFileSelectButton.setStyleSheet(u"")
+        # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
+        # fill the cell, which turns a row button into a slab when the page is taller than its contents. `size=(0, 0)`
+        # above drops the standalone 36x36 control size; this states the row's share. The Designer's `setStyleSheet("")`
+        # states no rule - a toolkit button paints itself - so it is dropped rather than kept as dead text.
+        self.inputFileSelectButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_4.addWidget(self.inputFileSelectButton)
-        self.batchSelectButton = QtButton(self.inputFileContainer)
+        self.batchSelectButton = Button(parent=self.inputFileContainer,
+            text=QCoreApplication.translate("MainWindow", u"Batch Select", None), variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.batchSelectButton.setObjectName(u"batchSelectButton")
         self.batchSelectButton.setMinimumSize(QSize(0, 30))
         self.batchSelectButton.setMaximumSize(QSize(16777215, 30))
         apply(self.batchSelectButton, BODY_PT)
-        self.batchSelectButton.setStyleSheet(u"")
+        self.batchSelectButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_4.addWidget(self.batchSelectButton)
         self.verticalLayout_32.addWidget(self.inputFileContainer)
-        self.inputFileText = QtLineEdit(self.scrollAreaWidgetContents_4)
+        self.inputFileText = CustomLineEdit(self.scrollAreaWidgetContents_4)
         self.inputFileText.setObjectName(u"inputFileText")
         sizePolicy7 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         sizePolicy7.setHorizontalStretch(0)
@@ -133,24 +185,30 @@ class GeneralSettingsPage:
         self.horizontalLayout_5 = QHBoxLayout(self.outputFileContainer)
         self.horizontalLayout_5.setObjectName(u"horizontalLayout_5")
         self.horizontalLayout_5.setContentsMargins(0, 0, 0, 0)
-        self.outputFileSelectButton = QtButton(self.outputFileContainer)
+        self.outputFileSelectButton = Button(parent=self.outputFileContainer,
+            text=QCoreApplication.translate("MainWindow", u"Select Output Folder", None), variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.outputFileSelectButton.setObjectName(u"outputFileSelectButton")
         self.outputFileSelectButton.setEnabled(False)
         self.outputFileSelectButton.setMinimumSize(QSize(0, 30))
         self.outputFileSelectButton.setMaximumSize(QSize(16777215, 30))
         apply(self.outputFileSelectButton, BODY_PT)
-        self.outputFileSelectButton.setStyleSheet(u"")
+        self.outputFileSelectButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_5.addWidget(self.outputFileSelectButton)
-        self.openOutputFolderButton = QtButton(self.outputFileContainer)
+        self.openOutputFolderButton = Button(parent=self.outputFileContainer,
+            text=QCoreApplication.translate("MainWindow", u"Open Output Folder", None), variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.openOutputFolderButton.setObjectName(u"openOutputFolderButton")
         self.openOutputFolderButton.setEnabled(False)
         self.openOutputFolderButton.setMinimumSize(QSize(0, 30))
         self.openOutputFolderButton.setMaximumSize(QSize(16777215, 30))
         apply(self.openOutputFolderButton, BODY_PT)
-        self.openOutputFolderButton.setStyleSheet(u"")
+        self.openOutputFolderButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_5.addWidget(self.openOutputFolderButton)
         self.verticalLayout_32.addWidget(self.outputFileContainer)
-        self.outputFileText = QtLineEdit(self.scrollAreaWidgetContents_4)
+        self.outputFileText = CustomLineEdit(self.scrollAreaWidgetContents_4)
         self.outputFileText.setObjectName(u"outputFileText")
         self.outputFileText.setEnabled(False)
         sizePolicy8 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
@@ -161,8 +219,9 @@ class GeneralSettingsPage:
         self.outputFileText.setMinimumSize(QSize(0, 30))
         self.outputFileText.setMaximumSize(QSize(10000, 30))
         self.verticalLayout_32.addWidget(self.outputFileText)
-        # A separator is one painted pixel: the toolkit's `Divider` is a button-region spec, not a widget, so the line is
-        # a token-painted panel one pixel tall (the deleted rule painted the frame white, which is `dialog.border`).
+        # A separator is one painted pixel of the Designer's 3 px sunken `QFrame`. The toolkit's `Divider` is a
+        # button-region spec, not a widget, so the line is a token-painted panel of `SEPARATOR_HEIGHT` (the deleted
+        # rule painted the frame white, which is `dialog.border`).
         self.line = SurfacePanel(self.scrollAreaWidgetContents_4, background_token="dialog.border")
         self.line.setObjectName(u"line")
         self.line.setFixedHeight(SEPARATOR_HEIGHT)
@@ -173,11 +232,11 @@ class GeneralSettingsPage:
         self.horizontalLayout_11 = QHBoxLayout(self.widget_3)
         self.horizontalLayout_11.setObjectName(u"horizontalLayout_11")
         self.horizontalLayout_11.setContentsMargins(0, 0, 0, 0)
-        self.label_12 = QtLabel(self.widget_3)
+        self.label_12 = Text(parent=self.widget_3)
         self.label_12.setObjectName(u"label_12")
         apply(self.label_12, BODY_PT)
         self.horizontalLayout_11.addWidget(self.label_12)
-        self.backendComboBox = QtComboBox(self.widget_3)
+        self.backendComboBox = ComboBox(self.widget_3)
         self.backendComboBox.setObjectName(u"backendComboBox")
         sizePolicy8.setHeightForWidth(self.backendComboBox.sizePolicy().hasHeightForWidth())
         self.backendComboBox.setSizePolicy(sizePolicy8)
@@ -195,14 +254,14 @@ class GeneralSettingsPage:
         self.horizontalLayout_56 = QHBoxLayout(self.widget_37)
         self.horizontalLayout_56.setObjectName(u"horizontalLayout_56")
         self.horizontalLayout_56.setContentsMargins(0, 0, 0, 0)
-        self.label_76 = QtLabel(self.widget_37)
+        self.label_76 = Text(parent=self.widget_37)
         self.label_76.setObjectName(u"label_76")
         apply(self.label_76, BODY_PT)
         self.horizontalLayout_56.addWidget(self.label_76)
         self.horizontalSpacer_21 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_56.addItem(self.horizontalSpacer_21)
         # A two-state box: the Designer's `setTristate(False)` below states exactly what the toolkit box is.
-        self.interpolateCheckBox = QtCheckBox(self.widget_37)
+        self.interpolateCheckBox = _row_checkbox(self.widget_37)
         self.interpolateCheckBox.setObjectName(u"interpolateCheckBox")
         self.interpolateCheckBox.setTristate(False)
         self.horizontalLayout_56.addWidget(self.interpolateCheckBox)
@@ -219,11 +278,11 @@ class GeneralSettingsPage:
         self.horizontalLayout_45 = QHBoxLayout(self.widget_28)
         self.horizontalLayout_45.setObjectName(u"horizontalLayout_45")
         self.horizontalLayout_45.setContentsMargins(0, 0, 0, 0)
-        self.label_14 = QtLabel(self.widget_28)
+        self.label_14 = Text(parent=self.widget_28)
         self.label_14.setObjectName(u"label_14")
         apply(self.label_14, BODY_PT)
         self.horizontalLayout_45.addWidget(self.label_14)
-        self.interpolateModelComboBox = QtComboBox(self.widget_28)
+        self.interpolateModelComboBox = ComboBox(self.widget_28)
         self.interpolateModelComboBox.setObjectName(u"interpolateModelComboBox")
         sizePolicy8.setHeightForWidth(self.interpolateModelComboBox.sizePolicy().hasHeightForWidth())
         self.interpolateModelComboBox.setSizePolicy(sizePolicy8)
@@ -237,19 +296,26 @@ class GeneralSettingsPage:
         self.horizontalLayout_55 = QHBoxLayout(self.interpolationContainer2)
         self.horizontalLayout_55.setObjectName(u"horizontalLayout_55")
         self.horizontalLayout_55.setContentsMargins(0, 0, 0, 0)
-        self.label_11 = QtLabel(self.interpolationContainer2)
+        self.label_11 = Text(parent=self.interpolationContainer2)
         self.label_11.setObjectName(u"label_11")
         apply(self.label_11, BODY_PT)
         self.horizontalLayout_55.addWidget(self.label_11)
-        self.interpolationMultiplierSpinBox = QtDoubleSpinBox(self.interpolationContainer2)
+        # `single_step=0.1` is the adapter's "Qt clamps and rounds to `decimals`" semantic, stated as the step the field
+        # actually shows: the toolkit's `DoubleSpinBox.setValue` SNAPS to `single_step` (its default 1.0 turns a stored
+        # `3.5` into `3.0`). The Designer then pins this box to `decimals(0)`, so the field shows whole multipliers.
+        self.interpolationMultiplierSpinBox = DoubleSpinBox(self.interpolationContainer2, single_step=0.1, decimals=1,
+            alignment=SPIN_ALIGNMENT)
         self.interpolationMultiplierSpinBox.setObjectName(u"interpolationMultiplierSpinBox")
         sizePolicy5.setHeightForWidth(self.interpolationMultiplierSpinBox.sizePolicy().hasHeightForWidth())
         self.interpolationMultiplierSpinBox.setSizePolicy(sizePolicy5)
         self.interpolationMultiplierSpinBox.setMinimumSize(QSize(75, 30))
         self.interpolationMultiplierSpinBox.setMaximumSize(QSize(75, 30))
-        self.interpolationMultiplierSpinBox.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.UpDownArrows)
+        # No `setButtonSymbols`: the toolkit field paints no ▲/▼ gutter and carries no symbol mode, so the Designer's
+        # `UpDownArrows` (the only mode it ever asks for) has nothing left to state here.
         self.interpolationMultiplierSpinBox.setDecimals(0)
-        self.interpolationMultiplierSpinBox.setMinimum(2.000000000000000)
+        # Qt's `setMinimum` is the one range spelling the toolkit field does not answer (`DoubleSpinBox` carries
+        # `setRange` only): the second bound is the layer's Qt default maximum (99.99), not the toolkit field's 100.0.
+        self.interpolationMultiplierSpinBox.setRange(2.000000000000000, 99.99)
         self.interpolationMultiplierSpinBox.setValue(2.000000000000000)
         self.horizontalLayout_55.addWidget(self.interpolationMultiplierSpinBox)
         self.verticalLayout_38.addWidget(self.interpolationContainer2)
@@ -258,13 +324,13 @@ class GeneralSettingsPage:
         self.horizontalLayout_31 = QHBoxLayout(self.sloMoModeContainer)
         self.horizontalLayout_31.setObjectName(u"horizontalLayout_31")
         self.horizontalLayout_31.setContentsMargins(0, 0, 0, 0)
-        self.label_36 = QtLabel(self.sloMoModeContainer)
+        self.label_36 = Text(parent=self.sloMoModeContainer)
         self.label_36.setObjectName(u"label_36")
         apply(self.label_36, BODY_PT)
         self.horizontalLayout_31.addWidget(self.label_36)
         self.horizontalSpacer_16 = QSpacerItem(226, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_31.addItem(self.horizontalSpacer_16)
-        self.sloMoModeCheckBox = QtCheckBox(self.sloMoModeContainer)
+        self.sloMoModeCheckBox = _row_checkbox(self.sloMoModeContainer)
         self.sloMoModeCheckBox.setObjectName(u"sloMoModeCheckBox")
         self.horizontalLayout_31.addWidget(self.sloMoModeCheckBox)
         self.verticalLayout_38.addWidget(self.sloMoModeContainer)
@@ -274,13 +340,13 @@ class GeneralSettingsPage:
         self.horizontalLayout_65 = QHBoxLayout(self.decompressModelContainer_2)
         self.horizontalLayout_65.setObjectName(u"horizontalLayout_65")
         self.horizontalLayout_65.setContentsMargins(0, 0, 0, 0)
-        self.label_86 = QtLabel(self.decompressModelContainer_2)
+        self.label_86 = Text(parent=self.decompressModelContainer_2)
         self.label_86.setObjectName(u"label_86")
         apply(self.label_86, BODY_PT)
         self.horizontalLayout_65.addWidget(self.label_86)
         self.horizontalSpacer_33 = QSpacerItem(324, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_65.addItem(self.horizontalSpacer_33)
-        self.decompressCheckBox = QtCheckBox(self.decompressModelContainer_2)
+        self.decompressCheckBox = _row_checkbox(self.decompressModelContainer_2)
         self.decompressCheckBox.setObjectName(u"decompressCheckBox")
         self.horizontalLayout_65.addWidget(self.decompressCheckBox)
         self.verticalLayout_32.addWidget(self.decompressModelContainer_2)
@@ -288,11 +354,11 @@ class GeneralSettingsPage:
         self.decompressContainer.setObjectName(u"decompressContainer")
         self.horizontalLayout_66 = QHBoxLayout(self.decompressContainer)
         self.horizontalLayout_66.setObjectName(u"horizontalLayout_66")
-        self.label_87 = QtLabel(self.decompressContainer)
+        self.label_87 = Text(parent=self.decompressContainer)
         self.label_87.setObjectName(u"label_87")
         apply(self.label_87, BODY_PT)
         self.horizontalLayout_66.addWidget(self.label_87)
-        self.decompressModelComboBox = QtComboBox(self.decompressContainer)
+        self.decompressModelComboBox = ComboBox(self.decompressContainer)
         self.decompressModelComboBox.setObjectName(u"decompressModelComboBox")
         sizePolicy8.setHeightForWidth(self.decompressModelComboBox.sizePolicy().hasHeightForWidth())
         self.decompressModelComboBox.setSizePolicy(sizePolicy8)
@@ -305,13 +371,13 @@ class GeneralSettingsPage:
         self.horizontalLayout_62 = QHBoxLayout(self.denoiseCheckBoxContainer)
         self.horizontalLayout_62.setObjectName(u"horizontalLayout_62")
         self.horizontalLayout_62.setContentsMargins(0, 0, 0, 0)
-        self.label_82 = QtLabel(self.denoiseCheckBoxContainer)
+        self.label_82 = Text(parent=self.denoiseCheckBoxContainer)
         self.label_82.setObjectName(u"label_82")
         apply(self.label_82, BODY_PT)
         self.horizontalLayout_62.addWidget(self.label_82)
         self.horizontalSpacer_32 = QSpacerItem(337, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_62.addItem(self.horizontalSpacer_32)
-        self.denoiseCheckBox = QtCheckBox(self.denoiseCheckBoxContainer)
+        self.denoiseCheckBox = _row_checkbox(self.denoiseCheckBoxContainer)
         self.denoiseCheckBox.setObjectName(u"denoiseCheckBox")
         self.horizontalLayout_62.addWidget(self.denoiseCheckBox)
         self.verticalLayout_32.addWidget(self.denoiseCheckBoxContainer)
@@ -324,11 +390,11 @@ class GeneralSettingsPage:
         self.horizontalLayout_63 = QHBoxLayout(self.widget_44)
         self.horizontalLayout_63.setObjectName(u"horizontalLayout_63")
         self.horizontalLayout_63.setContentsMargins(0, 0, 0, 0)
-        self.label_83 = QtLabel(self.widget_44)
+        self.label_83 = Text(parent=self.widget_44)
         self.label_83.setObjectName(u"label_83")
         apply(self.label_83, BODY_PT)
         self.horizontalLayout_63.addWidget(self.label_83)
-        self.denoiseModelComboBox = QtComboBox(self.widget_44)
+        self.denoiseModelComboBox = ComboBox(self.widget_44)
         self.denoiseModelComboBox.setObjectName(u"denoiseModelComboBox")
         sizePolicy8.setHeightForWidth(self.denoiseModelComboBox.sizePolicy().hasHeightForWidth())
         self.denoiseModelComboBox.setSizePolicy(sizePolicy8)
@@ -342,13 +408,13 @@ class GeneralSettingsPage:
         self.horizontalLayout_59 = QHBoxLayout(self.deblurCheckBoxContainer)
         self.horizontalLayout_59.setObjectName(u"horizontalLayout_59")
         self.horizontalLayout_59.setContentsMargins(0, 0, 0, 0)
-        self.label_78 = QtLabel(self.deblurCheckBoxContainer)
+        self.label_78 = Text(parent=self.deblurCheckBoxContainer)
         self.label_78.setObjectName(u"label_78")
         apply(self.label_78, BODY_PT)
         self.horizontalLayout_59.addWidget(self.label_78)
         self.horizontalSpacer_28 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_59.addItem(self.horizontalSpacer_28)
-        self.deblurCheckBox = QtCheckBox(self.deblurCheckBoxContainer)
+        self.deblurCheckBox = _row_checkbox(self.deblurCheckBoxContainer)
         self.deblurCheckBox.setObjectName(u"deblurCheckBox")
         self.horizontalLayout_59.addWidget(self.deblurCheckBox)
         self.verticalLayout_32.addWidget(self.deblurCheckBoxContainer)
@@ -363,11 +429,11 @@ class GeneralSettingsPage:
         self.horizontalLayout_60 = QHBoxLayout(self.widget_43)
         self.horizontalLayout_60.setObjectName(u"horizontalLayout_60")
         self.horizontalLayout_60.setContentsMargins(9, 9, 9, 9)
-        self.label_79 = QtLabel(self.widget_43)
+        self.label_79 = Text(parent=self.widget_43)
         self.label_79.setObjectName(u"label_79")
         apply(self.label_79, BODY_PT)
         self.horizontalLayout_60.addWidget(self.label_79)
-        self.deblurModelComboBox = QtComboBox(self.widget_43)
+        self.deblurModelComboBox = ComboBox(self.widget_43)
         self.deblurModelComboBox.setObjectName(u"deblurModelComboBox")
         sizePolicy8.setHeightForWidth(self.deblurModelComboBox.sizePolicy().hasHeightForWidth())
         self.deblurModelComboBox.setSizePolicy(sizePolicy8)
@@ -386,13 +452,13 @@ class GeneralSettingsPage:
         self.horizontalLayout_57 = QHBoxLayout(self.widget_39)
         self.horizontalLayout_57.setObjectName(u"horizontalLayout_57")
         self.horizontalLayout_57.setContentsMargins(0, 0, 0, 0)
-        self.label_77 = QtLabel(self.widget_39)
+        self.label_77 = Text(parent=self.widget_39)
         self.label_77.setObjectName(u"label_77")
         apply(self.label_77, BODY_PT)
         self.horizontalLayout_57.addWidget(self.label_77)
         self.horizontalSpacer_27 = QSpacerItem(40, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_57.addItem(self.horizontalSpacer_27)
-        self.upscaleCheckBox = QtCheckBox(self.widget_39)
+        self.upscaleCheckBox = _row_checkbox(self.widget_39)
         self.upscaleCheckBox.setObjectName(u"upscaleCheckBox")
         self.horizontalLayout_57.addWidget(self.upscaleCheckBox)
         self.horizontalLayout_58.addWidget(self.widget_39)
@@ -408,11 +474,11 @@ class GeneralSettingsPage:
         self.horizontalLayout = QHBoxLayout(self.widget)
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.horizontalLayout.setContentsMargins(0, 0, 0, 0)
-        self.label_7 = QtLabel(self.widget)
+        self.label_7 = Text(parent=self.widget)
         self.label_7.setObjectName(u"label_7")
         apply(self.label_7, BODY_PT)
         self.horizontalLayout.addWidget(self.label_7)
-        self.upscaleModelComboBox = QtComboBox(self.widget)
+        self.upscaleModelComboBox = ComboBox(self.widget)
         self.upscaleModelComboBox.setObjectName(u"upscaleModelComboBox")
         sizePolicy8.setHeightForWidth(self.upscaleModelComboBox.sizePolicy().hasHeightForWidth())
         self.upscaleModelComboBox.setSizePolicy(sizePolicy8)
@@ -426,20 +492,23 @@ class GeneralSettingsPage:
         self.horizontalLayout_50.setSpacing(6)
         self.horizontalLayout_50.setObjectName(u"horizontalLayout_50")
         self.horizontalLayout_50.setContentsMargins(0, 0, 0, 0)
-        self.label_72 = QtLabel(self.widget_42)
+        self.label_72 = Text(parent=self.widget_42)
         self.label_72.setObjectName(u"label_72")
         apply(self.label_72, BODY_PT)
         self.horizontalLayout_50.addWidget(self.label_72)
-        self.upscaleScaleSpinBox = QtDoubleSpinBox(self.widget_42)
+        # Same `single_step`/`decimals` statement as the interpolation multiplier: the toolkit field snaps `setValue`
+        # to its step, and the Designer then pins this box to whole scale factors (`decimals(0)`).
+        self.upscaleScaleSpinBox = DoubleSpinBox(self.widget_42, single_step=0.1, decimals=1, alignment=SPIN_ALIGNMENT)
         self.upscaleScaleSpinBox.setObjectName(u"upscaleScaleSpinBox")
         sizePolicy5.setHeightForWidth(self.upscaleScaleSpinBox.sizePolicy().hasHeightForWidth())
         self.upscaleScaleSpinBox.setSizePolicy(sizePolicy5)
         self.upscaleScaleSpinBox.setMinimumSize(QSize(75, 30))
         self.upscaleScaleSpinBox.setMaximumSize(QSize(75, 30))
-        self.upscaleScaleSpinBox.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.UpDownArrows)
+        # No `setButtonSymbols`: the toolkit field paints no ▲/▼ gutter and carries no symbol mode (see the
+        # interpolation multiplier above).
         self.upscaleScaleSpinBox.setDecimals(0)
-        self.upscaleScaleSpinBox.setMinimum(1.000000000000000)
-        self.upscaleScaleSpinBox.setMaximum(4.000000000000000)
+        # Qt's two range statements are the one call the toolkit field answers (`setRange`).
+        self.upscaleScaleSpinBox.setRange(1.000000000000000, 4.000000000000000)
         self.upscaleScaleSpinBox.setValue(2.000000000000000)
         self.horizontalLayout_50.addWidget(self.upscaleScaleSpinBox)
         self.verticalLayout_39.addWidget(self.widget_42)
@@ -454,24 +523,24 @@ class GeneralSettingsPage:
         self.horizontalLayout_qualityPresetRow = QHBoxLayout(self.qualityPresetRow)
         self.horizontalLayout_qualityPresetRow.setObjectName(u"horizontalLayout_qualityPresetRow")
         self.horizontalLayout_qualityPresetRow.setContentsMargins(0, 0, 0, 0)
-        self.qualityPresetLabel = QtLabel(self.qualityPresetRow)
+        self.qualityPresetLabel = Text(parent=self.qualityPresetRow)
         self.qualityPresetLabel.setObjectName(u"qualityPresetLabel")
         apply(self.qualityPresetLabel, BODY_PT)
         self.horizontalLayout_qualityPresetRow.addWidget(self.qualityPresetLabel)
         self.horizontalSpacer_qualityPreset = QSpacerItem(237, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_qualityPresetRow.addItem(self.horizontalSpacer_qualityPreset)
-        self.qualityPresetComboBox = QtComboBox(self.qualityPresetRow)
+        self.qualityPresetComboBox = ComboBox(self.qualityPresetRow)
         self.qualityPresetComboBox.addItem("")
         self.qualityPresetComboBox.addItem("")
         self.qualityPresetComboBox.setObjectName(u"qualityPresetComboBox")
         self.qualityPresetComboBox.setMinimumSize(QSize(0, 0))
         self.horizontalLayout_qualityPresetRow.addWidget(self.qualityPresetComboBox)
         self.verticalLayout_qualityPreset.addWidget(self.qualityPresetRow)
-        self.frameReuse = QtCheckBox(self.qualityPresetContainer)
+        self.frameReuse = _row_checkbox(self.qualityPresetContainer)
         self.frameReuse.setObjectName(u"frameReuse")
         self.frameReuse.setChecked(True)
         self.verticalLayout_qualityPreset.addWidget(self.frameReuse)
-        self.celReuse = QtCheckBox(self.qualityPresetContainer)
+        self.celReuse = _row_checkbox(self.qualityPresetContainer)
         self.celReuse.setObjectName(u"celReuse")
         self.celReuse.setChecked(False)
         self.verticalLayout_qualityPreset.addWidget(self.celReuse)
@@ -482,7 +551,10 @@ class GeneralSettingsPage:
         self.horizontalLayout_40.setSpacing(0)
         self.horizontalLayout_40.setObjectName(u"horizontalLayout_40")
         self.horizontalLayout_40.setContentsMargins(0, 0, 0, 0)
-        self.addToRenderQueueButton = QtButton(self.widget_25)
+        self.addToRenderQueueButton = Button(parent=self.widget_25,
+            text=QCoreApplication.translate("MainWindow", u" Add to Render Queue", None), variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.addToRenderQueueButton.setObjectName(u"addToRenderQueueButton")
         sizePolicy5.setHeightForWidth(self.addToRenderQueueButton.sizePolicy().hasHeightForWidth())
         self.addToRenderQueueButton.setSizePolicy(sizePolicy5)
