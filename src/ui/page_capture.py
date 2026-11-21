@@ -148,7 +148,18 @@ def install(window) -> None:
         QApplication.processEvents()
         QTimer.singleShot(per_page, lambda: snap(name, n))
 
-    def snap(name: str, n: int) -> None:
+    def snap(name: str, n: int, tries: int = 0) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        if not is_current(window, name) and tries < 20:
+            # The walk applies a page's action and grabs one tick later; a tab step used to photograph the page that was
+            # current before it (measured on a targeted capture). Re-apply and wait instead of writing a wrong pair.
+            _STEPS[n][1]()
+            QApplication.processEvents()
+            QTimer.singleShot(max(60, per_page // 4), lambda: snap(name, n, tries + 1))
+            return
+        if tries >= 20:
+            print(f"capture: {name} never became current - writing it anyway", flush=True)
         stabilise(window)
         pixmap = window.grab()
         path = os.path.join(out_dir, f"{name}.png")
@@ -167,6 +178,25 @@ def install(window) -> None:
     QTimer.singleShot(delay, lambda: warm(0))
 
 
+def _stabilise_state(window) -> None:
+    """Pin the app's own start-up choices, so two builds are compared in the same state.
+
+    The Process page probes the machine on start: which video encoder is selected (`libx264` on one boot, `x265_nvenc`
+    on another), whether the reuse boxes are enabled, and the command line those produce. Two boots of the SAME tree
+    therefore differ by 2-6 % of that page - measured: nav2-tab0 read 3.58 and 5.93 with an identical tree and an
+    identical nav1 (0.00, the environment marker). The value of a measurement is the interface, not the probe, so the
+    harness states the state it compares in: `RVE_UI_STABLE_STATE=0` disables this.
+    """
+    if os.environ.get("RVE_UI_STABLE_STATE", "1") != "1":
+        return
+    from PySide6.QtWidgets import QComboBox
+
+    for name in ("encoder", "upscaleModelComboBox"):
+        combo = getattr(window, name, None)
+        if isinstance(combo, QComboBox) and combo.count() > 0 and combo.currentIndex() != 0:
+            combo.setCurrentIndex(0)
+
+
 def stabilise(window) -> None:
     """Neutralise live machine values in labels named by ``RVE_UI_STABLE_TEXT`` (comma-separated object names).
 
@@ -178,6 +208,7 @@ def stabilise(window) -> None:
     """
     import re
 
+    _stabilise_state(window)
     names = [part.strip() for part in os.environ.get("RVE_UI_STABLE_TEXT", "").split(",") if part.strip()]
     if not names:
         return
