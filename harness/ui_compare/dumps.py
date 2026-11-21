@@ -38,12 +38,29 @@ def _key_name(node: dict, index: int, aliases: dict[str, str] | None) -> str:
     return f"~{cls}[{index}]"
 
 
+#: Toolkit containers that replace a stock one and change the path to the pages inside them.
+#: `TopTabHost` puts its pages under `TopTabPane/TopTabStack`, where `QTabWidget` had `qt_tabwidget_stackedwidget`;
+#: without this rewrite every widget inside a migrated tab stops pairing with its stock twin (measured: the settings
+#: page's `nav3-tab0` kept 0 of 315 paired widgets, so the widget table said "no widgets compared").
+_PATH_REWRITES = (
+    ("/TopTabPane/TopTabStack/", "/qt_tabwidget_stackedwidget/"),
+)
+
+
+def _canonical(path: str) -> str:
+    for new, stock in _PATH_REWRITES:
+        if new in path:
+            return path.replace(new, stock)
+    return path
+
+
 def flatten(tree: dict, aliases: dict[str, str] | None = None, prefix: str = "") -> dict[str, dict]:
     """`{path -> node}` with `path` built from object names, so two builds of one page share keys."""
     flat: dict[str, dict] = {}
 
     def walk(node: dict, path: str, index: int) -> None:
         key = f"{path}/{_key_name(node, index, aliases)}" if path else _key_name(node, index, aliases)
+        key = _canonical(key)
         base = key
         suffix = 2
         while key in flat:                 # Qt's private children repeat names; position keeps them apart

@@ -65,10 +65,11 @@ def _tab_host(page):
         return tabs
     if page is None:
         return None
-    # The toolkit host keeps the Designer's object name (`tabWidget`), so it is found by name, not by class.
-    host = page.findChild(QWidget, "tabWidget")
-    if host is not None and hasattr(host, "count") and hasattr(host, "setCurrentIndex"):
-        return host
+    # The toolkit host keeps whatever object name the Designer gave its tab container - `tabWidget` on the settings
+    # page, `processSettingsContainer` on the process page - so it is found by CLASS, not by name.
+    for child in page.findChildren(QWidget):
+        if type(child).__name__ == "TopTabHost" and hasattr(child, "setCurrentIndex"):
+            return child
     return None
 
 
