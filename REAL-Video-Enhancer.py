@@ -124,11 +124,16 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # P0 of plan-rve-ui-on-toolkit: put toolkit widgets into the live window and look at the result.
         # Off by default; RVE_TOOLKIT_SPIKE=1 is a measurement, not a migration.
         try:
-            from src.ui import toolkit_spike
+            from src.ui import toolkit_spike, toolkit_swap, toolkit_theme
+            if toolkit_swap.enabled() or toolkit_spike.enabled():
+                for line in toolkit_theme.install(QApplication.instance()):
+                    log("toolkit theme: " + line)
+            if toolkit_swap.enabled():
+                log("toolkit P1: " + str(toolkit_swap.migrate_page(self)))
             if toolkit_spike.enabled():
                 log("toolkit spike: replaced " + ", ".join(toolkit_spike.install(self)))
-        except Exception as _spike_exc:      # a spike must never stop the app from starting
-            log(f"toolkit spike failed: {_spike_exc}")
+        except Exception as _spike_exc:      # a migration step must never stop the app from starting
+            log(f"toolkit migration failed: {_spike_exc}")
         #self.VideoPreview.setVisible(False)
 
         # remove false hope
