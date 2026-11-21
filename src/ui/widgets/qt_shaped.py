@@ -21,9 +21,9 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QSizePolicy
-from PySide6.QtGui import QFont, QFontInfo, QFontMetrics
+from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetrics
 
-from sli_ui_toolkit.widgets import Button, CheckBox, ComboBox, CustomLineEdit, Text
+from sli_ui_toolkit.widgets import Button, ButtonRow, CheckBox, ComboBox, CustomLineEdit, Text
 
 
 def _constraints(widget) -> tuple:
@@ -127,14 +127,32 @@ class QtButton(Button):
         # Those numbers are RVE's QSS, expressed as the widget's own properties: `QPushButton{padding:5px 10px;
         # border-radius:10px; text-align:left; background-color:#2c313c}`. A QSS rule would be ignored by a
         # toolkit widget (a custom QWidget never gets WA_StyledBackground), so the look has to live here.
+        # RVE's button has no border (`QPushButton` rule sets only background, radius and padding), so the variant's
+        # default border layer is switched off explicitly instead of being painted a hair lighter than the plate.
+        # RVE's `padding: 5px 10px` is the QSS's box around the TEXT, and QPushButton draws a 16 px line inside a
+        # 30 px button - 5 px above and below still leaves room. The toolkit reserves the font's full line spacing plus
+        # the padding, and at RVE's 12 pt font that is 22 + 10 = 32 px against a Designer-pinned 30: the glyphs were
+        # clipped through the middle (measured on every 30 px button). Two pixels vertically is what the stock look
+        # actually uses.
+        # `content_padding` is (left, top, right, bottom) - RVE's QSS is `padding: 5px 10px`, i.e. 10 px horizontally
+        # and as little vertically as the Designer's pinned heights allow (the toolkit reserves a full line, so 5 px
+        # above and below a 30 px button clips the glyphs).
         super().__init__(None, text=text, parent=parent, variant="surface", content_align=_LEFT,
-                         content_padding=(5, 10, 5, 10), corner_radius=10)
+                         content_padding=(10, 5, 10, 0), corner_radius=10,
+                         border_color=QColor(0, 0, 0, 0))
         self._has_icon = False
         self._icon_box = QSize(0, 0)
-        # The toolkit's Button base gives every instance a 36x36 minimum (its own default control size), which turned
-        # RVE's 22x16 checkbox into a 36x36 square and clamped icon buttons. The Designer's own `setMinimumSize`
-        # statements run after this constructor and still apply where the page declares one.
+        # A button's text is painted with the toolkit's default UI font unless a ROW says otherwise: `setFont` alone
+        # left RVE's 12 pt labels rendering at 12 px, half the Designer's size (measured: ink 9 px tall against 15).
+        # The row is the documented way to state a pixel size, so the adapter keeps one row in sync with `setText`.
+        self._rve_font = QFont(self.font())
+        self._apply_rve_row()
+        # The toolkit's Button base gives every instance a 36x36 minimum AND maximum (its own default control size).
+        # The minimum turned RVE's 22x16 checkbox into a 36x36 square; the maximum clamped every text button to 36 px
+        # wide, which is what made labels look cut off. Both are cleared here; the Designer's own
+        # `setMinimumSize`/`setMaximumSize` statements run after this constructor and still apply where declared.
         self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
         # QPushButton's own policy: as wide as it needs, exactly as tall as its hint. The toolkit's button is happy to
         # fill the cell, which turned a 27 px button into a 96 px slab inside its row (measured on the settings page).
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
@@ -152,9 +170,17 @@ class QtButton(Button):
     def setText(self, text: str) -> None:        # noqa: N802
         # `Button.setText` re-derives its geometry AND resets `maximumSize` to unbounded (measured: a 30 px high
         # button came back unbounded, so every button in a row grew past the Designer's height). Whatever the caller
-        # had set is re-imposed after the pass.
+        # had set is re-imposed after the pass, and the row is rebuilt so the text keeps the button's font size.
         saved = _constraints(self)
-        super().setText(text)
+        Button.setText(self, text)
+        self._apply_rve_row()
+        _restore_constraints(self, saved)
+
+    def setFont(self, font: QFont) -> None:      # noqa: N802
+        saved = _constraints(self)
+        self._rve_font = QFont(font)
+        Button.setFont(self, font)
+        self._apply_rve_row()
         _restore_constraints(self, saved)
 
     def setIcon(self, icon) -> None:             # noqa: N802
@@ -171,6 +197,12 @@ class QtButton(Button):
         """The toolkit keeps the label in `_text` and exposes no getter; Qt's name is part of the shape RVE expects."""
         return getattr(self, "_text", "") or ""
 
+    def _apply_rve_row(self) -> None:
+        # `Button.setFont` does not feed the painter (the paint font comes from `ui_font(widget)` but the row's own size
+        # wins), so the adapter keeps the Qt font it was given and states the pixel size on the row.
+        size = QFontInfo(getattr(self, "_rve_font", self.font())).pixelSize()
+        self.setRows([ButtonRow(text=self.text(), size=size or None, h_align=None)])
+
     def sizeHint(self) -> QSize:                 # noqa: N802
         # Same QSS semantics as the combo: `padding: 5px 10px` around the content, and QPushButton's 27 px row for a
         # 12 px font (measured). An icon-only button is the icon plus the padding - RVE's nav buttons are 55x45 for a
@@ -180,11 +212,13 @@ class QtButton(Button):
         text = self.text()
         if not text:
             if has_icon:
-                return QSize(icon_size.width() + 20, icon_size.height() + 10)
+                return QSize(icon_size.width() + 20, icon_size.height() + 5)
             return super().sizeHint()
         fm = QFontMetrics(self.font())
         icon_room = (icon_size.width() + 6) if has_icon else 0
-        return QSize(fm.horizontalAdvance(text) + 20 + icon_room, fm.height() + 10)
+        # QSS `padding: 5px 10px`: the height is the line plus five pixels, which is exactly the 27 px row RVE's
+        # buttons occupy for a 12 pt font (measured against the Designer build).
+        return QSize(fm.horizontalAdvance(text) + 20 + icon_room, fm.lineSpacing() + 5)
 
     def minimumSizeHint(self) -> QSize:          # noqa: N802
         return self.sizeHint()
