@@ -50,10 +50,10 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:          # `python3 harness/scripts/ui_gates.py` puts only scripts/ on the path
     sys.path.insert(0, str(_ROOT))
 
-#: rule name -> the source roots it scans, relative to the repo root. Rule 1 skips `shell/`: the shell is not migrated
-#: yet, so a QSS rule there is still doing its job on a stock widget.
+#: rule name -> the source roots it scans, relative to the repo root. Rule 1 covers the shell too: its nav buttons are
+#: toolkit controls now, so a QSS rule there would be dead text exactly like a page's.
 SCOPES: dict[str, tuple[str, ...]] = {
-    "qss-on-adapter": ("src/ui/pages", "src/ui/widgets"),
+    "qss-on-adapter": ("src/ui/pages", "src/ui/shell", "src/ui/widgets"),
     "raw-chrome-px": ("src/ui/pages", "src/ui/shell", "src/ui/widgets"),
     "theme-read-at-build": ("src/ui/pages", "src/ui/shell", "src/ui/widgets"),
     "stock-widget": ("src/ui/pages",),

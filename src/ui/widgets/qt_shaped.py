@@ -399,10 +399,14 @@ class QtButton(Button):
         # Designer marks checkable, so the state machine exists before this line runs. A later `setCheckable(True)` on
         # a button built without it cannot be honoured (the toolkit offers no way to attach toggle after the fact), and
         # raising is the honest answer - a silent no-op would ship a button that never checks.
-        if on and not getattr(self, "_has_toggle", False):
+        if on and not self.isCheckable():
             raise NotImplementedError(
                 "Button toggle mode is constructor-only - build QtButton(parent, toggle=True); "
                 "the splitter passes the flag for a checkable page widget")
+
+    def isCheckable(self) -> bool:               # noqa: N802
+        """Qt's name for "this button has the toggle state machine"; the toolkit keeps it in `_has_toggle`."""
+        return bool(getattr(self, "_has_toggle", False))
 
     def setAutoExclusive(self, on: bool) -> None:    # noqa: N802
         if on:

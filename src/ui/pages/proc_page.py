@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QScrollBar, QSizePolicy, QSpacerItem,
+    QScrollArea, QSizePolicy, QSpacerItem,
     QSpinBox, QStackedWidget, QTabWidget, QTextEdit,
     QVBoxLayout, QWidget)
 import resources_rc
@@ -35,7 +35,8 @@ from src.ui.typography import apply, CAPTION_PT
 # with the stock `QTabWidget`'s strip geometry (the Designer's 22 px strip, no pane radius or inset, a 4 px tab corner);
 # `ImageLabel` is the pixmap counterpart of `QLabel` (parent first, and the alignment is stated because Qt's default is
 # left+vcenter, not the centre the preview label asks for).
-from sli_ui_toolkit.widgets import TabStyle, SurfacePanel, ImageLabel, TopTabHost
+from sli_ui_toolkit.widgets import (TabStyle, SurfacePanel, ImageLabel, MinimalistScrollBar,
+                                    TopTabHost)
 
 
 class ProcPagePage:
@@ -140,9 +141,13 @@ class ProcPagePage:
         self.renderPreviewBtn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.horizontalLayout_48.addWidget(self.renderPreviewBtn)
         self.verticalLayout_37.addWidget(self.widget_14)
-        self.timeInVideoScrollBar = QScrollBar(self.widget_30)
+        # The scrub bar is the toolkit's scrollbar, not a stock `QScrollBar`: same value API (`value`/`setValue`/
+        # `setRange`/`setMaximum`/`valueChanged`/`setEnabled` - `MinimalistScrollBar` subclasses `QScrollBar`), but the
+        # thumb is painted from the theme (`accent` while dragging, a translucent white handle otherwise) instead of
+        # from the window's deleted `QScrollBar::handle` rule. Orientation is the constructor's first argument, which
+        # replaces the Designer's `setOrientation(Horizontal)` statement.
+        self.timeInVideoScrollBar = MinimalistScrollBar(Qt.Orientation.Horizontal, self.widget_30)
         self.timeInVideoScrollBar.setObjectName(u"timeInVideoScrollBar")
-        self.timeInVideoScrollBar.setOrientation(Qt.Orientation.Horizontal)
         self.verticalLayout_37.addWidget(self.timeInVideoScrollBar)
         self.horizontalLayout_47.addWidget(self.widget_30)
         self.verticalLayout_5.addWidget(self.RenderedPreviewControlsContainer)

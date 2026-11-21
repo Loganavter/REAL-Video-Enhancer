@@ -2,8 +2,8 @@
 
 The checks live in `harness/scripts/ui_theme_audit.py` because PySide6 is installed in the app's venv, not in the
 portable interpreter the harness suite runs on. Here they are pinned to the suite for any environment that does have
-Qt: the table must agree with `QTstyle.Palette()`, cover every hex in `QTstyle.styleSheet()`, name only tokens the
-toolkit palette defines, and add no state to the palette it derives.
+Qt: the table must agree with `toolkit_theme.qt_palette()` (the palette `main()` applies when the theme is off), name
+only tokens the toolkit palette defines, and add no state to the palette it derives.
 """
 
 from __future__ import annotations

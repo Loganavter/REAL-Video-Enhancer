@@ -50,7 +50,6 @@ from src.ui.HomeTab import HomeTab
 from src.Backendhandler import BackendHandler
 from src.ModelHandler import totalModels
 from src.ui.AnimationHandler import AnimationHandler
-from src.ui.QTstyle import Palette
 from src.ui.QTcustom import RegularQTPopup, NotificationOverlay, TextOutputPopup
 from src.ui.RenderQueue import RenderQueue, RenderOptions
 from src.VideoInfo import VideoLoader
@@ -1018,7 +1017,10 @@ def main(file_to_open=None):
     except Exception as _theme_exc:
         log(f"toolkit theme failed: {_theme_exc}")
     if not theme_installed:
-        app.setPalette(Palette())
+        # The theme is off: apply RVE's own palette, which now lives with the token table it mirrors
+        # (`toolkit_theme.qt_palette()`) rather than in the deleted `src/ui/QTstyle.py`.
+        from src.ui.toolkit_theme import qt_palette
+        app.setPalette(qt_palette())
 
     """if not "--unlock" in sys.argv:
         lock_file = QLockFile(LOCKFILE)
