@@ -124,6 +124,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # P0 of plan-rve-ui-on-toolkit: put toolkit widgets into the live window and look at the result.
         # Off by default; RVE_TOOLKIT_SPIKE=1 is a measurement, not a migration.
         try:
+            from src.ui import page_capture
+            if page_capture.enabled():
+                page_capture.install(self)
+        except Exception as _cap_exc:
+            log(f"page capture failed: {_cap_exc}")
+        try:
             from src.ui import toolkit_spike, toolkit_swap, toolkit_theme
             if toolkit_swap.enabled() or toolkit_spike.enabled():
                 for line in toolkit_theme.install(QApplication.instance()):
