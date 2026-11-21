@@ -35,7 +35,7 @@ from src.ui.typography import apply, CAPTION_PT
 # with the stock `QTabWidget`'s strip geometry (the Designer's 22 px strip, no pane radius or inset, a 4 px tab corner);
 # `ImageLabel` is the pixmap counterpart of `QLabel` (parent first, and the alignment is stated because Qt's default is
 # left+vcenter, not the centre the preview label asks for).
-from sli_ui_toolkit.widgets import SurfacePanel, ImageLabel, TopTabHost
+from sli_ui_toolkit.widgets import TabStyle, SurfacePanel, ImageLabel, TopTabHost
 
 
 class ProcPagePage:
@@ -206,7 +206,11 @@ class ProcPagePage:
         self.verticalLayout_24.setSpacing(0)
         self.verticalLayout_24.setObjectName(u"verticalLayout_24")
         self.verticalLayout_24.setContentsMargins(0, 0, 0, 0)
-        self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=22, pane_radius=0,
+        # The original interface's tabs are BUTTONS standing apart from the content: no folder outline, no join cover,
+        # a plate on the selected one and a gap under the strip. `TabStyle` is the toolkit's styling surface for that.
+        self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=28, pane_radius=0,
+            tab_style=TabStyle(flat=True, gap=8, min_width=118, padding=16, spacing=4, radius=8,
+                               selected_token="button.dialog.default.background.pressed"),
             pane_inset=0, chrome_inset=0, tab_radius=4, pane_fill_token=None)
         self.processSettingsContainer.setObjectName(u"processSettingsContainer")
         sizePolicy3.setHeightForWidth(self.processSettingsContainer.sizePolicy().hasHeightForWidth())
