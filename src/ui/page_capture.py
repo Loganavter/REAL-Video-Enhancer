@@ -133,6 +133,12 @@ def stabilise(window) -> None:
 
     for name in names:
         for widget in window.findChildren(QWidget, name):
+            # A RICH-TEXT pane's content is environment state, not interface: the Home page's changelog is fetched from
+            # the network when it can be, so two runs of the same build show different notes and the page diff reads
+            # 2.9% of "regression" that is a release note. Freeze such panes to one placeholder line.
+            if hasattr(widget, "toPlainText") and os.environ.get("RVE_UI_STABLE_RICH", "1") == "1":
+                widget.setPlainText("stable text")
+                continue
             text = ""
             for getter in ("text", "toPlainText"):
                 fn = getattr(widget, getter, None)

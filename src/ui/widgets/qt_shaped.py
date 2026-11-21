@@ -493,9 +493,9 @@ class _QtSpinShape:
     #: RVE's `QSpinBox{padding:5px 10px; border-radius:10px}` on the toolkit's own constants.
     RADIUS = 10
     H_PADDING = 10
-    #: Measured: a stock spin box under RVE's QSS hints 32 px tall (a 20 px field with 5 px padding above and below).
-    #: The toolkit pins the same 32 px, so the number is stated rather than inherited.
-    HEIGHT = 32
+    #: The row is 29 px in the Designer's build - the same height as a combo, measured on the live app (the cell's
+    #: first attempt stated 32 from an offscreen probe, which shifted every row on the settings page by 3-6 px).
+    HEIGHT = 29
     #: RVE's stepper column: `::up-button`/`::down-button{width:20px; height:15px}`.
     STEP_BUTTON_WIDTH = 20
     STEP_BUTTON_GAP = 0
