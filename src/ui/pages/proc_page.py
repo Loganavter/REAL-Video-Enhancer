@@ -36,6 +36,25 @@ from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, Minimalis
 SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
 
+def _process_tab_button(text: str, tab_height: int, style):
+    """The process strip's tab button, built by the PAGE - the host half of `TopTabHost(tab_factory=...)`.
+
+    A plain toolkit `Button` at 6 px less than the strip height: the plate is a normal rounded button, its checked
+    state is the button's own, and the leftover 6 px plus the style's gap is the air under the strip. Before the factory
+    existed the strip built its own button and the only way to move the plate was a knob inside the widget.
+    """
+    tab = Button(
+        text=text or " ",
+        toggle=True,
+        variant="surface",
+        size=(0, max(1, tab_height - 6)),
+        corner_radius=8,
+        content_padding=(10, 2, 10, 2),
+    )
+    tab.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    return tab
+
+
 class ProcPagePage:
     """`procPage` - placed by its parent with `addWidget`."""
 
@@ -216,7 +235,8 @@ class ProcPagePage:
         # The original interface's tabs are BUTTONS standing apart from the content: no folder outline, no join cover,
         # a plate on the selected one and a gap under the strip. `TabStyle` is the toolkit's styling surface for that.
         self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=28, pane_radius=0, pane_inset=(10, 5, 10, 5),
-            tab_style=TabStyle(plate_margin=3, flat=True, border=False, gap=8, min_width=88, padding=10, spacing=4, radius=8,
+            tab_factory=_process_tab_button,
+            tab_style=TabStyle(flat=True, border=False, gap=8, min_width=88, padding=10, spacing=4, radius=8,
                                scroll_policy=Qt.ScrollBarPolicy.ScrollBarAsNeeded, reserve_scroll_row=True,
                                selected_token="button.dialog.default.background.pressed"),
             chrome_inset=0, tab_radius=4, pane_fill_token=None)
