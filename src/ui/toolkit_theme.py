@@ -45,6 +45,9 @@ LOOK: dict[str, tuple[str, str]] = {
     "Palette().HighlightedText": ("HighlightedText", "#000000"),
     # --- surfaces ----------------------------------------------------------------------------------------
     "MainWindow / #centralwidget{background-color}": ("dialog.background", "#1f232a"),
+    # The page/nav body. It was QSS-owned ("stock until W6") until the toolkit gained a container that paints a token
+    # (`SurfacePanel`); now a page is that container and the colour is a token with one meaning.
+    "QStackedWidget page surfaces{background-color}": ("surface.page", "#16191d"),
     "QPushButton{background-color}": ("dialog.button.background", "#2c313c"),
     # The toolkit button paints its plate from `button.dialog.default.*` (variant "surface"), so RVE's rule is stated
     # on those tokens; mapping only `dialog.button.background` left the plate at FLUENT's #3c3c3c (measured: the

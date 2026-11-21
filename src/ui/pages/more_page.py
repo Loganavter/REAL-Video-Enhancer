@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
 import resources_rc
 import resources_rc
 
+from sli_ui_toolkit.widgets import SurfacePanel
+
 
 class MorePagePage:
     """`morePage` - placed by its parent with `addWidget`."""
@@ -32,12 +34,10 @@ class MorePagePage:
 
     def build(self):
         """Build the widget tree and return the page root."""
-        self.morePage = QWidget()
+        # Layer C: the page body is the toolkit's token-painted container, not a widget with a stylesheet. The colour is
+        # `surface.page` (#16191d in RVE's palette) - the same value the deleted rule carried.
+        self.morePage = SurfacePanel(background_token="surface.page")
         self.morePage.setObjectName(u"morePage")
-        self.morePage.setStyleSheet(u"QWidget{\n"
-"background-color:#16191d\n"
-"\n"
-"}")
         self.gridLayout_6 = QGridLayout(self.morePage)
         self.gridLayout_6.setObjectName(u"gridLayout_6")
         return self.morePage
