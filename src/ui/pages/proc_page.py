@@ -119,7 +119,9 @@ class ProcPagePage:
         # `single_step=0.1` is the toolkit field's "clamp and round to the display precision" semantic (its `setValue`
         # SNAPS to `single_step`, which at the default 1.0 would turn 3.5 into 3.0); `decimals=2` is what the Designer's
         # stock `QDoubleSpinBox` displayed and `alignment` is Qt's own (the toolkit field defaults to centre).
-        self.startTimeSpinBox = DoubleSpinBox(self.widget_30, single_step=0.1, decimals=2,
+        self.startTimeSpinBox = DoubleSpinBox(self.widget_30, single_step=0.1, decimals=2, show_step_buttons=True,
+                                       step_button_width=20, field_height=29, show_step_buttons=True,
+                                       step_button_width=20, field_height=29,
             alignment=SPIN_ALIGNMENT)
         self.startTimeSpinBox.setObjectName(u"startTimeSpinBox")
         self.verticalLayout_37.addWidget(self.startTimeSpinBox)
@@ -308,7 +310,7 @@ class ProcPagePage:
         self.horizontalLayout_32.addLayout(self.onRenderButtonsContiainer)
         # `height=25` is the Designer's bar row; the toolkit toast bar's own default is 6 px. Its track paints from
         # the toolkit's `toast.progress.background` token (the adapter's call-site token was `progress.track.background`).
-        self.progressBar = ToastProgressBar(self.widget_13, height=25)
+        self.progressBar = ToastProgressBar(self.widget_13, height=25, track_token="progress.track.background")
         self.progressBar.setObjectName(u"progressBar")
         sizePolicy7.setHeightForWidth(self.progressBar.sizePolicy().hasHeightForWidth())
         self.progressBar.setSizePolicy(sizePolicy7)

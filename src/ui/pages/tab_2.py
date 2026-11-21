@@ -155,7 +155,8 @@ class Tab2Page:
         # actually shows: the toolkit's `DoubleSpinBox.setValue` SNAPS to `single_step` (its default 1.0 turned RVE's
         # stored `3.5` into `3.0`, which the settings glue then wrote back). At `decimals=1` a 0.1 step is exactly that
         # rounding, so `3.5` stays `3.5` (measured offscreen) while the arrow keys still step.
-        self.scene_change_detection_threshold = DoubleSpinBox(self.widget_7, single_step=0.1, decimals=1,
+        self.scene_change_detection_threshold = DoubleSpinBox(self.widget_7, single_step=0.1, decimals=1, show_step_buttons=True,
+                                      step_button_width=20, field_height=29,
             alignment=SPIN_ALIGNMENT)
         self.scene_change_detection_threshold.setObjectName(u"scene_change_detection_threshold")
         self.scene_change_detection_threshold.setMinimumSize(QSize(75, 30))
