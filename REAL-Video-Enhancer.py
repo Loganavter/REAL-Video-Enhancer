@@ -130,10 +130,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         except Exception as _cap_exc:
             log(f"page capture failed: {_cap_exc}")
         try:
-            from src.ui import toolkit_spike, toolkit_swap, toolkit_theme
-            if toolkit_swap.enabled() or toolkit_spike.enabled():
-                for line in toolkit_theme.install(QApplication.instance()):
-                    log("toolkit theme: " + line)
+            from src.ui import layout_dump
+            if layout_dump.enabled():
+                layout_dump.install(self)
+        except Exception as _dump_exc:
+            log(f"layout dump failed: {_dump_exc}")
+        try:
+            from src.ui import toolkit_spike, toolkit_swap
             if toolkit_swap.enabled():
                 log("toolkit P1: " + str(toolkit_swap.migrate_page(self)))
             if toolkit_spike.enabled():
@@ -221,7 +224,16 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.setWindowIcon(QIcon(icon_path))
         QApplication.setWindowIcon(QIcon(icon_path))
         self.setWindowTitle("REAL Video Enhancer")
-        self.setPalette(QApplication.style().standardPalette())
+        # Under the toolkit theme this call is the one that put the window subtree back on Fusion's default palette
+        # after the theme had already applied RVE's (measured: unmigrated pages shifted, `mainwindow` palette != app
+        # palette). The stock build keeps it - that is the look being reproduced.
+        try:
+            from src.ui import toolkit_theme as _toolkit_theme
+            _theme_owns_look = _toolkit_theme.enabled()
+        except Exception:
+            _theme_owns_look = False
+        if not _theme_owns_look:
+            self.setPalette(QApplication.style().standardPalette())
         self.setMinimumSize(950, 600)
 
         self.aspect_ratio = self.width() / self.height()
@@ -985,7 +997,22 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 def main(file_to_open=None):
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setPalette(Palette())
+    # The look has exactly one owner at a time. With a toolkit migration on, `ThemeManager` writes the palette
+    # (`src/ui/toolkit_theme.py` maps RVE's colours onto its tokens); otherwise RVE's own palette is applied as
+    # before. Installing the theme here, before the window exists, is deliberate: every widget is then built against
+    # the palette it will keep - the previous placement (after `setupUi`) lost the race against
+    # `MainWindow.setPalette(standardPalette())` and left half the tree on Fusion defaults.
+    theme_installed = False
+    try:
+        from src.ui import toolkit_theme
+        if toolkit_theme.enabled():
+            for line in toolkit_theme.install(app):
+                log("toolkit theme: " + line)
+            theme_installed = True
+    except Exception as _theme_exc:
+        log(f"toolkit theme failed: {_theme_exc}")
+    if not theme_installed:
+        app.setPalette(Palette())
 
     """if not "--unlock" in sys.argv:
         lock_file = QLockFile(LOCKFILE)

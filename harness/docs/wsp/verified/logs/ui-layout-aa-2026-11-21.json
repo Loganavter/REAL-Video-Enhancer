@@ -1,0 +1,188 @@
+{
+ "pages": {
+  "nav0.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav1.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav2-tab0.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav2-tab1.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav2-tab2.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav2-tab3.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav2-tab4.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav2.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav3-tab0.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav3-tab1.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav3-tab2.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav3.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  },
+  "nav4.json": {
+   "nodes": [
+    583,
+    583
+   ],
+   "missing": [],
+   "extra": [],
+   "geometry": [],
+   "text": [],
+   "visibility": [],
+   "state": [],
+   "ignored_text": 1,
+   "clean": true
+  }
+ },
+ "tolerance_px": 0,
+ "failed": []
+}

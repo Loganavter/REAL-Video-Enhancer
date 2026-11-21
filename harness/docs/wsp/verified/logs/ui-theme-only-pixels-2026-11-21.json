@@ -1,0 +1,151 @@
+{
+ "pages": {
+  "nav0.png": {
+   "mean": 0.082,
+   "over8_pct": 0.121,
+   "max": 130,
+   "worst_bands": [
+    460,
+    480,
+    0,
+    20
+   ]
+  },
+  "nav1.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2-tab0.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2-tab1.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2-tab2.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2-tab3.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2-tab4.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav2.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav3-tab0.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav3-tab1.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav3-tab2.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav3.png": {
+   "mean": 0.0,
+   "over8_pct": 0.0,
+   "max": 0,
+   "worst_bands": [
+    0,
+    20,
+    40,
+    60
+   ]
+  },
+  "nav4.png": {
+   "mean": 0.001,
+   "over8_pct": 0.0,
+   "max": 8,
+   "worst_bands": [
+    60,
+    40,
+    0,
+    20
+   ]
+  }
+ },
+ "budget": 0.05,
+ "failed": [
+  "nav0.png"
+ ]
+}

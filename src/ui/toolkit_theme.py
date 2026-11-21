@@ -1,62 +1,115 @@
-"""Install `sli-ui-toolkit`'s theme in RVE and map RVE's QSS onto its tokens.
+"""RVE's look as toolkit tokens: the only place a colour is mapped.
 
-Why this file exists: the P0 spike showed that a toolkit widget paints **nothing** underneath its content until the
-theme is installed, and that the *look* comes from the theme, not from the widget. RVE's look lives in QSS hex
-(`src/ui/QTstyle.py` plus inline strings in the generated `mainwindow.py`); the toolkit's lives in named tokens. So
-the minimal-deviation migration is a map, and this module is its single home.
+Why this file exists: RVE's look is not a stylesheet in one place. It is 22 inline `setStyleSheet` blocks the Designer
+wrote into `mainwindow.py`, one `styleSheet()` shared by the seven popups (`src/ui/QTstyle.py`), and a QPalette applied
+in `main()` (`REAL-Video-Enhancer.py:994`). The toolkit's look is named tokens. Under the owner's decision of
+2026-11-21 ("the theme owns the whole look"), this module is the single translation: each entry names the place in RVE
+that requires the colour, the toolkit token that replaces it, and the value.
 
-The map is filled in as phases migrate screens: an entry is only added after the screen it affects was captured and
-compared against the stock build, so nothing here is a guess about a colour nobody looked at.
+Two measured facts shape it:
 
-Source of every value below: `src/ui/QTstyle.py` (`styleSheet()`), read 2026-11-21.
+* a ticket that names a token the palette does not define is a **silent no-op**. The previous table asked for
+  `dialog.button.background.hover` and `dialog.button.background.checked`, which FLUENT_DARK does not have - so hover
+  and checked were never applied and the page looked "almost right" for a reason nobody could see in the log;
+* importing the toolkit subtree (`sli_ui_toolkit.theme`, `sli_ui_toolkit.widgets`) runs
+  `scrollbar_policy._register_builtin_policies()` at import time, and `register_widget_policy` immediately sweeps
+  every widget that already exists. Imported after `setupUi`, it retrofits 68 of RVE's 69 stock scrollbars with
+  `MinimalistScrollBar`; imported before the window exists, it touches nothing (measured both ways, 2026-11-21). So
+  the import order is part of the look, which is why `install()` is called from `main()` before `MainWindow` is
+  constructed and why the structural harness is the judge of it rather than an eyeball.
+
+`TOKENS` is built from `LOOK` so a token cannot be added to the palette without saying which rule asked for it, and
+`install()` refuses unknown token names instead of skipping them.
 """
 
 from __future__ import annotations
 
 from PySide6.QtGui import QColor
 
-# RVE QSS rule -> (token, hex). The left column is the literal selector in QTstyle.py so the mapping can be audited
-# against the stylesheet without guessing which rule a token came from.
-QSS_TO_TOKENS: dict[str, tuple[str, str]] = {
+# provenance -> (token, hex). The provenance is either a literal QSS selector from `QTstyle.py` / `mainwindow.py`, or
+# a QPalette role from `QTstyle.Palette()`. Keep the spelling exact: the audit test in `harness/tests` matches these
+# keys against the stylesheet and the palette, so a rule that changes there fails here instead of drifting.
+LOOK: dict[str, tuple[str, str]] = {
+    # --- QPalette roles: what stock widgets paint from when QSS says nothing -------------------------------
+    "Palette().Window": ("Window", "#1f232a"),
+    "Palette().WindowText": ("WindowText", "#ffffff"),
+    "Palette().Base": ("Base", "#191919"),
+    "Palette().AlternateBase": ("AlternateBase", "#353535"),
+    "Palette().ToolTipBase": ("ToolTipBase", "#000000"),
+    "Palette().ToolTipText": ("ToolTipText", "#ffffff"),
+    "Palette().Text": ("Text", "#ffffff"),
+    "Palette().Button": ("Button", "#353535"),
+    "Palette().ButtonText": ("ButtonText", "#ffffff"),
+    "Palette().BrightText": ("BrightText", "#ff0000"),
+    "Palette().Highlight": ("Highlight", "#2a82da"),
+    "Palette().HighlightedText": ("HighlightedText", "#000000"),
+    # --- surfaces ----------------------------------------------------------------------------------------
+    "MainWindow / #centralwidget{background-color}": ("dialog.background", "#1f232a"),
+    "#leftMenuSubContainer / #bottomMenuSubContainer{background-color}": ("surface.background", "#16191d"),
+    "QStackedWidget{background-color}": ("surface.background", "#16191d"),
     "QPushButton{background-color}": ("dialog.button.background", "#2c313c"),
-    "QPushButton:hover{background-color}": ("dialog.button.background.hover", "#343b47"),
-    "QPushButton:checked{background-color}": ("dialog.button.background.checked", "#676e7b"),
-    "QPushButton{color}": ("dialog.text", "#ffffff"),
-    "QLabel{color}": ("dialog.text", "#ffffff"),
-    "QPlainTextEdit{background-color}": ("surface.list", "#2c313c"),
-    "#centralwidget{background-color}": ("dialog.background", "#1f232a"),
-    # QCheckBox::indicator (outline) and ::indicator::checked (fill) - the toolkit's indicator paints its outline from
-    # dialog.border and its checked fill from `accent`, so those two tokens are what the stock rule means.
+    "QPushButton:hover{background-color}": ("dialog.button.hover", "#343b47"),
+    "QPushButton:checked / :disabled{background-color}": ("button.toggle.background.checked", "#676e7b"),
+    "QPlainTextEdit / QTextEdit{background-color}": ("surface.list", "#2c313c"),
+    "QLineEdit / dialog inputs{background-color}": ("dialog.input.background", "#2c313c"),
+    # --- text ----------------------------------------------------------------------------------------------
+    "QLabel / QLineEdit / QPushButton{color}": ("dialog.text", "#ffffff"),
+    # --- controls -----------------------------------------------------------------------------------------
+    # The stock checkbox is a white 1px outline with a white fill when checked (QTstyle.py). The toolkit's
+    # indicator paints its outline from `dialog.border` and its checked fill from `accent`, so RVE's monochrome
+    # look lands on those two tokens - and `accent` is also what a toolkit progress/toast fill uses, which is
+    # consistent with RVE's white `QProgressBar::chunk`.
     "QCheckBox::indicator{border}": ("dialog.border", "#ffffff"),
-    "QCheckBox::indicator::checked{background-color}": ("accent", "#ffffff"),
+    "QCheckBox::indicator::checked{background-color} / QProgressBar::chunk{background-color}": ("accent", "#ffffff"),
+    "QProgressBar{background-color}": ("slider.track.background", "#2c313c"),
+    "QPushButton::toolTip / menus{background-color}": ("tooltip.background", "#676e7b"),
+    "QToolTip{color}": ("tooltip.text", "#ffffff"),
 }
 
-# The tokens that actually exist in the toolkit's dark palette. Overriding a key the palette does not define is a
-# silent no-op (set_color writes into the dict, but no painter reads it), which is exactly the kind of false fix this
-# project keeps paying for - so unknown keys are reported instead of applied.
-KNOWN_TOKENS = frozenset({
-    "accent",
-    "dialog.border",
-    "dialog.button.background",
-    "dialog.text",
-    "surface.list",
-})
+
+def _build_tokens() -> dict[str, str]:
+    tokens: dict[str, str] = {}
+    for rule, (token, hex_value) in LOOK.items():
+        previous = tokens.get(token)
+        if previous is not None and previous.lower() != hex_value.lower():
+            # Two rules asking for different colours under one token is a decision the table cannot make silently:
+            # either the token is wrong for one of them, or RVE's look has two colours here and the toolkit needs a
+            # second token name.
+            raise ValueError(f"token {token!r} mapped to both {previous} and {hex_value} ({rule})")
+        tokens[token] = hex_value
+    return tokens
+
+
+#: token -> hex, derived from :data:`LOOK`.
+TOKENS: dict[str, str] = _build_tokens()
+
+
+def enabled() -> bool:
+    """True whenever a toolkit migration is on - the theme is the prerequisite of every one of them."""
+    import os
+    return any(os.environ.get(name, "0") == "1"
+               for name in ("RVE_TOOLKIT_THEME", "RVE_TOOLKIT_MIGRATE", "RVE_TOOLKIT_SPIKE"))
+
+
+def palette() -> dict[str, QColor]:
+    """FLUENT_DARK with RVE's values on top - complete on purpose, so no toolkit token is left unpainted."""
+    from sli_ui_toolkit.palettes import FLUENT_DARK
+
+    resolved = {name: QColor(value) for name, value in FLUENT_DARK.items()}
+    unknown = sorted(set(TOKENS) - set(resolved))
+    if unknown:
+        raise ValueError(f"tokens not in the toolkit palette: {unknown}")
+    for token, hex_value in TOKENS.items():
+        resolved[token] = QColor(hex_value)
+    return resolved
 
 
 def install(app) -> list[str]:
-    """Register the palettes, set the dark theme, apply the token map. Returns the lines applied/rejected."""
-    from sli_ui_toolkit.palettes import FLUENT_DARK, FLUENT_LIGHT
+    """Register RVE's palette, apply it, and return the applied lines (provenance -> token = value)."""
+    from sli_ui_toolkit.palettes import FLUENT_LIGHT
     from sli_ui_toolkit.theme import ThemeManager
 
     theme = ThemeManager.get_instance()
-    theme.register_palettes(FLUENT_LIGHT, FLUENT_DARK)
+    theme.register_palettes(FLUENT_LIGHT, palette())
     theme.set_theme("dark", app, await_ripples=False)
-
-    applied: list[str] = []
-    for rule, (token, hex_value) in QSS_TO_TOKENS.items():
-        if token in KNOWN_TOKENS:
-            theme.set_color(token, QColor(hex_value))
-            applied.append(f"{rule} -> {token} = {hex_value}")
-        else:
-            applied.append(f"{rule} -> {token}: SKIPPED (token not in the toolkit palette)")
-    return applied
+    return [f"{rule} -> {token} = {hex_value}" for rule, (token, hex_value) in LOOK.items()]
