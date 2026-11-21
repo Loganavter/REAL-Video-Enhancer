@@ -31,7 +31,7 @@ from src.ui.typography import apply, BODY_PT, DISPLAY_PT
 # and `SurfaceScrollArea` always paints a token plate (`surface.background` #2c313c or, with `surface_token=None`,
 # the palette's #1f232a; measured offscreen). `ImageLabel` is the pixmap counterpart, Qt-shaped already
 # (`setPixmap`/`setScaledContents`/`setText`), and paint-identical to `QLabel` at the Designer's default alignment.
-from sli_ui_toolkit.widgets import ImageLabel, OverlayScrollArea
+from sli_ui_toolkit.widgets import ImageLabel, OverlayScrollArea, SurfacePanel
 
 
 class DownloadPagePage:
@@ -55,50 +55,11 @@ class DownloadPagePage:
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.widget_26.sizePolicy().hasHeightForWidth())' (['widget_26'] live outside this page)
         # splitter: skipped 'sizePolicy.setHeightForWidth(self.renderQueueListWidget.sizePolicy().hasHeightForWidth())' (['renderQueueListWidget'] live outside this page)
         # splitter: skipped 'sizePolicy5.setHeightForWidth(self.OutputFilesListWidget.sizePolicy().hasHeightForWidth())' (['OutputFilesListWidget'] live outside this page)
-        self.downloadPage = QWidget()
+        # Layer C: the page body is the toolkit's token-painted container. Every rule this page carried styled a widget
+        # that is now a toolkit control (QLineEdit/QPushButton/QComboBox ignore QSS) or the background itself, so the
+        # whole sheet is gone and the colour comes from `surface.page` (#16191d).
+        self.downloadPage = SurfacePanel(background_token="surface.page")
         self.downloadPage.setObjectName(u"downloadPage")
-        self.downloadPage.setStyleSheet(u"QWidget{\n"
-"background-color:#16191d\n"
-"\n"
-"}\n"
-"QScrollArea{\n"
-"	background:transparent;\n"
-"}\n"
-"\n"
-"QLineEdit{\n"
-"background-color:#2c313c;\n"
-"border-radius: 10px;\n"
-"}\n"
-"\n"
-"QPushButton{\n"
-"    background-color:#2c313c;\n"
-"	text-align:left;\n"
-"	padding:5px 10px;\n"
-"	border-radius: 10px;\n"
-"}\n"
-"QPushButton:checked{\n"
-"	background-color:#676e7b;\n"
-"}\n"
-"QPushButton:hover{\n"
-"	background-color:#343b47;\n"
-"}\n"
-"QPushButton:disabled{\n"
-"	background-color:#676e7b;\n"
-"	color:gray;\n"
-"}\n"
-"QComboBox{\n"
-"background-color:#2c313c;\n"
-"	text-align:left;\n"
-"	padding:5px 10px;\n"
-"	border-radius: 10px;\n"
-"color:white;\n"
-"}\n"
-"Line{\n"
-"color:white;\n"
-"background-color:white;\n"
-"}\n"
-"\n"
-"")
         self.gridLayout_5 = QGridLayout(self.downloadPage)
         self.gridLayout_5.setObjectName(u"gridLayout_5")
         self.widget_10 = QWidget(self.downloadPage)
@@ -160,9 +121,9 @@ class DownloadPagePage:
         self.low_storage_label = QtLabel(self.backendSelectContainer)
         self.low_storage_label.setObjectName(u"low_storage_label")
         apply(self.low_storage_label, None, bold=True)
-        self.low_storage_label.setStyleSheet(u"QLabel {\n"
-"color: red;\n"
-"}")
+        # The stock label was red through this stylesheet; a toolkit label ignores QSS, so the colour is stated on the
+        # widget itself (the stylesheet was silently dead - a regression this migration inherited).
+        self.low_storage_label.setTextColor(QColor("red"))
         self.verticalLayout_11.addWidget(self.low_storage_label)
         # Layer B3: the stock area was transparent (`QScrollArea{background:transparent}` in the page rule) and its
         # scrollbar persistent; the overlay counterpart keeps the transparent surface (measured #16191d = the page)

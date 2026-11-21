@@ -287,3 +287,30 @@ def test_cli_table_marks_a_new_finding(capsys: pytest.CaptureFixture[str], monke
     assert ui_gates.main() == 1
     out = capsys.readouterr().out
     assert "NEW" in out and "setFixedWidth(40)" in out
+
+
+# --- the ratchet's regeneration is guarded ----------------------------------------------------------------
+
+def _fake_rekey_env(monkeypatch, tmp_path: Path, findings, known):
+    module_copy = tmp_path / "ui_gates_copy.py"
+    module_copy.write_text(Path(ui_gates.__file__).read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(ui_gates, "__file__", str(module_copy))
+    monkeypatch.setattr(ui_gates, "CHECKS", {"fake": lambda paths: findings})
+    monkeypatch.setattr(ui_gates, "SCOPES", {"fake": ("whatever.py",)})
+    monkeypatch.setattr(ui_gates, "KNOWN", known)
+    return module_copy
+
+
+def test_rekey_refuses_a_rule_that_would_grow(monkeypatch, tmp_path):
+    findings = [ui_gates.Finding("a.py", 1, "fake", "d")]
+    copy = _fake_rekey_env(monkeypatch, tmp_path, findings, {"fake": frozenset()})
+    assert ui_gates._rekey() == 2
+    # Nothing was written: the baseline still has no entry for the rule.
+    assert "a.py:1" not in copy.read_text(encoding="utf-8")
+
+
+def test_rekey_rewrites_shifted_fingerprints(monkeypatch, tmp_path):
+    findings = [ui_gates.Finding("a.py", 7, "fake", "d")]
+    copy = _fake_rekey_env(monkeypatch, tmp_path, findings, {"fake": frozenset({"a.py:5"})})
+    assert ui_gates._rekey() == 0
+    assert '"a.py:7"' in copy.read_text(encoding="utf-8")

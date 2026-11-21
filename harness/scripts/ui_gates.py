@@ -78,7 +78,6 @@ THEME_CALLS = frozenset({"get_color", "try_get_color"})
 #: entries; nothing is ever added, because they would not be debt but a new violation.
 KNOWN: dict[str, frozenset[str]] = {
     "qss-on-adapter": frozenset({
-        "src/ui/pages/download_page.py:163",
         "src/ui/pages/general_settings.py:508",
         "src/ui/pages/proc_page.py:281",
         "src/ui/pages/proc_page.py:288",
@@ -91,29 +90,29 @@ KNOWN: dict[str, frozenset[str]] = {
         "src/ui/pages/advanced_settings.py:191",
         "src/ui/pages/advanced_settings.py:211",
         "src/ui/pages/advanced_settings.py:66",
-        "src/ui/pages/download_page.py:146",
-        "src/ui/pages/download_page.py:150",
-        "src/ui/pages/download_page.py:181",
-        "src/ui/pages/download_page.py:192",
-        "src/ui/pages/download_page.py:212",
-        "src/ui/pages/download_page.py:229",
-        "src/ui/pages/download_page.py:233",
-        "src/ui/pages/download_page.py:250",
-        "src/ui/pages/download_page.py:252",
-        "src/ui/pages/download_page.py:258",
-        "src/ui/pages/download_page.py:260",
-        "src/ui/pages/download_page.py:275",
-        "src/ui/pages/download_page.py:277",
-        "src/ui/pages/download_page.py:283",
-        "src/ui/pages/download_page.py:285",
-        "src/ui/pages/download_page.py:302",
-        "src/ui/pages/download_page.py:304",
-        "src/ui/pages/download_page.py:310",
-        "src/ui/pages/download_page.py:312",
-        "src/ui/pages/download_page.py:327",
-        "src/ui/pages/download_page.py:329",
-        "src/ui/pages/download_page.py:335",
-        "src/ui/pages/download_page.py:337",
+        "src/ui/pages/download_page.py:107",
+        "src/ui/pages/download_page.py:111",
+        "src/ui/pages/download_page.py:142",
+        "src/ui/pages/download_page.py:153",
+        "src/ui/pages/download_page.py:173",
+        "src/ui/pages/download_page.py:190",
+        "src/ui/pages/download_page.py:194",
+        "src/ui/pages/download_page.py:211",
+        "src/ui/pages/download_page.py:213",
+        "src/ui/pages/download_page.py:219",
+        "src/ui/pages/download_page.py:221",
+        "src/ui/pages/download_page.py:236",
+        "src/ui/pages/download_page.py:238",
+        "src/ui/pages/download_page.py:244",
+        "src/ui/pages/download_page.py:246",
+        "src/ui/pages/download_page.py:263",
+        "src/ui/pages/download_page.py:265",
+        "src/ui/pages/download_page.py:271",
+        "src/ui/pages/download_page.py:273",
+        "src/ui/pages/download_page.py:288",
+        "src/ui/pages/download_page.py:290",
+        "src/ui/pages/download_page.py:296",
+        "src/ui/pages/download_page.py:298",
         "src/ui/pages/general_settings.py:108",
         "src/ui/pages/general_settings.py:109",
         "src/ui/pages/general_settings.py:115",
@@ -178,20 +177,20 @@ KNOWN: dict[str, frozenset[str]] = {
         "src/ui/pages/tab_3.py:57",
         "src/ui/pages/tab_3.py:77",
         "src/ui/pages/tab_4.py:79",
-        "src/ui/pages/tab_6.py:105",
-        "src/ui/pages/tab_6.py:110",
-        "src/ui/pages/tab_6.py:116",
-        "src/ui/pages/tab_6.py:139",
-        "src/ui/pages/tab_6.py:170",
-        "src/ui/pages/tab_6.py:217",
-        "src/ui/pages/tab_6.py:242",
-        "src/ui/pages/tab_6.py:269",
-        "src/ui/pages/tab_6.py:294",
-        "src/ui/pages/tab_6.py:319",
-        "src/ui/pages/tab_6.py:64",
-        "src/ui/pages/tab_6.py:82",
-        "src/ui/pages/tab_6.py:98",
-        "src/ui/pages/tab_6.py:99",
+        "src/ui/pages/tab_6.py:107",
+        "src/ui/pages/tab_6.py:108",
+        "src/ui/pages/tab_6.py:114",
+        "src/ui/pages/tab_6.py:119",
+        "src/ui/pages/tab_6.py:126",
+        "src/ui/pages/tab_6.py:150",
+        "src/ui/pages/tab_6.py:182",
+        "src/ui/pages/tab_6.py:230",
+        "src/ui/pages/tab_6.py:256",
+        "src/ui/pages/tab_6.py:284",
+        "src/ui/pages/tab_6.py:310",
+        "src/ui/pages/tab_6.py:336",
+        "src/ui/pages/tab_6.py:72",
+        "src/ui/pages/tab_6.py:90",
         "src/ui/shell/window.py:326",
         "src/ui/shell/window.py:327",
         "src/ui/shell/window.py:331",
@@ -225,16 +224,6 @@ KNOWN: dict[str, frozenset[str]] = {
         "src/ui/pages/render_queue_tab.py:106",
         "src/ui/pages/render_queue_tab.py:76",
         "src/ui/pages/tab_5.py:40",
-        "src/ui/pages/tab_6.py:114",
-        "src/ui/pages/tab_6.py:137",
-        "src/ui/pages/tab_6.py:168",
-        "src/ui/pages/tab_6.py:215",
-        "src/ui/pages/tab_6.py:240",
-        "src/ui/pages/tab_6.py:267",
-        "src/ui/pages/tab_6.py:292",
-        "src/ui/pages/tab_6.py:317",
-        "src/ui/pages/tab_6.py:59",
-        "src/ui/pages/tab_6.py:94",
     }),
     "theme-read-at-build": frozenset(),
 }
@@ -598,8 +587,47 @@ def stale_known(findings: Iterable[Finding]) -> list[tuple[str, str]]:
                   for fingerprint in fingerprints if (rule, fingerprint) not in present)
 
 
+def _rekey() -> int:
+    """Rewrite `KNOWN` from the tree, refusing if any rule would GROW (a ratchet is a shrink-only record).
+
+    Line-number fingerprints go stale on every edit above a recorded literal, which in an active migration is most
+    commits. Regenerating them by hand was a three-step dance with no guard against the one thing that must never
+    happen - a new violation entering the baseline. This makes the regeneration explicit and the grow-check automatic.
+    """
+    import re as _re
+
+    current = {rule: sorted(f.fingerprint() for f in check(SCOPES[rule])) for rule, check in CHECKS.items()}
+    grown = {rule: (len(got), len(KNOWN.get(rule, ()))) for rule, got in current.items()
+             if len(got) > len(KNOWN.get(rule, ()))}
+    if grown:
+        for rule, (got, known) in sorted(grown.items()):
+            print(f"REFUSED: {rule} would grow {known} -> {got}: retire the violation, do not re-baseline it")
+        return 2
+    lines = ["KNOWN: dict[str, frozenset[str]] = {"]
+    for rule in sorted(current):
+        fingerprints = current[rule]
+        if not fingerprints:
+            lines.append(f'    "{rule}": frozenset(),')
+            continue
+        lines.append(f'    "{rule}": frozenset({{')
+        lines.extend(f'        "{fp}",' for fp in fingerprints)
+        lines.append("    }),")
+    lines.append("}")
+    path = Path(__file__)
+    text = path.read_text(encoding="utf-8")
+    pattern = _re.compile(r"KNOWN: dict\[str, frozenset\[str\]\] = \{.*?\n\}", _re.S)
+    if not pattern.search(text):
+        print("REFUSED: the KNOWN block is not in the expected shape")
+        return 2
+    path.write_text(pattern.sub("\n".join(lines), text, count=1), encoding="utf-8")
+    print("re-keyed: " + ", ".join(f"{rule} {len(got)}" for rule, got in sorted(current.items())))
+    return 0
+
+
 def main() -> int:
     """Print the table of findings and the ratchet's verdict. 0 = nothing new, 1 = a new violation."""
+    if "--rekey" in sys.argv[1:]:
+        return _rekey()
     findings = all_findings()
     known = {f for f in findings if f.fingerprint() in KNOWN.get(f.rule, frozenset())}
     fresh = new_findings(findings)
