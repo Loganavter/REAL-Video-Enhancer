@@ -50,6 +50,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     "qss-on-adapter": ("src/ui/pages", "src/ui/widgets"),
     "raw-chrome-px": ("src/ui/pages", "src/ui/shell", "src/ui/widgets"),
     "theme-read-at-build": ("src/ui/pages", "src/ui/shell", "src/ui/widgets"),
+    "stock-widget": ("src/ui/pages",),
 }
 
 #: The adapters in `src/ui/widgets/qt_shaped.py`. A widget built by one of these paints itself, so a QSS rule aimed at
@@ -204,6 +205,65 @@ KNOWN: dict[str, frozenset[str]] = {
         "src/ui/shell/window.py:67",
     }),
     "theme-read-at-build": frozenset({
+    }),
+    "stock-widget": frozenset({
+        "src/ui/pages/advanced_settings.py:135",
+        "src/ui/pages/advanced_settings.py:189",
+        "src/ui/pages/advanced_settings.py:209",
+        "src/ui/pages/advanced_settings.py:58",
+        "src/ui/pages/advanced_settings.py:98",
+        "src/ui/pages/download_page.py:160",
+        "src/ui/pages/download_page.py:180",
+        "src/ui/pages/download_page.py:199",
+        "src/ui/pages/general_settings.py:205",
+        "src/ui/pages/general_settings.py:244",
+        "src/ui/pages/general_settings.py:267",
+        "src/ui/pages/general_settings.py:439",
+        "src/ui/pages/general_settings.py:445",
+        "src/ui/pages/general_settings.py:475",
+        "src/ui/pages/general_settings.py:524",
+        "src/ui/pages/general_settings.py:84",
+        "src/ui/pages/home_page.py:105",
+        "src/ui/pages/home_page.py:122",
+        "src/ui/pages/home_page.py:126",
+        "src/ui/pages/proc_page.py:198",
+        "src/ui/pages/proc_page.py:242",
+        "src/ui/pages/proc_page.py:248",
+        "src/ui/pages/proc_page.py:263",
+        "src/ui/pages/proc_page.py:343",
+        "src/ui/pages/proc_page.py:380",
+        "src/ui/pages/proc_page.py:423",
+        "src/ui/pages/render_queue_tab.py:106",
+        "src/ui/pages/render_queue_tab.py:76",
+        "src/ui/pages/settings_page.py:203",
+        "src/ui/pages/settings_page.py:212",
+        "src/ui/pages/tab_2.py:109",
+        "src/ui/pages/tab_2.py:135",
+        "src/ui/pages/tab_2.py:141",
+        "src/ui/pages/tab_2.py:161",
+        "src/ui/pages/tab_2.py:47",
+        "src/ui/pages/tab_2.py:87",
+        "src/ui/pages/tab_3.py:120",
+        "src/ui/pages/tab_3.py:141",
+        "src/ui/pages/tab_3.py:158",
+        "src/ui/pages/tab_3.py:164",
+        "src/ui/pages/tab_3.py:176",
+        "src/ui/pages/tab_3.py:182",
+        "src/ui/pages/tab_3.py:52",
+        "src/ui/pages/tab_3.py:72",
+        "src/ui/pages/tab_3.py:96",
+        "src/ui/pages/tab_4.py:74",
+        "src/ui/pages/tab_5.py:40",
+        "src/ui/pages/tab_6.py:114",
+        "src/ui/pages/tab_6.py:137",
+        "src/ui/pages/tab_6.py:168",
+        "src/ui/pages/tab_6.py:215",
+        "src/ui/pages/tab_6.py:240",
+        "src/ui/pages/tab_6.py:267",
+        "src/ui/pages/tab_6.py:292",
+        "src/ui/pages/tab_6.py:317",
+        "src/ui/pages/tab_6.py:59",
+        "src/ui/pages/tab_6.py:94",
     }),
 }
 
@@ -504,10 +564,41 @@ def check_theme_reads(paths: Iterable[str | Path]) -> list[Finding]:
 
 # --- the ratchet ------------------------------------------------------------------------------------------
 
+#: Widget classes the toolkit provides a counterpart for. A page that constructs one of these directly is a page the
+#: migration has not reached yet - and the host's law is "no stock Q* widget except what the toolkit gives".
+STOCK_WIDGETS = {
+    "QLabel": "Text", "QPushButton": "Button", "QCheckBox": "CheckBox", "QComboBox": "ComboBox",
+    "QLineEdit": "CustomLineEdit", "QSpinBox": "SpinBox", "QDoubleSpinBox": "DoubleSpinBox",
+    "QProgressBar": "ProgressBar/ToastProgressBar", "QListWidget": "IconListWidget",
+    "QTextEdit": "Text(mode='document')/ConsoleView", "QScrollArea": "SurfaceScrollArea/OverlayScrollArea",
+    "QTabWidget": "TopTabHost", "QSlider": "Slider", "QRadioButton": "RadioButton",
+}
+
+
+def check_stock_widgets(paths: Iterable[str | Path]) -> list[Finding]:
+    """A page module that builds a STOCK widget class instead of its toolkit counterpart.
+
+    The counters in `harness/tests/test_page_primitives.py` pin what a page builds today; this check is the ratchet
+    above them: the count of stock constructions per class may only go down. It is the enforcement of the rule "no QSS
+    and no Q* widget except what the toolkit provides" - without it, a regeneration quietly reintroduces `QLabel`.
+    """
+    findings: list[Finding] = []
+    for path in _python_files(paths):
+        for node in ast.walk(_parse(path)):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            if name in STOCK_WIDGETS:
+                findings.append(Finding(_display(path), getattr(node, "lineno", 0), "stock-widget",
+                                        f"{name} (toolkit: {STOCK_WIDGETS[name]})"))
+    return findings
+
+
 CHECKS = {
     "qss-on-adapter": check_qss,
     "raw-chrome-px": check_raw_px,
     "theme-read-at-build": check_theme_reads,
+    "stock-widget": check_stock_widgets,
 }
 
 
