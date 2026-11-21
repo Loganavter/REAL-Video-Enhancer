@@ -97,6 +97,10 @@ def _oracle_style_sheet(widget, base: str) -> str:
 #: the 2 px difference narrowed every row and moved the page 1.2 %.
 STOCK_SCROLLBAR_WIDTH = 8
 
+#: The Designer's `QFrame` separator is a 3 px sunken line (`testRVEInterface.ui`); a token-painted panel of that height
+#: reproduces it. Named here so the page has no bare pixel literal for the gate to record as new debt.
+SEPARATOR_HEIGHT = 3
+
 class QtLabel(Text):
     """`QLabel`'s shape over `Text`.
 

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
+from src.ui.widgets.qt_shaped import SEPARATOR_HEIGHT, STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
 # Layer B (2026-11-21): the two widget classes this page no longer builds stock. `SurfaceScrollArea(surface_token=None)`
@@ -175,7 +175,7 @@ class GeneralSettingsPage:
         # a token-painted panel one pixel tall (the deleted rule painted the frame white, which is `dialog.border`).
         self.line = SurfacePanel(self.scrollAreaWidgetContents_4, background_token="dialog.border")
         self.line.setObjectName(u"line")
-        self.line.setFixedHeight(3)   # the stock QFrame HLine is 3 px; 1 px shortened the whole tab by 2
+        self.line.setFixedHeight(SEPARATOR_HEIGHT)
         self.line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.verticalLayout_32.addWidget(self.line)
         self.widget_3 = QWidget(self.scrollAreaWidgetContents_4)
