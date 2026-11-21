@@ -8,25 +8,42 @@ from PySide6.QtCore import (
 
 
 class AnimationHandler:
-    def fadeInAnimation(self, qObject: QWidget, n=None):
-        self.opacity_effect = QGraphicsOpacityEffect()
-        qObject.setGraphicsEffect(self.opacity_effect)
+    """Page fades.
 
-        self.animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.animation.setDuration(200)  # Duration in milliseconds
-        self.animation.setStartValue(0)
-        self.animation.setEndValue(1)
-        self.animation.start()
+    A `QGraphicsOpacityEffect` on the page stack makes Qt render the whole stack into an offscreen surface and blit it.
+    The effect used to stay installed after the animation finished: with it, the blit is not invalidated by a page
+    switch, so the freshly shown page stayed BLACK (or stale) until some input forced a repaint - observed 2026-11-22 as
+    "the interface appears only when you click it". The effect is now removed the moment the fade ends, and the stack is
+    asked to repaint so the page paints directly from that point on.
+    """
+
+    def _fade(self, qObject: QWidget, start: float, end: float, on_done=None) -> None:
+        effect = QGraphicsOpacityEffect(qObject)
+        qObject.setGraphicsEffect(effect)
+        animation = QPropertyAnimation(effect, b"opacity")
+        animation.setDuration(200)
+        animation.setStartValue(start)
+        animation.setEndValue(end)
+
+        def _finish() -> None:
+            # The effect must not outlive the fade: it changes how every child below is painted, and a page switch under
+            # it leaves a stale blit. Removing it also drops the offscreen surface.
+            qObject.setGraphicsEffect(None)
+            qObject.update()
+            if on_done is not None:
+                on_done()
+
+        animation.finished.connect(_finish)
+        # Keep both alive: a QPropertyAnimation with no owner is garbage-collected mid-flight and the effect stays.
+        self._animation = animation
+        self._effect = effect
+        animation.start()
+
+    def fadeInAnimation(self, qObject: QWidget, n=None):
+        self._fade(qObject, 0.0, 1.0)
 
     def fadeOutAnimation(self, qObject: QWidget, n=None):
-        self.opacity_effect = QGraphicsOpacityEffect()
-        qObject.setGraphicsEffect(self.opacity_effect)
-
-        self.animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.animation.setDuration(200)  # Duration in milliseconds
-        self.animation.setStartValue(1)
-        self.animation.setEndValue(0)
-        self.animation.start()
+        self._fade(qObject, 1.0, 0.0)
 
     def fade_to_color(self, color):
         self.animation = QPropertyAnimation(self, b"styleSheet")
