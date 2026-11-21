@@ -7,16 +7,49 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize)
+from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
 from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
-# A pixmap `QLabel` migrates to the toolkit's image label, which carries `setPixmap`/`setScaledContents` itself - no
-# adapter is needed (`src/ui/widgets/qt_shaped.py` holds the shapes that need translation; this one drops in).
-from sli_ui_toolkit.widgets import SurfacePanel, SurfaceScrollArea
-from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
+# The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CustomLineEdit` for a
+# `QLineEdit`, `Button` for a `QPushButton`, `CheckBox` for a `QCheckBox`, `ComboBox` for a `QComboBox` and
+# `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, SurfacePanel,
+    SurfaceScrollArea, Text)
 from src.ui.typography import apply, BODY_PT
+
+#: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
+#: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
+#: to come from the compatibility layer (`STOCK_SCROLLBAR_WIDTH`), which this page no longer imports.
+STOCK_SCROLLBAR_WIDTH = 8
+
+#: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
+#: defaults to centre, which would move every value to the middle of its box.
+SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+
+def _row_checkbox(parent) -> CheckBox:
+    """A toolkit `CheckBox` shaped for an RVE settings row.
+
+    Two statements the row needs and the toolkit control does not carry as constructor arguments:
+
+    * **the row size.** `CheckBox` builds on `Button`'s standalone control size, so an empty box is a fixed 36x36
+      square (measured offscreen: `minimumSize() == maximumSize() == 36x36`, hint 24x30). RVE's row box is the
+      indicator plus its label - the row's own height decides - so the square is released here.
+    * **Qt's signal spelling.** RVE's glue binds `stateChanged(int)` (`src/ui/SettingsTab.py` writes the setting from
+      it). The toolkit declares `stateChanged`, but emits it from `setCheckState` only: a plain two-state click or
+      `setChecked` emits `toggled(bool)` alone (measured), so without this line a click would never be persisted.
+
+    Both belong in the toolkit's `CheckBox` (a `size=` for a row shape, `stateChanged` on every state change); until
+    it grows them they are stated once here instead of once per widget.
+    """
+    box = CheckBox(parent=parent)
+    box.setMinimumSize(0, 0)
+    box.setMaximumSize(16777215, 16777215)
+    box.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    box.toggled.connect(lambda checked: box.stateChanged.emit(2 if checked else 0))
+    return box
 
 
 class Tab2Page:
@@ -53,18 +86,21 @@ class Tab2Page:
         self.horizontalLayout_19.setSpacing(10)
         self.horizontalLayout_19.setObjectName(u"horizontalLayout_19")
         self.horizontalLayout_19.setContentsMargins(0, 0, 0, 0)
-        self.encoderLabel_3 = QtLabel(self.outputFileLocationContianer)
+        self.encoderLabel_3 = Text(parent=self.outputFileLocationContianer)
         self.encoderLabel_3.setObjectName(u"encoderLabel_3")
         apply(self.encoderLabel_3, BODY_PT)
         self.horizontalLayout_19.addWidget(self.encoderLabel_3)
         self.horizontalSpacer_11 = QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_19.addItem(self.horizontalSpacer_11)
-        self.output_folder_location = QtLineEdit(self.outputFileLocationContianer)
+        self.output_folder_location = CustomLineEdit(self.outputFileLocationContianer)
         self.output_folder_location.setObjectName(u"output_folder_location")
         self.output_folder_location.setMinimumSize(QSize(0, 25))
         self.horizontalLayout_19.addWidget(self.output_folder_location)
-        self.select_output_folder_location_btn = QtButton(self.outputFileLocationContianer)
+        self.select_output_folder_location_btn = Button(parent=self.outputFileLocationContianer, text="",
+            variant="surface", content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.select_output_folder_location_btn.setObjectName(u"select_output_folder_location_btn")
+        self.select_output_folder_location_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_19.addWidget(self.select_output_folder_location_btn)
         self.verticalLayout_25.addWidget(self.outputFileLocationContianer)
         self.sceneChangeDetectionSettingContainer = QWidget(self.scrollAreaWidgetContents_3)
@@ -73,13 +109,13 @@ class Tab2Page:
         self.horizontalLayout_17.setSpacing(10)
         self.horizontalLayout_17.setObjectName(u"horizontalLayout_17")
         self.horizontalLayout_17.setContentsMargins(0, 0, 0, 0)
-        self.label_20 = QtLabel(self.sceneChangeDetectionSettingContainer)
+        self.label_20 = Text(parent=self.sceneChangeDetectionSettingContainer)
         self.label_20.setObjectName(u"label_20")
         apply(self.label_20, BODY_PT)
         self.horizontalLayout_17.addWidget(self.label_20)
         self.horizontalSpacer_3 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_17.addItem(self.horizontalSpacer_3)
-        self.scene_change_detection_enabled = QtCheckBox(self.sceneChangeDetectionSettingContainer)
+        self.scene_change_detection_enabled = _row_checkbox(self.sceneChangeDetectionSettingContainer)
         self.scene_change_detection_enabled.setObjectName(u"scene_change_detection_enabled")
         self.horizontalLayout_17.addWidget(self.scene_change_detection_enabled)
         self.verticalLayout_25.addWidget(self.sceneChangeDetectionSettingContainer)
@@ -89,13 +125,13 @@ class Tab2Page:
         self.horizontalLayout_27.setSpacing(10)
         self.horizontalLayout_27.setObjectName(u"horizontalLayout_27")
         self.horizontalLayout_27.setContentsMargins(0, 0, 0, 0)
-        self.label_37 = QtLabel(self.widget_12)
+        self.label_37 = Text(parent=self.widget_12)
         self.label_37.setObjectName(u"label_37")
         apply(self.label_37, BODY_PT)
         self.horizontalLayout_27.addWidget(self.label_37)
         self.horizontalSpacer_13 = QSpacerItem(305, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_27.addItem(self.horizontalSpacer_13)
-        self.scene_change_detection_method = QtComboBox(self.widget_12)
+        self.scene_change_detection_method = ComboBox(self.widget_12)
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.addItem("")
@@ -109,18 +145,24 @@ class Tab2Page:
         self.horizontalLayout_14.setSpacing(10)
         self.horizontalLayout_14.setObjectName(u"horizontalLayout_14")
         self.horizontalLayout_14.setContentsMargins(0, 0, 0, 0)
-        self.label_30 = QtLabel(self.widget_7)
+        self.label_30 = Text(parent=self.widget_7)
         self.label_30.setObjectName(u"label_30")
         apply(self.label_30, BODY_PT)
         self.horizontalLayout_14.addWidget(self.label_30)
         self.horizontalSpacer_6 = QSpacerItem(305, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_14.addItem(self.horizontalSpacer_6)
-        self.scene_change_detection_threshold = QtDoubleSpinBox(self.widget_7)
+        # `single_step=0.1` is the adapter's "Qt clamps and rounds to `decimals`" semantic, stated as the step the field
+        # actually shows: the toolkit's `DoubleSpinBox.setValue` SNAPS to `single_step` (its default 1.0 turned RVE's
+        # stored `3.5` into `3.0`, which the settings glue then wrote back). At `decimals=1` a 0.1 step is exactly that
+        # rounding, so `3.5` stays `3.5` (measured offscreen) while the arrow keys still step.
+        self.scene_change_detection_threshold = DoubleSpinBox(self.widget_7, single_step=0.1, decimals=1,
+            alignment=SPIN_ALIGNMENT)
         self.scene_change_detection_threshold.setObjectName(u"scene_change_detection_threshold")
         self.scene_change_detection_threshold.setMinimumSize(QSize(75, 30))
         self.scene_change_detection_threshold.setDecimals(1)
-        self.scene_change_detection_threshold.setMinimum(1.000000000000000)
-        self.scene_change_detection_threshold.setMaximum(10.000000000000000)
+        # Qt's `setMinimum`/`setMaximum` are the one range spelling the toolkit field does not answer (`DoubleSpinBox`
+        # carries `setRange` only), so the Designer's two statements are the one call they compose to.
+        self.scene_change_detection_threshold.setRange(1.000000000000000, 10.000000000000000)
         self.horizontalLayout_14.addWidget(self.scene_change_detection_threshold)
         self.verticalLayout_25.addWidget(self.widget_7)
         self.widget_9 = QWidget(self.scrollAreaWidgetContents_3)
@@ -129,13 +171,13 @@ class Tab2Page:
         self.horizontalLayout_25.setSpacing(6)
         self.horizontalLayout_25.setObjectName(u"horizontalLayout_25")
         self.horizontalLayout_25.setContentsMargins(0, 0, 0, 0)
-        self.label_48 = QtLabel(self.widget_9)
+        self.label_48 = Text(parent=self.widget_9)
         self.label_48.setObjectName(u"label_48")
         apply(self.label_48, BODY_PT)
         self.horizontalLayout_25.addWidget(self.label_48)
         self.horizontalSpacer_10 = QSpacerItem(468, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_25.addItem(self.horizontalSpacer_10)
-        self.auto_border_cropping = QtCheckBox(self.widget_9)
+        self.auto_border_cropping = _row_checkbox(self.widget_9)
         self.auto_border_cropping.setObjectName(u"auto_border_cropping")
         self.horizontalLayout_25.addWidget(self.auto_border_cropping)
         self.verticalLayout_25.addWidget(self.widget_9)
