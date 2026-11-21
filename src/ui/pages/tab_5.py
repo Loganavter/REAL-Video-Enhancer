@@ -22,8 +22,10 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QSpinBox, QStackedWidget, QTabWidget, QTextEdit,
     QVBoxLayout, QWidget)
 import resources_rc
+
+from sli_ui_toolkit.widgets import ConsoleView
 import resources_rc
-from src.ui.typography import apply, SMALL_PT
+from src.ui.typography import font, SMALL_PT
 
 
 class Tab5Page:
@@ -37,21 +39,17 @@ class Tab5Page:
         self.tab_5.setObjectName(u"tab_5")
         self.horizontalLayout_10 = QHBoxLayout(self.tab_5)
         self.horizontalLayout_10.setObjectName(u"horizontalLayout_10")
-        self.renderOutput = QTextEdit(self.tab_5)
+        # Layer B: a log pane is the toolkit's painted console. ConsoleView carries the three QTextEdit calls the glue
+        # makes - setPlainText, setHtml (its plain text) and verticalScrollBar().setValue(maximum()) - which is why this
+        # widget could finally leave stock (src/ui/ProcessTab.py:481-485).
+        self.renderOutput = ConsoleView(self.tab_5)
         self.renderOutput.setObjectName(u"renderOutput")
         sizePolicy10 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         sizePolicy10.setHorizontalStretch(0)
         sizePolicy10.setVerticalStretch(0)
         sizePolicy10.setHeightForWidth(self.renderOutput.sizePolicy().hasHeightForWidth())
         self.renderOutput.setSizePolicy(sizePolicy10)
-        apply(self.renderOutput, SMALL_PT)
-        self.renderOutput.setStyleSheet(u"*:disabled{\n"
-" \n"
-"	color:white;\n"
-"}")
-        self.renderOutput.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.renderOutput.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.renderOutput.setReadOnly(True)
+        self.renderOutput.set_font(font(SMALL_PT))
         self.horizontalLayout_10.addWidget(self.renderOutput)
         self.retranslate()
         return self.tab_5

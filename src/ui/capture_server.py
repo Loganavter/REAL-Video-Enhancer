@@ -208,6 +208,16 @@ def install(window) -> None:
         for name in names:
             by_name[name]()
             QApplication.processEvents()
+            # Settle the page switch before the grab: one event pass is not enough right after the warm-up walk, and a
+            # grab of the previous page under the requested file name is a silent wrong reading (measured twice).
+            for _ in range(25):
+                QApplication.processEvents()
+                if page_capture.is_current(window, name):
+                    break
+                time.sleep(0.02)
+            else:
+                print(f"capture-server: {name} did not become current - the dump names a page it is not showing",
+                      flush=True)
             page_capture.stabilise(window)
             pixmap = window.grab()
             pixmap.save(os.path.join(out_dir, f"{name}.png"))

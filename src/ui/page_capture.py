@@ -46,9 +46,18 @@ def steps(window) -> list[tuple[str, object]]:
         tabs = _tab_host(page)
         if tabs is not None and tabs.count() > 1:
             for tab_index in range(tabs.count()):
+                # The action selects the PAGE too: the walk runs `nav2` before `nav2-tab0`, so in-order capture hid the
+                # omission, but a single `shot nav2-tab2` switched a tab on a page that was not on screen and the grab
+                # was the previous page (measured twice).
                 found.append((f"nav{index}-tab{tab_index}",
-                              lambda t=tabs, j=tab_index: t.setCurrentIndex(j)))
+                              lambda i=index, t=tabs, j=tab_index: _show(stack, i, t, j)))
     return found
+
+
+def _show(stack, page_index: int, tabs, tab_index: int) -> None:
+    """Make `page_index` current, then its tab `tab_index`."""
+    stack.setCurrentIndex(page_index)
+    tabs.setCurrentIndex(tab_index)
 
 
 def _tab_host(page):
@@ -71,6 +80,27 @@ def _tab_host(page):
         if type(child).__name__ == "TopTabHost" and hasattr(child, "setCurrentIndex"):
             return child
     return None
+
+
+def is_current(window, name: str) -> bool:
+    """Is the interface actually showing the page `name` (a walker stem like `nav2` or `nav3-tab1`)?
+
+    The capture server used to apply a page's action and grab the very next event pass; a request right after the
+    warm-up walk then photographed the PREVIOUS page while naming the file after the requested one - measured twice:
+    `shot nav2-tab1` wrote the download page, and the comparison charged that mismatch to the branch.
+    """
+    match = re.fullmatch(r"nav(\d+)(?:-tab(\d+))?", name)
+    stack = getattr(window, "stackedWidget", None)
+    if match is None or stack is None:
+        return False
+    index = int(match.group(1))
+    if stack.currentIndex() != index:
+        return False
+    tab_text = match.group(2)
+    if tab_text is None:
+        return True
+    host = _tab_host(stack.widget(index))
+    return host is not None and host.currentIndex() == int(tab_text)
 
 
 def install(window) -> None:
