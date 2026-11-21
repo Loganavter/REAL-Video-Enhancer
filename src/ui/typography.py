@@ -87,6 +87,31 @@ def apply(
     widget.setFont(font(pt, bold=bold, italic=italic, underline=underline, family=family))
 
 
+#: RVE's controls are 12 PX while its labels are 12 pt (= 16 px at 96 dpi): the deleted compatibility layer forced that
+#: pixel size in each adapter's constructor. Without it a control inherits the 12 pt font of the scroll area it sits in -
+#: measured as the single largest parity delta after the layer went (every control +33 % text, every row taller).
+CONTROL_PX = 12
+
+
+def apply_control_fonts(root) -> None:
+    """Pin the toolkit CONTROLS under ``root`` to RVE's control size, once per window.
+
+    A page's `apply(container, BODY_PT)` cascades a 16 px font into every toolkit control inside it; the toolkit controls
+    do not set a font of their own, so the cascade wins. One walk after the window is built states the rule in one place
+    instead of 147 call sites, and it is idempotent.
+    """
+    from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, SpinBox,
+                                        Stepper)
+
+    for cls in (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, SpinBox, Stepper):
+        for widget in root.findChildren(cls):
+            current = widget.font()
+            if current.pixelSize() == CONTROL_PX:
+                continue
+            current.setPixelSize(CONTROL_PX)
+            widget.setFont(current)
+
+
 def point_size_of(widget) -> float:
     """The widget's resolved point size (``QFontInfo``, so an unset size shows the application default)."""
     return QFontInfo(widget.font()).pointSizeF()

@@ -120,16 +120,14 @@ class ProcPagePage:
         # SNAPS to `single_step`, which at the default 1.0 would turn 3.5 into 3.0); `decimals=2` is what the Designer's
         # stock `QDoubleSpinBox` displayed and `alignment` is Qt's own (the toolkit field defaults to centre).
         self.startTimeSpinBox = DoubleSpinBox(self.widget_30, single_step=0.1, decimals=2, show_step_buttons=True,
-                                       step_button_width=20, field_height=29, show_step_buttons=True,
-                                       step_button_width=20, field_height=29,
-            alignment=SPIN_ALIGNMENT)
+                                              step_button_width=20, field_height=29, alignment=SPIN_ALIGNMENT)
         self.startTimeSpinBox.setObjectName(u"startTimeSpinBox")
         self.verticalLayout_37.addWidget(self.startTimeSpinBox)
         self.label_52 = Text(parent=self.widget_30)
         self.label_52.setObjectName(u"label_52")
         self.verticalLayout_37.addWidget(self.label_52)
-        self.endTimeSpinBox = DoubleSpinBox(self.widget_30, single_step=0.1, decimals=2,
-            alignment=SPIN_ALIGNMENT)
+        self.endTimeSpinBox = DoubleSpinBox(self.widget_30, single_step=0.1, decimals=2, show_step_buttons=True,
+                                            step_button_width=20, field_height=29, alignment=SPIN_ALIGNMENT)
         self.endTimeSpinBox.setObjectName(u"endTimeSpinBox")
         # Qt's `setMinimum` is the one range spelling the toolkit field does not answer (`DoubleSpinBox` carries
         # `setRange` only), so the Designer's minimum plus Qt's own default maximum (99.99) are one call.

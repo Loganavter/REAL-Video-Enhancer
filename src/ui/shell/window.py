@@ -222,6 +222,11 @@ class MainWindowShell:
         self.stackedWidget.setCurrentIndex(2)
         QMetaObject.connectSlotsByName(window)
         expose(window, self)
+        # One place for the control type size: a page's 12 pt container font would otherwise cascade 16 px into every
+        # toolkit control (the deleted adapter stated 12 px per control; this states it per window).
+        from src.ui.typography import apply_control_fonts
+
+        apply_control_fonts(window)
 
     def retranslate(self, window) -> None:
         window.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
