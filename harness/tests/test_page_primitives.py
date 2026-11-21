@@ -36,6 +36,12 @@ ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget"
 
 #: page module -> {designer widget name: the class the page builds}. Every watched widget is migrated to an adapter;
 #: a stock one coming back would have to be pinned here and argued for in review.
+#: Pages migrated off the compatibility layer by hand. The splitter's cross-check no longer applies to them: their
+#: widgets are constructed directly with the toolkit's constructor arguments, which `split_ui` does not emit. The
+#: generator and this cross-check retire together with `qt_shaped.py`; until then a page is listed here the moment it
+#: stops being regenerable, so the check keeps its meaning for the rest.
+HAND_MAINTAINED = frozenset({"tab_2", "tab_4"})
+
 PAGES_PIN: dict[str, dict[str, str]] = {
     "tab_2": {"scene_change_detection_threshold": "DoubleSpinBox"},
     "tab_3": {"ncnn_gpu_id": "QtSpinBox", "pytorch_gpu_id": "QtSpinBox"},
