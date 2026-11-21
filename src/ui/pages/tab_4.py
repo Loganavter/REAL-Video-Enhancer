@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
+from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtLabel
 
 
 class Tab4Page:
@@ -49,13 +50,13 @@ class Tab4Page:
         self.horizontalLayout_21.setSpacing(0)
         self.horizontalLayout_21.setObjectName(u"horizontalLayout_21")
         self.horizontalLayout_21.setContentsMargins(0, 0, 0, 0)
-        self.label_19 = QLabel(self.previewEnabledContainer)
+        self.label_19 = QtLabel(self.previewEnabledContainer)
         self.label_19.setObjectName(u"label_19")
         self.label_19.setFont(font4)
         self.horizontalLayout_21.addWidget(self.label_19)
         self.horizontalSpacer_2 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_21.addItem(self.horizontalSpacer_2)
-        self.preview_enabled = QCheckBox(self.previewEnabledContainer)
+        self.preview_enabled = QtCheckBox(self.previewEnabledContainer)
         self.preview_enabled.setObjectName(u"preview_enabled")
         self.horizontalLayout_21.addWidget(self.preview_enabled)
         self.verticalLayout_20.addWidget(self.previewEnabledContainer)
@@ -65,7 +66,7 @@ class Tab4Page:
         self.horizontalLayout_12.setSpacing(10)
         self.horizontalLayout_12.setObjectName(u"horizontalLayout_12")
         self.horizontalLayout_12.setContentsMargins(0, 0, 0, 0)
-        self.label_23 = QLabel(self.discordRPCSettingsContainer)
+        self.label_23 = QtLabel(self.discordRPCSettingsContainer)
         self.label_23.setObjectName(u"label_23")
         self.label_23.setFont(font4)
         self.horizontalLayout_12.addWidget(self.label_23)
@@ -77,7 +78,7 @@ class Tab4Page:
         self.label_29.setPixmap(QPixmap(u":/icons/icons/info.svg"))
         self.label_29.setScaledContents(True)
         self.horizontalLayout_12.addWidget(self.label_29)
-        self.discord_rich_presence = QCheckBox(self.discordRPCSettingsContainer)
+        self.discord_rich_presence = QtCheckBox(self.discordRPCSettingsContainer)
         self.discord_rich_presence.setObjectName(u"discord_rich_presence")
         self.horizontalLayout_12.addWidget(self.discord_rich_presence)
         self.verticalLayout_20.addWidget(self.discordRPCSettingsContainer)
@@ -86,7 +87,7 @@ class Tab4Page:
         self.verticalLayout_35 = QVBoxLayout(self.widget_29)
         self.verticalLayout_35.setObjectName(u"verticalLayout_35")
         self.verticalLayout_35.setContentsMargins(0, 0, 0, 0)
-        self.openRVEFolderBtn = QPushButton(self.widget_29)
+        self.openRVEFolderBtn = QtButton(self.widget_29)
         self.openRVEFolderBtn.setObjectName(u"openRVEFolderBtn")
         self.openRVEFolderBtn.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.verticalLayout_35.addWidget(self.openRVEFolderBtn)

@@ -26,6 +26,7 @@ import resources_rc
 from src.ui.pages.tab_2 import Tab2Page
 from src.ui.pages.tab_3 import Tab3Page
 from src.ui.pages.tab_4 import Tab4Page
+from src.ui.widgets.qt_shaped import QtButton
 
 
 class SettingsPagePage:
@@ -226,7 +227,7 @@ class SettingsPagePage:
         self.horizontalLayout_20.setObjectName(u"horizontalLayout_20")
         self.horizontalSpacer_4 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_20.addItem(self.horizontalSpacer_4)
-        self.resetSettingsBtn = QPushButton(self.widget_4)
+        self.resetSettingsBtn = QtButton(self.widget_4)
         self.resetSettingsBtn.setObjectName(u"resetSettingsBtn")
         self.horizontalLayout_20.addWidget(self.resetSettingsBtn)
         self.verticalLayout_18.addWidget(self.widget_4)

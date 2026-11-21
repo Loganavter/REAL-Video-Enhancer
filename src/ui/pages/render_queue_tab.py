@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
+from src.ui.widgets.qt_shaped import QtButton, QtLabel
 
 
 class RenderQueueTabPage:
@@ -88,13 +89,13 @@ class RenderQueueTabPage:
         self.widget_23.setObjectName(u"widget_23")
         self.verticalLayout_28 = QVBoxLayout(self.widget_23)
         self.verticalLayout_28.setObjectName(u"verticalLayout_28")
-        self.RemoveFromRenderQueue = QPushButton(self.widget_23)
+        self.RemoveFromRenderQueue = QtButton(self.widget_23)
         self.RemoveFromRenderQueue.setObjectName(u"RemoveFromRenderQueue")
         self.verticalLayout_28.addWidget(self.RemoveFromRenderQueue)
-        self.MoveUpRenderQueue = QPushButton(self.widget_23)
+        self.MoveUpRenderQueue = QtButton(self.widget_23)
         self.MoveUpRenderQueue.setObjectName(u"MoveUpRenderQueue")
         self.verticalLayout_28.addWidget(self.MoveUpRenderQueue)
-        self.MoveDownRenderQueue = QPushButton(self.widget_23)
+        self.MoveDownRenderQueue = QtButton(self.widget_23)
         self.MoveDownRenderQueue.setObjectName(u"MoveDownRenderQueue")
         self.verticalLayout_28.addWidget(self.MoveDownRenderQueue)
         self.horizontalLayout_38.addWidget(self.widget_23)
@@ -113,7 +114,7 @@ class RenderQueueTabPage:
 "border-radius:10px;\n"
 "}")
         self.gridLayout_4.addWidget(self.OutputFilesListWidget, 1, 0, 1, 1)
-        self.label_51 = QLabel(self.renderQueueTab)
+        self.label_51 = QtLabel(self.renderQueueTab)
         self.label_51.setObjectName(u"label_51")
         self.gridLayout_4.addWidget(self.label_51, 0, 0, 1, 1)
         self.verticalLayout_27.addLayout(self.gridLayout_4)

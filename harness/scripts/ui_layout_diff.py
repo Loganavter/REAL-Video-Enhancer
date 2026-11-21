@@ -27,17 +27,51 @@ def load(path: str) -> dict:
         return json.load(handle)
 
 
-def _name(node: dict, index: int) -> str:
+def prune_under(tree: dict, names: set[str]) -> int:
+    """Drop the children of widgets whose internals belong to a substituted class (`QComboBox` -> `ComboBox`).
+
+    A toolkit combo has no QListView inside, and that is not a lost property - the identity gate treats it the same
+    way. Returns how many subtrees were pruned, so a table says it happened instead of hiding it.
+    """
+    pruned = 0
+
+    def walk(node: dict) -> None:
+        nonlocal pruned
+        if node.get("name") in names:
+            if node.get("children"):
+                node.pop("children", None)
+                pruned += 1
+            return
+        for child in node.get("children", []):
+            walk(child)
+
+    walk(tree.get("root", {}))
+    return pruned
+
+
+def parse_aliases(pairs: list[str]) -> dict[str, str]:
+    """`--class-alias New=Old`: a deliberate class substitution, so paths still pair and the swap is counted."""
+    aliases: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise SystemExit(f"--class-alias expects New=Old, got {pair!r}")
+        new, old = pair.split("=", 1)
+        aliases[new.strip()] = old.strip()
+    return aliases
+
+
+def _name(node: dict, index: int, aliases: dict[str, str] | None = None) -> str:
     name = node.get("name") or ""
-    return name if name else f"~{node.get('class', '?')}[{index}]"
+    cls = (aliases or {}).get(node.get("class", ""), node.get("class", "?"))
+    return name if name else f"~{cls}[{index}]"
 
 
-def flatten(tree: dict) -> dict[str, dict]:
+def flatten(tree: dict, aliases: dict[str, str] | None = None) -> dict[str, dict]:
     """path -> node, path built from names so two runs of the same build produce the same keys."""
     flat: dict[str, dict] = {}
 
     def walk(node: dict, path: str, index: int) -> None:
-        key = f"{path}/{_name(node, index)}" if path else _name(node, index)
+        key = f"{path}/{_name(node, index, aliases)}" if path else _name(node, index, aliases)
         if key in flat:            # two unnamed siblings of the same class: disambiguate by position
             suffix = 2
             while f"{key}#{suffix}" in flat:
@@ -55,9 +89,10 @@ def _state(node: dict) -> dict:
     return {k: node[k] for k in ("currentIndex", "value", "checked") if k in node}
 
 
-def compare(stock: dict, rebuilt: dict, tolerance_px: int, ignore_text: list[str] | None = None) -> dict:
+def compare(stock: dict, rebuilt: dict, tolerance_px: int, ignore_text: list[str] | None = None,
+            class_aliases: dict[str, str] | None = None) -> dict:
     ignore_text = ignore_text or []
-    left, right = flatten(stock), flatten(rebuilt)
+    left, right = flatten(stock), flatten(rebuilt, class_aliases)
     missing = sorted(set(left) - set(right))
     extra = sorted(set(right) - set(left))
     geometry: list[tuple[str, list[int], list[int]]] = []
@@ -65,8 +100,11 @@ def compare(stock: dict, rebuilt: dict, tolerance_px: int, ignore_text: list[str
     state: list[tuple[str, dict, dict]] = []
     visibility: list[tuple[str, bool, bool]] = []
     ignored_text = 0
+    root_key = next(iter(left), None)
     for path in sorted(set(left) & set(right)):
         a, b = left[path], right[path]
+        if path == root_key:
+            continue          # the window's own position on screen is the user's / WM's business, not the interface
         if a.get("geometry") != b.get("geometry"):
             ga, gb = a.get("geometry", [0, 0, 0, 0]), b.get("geometry", [0, 0, 0, 0])
             if max(abs(x - y) for x, y in zip(ga, gb)) > tolerance_px:
@@ -103,6 +141,13 @@ def main() -> int:
     ap.add_argument("--ignore-text", action="append", default=[],
                     help="skip text comparison for paths containing this substring (repeatable; e.g. a label that "
                          "embeds free disk space)")
+    ap.add_argument("--geometry-any", action="store_true",
+                    help="compare rectangles of hidden widgets too; by default only visible ones count, because a "
+                         "hidden widget keeps the geometry it had when it was last shown")
+    ap.add_argument("--prune-under", action="append", default=[], metavar="NAME",
+                    help="do not compare the private children of these widget names (repeatable)")
+    ap.add_argument("--class-alias", action="append", default=[], metavar="NEW=OLD",
+                    help="treat NEW as OLD when pairing nodes - a deliberate migration substitution (repeatable)")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
 
@@ -119,11 +164,22 @@ def main() -> int:
     width = max((len(name) for name in shared), default=10)
     print(f"{'page'.ljust(width)}  {'nodes':>11}  {'miss':>4}  {'extra':>5}  {'geom':>4}  {'text':>4}  {'vis':>3}  {'state':>5}")
     for name in shared:
-        result = compare(load(stock_files[name]), load(rebuilt_files[name]), args.tolerance_px, args.ignore_text)
+        stock_tree = load(stock_files[name])
+        rebuilt_tree = load(rebuilt_files[name])
+        pruned = prune_under(stock_tree, set(args.prune_under))
+        result = compare(stock_tree, rebuilt_tree, args.tolerance_px, args.ignore_text,
+                         parse_aliases(args.class_alias))
+        if not args.geometry_any:
+            visible = {path: node for path, node in flatten(stock_tree, parse_aliases(args.class_alias)).items()
+                       if node.get("visible")}
+            result["geometry"] = [entry for entry in result["geometry"] if entry[0] in visible]
+        result["pruned"] = pruned
         results[name] = result
         print(f"{name.ljust(width)}  {result['nodes'][0]:5d}/{result['nodes'][1]:<5d}  "
               f"{len(result['missing']):4d}  {len(result['extra']):5d}  {len(result['geometry']):4d}  "
               f"{len(result['text']):4d}  {len(result['visibility']):3d}  {len(result['state']):5d}")
+        if result["pruned"]:
+            print(f"    (pruned {result['pruned']} substituted widget subtree(s) on the reference side)")
         if not result["clean"]:
             failed.append(name)
             shown = 0

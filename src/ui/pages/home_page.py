@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
+from src.ui.widgets.qt_shaped import QtButton, QtLabel
 
 
 class HomePagePage:
@@ -70,10 +71,10 @@ class HomePagePage:
         self.horizontalLayout_29.setObjectName(u"horizontalLayout_29")
         self.horizontalSpacer_14 = QSpacerItem(466, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_29.addItem(self.horizontalSpacer_14)
-        self.label_13 = QLabel(self.widget_11)
+        self.label_13 = QtLabel(self.widget_11)
         self.label_13.setObjectName(u"label_13")
         self.horizontalLayout_29.addWidget(self.label_13)
-        self.kofiBtn = QPushButton(self.widget_11)
+        self.kofiBtn = QtButton(self.widget_11)
         self.kofiBtn.setObjectName(u"kofiBtn")
         self.kofiBtn.setMaximumSize(QSize(55, 16777215))
         icon = QIcon()
@@ -82,10 +83,10 @@ class HomePagePage:
         self.kofiBtn.setIconSize(QSize(35, 35))
         self.kofiBtn.setCheckable(False)
         self.horizontalLayout_29.addWidget(self.kofiBtn)
-        self.label_16 = QLabel(self.widget_11)
+        self.label_16 = QtLabel(self.widget_11)
         self.label_16.setObjectName(u"label_16")
         self.horizontalLayout_29.addWidget(self.label_16)
-        self.githubBtn = QPushButton(self.widget_11)
+        self.githubBtn = QtButton(self.widget_11)
         self.githubBtn.setObjectName(u"githubBtn")
         self.githubBtn.setMaximumSize(QSize(55, 16777215))
         icon1 = QIcon()
@@ -105,7 +106,7 @@ class HomePagePage:
         self.label_2.setPixmap(QPixmap(u":/icons/icons/logo-v2.svg"))
         self.label_2.setScaledContents(False)
         self.gridLayout_7.addWidget(self.label_2, 0, 0, 1, 1)
-        self.label = QLabel(self.widget_8)
+        self.label = QtLabel(self.widget_8)
         self.label.setObjectName(u"label")
         sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         sizePolicy2.setHorizontalStretch(0)

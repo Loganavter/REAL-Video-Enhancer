@@ -28,6 +28,7 @@ from src.ui.pages.tab_6 import Tab6Page
 from src.ui.pages.render_queue_tab import RenderQueueTabPage
 from src.ui.pages.advanced_settings import AdvancedSettingsPage
 from src.ui.pages.tab_5 import Tab5Page
+from src.ui.widgets.qt_shaped import QtButton, QtLabel
 
 
 class ProcPagePage:
@@ -234,13 +235,13 @@ class ProcPagePage:
         self.widget_30.setObjectName(u"widget_30")
         self.verticalLayout_37 = QVBoxLayout(self.widget_30)
         self.verticalLayout_37.setObjectName(u"verticalLayout_37")
-        self.label_9 = QLabel(self.widget_30)
+        self.label_9 = QtLabel(self.widget_30)
         self.label_9.setObjectName(u"label_9")
         self.verticalLayout_37.addWidget(self.label_9)
         self.startTimeSpinBox = QDoubleSpinBox(self.widget_30)
         self.startTimeSpinBox.setObjectName(u"startTimeSpinBox")
         self.verticalLayout_37.addWidget(self.startTimeSpinBox)
-        self.label_52 = QLabel(self.widget_30)
+        self.label_52 = QtLabel(self.widget_30)
         self.label_52.setObjectName(u"label_52")
         self.verticalLayout_37.addWidget(self.label_52)
         self.endTimeSpinBox = QDoubleSpinBox(self.widget_30)
@@ -253,7 +254,7 @@ class ProcPagePage:
         self.horizontalLayout_48 = QHBoxLayout(self.widget_14)
         self.horizontalLayout_48.setObjectName(u"horizontalLayout_48")
         self.horizontalLayout_48.setContentsMargins(0, 0, 0, 0)
-        self.renderPreviewBtn = QPushButton(self.widget_14)
+        self.renderPreviewBtn = QtButton(self.widget_14)
         self.renderPreviewBtn.setObjectName(u"renderPreviewBtn")
         font2 = QFont()
         font2.setBold(False)
@@ -275,7 +276,7 @@ class ProcPagePage:
         self.verticalLayout_5.addWidget(self.RenderedPreviewControlsContainer)
         self.verticalLayout_34 = QVBoxLayout()
         self.verticalLayout_34.setObjectName(u"verticalLayout_34")
-        self.ETA = QLabel(self.processInfoContainer)
+        self.ETA = QtLabel(self.processInfoContainer)
         self.ETA.setObjectName(u"ETA")
         font3 = QFont()
         font3.setPointSize(10)
@@ -284,14 +285,14 @@ class ProcPagePage:
 "background-color: #1f232a\n"
 "}")
         self.verticalLayout_34.addWidget(self.ETA)
-        self.FPS = QLabel(self.processInfoContainer)
+        self.FPS = QtLabel(self.processInfoContainer)
         self.FPS.setObjectName(u"FPS")
         self.FPS.setFont(font3)
         self.FPS.setStyleSheet(u"QLabel{\n"
 "background-color: #1f232a\n"
 "}")
         self.verticalLayout_34.addWidget(self.FPS)
-        self.STATUS = QLabel(self.processInfoContainer)
+        self.STATUS = QtLabel(self.processInfoContainer)
         self.STATUS.setObjectName(u"STATUS")
         self.STATUS.setFont(font3)
         self.STATUS.setStyleSheet(u"QLabel{\n"
@@ -396,7 +397,7 @@ class ProcPagePage:
         self.horizontalLayout_32.addWidget(self.widget_24)
         self.onRenderButtonsContiainer = QHBoxLayout()
         self.onRenderButtonsContiainer.setObjectName(u"onRenderButtonsContiainer")
-        self.pauseRenderButton = QPushButton(self.widget_13)
+        self.pauseRenderButton = QtButton(self.widget_13)
         self.pauseRenderButton.setObjectName(u"pauseRenderButton")
         self.pauseRenderButton.setEnabled(True)
         self.pauseRenderButton.setMaximumSize(QSize(59, 55))
@@ -408,7 +409,7 @@ class ProcPagePage:
         self.pauseRenderButton.setCheckable(False)
         self.pauseRenderButton.setChecked(False)
         self.onRenderButtonsContiainer.addWidget(self.pauseRenderButton)
-        self.killRenderButton = QPushButton(self.widget_13)
+        self.killRenderButton = QtButton(self.widget_13)
         self.killRenderButton.setObjectName(u"killRenderButton")
         sizePolicy11 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         sizePolicy11.setHorizontalStretch(0)

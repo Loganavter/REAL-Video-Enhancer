@@ -30,7 +30,7 @@ ROLE_NAMES = {
 
 def audit() -> list[str]:
     """Every disagreement between the token table and RVE's own palette/stylesheet, as readable lines."""
-    from PySide6.QtGui import QPalette
+    from PySide6.QtGui import QColor, QPalette
 
     from src.ui import QTstyle, toolkit_theme
 
@@ -53,10 +53,13 @@ def audit() -> list[str]:
         if actual.lower() != hex_value.lower():
             problems.append(f"Palette().{name}: table says {hex_value}, QTstyle.Palette() says {actual}")
 
-    tokens = {value.lower() for value in toolkit_theme.TOKENS.values()}
-    styled = {value.lower() for value in re.findall(r"#[0-9a-fA-F]{6}", QTstyle.styleSheet())}
-    for missing in sorted(styled - tokens):
-        problems.append(f"QTstyle.styleSheet() uses {missing}, which no token covers")
+    from src.ui.toolkit_theme import _hexargb
+
+    tokens = {_hexargb(value) for value in toolkit_theme.TOKENS.values()}
+    styled = {_hexargb(value) for value in re.findall(r"#[0-9a-fA-F]{6}", QTstyle.styleSheet())}
+    owned = {_hexargb(value) for value in toolkit_theme.QSS_OWNED}
+    for missing in sorted(styled - tokens - owned, key=lambda value: value.lower()):
+        problems.append(f"QTstyle.styleSheet() uses {missing}, which no token covers and no QSS_OWNED entry explains")
 
     try:
         from sli_ui_toolkit.palettes import FLUENT_DARK
@@ -72,7 +75,7 @@ def audit() -> list[str]:
         if token not in resolved:
             problems.append(f"palette() drops toolkit token {token!r}")
     for token, hex_value in toolkit_theme.TOKENS.items():
-        if token in resolved and resolved[token].name().lower() != hex_value.lower():
+        if token in resolved and _hexargb(resolved[token].name(QColor.NameFormat.HexArgb)) != _hexargb(hex_value):
             problems.append(f"palette()[{token!r}] is {resolved[token].name()}, table says {hex_value}")
     return problems
 

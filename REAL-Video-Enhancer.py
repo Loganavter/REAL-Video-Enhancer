@@ -119,6 +119,8 @@ class MainWindow(QMainWindow):
         # Assemble the interface: the shell builds the chrome and the five nav pages, and exposes every widget as an
         # attribute of this window - the surface the glue below already binds (`self.label_20`, `self.stackedWidget`).
         start_time = time.time()
+        from src.ui import toolkit_boot
+        toolkit_boot.ensure()               # the pages import toolkit widgets: make that dependency explicit here
         from src.ui.shell.window import MainWindowShell
         self.shell = MainWindowShell()
         self.shell.build(self)
@@ -994,6 +996,13 @@ class MainWindow(QMainWindow):
 def main(file_to_open=None):
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    # Before the theme: `toolkit_theme.install` imports the toolkit, and without the path it would "fail" into RVE's
+    # own palette and log an error nobody reads - the app would then run with toolkit widgets on a stock palette.
+    try:
+        from src.ui import toolkit_boot
+        toolkit_boot.ensure()
+    except Exception as _boot_exc:
+        log(f"toolkit bootstrap failed: {_boot_exc}")
     # The look has exactly one owner at a time. With a toolkit migration on, `ThemeManager` writes the palette
     # (`src/ui/toolkit_theme.py` maps RVE's colours onto its tokens); otherwise RVE's own palette is applied as
     # before. Installing the theme here, before the window exists, is deliberate: every widget is then built against

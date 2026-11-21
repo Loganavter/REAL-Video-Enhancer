@@ -37,6 +37,12 @@ def _text_of(widget: QWidget) -> str:
                 continue
             if isinstance(text, str) and text:
                 return text
+    # Toolkit widgets keep their label in a field rather than a getter (`Button.setText` writes `_text`, and there is
+    # no `text()` to read it back). The dump has to see what the widget displays, so that field is the documented
+    # fallback - reading nothing there would have reported every migrated button as empty (measured).
+    private = getattr(widget, "_text", None)
+    if isinstance(private, str) and private:
+        return private
     to_plain = getattr(widget, "toPlainText", None)
     if callable(to_plain):
         try:
@@ -62,10 +68,14 @@ def _number_of(widget: QWidget) -> dict:
             # anything else is not JSON and not comparable across builds.
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 state[getter] = value
+    # Only a CHECKED widget records its check state. A `False` default is not interface information, and toolkit
+    # widgets expose `isChecked()` on classes that are not check boxes at all - recording it turned a class
+    # substitution into dozens of fake state differences (measured on the first W4 run).
     checked = getattr(widget, "isChecked", None)
     if callable(checked):
         try:
-            state["checked"] = bool(checked())
+            if checked():
+                state["checked"] = True
         except Exception:
             pass
     return state
@@ -115,6 +125,21 @@ def install(window) -> None:
     if not steps:
         return
 
+    def warm_up(index: int) -> None:
+        """First pass: make every page current once, so its layout has run before anything is written.
+
+        A page's children keep their construction-time geometry until the page has been current at least once; a
+        single-pass walk wrote dumps where the *next* pages were 100x30 boxes and 640x480 stubs, which reads as a
+        layout difference that is not there (measured twice, on both sides of a comparison).
+        """
+        if index >= len(steps):
+            QTimer.singleShot(0, lambda: walk(0))
+            return
+        _name, action = steps[index]
+        action()
+        QApplication.processEvents()
+        QTimer.singleShot(per_page, lambda: warm_up(index + 1))
+
     def walk(index: int) -> None:
         if index >= len(steps):
             QApplication.quit()
@@ -137,7 +162,7 @@ def install(window) -> None:
             print(f"layout: FAILED on {name}: {exc}\n{traceback.format_exc()}", flush=True)
         QTimer.singleShot(0, lambda: walk(index + 1))
 
-    QTimer.singleShot(delay, lambda: walk(0))
+    QTimer.singleShot(delay, lambda: warm_up(0))
 
 
 def _count(tree: dict) -> int:

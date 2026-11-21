@@ -45,12 +45,21 @@ LOOK: dict[str, tuple[str, str]] = {
     "Palette().HighlightedText": ("HighlightedText", "#000000"),
     # --- surfaces ----------------------------------------------------------------------------------------
     "MainWindow / #centralwidget{background-color}": ("dialog.background", "#1f232a"),
-    "#leftMenuSubContainer / #bottomMenuSubContainer{background-color}": ("surface.background", "#16191d"),
-    "QStackedWidget{background-color}": ("surface.background", "#16191d"),
     "QPushButton{background-color}": ("dialog.button.background", "#2c313c"),
+    # The toolkit button paints its plate from `button.dialog.default.*` (variant "surface"), so RVE's rule is stated
+    # on those tokens; mapping only `dialog.button.background` left the plate at FLUENT's #3c3c3c (measured: the
+    # migrated button had no visible plate against the page).
+    "QPushButton{background-color} (surface variant)": ("button.dialog.default.background", "#2c313c"),
+    "QPushButton:hover{background-color} (surface variant)": ("button.dialog.default.background.hover", "#343b47"),
+    "QPushButton:pressed{background-color} (surface variant)": ("button.dialog.default.background.pressed", "#676e7b"),
     "QPushButton:hover{background-color}": ("dialog.button.hover", "#343b47"),
     "QPushButton:checked / :disabled{background-color}": ("button.toggle.background.checked", "#676e7b"),
     "QPlainTextEdit / QTextEdit{background-color}": ("surface.list", "#2c313c"),
+    # The toolkit's combo field paints from `surface.background` (no per-widget override exists), and RVE's control
+    # plate is #2c313c, so that token is RVE's CONTROL surface. The page/nav background (#16191d) stays with the page
+    # QSS until W6 rebuilds those containers; mapping it here as well would give one token two meanings, which this
+    # table refuses by design. A field-specific token is a toolkit row for later, not a second colour here.
+    "QComboBox{background-color} (toolkit field token)": ("surface.background", "#2c313c"),
     "QLineEdit / dialog inputs{background-color}": ("dialog.input.background", "#2c313c"),
     # --- text ----------------------------------------------------------------------------------------------
     "QLabel / QLineEdit / QPushButton{color}": ("dialog.text", "#ffffff"),
@@ -60,10 +69,25 @@ LOOK: dict[str, tuple[str, str]] = {
     # look lands on those two tokens - and `accent` is also what a toolkit progress/toast fill uses, which is
     # consistent with RVE's white `QProgressBar::chunk`.
     "QCheckBox::indicator{border}": ("dialog.border", "#ffffff"),
-    "QCheckBox::indicator::checked{background-color} / QProgressBar::chunk{background-color}": ("accent", "#ffffff"),
+    # RVE's checked box is the `check-square.svg` icon: a white outline and a white tick on the page background, i.e.
+    # NO fill. The toolkit now takes those two colours from tokens (`checkbox.check`, `checkbox.background.checked`);
+    # a fully transparent fill is how an outline-only box is asked for.
+    "QCheckBox::indicator::checked{background-color}": ("checkbox.background.checked", "#00ffffff"),
+    "QCheckBox::indicator::checked{image: check-square.svg}": ("checkbox.check", "#ffffff"),
+    "QProgressBar::chunk{background-color}": ("accent", "#ffffff"),
     "QProgressBar{background-color}": ("slider.track.background", "#2c313c"),
     "QPushButton::toolTip / menus{background-color}": ("tooltip.background", "#676e7b"),
     "QToolTip{color}": ("tooltip.text", "#ffffff"),
+}
+
+
+#: Colours RVE's stylesheet still owns because the widget that paints them is still stock: the page/nav surfaces,
+#: the scroll areas, the tab widget, the list and the text edits. They become tokens when those widgets migrate (W6),
+#: and naming them here is the honest alternative to dropping the audit - a rule that vanishes from the table without a
+#: reason is exactly how a colour gets lost.
+QSS_OWNED: dict[str, str] = {
+    "#16191d": "page/nav surfaces (#leftMenuSubContainer, #bottomMenuSubContainer, QStackedWidget) - stock until W6",
+    "#cccccc": "tooltip/disabled text in rich-text labels - stock until W4 finishes",
 }
 
 
@@ -85,10 +109,19 @@ TOKENS: dict[str, str] = _build_tokens()
 
 
 def enabled() -> bool:
-    """True whenever a toolkit migration is on - the theme is the prerequisite of every one of them."""
+    """The theme is always on - toolkit widgets paint from tokens and RVE's pages are built with them.
+
+    `RVE_TOOLKIT_THEME=off` is the escape hatch for an A/B against the stock look (and for a bisect when a colour is
+    questioned): with the theme off, the app builds the pages but toolkit widgets have no palette to read.
+    """
     import os
-    return any(os.environ.get(name, "0") == "1"
-               for name in ("RVE_TOOLKIT_THEME", "RVE_TOOLKIT_MIGRATE", "RVE_TOOLKIT_SPIKE"))
+    return os.environ.get("RVE_TOOLKIT_THEME", "").lower() not in {"0", "off", "false", "no"}
+
+
+def _hexargb(value: str) -> str:
+    """`#rrggbb`, `#aarrggbb` and Qt's `.name()` spellings compared in one space (alpha included)."""
+    color = QColor(value)
+    return color.name(QColor.NameFormat.HexArgb).lower()
 
 
 def palette() -> dict[str, QColor]:

@@ -20,6 +20,7 @@ import argparse
 import importlib
 import importlib.util
 import os
+import re
 import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,6 +28,9 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 # page widget name -> module in src/ui/pages
+TOOLKIT_ALIASES = {"QtLabel": "QLabel", "QtButton": "QPushButton", "QtCheckBox": "QCheckBox",
+                   "QtComboBox": "QComboBox", "QtLineEdit": "QLineEdit"}
+
 PAGES = {
     "homePage": "home_page",
     "morePage": "more_page",
@@ -51,6 +55,37 @@ def _diff_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+_MIGRATED: set[str] | None = None
+
+
+def _migrated_names() -> set[str]:
+    """Every widget the pages build with a toolkit adapter - their private children are not the Designer's.
+
+    Gathered across all page modules, not just the one being compared: a page's reference tree contains its child
+    pages' widgets too, and a container must not be blamed for a combo its child migrated.
+    """
+    global _MIGRATED
+    if _MIGRATED is None:
+        names: set[str] = set()
+        for module in PAGES.values():
+            path = os.path.join(_ROOT, "src", "ui", "pages", f"{module}.py")
+            names |= set(re.findall(r"self\.(\w+) = Qt\w+\(", open(path, encoding="utf-8").read()))
+        _MIGRATED = names
+    return _MIGRATED
+
+
+def _prune_migrated(tree: dict, names: set[str]) -> None:
+    """Drop the children of a substituted widget: a toolkit combo has no QListView, and that is not a lost property."""
+    def walk(node: dict) -> None:
+        if node.get("name") in names:
+            node.pop("children", None)
+            return
+        for child in node.get("children", []):
+            walk(child)
+
+    walk(tree["root"])
 
 
 def _show_page(widget) -> None:
@@ -79,6 +114,20 @@ def _class_name(module: str, widget: str, page_module) -> str:
     raise SystemExit(f"{module}: no page class with page_id={widget!r}")
 
 
+def _designer_ui():
+    """The Designer baseline, from the fixture kept after the .ui was deleted (W3).
+
+    `harness/fixtures/designer_mainwindow.py` is the compiled output the split was made from, so the identity gate still
+    has a reference to compare against without the generated file living in the tree.
+    """
+    path = os.path.join(_ROOT, "harness", "fixtures", "designer_mainwindow.py")
+    spec = importlib.util.spec_from_file_location("designer_mainwindow", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module.Ui_MainWindow
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--geometry", action="store_true",
@@ -92,12 +141,13 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
 
     app = QApplication.instance() or QApplication([])
+    from src.ui import toolkit_theme
+    toolkit_theme.install(app)      # toolkit widgets paint from tokens; without the theme they log unknown tokens
     import resources_rc  # noqa: F401  - icons resolve through the compiled resource
-    from mainwindow import Ui_MainWindow
     from src.ui import layout_dump
 
     window = QMainWindow()
-    designer = Ui_MainWindow()
+    designer = _designer_ui()()
     designer.setupUi(window)
     window.show()
     app.processEvents()
@@ -126,12 +176,13 @@ def main() -> int:
         # propagates to its children. Shifting them was a bug in this script (it moved every rectangle by the stack's
         # padding and made an identical page look 20 rectangles off).
         reference = {"root": layout_dump._node(original)}
+        _prune_migrated(reference, _migrated_names())
         candidate = {"root": layout_dump._node(root)}
         # The page's own position is the container's business (the shell decides where a page sits); with geometry on,
         # the root is excluded and Qt's private QAbstractScrollArea/QTabWidget internals are named separately - they are
         # laid out by Qt on show/resize, and the live dump (whole window laid out once) is their gate.
         reference["root"]["geometry"] = list(candidate["root"]["geometry"])
-        result = diff.compare(reference, candidate, tolerance_px=0)
+        result = diff.compare(reference, candidate, tolerance_px=0, class_aliases=TOOLKIT_ALIASES)
         internals = [entry for entry in result["geometry"]
                      if "qt_scrollarea" in entry[0] or "qt_tabwidget" in entry[0]]
         result["geometry"] = [entry for entry in result["geometry"] if entry not in internals]
