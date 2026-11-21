@@ -78,6 +78,15 @@ ADAPTERS_PIN: dict[str, tuple[str, str, str, str]] = {
     "QtProgressBar": ("HEIGHT=25", "WIDTH=91", "Expanding/Fixed", "ToastProgressBar"),
 }
 
+#: The control shapes layer A closed, pinned the same way. The two oracles say *how* the size is decided: a stock
+#: `QCheckBox`/`QComboBox` with the same font, text/items and RVE's QSS, never a formula. A change here without the
+#: matching measurement in `DONE.md`/the adapter's docstring is the regression this pin exists for.
+SHAPES_PIN: dict[str, tuple[str, str, str, str]] = {
+    "QtCheckBox": ("toolkit", "stock-oracle:QCheckBox", "Minimum/Fixed", "CheckBox"),
+    "QtComboBox": ("toolkit", "stock-oracle:QComboBox", "Preferred/Fixed", "ComboBox"),
+    "QtButton": ("toolkit", "toolkit", "Minimum/Fixed", "Button"),
+}
+
 #: the shared mixin's stated geometry (RVE's QSS: `padding:5px 10px`, `border-radius:10px`, a 20 px arrow column).
 SHAPE_CONSTANTS = {
     "HEIGHT": 29,
@@ -252,6 +261,19 @@ def test_adapters_declare_the_pinned_geometry() -> None:
     classes = _classes(_parse(QT_SHAPED))
     actual = {name: _adapter_facts(name, classes) for name in ADAPTERS_PIN if name in classes}
     assert actual == ADAPTERS_PIN, f"adapter geometry changed: {actual} - {HINT}"
+
+
+def test_shaped_adapters_declare_the_pinned_geometry() -> None:
+    """Layer A's control shapes: the checkbox and combo keep a stock oracle, the button keeps the caller's policy.
+
+    The number behind the pin (measured on the Designer build, Fusion, RVE QSS):
+    `QtCheckBox` empty unchecked 22x16 / checked 26x20, `Reuse unchanged frames` checked 170x20, `By cel ...`
+    unchecked 263x17; `QtComboBox` tile list 59x29 and quality preset 104x29. The old checkbox formula stated a flat
+    22x16, so every CHECKED box - the ones this page's rows actually hold - moved when the adapter replaced it.
+    """
+    classes = _classes(_parse(QT_SHAPED))
+    actual = {name: _adapter_facts(name, classes) for name in SHAPES_PIN if name in classes}
+    assert actual == SHAPES_PIN, f"control-shape geometry changed: {actual} - {HINT}"
 
 
 def test_every_adapter_named_by_a_page_exists_and_is_pinned() -> None:

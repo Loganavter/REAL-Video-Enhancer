@@ -27,6 +27,7 @@ Pixmap labels stay `QLabel` too, because `Text` paints text only.
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
+from PySide6.QtCore import QEvent
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetrics
@@ -57,6 +58,26 @@ def _restore_constraints(widget, saved: tuple) -> None:
     widget.setMinimumSize(minimum)
     widget.setMaximumSize(maximum)
     widget.setSizePolicy(policy)
+
+
+def _oracle_style_sheet(widget, base: str) -> str:
+    """The QSS a stock counterpart actually inherited, plus the adapter's own rule.
+
+    A measurement widget built with only the adapter's hard-coded rule sees a different `padding`, `min-width` or
+    indicator size than the stock widget it is standing in for whenever a page states its own rule. Ancestors are
+    joined root-first and the widget's own sheet last, which is the order Qt's cascade applies; `base` is the rule
+    the adapter replaces (RVE's selector, verbatim).
+    """
+    sheets: list[str] = []
+    current = widget
+    while current is not None:
+        sheet = current.styleSheet()
+        if sheet and sheet.strip():
+            sheets.append(sheet)
+        current = current.parentWidget()
+    sheets.reverse()
+    sheets.append(base)
+    return "\n".join(sheets)
 
 
 class QtLabel(Text):
@@ -159,9 +180,21 @@ class QtButton(Button):
 
     RVE's QSS gives its buttons `text-align: left`, `padding: 5px 10px`, `border-radius: 10px`, so those are the
     adapter's defaults - the look is reproduced by the widget, not by a stylesheet that the painter would ignore.
+
+    Toggle mode is constructor-only in the toolkit (`Button(toggle=True)`), so the splitter states it at the call site
+    (`QtButton(parent, toggle=True)`) for a page widget the Designer marks `setCheckable(True)`. `setCheckable(True)`
+    after construction still raises: the toolkit has no way to turn the state machine on, and pretending otherwise
+    would ship a button that never checks. Auto-exclusive buttons stay stock - `Button` has no group semantics.
     """
 
-    def __init__(self, parent=None, text: str = "") -> None:
+    #: Caller constraints, remembered by the setters below. A toolkit geometry pass (`setText`, `_apply_text_geometry`
+    #: on an icon/text transition, `on_scale_changed`) may call `setFixedSize`, which overwrites both; the first
+    #: `sizeHint` after such a pass puts the caller's numbers back before the layout reads them.
+    _caller_min = None
+    _caller_max = None
+    _hint_settled = False
+
+    def __init__(self, parent=None, text: str = "", toggle: bool = False) -> None:
         # Those numbers are RVE's QSS, expressed as the widget's own properties: `QPushButton{padding:5px 10px;
         # border-radius:10px; text-align:left; background-color:#2c313c}`. A QSS rule would be ignored by a
         # toolkit widget (a custom QWidget never gets WA_StyledBackground), so the look has to live here.
@@ -176,10 +209,15 @@ class QtButton(Button):
         # and as little vertically as the Designer's pinned heights allow (the toolkit reserves a full line, so 5 px
         # above and below a 30 px button clips the glyphs).
         super().__init__(None, text=text, parent=parent, variant="surface", content_align=_LEFT,
-                         content_padding=(10, 5, 10, 5), corner_radius=10,
+                         content_padding=(10, 5, 10, 5), corner_radius=10, toggle=toggle,
                          border_color=QColor(0, 0, 0, 0))
         self._has_icon = False
         self._icon_box = QSize(0, 0)
+        # The base class records a 36x36 "design fixed size" for a button built without text and re-applies it on every
+        # scale change (`on_scale_changed`). RVE's icon buttons are sized by the Designer's max (59x55, 50x45, ...), so
+        # the toolkit's recording is dropped here or a live scale change would re-pin the 36x36 square.
+        self._design_fixed_size = (0, 0)
+        self._design_min_height = None
         # No `rows=`: the default content path paints the widget's own font (`paint_font(widget)` reads `font()`) AND
         # draws the icon, whereas a hand-built row has no icon slot at all - building rows dropped the "+" on RVE's
         # add-to-queue button (measured). `setFont` is therefore enough; it just needs the constraints preserved.
@@ -203,6 +241,38 @@ class QtButton(Button):
         else:
             Button.setSizePolicy(self, horizontal, vertical)
 
+    # -- the caller's constraints survive every toolkit geometry pass -------------------------------------
+
+    def setMinimumSize(self, *args) -> None:     # noqa: N802
+        super().setMinimumSize(*args)
+        self._caller_min = QSize(self.minimumSize())
+
+    def setMaximumSize(self, *args) -> None:     # noqa: N802
+        super().setMaximumSize(*args)
+        self._caller_max = QSize(self.maximumSize())
+
+    def _apply_text_geometry(self, has_text: bool) -> None:
+        """The toolkit's icon/text transition, with the caller's pins put back.
+
+        `_ButtonStyleApi._apply_text_geometry` calls `setFixedSize(36, 36)` when a button loses its text (measured: an
+        icon-only button the Designer gave 59x30 came back a 36x36 square). Every other path in this class snapshots
+        the constraints around the call; this one is the transition itself, so it is guarded once here instead of at
+        each caller - `setText`, `setRows`, a future toolkit setter and the scale pass all land in it.
+        """
+        saved = _constraints(self)
+        super()._apply_text_geometry(has_text)
+        _restore_constraints(self, saved)
+
+    def _settle_constraints(self) -> None:
+        """First `sizeHint` after construction: re-impose what the caller pinned, if a pass overwrote it."""
+        if self._hint_settled:
+            return
+        self._hint_settled = True
+        if self._caller_min is not None:
+            super().setMinimumSize(self._caller_min)
+        if self._caller_max is not None:
+            super().setMaximumSize(self._caller_max)
+
     def setText(self, text: str) -> None:        # noqa: N802
         # `Button.setText` re-derives its geometry AND resets `maximumSize` to unbounded (measured: a 30 px high
         # button came back unbounded, so every button in a row grew past the Designer's height). Whatever the caller
@@ -219,18 +289,23 @@ class QtButton(Button):
     def setIcon(self, icon) -> None:             # noqa: N802
         # The toolkit keeps its icon privately and exposes no getter; the hint below needs to know whether there is one
         # and how big it is, so the adapter records what Qt's setter was told.
+        saved = _constraints(self)
         self._has_icon = not icon.isNull()
         super().setIcon(icon)
+        _restore_constraints(self, saved)
 
     def setIconSize(self, size) -> None:         # noqa: N802
+        saved = _constraints(self)
         self._icon_box = QSize(size)
         super().setIconSize(size)
+        _restore_constraints(self, saved)
 
     def text(self) -> str:
         """The toolkit keeps the label in `_text` and exposes no getter; Qt's name is part of the shape RVE expects."""
         return getattr(self, "_text", "") or ""
 
     def sizeHint(self) -> QSize:                 # noqa: N802
+        self._settle_constraints()
         # Same QSS semantics as the combo: `padding: 5px 10px` around the content, and QPushButton's 27 px row for a
         # 12 px font (measured). An icon-only button is the icon plus the padding - RVE's nav buttons are 55x45 for a
         # 35 px icon, which is `icon + 20` by `icon + 10` (measured), not the toolkit's fixed 36x36.
@@ -257,10 +332,14 @@ class QtButton(Button):
 
 
     def setCheckable(self, on: bool) -> None:    # noqa: N802
-        # A toolkit `Button`'s toggle mode is a constructor flag; turning it on later is not supported, so the
-        # splitter keeps checkable buttons stock (nav rail, mode buttons) instead of pretending this worked.
-        if on:
-            raise NotImplementedError("Button toggle mode is constructor-only - checkable buttons stay QPushButton")
+        # Toggle mode is a constructor flag: the splitter emits `QtButton(parent, toggle=True)` for a page widget the
+        # Designer marks checkable, so the state machine exists before this line runs. A later `setCheckable(True)` on
+        # a button built without it cannot be honoured (the toolkit offers no way to attach toggle after the fact), and
+        # raising is the honest answer - a silent no-op would ship a button that never checks.
+        if on and not getattr(self, "_has_toggle", False):
+            raise NotImplementedError(
+                "Button toggle mode is constructor-only - build QtButton(parent, toggle=True); "
+                "the splitter passes the flag for a checkable page widget")
 
     def setAutoExclusive(self, on: bool) -> None:    # noqa: N802
         if on:
@@ -286,12 +365,29 @@ class QtCheckBox(CheckBox):
     `stateChanged(int)` is the Qt signal RVE's glue actually binds (12 sites: `ProcessTab`, `SettingsTab`, ...). The
     toolkit box reports `toggled(bool)`, so the adapter carries Qt's spelling as a derived signal - the same semantics
     (2 = checked, 0 = unchecked), no behaviour of its own.
+
+    The size comes from a stock `QCheckBox` oracle, not from a formula: the app QSS styles the indicator in two states
+    (`:unchecked` 14x14 with `left: 2px`, `:checked` 20x20), and Qt measures the state the box is currently in. Measured
+    on the Designer build (Fusion, RVE QSS): empty unchecked 22x16, empty checked 26x20, `Reuse unchanged frames`
+    checked 170x20, `By cel ...` unchecked 263x17. A flat 22x16 is the unchecked empty box only - every checked box on
+    the Process page is 26x20, which is the row shift this replaces.
     """
 
     stateChanged = Signal(int)
 
+    #: RVE's indicator rules, verbatim from the shell's QSS (`src/ui/shell/window.py`). The `image:` in the checked
+    #: rule paints the tick; it is left out of the oracle because a missing resource must not change a measurement,
+    #: and the 20x20 size - the part that moves the row - is kept.
+    RVE_QSS = (
+        "QCheckBox::indicator:unchecked{border:1px solid white;border-radius:2px;width:14px;height:14px;left:2px;}"
+        "QCheckBox::indicator:checked{color:white;border-radius:2px;width:20px;height:20px;}"
+    )
+
+    _stock_hint = None
+
     def __init__(self, parent=None, text: str | None = None) -> None:
         super().__init__(text or "", parent)
+        self._stock_hint = None
         self.toggled.connect(lambda checked: self.stateChanged.emit(2 if checked else 0))
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         # The toolkit's Button base caps every instance at 36x36. Clearing only the MINIMUM left the maximum in place,
@@ -299,26 +395,63 @@ class QtCheckBox(CheckBox):
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
 
+    def _invalidate(self) -> None:
+        self._stock_hint = None
+        # The hint moved, so the layout has to hear it (the combo's 107 px lesson: a cached hint nobody is told about
+        # is a widget that keeps its old width).
+        self.updateGeometry()
+
+    def event(self, event) -> bool:                 # noqa: N802
+        # The effective font can change without `setFont` being called: a page's `apply(container, BODY_PT)` runs
+        # before the children exist, so a widget measured during `build()` sees the inherited 12 pt, and polish later
+        # settles it to the app's 9 pt. A cached hint measured under the old font is exactly the "quality preset
+        # 104 -> 126" excursion (measured): the stock hint is 104x29 at 9 pt, the stale cache said 126x34. Qt sends
+        # `FontChange` for an inherited change; invalidating there is the missing rule.
+        if event.type() == QEvent.Type.FontChange:
+            self._invalidate()
+        return super().event(event)
+
+    def _stock_oracle(self):
+        from PySide6.QtWidgets import QCheckBox
+
+        oracle = QCheckBox()
+        oracle.setStyleSheet(_oracle_style_sheet(self, self.RVE_QSS))
+        oracle.setFont(self.font())
+        oracle.setText(self.text())
+        oracle.setChecked(self.isChecked())
+        return oracle
+
+    def _stock_metrics(self) -> QSize:
+        if self._stock_hint is None:
+            oracle = self._stock_oracle()
+            try:
+                self._stock_hint = oracle.sizeHint()
+            finally:
+                oracle.deleteLater()
+        return self._stock_hint
+
     def setChecked(self, checked: bool) -> None:     # noqa: N802
         # The toolkit animates the check mark over 150 ms from `toggled`. A checkbox set before its page is shown
         # never ticks that animation (a hidden widget gets no frames), so it painted as UNCHECKED while `isChecked()`
         # was True (measured on the process page). Qt's `setChecked` has no animation; neither does this.
         super().setChecked(checked)
         self.set_checked_progress(1.0 if checked else 0.0)
+        self._invalidate()
 
     def setText(self, text: str) -> None:            # noqa: N802
         saved = _constraints(self)
         super().setText(text)
         _restore_constraints(self, saved)
+        self._invalidate()
+
+    def setFont(self, font: QFont) -> None:          # noqa: N802
+        saved = _constraints(self)
+        super().setFont(font)
+        _restore_constraints(self, saved)
+        self._invalidate()
 
     def sizeHint(self) -> QSize:                 # noqa: N802
-        # RVE's box is the QSS's `QCheckBox::indicator`: 14 px, `left: 2px`, `border-radius: 2px`, and QCheckBox's
-        # own row height of 16 px for a 12 px font. The toolkit's constants are computed from ITS font, not the
-        # widget's (measured: two boxes in one page hinted 15 and 24 px tall), so the hint is stated here instead.
-        fm = QFontMetrics(self.font())
-        text = self.text()
-        width = 22 + ((6 + fm.horizontalAdvance(text)) if text else 0)
-        return QSize(width, 16)
+        return self._stock_metrics()
 
     def minimumSizeHint(self) -> QSize:          # noqa: N802
         return self.sizeHint()
@@ -346,6 +479,12 @@ class QtComboBox(ComboBox):
     def __init__(self, parent=None, **kwargs) -> None:
         super().__init__(parent, **kwargs)
         self._stock_hint = None
+        # `ComboBox.__init__` builds on `Button(..., size=(0, BASE_HEIGHT))`, so the toolkit pins min AND max height to
+        # its own 33 px. A Designer `setMaximumSize(230, 30)` then has no effect (Qt ignores a maximum below the
+        # minimum), which is the same class of defect that cost the spin boxes 3-6 px per row. The pins are released;
+        # the class's own `BASE_HEIGHT` still states the height and the Designer's statements remain the authority.
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
         # QComboBox's own policy is Preferred/Fixed, NOT Expanding: an Expanding combo eats the row's spare width and
         # squeezes the label next to it to its hint (measured: the settings rows lost 240 px of label). A layout shares
         # spare width among the Preferred items, which is what the Designer's rows were laid out against.
@@ -357,6 +496,14 @@ class QtComboBox(ComboBox):
         # (38 px on the settings page) even though its sizeHint had already grown to the stock 145 px - measured by
         # dumping the widget after the app had populated it.
         self.updateGeometry()
+
+    def event(self, event) -> bool:                       # noqa: N802
+        # Same rule as the checkbox: an inherited font change does not call `setFont`, and a hint cached under the
+        # pre-polish font is the measured 104 -> 126 excursion (the stock hint is 104x29 at the app's 9 pt; the cache
+        # held 126x34 from the 12 pt the page container had while `build()` ran).
+        if event.type() == QEvent.Type.FontChange:
+            self._invalidate()
+        return super().event(event)
 
     def addItem(self, text, userData=None) -> None:      # noqa: N802
         super().addItem(text, userData)
@@ -392,16 +539,39 @@ class QtComboBox(ComboBox):
     #: otherwise its padding and arrow are missing from the hint (measured: 70 vs the Designer's 78 px).
     RVE_QSS = "QComboBox{background-color:#2c313c; text-align:left; padding:5px 10px; border-radius:10px; color:white;}"
 
-    def _stock_metrics(self):
-        if self._stock_hint is None:
-            from PySide6.QtWidgets import QComboBox
+    def oracle_style_sheet(self) -> str:
+        """The stock widget's effective QSS, not just RVE's base rule.
 
-            oracle = QComboBox()
-            oracle.setStyleSheet(self.RVE_QSS)
-            oracle.setFont(self.font())
-            for index in range(self.count()):
-                oracle.addItem(self.itemText(index))
-            self._stock_hint = oracle.sizeHint()
+        The stock `QComboBox` inherited whatever the *page* and the window set, and a page rule can change the hint
+        (`padding`, `min-width`, a different radius). The oracle used to carry `RVE_QSS` alone, so any page that
+        stated its own rule was measured against a rule the stock widget never saw. Ancestors are joined root-first
+        and the widget's own sheet last, which is the cascade order Qt applies.
+        """
+        return _oracle_style_sheet(self, self.RVE_QSS)
+
+    def _stock_oracle(self):
+        from PySide6.QtWidgets import QComboBox
+
+        oracle = QComboBox()
+        oracle.setStyleSheet(self.oracle_style_sheet())
+        oracle.setFont(self.font())
+        # Qt's default policy (`AdjustToContentsOnFirstShow`) freezes the hint the first time the popup is shown;
+        # a measurement widget is never shown and its items change under it, so the policy is the per-query one.
+        # `minimumContentsLength` is left at 0: RVE's QSS states a padding, not a character floor (measured with 0,
+        # 1, 2 and 3: 59 -> 59, 65, 72, 79 px, none of which is a Designer width).
+        oracle.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        oracle.setMinimumContentsLength(0)
+        for index in range(self.count()):
+            oracle.addItem(self.itemText(index))
+        return oracle
+
+    def _stock_metrics(self) -> QSize:
+        if self._stock_hint is None:
+            oracle = self._stock_oracle()
+            try:
+                self._stock_hint = oracle.sizeHint()
+            finally:
+                oracle.deleteLater()
         return self._stock_hint
 
     def sizeHint(self) -> QSize:                          # noqa: N802
