@@ -55,6 +55,13 @@ TOOLKIT = {
     }),
     # `QtProgressBar` paints a token track/chunk and has setRange/setMinimum/setMaximum/setValue/value; Qt's
     # label/format/orientation switches have no counterpart (the toolkit bar paints no text).
+    # A log/read-only pane is the toolkit's painted console; it carries setPlainText/setHtml/verticalScrollBar. Qt's
+    # editor-only calls have no counterpart, so a pane that uses them stays stock.
+    "QTextEdit": ("ConsoleView", {
+        "setLineWrapMode",
+        "setAcceptRichText", "setUndoRedoEnabled", "setTextInteractionFlags", "setPlaceholderText",
+        "setTabStopDistance", "setWordWrapMode", "setCurrentCharFormat", "mergeCurrentCharFormat",
+    }),
     "QProgressBar": ("QtProgressBar", {
         "setFormat", "setInvertedAppearance", "setTextDirection", "setOrientation", "setAlignment", "reset",
     }),
@@ -285,7 +292,18 @@ def _widget_calls(page: Page, setup: list[Stmt]) -> dict[str, set[str]]:
     return calls
 
 
+#: Widgets that stay stock even though their call set looks migratable - the HOST feeds them an API the replacement
+#: lacks, which a page-only scan cannot see. Regenerating without this would silently swap them for the wrong class.
+STOCK_WIDGETS: dict[str, str] = {
+    "changeLogText": "HomeTab renders markdown into it (setMarkdown) and it is longer than its panel: ConsoleView "
+                     "shows plain text, Text never scrolls",
+    "systemInfoText": "a read-only rich-text plate that carries its own QSS padding; Text has no plate property",
+}
+
+
 def _toolkit_class(qt_class: str, widget: str, calls: dict[str, set[str]]) -> str | None:
+    if widget in STOCK_WIDGETS:
+        return None
     entry = TOOLKIT.get(qt_class)
     if entry is None:
         return None

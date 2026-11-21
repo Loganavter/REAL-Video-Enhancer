@@ -25,7 +25,7 @@ import resources_rc
 
 from sli_ui_toolkit.widgets import ConsoleView
 import resources_rc
-from src.ui.typography import font, SMALL_PT
+from src.ui.typography import apply, SMALL_PT
 
 
 class Tab5Page:
@@ -49,7 +49,7 @@ class Tab5Page:
         sizePolicy10.setVerticalStretch(0)
         sizePolicy10.setHeightForWidth(self.renderOutput.sizePolicy().hasHeightForWidth())
         self.renderOutput.setSizePolicy(sizePolicy10)
-        self.renderOutput.set_font(font(SMALL_PT))
+        apply(self.renderOutput, SMALL_PT)
         self.horizontalLayout_10.addWidget(self.renderOutput)
         self.retranslate()
         return self.tab_5

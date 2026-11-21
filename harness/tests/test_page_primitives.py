@@ -31,7 +31,8 @@ DESIGNER = ROOT / "harness" / "fixtures" / "designer_mainwindow.py"
 
 #: The Qt classes this pin owns (W4d), and the adapter that replaces them where one exists.
 WATCHED = ("QSpinBox", "QDoubleSpinBox", "QProgressBar", "QListWidget", "QTextEdit")
-ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget", "QtTextEdit")
+#: Replacement classes: the `Qt*` adapters from `qt_shaped.py`, plus toolkit classes a page constructs directly.
+ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget", "QtTextEdit", "ConsoleView")
 
 #: page module -> {designer widget name: the class the page builds}.
 #: Stock entries carry the reason in `GAPS` - they are not accidental leftovers.
@@ -53,7 +54,7 @@ PAGES_PIN: dict[str, dict[str, str]] = {
         "OutputFilesListWidget": "QListWidget",
     },
     "home_page": {"changeLogText": "QTextEdit", "systemInfoText": "QTextEdit"},
-    "tab_5": {"renderOutput": "QTextEdit"},
+    "tab_5": {"renderOutput": "ConsoleView"},
 }
 
 #: Widgets that stay stock, and why. These are toolkit rows, not local workarounds: the pin keeps the reason next to
@@ -66,8 +67,6 @@ GAPS: dict[str, str] = {
     "changeLogText": "Text(mode='document') never scrolls and the changelog is longer than its panel; ConsoleView has "
                      "no markdown",
     "systemInfoText": "a plain read-only panel with the same QTextEdit QSS as the changelog it sits beside",
-    "renderOutput": "ConsoleView is a console (radius 6, padding 6, floating bar) and Text never scrolls: migrating "
-                    "the log would move a page that is currently pixel-identical and retire no QSS",
 }
 
 #: adapter -> (height policy, width policy, size policy, bases) exactly as the adapter declares it.
@@ -97,7 +96,8 @@ SHAPE_CONSTANTS = {
     "STEP_ARROW_SIZE": 10,
 }
 
-#: The splitter's map after W4d: the three value controls are enabled; the two classes with no counterpart are not.
+#: The splitter's map: the value controls and the log pane are enabled; `QListWidget` is not (the toolkit has no
+#: compact text list - `IconListWidget` is a navigation list, measured at 3.2 % on the queue page).
 TOOLKIT_PIN: dict[str, frozenset[str]] = {
     "QLabel": frozenset({"setPixmap", "setScaledContents"}),
     "QPushButton": frozenset({"setAutoExclusive", "setAutoRepeat"}),
@@ -112,6 +112,9 @@ TOOLKIT_PIN: dict[str, frozenset[str]] = {
                                  "setKeyboardTracking"}),
     "QProgressBar": frozenset({"setFormat", "setInvertedAppearance", "setTextDirection", "setOrientation",
                                "setAlignment", "reset"}),
+    "QTextEdit": frozenset({"setLineWrapMode", "setAcceptRichText", "setUndoRedoEnabled", "setTextInteractionFlags",
+                            "setPlaceholderText", "setTabStopDistance", "setWordWrapMode", "setCurrentCharFormat",
+                            "mergeCurrentCharFormat"}),
 }
 
 HINT = "update the pin in harness/tests/test_page_primitives.py if the change is intended"
@@ -332,8 +335,13 @@ def test_splitter_would_emit_the_class_each_page_builds() -> None:
         assert not extra, f"splitter would emit unpinned primitives in {module}: {sorted(extra)} - {HINT}"
 
 
-@pytest.mark.parametrize("qt_class", ["QListWidget", "QTextEdit"])
+@pytest.mark.parametrize("qt_class", ["QListWidget"])
 def test_unmigrated_classes_are_absent_from_the_map(qt_class: str) -> None:
-    """A gap is a decision: enabling these without an adapter would build a class that cannot carry the Qt API."""
+    """A gap is a decision: enabling these without an adapter would build a class that cannot carry the Qt API.
+
+    `QTextEdit` left this list when `ConsoleView` gained the log surface (setPlainText/setHtml/verticalScrollBar);
+    `QListWidget` stays because `IconListWidget` is a navigation list, and a queue page built on it measured 3.2 % away
+    from the stock look. When a compact text list exists, this parameter goes away.
+    """
     tool = _split_ui()
     assert qt_class not in tool.TOOLKIT, f"{qt_class} was enabled in the splitter without an adapter - {HINT}"
