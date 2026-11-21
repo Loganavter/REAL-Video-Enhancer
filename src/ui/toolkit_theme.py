@@ -1,10 +1,10 @@
 """RVE's look as toolkit tokens: the only place a colour is mapped.
 
-Why this file exists: RVE's look is not a stylesheet in one place. It is 22 inline `setStyleSheet` blocks the Designer
-wrote into `mainwindow.py`, one `styleSheet()` shared by the seven popups (`src/ui/QTstyle.py`), and a QPalette applied
-in `main()` (`REAL-Video-Enhancer.py:994`). The toolkit's look is named tokens. Under the owner's decision of
-2026-11-21 ("the theme owns the whole look"), this module is the single translation: each entry names the place in RVE
-that requires the colour, the toolkit token that replaces it, and the value.
+Why this file exists: RVE's look was not a stylesheet in one place. It was 22 inline `setStyleSheet` blocks the
+Designer wrote into `mainwindow.py`, one `styleSheet()` shared by the seven popups (`src/ui/QTstyle.py`, deleted when
+the shell's last QSS went), and a QPalette applied in `main()`. The toolkit's look is named tokens. Under the owner's
+decision of 2026-11-21 ("the theme owns the whole look"), this module is the single translation: each entry names the
+place in RVE that requires the colour, the toolkit token that replaces it, and the value.
 
 Two measured facts shape it:
 
@@ -24,11 +24,14 @@ Two measured facts shape it:
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtGui import QColor
 
-# provenance -> (token, hex). The provenance is either a literal QSS selector from `QTstyle.py` / `mainwindow.py`, or
-# a QPalette role from `QTstyle.Palette()`. Keep the spelling exact: the audit test in `harness/tests` matches these
-# keys against the stylesheet and the palette, so a rule that changes there fails here instead of drifting.
+# provenance -> (token, hex). The provenance is either a literal QSS selector RVE used to carry, or a QPalette role from
+# the `QPalette` this module builds (`qt_palette()`, the theme-off fallback that used to live in `QTstyle.py`). Keep the
+# spelling exact: the audit in `harness/scripts` matches these keys against that palette, so a rule that changes there
+# fails instead of drifting.
 LOOK: dict[str, tuple[str, str]] = {
     # --- QPalette roles: what stock widgets paint from when QSS says nothing -------------------------------
     "Palette().Window": ("Window", "#1f232a"),
@@ -68,10 +71,10 @@ LOOK: dict[str, tuple[str, str]] = {
     # --- text ----------------------------------------------------------------------------------------------
     "QLabel / QLineEdit / QPushButton{color}": ("dialog.text", "#ffffff"),
     # --- controls -----------------------------------------------------------------------------------------
-    # The stock checkbox is a white 1px outline with a white fill when checked (QTstyle.py). The toolkit's
-    # indicator paints its outline from `dialog.border` and its checked fill from `accent`, so RVE's monochrome
-    # look lands on those two tokens - and `accent` is also what a toolkit progress/toast fill uses, which is
-    # consistent with RVE's white `QProgressBar::chunk`.
+    # The stock checkbox is a white 1px outline with a white fill when checked (the app's own stylesheet, now deleted).
+    # The toolkit's indicator paints its outline from `dialog.border` and its checked fill from `accent`, so RVE's
+    # monochrome look lands on those two tokens - and `accent` is also what a toolkit progress/toast fill uses, which
+    # is consistent with RVE's white `QProgressBar::chunk`.
     "QCheckBox::indicator{border}": ("dialog.border", "#ffffff"),
     # RVE's checked box is the `check-square.svg` icon: a white outline and a white tick on the page background, i.e.
     # NO fill. The toolkit now takes those two colours from tokens (`checkbox.check`, `checkbox.background.checked`);
@@ -96,6 +99,44 @@ QSS_OWNED: dict[str, str] = {
     "#16191d": "page/nav surfaces (#leftMenuSubContainer, #bottomMenuSubContainer, QStackedWidget) - stock until W6",
     "#cccccc": "tooltip/disabled text in rich-text labels - stock until W4 finishes",
 }
+
+
+#: `QPalette` roles the token table cannot map: the toolkit palette has no token for "a disabled control" or "a link",
+#: so these are facts of the fallback look rather than colours a toolkit painter reads. They are the half of the old
+#: `QTstyle.Palette()` that `LOOK` does not cover - kept here because this module now owns that palette.
+FALLBACK_ROLES: dict[str, str] = {
+    "Link": "#2a82da",
+}
+FALLBACK_DISABLED_ROLES: dict[str, str] = {
+    "Base": "#313131",
+    "Text": "#5a5a5a",
+    "Button": "#2a2a2a",
+    "ButtonText": "#5a5a5a",
+    "Window": "#313131",
+    "WindowText": "#5a5a5a",
+}
+
+
+def qt_palette():
+    """The stock `QPalette` RVE applies when the toolkit theme is off - `main()`'s fallback.
+
+    The enabled roles are read from :data:`LOOK` (so the table and the palette cannot disagree about a colour), the
+    disabled group and the link colour from the two tables above. This replaced `QTstyle.Palette()`: the audit used to
+    compare the token table against that file, and it now compares it against this function, which is what the app
+    actually applies.
+    """
+    from PySide6.QtGui import QPalette
+
+    palette = QPalette()
+    for rule, (_token, hex_value) in LOOK.items():
+        match = re.fullmatch(r"Palette\(\)\.(\w+)", rule)
+        if match:
+            palette.setColor(getattr(QPalette.ColorRole, match.group(1)), QColor(hex_value))
+    for name, hex_value in FALLBACK_ROLES.items():
+        palette.setColor(getattr(QPalette.ColorRole, name), QColor(hex_value))
+    for name, hex_value in FALLBACK_DISABLED_ROLES.items():
+        palette.setColor(QPalette.ColorGroup.Disabled, getattr(QPalette.ColorRole, name), QColor(hex_value))
+    return palette
 
 
 def _build_tokens() -> dict[str, str]:

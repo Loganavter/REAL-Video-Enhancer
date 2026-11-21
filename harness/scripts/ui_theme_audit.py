@@ -1,15 +1,19 @@
-"""Audit the look's token table against the two places RVE's colours actually live.
+"""Audit the look's token table against the palette RVE actually applies.
 
 `src/ui/toolkit_theme.py` claims to be the only place a colour is mapped. That claim is only worth something if the
-table cannot drift from its sources, and PySide6 lives in the app's venv (the harness suite runs on the portable
-interpreter without Qt), so the audit is a script first and a test second:
+table cannot drift from what the app paints, and PySide6 lives in the app's venv (the harness suite runs on the
+portable interpreter without Qt), so the audit is a script first and a test second:
 
     <app venv>/bin/python harness/scripts/ui_theme_audit.py      # this run
     pytest harness/tests/test_ui_theme.py                        # wherever PySide6 is installed
 
-Problems it reports: a QPalette role mapped to a colour `QTstyle.Palette()` does not have; a hex in
-`QTstyle.styleSheet()` that no token covers; a token the toolkit palette does not define (a silent no-op); a token
-missing from the built palette.
+Problems it reports: a QPalette role mapped to a colour `toolkit_theme.qt_palette()` does not have; a token the toolkit
+palette does not define (a silent no-op); a token missing from the built palette, or resolved to a different colour.
+
+The check this audit used to run - "every hex in `QTstyle.styleSheet()` is covered by a token" - retired with the
+stylesheet: the shell's QSS and `QTstyle.styleSheet()` are gone, so the loop that reached into RVE's last stylesheet
+had no second source left. The table itself is now the record of every colour the app paints, and `qss-on-adapter` in
+`harness/scripts/ui_gates.py` is what keeps a new stylesheet from appearing beside it.
 """
 
 from __future__ import annotations
@@ -25,17 +29,18 @@ if _ROOT not in sys.path:
 ROLE_NAMES = {
     "Window", "WindowText", "Base", "AlternateBase", "ToolTipBase", "ToolTipText",
     "Text", "Button", "ButtonText", "BrightText", "Highlight", "HighlightedText",
+    "Link", "LinkVisited",
 }
 
 
 def audit() -> list[str]:
-    """Every disagreement between the token table and RVE's own palette/stylesheet, as readable lines."""
+    """Every disagreement between the token table and the palette RVE applies, as readable lines."""
     from PySide6.QtGui import QColor, QPalette
 
-    from src.ui import QTstyle, toolkit_theme
+    from src.ui import toolkit_theme
 
     problems: list[str] = []
-    palette = QTstyle.Palette()
+    palette = toolkit_theme.qt_palette()
 
     roles: dict[str, str] = {}
     for rule, (_token, hex_value) in toolkit_theme.LOOK.items():
@@ -51,15 +56,15 @@ def audit() -> list[str]:
         role = getattr(QPalette.ColorRole, name)
         actual = palette.color(role).name()
         if actual.lower() != hex_value.lower():
-            problems.append(f"Palette().{name}: table says {hex_value}, QTstyle.Palette() says {actual}")
+            problems.append(f"Palette().{name}: table says {hex_value}, qt_palette() says {actual}")
+    for name in toolkit_theme.FALLBACK_ROLES:
+        if name not in ROLE_NAMES:
+            problems.append(f"FALLBACK_ROLES.{name}: not a QPalette role")
+    for name in toolkit_theme.FALLBACK_DISABLED_ROLES:
+        if name not in ROLE_NAMES:
+            problems.append(f"FALLBACK_DISABLED_ROLES.{name}: not a QPalette role")
 
     from src.ui.toolkit_theme import _hexargb
-
-    tokens = {_hexargb(value) for value in toolkit_theme.TOKENS.values()}
-    styled = {_hexargb(value) for value in re.findall(r"#[0-9a-fA-F]{6}", QTstyle.styleSheet())}
-    owned = {_hexargb(value) for value in toolkit_theme.QSS_OWNED}
-    for missing in sorted(styled - tokens - owned, key=lambda value: value.lower()):
-        problems.append(f"QTstyle.styleSheet() uses {missing}, which no token covers and no QSS_OWNED entry explains")
 
     try:
         from sli_ui_toolkit.palettes import FLUENT_DARK
