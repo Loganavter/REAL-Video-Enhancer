@@ -5,9 +5,10 @@ The checks are AST walks over source text, so every case here is a small synthet
 and handed to the check directly - no Qt, no page build, no display. That is also what makes the gate usable on the
 portable interpreter, which is where this suite runs.
 
-The last group pins the ratchet against THIS tree: `KNOWN` must equal what the checks report today, in both
-directions. If a page migrates and loses a pinned pixel, or its lines move, that test fails and names the stale
-entries - the ratchet is meant to shrink, and only a human knows whether the literal went away or the line moved.
+The last group pins the ratchet against THIS tree: `KNOWN` must equal what the checks report today, key by key and
+count by count, in both directions. If a page migrates and loses a pinned pixel that test fails and names the stale
+entries - the ratchet is meant to shrink. A line moving is not a change the ratchet can see: the key is
+`(path, site)` where `site` is the rule's own text, so only a literal appearing or going away touches it.
 """
 
 from __future__ import annotations
@@ -49,7 +50,9 @@ class Page:
     assert len(findings) == 1
     finding = findings[0]
     assert finding.rule == "qss-on-adapter"
-    assert (finding.line, finding.fingerprint().endswith(":5")) == (5, True)
+    assert (finding.line, finding.where.endswith(":5")) == (5, True)
+    # the ratchet key is the file and the text, never the line
+    assert finding.key() == (finding.path, finding.detail)
     # the report has to name the widget, or the migrator cannot find what to delete
     assert "QtButton" in finding.detail and "addButton" in finding.detail
     assert "\n" not in str(finding)
@@ -232,19 +235,23 @@ def test_the_module_does_not_import_qt() -> None:
 
 @pytest.mark.parametrize("rule", sorted(ui_gates.SCOPES))
 def test_ratchet_matches_the_tree(rule: str) -> None:
-    """`KNOWN` is today's count, in both directions.
+    """`KNOWN` is today's count per key, in both directions.
 
-    Extra here means an unrecorded violation (the gate would have stayed silent); missing means a page migrated or a
-    line moved. Either way the fix is the same edit, and the message says which.
+    Over a recorded count (or a key the list never had) means an unrecorded violation - the gate would have stayed
+    silent. Under it means a page migrated or a literal went away. Either way the fix is the same edit, and the
+    message says which. A line inserted above a literal appears in neither list: the key carries no line number.
     """
-    current = {f.fingerprint() for f in ui_gates.CHECKS[rule](ui_gates.SCOPES[rule])}
-    known = set(ui_gates.KNOWN[rule])
-    assert current - known == set(), (
-        f"{rule}: {len(current - known)} unrecorded violation(s) - retire the rule or the literal, do not add them "
-        f"to KNOWN: {sorted(current - known)}")
-    assert known - current == set(), (
-        f"{rule}: {len(known - current)} KNOWN entr(y/ies) no longer reproduced - a page migrated or a line moved; "
-        f"delete them so the ratchet shrinks: {sorted(known - current)}")
+    current = ui_gates.counts(ui_gates.CHECKS[rule](ui_gates.SCOPES[rule]))
+    known = ui_gates.KNOWN[rule]
+    grown = {key: (known.get(key, 0), found) for key, found in current.items() if found > known.get(key, 0)}
+    assert grown == {}, (
+        f"{rule}: {len(grown)} key(s) over their recorded count - retire the rule or the literal, do not add them "
+        f"to KNOWN: {grown}")
+    shrunk = {key: (recorded, current.get(key, 0)) for key, recorded in known.items()
+              if current.get(key, 0) < recorded}
+    assert shrunk == {}, (
+        f"{rule}: {len(shrunk)} KNOWN key(s) no longer reproduced - a page migrated or a literal went away; "
+        f"delete them so the ratchet shrinks: {shrunk}")
 
 
 def test_every_known_rule_has_a_check() -> None:
@@ -253,10 +260,9 @@ def test_every_known_rule_has_a_check() -> None:
 
 def test_ratchet_lets_a_known_finding_through_and_fails_a_new_one(tmp_path: Path) -> None:
     """The ratchet's one job: today's debt does not fail the build, tomorrow's violation does."""
-    known_rule = next(rule for rule, fingerprints in ui_gates.KNOWN.items() if fingerprints)
-    fingerprint = sorted(ui_gates.KNOWN[known_rule])[0]
-    path, line = fingerprint.rsplit(":", 1)
-    recorded = ui_gates.Finding(path, int(line), known_rule, "recorded")
+    known_rule = next(rule for rule, entries in ui_gates.KNOWN.items() if entries)
+    path, site = sorted(ui_gates.KNOWN[known_rule])[0]
+    recorded = ui_gates.Finding(path, 1234, known_rule, site)     # any line: the key does not carry one
     assert ui_gates.new_findings([recorded]) == []
 
     fresh = _raw_px(tmp_path, "def build(self):\n    self.w.setFixedWidth(40)\n")
@@ -264,10 +270,40 @@ def test_ratchet_lets_a_known_finding_through_and_fails_a_new_one(tmp_path: Path
     assert ui_gates.new_findings(fresh) == fresh
 
 
-def test_stale_entries_are_named(tmp_path: Path) -> None:
+def test_one_occurrence_over_the_recorded_count_is_new(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A count is the record: the same literal one more time in one file is growth, not the same debt again.
+
+    This is what the key's count is for - a plain set keyed by `(path, site)` would call the second one a duplicate.
+    """
+    monkeypatch.setitem(ui_gates.KNOWN, "fake", {("a.py", "setFixedWidth(40)"): 1})
+    findings = [ui_gates.Finding("a.py", 1, "fake", "setFixedWidth(40)"),
+                ui_gates.Finding("a.py", 9, "fake", "setFixedWidth(40)")]
+    assert [finding.line for finding in ui_gates.new_findings(findings)] == [9]
+
+
+def test_a_line_shift_does_not_change_the_key(tmp_path: Path) -> None:
+    """The tax this ratchet replaces: +1 line at the top of `general_settings.py` re-keyed 29 entries, red two tests,
+    and three commits in one day exist only to move fingerprints."""
+    body = "class Page:\n    def build(self):\n        self.w.setFixedWidth(222)\n        icon = QSize(32, 32)\n"
+    first = _raw_px(tmp_path, body)
+    _write(tmp_path, "\n\n\n" + body)          # same file, three blank lines above the literals
+    second = ui_gates.check_raw_px([tmp_path / "case.py"])
+    assert [finding.line for finding in first] != [finding.line for finding in second]      # the report moved
+    assert [finding.key() for finding in first] == [finding.key() for finding in second]    # the ratchet did not
+
+
+def test_stale_entries_are_named() -> None:
     stale = ui_gates.stale_known([])
-    assert len(stale) == sum(len(v) for v in ui_gates.KNOWN.values())
-    assert all(rule in ui_gates.SCOPES for rule, _ in stale)
+    assert len(stale) == sum(len(entries) for entries in ui_gates.KNOWN.values())
+    assert all(rule in ui_gates.SCOPES for rule, *_ in stale)
+
+
+def test_a_short_count_is_stale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ten `QSize(30, 30)` becoming nine is the list owing an entry, even though the key still exists."""
+    monkeypatch.setitem(ui_gates.KNOWN, "fake", {("a.py", "QSize(30, 30)"): 10})
+    findings = [ui_gates.Finding("a.py", 5, "fake", "QSize(30, 30)")]
+    assert [entry for entry in ui_gates.stale_known(findings) if entry[0] == "fake"] == [
+        ("fake", ("a.py", "QSize(30, 30)"), 10, 1)]
 
 
 def test_cli_is_clean_on_this_tree(capsys: pytest.CaptureFixture[str]) -> None:
@@ -303,14 +339,39 @@ def _fake_rekey_env(monkeypatch, tmp_path: Path, findings, known):
 
 def test_rekey_refuses_a_rule_that_would_grow(monkeypatch, tmp_path):
     findings = [ui_gates.Finding("a.py", 1, "fake", "d")]
-    copy = _fake_rekey_env(monkeypatch, tmp_path, findings, {"fake": frozenset()})
+    copy = _fake_rekey_env(monkeypatch, tmp_path, findings, {"fake": {}})
     assert ui_gates._rekey() == 2
     # Nothing was written: the baseline still has no entry for the rule.
-    assert "a.py:1" not in copy.read_text(encoding="utf-8")
+    assert "'a.py'" not in copy.read_text(encoding="utf-8")
 
 
-def test_rekey_rewrites_shifted_fingerprints(monkeypatch, tmp_path):
-    findings = [ui_gates.Finding("a.py", 7, "fake", "d")]
-    copy = _fake_rekey_env(monkeypatch, tmp_path, findings, {"fake": frozenset({"a.py:5"})})
+def test_rekey_refuses_a_substitution(monkeypatch, tmp_path):
+    """One key retired, another introduced: the total is unchanged, so the old total-only guard passed it silently."""
+    findings = [ui_gates.Finding("a.py", 1, "fake", "setFixedWidth(40)"),
+                ui_gates.Finding("a.py", 5, "fake", "setFixedWidth(222)")]
+    known = {"fake": {("a.py", "setFixedWidth(40)"): 1, ("a.py", "setFixedWidth(999)"): 1}}
+    copy = _fake_rekey_env(monkeypatch, tmp_path, findings, known)
+    assert len(findings) == sum(known["fake"].values())          # the totals match: this is the hole
+    assert ui_gates._rekey() == 2
+    assert "'setFixedWidth(222)'" not in copy.read_text(encoding="utf-8")
+
+
+def test_rekey_rewrites_a_baseline_whose_lines_moved(monkeypatch, tmp_path):
+    """The key no longer carries a line, so a shifted literal is not growth - and no line number is persisted."""
+    findings = [ui_gates.Finding("a.py", 77, "fake", "d")]
+    copy = _fake_rekey_env(monkeypatch, tmp_path, findings, {"fake": {("a.py", "d"): 1}})
     assert ui_gates._rekey() == 0
-    assert '"a.py:7"' in copy.read_text(encoding="utf-8")
+    text = copy.read_text(encoding="utf-8")
+    assert "('a.py', 'd'): 1" in text
+    assert "a.py:77" not in text
+
+
+def test_rekey_drops_entries_that_are_gone(monkeypatch, tmp_path):
+    """Shrinking is the one direction regeneration is for: a retired literal leaves the baseline."""
+    findings = [ui_gates.Finding("a.py", 2, "fake", "d")]
+    known = {"fake": {("a.py", "d"): 1, ("a.py", "retired"): 1}}
+    copy = _fake_rekey_env(monkeypatch, tmp_path, findings, known)
+    assert ui_gates._rekey() == 0
+    text = copy.read_text(encoding="utf-8")
+    assert "('a.py', 'd'): 1" in text
+    assert "'retired'" not in text
