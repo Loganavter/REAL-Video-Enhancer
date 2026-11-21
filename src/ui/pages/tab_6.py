@@ -26,6 +26,12 @@ import resources_rc
 from src.ui.widgets.qt_shaped import QtComboBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 
+# Layer B (2026-11-21): the eight info icons are pixmap-only labels, so their toolkit counterpart is `ImageLabel`
+# (Qt-shaped already: `setPixmap`/`setScaledContents`). A `QLabel` paints a pixmap-only label at the default
+# `AlignLeft|AlignVCenter` and `ImageLabel` centres, so the alignment is stated at construction to keep the icon
+# where the Designer put it (same statement as the Home page's logo).
+from sli_ui_toolkit.widgets import ImageLabel
+
 
 class Tab6Page:
     """`tab_6` - placed by its parent with `addTab`."""
@@ -111,7 +117,8 @@ class Tab6Page:
         self.horizontalLayout_54.addWidget(self.EncoderCommand)
         self.scrollArea_6.setWidget(self.scrollAreaWidgetContents_6)
         self.horizontalLayout_51.addWidget(self.scrollArea_6)
-        self.label_75 = QLabel(self.widget_32)
+        self.label_75 = ImageLabel(self.widget_32,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_75.setObjectName(u"label_75")
         self.label_75.setMaximumSize(QSize(25, 25))
         self.label_75.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -134,7 +141,8 @@ class Tab6Page:
         self.horizontalLayout_15.addWidget(self.encoderLabel)
         self.horizontalSpacer_9 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_15.addItem(self.horizontalSpacer_9)
-        self.label_54 = QLabel(self.widget_17)
+        self.label_54 = ImageLabel(self.widget_17,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_54.setObjectName(u"label_54")
         self.label_54.setMaximumSize(QSize(25, 25))
         self.label_54.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -165,7 +173,8 @@ class Tab6Page:
         self.horizontalLayout_36.addWidget(self.encoderLabel_2)
         self.horizontalSpacer_22 = QSpacerItem(237, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_36.addItem(self.horizontalSpacer_22)
-        self.label_55 = QLabel(self.widget_16)
+        self.label_55 = ImageLabel(self.widget_16,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_55.setObjectName(u"label_55")
         self.label_55.setMaximumSize(QSize(25, 25))
         self.label_55.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -212,7 +221,8 @@ class Tab6Page:
         self.horizontalLayout_44.addWidget(self.label_49)
         self.horizontalSpacer_19 = QSpacerItem(437, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_44.addItem(self.horizontalSpacer_19)
-        self.label_50 = QLabel(self.widget_27)
+        self.label_50 = ImageLabel(self.widget_27,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_50.setObjectName(u"label_50")
         self.label_50.setMaximumSize(QSize(25, 25))
         self.label_50.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -237,7 +247,8 @@ class Tab6Page:
         self.horizontalLayout_35.addWidget(self.encoderLabel_7)
         self.horizontalSpacer_20 = QSpacerItem(469, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_35.addItem(self.horizontalSpacer_20)
-        self.label_58 = QLabel(self.widget_21)
+        self.label_58 = ImageLabel(self.widget_21,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_58.setObjectName(u"label_58")
         self.label_58.setMaximumSize(QSize(25, 25))
         self.label_58.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -264,7 +275,8 @@ class Tab6Page:
         self.horizontalLayout_34.addWidget(self.encoderLabel_10)
         self.horizontalSpacer_30 = QSpacerItem(382, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_34.addItem(self.horizontalSpacer_30)
-        self.label_56 = QLabel(self.widget_20)
+        self.label_56 = ImageLabel(self.widget_20,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_56.setObjectName(u"label_56")
         self.label_56.setMaximumSize(QSize(25, 25))
         self.label_56.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -289,7 +301,8 @@ class Tab6Page:
         self.horizontalLayout_2.addWidget(self.encoderLabel_6)
         self.horizontalSpacer_18 = QSpacerItem(494, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_2.addItem(self.horizontalSpacer_18)
-        self.label_57 = QLabel(self.widget_36)
+        self.label_57 = ImageLabel(self.widget_36,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_57.setObjectName(u"label_57")
         self.label_57.setMaximumSize(QSize(25, 25))
         self.label_57.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -314,7 +327,8 @@ class Tab6Page:
         self.horizontalLayout_41.addWidget(self.encoderLabel_11)
         self.horizontalSpacer_35 = QSpacerItem(382, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_41.addItem(self.horizontalSpacer_35)
-        self.label_59 = QLabel(self.widget_41)
+        self.label_59 = ImageLabel(self.widget_41,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_59.setObjectName(u"label_59")
         self.label_59.setMaximumSize(QSize(25, 25))
         self.label_59.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -341,10 +355,8 @@ class Tab6Page:
     def retranslate(self) -> None:
         self.label_74.setText(QCoreApplication.translate("MainWindow", u"Encoder Settings", None))
         self.label_75.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Encoder command:</span></p><p><span style=\" font-weight:700;\">     -</span> Encoder settings passed to FFMpeg, can be manually tweaked.</p></body></html>", None))
-        self.label_75.setText("")
         self.encoderLabel.setText(QCoreApplication.translate("MainWindow", u"Video Encoder", None))
         self.label_54.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Encoder:</span></p><p>- Compression algorithm for video, most common is libx264</p><p>- Any encoder without a device label is a CPU encoder.</p><p>- <span style=\" font-weight:700; text-decoration: underline;\">Lossy Encoders:</span></p><p>- libx264 (<span style=\" font-weight:700;\">mkv, mp4, mov, avi</span>)</p><p>- libx265 (<span style=\" font-weight:700;\">mkv, mp4, mov</span>)</p><p>- vp9 (<span style=\" font-weight:700;\">mkv, webm</span>)</p><p>- av1 (<span style=\" font-weight:700;\">mkv, mp4, webm</span>)</p><p>- <span style=\" font-weight:700; text-decoration: underline;\">Lossless Encoders:</span></p><p>- prores (<span style=\" font-weight:700;\">mkv, mov</span>)</p><p>- ffv1 (<span style=\" font-weight:700;\">mkv, avi</span>)</p></body></html>", None))
-        self.label_54.setText("")
         self.encoder.setItemText(0, QCoreApplication.translate("MainWindow", u"libx264", None))
         self.encoder.setItemText(1, QCoreApplication.translate("MainWindow", u"libx265", None))
         self.encoder.setItemText(2, QCoreApplication.translate("MainWindow", u"vp9", None))
@@ -357,7 +369,6 @@ class Tab6Page:
         self.encoder.setItemText(9, QCoreApplication.translate("MainWindow", u"av1_nvenc (40 series and up)", None))
         self.encoderLabel_2.setText(QCoreApplication.translate("MainWindow", u"Video Encoder Speed", None))
         self.label_55.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Encoder Speed:</span></p><p> - Speed at which the encoder processes the video, <span style=\" font-weight:700; text-decoration: underline;\">Slower</span> processing time means <span style=\" font-weight:700; text-decoration: underline;\">Better results for the file size</span><span style=\" text-decoration: underline;\">.</span></p></body></html>", None))
-        self.label_55.setText("")
         self.video_encoder_speed.setItemText(0, QCoreApplication.translate("MainWindow", u"fastest", None))
         self.video_encoder_speed.setItemText(1, QCoreApplication.translate("MainWindow", u"fast", None))
         self.video_encoder_speed.setItemText(2, QCoreApplication.translate("MainWindow", u"medium", None))
@@ -372,7 +383,6 @@ class Tab6Page:
         self.video_quality.setItemText(5, QCoreApplication.translate("MainWindow", u"Low", None))
         self.label_49.setText(QCoreApplication.translate("MainWindow", u"Video Container", None))
         self.label_50.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Video Container</span></p><p>- Changes the video container in the default output file generated container.</p><p>- <span style=\" font-weight:700;\">mkv </span>is <span style=\" font-weight:700;\">recomended</span> due to its extensive support for different formats.</p><p><span style=\" font-weight:700;\">WARNING: Changing this </span><span style=\" font-weight:700; text-decoration: underline;\">MAY</span><span style=\" font-weight:700;\"> break encoder compadibility. </span></p><p><span style=\" font-weight:700;\">Please look at the audio and video encoder tooltips for compadibility.</span></p></body></html>", None))
-        self.label_50.setText("")
         self.video_container.setItemText(0, QCoreApplication.translate("MainWindow", u"mkv", None))
         self.video_container.setItemText(1, QCoreApplication.translate("MainWindow", u"mp4", None))
         self.video_container.setItemText(2, QCoreApplication.translate("MainWindow", u"mov", None))
@@ -381,7 +391,6 @@ class Tab6Page:
         self.encoderLabel_7.setText(QCoreApplication.translate("MainWindow", u"Video Pixel Format", None))
         self.label_58.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Pixel Format</span></p><p>- D<span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; color:#cccccc;\">efines how color information is stored for each pixel in a video frame.</span></p><p><span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; color:#cccccc;\">- yuv420p: Most common, removes the most information. </span>(<span style=\" font-weight:700;\">mkv, mp4, mov, avi, webm</span>)</p><p><span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; color:#cccccc;\">- yuv422p: In between 420p and 444p. </span>(<span style=\" font-weight:700;\">mkv, mov, mp4</span>)</p><p><span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; color:#cccccc;\">- yuv444p: Keeps the most information. </span>(<span style=\" font-weight:700;\">mkv, mov, mp4</span>)<br/></p><p>- <span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; colo"
                         "r:#cccccc;\">yuv 420/422/444 p10le: 10 bit version of each. (MKV and MP4 containers only) </span>(<span style=\" font-weight:700;\">mkv, mov, mp4</span>)</p></body></html>", None))
-        self.label_58.setText("")
         self.video_pixel_format.setItemText(0, QCoreApplication.translate("MainWindow", u"yuv420p", None))
         self.video_pixel_format.setItemText(1, QCoreApplication.translate("MainWindow", u"yuv422p", None))
         self.video_pixel_format.setItemText(2, QCoreApplication.translate("MainWindow", u"yuv444p", None))
@@ -390,21 +399,18 @@ class Tab6Page:
         self.video_pixel_format.setItemText(5, QCoreApplication.translate("MainWindow", u"yuv444p (10 bit)", None))
         self.encoderLabel_10.setText(QCoreApplication.translate("MainWindow", u"Audio Encoder", None))
         self.label_56.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Audio Encoder</span></p><p>- <span style=\" font-weight:700;\">Recommended </span>to use <span style=\" font-weight:700;\">aac</span> if the video container is <span style=\" font-weight:700;\">not mkv, </span>or if the output video has audio isses.</p><p><span style=\" font-weight:700;\">- </span>copy_audio: No re-encoding is done on the output</p><p>- aac: Most common, and high quality.</p><p>- libmp3lame: Used less, low quality.</p><p>- opus: Used for <span style=\" font-weight:700;\">webm</span>.</p></body></html>", None))
-        self.label_56.setText("")
         self.audio_encoder.setItemText(0, QCoreApplication.translate("MainWindow", u"copy_audio", None))
         self.audio_encoder.setItemText(1, QCoreApplication.translate("MainWindow", u"aac", None))
         self.audio_encoder.setItemText(2, QCoreApplication.translate("MainWindow", u"libmp3lame", None))
         self.audio_encoder.setItemText(3, QCoreApplication.translate("MainWindow", u"opus", None))
         self.encoderLabel_6.setText(QCoreApplication.translate("MainWindow", u"Audio Bitrate", None))
         self.label_57.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Audio Bitrate</span></p><p><span style=\" font-weight:700;\">- </span>Higher bitrate = higher quality</p><p>   - Only applies to <span style=\" font-weight:700;\">aac </span>and <span style=\" font-weight:700;\">libmp3lame</span>.</p></body></html>", None))
-        self.label_57.setText("")
         self.audio_bitrate.setItemText(0, QCoreApplication.translate("MainWindow", u"320k", None))
         self.audio_bitrate.setItemText(1, QCoreApplication.translate("MainWindow", u"192k", None))
         self.audio_bitrate.setItemText(2, QCoreApplication.translate("MainWindow", u"128k", None))
         self.audio_bitrate.setItemText(3, QCoreApplication.translate("MainWindow", u"96k", None))
         self.encoderLabel_11.setText(QCoreApplication.translate("MainWindow", u"Subtiitle Encoder", None))
         self.label_59.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Subtitle Encoder</span></p><p>- <span style=\" font-weight:700;\">Recommended </span>to use <span style=\" font-weight:700;\">webvtt</span> if the video container is <span style=\" font-weight:700;\">not mkv, </span>or if the output video has audio isses.</p><p><br/>All encoders here are <span style=\" font-weight:700;\">Text Only. </span>If you are enhancing a <span style=\" font-weight:700;\">DVD, </span>use <span style=\" font-weight:700;\">copy_subtitle</span>.</p></body></html>", None))
-        self.label_59.setText("")
         self.subtitle_encoder.setItemText(0, QCoreApplication.translate("MainWindow", u"copy_subtitle", None))
         self.subtitle_encoder.setItemText(1, QCoreApplication.translate("MainWindow", u"ass", None))
         self.subtitle_encoder.setItemText(2, QCoreApplication.translate("MainWindow", u"srt", None))
