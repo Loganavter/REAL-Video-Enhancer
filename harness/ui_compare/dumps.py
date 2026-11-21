@@ -76,3 +76,40 @@ def prune_under(tree: dict, names: set[str]) -> int:
 
     walk(tree.get("root", {}))
     return pruned
+
+
+def current_page_root(tree: dict) -> str | None:
+    """Name of the page the dump was taken with - every dump contains the WHOLE window.
+
+    Without this, the comparison pairs widgets of the *other* pages too (a dump of `nav0` also holds `nav2`'s tree), and
+    a page that was current in one build but not the other reads as dozens of moved, 100%-different containers.
+    """
+    root = tree.get("root", {})
+
+    def find(node: dict, name: str) -> dict | None:
+        if node.get("name") == name:
+            return node
+        for child in node.get("children", []):
+            found = find(child, name)
+            if found is not None:
+                return found
+        return None
+
+    stack = find(root, "stackedWidget")
+    if stack is None:
+        return None
+    index = stack.get("currentIndex", 0)
+    children = stack.get("children", [])
+    # QStackedWidget keeps its pages as direct QWidget children (its private frame is not a QWidget child in this dump).
+    pages = [child for child in children if child.get("class") != "QScrollBar"]
+    if not (0 <= index < len(pages)):
+        return None
+    page = pages[index]
+    tabs = find(page, "tabWidget") or find(page, "processSettingsContainer")
+    if tabs is not None and tabs.get("currentIndex", -1) >= 0:
+        tab_pages = [child for child in tabs.get("children", [])
+                     if child.get("class") not in {"QScrollBar", "QTabBar", "QStackedWidget"}]
+        tab_index = tabs.get("currentIndex", 0)
+        if 0 <= tab_index < len(tab_pages):
+            return tab_pages[tab_index].get("name") or page.get("name")
+    return page.get("name")

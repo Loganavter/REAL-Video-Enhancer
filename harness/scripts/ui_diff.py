@@ -25,7 +25,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from harness.ui_compare import (  # noqa: E402
-    flatten, format_page_table, format_widget_table, load, page_deltas, parse_aliases, prune_under, widget_deltas,
+    current_page_root, flatten, format_page_table, format_widget_table, load, page_deltas, parse_aliases, prune_under,
+    widget_deltas,
 )
 
 
@@ -99,8 +100,14 @@ def main() -> int:
             prune_under(stock_tree, set(args.prune_under))
         stock_img = _image(os.path.join(args.stock_png, name.replace(".json", ".png"))) if args.stock_png else None
         new_img = _image(os.path.join(args.new_png, name.replace(".json", ".png"))) if args.new_png else None
-        widgets_all.extend(widget_deltas(name, stock_tree, new_tree, stock_img, new_img, aliases,
-                                         args.ignore_text))
+        page_root = current_page_root(stock_tree)
+        rows = widget_deltas(name, stock_tree, new_tree, stock_img, new_img, aliases, args.ignore_text)
+        if page_root:
+            marker = f"/{page_root}/"
+            rows = [row for row in rows if marker in row.path or row.path.endswith(f"/{page_root}")]
+        for row in rows:
+            row.page = name
+        widgets_all.extend(rows)
         summary = _page_pixels(stock_img, new_img)
         summary["page"] = name
         page_rows.append(summary)

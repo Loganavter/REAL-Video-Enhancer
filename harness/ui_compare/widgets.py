@@ -39,9 +39,17 @@ class WidgetDelta:
 
     @property
     def severity(self) -> float:
-        """Ordering for the table: content regressions first, then the worst ink, then movement."""
-        base = 1000.0 if self.content_changed else 0.0
-        return base + (self.ink_pct or 0.0) + (min(20.0, sum(abs(v) for v in (self.moved or ()))) / 10.0)
+        """Ordering for the table.
+
+        What the eye notices is ink and lost content (text, icon, font, state). Palette roles are reported but weigh
+        little: on this app they are a side effect of the page QSS (each widget class ends up with its own Base/Button
+        values), so a role difference with identical pixels is information, not a regression - measured by flipping the
+        palette and watching the table stay identical.
+        """
+        content = 1000.0 if (self.text or self.icon or self.font_px or self.state or self.visibility
+                             or self.enabled) else 0.0
+        palette = 10.0 if self.colours else 0.0
+        return content + palette + (self.ink_pct or 0.0) + (min(20.0, sum(abs(v) for v in (self.moved or ()))) / 10.0)
 
     def summary(self) -> str:
         parts = []
@@ -82,8 +90,12 @@ def widget_deltas(page: str, stock_tree: dict, new_tree: dict, stock_img, new_im
     rows: list[WidgetDelta] = []
     for path in sorted(set(left) & set(right)):
         a, b = left[path], right[path]
-        row = WidgetDelta(page=page, path=path, name=path.split("/")[-1], cls=a.get("class", ""))
         rect_a, rect_b = abs_rect(a), abs_rect(b)
+        # A collapsed widget (0-4 px in either axis) has no ink to compare; cropping it produced "100% different"
+        # rows for things like a 33x0 button the Designer never laid out.
+        if rect_a[2] < 4 or rect_a[3] < 4:
+            continue
+        row = WidgetDelta(page=page, path=path, name=path.split("/")[-1], cls=a.get("class", ""))
         row.stock_rect, row.new_rect = rect_a, rect_b
         row.moved = tuple(y - x for x, y in zip(rect_a, rect_b))
         if a.get("visible") != b.get("visible"):

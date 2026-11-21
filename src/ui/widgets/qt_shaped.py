@@ -313,17 +313,42 @@ class QtComboBox(ComboBox):
         # spare width among the Preferred items, which is what the Designer's rows were laid out against.
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
+    def _invalidate(self) -> None:
+        self._stock_hint = None
+        # The hint changed, so the LAYOUT has to know. Without this the combo kept the width it was given while empty
+        # (38 px on the settings page) even though its sizeHint had already grown to the stock 145 px - measured by
+        # dumping the widget after the app had populated it.
+        self.updateGeometry()
+
     def addItem(self, text, userData=None) -> None:      # noqa: N802
         super().addItem(text, userData)
-        self._stock_hint = None
+        self._invalidate()
 
     def addItems(self, texts) -> None:                   # noqa: N802
         super().addItems(texts)
-        self._stock_hint = None
+        self._invalidate()
+
+    def clear(self) -> None:                             # noqa: N802
+        super().clear()
+        self._invalidate()
+
+    def setItemText(self, index: int, text: str) -> None:  # noqa: N802
+        # The Designer adds EMPTY items and fills the text from `retranslateUi` (`setItemText`), so invalidating only
+        # on add/clear cached the width of an empty combo: 38 px against the stock 145 (measured).
+        super().setItemText(index, text)
+        self._invalidate()
+
+    def insertItem(self, index: int, text: str, userData=None) -> None:  # noqa: N802
+        super().insertItem(index, text, userData)
+        self._invalidate()
+
+    def removeItem(self, index: int) -> None:             # noqa: N802
+        super().removeItem(index)
+        self._invalidate()
 
     def setFont(self, font) -> None:                     # noqa: N802
         super().setFont(font)
-        self._stock_hint = None
+        self._invalidate()
 
     #: RVE's combo rule, verbatim - the oracle below must be measured under the same QSS the stock widget had,
     #: otherwise its padding and arrow are missing from the hint (measured: 70 vs the Designer's 78 px).
@@ -353,19 +378,17 @@ class QtComboBox(ComboBox):
 class QtLineEdit(CustomLineEdit):
     """`QLineEdit`'s shape over `CustomLineEdit`.
 
-    RVE's line edit is 25 px tall for a 12 px font (`QLineEdit` with the page's 5 px padding); the toolkit field is
-    32. Height is stated here, width stays expanding like Qt's.
+    RVE's line edit is 25 px tall (the Designer's `setMinimumSize(0, 25)`), and `CustomLineEdit` pins its height in the
+    constructor (`setFixedHeight(scaled_px(HEIGHT))`, `HEIGHT = 32`), which no `sizeHint` override can undo - the field
+    stayed 32 px against the stock 25 (measured). The subclass states the height the class reads, so the fixed size and
+    every internal rect agree.
     """
+
+    HEIGHT = 25
 
     def __init__(self, parent=None, **kwargs) -> None:
         super().__init__(parent, **kwargs)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-    def sizeHint(self) -> QSize:                 # noqa: N802
-        return QSize(super().sizeHint().width(), QFontMetrics(self.font()).height() + 8)
-
-    def minimumSizeHint(self) -> QSize:          # noqa: N802
-        return self.sizeHint()
 
 
 def _left():
