@@ -201,6 +201,22 @@ def install(window) -> None:
                 return
             QTimer.singleShot(100, lambda: press_start(ticks + 1))
 
+        def select_a_backend() -> None:
+            """Prefer a backend that initialises in this runtime.
+
+            The default is TensorRT, and its engine build blocks forever here (measured: the backend child sits in
+            `futex_wait` at ~4 % CPU while the app waits on its stdout, ProcessTab.py:323). Torch/PyTorch runs.
+            """
+            combo = getattr(window, "backendComboBox", None)
+            if combo is None or not hasattr(combo, "count"):
+                return
+            for index in range(combo.count()):
+                text = combo.itemText(index).lower()
+                if "torch" in text and "tensorrt" not in text:
+                    if combo.currentIndex() != index:
+                        combo.setCurrentIndex(index)
+                    return
+
         def select_a_model() -> None:
             """The app refuses to queue without one: "Please select at least one model!" (REAL-Video-Enhancer.py:537).
 
@@ -219,6 +235,7 @@ def install(window) -> None:
                 combo.setCurrentIndex(0)
 
         def press_add() -> None:
+            select_a_backend()
             select_a_model()
             window.addToRenderQueueButton.click()
             QTimer.singleShot(200, press_start)
