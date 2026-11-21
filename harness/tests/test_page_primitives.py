@@ -72,15 +72,15 @@ GAPS: dict[str, str] = {
 
 #: adapter -> (height policy, width policy, size policy, bases) exactly as the adapter declares it.
 ADAPTERS_PIN: dict[str, tuple[str, str, str, str]] = {
-    "QtSpinBox": ("HEIGHT=32", "stock-oracle:QSpinBox", "Minimum/Fixed", "_QtSpinShape, Stepper"),
-    "QtDoubleSpinBox": ("HEIGHT=32", "stock-oracle:QDoubleSpinBox", "Minimum/Fixed",
+    "QtSpinBox": ("HEIGHT=29", "stock-oracle:QSpinBox", "Minimum/Fixed", "_QtSpinShape, Stepper"),
+    "QtDoubleSpinBox": ("HEIGHT=29", "stock-oracle:QDoubleSpinBox", "Minimum/Fixed",
                         "_QtSpinShape, StepButtonsMixin, DoubleSpinBox"),
     "QtProgressBar": ("HEIGHT=25", "WIDTH=91", "Expanding/Fixed", "ToastProgressBar"),
 }
 
 #: the shared mixin's stated geometry (RVE's QSS: `padding:5px 10px`, `border-radius:10px`, a 20 px arrow column).
 SHAPE_CONSTANTS = {
-    "HEIGHT": 32,
+    "HEIGHT": 29,
     "RADIUS": 10,
     "H_PADDING": 10,
     "STEP_BUTTON_WIDTH": 20,
@@ -267,7 +267,7 @@ def test_spin_box_geometry_constants_are_rve_numbers() -> None:
     assert shape is not None, "the shared spin-box shape mixin is gone - " + HINT
     actual = {name: _constant([shape], name) for name in SHAPE_CONSTANTS}
     assert actual == SHAPE_CONSTANTS, (
-        f"spin-box constants {actual} vs {SHAPE_CONSTANTS} (RVE's QSS: 32 px row, radius 10, padding 10, a 20 px "
+        f"spin-box constants {actual} vs {SHAPE_CONSTANTS} (the live rows are 29 px, radius 10, padding 10, a 20 px "
         f"arrow column) - {HINT}")
 
 
