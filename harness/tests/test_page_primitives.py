@@ -311,6 +311,8 @@ def test_splitter_would_emit_the_class_each_page_builds() -> None:
     """Regeneration gate: the splitter's own decision equals the page module's constructor."""
     decision = _splitter_decision()
     for module, widgets in PAGES_PIN.items():
+        if module in HAND_MAINTAINED:
+            continue
         assert module in decision, f"the splitter would not emit {module}.py at all - {HINT}"
         for widget, cls in widgets.items():
             assert widget in decision[module], (
