@@ -19,7 +19,7 @@ verdict. The verdict is the widget table.
 
 from __future__ import annotations
 
-from .dumps import current_page_root, flatten, load, parse_aliases, prune_under
+from .dumps import flatten_with_origins, current_page_root, flatten, load, parse_aliases, prune_under
 from .metrics import abs_rect, ink_share
 from .report import format_page_table, format_widget_table
 from .widgets import page_deltas, widget_deltas
@@ -28,6 +28,7 @@ __all__ = [
     "current_page_root",
     "abs_rect",
     "flatten",
+    "flatten_with_origins",
     "format_page_table",
     "format_widget_table",
     "ink_share",

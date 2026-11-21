@@ -56,9 +56,25 @@ def _canonical(path: str) -> str:
 
 def flatten(tree: dict, aliases: dict[str, str] | None = None, prefix: str = "") -> dict[str, dict]:
     """`{path -> node}` with `path` built from object names, so two builds of one page share keys."""
-    flat: dict[str, dict] = {}
+    return flatten_with_origins(tree, aliases, prefix)[0]
 
-    def walk(node: dict, path: str, index: int) -> None:
+
+def flatten_with_origins(tree: dict, aliases: dict[str, str] | None = None,
+                         prefix: str = "") -> tuple[dict[str, dict], dict[str, tuple[int, int]]]:
+    """`({path -> node}, {path -> absolute origin})`, both from the SAME raw walk.
+
+    The dump stores parent-local geometry, so a widget's screen rect is the sum of its ancestors' offsets. Resolving that
+    by looking the ancestors up in a canonicalised path is wrong wherever the canonicalisation rewrites a name: inside a
+    migrated tab host the stock side then counts the host's chrome and the new side does not, which produced a "22 px
+    shift" that the page images contradicted (the first text row sits at y=81 in both). Accumulating during the walk has
+    no such gap - every node's origin is the parent's plus its own offset.
+    """
+    flat: dict[str, dict] = {}
+    origins: dict[str, tuple[int, int]] = {}
+
+    def walk(node: dict, path: str, index: int, ox: int, oy: int) -> None:
+        geometry = node.get("geometry") or (0, 0, 0, 0)
+        absolute = (ox + int(geometry[0]), oy + int(geometry[1]))
         key = f"{path}/{_key_name(node, index, aliases)}" if path else _key_name(node, index, aliases)
         key = _canonical(key)
         base = key
@@ -67,11 +83,12 @@ def flatten(tree: dict, aliases: dict[str, str] | None = None, prefix: str = "")
             key = f"{base}#{suffix}"
             suffix += 1
         flat[key] = node
+        origins[key] = absolute
         for child_index, child in enumerate(node.get("children", [])):
-            walk(child, key, child_index)
+            walk(child, key, child_index, absolute[0], absolute[1])
 
-    walk(tree.get("root", {}), prefix, 0)
-    return flat
+    walk(tree.get("root", {}), prefix, 0, 0, 0)
+    return flat, origins
 
 
 def prune_under(tree: dict, names: set[str]) -> int:

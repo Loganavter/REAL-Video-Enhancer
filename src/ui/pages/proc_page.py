@@ -207,7 +207,7 @@ class ProcPagePage:
         self.verticalLayout_24.setObjectName(u"verticalLayout_24")
         self.verticalLayout_24.setContentsMargins(0, 0, 0, 0)
         self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=22, pane_radius=0,
-            pane_inset=0, chrome_inset=0, tab_radius=4)
+            pane_inset=0, chrome_inset=0, tab_radius=4, pane_fill_token=None)
         self.processSettingsContainer.setObjectName(u"processSettingsContainer")
         sizePolicy3.setHeightForWidth(self.processSettingsContainer.sizePolicy().hasHeightForWidth())
         self.processSettingsContainer.setSizePolicy(sizePolicy3)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .dumps import flatten
+from .dumps import flatten_with_origins
 from .metrics import abs_rect, box_of, ink_share
 
 
@@ -82,33 +82,19 @@ def _colours(node: dict) -> dict[str, str]:
             if key in {"Button", "Base", "Window", "Text"}}
 
 
-def _origin(flat: dict, path: str) -> tuple[int, int]:
-    """Screen offset of a widget's parent chain (the dump's geometry is parent-local)."""
-    x = y = 0
-    parts = path.split("/")
-    for index in range(1, len(parts)):
-        ancestor = flat.get("/".join(parts[:index]))
-        if ancestor is None:
-            continue
-        geometry = ancestor.get("geometry") or (0, 0, 0, 0)
-        x += geometry[0]
-        y += geometry[1]
-    return x, y
-
-
 def widget_deltas(page: str, stock_tree: dict, new_tree: dict, stock_img, new_img,
                   aliases: dict[str, str] | None = None, ignore_text: list[str] | None = None) -> list[WidgetDelta]:
     ignore_text = ignore_text or []
-    left = flatten(stock_tree, aliases)
-    right = flatten(new_tree, aliases)
+    left, left_origin = flatten_with_origins(stock_tree, aliases)
+    right, right_origin = flatten_with_origins(new_tree, aliases)
     rows: list[WidgetDelta] = []
     for path in sorted(set(left) & set(right)):
         a, b = left[path], right[path]
         # The dump stores PARENT-LOCAL geometry, so a widget's screen rect is the sum of its ancestors' offsets. Reading
         # it as absolute put every crop in the wrong place: a container mid-page reported 100 % ink between two builds
         # whose centre pixel is identical, and a pane reported its text "clipped" while the label was intact.
-        rect_a = abs_rect(a, *_origin(left, path))
-        rect_b = abs_rect(b, *_origin(right, path))
+        rect_a = abs_rect(a, *left_origin.get(path, (0, 0)))
+        rect_b = abs_rect(b, *right_origin.get(path, (0, 0)))
         # A collapsed widget (0-4 px in either axis) has no ink to compare; cropping it produced "100% different"
         # rows for things like a 33x0 button the Designer never laid out.
         if rect_a[2] < 4 or rect_a[3] < 4:
@@ -146,8 +132,8 @@ def widget_deltas(page: str, stock_tree: dict, new_tree: dict, stock_img, new_im
 
 def page_deltas(page: str, stock_tree: dict, new_tree: dict, aliases: dict[str, str] | None = None) -> dict:
     """Tree-level counts for one page: what the structural gate prints."""
-    left = flatten(stock_tree, aliases)
-    right = flatten(new_tree, aliases)
+    left, left_origin = flatten_with_origins(stock_tree, aliases)
+    right, right_origin = flatten_with_origins(new_tree, aliases)
     result = {
         "page": page,
         "nodes": (len(left), len(right)),

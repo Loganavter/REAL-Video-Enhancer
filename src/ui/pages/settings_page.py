@@ -62,7 +62,7 @@ class SettingsPagePage:
         # rounded 10 px pane (which would also inset the content by 10 px a side).
         # GAP: the per-tab radius (`border-radius: 4px`) is `TopTabBar`'s own constructor argument and `TopTabHost`
         # does not forward it - the tabs keep the toolkit's 10 px corner until the toolkit offers `tab_radius=`.
-        self.tabWidget = TopTabHost(self.scrollAreaWidgetContents, tab_height=22, pane_radius=0, pane_inset=0, chrome_inset=0, tab_radius=4)
+        self.tabWidget = TopTabHost(self.scrollAreaWidgetContents, tab_height=22, pane_radius=0, pane_inset=0, chrome_inset=0, tab_radius=4, pane_fill_token=None)
         self.tabWidget.setObjectName(u"tabWidget")
         self.tab_2_page = Tab2Page()
         self.tab_2 = self.tab_2_page.build()
