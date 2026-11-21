@@ -129,17 +129,14 @@ class MainWindow(QMainWindow):
         # P0 of plan-rve-ui-on-toolkit: put toolkit widgets into the live window and look at the result.
         # Off by default; RVE_TOOLKIT_SPIKE=1 is a measurement, not a migration.
         try:
-            from src.ui import page_capture
+            from src.ui import layout_dump, page_capture
             if page_capture.enabled():
+                # The capture walker writes the layout dump too when one was asked for (one walk, both artefacts).
                 page_capture.install(self)
+            elif layout_dump.enabled():
+                layout_dump.install(self)
         except Exception as _cap_exc:
             log(f"page capture failed: {_cap_exc}")
-        try:
-            from src.ui import layout_dump
-            if layout_dump.enabled():
-                layout_dump.install(self)
-        except Exception as _dump_exc:
-            log(f"layout dump failed: {_dump_exc}")
         # The v2 runtime swap (`toolkit_swap.py`, `toolkit_spike.py`) is gone with W3: pages are built by their own
         # modules now, so a migration is an edit in a page module, not a splice into a live Designer tree.
         #self.VideoPreview.setVisible(False)

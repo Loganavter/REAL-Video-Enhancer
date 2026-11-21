@@ -85,6 +85,14 @@ def install(window) -> None:
         path = os.path.join(out_dir, f"{name}.png")
         pixmap.save(path)
         print(f"capture: {path} {pixmap.width()}x{pixmap.height()}", flush=True)
+        # One walk, both artefacts: a capture run that also asked for a layout dump writes the JSON for the same page
+        # here instead of paying a second 40 s settle in a separate process (the two walks visit identical pages).
+        try:
+            from src.ui import layout_dump
+            if layout_dump.enabled():
+                layout_dump.write_page(window, name)
+        except Exception as exc:
+            print(f"capture: layout dump for {name} failed: {exc}", flush=True)
         QTimer.singleShot(0, lambda: capture(n + 1))
 
     QTimer.singleShot(delay, lambda: capture(0))

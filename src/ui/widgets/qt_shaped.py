@@ -201,7 +201,10 @@ class QtButton(Button):
         # `Button.setFont` does not feed the painter (the paint font comes from `ui_font(widget)` but the row's own size
         # wins), so the adapter keeps the Qt font it was given and states the pixel size on the row.
         size = QFontInfo(getattr(self, "_rve_font", self.font())).pixelSize()
-        self.setRows([ButtonRow(text=self.text(), size=size or None, h_align=None)])
+        # `ButtonRow.ratio` defaults to 0.5: a single-row button then gets HALF the content height and the text is cut
+        # through the middle (measured on every RVE button). One row owns the whole height, as BlinkTable's call sites
+        # state explicitly (`ratio=1.0`).
+        self.setRows([ButtonRow(text=self.text(), size=size or None, h_align=None, ratio=1.0)])
 
     def sizeHint(self) -> QSize:                 # noqa: N802
         # Same QSS semantics as the combo: `padding: 5px 10px` around the content, and QPushButton's 27 px row for a

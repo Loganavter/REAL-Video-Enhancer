@@ -151,18 +151,27 @@ def install(window) -> None:
         QTimer.singleShot(per_page, lambda: write(name, index))
 
     def write(name: str, index: int) -> None:
-        path = os.path.join(out_dir, f"{name}.json")
-        try:
-            tree = dump(window)
-            with open(path, "w", encoding="utf-8") as handle:
-                json.dump(tree, handle, indent=1, sort_keys=True)
-            print(f"layout: {path} {_count(tree)} widgets", flush=True)
-        except Exception as exc:      # an instrument that dies silently hangs the run until the timeout
-            import traceback
-            print(f"layout: FAILED on {name}: {exc}\n{traceback.format_exc()}", flush=True)
+        write_page(window, name)
         QTimer.singleShot(0, lambda: walk(index + 1))
 
     QTimer.singleShot(delay, lambda: warm_up(0))
+
+
+def write_page(window, name: str) -> None:
+    """Write one page's dump into `RVE_UI_LAYOUT_DUMP`. Shared with the capture walker (one walk, both artefacts)."""
+    out_dir = os.environ.get("RVE_UI_LAYOUT_DUMP", "")
+    if not out_dir:
+        return
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{name}.json")
+    try:
+        tree = dump(window)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(tree, handle, indent=1, sort_keys=True)
+        print(f"layout: {path} {_count(tree)} widgets", flush=True)
+    except Exception as exc:      # an instrument that dies silently hangs the run until the timeout
+        import traceback
+        print(f"layout: FAILED on {name}: {exc}\n{traceback.format_exc()}", flush=True)
 
 
 def _count(tree: dict) -> int:
