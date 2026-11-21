@@ -131,6 +131,24 @@ def _trace_threshold(window) -> None:
 
     spin.valueChanged.connect(on_change)
 
+    # Which spin box is actually on screen? The intermittency said "a different widget than the one written to", so
+    # dump every QDoubleSpinBox the window owns, with its value, visibility and parent chain, three seconds in.
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    def dump() -> None:
+        log(f"trace: window.scene_change_detection_threshold = {getattr(window, 'scene_change_detection_threshold', None)}"
+            f" value={spin.value()}")
+        for box in window.findChildren(QDoubleSpinBox):
+            chain, parent = [], box.parentWidget()
+            while parent is not None and len(chain) < 4:
+                chain.append(parent.objectName() or type(parent).__name__)
+                parent = parent.parentWidget()
+            log(f"trace: spin {box.objectName() or type(box).__name__} value={box.value()} visible={box.isVisible()}"
+                f" geom={box.geometry().getRect()} parents={'<'.join(chain)}")
+
+    QTimer.singleShot(3000, dump)
+
 
 def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
     """Replace the page's stock primitives with toolkit widgets. Returns the count per class."""
@@ -149,16 +167,15 @@ def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
 
     _trace_threshold(window)
     wanted = _wanted()
-    # EXCLUDED, with what the trace actually measured (RVE_TOOLKIT_TRACE=1):
-    #  * the threshold widget's own history is clean: 1.0 from the .ui, then 3.5 at SettingsTab.connectSettingText:437
-    #    and never changed again - the swap does not touch its value;
-    #  * `output_folder_location.textChanged` fires once with the right path, and writeOutputFolder does not run in
-    #    the default flow;
-    #  * BUT with the line edit swapped the page INTERMITTENTLY renders the threshold as 1.0: stock build 3 runs ->
-    #    identical to the baseline (0.00); migrated build -> 1.0 in some runs, 3.5 in another with the same class set.
-    # So the failing runs are showing a DIFFERENT spin box than the one the glue writes to (the trace proves the
-    # captured one receives 3.5), which is a swap/geometry problem, not the value. Until that is pinned the field
-    # stays stock: the verified configuration is 4 classes, mean 3.28 / 3.51%, threshold correct.
+    # EXCLUDED: including the line edit makes the scene-detection threshold row render 1.0 instead of 3.5, and the
+    # evidence is contradictory in a way that is written down rather than papered over:
+    #   * excluded  -> 3.5 on screen, page deviation mean 3.28 / 3.51% (verified twice, settled captures);
+    #   * included  -> 1.0 on screen, deviation 5.69% (settled capture at 42 s as well - so NOT a startup transient,
+    #     which was the first wrong guess);
+    #   * with RVE_TOOLKIT_TRACE=1 the widget the window attribute points at reads value=3.5, visible=True,
+    #     geometry laid out - while the same frame's screenshot shows 1.0 at that row. So two objects are involved
+    #     and the next step is a dump scoped to that row (siblings by geometry), not a whole-window one.
+    # The exclusion keeps the verified configuration until that is answered.
     EXCLUDED: set[type] = {QLineEdit}
 
     def allowed(cls: type) -> bool:
