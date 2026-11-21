@@ -32,6 +32,7 @@ WATCHED = ("QSpinBox", "QDoubleSpinBox", "QProgressBar", "QListWidget", "QTextEd
 #: Replacement classes: the `Qt*` adapters from `qt_shaped.py`, plus toolkit classes a page constructs directly (a page
 #: that migrates off the compatibility layer names the toolkit class itself, e.g. `DoubleSpinBox`).
 ADAPTER_NAMES = ("QtSpinBox", "QtDoubleSpinBox", "QtProgressBar", "QtListWidget", "QtTextEdit", "ConsoleView",
+                 "DoubleSpinBox", "Stepper", "ToastProgressBar",
                  "RichTextView", "TextListWidget", "DoubleSpinBox")
 
 #: page module -> {designer widget name: the class the page builds}. Every watched widget is migrated to an adapter;
