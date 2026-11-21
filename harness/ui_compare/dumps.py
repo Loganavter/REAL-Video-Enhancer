@@ -79,12 +79,13 @@ def prune_under(tree: dict, names: set[str]) -> int:
 
 
 def current_page_root(tree: dict) -> str | None:
-    """Name of the page the dump was taken with - every dump contains the WHOLE window.
+    """Name of the page that was current when the dump was written - every dump contains the WHOLE window.
 
-    Without this, the comparison pairs widgets of the *other* pages too (a dump of `nav0` also holds `nav2`'s tree), and
-    a page that was current in one build but not the other reads as dozens of moved, 100%-different containers.
+    Resolved by VISIBILITY, not by `currentIndex`: a stack hides every page but one, and an index is only meaningful
+    when it was written by the same walker version that wrote the names. A baseline captured with an older walker had
+    its indices shifted by one, which made a dump of one page report another page's widgets (measured: "Advanced"
+    listed the Home page's buttons).
     """
-    root = tree.get("root", {})
 
     def find(node: dict, name: str) -> dict | None:
         if node.get("name") == name:
@@ -95,21 +96,26 @@ def current_page_root(tree: dict) -> str | None:
                 return found
         return None
 
+    def visible_page(container: dict | None) -> str | None:
+        if container is None:
+            return None
+        pages = [child for child in container.get("children", []) if child.get("class") != "QScrollBar"]
+        for page in pages:
+            if page.get("visible"):
+                return page.get("name")
+        index = container.get("currentIndex", 0)
+        return pages[index].get("name") if 0 <= index < len(pages) else None
+
+    root = tree.get("root", {})
     stack = find(root, "stackedWidget")
-    if stack is None:
+    page_name = visible_page(stack)
+    if page_name is None:
         return None
-    index = stack.get("currentIndex", 0)
-    children = stack.get("children", [])
-    # QStackedWidget keeps its pages as direct QWidget children (its private frame is not a QWidget child in this dump).
-    pages = [child for child in children if child.get("class") != "QScrollBar"]
-    if not (0 <= index < len(pages)):
-        return None
-    page = pages[index]
+    page = find(root, page_name) or {}
     tabs = find(page, "tabWidget") or find(page, "processSettingsContainer")
-    if tabs is not None and tabs.get("currentIndex", -1) >= 0:
-        tab_pages = [child for child in tabs.get("children", [])
-                     if child.get("class") not in {"QScrollBar", "QTabBar", "QStackedWidget"}]
-        tab_index = tabs.get("currentIndex", 0)
-        if 0 <= tab_index < len(tab_pages):
-            return tab_pages[tab_index].get("name") or page.get("name")
-    return page.get("name")
+    if tabs is not None:
+        holder = find(tabs, "qt_tabwidget_stackedwidget") or tabs
+        tab_name = visible_page(holder)
+        if tab_name:
+            return tab_name
+    return page_name

@@ -108,6 +108,23 @@ class QtLabel(Text):
         # to the top (measured: `encoderLabel_3` 98 px tall in the Designer build, 22 px after migration).
         return QSizePolicy.Policy.Preferred
 
+    def setStyleSheet(self, css: str) -> None:   # noqa: N802
+        # A QSS rule on a toolkit widget is a no-op, and RVE's pages still carry a few per-widget ones from the
+        # Designer (`low_storage_label` is `QLabel { color: red; }`). Rather than let the colour vanish silently, the
+        # two properties a label actually declares are translated to the painter's own setters; anything else is
+        # reported once so the gate's finding is not the only trace.
+        if not css or not css.strip():
+            return
+        import re
+
+        colour = re.search(r"\bcolor\s*:\s*([^;}\s]+)", css)
+        if colour:
+            self.setColor(QColor(colour.group(1)))
+        size = re.search(r"\bfont-size\s*:\s*(\d+)\s*(px|pt)?", css)
+        if size:
+            value = int(size.group(1))
+            self.setPixelSize(value * 4 // 3 if size.group(2) == "pt" else value)
+
     def setPixmap(self, pixmap) -> None:         # noqa: N802
         raise NotImplementedError(
             "Text paints text only - a pixmap label stays QLabel (the splitter keeps such labels stock)")
