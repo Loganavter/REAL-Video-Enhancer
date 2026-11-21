@@ -94,6 +94,16 @@ def install(window) -> None:
         QTimer.singleShot(120, poll)
 
     def handle(wanted: str) -> None:
+        if wanted == "stack":
+            # Every thread's Python stack, written next to the server's other answers. The render runs in a worker, and
+            # a stuck first frame needs the call it is stuck IN, not an inference from a progress bar.
+            import faulthandler
+
+            path = os.path.join(root, "stacks.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                faulthandler.dump_traceback(file=handle, all_threads=True)
+            _finish({"stamp": _stamp(), "kind": "stack", "path": path})
+            return
         if wanted.startswith("render:"):
             render(wanted[len("render:"):].strip())
             return
@@ -113,7 +123,7 @@ def install(window) -> None:
         version used a fixed 1.2 s delay and answered "the queue stayed empty").
         """
         stamp = _stamp()
-        result = {"stamp": stamp, "kind": "render", "video": video, "queued": 0, "started": False,
+        result = {"stamp": stamp, "kind": "render", "video": video, "backend": None, "queued": 0, "started": False,
                   "finished": False, "seconds": 0.0, "output": None, "error": None}
         started_at = time.time()
 
@@ -131,6 +141,7 @@ def install(window) -> None:
         def finish(error: str | None = None) -> None:
             result["seconds"] = round(time.time() - started_at, 1)
             result["queued"] = len(getattr(window.renderQueue, "queue", []) or [])
+            result["backend"] = backend_of()
             result["output"] = output_of_last_item()
             if result["output"] and os.path.exists(result["output"]):
                 result["output_bytes"] = os.path.getsize(result["output"])
@@ -138,6 +149,19 @@ def install(window) -> None:
                 result["error"] = error
             _finish(result)
             print(f"capture-server: render {result}", flush=True)
+
+        def backend_of() -> str | None:
+            """Which backend the job actually runs on - the payload has to say, or a stall cannot be attributed."""
+            for attr in ("backendComboBox", "backend_combo", "backend"):
+                combo = getattr(window, attr, None)
+                if combo is not None and hasattr(combo, "currentText"):
+                    try:
+                        text = combo.currentText()
+                    except Exception:
+                        continue
+                    if text:
+                        return str(text)
+            return None
 
         def progress_sample() -> dict:
             """What the UI says about the job right now - a timeout without this cannot tell a slow model load from a
@@ -150,6 +174,7 @@ def install(window) -> None:
                 "queue": len(getattr(queue, "queue", []) or []) if queue is not None else None,
                 "start_enabled": bool(window.startRenderButton.isEnabled()),
                 "status": (getattr(window, "STATUS", None).text() if getattr(window, "STATUS", None) is not None else None),
+                "backend": backend_of(),
             }
             return sample
 
