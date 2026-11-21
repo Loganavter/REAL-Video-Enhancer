@@ -232,6 +232,11 @@ class QtButton(Button):
         # `setMinimumSize`/`setMaximumSize` statements run after this constructor and still apply where declared.
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
+        # The clearing above IS the caller's state until the page says otherwise: `_apply_text_geometry` runs inside the
+        # toolkit constructor and pins 36x36, so a snapshot taken later would carry the toolkit's square as if the
+        # caller had asked for it (measured: five icon-only buttons stayed 36x36 where the Designer gives 50x30/59x30).
+        self._caller_min = QSize(0, 0)
+        self._caller_max = QSize(16777215, 16777215)
         # QPushButton's own policy: as wide as it needs, exactly as tall as its hint. The toolkit's button is happy to
         # fill the cell, which turned a 27 px button into a 96 px slab inside its row (measured on the settings page).
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
@@ -247,6 +252,21 @@ class QtButton(Button):
             Button.setSizePolicy(self, horizontal, vertical)
 
     # -- the caller's constraints survive every toolkit geometry pass -------------------------------------
+
+    def _own_constraints(self) -> tuple:
+        """The CALLER's pins, not whatever a toolkit pass left behind."""
+        minimum = self._caller_min if self._caller_min is not None else self.minimumSize()
+        maximum = self._caller_max if self._caller_max is not None else self.maximumSize()
+        return (minimum, maximum, self.sizePolicy())
+
+    def setFixedSize(self, *args) -> None:       # noqa: N802
+        # A toolkit pass may fix a design size (the 36x36 square for an icon-only button). The CALLER's pins win: the
+        # Designer gives these buttons a maximum, and a fixed size overwrote it at construction (measured: 29 calls
+        # from `Button.__init__`, every one turning a 50x45 icon button into a 36x36 square before the page could size
+        # it).
+        saved = self._own_constraints()
+        super().setFixedSize(*args)
+        _restore_constraints(self, saved)
 
     def setMinimumSize(self, *args) -> None:     # noqa: N802
         super().setMinimumSize(*args)
@@ -264,9 +284,16 @@ class QtButton(Button):
         the constraints around the call; this one is the transition itself, so it is guarded once here instead of at
         each caller - `setText`, `setRows`, a future toolkit setter and the scale pass all land in it.
         """
-        saved = _constraints(self)
+        saved = self._own_constraints()
         super()._apply_text_geometry(has_text)
+        # The pass records the toolkit's 36x36 square as the button's DESIGN size, and `on_scale_changed` re-applies it
+        # at the live factor - so restoring the constraints here was not enough: the next scale event put the square
+        # back (measured: five icon-only buttons were 50x45 offscreen and 36x36 in the running app, which is the only
+        # place the scale bus fires).
+        self._design_fixed_size = (0, 0)
+        self._design_min_height = None
         _restore_constraints(self, saved)
+        self.updateGeometry()
 
     def _settle_constraints(self) -> None:
         """First `sizeHint` after construction: re-impose what the caller pinned, if a pass overwrote it."""
@@ -282,28 +309,34 @@ class QtButton(Button):
         # `Button.setText` re-derives its geometry AND resets `maximumSize` to unbounded (measured: a 30 px high
         # button came back unbounded, so every button in a row grew past the Designer's height). Whatever the caller
         # had set is re-imposed after the pass, and the row is rebuilt so the text keeps the button's font size.
-        saved = _constraints(self)
+        saved = self._own_constraints()
         Button.setText(self, text)
         _restore_constraints(self, saved)
+        self.updateGeometry()
 
     def setFont(self, font: QFont) -> None:      # noqa: N802
-        saved = _constraints(self)
+        saved = self._own_constraints()
         Button.setFont(self, font)
         _restore_constraints(self, saved)
 
     def setIcon(self, icon) -> None:             # noqa: N802
         # The toolkit keeps its icon privately and exposes no getter; the hint below needs to know whether there is one
         # and how big it is, so the adapter records what Qt's setter was told.
-        saved = _constraints(self)
+        saved = self._own_constraints()
         self._has_icon = not icon.isNull()
         super().setIcon(icon)
         _restore_constraints(self, saved)
+        # The hint is computed from the icon, and the layout caches it: without this a button whose icon arrives after
+        # construction keeps the hint it had while empty - the toolkit's 36x36 design square - and the row sizes to
+        # that (measured: five icon-only buttons stayed 36x36 where the Designer gives them 50x30 / 59x30).
+        self.updateGeometry()
 
     def setIconSize(self, size) -> None:         # noqa: N802
-        saved = _constraints(self)
+        saved = self._own_constraints()
         self._icon_box = QSize(size)
         super().setIconSize(size)
         _restore_constraints(self, saved)
+        self.updateGeometry()
 
     def text(self) -> str:
         """The toolkit keeps the label in `_text` and exposes no getter; Qt's name is part of the shape RVE expects."""
@@ -327,6 +360,9 @@ class QtButton(Button):
         content_h = max(fm.lineSpacing(), icon_size.height() if has_icon else 0)
         if not text:
             if has_icon:
+                # `padding: 5px 10px` around the icon: the stock hint for a 40x45 icon is 64x55, and for a 30 px icon
+                # 54x40 (measured under RVE's QSS). The Designer's own maximum then decides - 59x55 for the start
+                # button, whose 55 px is the row's height; removing this 10 px made it 45 and moved the tab host.
                 return QSize(icon_size.width() + 20, content_h + 10)
             return super().sizeHint()
         icon_room = (icon_size.width() + 6) if has_icon else 0
@@ -399,6 +435,11 @@ class QtCheckBox(CheckBox):
         # so a labelled checkbox was clipped to a 36 px strip with its text cut off (measured on the process page).
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
+        # The clearing above IS the caller's state until the page says otherwise: `_apply_text_geometry` runs inside the
+        # toolkit constructor and pins 36x36, so a snapshot taken later would carry the toolkit's square as if the
+        # caller had asked for it (measured: five icon-only buttons stayed 36x36 where the Designer gives 50x30/59x30).
+        self._caller_min = QSize(0, 0)
+        self._caller_max = QSize(16777215, 16777215)
 
     def _invalidate(self) -> None:
         self._stock_hint = None

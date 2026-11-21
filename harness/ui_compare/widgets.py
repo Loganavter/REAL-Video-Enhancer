@@ -95,6 +95,12 @@ def widget_deltas(page: str, stock_tree: dict, new_tree: dict, stock_img, new_im
         # rows for things like a 33x0 button the Designer never laid out.
         if rect_a[2] < 4 or rect_a[3] < 4:
             continue
+        # A widget hidden in BOTH builds is not on the screen this dump was taken of: its geometry is whatever the
+        # construction left behind (a page that was never shown keeps its build-time size), and comparing those numbers
+        # reports defects nobody can see. Measured: five icon buttons read 36x36 against the stock 50x30 on a page that
+        # was hidden while dumping a DIFFERENT tab, and that reading sent a fix chasing a size no screenshot contains.
+        if not (a.get("visible") or b.get("visible")):
+            continue
         row = WidgetDelta(page=page, path=path, name=path.split("/")[-1], cls=a.get("class", ""))
         row.stock_rect, row.new_rect = rect_a, rect_b
         row.moved = tuple(y - x for x, y in zip(rect_a, rect_b))
