@@ -5340,3 +5340,56 @@ tasks:
     ad-hoc segment measurement in this repo has been paying for minutes of GPU - and any per-clip number taken that
     way describes a longer population than it claims. Nothing else depends on the flags: the tuner, the gate and the
     acceptance statistics are all per-frame.
+
+- id: rve-ui-on-toolkit-2026-11-21
+  title: 'Put RVE''s interface onto sli-ui-toolkit: shell, tabs, seven bespoke popups, theming and primitives'
+  type: refactor
+  status: todo
+  owner: '@supervisor'
+  priority: P2
+  gpu: false
+  cost: 10d
+  tags:
+  - ui
+  - toolkit
+  - migration
+  base_branch: perf/inference
+  relates_to:
+  - harness/docs/wsp/plan-rve-ui-on-toolkit-2026-11-21.md
+  - testRVEInterface.ui
+  - src/ui/QTcustom.py
+  - src/ui/QTstyle.py
+  owns_files:
+  - testRVEInterface.ui
+  - mainwindow.py
+  - src/ui/
+  refutes: >-
+    The task as stated on 2026-11-21 was "рефакторинг интерфейса на sli ui toolkit" - move the interface ONTO the
+    toolkit. The first attempt read it as "refactor sli-ui-toolkit" and spent the session on the library's own API
+    (six rows on the toolkit board). Those rows are real improvements but answer a different question. This row is the
+    corrected reading: RVE is the only PySide6 host with code on this machine (0 references to the toolkit today; the
+    other app checkout is a PyQt6-era 9.0.0 release that cannot use the current toolkit at all).
+  acceptance: >-
+    (a) P0 decides the fork in the road with a spike, not a preference: one toolkit Button promoted inside the
+    existing testRVEInterface.ui and one Toast raised from NotificationOverlay's call sites, then the app starts and
+    the spike names A (keep the Designer shell) or B (move the shell to code). (b) P1 migrates ONE tab whole -
+    Button/Text/CustomLineEdit/Combobox - and deletes that tab's QSS in the same change, so no screen has two colour
+    sources. (c) P2 removes the seven bespoke popup classes from QTcustom.py in favour of Toast/BaseDialog/flyouts,
+    one class per commit, with no QProgressDialog or ad-hoc QDialog left. (d) P3 moves QTabWidget/QStackedWidget to
+    TopTabBar/AdaptiveTabStrip with tab switching, shortcuts and the queue badge behaving as before. (e) P4 applies
+    the P0 decision and leaves QTstyle.py either gone or reduced to tokens RVE still owns. Every phase: RVE suites
+    green, astcheck clean, a LIVE look at the touched screen against the previous build (offscreen green is not
+    evidence for a layout), and one render queued and completed through the GUI - a tab that cannot start a render is
+    a regression however it paints. Falsifier: if the P0 spike shows promoted toolkit widgets misbehave inside the
+    6 579-line .ui worse than a hand-written shell, the plan stops at B-or-nothing and the row is resolved by that
+    finding instead of by a half-migrated UI.
+  note: >-
+    Inventory measured on perf/inference @ a565077b: shell testRVEInterface.ui 6 579 lines -> mainwindow.py 3 749
+    generated; src/ui ~2 900 lines (ProcessTab 696, SettingsTab 668, QTcustom 866, RenderQueue 348, Updater 204,
+    QTstyle 119); seven bespoke popup classes in QTcustom.py (NotificationOverlay, DownloadProgressPopup,
+    SettingUpBackendPopup, DisplayCommandOutputPopup, TextOutputPopup, RegularQTPopup, IndependentQTPopup) plus four
+    thread wrappers that are not UI. Toolkit counterparts: Toast/ToastManager, BaseDialog + dialog_shell,
+    BaseFlyout/IconActionFlyout/SimpleOptionsFlyout, TopTabBar/TopTabHost/AdaptiveTabStrip/sidebar_nav_list,
+    Button/Text/CustomLineEdit/FluentComboBox, theme + WidgetPolicyProxyStyle + UiScale, LogConsoleWidget,
+    LoadingSpinner, MinimalistScrollbar, DropZoneLabel. Full plan: harness/docs/wsp/plan-rve-ui-on-toolkit-2026-11-21.md
+    (phases, the Designer-vs-code fork, verification shape, risks). NOT started: no code changed by this row yet.
