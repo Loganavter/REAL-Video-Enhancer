@@ -216,7 +216,7 @@ class ProcPagePage:
         # The original interface's tabs are BUTTONS standing apart from the content: no folder outline, no join cover,
         # a plate on the selected one and a gap under the strip. `TabStyle` is the toolkit's styling surface for that.
         self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=28, pane_radius=0, pane_inset=(10, 5, 10, 5),
-            tab_style=TabStyle(flat=True, border=False, gap=8, min_width=88, padding=10, spacing=4, radius=8,
+            tab_style=TabStyle(plate_margin=3, flat=True, border=False, gap=8, min_width=88, padding=10, spacing=4, radius=8,
                                scroll_policy=Qt.ScrollBarPolicy.ScrollBarAsNeeded, reserve_scroll_row=True,
                                selected_token="button.dialog.default.background.pressed"),
             chrome_inset=0, tab_radius=4, pane_fill_token=None)
