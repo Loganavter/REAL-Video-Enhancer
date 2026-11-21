@@ -62,6 +62,13 @@ def main() -> int:
     ap.add_argument("--class-alias", action="append", default=[], metavar="NEW=OLD")
     ap.add_argument("--prune-under", action="append", default=[], metavar="NAME")
     ap.add_argument("--ignore-text", action="append", default=[])
+    ap.add_argument("--include-hidden", action="store_true",
+                    help="compare widgets that are hidden on either side; by default only widgets visible in BOTH "
+                         "builds count, because a hidden widget keeps stale geometry and its page may simply not be "
+                         "the current one in one of the dumps")
+    ap.add_argument("--no-dedupe", action="store_true",
+                    help="keep one row per (page, widget); by default a widget is reported once, on the page where "
+                         "it differs most (every dump contains the whole window, so one widget appears 13 times)")
     ap.add_argument("--json", default="")
     args = ap.parse_args()
 
@@ -93,6 +100,15 @@ def main() -> int:
         page_rows.append(summary)
         tree_rows.append(page_deltas(name, stock_tree, new_tree, aliases))
 
+    if not args.include_hidden:
+        widgets_all = [row for row in widgets_all if not row.visibility]
+    if not args.no_dedupe:
+        best: dict[str, object] = {}
+        for row in widgets_all:
+            current = best.get(row.path.rsplit("/", 1)[-1])
+            if current is None or row.severity > current.severity:
+                best[row.path.rsplit("/", 1)[-1]] = row
+        widgets_all = list(best.values())
     widgets_all.sort(key=lambda row: -row.severity)
     exit_code = 0
     if args.views in {"widgets", "both"}:

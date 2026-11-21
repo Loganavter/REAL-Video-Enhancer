@@ -75,6 +75,8 @@ def install(window) -> None:
         single pass writes dumps where the *later* pages are 100x30 boxes - which the comparison then reports as
         "visible False -> True" and a whole-page geometry difference that does not exist (measured).
         """
+        from PySide6.QtWidgets import QApplication
+
         if index >= len(steps_list):
             QTimer.singleShot(0, lambda: capture(0))
             return
