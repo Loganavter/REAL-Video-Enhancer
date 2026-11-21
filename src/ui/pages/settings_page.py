@@ -7,18 +7,22 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize)
+from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
 from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
 # The page body is a toolkit scroll area and its tab strip the toolkit's tab host: a stock `QScrollArea`/`QTabWidget`
 # paints through the widget style (so the page QSS styled them) while these paint themselves and read theme tokens.
-from sli_ui_toolkit.widgets import SurfacePanel, SurfaceScrollArea, TopTabHost
+# `Button` is the toolkit's `QPushButton`; the page imports no compatibility adapter.
+from sli_ui_toolkit.widgets import Button, SurfacePanel, SurfaceScrollArea, TopTabHost
 from src.ui.pages.tab_2 import Tab2Page
 from src.ui.pages.tab_3 import Tab3Page
 from src.ui.pages.tab_4 import Tab4Page
-from src.ui.widgets.qt_shaped import STOCK_SCROLLBAR_WIDTH, QtButton
+
+#: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this, not
+#: the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row.
+STOCK_SCROLLBAR_WIDTH = 8
 
 
 class SettingsPagePage:
@@ -69,8 +73,13 @@ class SettingsPagePage:
         self.horizontalLayout_20.setObjectName(u"horizontalLayout_20")
         self.horizontalSpacer_4 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_20.addItem(self.horizontalSpacer_4)
-        self.resetSettingsBtn = QtButton(self.widget_4)
+        self.resetSettingsBtn = Button(parent=self.widget_4, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.resetSettingsBtn.setObjectName(u"resetSettingsBtn")
+        # QPushButton's own policy: as wide as it needs, exactly as tall as its hint - the toolkit button would
+        # otherwise take the whole cell next to the spacer.
+        self.resetSettingsBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_20.addWidget(self.resetSettingsBtn)
         self.verticalLayout_18.addWidget(self.widget_4)
         self.scrollArea.setWidget(self.scrollAreaWidgetContents)

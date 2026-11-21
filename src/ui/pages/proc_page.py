@@ -7,20 +7,10 @@ look is intentionally changing - the structural harness compares this page again
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-    QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplication, QCheckBox,
-    QComboBox, QDoubleSpinBox, QFrame, QGridLayout,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QProgressBar, QPushButton,
-    QScrollArea, QSizePolicy, QSpacerItem,
-    QSpinBox, QStackedWidget, QTabWidget, QTextEdit,
-    QVBoxLayout, QWidget)
+from PySide6.QtCore import (QCoreApplication, QSize, Qt)
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
+    QWidget)
 import resources_rc
 import resources_rc
 from src.ui.pages.general_settings import GeneralSettingsPage
@@ -28,15 +18,22 @@ from src.ui.pages.tab_6 import Tab6Page
 from src.ui.pages.render_queue_tab import RenderQueueTabPage
 from src.ui.pages.advanced_settings import AdvancedSettingsPage
 from src.ui.pages.tab_5 import Tab5Page
-from src.ui.widgets.qt_shaped import QtButton, QtDoubleSpinBox, QtLabel, QtProgressBar
 from src.ui.typography import apply, CAPTION_PT
 
 # Layer B (2026-11-21): the three widget classes this page no longer builds stock. `TopTabHost` is the tab host, built
 # with the stock `QTabWidget`'s strip geometry (the Designer's 22 px strip, no pane radius or inset, a 4 px tab corner);
 # `ImageLabel` is the pixmap counterpart of `QLabel` (parent first, and the alignment is stated because Qt's default is
 # left+vcenter, not the centre the preview label asks for).
-from sli_ui_toolkit.widgets import (TabStyle, SurfacePanel, ImageLabel, MinimalistScrollBar,
-                                    TopTabHost)
+#
+# Layer E (page migration): `Text` where the Designer had a `QLabel`, `Button` where it had a `QPushButton`,
+# `DoubleSpinBox` for a `QDoubleSpinBox` and `ToastProgressBar` for a `QProgressBar`. Nothing here needs a Qt-shaped
+# compatibility adapter.
+from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, MinimalistScrollBar, SurfacePanel, TabStyle,
+                                    Text, ToastProgressBar, TopTabHost)
+
+#: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
+#: defaults to centre, which would move every value to the middle of its box.
+SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
 
 class ProcPagePage:
@@ -116,18 +113,25 @@ class ProcPagePage:
         self.widget_30.setObjectName(u"widget_30")
         self.verticalLayout_37 = QVBoxLayout(self.widget_30)
         self.verticalLayout_37.setObjectName(u"verticalLayout_37")
-        self.label_9 = QtLabel(self.widget_30)
+        self.label_9 = Text(parent=self.widget_30)
         self.label_9.setObjectName(u"label_9")
         self.verticalLayout_37.addWidget(self.label_9)
-        self.startTimeSpinBox = QtDoubleSpinBox(self.widget_30)
+        # `single_step=0.1` is the toolkit field's "clamp and round to the display precision" semantic (its `setValue`
+        # SNAPS to `single_step`, which at the default 1.0 would turn 3.5 into 3.0); `decimals=2` is what the Designer's
+        # stock `QDoubleSpinBox` displayed and `alignment` is Qt's own (the toolkit field defaults to centre).
+        self.startTimeSpinBox = DoubleSpinBox(self.widget_30, single_step=0.1, decimals=2,
+            alignment=SPIN_ALIGNMENT)
         self.startTimeSpinBox.setObjectName(u"startTimeSpinBox")
         self.verticalLayout_37.addWidget(self.startTimeSpinBox)
-        self.label_52 = QtLabel(self.widget_30)
+        self.label_52 = Text(parent=self.widget_30)
         self.label_52.setObjectName(u"label_52")
         self.verticalLayout_37.addWidget(self.label_52)
-        self.endTimeSpinBox = QtDoubleSpinBox(self.widget_30)
+        self.endTimeSpinBox = DoubleSpinBox(self.widget_30, single_step=0.1, decimals=2,
+            alignment=SPIN_ALIGNMENT)
         self.endTimeSpinBox.setObjectName(u"endTimeSpinBox")
-        self.endTimeSpinBox.setMinimum(1.000000000000000)
+        # Qt's `setMinimum` is the one range spelling the toolkit field does not answer (`DoubleSpinBox` carries
+        # `setRange` only), so the Designer's minimum plus Qt's own default maximum (99.99) are one call.
+        self.endTimeSpinBox.setRange(1.000000000000000, 99.990000000000000)
         self.endTimeSpinBox.setValue(1.000000000000000)
         self.verticalLayout_37.addWidget(self.endTimeSpinBox)
         self.widget_14 = QWidget(self.widget_30)
@@ -135,9 +139,14 @@ class ProcPagePage:
         self.horizontalLayout_48 = QHBoxLayout(self.widget_14)
         self.horizontalLayout_48.setObjectName(u"horizontalLayout_48")
         self.horizontalLayout_48.setContentsMargins(0, 0, 0, 0)
-        self.renderPreviewBtn = QtButton(self.widget_14)
+        self.renderPreviewBtn = Button(parent=self.widget_14, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.renderPreviewBtn.setObjectName(u"renderPreviewBtn")
         apply(self.renderPreviewBtn, None)
+        # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
+        # fill the cell, which turns a row button into a slab when the column is taller than its contents.
+        self.renderPreviewBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.renderPreviewBtn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.horizontalLayout_48.addWidget(self.renderPreviewBtn)
         self.verticalLayout_37.addWidget(self.widget_14)
@@ -153,17 +162,17 @@ class ProcPagePage:
         self.verticalLayout_5.addWidget(self.RenderedPreviewControlsContainer)
         self.verticalLayout_34 = QVBoxLayout()
         self.verticalLayout_34.setObjectName(u"verticalLayout_34")
-        self.ETA = QtLabel(self.processInfoContainer)
+        self.ETA = Text(parent=self.processInfoContainer)
         self.ETA.setObjectName(u"ETA")
         apply(self.ETA, CAPTION_PT)
 
         self.verticalLayout_34.addWidget(self.ETA)
-        self.FPS = QtLabel(self.processInfoContainer)
+        self.FPS = Text(parent=self.processInfoContainer)
         self.FPS.setObjectName(u"FPS")
         apply(self.FPS, CAPTION_PT)
 
         self.verticalLayout_34.addWidget(self.FPS)
-        self.STATUS = QtLabel(self.processInfoContainer)
+        self.STATUS = Text(parent=self.processInfoContainer)
         self.STATUS.setObjectName(u"STATUS")
         apply(self.STATUS, CAPTION_PT)
 
@@ -236,7 +245,6 @@ class ProcPagePage:
         self.widget_13 = SurfacePanel(self.bottomMenuSubContainer, background_token="surface.page")
         self.widget_13.setObjectName(u"widget_13")
         self.widget_13.setMaximumSize(QSize(500, 16777215))
-        self.widget_13.setStyleSheet(u"")
         self.horizontalLayout_32 = QHBoxLayout(self.widget_13)
         self.horizontalLayout_32.setSpacing(6)
         self.horizontalLayout_32.setObjectName(u"horizontalLayout_32")
@@ -247,16 +255,21 @@ class ProcPagePage:
         self.horizontalLayout_39.setSpacing(0)
         self.horizontalLayout_39.setObjectName(u"horizontalLayout_39")
         self.horizontalLayout_39.setContentsMargins(0, 0, 0, 0)
-        self.startRenderButton = QtButton(self.widget_24)
+        self.startRenderButton = Button(parent=self.widget_24, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.startRenderButton.setObjectName(u"startRenderButton")
         self.startRenderButton.setEnabled(True)
         self.startRenderButton.setMaximumSize(QSize(59, 55))
-        self.startRenderButton.setStyleSheet(u"")
+        # QPushButton's own policy: as wide as it needs, exactly as tall as its hint - the toolkit button would
+        # otherwise fill the cell and grow past the Designer's 55 px ceiling in a taller row.
+        self.startRenderButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         icon3 = QIcon()
         icon3.addFile(u":/icons/icons/play-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.startRenderButton.setIcon(icon3)
         self.startRenderButton.setIconSize(QSize(40, 45))
-        self.startRenderButton.setCheckable(False)
+        # `setCheckable(False)` states the button's own default and `Button` has no such setter (toggle mode is the
+        # constructor's `toggle=`), so the Designer's line is a no-op here; the two state resets below are kept.
         self.startRenderButton.setChecked(False)
         self.startRenderButton.setAutoRepeat(False)
         self.startRenderButton.setAutoExclusive(False)
@@ -264,19 +277,22 @@ class ProcPagePage:
         self.horizontalLayout_32.addWidget(self.widget_24)
         self.onRenderButtonsContiainer = QHBoxLayout()
         self.onRenderButtonsContiainer.setObjectName(u"onRenderButtonsContiainer")
-        self.pauseRenderButton = QtButton(self.widget_13)
+        self.pauseRenderButton = Button(parent=self.widget_13, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.pauseRenderButton.setObjectName(u"pauseRenderButton")
         self.pauseRenderButton.setEnabled(True)
         self.pauseRenderButton.setMaximumSize(QSize(59, 55))
-        self.pauseRenderButton.setStyleSheet(u"")
+        self.pauseRenderButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         icon4 = QIcon()
         icon4.addFile(u":/icons/icons/pause-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.pauseRenderButton.setIcon(icon4)
         self.pauseRenderButton.setIconSize(QSize(40, 45))
-        self.pauseRenderButton.setCheckable(False)
         self.pauseRenderButton.setChecked(False)
         self.onRenderButtonsContiainer.addWidget(self.pauseRenderButton)
-        self.killRenderButton = QtButton(self.widget_13)
+        self.killRenderButton = Button(parent=self.widget_13, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.killRenderButton.setObjectName(u"killRenderButton")
         sizePolicy11 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         sizePolicy11.setHorizontalStretch(0)
@@ -290,12 +306,15 @@ class ProcPagePage:
         self.killRenderButton.setIconSize(QSize(40, 45))
         self.onRenderButtonsContiainer.addWidget(self.killRenderButton)
         self.horizontalLayout_32.addLayout(self.onRenderButtonsContiainer)
-        self.progressBar = QtProgressBar(self.widget_13, track_token="progress.track.background")
+        # `height=25` is the Designer's bar row; the toolkit toast bar's own default is 6 px. Its track paints from
+        # the toolkit's `toast.progress.background` token (the adapter's call-site token was `progress.track.background`).
+        self.progressBar = ToastProgressBar(self.widget_13, height=25)
         self.progressBar.setObjectName(u"progressBar")
         sizePolicy7.setHeightForWidth(self.progressBar.sizePolicy().hasHeightForWidth())
         self.progressBar.setSizePolicy(sizePolicy7)
         self.progressBar.setValue(0)
-        self.progressBar.setTextVisible(False)
+        # `setTextVisible(False)` is gone with the stock bar: `ToastProgressBar` paints no label at all, so that state
+        # is the one it is always in.
         self.horizontalLayout_32.addWidget(self.progressBar)
         self.verticalLayout_21.addWidget(self.widget_13)
         self.verticalLayout_7.addWidget(self.bottomMenuSubContainer)

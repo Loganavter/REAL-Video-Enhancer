@@ -13,14 +13,16 @@ from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QSpacerIte
     QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import QtButton, QtLabel
 from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 
 # Layer B3 (2026-11-21): the logo is the page's only stock pixmap label, and `ImageLabel` is its toolkit counterpart
 # (Qt-shaped already: `setPixmap`/`setScaledContents`/`setText`). The Designer's `QLabel` paints a pixmap-only label at
 # `AlignLeft|AlignVCenter`; `ImageLabel` defaults to centre, so the alignment is stated to keep the logo where it is
 # (measured offscreen: identical pixels at this alignment, mean 0.00 against the stock label).
-from sli_ui_toolkit.widgets import RichTextView, SurfacePanel, ImageLabel
+#
+# The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `Button` where it had a
+# `QPushButton`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.widgets import Button, ImageLabel, RichTextView, SurfacePanel, Text
 
 
 class HomePagePage:
@@ -45,29 +47,38 @@ class HomePagePage:
         self.horizontalLayout_29.setObjectName(u"horizontalLayout_29")
         self.horizontalSpacer_14 = QSpacerItem(466, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_29.addItem(self.horizontalSpacer_14)
-        self.label_13 = QtLabel(self.widget_11)
+        self.label_13 = Text(parent=self.widget_11)
         self.label_13.setObjectName(u"label_13")
         self.horizontalLayout_29.addWidget(self.label_13)
-        self.kofiBtn = QtButton(self.widget_11)
+        self.kofiBtn = Button(parent=self.widget_11, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.kofiBtn.setObjectName(u"kofiBtn")
+        # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
+        # fill the cell, which turns an icon button into a slab when the row is taller than its contents. `size=(0, 0)`
+        # above drops the standalone 36x36 control size; this states the row's share.
+        self.kofiBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.kofiBtn.setMaximumSize(QSize(55, 16777215))
         icon = QIcon()
         icon.addFile(u":/icons/icons/coffee.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.kofiBtn.setIcon(icon)
         self.kofiBtn.setIconSize(QSize(35, 35))
-        self.kofiBtn.setCheckable(False)
+        # `setCheckable(False)` states the button's own default, and `Button` has no such setter (toggle mode is the
+        # constructor's `toggle=`), so the Designer's line is a no-op here.
         self.horizontalLayout_29.addWidget(self.kofiBtn)
-        self.label_16 = QtLabel(self.widget_11)
+        self.label_16 = Text(parent=self.widget_11)
         self.label_16.setObjectName(u"label_16")
         self.horizontalLayout_29.addWidget(self.label_16)
-        self.githubBtn = QtButton(self.widget_11)
+        self.githubBtn = Button(parent=self.widget_11, text="", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.githubBtn.setObjectName(u"githubBtn")
+        self.githubBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.githubBtn.setMaximumSize(QSize(55, 16777215))
         icon1 = QIcon()
         icon1.addFile(u":/icons/icons/github.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.githubBtn.setIcon(icon1)
         self.githubBtn.setIconSize(QSize(35, 35))
-        self.githubBtn.setCheckable(False)
         self.horizontalLayout_29.addWidget(self.githubBtn)
         self.horizontalLayout_28.addWidget(self.widget_11)
         self.gridLayout_2.addLayout(self.horizontalLayout_28, 4, 0, 1, 1)
@@ -81,14 +92,16 @@ class HomePagePage:
         self.label_2.setPixmap(QPixmap(u":/icons/icons/logo-v2.svg"))
         self.label_2.setScaledContents(False)
         self.gridLayout_7.addWidget(self.label_2, 0, 0, 1, 1)
-        self.label = QtLabel(self.widget_8)
+        self.label = Text(parent=self.widget_8)
         self.label.setObjectName(u"label")
         sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         sizePolicy2.setHorizontalStretch(0)
         sizePolicy2.setVerticalStretch(0)
         sizePolicy2.setHeightForWidth(self.label.sizePolicy().hasHeightForWidth())
-        self.label.setSizePolicy(sizePolicy2)
         apply(self.label, DISPLAY_PT, family="Fira Mono")
+        # `Text` re-derives its own size policy on every style pass (Fixed vertically unless it word-wraps), so the
+        # Designer's Preferred/Expanding is stated after `apply`, the pass that would otherwise drop it.
+        self.label.setSizePolicy(sizePolicy2)
         self.gridLayout_7.addWidget(self.label, 0, 1, 1, 1)
         self.gridLayout_2.addWidget(self.widget_8, 1, 0, 1, 1)
         self.horizontalLayout_30 = QHBoxLayout()
