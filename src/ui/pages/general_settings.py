@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import SEPARATOR_HEIGHT, STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
+from src.ui.widgets.qt_shaped import RVE_CONTROL_FONT_PX, SEPARATOR_HEIGHT, STOCK_SCROLLBAR_WIDTH, QtButton, QtCheckBox, QtComboBox, QtDoubleSpinBox, QtLabel, QtLineEdit
 from src.ui.typography import apply, BODY_PT
 
 # Layer B (2026-11-21): the two widget classes this page no longer builds stock. `SurfaceScrollArea(surface_token=None)`
@@ -535,6 +535,9 @@ class GeneralSettingsPage:
         # A read-only rich-text panel: the toolkit's `RichTextView` takes the host's `setText`/`setFontPointSize` calls
         # and scrolls its own content (the plate is `surface.list`, the colour the deleted page rule carried).
         self.inputVideoInfoTextEdit = RichTextView(self.widget_26, padding=(10, 5, 10, 5))
+        # The stock editor's text is 12 PIXELS (the Designer's sizing); `setFontPointSize` would convert through the
+        # screen DPI and render 16 px, which grew every line of this panel.
+        self.inputVideoInfoTextEdit.setTextPixelSize(RVE_CONTROL_FONT_PX)
         self.inputVideoInfoTextEdit.setObjectName(u"inputVideoInfoTextEdit")
         self.inputVideoInfoTextEdit.setEnabled(False)
         sizePolicy3.setHeightForWidth(self.inputVideoInfoTextEdit.sizePolicy().hasHeightForWidth())
