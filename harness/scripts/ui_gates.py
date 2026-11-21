@@ -19,12 +19,18 @@ The three checks are plain AST functions returning `Finding`s ("rule, where, wha
 interpreter without PySide6, and each has its own source scope (declared in `SCOPES`).
 
 **The ratchet.** Now is the worst moment for all three gates: the pages are the Designer's own statements, so they
-carry 118 pinned pixels and two QSS rules on widgets that are already toolkit controls. A gate that is red on day one
-is a gate nobody reads, so `KNOWN` records today's findings by `file:line` fingerprint per rule and the gate fails
-only when a **new** one appears - and equally when a recorded one is gone, so the list cannot rot. The docstring of
-the ratchet is the rule: *`KNOWN` only shrinks.* A page that migrates and loses its pinning must drop its entries in
-the same change; a page that keeps them keeps its place in the list. Delete an entry without deleting the literal and
-the gate names it as new, which is the only direction that can grow a migration.
+carry 88 pinned pixels and two QSS rules on widgets that are already toolkit controls. A gate that is red on day one
+is a gate nobody reads, so `KNOWN` records today's findings per rule and the gate fails only when a **new** one
+appears - and equally when a recorded one is gone, so the list cannot rot. The docstring of the ratchet is the rule:
+*`KNOWN` only shrinks.* A page that migrates and loses its pinning must drop its entries in the same change; a page
+that keeps them keeps its place in the list. Delete an entry without deleting the literal and the gate names it as
+new, which is the only direction that can grow a migration.
+
+The key is `(path, site)` with a count, not `file:line`: `site` is the rule's own stable text (`setFixedWidth(222)`,
+`QtButton addButton: QPushButton{...}`) and the count is how many times one file repeats it. Line numbers are
+reported to humans and never used for identity, so an edit that inserts a line above a recorded literal leaves the
+ratchet untouched - with the old `file:line` key one blank line at the top of `general_settings.py` re-keyed 29
+entries and red two tests.
 
 Usage:
 
@@ -73,103 +79,61 @@ EXEMPT_PX = frozenset({0, 1, 16777215})
 #: (or of no theme at all) into a module-level constant.
 THEME_CALLS = frozenset({"get_color", "try_get_color"})
 
-#: rule -> `file:line` fingerprints recorded as today's debt. Generated from the tree at this commit, not invented:
-#: `python3 -m harness.scripts.ui_gates` prints the current list. **It only shrinks** - a page that migrates removes its
-#: entries; nothing is ever added, because they would not be debt but a new violation.
-KNOWN: dict[str, frozenset[str]] = {
-    "qss-on-adapter": frozenset(),
-    "raw-chrome-px": frozenset({
-        "src/ui/pages/advanced_settings.py:116",
-        "src/ui/pages/advanced_settings.py:74",
-        "src/ui/pages/download_page.py:107",
-        "src/ui/pages/download_page.py:111",
-        "src/ui/pages/download_page.py:142",
-        "src/ui/pages/download_page.py:174",
-        "src/ui/pages/download_page.py:178",
-        "src/ui/pages/download_page.py:195",
-        "src/ui/pages/download_page.py:197",
-        "src/ui/pages/download_page.py:203",
-        "src/ui/pages/download_page.py:205",
-        "src/ui/pages/download_page.py:220",
-        "src/ui/pages/download_page.py:222",
-        "src/ui/pages/download_page.py:228",
-        "src/ui/pages/download_page.py:230",
-        "src/ui/pages/download_page.py:247",
-        "src/ui/pages/download_page.py:249",
-        "src/ui/pages/download_page.py:255",
-        "src/ui/pages/download_page.py:257",
-        "src/ui/pages/download_page.py:272",
-        "src/ui/pages/download_page.py:274",
-        "src/ui/pages/download_page.py:280",
-        "src/ui/pages/download_page.py:282",
-        "src/ui/pages/general_settings.py:104",
-        "src/ui/pages/general_settings.py:117",
-        "src/ui/pages/general_settings.py:118",
-        "src/ui/pages/general_settings.py:124",
-        "src/ui/pages/general_settings.py:125",
-        "src/ui/pages/general_settings.py:137",
-        "src/ui/pages/general_settings.py:138",
-        "src/ui/pages/general_settings.py:149",
-        "src/ui/pages/general_settings.py:150",
-        "src/ui/pages/general_settings.py:157",
-        "src/ui/pages/general_settings.py:158",
-        "src/ui/pages/general_settings.py:171",
-        "src/ui/pages/general_settings.py:172",
-        "src/ui/pages/general_settings.py:195",
-        "src/ui/pages/general_settings.py:241",
-        "src/ui/pages/general_settings.py:242",
-        "src/ui/pages/general_settings.py:258",
-        "src/ui/pages/general_settings.py:259",
-        "src/ui/pages/general_settings.py:310",
-        "src/ui/pages/general_settings.py:346",
-        "src/ui/pages/general_settings.py:385",
-        "src/ui/pages/general_settings.py:430",
-        "src/ui/pages/general_settings.py:447",
-        "src/ui/pages/general_settings.py:448",
-        "src/ui/pages/general_settings.py:499",
-        "src/ui/pages/general_settings.py:504",
-        "src/ui/pages/general_settings.py:511",
-        "src/ui/pages/general_settings.py:524",
-        "src/ui/pages/general_settings.py:525",
-        "src/ui/pages/home_page.py:63",
-        "src/ui/pages/home_page.py:67",
-        "src/ui/pages/home_page.py:75",
-        "src/ui/pages/home_page.py:79",
-        "src/ui/pages/proc_page.py:175",
-        "src/ui/pages/proc_page.py:190",
-        "src/ui/pages/proc_page.py:233",
-        "src/ui/pages/proc_page.py:248",
-        "src/ui/pages/proc_page.py:253",
-        "src/ui/pages/proc_page.py:265",
-        "src/ui/pages/proc_page.py:270",
-        "src/ui/pages/proc_page.py:281",
-        "src/ui/pages/proc_page.py:285",
-        "src/ui/pages/render_queue_tab.py:86",
-        "src/ui/pages/settings_page.py:52",
-        "src/ui/pages/settings_page.py:56",
-        "src/ui/pages/tab_2.py:131",
-        "src/ui/pages/tab_2.py:58",
-        "src/ui/pages/tab_2.py:75",
-        "src/ui/pages/tab_6.py:107",
-        "src/ui/pages/tab_6.py:108",
-        "src/ui/pages/tab_6.py:113",
-        "src/ui/pages/tab_6.py:118",
-        "src/ui/pages/tab_6.py:72",
-        "src/ui/pages/tab_6.py:90",
-        "src/ui/shell/window.py:326",
-        "src/ui/shell/window.py:327",
-        "src/ui/shell/window.py:331",
-        "src/ui/shell/window.py:337",
-        "src/ui/shell/window.py:341",
-        "src/ui/shell/window.py:357",
-        "src/ui/shell/window.py:365",
-        "src/ui/shell/window.py:370",
-        "src/ui/shell/window.py:372",
-        "src/ui/shell/window.py:61",
-        "src/ui/shell/window.py:67",
-    }),
-    "stock-widget": frozenset(),
-    "theme-read-at-build": frozenset(),
+#: rule -> `(path, site)` -> how many times the file repeats it. Generated from the tree at this commit, not invented:
+#: `python3 -m harness.scripts.ui_gates` prints the current list. **It only shrinks** - a page that migrates removes
+#: its entries; nothing is ever added, because a new entry would not be debt but a new violation.
+#:
+#: `site` is the rule's own stable text, and the count is what keeps two identical literals apart: a plain set keyed
+#: by `(path, site)` would stop noticing a third `QSize(30, 30)` in `download_page.py`, while a count going 10 -> 11
+#: is growth. No key carries a line number, so inserting a line above a recorded literal re-keys nothing.
+KNOWN: dict[str, dict[tuple[str, str], int]] = {
+    "qss-on-adapter": {},
+    "raw-chrome-px": {
+        ('src/ui/pages/advanced_settings.py', 'setGeometry(460, 516)'): 1,
+        ('src/ui/pages/advanced_settings.py', 'setMinimumSize(351, 128)'): 1,
+        ('src/ui/pages/download_page.py', 'QSize(30, 30)'): 10,
+        ('src/ui/pages/download_page.py', 'setGeometry(928, 302)'): 1,
+        ('src/ui/pages/download_page.py', 'setMaximumSize(50, 45)'): 10,
+        ('src/ui/pages/general_settings.py', 'QSize(230)'): 1,
+        ('src/ui/pages/general_settings.py', 'QSize(32, 32)'): 1,
+        ('src/ui/pages/general_settings.py', 'setGeometry(470, 1040)'): 1,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(1000, 30)'): 1,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(10000, 30)'): 1,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(100000, 180)'): 1,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(200, 35)'): 1,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(230, 30)'): 2,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(250, 30)'): 4,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(30)'): 4,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(42344, 200)'): 1,
+        ('src/ui/pages/general_settings.py', 'setMaximumSize(75, 30)'): 2,
+        ('src/ui/pages/general_settings.py', 'setMinimumSize(190)'): 1,
+        ('src/ui/pages/general_settings.py', 'setMinimumSize(30)'): 6,
+        ('src/ui/pages/general_settings.py', 'setMinimumSize(75, 30)'): 2,
+        ('src/ui/pages/home_page.py', 'QSize(35, 35)'): 2,
+        ('src/ui/pages/home_page.py', 'setMaximumSize(55)'): 2,
+        ('src/ui/pages/proc_page.py', 'QSize(40, 45)'): 3,
+        ('src/ui/pages/proc_page.py', 'setMaximumSize(500)'): 3,
+        ('src/ui/pages/proc_page.py', 'setMaximumSize(59, 55)'): 3,
+        ('src/ui/pages/render_queue_tab.py', 'setMaximumSize(335)'): 1,
+        ('src/ui/pages/settings_page.py', 'setGeometry(1026, 652)'): 1,
+        ('src/ui/pages/settings_page.py', 'setMaximumSize(112312)'): 1,
+        ('src/ui/pages/tab_2.py', 'setGeometry(968, 528)'): 1,
+        ('src/ui/pages/tab_2.py', 'setMinimumSize(25)'): 1,
+        ('src/ui/pages/tab_2.py', 'setMinimumSize(75, 30)'): 1,
+        ('src/ui/pages/tab_6.py', 'setGeometry(453, 581)'): 1,
+        ('src/ui/pages/tab_6.py', 'setGeometry(918, 48)'): 1,
+        ('src/ui/pages/tab_6.py', 'setMaximumSize(100)'): 1,
+        ('src/ui/pages/tab_6.py', 'setMaximumSize(50)'): 1,
+        ('src/ui/pages/tab_6.py', 'setMinimumSize(50)'): 1,
+        ('src/ui/pages/tab_6.py', 'setMinimumSize(900, 30)'): 1,
+        ('src/ui/shell/window.py', 'QSize(35, 35)'): 4,
+        ('src/ui/shell/window.py', 'resize(1163, 700)'): 1,
+        ('src/ui/shell/window.py', 'setMaximumSize(55)'): 4,
+        ('src/ui/shell/window.py', 'setMinimumSize(1050, 700)'): 1,
+        ('src/ui/shell/window.py', 'setMinimumSize(31)'): 1,
+    },
+    "stock-widget": {},
+    "theme-read-at-build": {},
 }
 
 
@@ -182,18 +146,23 @@ class Finding:
     rule: str
     detail: str
 
-    def fingerprint(self) -> str:
-        """The ratchet's key: `file:line`.
+    def key(self) -> tuple[str, str]:
+        """The ratchet's key: `(path, site)`, where `site` is the rule's own text for what the line does.
 
-        Deliberately brittle: an edit above a recorded literal re-keys it, so a merge that only moves lines needs a
-        regeneration (`python3 - <<'PY'` recipe in the plan). A stable key would have to count occurrences per
-        `(file, rule, detail)` - two identical literals in one file currently share a fingerprint, and a plain set
-        would then stop noticing a third one (measured: 118 findings collapsed to 50 keys).
+        Line numbers are deliberately absent. Inserting a line above a recorded literal moves nothing that matters -
+        the same file still pins the same geometry the same number of times - so the ratchet stays put instead of
+        demanding a regeneration. The count `KNOWN` stores alongside the key is what keeps two identical literals
+        apart: a plain set keyed by `(path, site)` would stop noticing a third one.
         """
+        return (self.path, self.detail)
+
+    @property
+    def where(self) -> str:
+        """`file:line` - for the table and for a failure message a human has to act on. Never part of the key."""
         return f"{self.path}:{self.line}"
 
     def __str__(self) -> str:
-        return f"{self.path}:{self.line}: {self.rule}: {self.detail}"
+        return f"{self.where}: {self.rule}: {self.detail}"
 
 
 # --- plumbing ---------------------------------------------------------------------------------------------
@@ -370,8 +339,8 @@ def check_raw_px(paths: Iterable[str | Path]) -> list[Finding]:
     - a name, a layout geometry, `fontMetrics().height()` - is not a finding: that is the direction the migration is
     moving in, and the literal is what this gate is for.
 
-    The gate is a ratchet: `KNOWN` holds today's literals (118 of them at this commit, in 12 modules) and that list
-    only shrinks - each page that migrates deletes its entries, and nothing is ever added to it.
+    The gate is a ratchet: `KNOWN` holds today's literals (88 of them at this commit, in 10 modules, 42 `(path, site)`
+    keys) and that list only shrinks - each page that migrates deletes its entries, and nothing is ever added to it.
     """
     findings: list[Finding] = []
     for path in _python_files(paths):
@@ -515,56 +484,94 @@ def all_findings() -> list[Finding]:
     return sorted(findings)
 
 
-def new_findings(findings: Iterable[Finding]) -> list[Finding]:
-    """The findings the ratchet does not know about - the reason to fail a build."""
-    return [f for f in findings if f.fingerprint() not in KNOWN.get(f.rule, frozenset())]
+def counts(findings: Iterable[Finding]) -> dict[tuple[str, str], int]:
+    """How many times each `(path, site)` occurs - the value side of the ratchet."""
+    tally: dict[tuple[str, str], int] = {}
+    for finding in findings:
+        tally[finding.key()] = tally.get(finding.key(), 0) + 1
+    return tally
 
 
-def stale_known(findings: Iterable[Finding]) -> list[tuple[str, str]]:
-    """`(rule, fingerprint)` entries in `KNOWN` that nothing reproduces any more: a page migrated, or a line moved.
+def _allocation(findings: Iterable[Finding]) -> list[tuple[Finding, bool]]:
+    """Every finding paired with whether the ratchet's recorded count already covers it.
 
-    Stale is not a new violation, so it does not fail the CLI - but it is the signal the list must shrink, and the
-    suite pins it so the list cannot quietly keep dead entries.
+    The recorded count is spent in sorted order (lowest line first), so the verdict is deterministic and the
+    `file:line` a failure names is a real one in today's tree, not a reconstruction from the key.
     """
-    present = {(f.rule, f.fingerprint()) for f in findings}
-    return sorted((rule, fingerprint) for rule, fingerprints in KNOWN.items()
-                  for fingerprint in fingerprints if (rule, fingerprint) not in present)
+    remaining = {rule: dict(recorded) for rule, recorded in KNOWN.items()}
+    rows: list[tuple[Finding, bool]] = []
+    for finding in sorted(findings):
+        allowance = remaining.get(finding.rule, {})
+        left = allowance.get(finding.key(), 0)
+        if left:
+            allowance[finding.key()] = left - 1
+            rows.append((finding, True))
+        else:
+            rows.append((finding, False))
+    return rows
+
+
+def new_findings(findings: Iterable[Finding]) -> list[Finding]:
+    """The findings the ratchet does not cover: a key it never recorded, or one occurrence over its count."""
+    return [finding for finding, known in _allocation(findings) if not known]
+
+
+def stale_known(findings: Iterable[Finding]) -> list[tuple[str, tuple[str, str], int, int]]:
+    """`(rule, key, recorded, found)` entries in `KNOWN` the tree no longer fills: a page migrated, or a literal went.
+
+    Short counts are stale exactly like missing keys - the count is the record, so ten `QSize(30, 30)` becoming nine
+    is the list owing an entry. Stale is not a new violation, so it does not fail the CLI - but it is the signal the
+    list must shrink, and the suite pins it so the list cannot quietly keep dead entries.
+    """
+    present: dict[str, dict[tuple[str, str], int]] = {}
+    for finding in findings:
+        per_rule = present.setdefault(finding.rule, {})
+        per_rule[finding.key()] = per_rule.get(finding.key(), 0) + 1
+    return sorted((rule, key, recorded, present.get(rule, {}).get(key, 0))
+                  for rule, entries in KNOWN.items()
+                  for key, recorded in entries.items()
+                  if present.get(rule, {}).get(key, 0) < recorded)
 
 
 def _rekey() -> int:
-    """Rewrite `KNOWN` from the tree, refusing if any rule would GROW (a ratchet is a shrink-only record).
+    """Rewrite `KNOWN` from the tree, refusing if ANY key would GROW (a ratchet is a shrink-only record).
 
-    Line-number fingerprints go stale on every edit above a recorded literal, which in an active migration is most
-    commits. Regenerating them by hand was a three-step dance with no guard against the one thing that must never
-    happen - a new violation entering the baseline. This makes the regeneration explicit and the grow-check automatic.
+    The guard is per key, not per total. Comparing totals let a substitution through: retire one pin, introduce
+    another in the same commit, and the count is unchanged while the baseline silently absorbs a new violation. A key
+    the baseline never recorded counts as 0 recorded, so its first occurrence is growth like any other.
     """
     import re as _re
 
-    current = {rule: sorted(f.fingerprint() for f in check(SCOPES[rule])) for rule, check in CHECKS.items()}
-    grown = {rule: (len(got), len(KNOWN.get(rule, ()))) for rule, got in current.items()
-             if len(got) > len(KNOWN.get(rule, ()))}
+    current = {rule: counts(check(SCOPES[rule])) for rule, check in CHECKS.items()}
+    grown = [(rule, key, KNOWN.get(rule, {}).get(key, 0), found)
+             for rule, tally in current.items()
+             for key, found in tally.items()
+             if found > KNOWN.get(rule, {}).get(key, 0)]
     if grown:
-        for rule, (got, known) in sorted(grown.items()):
-            print(f"REFUSED: {rule} would grow {known} -> {got}: retire the violation, do not re-baseline it")
+        for rule, (path, site), recorded, found in sorted(grown):
+            print(f"REFUSED: {rule}: {path}: {site!r} would grow {recorded} -> {found}: "
+                  "retire the violation, do not re-baseline it")
         return 2
-    lines = ["KNOWN: dict[str, frozenset[str]] = {"]
+    lines = ["KNOWN: dict[str, dict[tuple[str, str], int]] = {"]
     for rule in sorted(current):
-        fingerprints = current[rule]
-        if not fingerprints:
-            lines.append(f'    "{rule}": frozenset(),')
+        tally = current[rule]
+        if not tally:
+            lines.append(f'    "{rule}": {{}},')
             continue
-        lines.append(f'    "{rule}": frozenset({{')
-        lines.extend(f'        "{fp}",' for fp in fingerprints)
-        lines.append("    }),")
+        lines.append(f'    "{rule}": {{')
+        lines.extend(f"        ({path!r}, {site!r}): {found},"
+                     for (path, site), found in sorted(tally.items()))
+        lines.append("    },")
     lines.append("}")
     path = Path(__file__)
     text = path.read_text(encoding="utf-8")
-    pattern = _re.compile(r"KNOWN: dict\[str, frozenset\[str\]\] = \{.*?\n\}", _re.S)
+    pattern = _re.compile(r"KNOWN: dict\[str, dict\[tuple\[str, str\], int\]\] = \{.*?\n\}", _re.S)
     if not pattern.search(text):
         print("REFUSED: the KNOWN block is not in the expected shape")
         return 2
     path.write_text(pattern.sub("\n".join(lines), text, count=1), encoding="utf-8")
-    print("re-keyed: " + ", ".join(f"{rule} {len(got)}" for rule, got in sorted(current.items())))
+    print("re-keyed: " + ", ".join(f"{rule} {sum(tally.values())} findings / {len(tally)} keys"
+                                   for rule, tally in sorted(current.items())))
     return 0
 
 
@@ -573,27 +580,29 @@ def main() -> int:
     if "--rekey" in sys.argv[1:]:
         return _rekey()
     findings = all_findings()
-    known = {f for f in findings if f.fingerprint() in KNOWN.get(f.rule, frozenset())}
-    fresh = new_findings(findings)
+    rows = _allocation(findings)
+    fresh = [finding for finding, known in rows if not known]
     stale = stale_known(findings)
 
-    width = max((len(f"{f.path}:{f.line}") for f in findings), default=0)
+    width = max((len(f.where) for f in findings), default=0)
     print(f"{'where'.ljust(width)}  rule                 detail")
-    for finding in findings:
-        mark = "known  " if finding in known else "NEW    "
-        print(f"{f'{finding.path}:{finding.line}'.ljust(width)}  {mark}{finding.rule:<20} {finding.detail}")
+    for finding, known in rows:
+        mark = "known  " if known else "NEW    "
+        print(f"{finding.where.ljust(width)}  {mark}{finding.rule:<20} {finding.detail}")
 
     print()
-    print(f"{len(findings)} finding(s): {len(fresh)} new, {len(known)} recorded in KNOWN (the ratchet)")
+    print(f"{len(findings)} finding(s): {len(fresh)} new, "
+          f"{sum(1 for _, known in rows if known)} recorded in KNOWN (the ratchet)")
     for rule in SCOPES:
         count = sum(1 for f in findings if f.rule == rule)
-        print(f"  {rule:<20} {count:>4}  (KNOWN {len(KNOWN.get(rule, frozenset()))})")
+        recorded = sum(KNOWN.get(rule, {}).values())
+        print(f"  {rule:<20} {count:>4}  (KNOWN {recorded})")
     if stale:
         print()
-        print(f"{len(stale)} stale KNOWN entr{'y' if len(stale) == 1 else 'ies'} - a page migrated or a line moved; "
-              "delete them so the ratchet keeps shrinking:")
-        for rule, fingerprint in stale:
-            print(f"  {rule}: {fingerprint}")
+        print(f"{len(stale)} stale KNOWN entr{'y' if len(stale) == 1 else 'ies'} - a page migrated or a literal went "
+              "away; delete them so the ratchet keeps shrinking:")
+        for rule, (path, site), recorded, found in stale:
+            print(f"  {rule}: {path}: {site!r} (recorded {recorded}, found {found})")
     if fresh:
         print()
         print("NEW findings are the failure: retire the rule or the literal, do not add it to KNOWN.")
