@@ -127,8 +127,17 @@ def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
         counts[key] = counts.get(key, 0) + 1
 
     wanted = _wanted()
+    # Excluded by default, with the measured reason: swapping the output-path QLineEdit for CustomLineEdit makes the
+    # scene-detection threshold field render 1.0 instead of 3.5 (settings.txt holds 3.5 and the glue's setValue runs;
+    # bisect: stock 3.5, labels-only 3.5, labels+buttons+line-edit 1.0). The path is `SettingsTab.connects
+    # output_folder_location.textChanged -> writeOutputFolder`, which validates the directory and re-sets the field -
+    # the interaction is not understood yet, and a page that shows the wrong threshold is worse than a page with one
+    # stock field. Remove QLineEdit from this set once that path is traced.
+    EXCLUDED = {QLineEdit}
 
     def allowed(cls: type) -> bool:
+        if cls in EXCLUDED:
+            return False
         return wanted is None or cls.__name__.lower() in wanted
 
     for widget in list(page.findChildren(QWidget)):
