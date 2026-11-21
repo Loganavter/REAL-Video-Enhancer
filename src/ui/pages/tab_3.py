@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
     QVBoxLayout, QWidget)
 import resources_rc
 import resources_rc
-from src.ui.widgets.qt_shaped import QtCheckBox, QtComboBox, QtLabel
+from src.ui.widgets.qt_shaped import QtCheckBox, QtComboBox, QtLabel, QtSpinBox
 from src.ui.typography import apply, BODY_PT
 
 
@@ -161,7 +161,7 @@ class Tab3Page:
         self.label_46.setPixmap(QPixmap(u":/icons/icons/info.svg"))
         self.label_46.setScaledContents(True)
         self.precisionSettingsContainer_4.addWidget(self.label_46)
-        self.ncnn_gpu_id = QSpinBox(self.renderSettingsContainer)
+        self.ncnn_gpu_id = QtSpinBox(self.renderSettingsContainer)
         self.ncnn_gpu_id.setObjectName(u"ncnn_gpu_id")
         self.ncnn_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_4.addWidget(self.ncnn_gpu_id)
@@ -179,7 +179,7 @@ class Tab3Page:
         self.label_44.setPixmap(QPixmap(u":/icons/icons/info.svg"))
         self.label_44.setScaledContents(True)
         self.precisionSettingsContainer_3.addWidget(self.label_44)
-        self.pytorch_gpu_id = QSpinBox(self.renderSettingsContainer)
+        self.pytorch_gpu_id = QtSpinBox(self.renderSettingsContainer)
         self.pytorch_gpu_id.setObjectName(u"pytorch_gpu_id")
         self.pytorch_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_3.addWidget(self.pytorch_gpu_id)

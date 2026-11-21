@@ -28,7 +28,7 @@ from src.ui.pages.tab_6 import Tab6Page
 from src.ui.pages.render_queue_tab import RenderQueueTabPage
 from src.ui.pages.advanced_settings import AdvancedSettingsPage
 from src.ui.pages.tab_5 import Tab5Page
-from src.ui.widgets.qt_shaped import QtButton, QtLabel
+from src.ui.widgets.qt_shaped import QtButton, QtDoubleSpinBox, QtLabel, QtProgressBar
 from src.ui.typography import apply, CAPTION_PT
 
 
@@ -239,13 +239,13 @@ class ProcPagePage:
         self.label_9 = QtLabel(self.widget_30)
         self.label_9.setObjectName(u"label_9")
         self.verticalLayout_37.addWidget(self.label_9)
-        self.startTimeSpinBox = QDoubleSpinBox(self.widget_30)
+        self.startTimeSpinBox = QtDoubleSpinBox(self.widget_30)
         self.startTimeSpinBox.setObjectName(u"startTimeSpinBox")
         self.verticalLayout_37.addWidget(self.startTimeSpinBox)
         self.label_52 = QtLabel(self.widget_30)
         self.label_52.setObjectName(u"label_52")
         self.verticalLayout_37.addWidget(self.label_52)
-        self.endTimeSpinBox = QDoubleSpinBox(self.widget_30)
+        self.endTimeSpinBox = QtDoubleSpinBox(self.widget_30)
         self.endTimeSpinBox.setObjectName(u"endTimeSpinBox")
         self.endTimeSpinBox.setMinimum(1.000000000000000)
         self.endTimeSpinBox.setValue(1.000000000000000)
@@ -420,7 +420,7 @@ class ProcPagePage:
         self.killRenderButton.setIconSize(QSize(40, 45))
         self.onRenderButtonsContiainer.addWidget(self.killRenderButton)
         self.horizontalLayout_32.addLayout(self.onRenderButtonsContiainer)
-        self.progressBar = QProgressBar(self.widget_13)
+        self.progressBar = QtProgressBar(self.widget_13)
         self.progressBar.setObjectName(u"progressBar")
         sizePolicy7.setHeightForWidth(self.progressBar.sizePolicy().hasHeightForWidth())
         self.progressBar.setSizePolicy(sizePolicy7)

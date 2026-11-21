@@ -32,13 +32,32 @@ PAGE_CONTAINERS = {"stackedWidget"}
 #: Qt class -> (adapter class in src/ui/widgets/qt_shaped.py, calls that make the toolkit widget unfit).
 #: A widget is migrated only when it uses none of the blocking calls - the toolkit has no tristate box, no checkable
 #: push button with RVE's semantics, and `Text` paints no pixmaps. Those stay stock and become toolkit rows.
+#:
+#: The value controls (W4d): the blocking sets are the Qt API the toolkit has no counterpart for, so a later
+#: regeneration keeps such a widget stock instead of building an adapter that would fail at runtime.
 TOOLKIT = {
     "QLabel": ("QtLabel", {"setPixmap", "setScaledContents"}),
     "QPushButton": ("QtButton", {"setAutoExclusive", "setAutoRepeat"}),
     "QCheckBox": ("QtCheckBox", {"setTristate"}),
     "QComboBox": ("QtComboBox", set()),
     "QLineEdit": ("QtLineEdit", set()),
+    # `QtSpinBox`/`QtDoubleSpinBox` carry setRange/setMinimum/setMaximum/setValue/value/text/textChanged and map
+    # ButtonSymbols onto the stepper's visibility; prefix/suffix/special-value text/wrapping have no counterpart.
+    "QSpinBox": ("QtSpinBox", {
+        "setPrefix", "setSuffix", "setSpecialValueText", "setWrapping", "setAccelerated",
+        "setGroupSeparatorShown", "setCorrectionMode", "setInvertedControls", "setKeyboardTracking",
+    }),
+    "QDoubleSpinBox": ("QtDoubleSpinBox", {
+        "setPrefix", "setSuffix", "setSpecialValueText", "setWrapping", "setAccelerated",
+        "setGroupSeparatorShown", "setCorrectionMode", "setInvertedControls", "setKeyboardTracking",
+    }),
+    # `QtProgressBar` paints a token track/chunk and has setRange/setMinimum/setMaximum/setValue/value; Qt's
+    # label/format/orientation switches have no counterpart (the toolkit bar paints no text).
+    "QProgressBar": ("QtProgressBar", {
+        "setFormat", "setInvertedAppearance", "setTextDirection", "setOrientation", "setAlignment", "reset",
+    }),
 }
+
 
 
 class Stmt:
