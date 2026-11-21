@@ -192,7 +192,12 @@ def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
             # row shifts by a few pixels against the Designer layout (measured: labels-only run, 3.06% of the card,
             # and every fixed-coordinate comparison after it failed by an offset rather than by colour).
             font = widget.font()
-            size = font.pixelSize() if font.pixelSize() > 0 else None
+            # RVE's labels carry POINT sizes (pointSizeF 12, pixelSize -1); passing None for the pixel size made
+            # Text fall back to its variant's 12 px (~9 pt), so every caption rendered smaller and every row shifted
+            # (measured on the page diff: the labels' ink doubled with an offset). QFontInfo resolves points against
+            # the device, which is the number Text needs.
+            from PySide6.QtGui import QFontInfo
+            size = QFontInfo(font).pixelSize()
             target = Text(
                 widget.text(),
                 parent=widget.parentWidget(),
