@@ -60,9 +60,29 @@ def _selectors(css: str) -> list[str]:
     return [match.group(1).strip() for match in re.finditer(r"([A-Za-z#][\w:#.\- ]*?)\s*\{", css)]
 
 
+def _descendants(page: str, seen: set[str] | None = None) -> set[str]:
+    """The page plus every page module it imports from `src.ui.pages`.
+
+    A page's stylesheet applies to its whole subtree, and a page holds its child pages as objects built by their own
+    modules (`settingsPage` hosts `tab_2/3/4`). Judging a rule by the parent's own constructions alone would delete a
+    `QScrollArea` rule while a child tab still has a stock scroll area.
+    """
+    seen = seen if seen is not None else set()
+    path = os.path.join(PAGES, f"{page}.py")
+    if page in seen or not os.path.exists(path):
+        return seen
+    seen.add(page)
+    source = open(path, encoding="utf-8").read()
+    for match in re.finditer(r"from src\.ui\.pages\.(\w+) import", source):
+        _descendants(match.group(1), seen)
+    return seen
+
+
 def analyse(page: str) -> dict:
     path = os.path.join(PAGES, f"{page}.py")
-    built = _built(path)
+    built: dict[str, str] = {}
+    for module in _descendants(page):
+        built.update(_built(os.path.join(PAGES, f"{module}.py")))
     adapters = {name for name, cls in built.items() if ADAPTER.match(cls)}
     stock = {cls for cls in built.values() if cls in STOCK}
     rows = []
