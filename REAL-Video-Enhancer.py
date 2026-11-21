@@ -121,6 +121,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.setupUi(self)
         end_time = time.time()
         log("Setup ui time: " + str(end_time - start_time))
+        # P0 of plan-rve-ui-on-toolkit: put toolkit widgets into the live window and look at the result.
+        # Off by default; RVE_TOOLKIT_SPIKE=1 is a measurement, not a migration.
+        try:
+            from src.ui import toolkit_spike
+            if toolkit_spike.enabled():
+                log("toolkit spike: replaced " + ", ".join(toolkit_spike.install(self)))
+        except Exception as _spike_exc:      # a spike must never stop the app from starting
+            log(f"toolkit spike failed: {_spike_exc}")
         #self.VideoPreview.setVisible(False)
 
         # remove false hope
