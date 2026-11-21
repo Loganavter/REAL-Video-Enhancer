@@ -31,6 +31,12 @@ from src.ui.pages.tab_5 import Tab5Page
 from src.ui.widgets.qt_shaped import QtButton, QtDoubleSpinBox, QtLabel, QtProgressBar
 from src.ui.typography import apply, CAPTION_PT
 
+# Layer B (2026-11-21): the three widget classes this page no longer builds stock. `TopTabHost` is the tab host, built
+# with the stock `QTabWidget`'s strip geometry (the Designer's 22 px strip, no pane radius or inset, a 4 px tab corner);
+# `ImageLabel` is the pixmap counterpart of `QLabel` (parent first, and the alignment is stated because Qt's default is
+# left+vcenter, not the centre the preview label asks for).
+from sli_ui_toolkit.widgets import ImageLabel, TopTabHost
+
 
 class ProcPagePage:
     """`procPage` - placed by its parent with `addWidget`."""
@@ -195,19 +201,17 @@ class ProcPagePage:
         self.verticalLayout_8.setSpacing(0)
         self.verticalLayout_8.setObjectName(u"verticalLayout_8")
         self.verticalLayout_8.setContentsMargins(0, 0, 0, 0)
-        self.previewLabel = QLabel(self.previewSubContainer)
+        # The stock label's own sheet was `QLabel{color:#fff; background-color:#1f232a}`: the colour had no subject (a
+        # pixmap label has no text channel) and the background is `#previewSubContainer`'s own plate, painted by the
+        # container's QSS, so the label keeps no surface of its own and the parent shows through.
+        self.previewLabel = ImageLabel(self.previewSubContainer,
+            alignment=Qt.AlignmentFlag.AlignCenter)
         self.previewLabel.setObjectName(u"previewLabel")
         sizePolicy4 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         sizePolicy4.setHorizontalStretch(0)
         sizePolicy4.setVerticalStretch(0)
         sizePolicy4.setHeightForWidth(self.previewLabel.sizePolicy().hasHeightForWidth())
         self.previewLabel.setSizePolicy(sizePolicy4)
-        self.previewLabel.setStyleSheet(u"\n"
-"QLabel{\n"
-"	color: #fff;\n"
-"    background-color:#1f232a;\n"
-"}\n"
-"")
         self.previewLabel.setScaledContents(False)
         self.previewLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.verticalLayout_8.addWidget(self.previewLabel)
@@ -260,7 +264,8 @@ class ProcPagePage:
         apply(self.renderPreviewBtn, None)
         self.renderPreviewBtn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.horizontalLayout_48.addWidget(self.renderPreviewBtn)
-        self.label_63 = QLabel(self.widget_14)
+        self.label_63 = ImageLabel(self.widget_14,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_63.setObjectName(u"label_63")
         self.label_63.setMaximumSize(QSize(25, 25))
         self.label_63.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -340,7 +345,8 @@ class ProcPagePage:
         self.verticalLayout_24.setSpacing(0)
         self.verticalLayout_24.setObjectName(u"verticalLayout_24")
         self.verticalLayout_24.setContentsMargins(0, 0, 0, 0)
-        self.processSettingsContainer = QTabWidget(self.widget_2)
+        self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=22, pane_radius=0,
+            pane_inset=0, chrome_inset=0, tab_radius=4)
         self.processSettingsContainer.setObjectName(u"processSettingsContainer")
         sizePolicy3.setHeightForWidth(self.processSettingsContainer.sizePolicy().hasHeightForWidth())
         self.processSettingsContainer.setSizePolicy(sizePolicy3)
@@ -377,7 +383,7 @@ class ProcPagePage:
         self.horizontalLayout_39.setSpacing(0)
         self.horizontalLayout_39.setObjectName(u"horizontalLayout_39")
         self.horizontalLayout_39.setContentsMargins(0, 0, 0, 0)
-        self.startRenderButton = QPushButton(self.widget_24)
+        self.startRenderButton = QtButton(self.widget_24)
         self.startRenderButton.setObjectName(u"startRenderButton")
         self.startRenderButton.setEnabled(True)
         self.startRenderButton.setMaximumSize(QSize(59, 55))
@@ -435,12 +441,10 @@ class ProcPagePage:
         return self.procPage
 
     def retranslate(self) -> None:
-        self.previewLabel.setText("")
         self.label_9.setText(QCoreApplication.translate("MainWindow", u"Start Time (seconds)", None))
         self.label_52.setText(QCoreApplication.translate("MainWindow", u"End Time (seconds)", None))
         self.renderPreviewBtn.setText(QCoreApplication.translate("MainWindow", u"Render Preview", None))
         self.label_63.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Render Preview:</span></p><p>     - Renders a small portion of the video to show the results (most useful for upscaling)</p></body></html>", None))
-        self.label_63.setText("")
         self.ETA.setText(QCoreApplication.translate("MainWindow", u"ETA: ", None))
         self.FPS.setText(QCoreApplication.translate("MainWindow", u"FPS:", None))
         self.STATUS.setText(QCoreApplication.translate("MainWindow", u"STATUS:", None))

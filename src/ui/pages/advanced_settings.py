@@ -26,6 +26,13 @@ import resources_rc
 from src.ui.widgets.qt_shaped import QtCheckBox, QtComboBox, QtLabel
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 
+# Layer B (2026-11-21): the two widget classes this page no longer builds stock. `ImageLabel` is the pixmap
+# counterpart of `QLabel` (it takes the parent first, so the Designer's statement order survives), and
+# `SurfaceScrollArea(surface_token=None)` is the stock `QScrollArea`'s geometry without a surface of its own: this
+# page's body is painted by `procPage`'s `QWidget{background-color:#16191d}` rule, and `content_inset=1` keeps the
+# stock StyledPanel frame's 1 px inset on each side.
+from sli_ui_toolkit.widgets import ImageLabel, SurfaceScrollArea
+
 
 class AdvancedSettingsPage:
     """`advancedSettings` - placed by its parent with `addTab`."""
@@ -55,7 +62,7 @@ class AdvancedSettingsPage:
         self.advancedSettings.setMaximumSize(QSize(16777215, 16777215))
         self.verticalLayout_29 = QVBoxLayout(self.advancedSettings)
         self.verticalLayout_29.setObjectName(u"verticalLayout_29")
-        self.scrollArea_5 = QScrollArea(self.advancedSettings)
+        self.scrollArea_5 = SurfaceScrollArea(self.advancedSettings, surface_token=None, content_inset=1)
         self.scrollArea_5.setObjectName(u"scrollArea_5")
         sizePolicy3.setHeightForWidth(self.scrollArea_5.sizePolicy().hasHeightForWidth())
         self.scrollArea_5.setSizePolicy(sizePolicy3)
@@ -95,7 +102,8 @@ class AdvancedSettingsPage:
         self.horizontalLayout_42.addWidget(self.label_18)
         self.horizontalSpacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_42.addItem(self.horizontalSpacer)
-        self.label_5 = QLabel(self.benchmarkModeContainer)
+        self.label_5 = ImageLabel(self.benchmarkModeContainer,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_5.setObjectName(u"label_5")
         self.label_5.setMaximumSize(QSize(25, 25))
         self.label_5.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -132,7 +140,8 @@ class AdvancedSettingsPage:
         self.horizontalLayout_16.addWidget(self.label_33)
         self.horizontalSpacer_8 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_16.addItem(self.horizontalSpacer_8)
-        self.label_34 = QLabel(self.tilingContainer)
+        self.label_34 = ImageLabel(self.tilingContainer,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_34.setObjectName(u"label_34")
         self.label_34.setMaximumSize(QSize(25, 25))
         self.label_34.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -186,7 +195,8 @@ class AdvancedSettingsPage:
         self.horizontalLayout_53.addWidget(self.label_70)
         self.horizontalSpacer_26 = QSpacerItem(226, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_53.addItem(self.horizontalSpacer_26)
-        self.label_71 = QLabel(self.sloMoModeContainer_5)
+        self.label_71 = ImageLabel(self.sloMoModeContainer_5,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_71.setObjectName(u"label_71")
         self.label_71.setMaximumSize(QSize(25, 25))
         self.label_71.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -206,7 +216,8 @@ class AdvancedSettingsPage:
         self.horizontalLayout_52.addWidget(self.label_68)
         self.horizontalSpacer_25 = QSpacerItem(226, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_52.addItem(self.horizontalSpacer_25)
-        self.label_69 = QLabel(self.sloMoModeContainer_4)
+        self.label_69 = ImageLabel(self.sloMoModeContainer_4,
+            alignment=Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
         self.label_69.setObjectName(u"label_69")
         self.label_69.setMaximumSize(QSize(25, 25))
         self.label_69.setPixmap(QPixmap(u":/icons/icons/info.svg"))
@@ -235,12 +246,10 @@ class AdvancedSettingsPage:
         self.label_18.setStatusTip("")
         self.label_18.setText(QCoreApplication.translate("MainWindow", u"Benchmark Mode", None))
         self.label_5.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Perform processing without outputing new video. This tests the raw performance of the inference.</p></body></html>", None))
-        self.label_5.setText("")
         self.benchmarkModeCheckBox.setText("")
         self.label_40.setText(QCoreApplication.translate("MainWindow", u"Upscale/Restoration Tile Settings", None))
         self.label_33.setText(QCoreApplication.translate("MainWindow", u"Tiling", None))
         self.label_34.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Split up processing upscaled frames into chunks.</p><p>Lowers VRAM usage, but also slows down render. </p><p>Only use when render failes due to VRAM limits.</p></body></html>", None))
-        self.label_34.setText("")
         self.tilingCheckBox.setText("")
         self.label_32.setText(QCoreApplication.translate("MainWindow", u"Tile Size", None))
         self.tileSizeComboBox.setItemText(0, QCoreApplication.translate("MainWindow", u"512", None))
@@ -251,9 +260,7 @@ class AdvancedSettingsPage:
         self.label_42.setText(QCoreApplication.translate("MainWindow", u"Interpolate Settings", None))
         self.label_70.setText(QCoreApplication.translate("MainWindow", u"Dynamic Scaled Flow (Pytorch Only)", None))
         self.label_71.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Scales optical flow based on the difference between frames.</p><p>Helps with anime interpolation.</p></body></html>", None))
-        self.label_71.setText("")
         self.dynamicScaledOpticalFlowCheckBox.setText("")
         self.label_68.setText(QCoreApplication.translate("MainWindow", u"Ensemble (Pytorch/TensorRT Only)", None))
         self.label_69.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Ensembles flow, can produce better results.</p><p>Only compadible with older RIFE models and GMFSS</p></body></html>", None))
-        self.label_69.setText("")
         self.ensembleCheckBox.setText("")
