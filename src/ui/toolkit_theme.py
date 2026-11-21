@@ -25,12 +25,18 @@ QSS_TO_TOKENS: dict[str, tuple[str, str]] = {
     "QLabel{color}": ("dialog.text", "#ffffff"),
     "QPlainTextEdit{background-color}": ("surface.list", "#2c313c"),
     "#centralwidget{background-color}": ("dialog.background", "#1f232a"),
+    # QCheckBox::indicator (outline) and ::indicator::checked (fill) - the toolkit's indicator paints its outline from
+    # dialog.border and its checked fill from `accent`, so those two tokens are what the stock rule means.
+    "QCheckBox::indicator{border}": ("dialog.border", "#ffffff"),
+    "QCheckBox::indicator::checked{background-color}": ("accent", "#ffffff"),
 }
 
 # The tokens that actually exist in the toolkit's dark palette. Overriding a key the palette does not define is a
 # silent no-op (set_color writes into the dict, but no painter reads it), which is exactly the kind of false fix this
 # project keeps paying for - so unknown keys are reported instead of applied.
 KNOWN_TOKENS = frozenset({
+    "accent",
+    "dialog.border",
     "dialog.button.background",
     "dialog.text",
     "surface.list",

@@ -74,7 +74,14 @@ def _bridge_button():
 def _copy_common(source: QWidget, target: QWidget) -> None:
     target.setObjectName(source.objectName())
     target.setToolTip(source.toolTip())
-    target.setMinimumSize(source.minimumSize())
+    # A toolkit widget paints itself and does not derive a usable size hint from its content while its page is
+    # hidden, so the stock widget's hint is the geometry source: without this the migrated Button collapsed to an
+    # empty square and the ComboBox truncated to 'sudo_scene_dete...' (measured, P1 run 3).
+    hint = source.sizeHint()
+    if hint.width() > 0 and hint.height() > 0:
+        target.setMinimumSize(hint)
+    else:
+        target.setMinimumSize(source.minimumSize())
     target.setMaximumSize(source.maximumSize())
     target.setSizePolicy(source.sizePolicy())
 
@@ -97,6 +104,13 @@ def _replace(source: QWidget, target: QWidget, window) -> None:
         setattr(window, name, target)
 
 
+def _wanted() -> set[str] | None:
+    """Optional class filter, for bisecting which replacement changes behaviour (`RVE_TOOLKIT_SWAP=qcombobox,…`)."""
+    import os
+    raw = os.environ.get("RVE_TOOLKIT_SWAP", "").strip()
+    return {part.strip().lower() for part in raw.split(",")} if raw else None
+
+
 def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
     """Replace the page's stock primitives with toolkit widgets. Returns the count per class."""
     from sli_ui_toolkit.widgets import Button, ComboBox, CustomLineEdit, Text
@@ -112,37 +126,57 @@ def migrate_page(window, page_name: str = DEFAULT_PAGE) -> dict[str, int]:
     def bump(key: str) -> None:
         counts[key] = counts.get(key, 0) + 1
 
+    wanted = _wanted()
+
+    def allowed(cls: type) -> bool:
+        return wanted is None or cls.__name__.lower() in wanted
+
     for widget in list(page.findChildren(QWidget)):
         if widget.parent() is None:
             continue
-        if isinstance(widget, QLabel):
-            target = Text(widget.text(), parent=widget.parentWidget())
+        if isinstance(widget, QLabel) and allowed(QLabel):
+            # The toolkit paints its own font: without the source's, a label renders at the variant's size and the
+            # row shifts by a few pixels against the Designer layout (measured: labels-only run, 3.06% of the card,
+            # and every fixed-coordinate comparison after it failed by an offset rather than by colour).
+            font = widget.font()
+            size = font.pixelSize() if font.pixelSize() > 0 else None
+            target = Text(
+                widget.text(),
+                parent=widget.parentWidget(),
+                variant="body",
+                family=font.family() or None,
+                pixel_size=size,
+                bold=font.bold() or None,
+                italic=font.italic() or None,
+            )
             target.setAlignment(widget.alignment())
             _copy_common(widget, target)
             _replace(widget, target, window)
             bump("QLabel->Text")
-        elif isinstance(widget, QPushButton):
-            target = BridgedButton(widget.text(), parent=widget.parentWidget())
+        elif isinstance(widget, QPushButton) and allowed(QPushButton):
+            # Button's first positional is the ICON (text is keyword-only): passing the label there made QIcon
+            # interpret it as a path, and the migrated button painted nothing (measured, P1 run 4).
+            target = BridgedButton(text=widget.text(), parent=widget.parentWidget())
             target.setEnabled(widget.isEnabled())
             _copy_common(widget, target)
             _replace(widget, target, window)
             # the glue binds `clicked`; carry any already-connected slot across
             widget.clicked.connect(target.click)
             bump("QPushButton->Button")
-        elif isinstance(widget, QLineEdit):
+        elif isinstance(widget, QLineEdit) and allowed(QLineEdit):
             target = CustomLineEdit(parent=widget.parentWidget())
             target.setText(widget.text())
             _copy_common(widget, target)
             _replace(widget, target, window)
             bump("QLineEdit->CustomLineEdit")
-        elif isinstance(widget, QComboBox):
+        elif isinstance(widget, QComboBox) and allowed(QComboBox):
             target = ComboBox(parent=widget.parentWidget())
             target.addItems([widget.itemText(i) for i in range(widget.count())])
             target.setCurrentIndex(widget.currentIndex())
             _copy_common(widget, target)
             _replace(widget, target, window)
             bump("QComboBox->ComboBox")
-        elif isinstance(widget, QCheckBox):
+        elif isinstance(widget, QCheckBox) and allowed(QCheckBox):
             target = BridgedCheckBox(widget.text(), parent=widget.parentWidget())
             target.setChecked(widget.isChecked())
             _copy_common(widget, target)
