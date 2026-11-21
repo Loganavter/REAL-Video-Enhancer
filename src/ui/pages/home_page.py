@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
 import resources_rc
 import resources_rc
 from src.ui.widgets.qt_shaped import QtButton, QtLabel
+from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 
 
 class HomePagePage:
@@ -113,10 +114,7 @@ class HomePagePage:
         sizePolicy2.setVerticalStretch(0)
         sizePolicy2.setHeightForWidth(self.label.sizePolicy().hasHeightForWidth())
         self.label.setSizePolicy(sizePolicy2)
-        font = QFont()
-        font.setFamilies([u"Fira Mono"])
-        font.setPointSize(25)
-        self.label.setFont(font)
+        apply(self.label, DISPLAY_PT, family="Fira Mono")
         self.gridLayout_7.addWidget(self.label, 0, 1, 1, 1)
         self.gridLayout_2.addWidget(self.widget_8, 1, 0, 1, 1)
         self.horizontalLayout_30 = QHBoxLayout()
@@ -127,9 +125,7 @@ class HomePagePage:
         self.horizontalLayout_30.addWidget(self.changeLogText)
         self.systemInfoText = QTextEdit(self.homePage)
         self.systemInfoText.setObjectName(u"systemInfoText")
-        font1 = QFont()
-        font1.setPointSize(15)
-        self.systemInfoText.setFont(font1)
+        apply(self.systemInfoText, GROUP_TITLE_PT)
         self.systemInfoText.setReadOnly(True)
         self.horizontalLayout_30.addWidget(self.systemInfoText)
         self.gridLayout_2.addLayout(self.horizontalLayout_30, 2, 0, 1, 1)

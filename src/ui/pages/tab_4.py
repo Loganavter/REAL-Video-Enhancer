@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
 import resources_rc
 import resources_rc
 from src.ui.widgets.qt_shaped import QtButton, QtCheckBox, QtLabel
+from src.ui.typography import apply, BODY_PT
 
 
 class Tab4Page:
@@ -33,8 +34,6 @@ class Tab4Page:
 
     def build(self):
         """Build the widget tree and return the page root."""
-        font4 = QFont()
-        font4.setPointSize(12)
         self.tab_4 = QWidget()
         self.tab_4.setObjectName(u"tab_4")
         self.verticalLayout_23 = QVBoxLayout(self.tab_4)
@@ -52,7 +51,7 @@ class Tab4Page:
         self.horizontalLayout_21.setContentsMargins(0, 0, 0, 0)
         self.label_19 = QtLabel(self.previewEnabledContainer)
         self.label_19.setObjectName(u"label_19")
-        self.label_19.setFont(font4)
+        apply(self.label_19, BODY_PT)
         self.horizontalLayout_21.addWidget(self.label_19)
         self.horizontalSpacer_2 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_21.addItem(self.horizontalSpacer_2)
@@ -68,7 +67,7 @@ class Tab4Page:
         self.horizontalLayout_12.setContentsMargins(0, 0, 0, 0)
         self.label_23 = QtLabel(self.discordRPCSettingsContainer)
         self.label_23.setObjectName(u"label_23")
-        self.label_23.setFont(font4)
+        apply(self.label_23, BODY_PT)
         self.horizontalLayout_12.addWidget(self.label_23)
         self.horizontalSpacer_5 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_12.addItem(self.horizontalSpacer_5)

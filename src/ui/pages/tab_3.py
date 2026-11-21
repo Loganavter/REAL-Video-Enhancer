@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplicati
 import resources_rc
 import resources_rc
 from src.ui.widgets.qt_shaped import QtCheckBox, QtComboBox, QtLabel
+from src.ui.typography import apply, BODY_PT
 
 
 class Tab3Page:
@@ -33,8 +34,6 @@ class Tab3Page:
 
     def build(self):
         """Build the widget tree and return the page root."""
-        font4 = QFont()
-        font4.setPointSize(12)
         self.tab_3 = QWidget()
         self.tab_3.setObjectName(u"tab_3")
         self.verticalLayout_22 = QVBoxLayout(self.tab_3)
@@ -48,7 +47,7 @@ class Tab3Page:
         self.precisionSettingsContainer.setObjectName(u"precisionSettingsContainer")
         self.label_3 = QtLabel(self.renderSettingsContainer)
         self.label_3.setObjectName(u"label_3")
-        self.label_3.setFont(font4)
+        apply(self.label_3, BODY_PT)
         self.precisionSettingsContainer.addWidget(self.label_3)
         self.label_17 = QLabel(self.renderSettingsContainer)
         self.label_17.setObjectName(u"label_17")
@@ -68,7 +67,7 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer.setObjectName(u"tensorRTOptLevelSettingsContainer")
         self.label_15 = QtLabel(self.renderSettingsContainer)
         self.label_15.setObjectName(u"label_15")
-        self.label_15.setFont(font4)
+        apply(self.label_15, BODY_PT)
         self.tensorRTOptLevelSettingsContainer.addWidget(self.label_15)
         self.label_21 = QLabel(self.renderSettingsContainer)
         self.label_21.setObjectName(u"label_21")
@@ -90,7 +89,7 @@ class Tab3Page:
         self.horizontalLayout_67.setObjectName(u"horizontalLayout_67")
         self.label_88 = QtLabel(self.renderSettingsContainer)
         self.label_88.setObjectName(u"label_88")
-        self.label_88.setFont(font4)
+        apply(self.label_88, BODY_PT)
         self.horizontalLayout_67.addWidget(self.label_88)
         self.horizontalSpacer_34 = QSpacerItem(488, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_67.addItem(self.horizontalSpacer_34)
@@ -114,7 +113,7 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer_3.setObjectName(u"tensorRTOptLevelSettingsContainer_3")
         self.label_84 = QtLabel(self.renderSettingsContainer)
         self.label_84.setObjectName(u"label_84")
-        self.label_84.setFont(font4)
+        apply(self.label_84, BODY_PT)
         self.tensorRTOptLevelSettingsContainer_3.addWidget(self.label_84)
         self.horizontalSpacer_31 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.tensorRTOptLevelSettingsContainer_3.addItem(self.horizontalSpacer_31)
@@ -135,7 +134,7 @@ class Tab3Page:
         self.precisionSettingsContainer_2.setObjectName(u"precisionSettingsContainer_2")
         self.label_22 = QtLabel(self.renderSettingsContainer)
         self.label_22.setObjectName(u"label_22")
-        self.label_22.setFont(font4)
+        apply(self.label_22, BODY_PT)
         self.precisionSettingsContainer_2.addWidget(self.label_22)
         self.horizontalSpacer_15 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.precisionSettingsContainer_2.addItem(self.horizontalSpacer_15)
@@ -154,7 +153,7 @@ class Tab3Page:
         self.precisionSettingsContainer_4.setObjectName(u"precisionSettingsContainer_4")
         self.label_45 = QtLabel(self.renderSettingsContainer)
         self.label_45.setObjectName(u"label_45")
-        self.label_45.setFont(font4)
+        apply(self.label_45, BODY_PT)
         self.precisionSettingsContainer_4.addWidget(self.label_45)
         self.label_46 = QLabel(self.renderSettingsContainer)
         self.label_46.setObjectName(u"label_46")
@@ -172,7 +171,7 @@ class Tab3Page:
         self.precisionSettingsContainer_3.setObjectName(u"precisionSettingsContainer_3")
         self.label_43 = QtLabel(self.renderSettingsContainer)
         self.label_43.setObjectName(u"label_43")
-        self.label_43.setFont(font4)
+        apply(self.label_43, BODY_PT)
         self.precisionSettingsContainer_3.addWidget(self.label_43)
         self.label_44 = QLabel(self.renderSettingsContainer)
         self.label_44.setObjectName(u"label_44")
