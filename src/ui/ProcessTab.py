@@ -456,8 +456,23 @@ class ProcessTab:
 
         self.closePausedSharedMemory()
 
-        renderQueue.clear()
+        # NO automatic `renderQueue.clear()`: a finished job stays in the list with its final state (owner, 2026-11-22),
+        # and a job that never ran because the render stopped must stay too. Clearing is a USER action - the context
+        # menu's "Clear queue" or removing the selection. Two automatic clears used to wipe the queue at the end of every
+        # pass, which is exactly the "items disappear without me deleting them" report.
         self.onRenderCompletion()
+
+    def _restoreQueueAfterPreview(self) -> None:
+        """Put back what `renderPreview` set aside, and drop the preview job itself from the list."""
+        backup = getattr(self.parent, "_queue_after_preview", None)
+        if not backup:
+            return
+        self.parent._queue_after_preview = None
+        queue = self.parent.renderQueue
+        # the preview job is history, not work: it is not re-added
+        queue.clear()
+        for job in backup:
+            queue.add(job)
 
     def guiChangesOnRenderCompletion(self):
         if all(return_code == 0 or return_code == 3221225477 for return_code in self.return_codes) or self.userKilled: # 3221225477 comes up when using ncnn on windows for some reason, but no error in output itself.
@@ -478,7 +493,7 @@ class ProcessTab:
         self.parent.FPS.setText("FPS: ")
         self.parent.ETA.setText("ETA: ")
         self.parent.STATUS.setText("Status: ")
-        self.parent.renderQueue.clear()
+        self._restoreQueueAfterPreview()
         if self.currentRenderOptions.isPreview:
             from PySide6.QtMultimedia import QMediaPlayer
             try:

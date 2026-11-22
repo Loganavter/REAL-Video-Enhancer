@@ -379,6 +379,10 @@ class MainWindow(QMainWindow):
         # connect getting default output file
 
     def renderPreview(self):
+        # The preview renders ONE job, but it used to delete the whole queue to get there - queued work vanished from a
+        # button that says "preview" (owner: "items disappear without me deleting them", 2026-11-22). The queue is put
+        # aside and restored when the preview finishes (`guiChangesOnRenderCompletion`).
+        self._queue_after_preview = list(self.renderQueue.getQueue())
         self.renderQueue.clear()
         renderOptions = self.getCurrentRenderOptions()
         renderOptions.outputPath = os.path.join(TEMP_DOWNLOAD_PATH, f"{os.path.basename(renderOptions.inputFile)}_preview.mkv")
