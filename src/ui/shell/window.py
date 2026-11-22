@@ -266,7 +266,46 @@ class MainWindowShell:
         _window_palette = window.palette()
         _window_palette.setColor(QPalette.ColorRole.Window, _backdrop)
         window.setPalette(_window_palette)
+
         expose(window, self)
+
+        # The nav stack needs the same guarantee `TopTabHost` gives its sub-tabs: `QStackedLayout` in StackOne mode lays
+        # out only the page it shows, so `procPage`/`settingsPage`/`downloadPage` sat at Qt's 640x480 while hidden and
+        # the audit caught exactly that (2026-11-22). Showing one then clips its content at the old width until a window
+        # resize - the owner's "the right 15 % never repaints".
+        from PySide6.QtCore import QEvent, QObject
+
+        class _PageStackFit(QObject):
+            def eventFilter(self, watched, event):
+                if event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+                    self.fit()
+                return False
+
+            def fit(self) -> None:
+                stack = window.stackedWidget
+                size = stack.size()
+                if size.isEmpty():
+                    return
+                for index in range(stack.count()):
+                    page = stack.widget(index)
+                    if page is None:
+                        continue
+                    if page.size() != size:
+                        page.resize(size)
+                    try:
+                        from sli_ui_toolkit.ui.layout_settle import settle_layout
+                    except Exception:
+                        continue
+                    try:
+                        settle_layout(page)
+                    except Exception:
+                        pass
+
+        _page_fit = _PageStackFit(window)
+        _page_fit.fit()
+        window.stackedWidget.installEventFilter(_page_fit)
+        window.stackedWidget.currentChanged.connect(lambda _index: _page_fit.fit())
+        window._page_stack_fit = _page_fit
         # One place for the control type size: a page's 12 pt container font would otherwise cascade 16 px into every
         # toolkit control (the deleted adapter stated 12 px per control; this states it per window).
         from src.ui.typography import apply_control_fonts

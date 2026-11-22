@@ -12,6 +12,9 @@ A stray rectangle has exactly two possible origins, and they need opposite fixes
 * **Ctrl+Shift+R** repaints the whole window from scratch. If the rectangle disappears, it was a stale frame.
 * **Ctrl+Shift+H** hides the widget under the cursor (`QApplication.widgetAt`) and logs its chain. If the rectangle
   disappears with that widget hidden, it is inside that widget; if the rectangle stays, the painter is behind it.
+* **Ctrl+Shift+D** writes `layout-audit-<stamp>.txt` next to `log.txt`: every widget whose own rect clips the children it
+  lays out (with the overflow in px) and every stacked page whose size is not the stack's. That is the one answer the two
+  keys above cannot give - "the rectangle IS painted, by a widget that lost 118 px of width".
 
 Both log to the app log, so the chain is copyable without reading it off the screen. Environment-gated like the
 inspector: they are diagnosis tools, not a shipping feature.
@@ -33,6 +36,10 @@ ENV_FORCE_COMPOSITE = "RVE_UI_FORCE_COMPOSITE"
 
 REPAINT_SHORTCUT = "Ctrl+Shift+R"
 HIDE_SHORTCUT = "Ctrl+Shift+H"
+#: Layout audit: names the widget whose own rect is SMALLER than the children it lays out (the clipping signature) and
+#: every page inside a QStackedWidget whose size is not the stack's (the stale-page signature). It writes a file, so the
+#: answer is copyable instead of argued over a screenshot.
+AUDIT_SHORTCUT = "Ctrl+Shift+D"
 
 
 def enabled() -> bool:
@@ -81,6 +88,19 @@ def install(window) -> QObject | None:
         widget.hide()
         window.repaint()
 
+    def _audit() -> None:
+        from . import layout_audit
+
+        path = layout_audit.write(window)   # next to log.txt, like the SIGUSR1 stack dump
+        with open(path, encoding="utf-8") as handle:      # copy the verdict into the log: one press, one answer
+            for line in handle.read().splitlines()[:12]:
+                _log(window, f"audit: {line}")
+        _log(window, f"audit written: {path}")
+
+    audit_shortcut = QShortcut(QKeySequence(AUDIT_SHORTCUT), window)
+    audit_shortcut.activated.connect(_audit)
+    holder._audit_shortcut = audit_shortcut  # type: ignore[attr-defined]
+
     repaint_shortcut = QShortcut(QKeySequence(REPAINT_SHORTCUT), window)
     repaint_shortcut.activated.connect(_repaint)
     hide_shortcut = QShortcut(QKeySequence(HIDE_SHORTCUT), window)
@@ -90,7 +110,7 @@ def install(window) -> QObject | None:
     holder._hide_shortcut = hide_shortcut  # type: ignore[attr-defined]
     window._debug_keys = holder
     _log(window, f"debug keys: {REPAINT_SHORTCUT} = repaint the window, {HIDE_SHORTCUT} = hide the widget "
-                 f"under the cursor")
+                 f"under the cursor, {AUDIT_SHORTCUT} = write a layout audit")
     return holder
 
 

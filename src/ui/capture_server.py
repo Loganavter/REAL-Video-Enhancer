@@ -358,6 +358,48 @@ def install(window) -> None:
                  "changed": before != [row.inputFile for row in queue_model.getQueue()]})
         print(f"capture-server: move {direction} -> moved={moved} selected={widget.selectedRows()}", flush=True)
 
+    def where(_spec: str = "") -> None:
+        """Which code is actually RUNNING: `where:` - paths, commits, and the revision of the toolkit in memory.
+
+        "Am I on the right checkout?" cannot be answered by looking at a screenshot, and a process started before a fix
+        keeps running the old modules: this answer names the file each module came from, the git commit of every repo
+        involved, and whether the functions the fix added exist in the loaded copy.
+        """
+        import inspect as _inspect
+        import subprocess as _subprocess
+        import sys as _sys
+
+        def repo_state(path: str) -> dict:
+            root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+            try:
+                head = _subprocess.run(["git", "-C", root, "rev-parse", "--short", "HEAD"],
+                                       capture_output=True, text=True, timeout=5).stdout.strip()
+                branch = _subprocess.run(["git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD"],
+                                         capture_output=True, text=True, timeout=5).stdout.strip()
+                dirty = _subprocess.run(["git", "-C", root, "status", "--porcelain"],
+                                        capture_output=True, text=True, timeout=5).stdout.strip()
+            except Exception as error:
+                return {"root": root, "error": str(error)}
+            return {"root": root, "head": head, "branch": branch, "dirty_files": len(dirty.splitlines())}
+
+        report = {"stamp": _stamp(), "kind": "where", "executable": _sys.executable,
+                  "argv0": _sys.argv[0], "python": _sys.version.split()[0], "modules": {}}
+        for name in ("sli_ui_toolkit", "sli_ui_toolkit.ui.widgets.composite.top_tab_bar.host",
+                     "sli_ui_toolkit.ui.widgets.composite.text_list_widget"):
+            module = _sys.modules.get(name)
+            path = getattr(module, "__file__", None) if module is not None else None
+            report["modules"][name] = {"file": path, "loaded": module is not None}
+        host_module = _sys.modules.get("sli_ui_toolkit.ui.widgets.composite.top_tab_bar.host")
+        report["host_has_fit_pages"] = bool(host_module and hasattr(host_module.TopTabHost, "_fit_pages"))
+        widget_module = _sys.modules.get("sli_ui_toolkit.ui.widgets.composite.text_list_widget")
+        report["rows_fill_present"] = bool(widget_module and hasattr(widget_module.TextListWidget, "fill_colour"))
+        toolkit_file = report["modules"].get("sli_ui_toolkit", {}).get("file")
+        report["toolkit_repo"] = repo_state(toolkit_file) if toolkit_file else None
+        report["app_repo"] = repo_state(_sys.argv[0])
+        _finish(report)
+        print(f"capture-server: where -> app {report['app_repo'].get('head')} toolkit "
+              f"{report['toolkit_repo'].get('head') if report['toolkit_repo'] else 'n/a'}", flush=True)
+
     def widget_state(name: str) -> None:
         """The interactive state of one named widget: `state:<objectName>`.
 
@@ -412,6 +454,17 @@ def install(window) -> None:
     def handle(wanted: str) -> None:
         if wanted.startswith("probe:"):
             probe(wanted[len("probe:"):])
+            return
+        if wanted.startswith("audit:"):
+            from src.ui.devtools import layout_audit
+
+            lines = layout_audit.audit(window)
+            path = layout_audit.write(window)
+            _finish({"stamp": _stamp(), "kind": "audit", "lines": lines, "path": path})
+            print(f"capture-server: audit -> {len(lines) - 3} finding(s), {path}", flush=True)
+            return
+        if wanted.startswith("where:"):
+            where(wanted[len("where:"):])
             return
         if wanted.startswith("state:"):
             widget_state(wanted[len("state:"):])
