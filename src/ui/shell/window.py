@@ -250,6 +250,21 @@ class MainWindowShell:
         # owner, 2026-11-22.)
         import os as _os
 
+        # The polarity the reference host actually uses: the WINDOW is translucent (it is a client-decorated surface with
+        # a rounded body) and everything INSIDE it is opaque. RVE had it inverted - an opaque window with translucent
+        # pages - which is the arrangement that leaks stale frames through every uncovered pixel: the owner's black bands
+        # and repeated panels after a resize, while BlinkTable on the same compositor and GPU is clean
+        # (BlinkTable `src/ui/main_window/window.py:113`: WA_TranslucentBackground + paint_rounded_window_background).
+        # With opaque pages (SurfacePanel.set_opaque) nothing can show through, so the translucent surface costs nothing.
+        # RVE_UI_TRANSLUCENT_WINDOW=0 restores the old polarity for an A/B.
+        # OPT-IN only, and the default is OFF: enabling translucency on the main window is the trap the owner remembers
+        # from the reference host - "turn it on and the toast shadows break badly". A translucent top-level forces the
+        # whole window into a per-pixel-alpha composition, and the popups drawn over it (toasts, tooltips, menus) lose
+        # their shadow compositing. `RVE_UI_TRANSLUCENT_WINDOW=1` is here for a measurement, not as a default.
+        if _os.environ.get("RVE_UI_TRANSLUCENT_WINDOW") == "1":
+            window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            window.setAutoFillBackground(False)
+
         if _os.environ.get("RVE_UI_NO_BACKDROP_PAINT"):
             # The paintEvent-based fill and the opacity declaration go together: with one gone the other would leave the
             # window unpainted. Both are switched off for the bisect of the window's own properties.
@@ -276,17 +291,11 @@ class MainWindowShell:
         if not _os.environ.get("RVE_UI_NO_OPAQUE_PAGES"):
             from sli_ui_toolkit.widgets import SurfacePanel as _SurfacePanel
 
-            pages = []
-            for index in range(window.stackedWidget.count()):
-                pages.append(window.stackedWidget.widget(index))
-            for host in window.findChildren(QWidget):
-                if type(host).__name__ != "TopTabHost":
-                    continue
-                for index in range(host.count()):
-                    pages.append(host.widget(index))
-            for page in pages:
-                if isinstance(page, _SurfacePanel):
-                    page.set_opaque(True)
+            # EVERY SurfacePanel, not only the pages: a translucent panel anywhere in the tree is a pixel whose owner is
+            # "whatever is behind it", and the same trap applies one level down (the toast-shadow lesson the owner
+            # remembers is exactly this: a translucent surface under a popup ruins its shadow).
+            for panel in window.findChildren(_SurfacePanel):
+                panel.set_opaque(True)
 
         # The nav stack needs the same guarantee `TopTabHost` gives its sub-tabs: `QStackedLayout` in StackOne mode lays
         # out only the page it shows, so `procPage`/`settingsPage`/`downloadPage` sat at Qt's 640x480 while hidden and

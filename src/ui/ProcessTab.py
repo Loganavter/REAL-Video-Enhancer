@@ -166,8 +166,14 @@ class ProcessTab:
         def on_context_menu(point) -> None:
             # A FRESH menu per request: the toolkit's popup surface destroys itself when it hides, so reusing one
             # instance raised "Internal C++ object (ContextMenu) already deleted" on the second right-click (measured).
+            # NO `surface="popup"`: this was the app's only Qt.Popup, and the reference host's investigation of exactly
+            # this symptom ends with one line - "a Qt.Popup whose QWidget parent is the top-level window breaks the
+            # window's compositing on this Wayland/XWayland+NVIDIA stack: in-window translucent surfaces (toasts) render
+            # opaque black, existing QRhiWidgets slow down" (blinktable docs/dev/investigations/
+            # inv-2026-10-06-ql-rhi-menu-first.md, Root cause RESOLVED). The toolkit's default surface is the in-window
+            # one, which is what every other menu in that app uses; the popup mode is opt-in and we opted in by accident.
             menu = ContextMenu(widget, entries=entries_for(self.parent.renderQueue),
-                               on_triggered=on_action, surface="popup")
+                               on_triggered=on_action)
             # `on_triggered` is constructor state (the toolkit keeps it as `_on_triggered`), so it is passed here and
             # not assigned afterwards - an attribute set after construction would never fire.
             self._queue_menu = menu
