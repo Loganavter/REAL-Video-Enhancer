@@ -166,6 +166,31 @@ def probe_at(window: QWidget, global_pos=None) -> list[str]:
         lines.append(f"  VERDICT: compare by eye - the probe says this pixel RENDERS as {rendered_colour}. If the block "
                      f"you see is a different colour, the compositor is showing a stale frame; if it is this colour, a "
                      f"widget paints it and the chain above names it.")
+    # Anything still mapped ON TOP of the window: a menu or tooltip that did not go away keeps the area under it
+    # unrepainted (Qt treats a covered region as somebody else's), and the symptom is "every control stops updating
+    # until I click somewhere" - the owner's words (2026-11-22).
+    lines.append("  popups / top-level windows:")
+    try:
+        app = QApplication.instance()
+        popups = []
+        for top in app.topLevelWidgets() if app is not None else []:
+            if not top.isVisible() or top is window:
+                continue
+            popups.append(
+                f"    {type(top).__name__}#{top.objectName()} {_rect(top)} "
+                f"opaque={bool(top.testAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent))} "
+                f"translucent={bool(top.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))}"
+            )
+        lines.extend(popups or ["    (none)"])
+        if app is not None:
+            active_popup = app.activePopupWidget()
+            lines.append(f"  activePopupWidget: "
+                         f"{type(active_popup).__name__ if active_popup is not None else 'none'}")
+            modal = app.activeModalWidget()
+            lines.append(f"  activeModalWidget: {type(modal).__name__ if modal is not None else 'none'}")
+    except Exception as error:
+        lines.append(f"  popups: unavailable ({error})")
+
     try:
         ratio = window.devicePixelRatioF()
         handle = window.windowHandle()
