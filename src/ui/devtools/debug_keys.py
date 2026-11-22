@@ -76,20 +76,58 @@ def _app_root() -> str:
 
 
 def _log(window, message: str) -> None:
-    """Use the host's log when it has one, else stderr - the app's log is where a report is read from."""
-    logger = getattr(window, "log", None) or getattr(window, "_log", None)
-    if callable(logger):
-        logger(message)
+    """Write into the app's own `log.txt` - that is the file a report is read from.
+
+    It used to print to stdout, i.e. the terminal the app was launched from: the owner pressed the keys, saw nothing in
+    `log.txt`, and the whole diagnosis stalled on an output stream nobody was reading (2026-11-22).
+    """
+    line = f"[debug-keys] {message}"
+    try:
+        from src.Util import log as app_log
+
+        app_log(line)
         return
-    print(f"[debug-keys] {message}", flush=True)
+    except Exception:
+        pass
+    try:
+        import os as _os
+
+        with open(_os.path.join(_app_root(), "log.txt"), "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except Exception:
+        print(line, flush=True)
 
 
 def install(window) -> QObject | None:
-    """Install the hotkeys on `window`; returns the holder object (keeps the shortcuts alive)."""
+    """Install the debug keys; returns the holder object (keeps the filter alive).
+
+    One application-wide event filter rather than four `QShortcut`s: a shortcut only fires while its window is the active
+    one, and it says nothing when it does NOT fire - so "I pressed it and nothing happened" could not be told apart from
+    "the key never arrived". Every press is logged before it is handled.
+    """
     if getattr(window, "_debug_keys", None) is not None:
         return None
 
-    holder = QObject(window)
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeySequence
+
+    class _Keys(QObject):
+        def eventFilter(self, watched, event):  # noqa: N802 - Qt API
+            if event.type() != QEvent.Type.KeyPress:
+                return False
+            sequence = QKeySequence(event.keyCombination())
+            text = sequence.toString()
+            try:
+                if text not in _ACTIONS:
+                    return False
+            except Exception:
+                return False
+            _log(window, f"key {text}")
+            try:
+                _ACTIONS[text]()
+            except Exception as error:                 # a broken probe must say so, not die silently
+                _log(window, f"key {text} failed: {type(error).__name__}: {error}")
+            return True
 
     def _repaint() -> None:
         _log(window, "repaint: full window")
@@ -108,7 +146,7 @@ def install(window) -> QObject | None:
     def _audit() -> None:
         from . import layout_audit
 
-        path = layout_audit.write(window)   # next to log.txt, like the SIGUSR1 stack dump
+        path = layout_audit.write(window, _app_root())
         with open(path, encoding="utf-8") as handle:      # copy the verdict into the log: one press, one answer
             for line in handle.read().splitlines()[:12]:
                 _log(window, f"audit: {line}")
@@ -123,26 +161,26 @@ def install(window) -> QObject | None:
                 _log(window, f"probe: {line}")
         _log(window, f"probe written: {path}")
 
-    probe_shortcut = QShortcut(QKeySequence(PROBE_SHORTCUT), window)
-    probe_shortcut.activated.connect(_probe)
-    holder._probe_shortcut = probe_shortcut  # type: ignore[attr-defined]
+    global _ACTIONS
+    _ACTIONS = {
+        REPAINT_SHORTCUT: _repaint,
+        HIDE_SHORTCUT: _hide_under_cursor,
+        AUDIT_SHORTCUT: _audit,
+        PROBE_SHORTCUT: _probe,
+    }
 
-    audit_shortcut = QShortcut(QKeySequence(AUDIT_SHORTCUT), window)
-    audit_shortcut.activated.connect(_audit)
-    holder._audit_shortcut = audit_shortcut  # type: ignore[attr-defined]
-
-    repaint_shortcut = QShortcut(QKeySequence(REPAINT_SHORTCUT), window)
-    repaint_shortcut.activated.connect(_repaint)
-    hide_shortcut = QShortcut(QKeySequence(HIDE_SHORTCUT), window)
-    hide_shortcut.activated.connect(_hide_under_cursor)
-
-    holder._repaint_shortcut = repaint_shortcut  # type: ignore[attr-defined]
-    holder._hide_shortcut = hide_shortcut  # type: ignore[attr-defined]
+    app = QApplication.instance()
+    if app is None:
+        return None
+    holder = _Keys(app)
+    app.installEventFilter(holder)
     window._debug_keys = holder
-    _log(window, f"debug keys: {REPAINT_SHORTCUT} = repaint the window, {HIDE_SHORTCUT} = hide the widget "
-                 f"under the cursor, {AUDIT_SHORTCUT} = write a layout audit, "
-                 f"{PROBE_SHORTCUT} = probe the pixel under the cursor")
+    _log(window, f"debug keys armed: {REPAINT_SHORTCUT} = repaint, {HIDE_SHORTCUT} = hide under cursor, "
+                 f"{AUDIT_SHORTCUT} = layout audit, {PROBE_SHORTCUT} = pixel probe (every press is logged)")
     return holder
+
+
+_ACTIONS: dict = {}
 
 
 def force_composite(window) -> bool:

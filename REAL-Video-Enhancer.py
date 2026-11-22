@@ -179,6 +179,7 @@ class MainWindow(QMainWindow):
 
             if debug_keys.enabled():
                 debug_keys.install(self)
+                log("debug keys: Ctrl+Shift+R repaint | H hide under cursor | D layout audit | P pixel probe")
             debug_keys.force_composite(self)
             from src.ui.devtools import bisect
 
