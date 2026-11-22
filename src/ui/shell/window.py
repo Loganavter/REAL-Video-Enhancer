@@ -225,11 +225,19 @@ class MainWindowShell:
         # paint (a missing token, a widget built before the theme) then shows the DESKTOP through a compositing WM -
         # observed 2026-11-22 on the owner's screen as a ghost window. An opaque backdrop makes that impossible.
         _backdrop = toolkit_theme.token_color("surface.page")
-        if _backdrop is not None:
-            window.setAutoFillBackground(True)
-            _window_palette = window.palette()
-            _window_palette.setColor(QPalette.ColorRole.Window, _backdrop)
-            window.setPalette(_window_palette)
+        if _backdrop is None:
+            # Loud, not silent: with no backdrop the window is only opaque where its children happen to paint, and a
+            # compositing WM shows whatever is behind through every surface that does not (a "ghost window" on the
+            # owner's screen, 2026-11-22). The theme is mandatory before the window is built, so a missing token here
+            # means the startup order broke - fail with the reason instead of shipping a see-through window.
+            raise RuntimeError(
+                "window backdrop: the theme has no `surface.page` token, so the window would have no opaque "
+                "background and a compositing window manager would show the desktop through it. Install the toolkit "
+                "theme before MainWindowShell.build().")
+        window.setAutoFillBackground(True)
+        _window_palette = window.palette()
+        _window_palette.setColor(QPalette.ColorRole.Window, _backdrop)
+        window.setPalette(_window_palette)
         expose(window, self)
         # One place for the control type size: a page's 12 pt container font would otherwise cascade 16 px into every
         # toolkit control (the deleted adapter stated 12 px per control; this states it per window).

@@ -62,3 +62,23 @@ def test_the_policy_is_applied_to_the_window_not_to_selected_pages() -> None:
             assert node.args, "apply_wheel_requires_focus() must receive the root it walks"
             assert isinstance(node.args[0], ast.Name) and node.args[0].id == "window", (
                 "the policy is applied to something other than the whole window")
+
+
+def test_the_window_backdrop_cannot_be_silently_skipped() -> None:
+    """No `surface.page` token must stop the build, not leave a window that paints nothing.
+
+    Measured 2026-11-22: building the window without the theme installed left `autoFillBackground=False` and the palette
+    Window role at Qt's light default (`#efefef`) - every page/panel is `WA_TranslucentBackground`, so a compositing WM
+    shows the desktop through any surface that fails to paint. The branch used to `if _backdrop is not None:` and skip
+    everything else, which is exactly the silent version of that failure.
+    """
+    tree = ast.parse(WINDOW.read_text(encoding="utf-8"))
+    raises = [node for node in ast.walk(tree)
+              if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)
+              and isinstance(node.exc.func, ast.Name) and node.exc.func.id == "RuntimeError"]
+    messages = " ".join(
+        ast.literal_eval(arg) for node in raises for arg in node.exc.args
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str))
+    assert "surface.page" in messages, "the backdrop guard no longer explains the missing token"
+    source = WINDOW.read_text(encoding="utf-8")
+    assert "window.setAutoFillBackground(True)" in source, "the window no longer fills its own background"
