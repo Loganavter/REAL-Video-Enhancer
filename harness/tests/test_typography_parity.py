@@ -158,6 +158,13 @@ def _normalised(spec: dict) -> tuple:
     return (spec["pt"], spec["bold"], spec["italic"], spec["underline"], spec["family"])
 
 
+#: Widgets the pages add on purpose, with the reason. A page may outgrow the Designer; what it may not do is grow
+#: silently - an entry here is a decision, and one that stops matching is reported so this list cannot rot.
+ALLOWED_EXTRA_FONTS: dict[str, str] = {
+    "progressDetail": ("added on purpose: the numbers under the progress bar (owner, 2026-11-22)"),
+}
+
+
 def test_pages_match_the_designer_fixture_widget_by_widget() -> None:
     constants = _constants()
     designer = _collect(FIXTURE, constants)
@@ -170,9 +177,11 @@ def test_pages_match_the_designer_fixture_widget_by_widget() -> None:
             pages[widget] = (path.name, spec)
 
     missing = sorted(set(designer) - set(pages))
-    extra = sorted(set(pages) - set(designer))
+    extra = sorted(set(pages) - set(designer) - set(ALLOWED_EXTRA_FONTS))
     assert not missing, f"pages lost the Designer's font on: {missing}"
     assert not extra, f"pages set fonts the Designer never did: {extra}"
+    stale = sorted(set(ALLOWED_EXTRA_FONTS) & set(designer))
+    assert not stale, f"recorded as an addition but the Designer builds it now: {stale}"
 
     drifted = {
         widget: (_normalised(designer[widget]), _normalised(pages[widget][1]), pages[widget][0])

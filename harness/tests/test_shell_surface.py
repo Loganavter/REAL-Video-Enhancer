@@ -92,7 +92,10 @@ ACCEPTED_MISSING: dict[str, str] = {
 #: Exposed names the Designer never builds. Empty today: the 13 page objects (`<name>_page`) are
 #: `expose()`'s recursion seam - they are walked, never set on the window - so every exposed name is a
 #: Designer name. An entry here is an attribute the glue reads that the Designer knows nothing about.
-EXPOSED_NOT_DESIGNER: dict[str, str] = {}
+EXPOSED_NOT_DESIGNER: dict[str, str] = {
+    "progressDetail": ("added on purpose: the progress bar paints no label, so the percentage, elapsed, remaining and "
+                       "frame counter need a line of their own under it (owner, 2026-11-22)"),
+}
 
 #: Exposed names that collide with a `QMainWindow` member (a later call to the Qt method/property would
 #: hit the widget instead).
