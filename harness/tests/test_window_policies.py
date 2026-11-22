@@ -36,9 +36,11 @@ def test_the_window_build_applies_every_window_wide_policy() -> None:
     assert "apply_wheel_requires_focus" in calls, (
         "the wheel policy is gone: a wheel over a combo steps its value while scrolling the page (owner report "
         "2026-11-22)")
-    assert "apply_edge_fades" in calls, (
-        "the clipped-edge fade is gone: a scroll area cuts its content with a hard line instead of fading (owner asked "
-        "for the Google look, 2026-11-22)")
+    # The edge fade is opt-in (RVE_UI_EDGE_FADE) while the render-time freeze it caused is diagnosed, so the call sits
+    # behind a guard - what is pinned is that it still EXISTS and is not wired unconditionally.
+    source = WINDOW.read_text(encoding="utf-8")
+    assert "apply_edge_fades" in source, "the edge-fade wiring is gone entirely"
+    assert "RVE_UI_EDGE_FADE" in source, "the edge fade must stay opt-in until the render freeze is understood"
 
 
 def test_the_wheel_policy_turns_the_toolkit_flag_on_for_every_control_that_has_one() -> None:

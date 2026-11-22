@@ -1030,6 +1030,15 @@ def main(file_to_open=None):
         if _timing:
             print(f"startup {_time.perf_counter() - _t0:6.2f}s  {label}", flush=True)
 
+    # A hung window must be dumpable without ptrace (this host runs yama ptrace_scope=1, so py-spy/gdb cannot attach):
+    # `kill -USR1 <pid>` writes every thread's Python stack next to log.txt.
+    try:
+        from src.ui.devtools import fault_stack
+
+        fault_stack.install(os.path.dirname(os.path.abspath(__file__)))
+    except Exception as _stack_exc:
+        print(f"[stack] dump handler unavailable: {_stack_exc}", flush=True)
+
     # The surface format stays the platform default, like every other Qt application on this machine: the reference app
     # (Telegram Desktop 7.2.9) never touches `QSurfaceFormat`, and the "desktop shows through the window" artifact turned
     # out to be environment-level (it reproduces in BlinkTable and tdesktop on the same GNOME/NVIDIA session and is

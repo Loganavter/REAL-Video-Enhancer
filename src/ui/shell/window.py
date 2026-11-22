@@ -272,11 +272,16 @@ class MainWindowShell:
         from src.ui.wheel_policy import apply_wheel_requires_focus
 
         apply_wheel_requires_focus(window)
-        # And one place for the clipped-edge fade: a scroll area that continues past its edge fades out instead of cutting
-        # the content with a hard line (owner asked for Google's look).
-        from src.ui.scroll_fade import apply_edge_fades
+        # The clipped-edge fade is OPT-IN and OFF by default while the render-time freeze is being diagnosed: the first
+        # implementation rendered the whole scroll content into a pixmap per paint, which is not affordable on a render log
+        # (owner, 2026-11-22: the window froze at ~80 % CPU after a render). `RVE_UI_EDGE_FADE=1` turns it back on for a
+        # measurement, never by default until the freeze is understood.
+        import os as _os
 
-        apply_edge_fades(window)
+        if _os.environ.get("RVE_UI_EDGE_FADE"):
+            from src.ui.scroll_fade import apply_edge_fades
+
+            apply_edge_fades(window)
 
     def retranslate(self, window) -> None:
         window.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))

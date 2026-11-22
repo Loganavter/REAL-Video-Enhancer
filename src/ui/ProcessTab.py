@@ -463,6 +463,30 @@ class ProcessTab:
     def modelNameToFile(self):
         pass
 
+    def syncRenderConsole(self) -> None:
+        """Push the render log into the console INCREMENTALLY.
+
+        `updateProcessTab` runs on the update thread's 100 ms clock, and the old body re-set the whole accumulated log on
+        every tick. The toolkit console re-wraps what it is given, so the cost grew with the log: after a couple of
+        minutes a single tick took longer than the tick interval and the GUI thread never returned to the event loop -
+        the window froze with the render still going and stayed pegged at ~80 % CPU afterwards (py-spy: setPlainText ->
+        set_lines -> _wrap_line, owner 2026-11-22).
+
+        Append what is new, and rebuild only when the log was replaced (a new render, a reset): the prefix check makes
+        that decision O(1) on the common path.
+        """
+        console = self.parent.renderOutput
+        lines = list(self.renderTextOutputList or [])
+        sent = getattr(self, "_console_sent_lines", [])
+        if len(lines) >= len(sent) and lines[:len(sent)] == sent:
+            new = lines[len(sent):]
+            if new:
+                console.append_lines(new)
+                self._console_sent_lines = lines
+            return
+        console.setPlainText(self.splitListIntoStringWithNewLines(lines))
+        self._console_sent_lines = lines
+
     def updateProcessTab(self, qimage: QtGui.QImage):
         """
         Called by the worker QThread, and updates the GUI elements: Progressbar, Preview, FPS
@@ -474,12 +498,7 @@ class ProcessTab:
                 # only set the range to multiply the frame count if the method is interpolate
                 self.max_value
             )
-            # print(self.renderTextOutputList)
-            self.parent.renderOutput.setPlainText(
-                self.splitListIntoStringWithNewLines(self.renderTextOutputList)
-            )
-            scrollbar = self.parent.renderOutput.verticalScrollBar()
-            scrollbar.setValue(scrollbar.maximum())
+            self.syncRenderConsole()
             self.parent.progressBar.setValue(self.currentFrame)
             if self.fps != 0:
                 self.parent.FPS.setVisible(True)
