@@ -269,6 +269,25 @@ class MainWindowShell:
 
         expose(window, self)
 
+        # Opaque pages: a content host fills its own rect instead of being translucent and relying on what is behind it
+        # (the reference host's OpaqueFillHost). With translucent pages every uncovered pixel is somebody else's - and a
+        # compositor that keeps a stale frame, or a parent that skips a repaint, shows through the hole: the owner's
+        # black bands after a resize (2026-11-22). `RVE_UI_NO_OPAQUE_PAGES=1` bisects it away.
+        if not _os.environ.get("RVE_UI_NO_OPAQUE_PAGES"):
+            from sli_ui_toolkit.widgets import SurfacePanel as _SurfacePanel
+
+            pages = []
+            for index in range(window.stackedWidget.count()):
+                pages.append(window.stackedWidget.widget(index))
+            for host in window.findChildren(QWidget):
+                if type(host).__name__ != "TopTabHost":
+                    continue
+                for index in range(host.count()):
+                    pages.append(host.widget(index))
+            for page in pages:
+                if isinstance(page, _SurfacePanel):
+                    page.set_opaque(True)
+
         # The nav stack needs the same guarantee `TopTabHost` gives its sub-tabs: `QStackedLayout` in StackOne mode lays
         # out only the page it shows, so `procPage`/`settingsPage`/`downloadPage` sat at Qt's 640x480 while hidden and
         # the audit caught exactly that (2026-11-22). Showing one then clips its content at the old width until a window
