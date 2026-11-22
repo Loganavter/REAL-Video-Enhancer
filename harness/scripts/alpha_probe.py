@@ -10,6 +10,7 @@ difference is the "few tens of alpha" case: the surface carries per-pixel alpha 
 
     python3 harness/scripts/alpha_probe.py compare over-black.png over-magenta.png --bg-a 000000 --bg-b ff00ff
     python3 harness/scripts/alpha_probe.py compare over-black.png over-magenta.png --bg-a 000000 --bg-b ff00ff --rect 1200,200,60,60
+    python3 harness/scripts/alpha_probe.py probe browser.png app.png --at 700,230 --plate-from 700,600
 
 Why screenshots and not `QWidget.grab()`: `grab()` repaints the widget tree into a fresh buffer, so it can never see a
 surface-level alpha problem - it reports 255 everywhere on a window that bleeds.
@@ -69,6 +70,37 @@ def compare(path_a: str, path_b: str, bg_a: tuple[int, int, int], bg_b: tuple[in
     return 1
 
 
+def probe(bg_path: str, app_path: str, at: tuple[int, int], plate: tuple[int, int, int]) -> int:
+    """One point, two shots: what the window shows over a known background.
+
+    The owner's workflow is "here is the browser, here is the app over it". At a screen point the app paints `plate`
+    when opaque, so `observed = a*plate + (1-a)*background` and
+
+        a = (observed - background) / (plate - background)
+
+    is the app's opacity AT THAT PIXEL. Channels where the two differ by <= 8 levels carry no information and are
+    skipped; `a == 1` means the pixel is the app and nothing of the background survived.
+    """
+    image_bg, image_app = _load(bg_path), _load(app_path)
+    if image_bg.size != image_app.size:
+        raise SystemExit(f"screenshots differ in size: {image_bg.size} vs {image_app.size}")
+    x, y = at
+    background = tuple(image_bg.getpixel((x, y)))
+    observed = tuple(image_app.getpixel((x, y)))
+    result = 0
+    print(f"point ({x},{y})  background {background}  observed {observed}  plate {plate}")
+    for channel, name in enumerate("RGB"):
+        span = plate[channel] - background[channel]
+        if abs(span) <= 8:
+            continue
+        opacity = (observed[channel] - background[channel]) / span
+        verdict = "opaque" if opacity > 0.97 else "SEMI-TRANSPARENT"
+        print(f"  {name}: opacity {opacity:.3f} (alpha {round(255 * opacity)}) -> {verdict}")
+        if opacity <= 0.97:
+            result = 1
+    return result
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Measure whether a window's fill is opaque, from two screenshots.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -78,8 +110,26 @@ def main(argv: list[str]) -> int:
     compare_parser.add_argument("--bg-a", default="000000", help="colour behind the app in the first shot")
     compare_parser.add_argument("--bg-b", default="ff00ff", help="colour behind the app in the second shot")
     compare_parser.add_argument("--rect", default=None, metavar="X,Y,W,H", help="restrict the comparison")
+    probe_parser = sub.add_parser("probe", help="one screen point: browser-only shot vs app-over-browser shot")
+    probe_parser.add_argument("background_shot")
+    probe_parser.add_argument("app_shot")
+    probe_parser.add_argument("--at", required=True, metavar="X,Y")
+    probe_parser.add_argument("--plate", default=None, metavar="RRGGBB",
+                              help="the colour the app paints there when opaque (default: sampled from the app shot)")
+    probe_parser.add_argument("--plate-from", default=None, metavar="X,Y",
+                              help="sample the plate colour from this point of the app shot")
     args = parser.parse_args(argv)
 
+    if args.command == "probe":
+        at = tuple(int(part) for part in args.at.split(","))
+        if args.plate:
+            plate = _parse_colour(args.plate)
+        elif args.plate_from:
+            px, py = (int(part) for part in args.plate_from.split(","))
+            plate = tuple(_load(args.app_shot).getpixel((px, py)))
+        else:
+            raise SystemExit("give --plate RRGGBB or --plate-from X,Y (the app's own opaque colour there)")
+        return probe(args.background_shot, args.app_shot, at, plate)
     if args.command == "compare":
         rect = tuple(int(part) for part in args.rect.split(",")) if args.rect else None
         return compare(args.first, args.second, _parse_colour(args.bg_a), _parse_colour(args.bg_b), rect)
