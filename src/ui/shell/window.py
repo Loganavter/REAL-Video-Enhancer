@@ -236,6 +236,11 @@ class MainWindowShell:
         from src.ui.typography import apply_control_fonts
 
         apply_control_fonts(window)
+        # And one place for the wheel: a value control answers it only when it already has focus, so a wheel over a
+        # combo scrolls the page instead of stepping the value under the cursor (owner: "tons of misclicks").
+        from src.ui.wheel_policy import apply_wheel_requires_focus
+
+        apply_wheel_requires_focus(window)
 
     def retranslate(self, window) -> None:
         window.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
