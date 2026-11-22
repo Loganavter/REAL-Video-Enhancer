@@ -310,6 +310,23 @@ class ToolkitDialog(BaseDialog):
         self.root_layout.setContentsMargins(16, 16, 16, 16)
         self.root_layout.setSpacing(10)
 
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API
+        """Give the dialog RVE's type sizes on its first show.
+
+        A dialog is its own top level, so `typography.apply_control_fonts(window)` (the one place the app states "labels
+        12 pt, controls 12 px") never reached it: its text ran at the toolkit's design size while everything else in the
+        app is larger (owner, 2026-11-22: "the text is somehow small"). Applied once, on the first show, so every dialog -
+        including the ones written later - inherits the app's typography."""
+        super().showEvent(event)
+        if getattr(self, "_typography_applied", False):
+            return
+        self._typography_applied = True
+        from ..typography import BODY_PT, apply as apply_font, apply_control_fonts
+
+        for label in self.findChildren(Text):
+            apply_font(label, BODY_PT)
+        apply_control_fonts(self)
+
 
 class ConsoleSurface(ConsoleView):  # type: ignore[misc,valid-type]
     """``ConsoleView`` with the stock text-edit names the old popups exposed.
