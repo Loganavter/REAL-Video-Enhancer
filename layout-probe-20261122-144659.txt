@@ -1,0 +1,14 @@
+probe 14:46:59 at global 1493,440
+  chain: _Rows < QWidget#qt_scrollarea_viewport < OverlayScrollArea < TextListWidget#renderQueueListWidget < QWidget#widget_22 < SurfacePanel#renderQueueTab < QStackedWidget#TopTabStack < TopTabPane#TopTabPane < TopTabHost#processSettingsContainer < SurfacePanel#widget_2 < SurfacePanel#bottomMenuSubContainer < QWidget#processContainer < SurfacePanel#procPage < QStackedWidget#stackedWidget < QWidget#mainWindowContainer < QWidget#centralWidget < QWidget#centralwidget < MainWindow#MainWindow
+  [0] _Rows# 0,0 462x248 content=462x248 local=287,136 inside=True native_win=False opaque=False translucent=False autofill=False
+  [1] QWidget#qt_scrollarea_viewport 0,0 462x248 content=462x248 local=287,136 inside=True native_win=False opaque=False translucent=False autofill=False
+  [2] OverlayScrollArea# 0,0 462x248 content=462x248 local=287,136 inside=True native_win=True opaque=False translucent=False autofill=False
+  [3] TextListWidget#renderQueueListWidget 0,0 462x248 content=462x248 local=287,136 inside=True native_win=True opaque=False translucent=True autofill=False
+  [4] QWidget#widget_22 9,9 462x248 content=462x248 local=287,136 inside=True native_win=True opaque=False translucent=False autofill=False
+  [5] SurfacePanel#renderQueueTab 0,0 480x519 content=480x519 local=296,145 inside=True native_win=True opaque=False translucent=False autofill=False
+  [6] QStackedWidget#TopTabStack 10,5 480x519 content=480x519 local=296,145 inside=True native_win=True opaque=False translucent=False autofill=True
+  [7] TopTabPane#TopTabPane 0,42 500x529 content=500x529 local=306,150 inside=True native_win=True opaque=False translucent=False autofill=False
+  RENDERED pixel at the cursor: #1f232a
+  SCREEN   pixel at the cursor: n/a
+  VERDICT: compare by eye - the probe says this pixel RENDERS as #1f232a. If the block you see is a different colour, the compositor is showing a stale frame; if it is this colour, a widget paints it and the chain above names it.
+  surface: devicePixelRatio=1 platform=wayland window_handle=yes

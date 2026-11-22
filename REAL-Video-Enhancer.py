@@ -808,6 +808,15 @@ class MainWindow(QMainWindow):
         
         self.processTab.run(renderQueue)
 
+    def _wayland_repaint(self, reason: str) -> None:
+        """Wayland keeps the previous frame outside what the new content covers (see `src/ui/shell/wayland_repaint`)."""
+        try:
+            from src.ui.shell.wayland_repaint import force_full_repaint
+
+            force_full_repaint(self, reason=reason)
+        except Exception:
+            pass
+
     def disableProcessPage(self):
         for child in self.generalSettings.children():
             child.setEnabled(False)
@@ -818,6 +827,7 @@ class MainWindow(QMainWindow):
         # interactive; only mutations are locked, which keeps the queue coherent under the writer thread that is
         # consuming it.
         self.renderQueue.set_locked(True)
+        self._wayland_repaint("render start")
         for child in self.encoderSettings.children():
             child.setEnabled(False)
         self.RenderedPreviewControlsContainer.setEnabled(False)
@@ -834,6 +844,7 @@ class MainWindow(QMainWindow):
         for child in self.advancedSettings.children():
             child.setEnabled(True)
         self.renderQueue.set_locked(False)
+        self._wayland_repaint("render finish")
         for child in self.encoderSettings.children():
             child.setEnabled(True)
         self.RenderedPreviewControlsContainer.setEnabled(True)

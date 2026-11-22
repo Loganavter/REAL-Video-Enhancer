@@ -304,6 +304,24 @@ class MainWindowShell:
         _page_fit = _PageStackFit(window)
         _page_fit.fit()
         window.stackedWidget.installEventFilter(_page_fit)
+
+        # Wayland: a page switch leaves the area the new page does not cover showing the previous frame. The reference
+        # host documents the remedy ("force synchronous repaints after the heal"), and RVE keeps translucent pages, so the
+        # same rule applies here - see `wayland_repaint` for the measurement behind it.
+        try:
+            from src.ui.shell.wayland_repaint import force_full_repaint
+
+            window.stackedWidget.currentChanged.connect(
+                lambda _index: force_full_repaint(window, reason="nav page switch"))
+            for host in window.findChildren(QWidget):
+                if type(host).__name__ == "TopTabHost":
+                    try:
+                        host.currentChanged.connect(
+                            lambda _index, h=host: force_full_repaint(h, reason="sub-tab switch"))
+                    except Exception:
+                        continue
+        except Exception:
+            pass
         window.stackedWidget.currentChanged.connect(lambda _index: _page_fit.fit())
         window._page_stack_fit = _page_fit
         # One place for the control type size: a page's 12 pt container font would otherwise cascade 16 px into every
