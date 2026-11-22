@@ -370,7 +370,6 @@ class RenderQueue:
             del self.queue[row]
             del self.inputNameList[row]
         self._refresh([], current=max(0, min(first, len(self.inputNameList) - 1)))
-        self._repaint_window("queue remove")
         return len(rows)
 
     def moveSelected(self, direction: str = "up") -> bool:
@@ -400,17 +399,7 @@ class RenderQueue:
         if moved:
             order_after = sorted(selected)
             self._refresh(order_after, current=order_after[0])
-            self._repaint_window("queue move")
         return moved
-
-    def _repaint_window(self, reason: str) -> None:
-        """Wayland keeps the previous frame where the new content does not cover it (see `src/ui/shell/wayland_repaint`)."""
-        try:
-            from src.ui.shell.wayland_repaint import force_full_repaint
-
-            force_full_repaint(self.qlistwidget, reason=reason)
-        except Exception:
-            pass
 
     # -- the QListWidget-era names this manager answers (the toolkit control keeps the same calls) ------
 
