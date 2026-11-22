@@ -214,6 +214,14 @@ def install(app) -> list[str]:
     theme = ThemeManager.get_instance()
     theme.register_palettes(FLUENT_LIGHT, palette())
     theme.set_theme("dark", app, await_ripples=False)
+    # Tooltips are the toolkit's own bubble: a rounded plate with a soft shadow painted from tokens
+    # (`tooltip.background` / `tooltip.text`). The stock QToolTip paints a square, unshadowed rectangle on some
+    # platforms, and it is a separate top-level window that ignores the app palette on others - installing the
+    # interceptor makes every `setToolTip` in the app use the themed bubble.
+    from sli_ui_toolkit.ui.widgets.atomic.tooltips import install_application_tooltips
+
+    install_application_tooltips(app)
+
     # RVE's CONTROLS are 12 px while its labels are 12 pt (16 px at 96 dpi): the compatibility layer forced that pixel
     # size in each adapter's constructor, and without it every toolkit control inherited the 16 px application font -
     # measured as the single largest parity delta after the layer went (controls +33 % text, every row taller). Labels
