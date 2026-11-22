@@ -6,6 +6,7 @@ from ..Util import currentDirectory, checkForWritePermissions, open_folder, log,
 from .QTcustom import RegularQTPopup
 from ..GenerateFFMpegCommand import FFMpegCommand
 from ..VideoInfo import VideoLoader
+from ..video_probe import is_probeable_input
 
 # the combo box shows user words, the backend wants flag values.
 # this is the single place where the two are mapped.
@@ -140,12 +141,19 @@ class SettingsTab:
         self.out_pixel_fmt = pxfmtDict[self.out_pixel_fmt]
 
         input_file = self.parent.inputFileText.text()
-        if input_file and len(input_file) > 1: # caching is nice
-            if self.input_file != input_file:
-                self.input_file = input_file
+        # Only ask the backend about a REAL file (or a URL): the field carries the batch sentinel `{ MULTIPLE_FILES }`
+        # whenever a folder is loaded, and probing that produced no FPS line - which used to end in a ZeroDivisionError
+        # on every encoder change (measured 2026-11-22).
+        if is_probeable_input(input_file) and self.input_file != input_file:
+            # caching is nice: the probe launches a backend for cv2 + ffmpeg
+            self.input_file = input_file
+            try:
                 self.ffmpegInfoWrapper = VideoLoader(self.input_file)
                 self.ffmpegInfoWrapper.loadVideo()
                 self.ffmpegInfoWrapper.getData()
+            except Exception as probe_error:      # a broken file must not take the settings page down
+                log(f"encoder settings: could not read {self.input_file} ({probe_error})")
+            else:
                 self.hdr_mode = (self.ffmpegInfoWrapper.is_hdr) and self.settings.settings['auto_hdr_mode'] == "True"
                 self.color_space = self.ffmpegInfoWrapper.color_space
                 self.color_primaries = self.ffmpegInfoWrapper.color_primaries

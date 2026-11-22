@@ -2,6 +2,7 @@ import subprocess
 import re
 import os
 from .constants import FFMPEG_PATH
+from .video_probe import duration_seconds, is_probeable_input
 
 class RVEBackendWrapper:
     def __init__(self, input_file: str):
@@ -146,7 +147,9 @@ class VideoLoader:
        
         self.fps = self.ffmpeg_info.get_fps()
         self.total_frames = int(self.ffmpeg_info.get_total_frames())
-        self.duration = self.total_frames / self.fps
+        # `duration_seconds` owns the zero-fps rule: a probe that reports no frame rate is a 0-duration video, not a
+        # crash (src/video_probe.py explains the traceback this replaces).
+        self.duration = duration_seconds(self.total_frames, self.fps)
         self.color_space = self.ffmpeg_info.get_color_space()
         self.color_transfer = self.ffmpeg_info.get_color_transfer()
         self.color_primaries = self.ffmpeg_info.get_color_primaries()
