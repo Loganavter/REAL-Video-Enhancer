@@ -40,6 +40,9 @@ HIDE_SHORTCUT = "Ctrl+Shift+H"
 #: every page inside a QStackedWidget whose size is not the stack's (the stale-page signature). It writes a file, so the
 #: answer is copyable instead of argued over a screenshot.
 AUDIT_SHORTCUT = "Ctrl+Shift+D"
+#: Cursor probe: names the painter at the cursor and compares what it RENDERS (`grab()`) with what the screen shows
+#: (`grabWindow`) - the pair that separates our painting from the compositor's.
+PROBE_SHORTCUT = "Ctrl+Shift+P"
 
 
 def enabled() -> bool:
@@ -97,6 +100,19 @@ def install(window) -> QObject | None:
                 _log(window, f"audit: {line}")
         _log(window, f"audit written: {path}")
 
+    def _probe() -> None:
+        from . import layout_audit
+
+        path = layout_audit.write_probe(window)
+        with open(path, encoding="utf-8") as handle:
+            for line in handle.read().splitlines():
+                _log(window, f"probe: {line}")
+        _log(window, f"probe written: {path}")
+
+    probe_shortcut = QShortcut(QKeySequence(PROBE_SHORTCUT), window)
+    probe_shortcut.activated.connect(_probe)
+    holder._probe_shortcut = probe_shortcut  # type: ignore[attr-defined]
+
     audit_shortcut = QShortcut(QKeySequence(AUDIT_SHORTCUT), window)
     audit_shortcut.activated.connect(_audit)
     holder._audit_shortcut = audit_shortcut  # type: ignore[attr-defined]
@@ -110,7 +126,8 @@ def install(window) -> QObject | None:
     holder._hide_shortcut = hide_shortcut  # type: ignore[attr-defined]
     window._debug_keys = holder
     _log(window, f"debug keys: {REPAINT_SHORTCUT} = repaint the window, {HIDE_SHORTCUT} = hide the widget "
-                 f"under the cursor, {AUDIT_SHORTCUT} = write a layout audit")
+                 f"under the cursor, {AUDIT_SHORTCUT} = write a layout audit, "
+                 f"{PROBE_SHORTCUT} = probe the pixel under the cursor")
     return holder
 
 

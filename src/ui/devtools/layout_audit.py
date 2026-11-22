@@ -21,7 +21,8 @@ from __future__ import annotations
 import os
 import time
 
-from PySide6.QtWidgets import QStackedWidget, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 
 
 def _rect(widget: QWidget) -> str:
@@ -96,9 +97,79 @@ def audit(window: QWidget) -> list[str]:
     return lines
 
 
+def probe_at(window: QWidget, global_pos=None) -> list[str]:
+    """Name the painter at a screen point, and compare what it WOULD paint with what is on the screen.
+
+    The audit answers "is something clipped" (geometry). When geometry is correct and the screen still shows a stale
+    strip, the question changes: does the widget paint the right pixel and the compositor show another? The rendered
+    answer comes from `widget.grab()` - a fresh re-render of that widget - and the screen answer from
+    `QScreen.grabWindow`, so the two can be compared directly.
+    """
+    from PySide6.QtGui import QCursor
+
+    pos = global_pos or QCursor.pos()
+    lines = [f"probe {time.strftime('%H:%M:%S')} at global {pos.x()},{pos.y()}"]
+
+    widget = QApplication.widgetAt(pos) if QApplication.instance() is not None else None
+    if widget is None:
+        lines.append("  nothing under the cursor (QApplication.widgetAt returned None)")
+        return lines
+
+    lines.append(f"  chain: {_chain(widget)}")
+    node = widget
+    depth = 0
+    while node is not None and depth < 8:
+        local = node.mapFromGlobal(pos)
+        inside = node.rect().contains(local)
+        native = bool(node.internalWinId())
+        lines.append(
+            f"  [{depth}] {type(node).__name__}#{node.objectName()} {_rect(node)} "
+            f"content={node.contentsRect().width()}x{node.contentsRect().height()} "
+            f"local={local.x()},{local.y()} inside={inside} native_win={native} "
+            f"opaque={bool(node.testAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent))} "
+            f"translucent={bool(node.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))} "
+            f"autofill={bool(node.autoFillBackground())}"
+        )
+        node = node.parentWidget()
+        depth += 1
+
+    # Rendered truth: re-render the widget under the cursor and read the pixel at the cursor.
+    try:
+        local = widget.mapFromGlobal(pos)
+        image = widget.grab().toImage()
+        if 0 <= local.x() < image.width() and 0 <= local.y() < image.height():
+            rendered = image.pixelColor(local.x(), local.y()).name()
+            lines.append(f"  RENDERED pixel at the cursor: {rendered}")
+        else:
+            lines.append(f"  RENDERED: cursor outside the grabbed image ({image.width()}x{image.height()})")
+    except Exception as error:
+        lines.append(f"  RENDERED: grab failed ({error})")
+
+    # Screen truth: what the compositor is showing at that point.
+    try:
+        screen = window.screen()
+        pixmap = screen.grabWindow(0, pos.x(), pos.y(), 1, 1)
+        on_screen = pixmap.toImage().pixelColor(0, 0).name() if not pixmap.isNull() else "n/a"
+        lines.append(f"  SCREEN   pixel at the cursor: {on_screen}")
+        if "rendered" in locals() and on_screen not in ("n/a", rendered):
+            lines.append("  MISMATCH: the widget renders one colour and the screen shows another")
+    except Exception as error:
+        lines.append(f"  SCREEN: grabWindow unavailable ({error})")
+    return lines
+
+
 def _page_name(page: QWidget) -> str:
     name = page.objectName()
     return f"{type(page).__name__}#{name}" if name else type(page).__name__
+
+
+def write_probe(window: QWidget, directory: str | None = None) -> str:
+    """Write the cursor probe (see `probe_at`) next to the app's log; returns the file path."""
+    directory = directory or os.getcwd()
+    path = os.path.join(directory, f"layout-probe-{time.strftime('%Y%m%d-%H%M%S')}.txt")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(probe_at(window)) + "\n")
+    return path
 
 
 def write(window: QWidget, directory: str | None = None) -> str:
