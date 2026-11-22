@@ -1038,18 +1038,18 @@ def main(file_to_open=None):
         if _timing:
             print(f"startup {_time.perf_counter() - _t0:6.2f}s  {label}", flush=True)
 
-    # Opaque surfaces, asked for BEFORE the platform plugin is up: QtWayland chooses the toplevel's buffer format from
-    # the default QSurfaceFormat, and a buffer with an alpha channel is what lets a compositor (and, on some stacks, the
-    # direct-scanout path) blend the desktop into pixels the app did not paint. Nothing in this app needs a translucent
-    # toplevel - the rounded corners are painted inside the surface - so ask for no alpha at all.
-    from PySide6.QtGui import QSurfaceFormat
+    # The surface format stays the platform default, like every other Qt application on this machine: the reference app
+    # (Telegram Desktop 7.2.9) never touches `QSurfaceFormat`, and the "desktop shows through the window" artifact turned
+    # out to be environment-level (it reproduces in BlinkTable and tdesktop on the same GNOME/NVIDIA session and is
+    # invisible in screenshots - harness/docs/wsp/session-2026-11-22.md §20). Asking for an alpha-less surface is kept as
+    # an explicit experiment, not as a default deviation.
+    if os.environ.get("RVE_UI_ALPHA0"):
+        from PySide6.QtGui import QSurfaceFormat
 
-    if os.environ.get("RVE_UI_NO_ALPHA0"):
-        print("[window] RVE_UI_NO_ALPHA0: leaving the default surface format alone", flush=True)
-    else:
         _surface_format = QSurfaceFormat.defaultFormat()
         _surface_format.setAlphaBufferSize(0)
         QSurfaceFormat.setDefaultFormat(_surface_format)
+        print("[window] RVE_UI_ALPHA0: surface format without an alpha channel", flush=True)
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
