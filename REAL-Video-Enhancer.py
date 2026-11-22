@@ -139,6 +139,16 @@ class MainWindow(QMainWindow):
                 layout_dump.install(self)
         except Exception as _cap_exc:
             log(f"page capture failed: {_cap_exc}")
+        # The toolkit's UI inspector, opt-in (`RVE_UI_INSPECTOR=1`): the tool window plus Shift+click selection. It
+        # installs an application-wide event filter, so it is a development instrument, not a default.
+        try:
+            from src.ui.devtools import ui_inspector
+
+            if ui_inspector.enabled():
+                ui_inspector.install(self)
+                log("ui inspector: armed (Shift+click a widget; Ctrl+Shift+I raises the tool window)")
+        except Exception as _inspector_exc:
+            log(f"ui inspector failed: {_inspector_exc}")
         # The v2 runtime swap (`toolkit_swap.py`, `toolkit_spike.py`) is gone with W3: pages are built by their own
         # modules now, so a migration is an edit in a page module, not a splice into a live Designer tree.
         #self.VideoPreview.setVisible(False)
