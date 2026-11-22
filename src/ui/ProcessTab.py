@@ -10,6 +10,7 @@ from PySide6.QtGui import QPixmap, QPainter, QPainterPath, QColor, QFontMetrics
 from PySide6.QtCore import Qt, QSize, QUrl
 
 from .RenderQueue import RenderQueue
+from ..render_jobs import short_duration
 from .render_log import LogLine, RenderLogFilter
 from . import shared_flag
 
@@ -62,6 +63,8 @@ class ProcessTab:
         self.userKilled = False
         self.currentRenderOptions = None
         self.status = "Idle"
+        #: monotonic stamp of the current render, for the "elapsed" half of the progress line
+        self._render_started_mono = None
         self.animationHandler = AnimationHandler()
         self.tileUpAnimationHandler = AnimationHandler()
         self.tileDownAnimationHandler = AnimationHandler()
@@ -81,6 +84,38 @@ class ProcessTab:
         # get default backend
         self.QConnect()
         self.populateModels(self.parent.backendComboBox.currentText())
+        self.setStatus("Idle")
+
+    def setStatus(self, text: str) -> None:
+        """The one place that decides what `STATUS:` says - never leave a stale phase on screen."""
+        self.status = str(text)
+        try:
+            self.parent.STATUS.setText(f"Status: {self.status}")
+        except Exception:
+            pass
+
+    def setProgressDetail(self, text: str) -> None:
+        try:
+            self.parent.progressDetail.setText(str(text))
+        except Exception:
+            pass
+
+    def progressDetailText(self) -> str:
+        """`42% · 12m3s elapsed · 16m40s left · frame 1234/5678` - empty while idle."""
+        if self._render_started_mono is None and not self.max_value:
+            return ""
+        total = max(1, int(self.max_value or 0))
+        done = max(0, min(total, int(self.currentFrame or 0)))
+        parts = [f"{int(round(100.0 * done / total))}%"]
+        if self._render_started_mono is not None:
+            from time import monotonic
+
+            elapsed = max(0.0, monotonic() - self._render_started_mono)
+            parts.append(f"{short_duration(elapsed)} elapsed")
+        if self.eta:
+            parts.append(f"{self.eta} left")
+        parts.append(f"frame {done}/{total}")
+        return " · ".join(parts)
 
     def populateModels(self, backend) -> dict:
         """
@@ -263,10 +298,15 @@ class ProcessTab:
         hide_layout_widgets(self.parent.onRenderButtonsContiainer)
         self.parent.startRenderButton.setVisible(True)
         self.parent.startRenderButton.setEnabled(True)
+        self.setStatus("Paused")
 
     def resumeRender(self):
         shmbuf = self.pausedSharedMemory.buf
         shmbuf[0] = 0  # 0 = False
+        from time import monotonic
+
+        self._render_started_mono = monotonic()
+        self.setStatus("Preparing")
         show_layout_widgets(self.parent.onRenderButtonsContiainer)
         self.parent.onRenderButtonsContiainer.setEnabled(True)
         self.parent.startRenderButton.setVisible(False)
@@ -321,6 +361,10 @@ class ProcessTab:
         self.return_codes = [] # reset return codes
         self.userKilled = False # reset userkilled
         # gui changes
+        from time import monotonic
+
+        self._render_started_mono = monotonic()
+        self.setStatus("Preparing")
         show_layout_widgets(self.parent.onRenderButtonsContiainer)
         self.parent.startRenderButton.setVisible(False)
         self.parent.startRenderButton.clicked.disconnect()
@@ -423,10 +467,10 @@ class ProcessTab:
                         self.fps = re.search(r"FPS: (\d+)", line).group(1)
                         # bounded to h:mm:ss: the stream can carry a log record on the same line
                         self.eta = re.search(r"ETA: (\d+(?::\d+){2})", line).group(1)
-                        self.status = "Rendering"
+                        self.setStatus("Rendering")
 
                     if "this may take a while" in line.lower():
-                        self.status = "Building Engine, this may take a while."
+                        self.setStatus("Building engine…")
 
 
                     # The pane gets the EVENTS, not the telemetry: per-frame timings, the live progress line it already
@@ -490,9 +534,13 @@ class ProcessTab:
         self.parent.startRenderButton.clicked.connect(self.parent.startRender)
         self.parent.enableProcessPage()
         self.parent.startRenderButton.setVisible(True)
+        self._render_started_mono = None
+        self.setProgressDetail("")
+        finished_ok = all(code == 0 or code == 3221225477 for code in self.return_codes) or self.userKilled
+        self.setStatus("Idle" if finished_ok else "Failed")
         self.parent.FPS.setText("FPS: ")
         self.parent.ETA.setText("ETA: ")
-        self.parent.STATUS.setText("Status: ")
+
         self._restoreQueueAfterPreview()
         if self.currentRenderOptions.isPreview:
             from PySide6.QtMultimedia import QMediaPlayer
@@ -647,6 +695,7 @@ class ProcessTab:
             except Exception:
                 pass
             self.parent.progressBar.setValue(self.currentFrame)
+            self.setProgressDetail(self.progressDetailText())
             if self.fps != 0:
                 self.parent.FPS.setVisible(True)
                 self.parent.FPS.setText(f"FPS: {self.fps}")

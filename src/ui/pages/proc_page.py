@@ -326,6 +326,13 @@ class ProcPagePage:
         # is the one it is always in.
         self.horizontalLayout_32.addWidget(self.progressBar)
         self.verticalLayout_21.addWidget(self.widget_13)
+        # The bar itself paints no label, so the numbers live on their own line right under it: percentage, elapsed,
+        # remaining and the frame counter (owner, 2026-11-22: "under the huge progress bar there is no way to learn the
+        # progress in percent or minutes, how much has passed").
+        self.progressDetail = Text(parent=self.bottomMenuSubContainer)
+        self.progressDetail.setObjectName(u"progressDetail")
+        apply(self.progressDetail, CAPTION_PT)
+        self.verticalLayout_21.addWidget(self.progressDetail)
         self.verticalLayout_7.addWidget(self.bottomMenuSubContainer)
         self.gridLayout_3.addWidget(self.processContainer, 0, 1, 1, 1)
         self.processSettingsContainer.setCurrentIndex(0)
