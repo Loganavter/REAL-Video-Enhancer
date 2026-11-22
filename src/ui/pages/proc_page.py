@@ -94,6 +94,11 @@ class ProcPagePage:
         self.previewLabel.setSizePolicy(sizePolicy4)
         self.previewLabel.setScaledContents(False)
         self.previewLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # `RVE_UI_PREVIEW_LABEL=default|opaque|fill|hide|small` cuts THIS label down one property at a time; the default
+        # is a no-op, and the module logs the mode it applied (src/ui/devtools/label_bisect.py).
+        from src.ui.devtools import label_bisect
+
+        label_bisect.apply(self.previewLabel)
         self.verticalLayout_8.addWidget(self.previewLabel)
         self.VideoPreview = QWidget(self.previewSubContainer)
         self.VideoPreview.setObjectName(u"VideoPreview")
