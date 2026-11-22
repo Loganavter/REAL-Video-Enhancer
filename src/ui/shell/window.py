@@ -234,12 +234,13 @@ class MainWindowShell:
                 "window backdrop: the theme has no `surface.page` token, so the window would have no opaque "
                 "background and a compositing window manager would show the desktop through it. Install the toolkit "
                 "theme before MainWindowShell.build().")
-        # Paint it ourselves and DECLARE the surface opaque. `autoFillBackground` alone fills the window, but Qt still
-        # reports a surface with per-pixel alpha to the compositor: any pixel a child leaves alone (every page/panel is
-        # WA_TranslucentBackground, and an `ImageLabel` with no pixmap paints nothing) is then blended against whatever
-        # window sits behind the app - the owner saw his terminal through the preview pane (2026-11-22). With
-        # WA_OpaquePaintEvent the whole window rect goes into the surface's opaque region, so the compositor ignores
-        # alpha there, and `MainWindow.paintEvent` guarantees the fill really covers every pixel.
+        # Paint the backdrop ourselves - the reference host's `OpaqueFillHost` pattern: an explicit `paintEvent` fill
+        # with `WA_TranslucentBackground` off and `autoFillBackground` off, and NO `WA_OpaquePaintEvent` (that flag is
+        # for leaf widgets that fill their own rect; on a container whose children skip painting it leaves their areas
+        # unrepainted, which is the stale-fragment bug this comment used to prescribe). The see-through the owner saw
+        # through the preview pane turned out to be environment-level - it reproduces in BlinkTable and in Telegram
+        # Desktop on the same mutter/NVIDIA session and never in a screenshot (session note §20) - so it must not be
+        # bought with a flag that breaks repainting.
         window._backdrop_colour = _backdrop
         window.setAutoFillBackground(False)
         # `RVE_UI_FORCE_COMPOSITE=1` withholds the opaque DECLARATION only: the window still paints its own backdrop, so
@@ -253,10 +254,14 @@ class MainWindowShell:
             # The paintEvent-based fill and the opacity declaration go together: with one gone the other would leave the
             # window unpainted. Both are switched off for the bisect of the window's own properties.
             window.setAutoFillBackground(True)
-        elif _os.environ.get("RVE_UI_FORCE_COMPOSITE"):
-            print("[window] composite test: the opaque region is NOT declared - the compositor must blend this window",
-                  flush=True)
-        else:
+        elif _os.environ.get("RVE_UI_OPAQUE_SURFACE"):
+            # Opt-in only, and not the default: `WA_OpaquePaintEvent` on a window whose children are all translucent is
+            # the anti-pattern the reference host spells out - "that flag plus a skipped/disabled update punches
+            # see-through holes through the window chrome" (BlinkTable `ui/widgets/shelf/widget.py`, OpaqueFillHost).
+            # Here it cost stale pixels: a sub-tab switch or a render start left fragments of the previous page because
+            # nothing repainted the area the new content did not cover (owner, 2026-11-22, healed by a window resize).
+            # The canopy below is the reference host's pattern instead: the widget paints its own rect, the flag that
+            # tells Qt "I paint everything, do not repaint for me" is NOT set.
             window.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         _window_palette = window.palette()
         _window_palette.setColor(QPalette.ColorRole.Window, _backdrop)

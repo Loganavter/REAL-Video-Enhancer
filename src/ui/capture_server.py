@@ -284,9 +284,12 @@ def install(window) -> None:
         the same pixels whether or not it is disabled, so a grab cannot tell them apart. This answer can: `enabled`,
         visibility, and the scroll range/value of whatever scrolls inside it.
         """
+        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QWidget
 
         target = window.findChild(QWidget, name.strip())
+        if target is None and name.strip() == window.objectName():
+            target = window          # the window itself is not its own child
         report = {"stamp": _stamp(), "kind": "state", "target": name.strip(), "error": None}
         if target is None:
             report["error"] = "widget not found"
@@ -298,6 +301,10 @@ def install(window) -> None:
             "enabled": bool(target.isEnabled()),
             "visible": bool(target.isVisible()),
             "size": [target.width(), target.height()],
+            # The window's own attributes: `opaque_paint` is the flag that used to make the shell skip repaints.
+            "opaque_paint": bool(target.testAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)),
+            "translucent": bool(target.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)),
+            "autofill": bool(target.autoFillBackground()),
         })
         for attr in ("count", "currentRow", "selectedRows", "selectedCount"):
             getter = getattr(target, attr, None)
