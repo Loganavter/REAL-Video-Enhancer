@@ -81,25 +81,11 @@ class RenderQueueTabPage:
         self.renderQueueListWidget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.renderQueueListWidget.setProperty(u"showDropIndicator", True)
         self.horizontalLayout_38.addWidget(self.renderQueueListWidget)
-        self.verticalLayout_27.addWidget(self.widget_22)
-        self.gridLayout_4 = QGridLayout()
-        self.gridLayout_4.setSpacing(0)
-        self.gridLayout_4.setObjectName(u"gridLayout_4")
-        self.OutputFilesListWidget = TextListWidget(self.renderQueueTab, row_height=20, radius=10,
-            surface_token="dialog.background")
-        self.OutputFilesListWidget.setObjectName(u"OutputFilesListWidget")
-        sizePolicy5.setHeightForWidth(self.OutputFilesListWidget.sizePolicy().hasHeightForWidth())
-        self.OutputFilesListWidget.setSizePolicy(sizePolicy5)
-        self.OutputFilesListWidget.setMinimumSize(QSize(0, 0))
-        self.OutputFilesListWidget.setMaximumSize(QSize(16777215, 16777215))
-
-        self.gridLayout_4.addWidget(self.OutputFilesListWidget, 1, 0, 1, 1)
-        self.label_51 = Text(parent=self.renderQueueTab)
-        self.label_51.setObjectName(u"label_51")
-        self.gridLayout_4.addWidget(self.label_51, 0, 0, 1, 1)
-        self.verticalLayout_27.addLayout(self.gridLayout_4)
+        self.verticalLayout_27.addWidget(self.widget_22, 1)
+        # The bottom "Finished Output Files" list is gone (owner, 2026-11-22): a finished job stays in the queue with its
+        # final state, so the page is ONE list and it takes the whole height instead of sharing it with a second pane.
         self.retranslate()
         return self.renderQueueTab
 
     def retranslate(self) -> None:
-        self.label_51.setText(QCoreApplication.translate("MainWindow", u"Finished Output Files:", None))
+        pass

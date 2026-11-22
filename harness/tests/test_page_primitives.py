@@ -75,7 +75,6 @@ PAGES_PIN: dict[str, dict[str, str]] = {
     },
     "render_queue_tab": {
         "renderQueueListWidget": "TextListWidget",
-        "OutputFilesListWidget": "TextListWidget",
     },
     "home_page": {"changeLogText": "RichTextView", "systemInfoText": "RichTextView"},
     "tab_5": {"renderOutput": "ConsoleView"},

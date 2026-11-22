@@ -534,6 +534,33 @@ def install(window) -> None:
                      "point": [gx, gy]})
             print(f"capture-server: probe_at ({gx},{gy}) -> {len(lines)} line(s)", flush=True)
             return
+        if wanted.startswith("job:"):
+            # Put one queue row into a given state so the row painter can be looked at without a render:
+            # `job:<index>@<status>:<fraction>` e.g. `job:1@rendering:0.75`.
+            spec = wanted[len("job:"):].strip()
+            index_text, _, state_text = spec.partition("@")
+            status, _, fraction_text = state_text.partition(":")
+            jobs = window.renderQueue.getQueue()
+            report = {"stamp": _stamp(), "kind": "job", "error": None, "index": index_text}
+            try:
+                index = int(index_text)
+                job = jobs[index]
+            except (ValueError, IndexError):
+                report["error"] = "no such job"
+                _finish(report)
+                return
+            window.renderQueue.mark_rendering(job)
+            if status == "done":
+                window.renderQueue.mark_finished(job)
+            elif fraction_text:
+                window.renderQueue.update_progress(job, float(fraction_text))
+            window.renderQueueListWidget.update()
+            for _ in range(4):
+                QApplication.processEvents()
+            report["state"] = (job.state.status, job.state.progress)
+            _finish(report)
+            print(f"capture-server: job {index} -> {report['state']}", flush=True)
+            return
         if wanted.startswith("audit:"):
             from src.ui.devtools import layout_audit
 

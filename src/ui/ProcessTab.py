@@ -121,6 +121,24 @@ class ProcessTab:
             else:
                 subprocess.Popen(["xdg-open", output_folder])
 
+    def installQueueRows(self) -> None:
+        """Queue rows carry a job's state: a thin progress bar, the percentage, and a hover line.
+
+        The rows are painted by the host - `TextListWidget` stays a text list (see `src/ui/render_jobs.py`).
+        """
+        from .queue_rows import queue_row_painter, queue_tooltip
+
+        widget = self.parent.renderQueueListWidget
+        widget.set_row_painter(queue_row_painter(self.parent.renderQueue))
+        widget.set_row_tooltip_provider(queue_tooltip(self.parent.renderQueue))
+
+    def refreshQueueRows(self) -> None:
+        """Repaint the queue after a state change (a tick, a finish): the painter reads the model, no row rebuild."""
+        try:
+            self.parent.renderQueueListWidget.update()
+        except Exception:
+            pass
+
     def installQueueMenu(self) -> None:
         """The queue's right-click menu - the replacement for the three buttons the page used to carry.
 
@@ -185,6 +203,7 @@ class ProcessTab:
         # connect file select buttons
         self.parent.addToRenderQueueButton.clicked.connect(self.parent.addToRenderQueue)
         self.installQueueMenu()
+        self.installQueueRows()
         self.parent.inputFileSelectButton.clicked.connect(self.parent.openInputFile)
         self.parent.batchSelectButton.clicked.connect(self.parent.openBatchFiles)
         self.parent.inputFileText.textChanged.connect(self.parent.loadVideo)
@@ -350,10 +369,12 @@ class ProcessTab:
     ):
         self.createPausedSharedMemory()
 
-        for renderOptions in renderQueue.getQueue():
+        for renderOptions in renderQueue.pending_jobs():
             
             self.isPreview = renderOptions.isPreview
             self.currentRenderOptions = renderOptions
+            renderQueue.mark_rendering(renderOptions)
+            self.refreshQueueRows()
 
             # The preview block is a fixed-size thumbnail now, not the output frame: its
             # geometry comes from one constant on both sides, so it is allocated before the
@@ -429,9 +450,8 @@ class ProcessTab:
                 if len(line) > 2:
                     log(line)
 
-            self.parent.OutputFilesListWidget.addItem(
-                renderOptions.outputPath
-            )  # add the file to the list widget
+            renderQueue.mark_finished(renderOptions, ok=self.return_codes[-1] in (0, 3221225477))
+            self.refreshQueueRows()
             self.workerThread.deleteSharedMemory()
 
         self.closePausedSharedMemory()
@@ -604,6 +624,13 @@ class ProcessTab:
                 self.max_value
             )
             self.syncRenderConsole()
+            try:
+                options = getattr(self, "currentRenderOptions", None)
+                if options is not None and self.max_value:
+                    self.parent.renderQueue.update_progress(options, self.currentFrame / max(1, self.max_value))
+                    self.refreshQueueRows()
+            except Exception:
+                pass
             self.parent.progressBar.setValue(self.currentFrame)
             if self.fps != 0:
                 self.parent.FPS.setVisible(True)

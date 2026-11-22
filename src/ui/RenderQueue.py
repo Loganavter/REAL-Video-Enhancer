@@ -293,6 +293,42 @@ class RenderOptions:
         
 
 
+from dataclasses import dataclass as _dataclass, field as _field
+from time import monotonic as _monotonic, time as _wallclock
+
+
+@_dataclass
+class JobState:
+    """Where one queued job stands: the queue row's progress bar and its hover line come from here.
+
+    Times are kept twice on purpose: `monotonic` for durations (wall-clock jumps must not produce a negative render time)
+    and wall clock for "18hr ago" (a monotonic origin means nothing to a human).
+    """
+
+    status: str = "pending"          # pending | rendering | done | failed
+    progress: float | None = None    # 0..1 while rendering, 1.0 when done
+    started_mono: float | None = None
+    started_wall: float | None = None
+    finished_mono: float | None = None
+    finished_wall: float | None = None
+    source_seconds: float = 0.0      # the input's duration
+    error: str = ""
+
+    def elapsed(self) -> float:
+        if self.started_mono is None:
+            return 0.0
+        end = self.finished_mono if self.finished_mono is not None else _monotonic()
+        return max(0.0, end - self.started_mono)
+
+    def duration(self) -> float:
+        """Render time for a finished job, elapsed time for a running one."""
+        return self.elapsed()
+
+    def produced_seconds(self) -> float:
+        """Media duration produced so far (progress x source duration)."""
+        return max(0.0, (self.progress or 0.0)) * self.source_seconds
+
+
 class RenderQueue:
     """The render queue: the options, the names, and the list the user picks them from.
 
@@ -321,6 +357,9 @@ class RenderQueue:
     def add(self, renderable: RenderOptions):
         if self.locked:
             return
+        if getattr(renderable, "state", None) is None:
+            renderable.state = JobState(source_seconds=float(getattr(renderable, "videoFrameCount", 0) or 0)
+                                        / max(1.0, float(getattr(renderable, "videoFps", 1) or 1)))
         self.queue.append(renderable)
         self.qlistwidget.addItem(renderable.inputFile)
         self.inputNameList.append(renderable.inputFile)
@@ -339,6 +378,35 @@ class RenderQueue:
 
     def getQueue(self) -> list[RenderOptions]:
         return self.queue
+
+    def pending_jobs(self) -> list[RenderOptions]:
+        """Jobs still to render - a finished row stays in the list as history, it is not run again."""
+        return [item for item in self.queue if getattr(getattr(item, "state", None), "status", "pending") == "pending"]
+
+    def mark_rendering(self, renderable: RenderOptions) -> None:
+        state = getattr(renderable, "state", None)
+        if state is None:
+            return
+        state.status = "rendering"
+        state.progress = 0.0
+        state.started_mono = _monotonic()
+        state.started_wall = _wallclock()
+
+    def update_progress(self, renderable: RenderOptions, fraction: float) -> None:
+        state = getattr(renderable, "state", None)
+        if state is None or state.status != "rendering":
+            return
+        state.progress = max(0.0, min(1.0, float(fraction)))
+
+    def mark_finished(self, renderable: RenderOptions, *, ok: bool = True, error: str = "") -> None:
+        state = getattr(renderable, "state", None)
+        if state is None:
+            return
+        state.status = "done" if ok else "failed"
+        state.progress = 1.0 if ok else state.progress
+        state.finished_mono = _monotonic()
+        state.finished_wall = _wallclock()
+        state.error = str(error)
 
     def selectedRows(self) -> list[int]:
         rows = getattr(self.qlistwidget, "selectedRows", None)

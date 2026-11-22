@@ -36,6 +36,12 @@ _ICON_REASON = ("question-mark icon label, deleted with the rest in 54b36567; th
 
 #: Designer attributes the app deliberately no longer exposes. Keyed by name: a name that reappears on
 #: the surface must be removed from here (the test asserts both directions), so this cannot rot silently.
+_FINISHED_LIST_REASON = (
+    "the queue page's second list ('Finished Output Files') was removed on purpose: a finished job stays in the queue as "
+    "a row with its final state, so the page is one list that takes the whole height (owner, 2026-11-22). The frozen "
+    "Designer fixture still builds it"
+)
+
 _QUEUE_BUTTONS_REASON = (
     "the queue's Remove / Move Up / Move Down buttons and their column were deleted on purpose: the actions live in "
     "the list's right-click menu and apply to the whole selection (owner, 2026-11-22). The frozen Designer fixture "
@@ -47,6 +53,9 @@ ACCEPTED_MISSING: dict[str, str] = {
     "MoveUpRenderQueue": _QUEUE_BUTTONS_REASON,
     "MoveDownRenderQueue": _QUEUE_BUTTONS_REASON,
     "widget_23": _QUEUE_BUTTONS_REASON,
+    "OutputFilesListWidget": _FINISHED_LIST_REASON,
+    "gridLayout_4": _FINISHED_LIST_REASON,
+    "label_51": _FINISHED_LIST_REASON,
     "verticalLayout_28": _QUEUE_BUTTONS_REASON,
     "label_17": _ICON_REASON,
     "label_21": _ICON_REASON,
