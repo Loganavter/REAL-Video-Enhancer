@@ -249,7 +249,11 @@ class MainWindowShell:
         # owner, 2026-11-22.)
         import os as _os
 
-        if _os.environ.get("RVE_UI_FORCE_COMPOSITE"):
+        if _os.environ.get("RVE_UI_NO_BACKDROP_PAINT"):
+            # The paintEvent-based fill and the opacity declaration go together: with one gone the other would leave the
+            # window unpainted. Both are switched off for the bisect of the window's own properties.
+            window.setAutoFillBackground(True)
+        elif _os.environ.get("RVE_UI_FORCE_COMPOSITE"):
             print("[window] composite test: the opaque region is NOT declared - the compositor must blend this window",
                   flush=True)
         else:

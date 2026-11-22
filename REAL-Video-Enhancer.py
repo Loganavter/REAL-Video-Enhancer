@@ -104,7 +104,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QPainter
 
         backdrop = getattr(self, "_backdrop_colour", None)
-        if backdrop is None:
+        if backdrop is None or os.environ.get("RVE_UI_NO_BACKDROP_PAINT"):
             super().paintEvent(event)
             return
         painter = QPainter(self)
@@ -1044,9 +1044,12 @@ def main(file_to_open=None):
     # toplevel - the rounded corners are painted inside the surface - so ask for no alpha at all.
     from PySide6.QtGui import QSurfaceFormat
 
-    _surface_format = QSurfaceFormat.defaultFormat()
-    _surface_format.setAlphaBufferSize(0)
-    QSurfaceFormat.setDefaultFormat(_surface_format)
+    if os.environ.get("RVE_UI_NO_ALPHA0"):
+        print("[window] RVE_UI_NO_ALPHA0: leaving the default surface format alone", flush=True)
+    else:
+        _surface_format = QSurfaceFormat.defaultFormat()
+        _surface_format.setAlphaBufferSize(0)
+        QSurfaceFormat.setDefaultFormat(_surface_format)
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -1128,28 +1131,16 @@ def main(file_to_open=None):
     _warm_widget(window)
     window.grab()
     _stamp("first frame warmed")
-    # Mutually exclusive, not both: `show()` after `showFullScreen()` asks the platform for a NORMAL window again, and
-    # QtWayland/GNOME can end up with a state/frame that disagrees with the surface geometry - observed by the owner as
-    # the app "missing by ~50 px" (the title bar's height) with a strip of the desktop showing at one edge, flipping up
-    # and down between reconfigurations (2026-11-22). One call states one state.
-    if "--fullscreen" in sys.argv:
+    # One call, one state - `show()` after `showFullScreen()` asks the platform for a NORMAL window again, and
+    # QtWayland/GNOME can end up with a state/frame that disagrees with the surface geometry.
+    #
+    # `--fullscreen` means MAXIMIZED, not `showFullScreen()`: borderless fullscreen is by definition a window with no
+    # decorations, which the owner called "уродский, буквально без CSD" (2026-11-22). Maximized keeps the title bar and
+    # still covers the screen. The borderless case is its own flag, because it is its own thing.
+    if "--borderless-fullscreen" in sys.argv:
         window.showFullScreen()
-
-        def _assert_fullscreen() -> None:
-            """Re-state the state once if the compositor acknowledged the map with a normal window.
-
-            A Wayland compositor may answer the first commit with a normal-state configure (the request and the map
-            race), which leaves the window sized like a normal window while the surface was already laid out for the
-            screen: the owner saw the app "miss by ~50 px, now up, now down" - the title bar's height (2026-11-22).
-            One re-assert, logged, so a compositor that refuses is visible in the log instead of looking like a paint
-            bug.
-            """
-            if window.windowState() & Qt.WindowState.WindowFullScreen:
-                return
-            log("fullscreen: the state did not take on map - re-asserting once")
-            window.showFullScreen()
-
-        QTimer.singleShot(0, _assert_fullscreen)
+    elif "--fullscreen" in sys.argv:
+        window.showMaximized()
     else:
         window.show()
     # Drain the event loop before handing control to app.exec(). `show()` only QUEUES the map and the first paint, and
@@ -1168,7 +1159,7 @@ def main(file_to_open=None):
 """
 custom command args
 --debug: runs the app in debug mode
---fullscreen: runs the app in fullscreen
+--fullscreen: starts maximized (decorated); --borderless-fullscreen: real fullscreen, no frame
 --swap-flatpak-checks: swaps the flatpak checks, ex if the app is running in flatpak, it will run as if it is not
 """
 
