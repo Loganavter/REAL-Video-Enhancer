@@ -126,6 +126,7 @@ def probe_at(window: QWidget, global_pos=None) -> list[str]:
             f"  [{depth}] {type(node).__name__}#{node.objectName()} {_rect(node)} "
             f"content={node.contentsRect().width()}x{node.contentsRect().height()} "
             f"local={local.x()},{local.y()} inside={inside} native_win={native} "
+            f"window_type={int(node.windowType())} flags={int(node.windowFlags())} "
             f"opaque={bool(node.testAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent))} "
             f"translucent={bool(node.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))} "
             f"autofill={bool(node.autoFillBackground())}"
@@ -190,6 +191,14 @@ def probe_at(window: QWidget, global_pos=None) -> list[str]:
             lines.append(f"  activeModalWidget: {type(modal).__name__ if modal is not None else 'none'}")
     except Exception as error:
         lines.append(f"  popups: unavailable ({error})")
+
+    try:
+        handle = window.windowHandle()
+        if handle is not None:
+            lines.append(f"  window handle: flags={int(handle.flags())} type={int(handle.type())} "
+                         f"visible={handle.isVisible()} exposed={handle.isExposed()}")
+    except Exception:
+        pass
 
     try:
         ratio = window.devicePixelRatioF()
