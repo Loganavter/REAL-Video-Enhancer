@@ -149,6 +149,15 @@ class MainWindow(QMainWindow):
                 log("ui inspector: armed (Shift+click a widget; Ctrl+Shift+I raises the tool window)")
         except Exception as _inspector_exc:
             log(f"ui inspector failed: {_inspector_exc}")
+        # Two debug keys for "there is a rectangle on my screen": Ctrl+Shift+R repaints the window, Ctrl+Shift+H hides
+        # the widget under the cursor and logs its chain. Opt-in, like the inspector.
+        try:
+            from src.ui.devtools import debug_keys
+
+            if debug_keys.enabled():
+                debug_keys.install(self)
+        except Exception as _debug_keys_exc:
+            log(f"debug keys failed: {_debug_keys_exc}")
         # The v2 runtime swap (`toolkit_swap.py`, `toolkit_spike.py`) is gone with W3: pages are built by their own
         # modules now, so a migration is an edit in a page module, not a splice into a live Designer tree.
         #self.VideoPreview.setVisible(False)
