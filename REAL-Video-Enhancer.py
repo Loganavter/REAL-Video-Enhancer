@@ -13,7 +13,7 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["NVIDIA_TENSORRT_DISABLE_INTERNAL_PIP"] = "0"
 os.environ["PYTHON_JIT"] = "1" # enable python's experimental JIT for better performance in python 3.13
 from PySide6.QtCore import QLockFile
-from PySide6.QtWidgets import (
+from PySide6.QtWidgets import (QStackedWidget, 
     QApplication,
     QMainWindow,
     QFileDialog,
@@ -1047,6 +1047,34 @@ def main(file_to_open=None):
     # application and the deferred re-layout, so the frame the window manager presents is already complete. Cheap
     # (one full render) and it does not depend on guessing how many event-loop turns a WM needs.
     window.ensurePolished()
+
+    # Warm EVERY page of every stack, not just the current one. A QStackedWidget lays a page out the first time it is
+    # shown, and the toolkit settles its text engine and control style on that same first paint - so each page arrived
+    # with one empty frame when the user switched to it (owner report: "every content page, text ones included"). One
+    # offscreen render per page, before the window is mapped, pays that cost invisibly: `grab()` renders a hidden widget.
+    def _warm_widget(widget) -> None:
+        """Render a widget and every page of every stack below it, then recurse into those pages.
+
+        Recursive on purpose: an inner stack's non-current pages are not painted when its parent page is grabbed, so a
+        single pass over `findChildren(QStackedWidget)` leaves the nested tabs cold (a settings tab was exactly that).
+        """
+        if widget is None:
+            return
+        widget.ensurePolished()
+        widget.grab()
+        for stack in widget.findChildren(QStackedWidget):
+            current = stack.currentIndex()
+            for index in range(stack.count()):
+                page = stack.widget(index)
+                if page is None:
+                    continue
+                page.ensurePolished()
+                page.grab()
+                _warm_widget(page)
+            stack.setCurrentIndex(current)
+
+    _stamp("pages polished")
+    _warm_widget(window)
     window.grab()
     _stamp("first frame warmed")
     if "--fullscreen" in sys.argv:
