@@ -145,16 +145,34 @@ def probe_at(window: QWidget, global_pos=None) -> list[str]:
     except Exception as error:
         lines.append(f"  RENDERED: grab failed ({error})")
 
-    # Screen truth: what the compositor is showing at that point.
+    # Screen truth: what the compositor is showing at that point. A native Wayland client cannot read the screen, and
+    # then the human is the instrument - the verdict line says which two colours to compare.
     try:
         screen = window.screen()
         pixmap = screen.grabWindow(0, pos.x(), pos.y(), 1, 1)
         on_screen = pixmap.toImage().pixelColor(0, 0).name() if not pixmap.isNull() else "n/a"
         lines.append(f"  SCREEN   pixel at the cursor: {on_screen}")
-        if "rendered" in locals() and on_screen not in ("n/a", rendered):
-            lines.append("  MISMATCH: the widget renders one colour and the screen shows another")
     except Exception as error:
-        lines.append(f"  SCREEN: grabWindow unavailable ({error})")
+        on_screen = "n/a"
+        lines.append(f"  SCREEN: grabWindow unavailable ({error}) - this session cannot read the screen from inside the app")
+    rendered_colour = rendered if "rendered" in locals() else "n/a"
+    if on_screen not in ("n/a",) and rendered_colour != "n/a":
+        if on_screen != rendered_colour:
+            lines.append("  VERDICT: MISMATCH - the widget renders one colour and the screen shows another "
+                         "(compositor / backing store, not layout)")
+        else:
+            lines.append("  VERDICT: the screen agrees with the render - a widget really paints this pixel")
+    else:
+        lines.append(f"  VERDICT: compare by eye - the probe says this pixel RENDERS as {rendered_colour}. If the block "
+                     f"you see is a different colour, the compositor is showing a stale frame; if it is this colour, a "
+                     f"widget paints it and the chain above names it.")
+    try:
+        ratio = window.devicePixelRatioF()
+        handle = window.windowHandle()
+        lines.append(f"  surface: devicePixelRatio={ratio:g} platform={QApplication.platformName()} "
+                     f"window_handle={'yes' if handle is not None else 'no'}")
+    except Exception:
+        pass
     return lines
 
 
