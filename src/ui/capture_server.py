@@ -145,6 +145,138 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: probe {target}@({wx},{wy}) -> {len(report['chain'])} step(s)", flush=True)
 
+    def click(spec: str) -> None:
+        """Send a real left click: `click:<objectName>@x,y`.
+
+        A screenshot cannot tell "the row was selected" from "the row was clicked and nothing happened", and the
+        offscreen tests deliver their own events - this routes the click the way the platform does, through the widget
+        the hit-test finds.
+        """
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QWidget
+
+        target, _, coords = spec.partition("@")
+        target = target.strip()
+        widget = window.findChild(QWidget, target)
+        report = {"stamp": _stamp(), "kind": "click", "target": target, "point": coords.strip() or None,
+                  "error": None, "hit": None}
+        if widget is None:
+            report["error"] = "widget not found"
+            _finish(report)
+            print(f"capture-server: click {target!r} -> widget not found", flush=True)
+            return
+        try:
+            x, y = (int(value) for value in coords.split(","))
+        except ValueError:
+            report["error"] = "point is not x,y"
+            _finish(report)
+            return
+        point = QPoint(x, y)
+        hit = widget.childAt(point)
+        report["hit"] = {"class": type(hit).__name__, "name": hit.objectName()} if hit is not None else None
+        report["target_size"] = [widget.width(), widget.height()]
+        # The geometry chain: a painted list is three widgets deep, and a press that never reaches the rows widget looks
+        # exactly like "the click was ignored".
+        chain = []
+        node = widget
+        rows = getattr(widget, "_rows", None)
+        if rows is not None:
+            chain.append({"what": "rows", "geom": [rows.x(), rows.y(), rows.width(), rows.height()],
+                          "parent": type(rows.parent()).__name__,
+                          "in_list": [rows.mapTo(widget, QPoint(0, 0)).x(), rows.mapTo(widget, QPoint(0, 0)).y()],
+                          # What makes Qt SKIP a widget for mouse delivery (childAt ignores both of these, so a
+                          # "childAt says _Rows" answer is not proof that the press lands there):
+                          "enabled": bool(rows.isEnabled()), "visible": bool(rows.isVisible()),
+                          "mouse_transparent": bool(rows.testAttribute(
+                              Qt.WidgetAttribute.WA_TransparentForMouseEvents)),
+                          "blocked_by_modal": bool(qt_widgets.QApplication.activeModalWidget()) if False else None})
+        scroll = getattr(widget, "_scroll", None)
+        if scroll is not None:
+            viewport = scroll.viewport()
+            chain.append({
+                "what": "scroll", "geom": [scroll.x(), scroll.y(), scroll.width(), scroll.height()],
+                "viewport": [viewport.x(), viewport.y(), viewport.width(), viewport.height()],
+                # The attribute that makes Qt SKIP a widget for mouse delivery lives on EVERY level of the chain:
+                # a transparent scroll area keeps the press at the list, and no child ever sees it.
+                "scroll_transparent": bool(scroll.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)),
+                "viewport_transparent": bool(viewport.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)),
+                "scroll_enabled": bool(scroll.isEnabled()), "viewport_enabled": bool(viewport.isEnabled()),
+            })
+        report["geometry"] = chain
+        # WHERE the press actually lands: `childAt` is this script's guess, an event filter is the platform's answer.
+        from PySide6.QtCore import QEvent, QObject
+
+        delivered = []
+
+        class _Tap(QObject):
+            def eventFilter(self, obj, event):
+                if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+                    delivered.append((event.type().name, type(obj).__name__, obj.objectName()))
+                return False
+
+        tap = _Tap()
+        QApplication.instance().installEventFilter(tap)
+        try:
+            # Through the WINDOW, not the widget: `QTest.mouseClick(some_widget, ...)` posts straight to that widget,
+            # which is how an offscreen test can "prove" a click on a row that the platform would deliver elsewhere.
+            # The window handle goes through Qt's own hit-testing - the same path a real mouse takes.
+            target_window = window.windowHandle()
+            window_point = widget.mapTo(window, point)
+            QTest.mouseClick(target_window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                             window_point)
+            for _ in range(6):
+                QApplication.processEvents()
+        finally:
+            QApplication.instance().removeEventFilter(tap)
+        report["delivered"] = delivered[:6]
+        selected = getattr(widget, "selectedRows", None)
+        report["selectedRows"] = sorted(selected()) if callable(selected) else None
+        report["currentRow"] = widget.currentRow() if hasattr(widget, "currentRow") else None
+        _finish(report)
+        print(f"capture-server: click {target}@({x},{y}) -> hit={report['hit']} selected={report['selectedRows']}", flush=True)
+
+    def drag(spec: str) -> None:
+        """A real drag through the window: `drag:<objectName>@x1,y1>dydx...` - `x1,y1:x2,y2`.
+
+        The rubber band is the gesture the owner asked for, and it cannot be proven any other way: a synthetic move sent
+        straight to a widget bypasses the application filter that makes the band keep tracking.
+        """
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QWidget
+
+        target, _, coords = spec.partition("@")
+        widget = window.findChild(QWidget, target.strip())
+        report = {"stamp": _stamp(), "kind": "drag", "target": target.strip(), "error": None}
+        if widget is None or ":" not in coords:
+            report["error"] = "widget not found" if widget is None else "expected x1,y1:x2,y2"
+            _finish(report)
+            return
+        try:
+            start_text, end_text = coords.split(":", 1)
+            x1, y1 = (int(v) for v in start_text.split(","))
+            x2, y2 = (int(v) for v in end_text.split(","))
+        except ValueError:
+            report["error"] = "points are not x,y:x,y"
+            _finish(report)
+            return
+        target_window = window.windowHandle()
+        p1 = widget.mapTo(window, QPoint(x1, y1))
+        p2 = widget.mapTo(window, QPoint(x2, y2))
+        QTest.mousePress(target_window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p1)
+        for step in range(1, 5):
+            QApplication.processEvents()
+            mid = QPoint(p1.x() + (p2.x() - p1.x()) * step // 4, p1.y() + (p2.y() - p1.y()) * step // 4)
+            QTest.mouseMove(target_window, mid, 10)
+        QTest.mouseRelease(target_window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p2)
+        for _ in range(8):
+            QApplication.processEvents()
+        selected = getattr(widget, "selectedRows", None)
+        report["selectedRows"] = sorted(selected()) if callable(selected) else None
+        _finish(report)
+        print(f"capture-server: drag {target}@({x1},{y1})->({x2},{y2}) selected={report['selectedRows']}", flush=True)
+
     def widget_state(name: str) -> None:
         """The interactive state of one named widget: `state:<objectName>`.
 
@@ -191,6 +323,12 @@ def install(window) -> None:
             return
         if wanted.startswith("state:"):
             widget_state(wanted[len("state:"):])
+            return
+        if wanted.startswith("click:"):
+            click(wanted[len("click:"):])
+            return
+        if wanted.startswith("drag:"):
+            drag(wanted[len("drag:"):])
             return
         if wanted == "stack":
             # Every thread's Python stack, written next to the server's other answers. The render runs in a worker, and
