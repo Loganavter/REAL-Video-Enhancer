@@ -15,7 +15,7 @@ import resources_rc
 
 # The page builds the toolkit's own controls: `Button` where the Designer had a `QPushButton`, `Text` where it had a
 # `QLabel`. Nothing here needs a Qt-shaped compatibility adapter.
-from sli_ui_toolkit.widgets import Button, SurfacePanel, Text, TextListWidget
+from sli_ui_toolkit.widgets import SurfacePanel, Text, TextListWidget
 
 
 class RenderQueueTabPage:
@@ -73,36 +73,14 @@ class RenderQueueTabPage:
         sizePolicy.setHeightForWidth(self.renderQueueListWidget.sizePolicy().hasHeightForWidth())
         self.renderQueueListWidget.setSizePolicy(sizePolicy)
         self.renderQueueListWidget.setMinimumSize(QSize(0, 0))
-        self.renderQueueListWidget.setMaximumSize(QSize(335, 16777215))
-
+        # The three action buttons that used to sit in a column beside the queue are gone (owner, 2026-11-22): the
+        # actions live in the right-click menu now, and the rows are picked like files - click, Ctrl, Shift, or a
+        # rubber band dragged across them. With the column gone the list takes the full row instead of 335 px of it.
+        self.renderQueueListWidget.setMaximumSize(QSize(16777215, 16777215))
+        self.renderQueueListWidget.setSelectionMode("extended")
+        self.renderQueueListWidget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.renderQueueListWidget.setProperty(u"showDropIndicator", True)
         self.horizontalLayout_38.addWidget(self.renderQueueListWidget)
-        self.widget_23 = QWidget(self.widget_22)
-        self.widget_23.setObjectName(u"widget_23")
-        self.verticalLayout_28 = QVBoxLayout(self.widget_23)
-        self.verticalLayout_28.setObjectName(u"verticalLayout_28")
-        # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
-        # fill the cell, which turns a row button into a slab when the column is taller than its three buttons.
-        # `size=(0, 0)` drops the standalone 36x36 control size; the policy states the row's share.
-        self.RemoveFromRenderQueue = Button(parent=self.widget_23, text="", variant="surface",
-            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
-        self.RemoveFromRenderQueue.setObjectName(u"RemoveFromRenderQueue")
-        self.RemoveFromRenderQueue.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.verticalLayout_28.addWidget(self.RemoveFromRenderQueue)
-        self.MoveUpRenderQueue = Button(parent=self.widget_23, text="", variant="surface",
-            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
-        self.MoveUpRenderQueue.setObjectName(u"MoveUpRenderQueue")
-        self.MoveUpRenderQueue.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.verticalLayout_28.addWidget(self.MoveUpRenderQueue)
-        self.MoveDownRenderQueue = Button(parent=self.widget_23, text="", variant="surface",
-            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
-        self.MoveDownRenderQueue.setObjectName(u"MoveDownRenderQueue")
-        self.MoveDownRenderQueue.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.verticalLayout_28.addWidget(self.MoveDownRenderQueue)
-        self.horizontalLayout_38.addWidget(self.widget_23)
         self.verticalLayout_27.addWidget(self.widget_22)
         self.gridLayout_4 = QGridLayout()
         self.gridLayout_4.setSpacing(0)
@@ -124,7 +102,4 @@ class RenderQueueTabPage:
         return self.renderQueueTab
 
     def retranslate(self) -> None:
-        self.RemoveFromRenderQueue.setText(QCoreApplication.translate("MainWindow", u"Remove", None))
-        self.MoveUpRenderQueue.setText(QCoreApplication.translate("MainWindow", u"Move Up", None))
-        self.MoveDownRenderQueue.setText(QCoreApplication.translate("MainWindow", u"Move Down", None))
         self.label_51.setText(QCoreApplication.translate("MainWindow", u"Finished Output Files:", None))

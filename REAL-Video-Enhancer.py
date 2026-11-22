@@ -122,6 +122,10 @@ class MainWindow(QMainWindow):
         self.anyBackendsInstalled = True
         self.videoLength = 1
         self.batchVideos = []
+        #: `path -> probe record` from `src/ui/batch_probe.py`. The queue add reads this instead of launching a
+        #: `--print_video_info` interpreter per file a second time.
+        self.batchInfo = {}
+        self._batchProbe = None
 
 
         settings = Settings()
@@ -701,6 +705,20 @@ class MainWindow(QMainWindow):
             encoderCommand=self.EncoderCommand.text(),
         )
 
+    def _applyVideoInfo(self, info: dict) -> None:
+        """The page's per-video fields, from a probe record (single file or a folder's batch)."""
+        self.videoWidth = info.get("width", 0)
+        self.videoHeight = info.get("height", 0)
+        self.videoFps = info.get("fps", 0)
+        self.videoLength = info.get("duration", 0)
+        self.videoFrameCount = info.get("total_frames", 0)
+        self.videoEncoder = info.get("codec", "")
+        self.videoBitrate = info.get("bitrate", "")
+        self.colorSpace = info.get("color_space", "")
+        self.pixelFMT = info.get("pixel_format", "")
+        self.videoHDR = info.get("is_hdr", False)
+        self.videoBitDepth = info.get("bit_depth", None)
+
     def addToRenderQueue(self):
         self.settings.readSettings()
         input_file = self.inputFileText.text()
@@ -708,48 +726,56 @@ class MainWindow(QMainWindow):
 
         if "{MULTIPLE_FILES}" in input_file.strip().replace(" ", ""):
             output_path = os.path.dirname(output_path)
-            for video in self.batchVideos:
-                videoHandler = VideoLoader(video)
-                videoHandler.loadVideo()
-                videoHandler.getData()
-                self.videoWidth = videoHandler.width
-                self.videoHeight = videoHandler.height
-                self.videoFps = videoHandler.fps
-                self.videoLength = videoHandler.duration
-                self.videoFrameCount = videoHandler.total_frames
-                self.videoEncoder = videoHandler.codec_str
-                self.videoBitrate = videoHandler.bitrate
-                self.videoContainer = videoHandler.videoContainer
-                self.colorSpace = videoHandler.color_space
-                self.pixelFMT = videoHandler.pixel_format
-                self.videoHDR = videoHandler.is_hdr
-                self.videoBitDepth = videoHandler.bit_depth
-                
+            if not self.batchVideos:
+                NotificationOverlay("No videos loaded - pick the folder again.", self, timeout=2000)
+                return
+            added = 0
+            skipped = 0
+            for video in list(self.batchVideos):
+                # The folder read already probed this file; asking again is what made a batch add feel like a freeze
+                # (one backend interpreter per video on the GUI thread).
+                info = self.batchInfo.get(video)
+                if info:
+                    self._applyVideoInfo(info)
+                else:
+                    videoHandler = VideoLoader(video)
+                    videoHandler.loadVideo()
+                    videoHandler.getData()
+                    self._applyVideoInfo({
+                        "width": videoHandler.width, "height": videoHandler.height, "fps": videoHandler.fps,
+                        "duration": videoHandler.duration, "total_frames": videoHandler.total_frames,
+                        "codec": videoHandler.codec_str, "bitrate": videoHandler.bitrate,
+                        "color_space": videoHandler.color_space, "pixel_format": videoHandler.pixel_format,
+                        "is_hdr": videoHandler.is_hdr, "bit_depth": videoHandler.bit_depth,
+                    })
 
                 # set output_path for checking
-                default_output_path = self.setDefaultOutputFile(
-                    video, output_path
-                )
+                default_output_path = self.setDefaultOutputFile(video, output_path)
 
                 # check if file already exists in renderQueue
                 if any(item.outputPath == default_output_path for item in self.renderQueue.getQueue()):
-                    NotificationOverlay(f"Skipped (Already in queue): {default_output_path}", self, timeout=1500)
+                    skipped += 1
                     continue
 
                 renderOptions = self.getCurrentRenderOptions(
                     input_file=video,
-                    output_path=self.setDefaultOutputFile(video, output_path),
+                    output_path=default_output_path,
                 )
                 if renderOptions == 1:
                     return
-                # alert user that item has been added to queue
                 self.renderQueue.add(renderOptions)
-                
+                added += 1
 
-            # clear batch file list
-            self.batchVideos = []
+            # The batch STAYS loaded: it used to be cleared right here, so a second "Add to queue" press did nothing at
+            # all and read as "the list reset itself" (owner, 2026-11-22). Pressing again now adds whatever is new and
+            # says how many were already there.
+            message = f"Added {added} to the queue"
+            if skipped:
+                message += f", {skipped} already in it"
+            if not added and not skipped:
+                message = "Nothing to add"
+            NotificationOverlay(message, self, timeout=2000)
             return
-
 
         for renderOptions in self.renderQueue.getQueue():
             if output_path == renderOptions.outputPath:
@@ -784,8 +810,11 @@ class MainWindow(QMainWindow):
             child.setEnabled(False)
         for child in self.advancedSettings.children():
             child.setEnabled(False)
-        for child in self.renderQueueTab.children():
-            child.setEnabled(False)
+        # NOT `self.renderQueueTab.children()`: disabling the page disabled its LIST, and the wheel over a disabled
+        # widget does nothing - the owner could not scroll the queue while a render ran (2026-11-22). The tab stays
+        # interactive; only mutations are locked, which keeps the queue coherent under the writer thread that is
+        # consuming it.
+        self.renderQueue.set_locked(True)
         for child in self.encoderSettings.children():
             child.setEnabled(False)
         self.RenderedPreviewControlsContainer.setEnabled(False)
@@ -801,8 +830,7 @@ class MainWindow(QMainWindow):
             child.setEnabled(True)
         for child in self.advancedSettings.children():
             child.setEnabled(True)
-        for child in self.renderQueueTab.children():
-            child.setEnabled(True)
+        self.renderQueue.set_locked(False)
         for child in self.encoderSettings.children():
             child.setEnabled(True)
         self.RenderedPreviewControlsContainer.setEnabled(True)
@@ -815,17 +843,18 @@ class MainWindow(QMainWindow):
             NotificationOverlay("Please select a video file!", self, timeout=1500)
             return
         if multi_file:
+            from src.ui.batch_probe import BatchProbeThread
+            from src.ui.video_scan import video_files
+
             self.outputFileText.setEnabled(False)
-            for file in os.listdir(inputFile):
-                video = os.path.join(inputFile, file)
-                videoHandler = VideoLoader(video)
-                videoHandler.loadVideo()
-                if videoHandler.isValidVideo():
-                   self.batchVideos.append(video)
-            if self.batchVideos == 0:
+            # The batch is REPLACED by a new folder, never appended to: picking a folder twice used to double every
+            # entry, and the queue add then reported every file as "already in queue".
+            self.batchVideos = []
+            self.batchInfo = {}
+            files = video_files(inputFile)
+            if not files:
                 NotificationOverlay("No valid videos found in the selected folder!", self, timeout=1500)
                 return
-            NotificationOverlay("Loaded " + str(len(self.batchVideos)) + " videos.", self, timeout=1500)
             self.inputFileText.setText(" { MULTIPLE_FILES } ")
             self.inputFileText.setEnabled(False)
             self.videoWidth = 0
@@ -840,6 +869,12 @@ class MainWindow(QMainWindow):
             self.pixelFMT = "Multi File"
             self.videoHDR = "Multi File"
             self.videoBitDepth = "Multi File"
+            self._startBatchProbe(files, total=len(files))
+            self.outputFileSelectButton.setEnabled(True)
+            self.openOutputFolderButton.setEnabled(True)
+            self.isVideoLoaded = True
+            self.updateVideoGUIDetails()
+            return
         else:
                     
             videoHandler = VideoLoader(inputFile)
@@ -870,6 +905,47 @@ class MainWindow(QMainWindow):
         self.openOutputFolderButton.setEnabled(True)    
         self.isVideoLoaded = True
         self.updateVideoGUIDetails()
+
+    def _startBatchProbe(self, files, total: int) -> None:
+        """Read the folder on a thread: the window keeps painting and every record shows up as progress.
+
+        This used to be a loop of `VideoLoader` on the GUI thread, one backend interpreter per file (0.16 s each here,
+        so half a minute for 200 files), and it re-ran for every file again when the batch was added to the queue.
+        """
+        from src.ui.batch_probe import BatchProbeThread
+
+        if getattr(self, "_batchProbe", None) is not None:
+            self._batchProbe.wait()
+        probe = BatchProbeThread(files, self)
+        self._batchProbe = probe
+        seen = {"count": 0}
+
+        def on_record(record: dict) -> None:
+            seen["count"] += 1
+            path = record.get("path")
+            if not record.get("valid") or not path:
+                return
+            self.batchInfo[path] = record
+            if path not in self.batchVideos:
+                self.batchVideos.append(path)
+            if seen["count"] % 10 == 0:
+                NotificationOverlay(f"Reading videos: {seen['count']} / {total}", self, timeout=600)
+
+        def on_done(records) -> None:
+            if not self.batchVideos:
+                NotificationOverlay("No valid videos found in the selected folder!", self, timeout=2000)
+                self.inputFileText.setText("")
+                self.inputFileText.setEnabled(True)
+                return
+            NotificationOverlay(f"Loaded {len(self.batchVideos)} videos.", self, timeout=1500)
+
+        def on_failed(message: str) -> None:
+            NotificationOverlay(f"Could not read the folder: {message}", self, timeout=2500)
+
+        probe.record.connect(on_record)
+        probe.completed.connect(on_done)
+        probe.failed.connect(on_failed)
+        probe.start()
 
     # input file button
     def openInputFile(self):
@@ -1006,14 +1082,34 @@ class MainWindow(QMainWindow):
             os.path.join(outputFolder, self.setDefaultOutputFile(self.inputFileText.text(), outputFolder))
         )
 
+    def shutdown(self):
+        """Every exit path ends here: `app.quit()` never delivers `closeEvent`.
+
+        A quit (the control surface does it, and so does any non-window exit) left the backend render process ALIVE and
+        both shared segments in `/dev/shm` - the orphan then held the GPU and the next render "did nothing" (measured
+        2026-11-22: a render was still running after the window was gone). This is wired to `aboutToQuit`, which Qt
+        emits however the loop ends.
+        """
+        if getattr(self, "_shutdown_done", False):
+            return
+        self._shutdown_done = True
+        if hasattr(self, "processTab"):
+            try:
+                self.processTab.killRenderProcess()
+            except Exception:
+                pass
+            try:
+                self.processTab.closePausedSharedMemory()
+            except Exception:
+                pass
+
     def closeEvent(self, event):
 
         from src.ui.dialogs.toolkit_dialogs import confirm
 
         if confirm(self, "Are you sure you want to exit?"):
             FileHandler.removeFolder(TEMP_DOWNLOAD_PATH)
-            if hasattr(self, "processTab"):
-                self.processTab.killRenderProcess()
+            self.shutdown()
             event.accept()
         else:
             event.ignore()
@@ -1154,6 +1250,9 @@ def main(file_to_open=None):
     window.repaint()
     app.processEvents()
     _stamp("first frame drained")
+    # `aboutToQuit` fires for every way the loop ends; `closeEvent` only for a window close, and the control surface (and
+    # any `app.quit()`) bypasses it. Without this the backend render process survived the window and held the GPU.
+    app.aboutToQuit.connect(window.shutdown)
     sys.exit(app.exec())
 
 

@@ -38,6 +38,11 @@ class Tab5Page:
         sizePolicy10.setHeightForWidth(self.renderOutput.sizePolicy().hasHeightForWidth())
         self.renderOutput.setSizePolicy(sizePolicy10)
         apply(self.renderOutput, SMALL_PT)
+        # Content that continues past the pane's edge fades instead of being cut by a hard line, and the log keeps
+        # itself pinned to the bottom while the user has not scrolled away (owner, 2026-11-22). Both live in the console:
+        # the fade is one painted gradient, the follow is the console's own scroll state.
+        self.renderOutput.set_edge_fade_enabled(True)
+        self.renderOutput.set_max_lines(4000)
         self.horizontalLayout_10.addWidget(self.renderOutput)
         self.retranslate()
         return self.tab_5

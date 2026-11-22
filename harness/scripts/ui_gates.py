@@ -112,7 +112,6 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
         ('src/ui/pages/proc_page.py', 'QSize(40, 45)'): 3,
         ('src/ui/pages/proc_page.py', 'setMaximumSize(500)'): 3,
         ('src/ui/pages/proc_page.py', 'setMaximumSize(59, 55)'): 3,
-        ('src/ui/pages/render_queue_tab.py', 'setMaximumSize(335)'): 1,
         ('src/ui/pages/settings_page.py', 'setGeometry(1026, 652)'): 1,
         ('src/ui/pages/settings_page.py', 'setMaximumSize(112312)'): 1,
         ('src/ui/pages/tab_2.py', 'setGeometry(968, 528)'): 1,

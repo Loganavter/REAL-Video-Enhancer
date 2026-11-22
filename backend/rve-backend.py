@@ -1,6 +1,8 @@
 import os
 import argparse
 import sys
+import threading
+import time
 from src.version import __version__
 from src.utils.Util import log
 
@@ -41,6 +43,37 @@ class HandleApplication:
                 print_video_info(video_info)
                 #profiler.stop()
                 #print(profiler.output_text(unicode=True, color=True))
+                sys.exit(0)
+
+            if self.args.print_video_info_batch:
+                # ONE interpreter for a whole folder. The GUI used to launch this process per file (a cv2 + ffmpeg
+                # probe each), which is where picking a folder of 50 videos spent a minute on the GUI thread.
+                import json as _json
+
+                for path in self.args.print_video_info_batch:
+                    record = {"path": path, "valid": False}
+                    try:
+                        info = OpenCVInfo(path, ffmpeg_path=self.ffmpeg_path)
+                        width, height = info.get_width_x_height()
+                        frames = int(info.get_total_frames() or 0)
+                        fps = float(info.get_fps() or 0.0)
+                        record.update({
+                            "valid": bool(frames > 1 and width > 0 and height > 0),
+                            "width": int(width),
+                            "height": int(height),
+                            "fps": fps,
+                            "total_frames": frames,
+                            "duration": (frames / fps) if fps else 0.0,
+                            "codec": info.get_codec(),
+                            "bitrate": info.get_bitrate(),
+                            "color_space": info.get_color_space(),
+                            "pixel_format": info.get_pixel_format(),
+                            "is_hdr": bool(info.is_hdr()),
+                            "bit_depth": info.get_bit_depth(),
+                        })
+                    except Exception as error:      # a broken file must not take the folder down with it
+                        record["error"] = str(error)
+                    print(_json.dumps(record), flush=True)
                 sys.exit(0)
             else:
                 video_info = OpenCVInfo(self.args.input, ffmpeg_path=self.ffmpeg_path)
@@ -643,6 +676,13 @@ class HandleApplication:
             type=str,
         )
         parser.add_argument(
+            "--print_video_info_batch",
+            help="Print one JSON line per video for every path given, then exit (one interpreter for a whole folder).",
+            default=None,
+            nargs="+",
+            type=str,
+        )
+        parser.add_argument(
             "--ensemble",
             help="Use ensemble when interpolating if the model supports it.",
             action="store_true",
@@ -735,7 +775,82 @@ class HandleApplication:
             print("WARNING: HDR mode is not supported with ncnn backend, falling back to SDR",file=sys.stderr)
             self.args.hdr_mode = False            
 
+def _release_named_segments(names) -> None:
+    """Unlink the GUI's shared segments when it died without cleaning up after itself."""
+    from multiprocessing import shared_memory
+
+    for name in names:
+        if not name:
+            continue
+        try:
+            try:
+                stale = shared_memory.SharedMemory(name=name, track=False)
+            except TypeError:  # Python < 3.13 has no `track=`
+                stale = shared_memory.SharedMemory(name=name)
+        except Exception:
+            continue
+        try:
+            stale.close()
+            stale.unlink()
+        except Exception:
+            pass
+
+
+def watch_parent(names=(), interval: float = 1.0) -> None:
+    """Exit when the GUI that started us is gone.
+
+    The front end terminates the backend on a clean quit, but a crash, a SIGKILL or a closed terminal leaves it running -
+    and a live backend keeps holding the GPU and writing frames nobody sees, so the next render looks like it "does
+    nothing" (owner, 2026-11-22). A dead parent is visible without ptrace or prctl: we are reparented to init or to the
+    session's subreaper. The ffmpeg children then die on their own - their stdin pipe closes with us.
+
+    Everything here is guarded and `os._exit` is unconditional: the FIRST version logged before exiting, and with the
+    GUI gone, stderr is a broken pipe - the write raised, the thread died, and the backend rendered on for minutes while
+    looking like it was watching the window (measured: still alive 12 s after SIGKILL, with the GUI's segments left in
+    /dev/shm).
+    """
+    try:
+        parent = os.getppid()
+    except Exception:
+        return
+    if parent <= 1:
+        return
+    while True:
+        try:
+            time.sleep(interval)
+            if os.getppid() == parent:
+                continue
+        except Exception:
+            pass
+        # The parent changed (or the check itself failed): this process has no owner left.
+        try:
+            log(f"parent process {parent} is gone; exiting so the GPU is released")
+        except Exception:
+            pass
+        # The GUI could not run its own cleanup (it was killed), so its segments would sit in /dev/shm forever: the
+        # names carry its pid and nothing will ever look for them again.
+        try:
+            _release_named_segments(names)
+        except Exception:
+            pass
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(3)
+
+
 if __name__ == "__main__":
-    
+    _segments = []
+    for _flag in ("--pause_shared_memory_id", "--preview_shared_memory_id"):
+        if _flag in sys.argv:
+            _index = sys.argv.index(_flag)
+            if _index + 1 < len(sys.argv):
+                _segments.append(sys.argv[_index + 1])
+    # The preview block is allocated by the GUI whether or not the preview is switched on, so its name is derived the
+    # same way the GUI derives it (`src/constants.py`), not only taken from the flag the backend is given.
+    _segments.append("/image_preview" + str(os.getppid()))
+    threading.Thread(target=watch_parent, args=(tuple(_segments),), name="parent-watchdog", daemon=True).start()
     HandleApplication()
     

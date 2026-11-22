@@ -6,6 +6,8 @@ import struct
 import time
 import numpy as np
 from multiprocessing import shared_memory
+
+from . import shared_flag
 import re
 import html
 
@@ -206,29 +208,20 @@ class UpdateGUIThread(QThread):
             + 2 * self.previewBoxW * self.previewBoxH * 3
         )
         try:
-            self.shm = shared_memory.SharedMemory(
-                name=self.imagePreviewSharedMemoryID, create=True, size=size
-            )
+            self.shm = shared_flag.create_many(self.imagePreviewSharedMemoryID, size)
         except FileExistsError:
             # a crashed run leaves the block behind (POSIX keeps it until unlinked), and a
             # restarted session can be handed the same name: drop the stale block, then
             # allocate ours. Attaching to the old one would keep its size and header.
-            stale = shared_memory.SharedMemory(name=self.imagePreviewSharedMemoryID)
-            stale.close()
-            stale.unlink()
-            self.shm = shared_memory.SharedMemory(
-                name=self.imagePreviewSharedMemoryID, create=True, size=size
-            )
+            stale = shared_flag.attach(self.imagePreviewSharedMemoryID)
+            shared_flag.release(stale)
+            self.shm = shared_flag.create_many(self.imagePreviewSharedMemoryID, size)
         self.shm.buf[self.PREVIEW_OFF_WANTED] = 1  # ask for the first frame
+        shared_flag.register(lambda: getattr(self, "shm", None))
 
     def deleteSharedMemory(self):
-        try:
-            if self.shm is not None:
-                    self.shm.close()
-                    self.shm.unlink()
-                    self.shm = None
-        except Exception:
-            pass
+        shm, self.shm = self.shm, None
+        shared_flag.release(shm)
 
     def run(self):
         last_seq = 0

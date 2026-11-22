@@ -36,7 +36,18 @@ _ICON_REASON = ("question-mark icon label, deleted with the rest in 54b36567; th
 
 #: Designer attributes the app deliberately no longer exposes. Keyed by name: a name that reappears on
 #: the surface must be removed from here (the test asserts both directions), so this cannot rot silently.
+_QUEUE_BUTTONS_REASON = (
+    "the queue's Remove / Move Up / Move Down buttons and their column were deleted on purpose: the actions live in "
+    "the list's right-click menu and apply to the whole selection (owner, 2026-11-22). The frozen Designer fixture "
+    "still builds them"
+)
+
 ACCEPTED_MISSING: dict[str, str] = {
+    "RemoveFromRenderQueue": _QUEUE_BUTTONS_REASON,
+    "MoveUpRenderQueue": _QUEUE_BUTTONS_REASON,
+    "MoveDownRenderQueue": _QUEUE_BUTTONS_REASON,
+    "widget_23": _QUEUE_BUTTONS_REASON,
+    "verticalLayout_28": _QUEUE_BUTTONS_REASON,
     "label_17": _ICON_REASON,
     "label_21": _ICON_REASON,
     "label_24": _ICON_REASON,

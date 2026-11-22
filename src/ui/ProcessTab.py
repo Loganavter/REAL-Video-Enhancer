@@ -10,6 +10,8 @@ from PySide6.QtGui import QPixmap, QPainter, QPainterPath, QColor, QFontMetrics
 from PySide6.QtCore import Qt, QSize, QUrl
 
 from .RenderQueue import RenderQueue
+from .render_log import LogLine, RenderLogFilter
+from . import shared_flag
 
 from .AnimationHandler import AnimationHandler
 from .QTcustom import (
@@ -46,6 +48,9 @@ class ProcessTab:
     def __init__(self, parent, settings: Settings):
         self.parent = parent
         self.renderTextOutputList = None
+        #: The curated lines (`LogLine`: text + level) behind `renderTextOutputList`; the console paints these.
+        self.renderLogLines: list[LogLine] | None = None
+        self._log_filter = RenderLogFilter()
         self.isOverwrite = False
         self.outputVideoHeight = None
         self.outputVideoWidth = None
@@ -116,18 +121,64 @@ class ProcessTab:
             else:
                 subprocess.Popen(["xdg-open", output_folder])
 
+    def installQueueMenu(self) -> None:
+        """The queue's right-click menu - the replacement for the three buttons the page used to carry.
+
+        Built from the toolkit's own `ContextMenu` (theme surface, keyboard focus, the danger colour on the destructive
+        rows). The rows are selected by the list before `customContextMenuRequested` fires, so every action applies to
+        the whole selection: remove the picked items, or slide the block up/down. The entries are rebuilt on every
+        request because their enabled state depends on the selection and on the render lock.
+        """
+        from sli_ui_toolkit.widgets import ContextMenu, ContextMenuAction, ContextMenuSeparator
+
+        widget = self.parent.renderQueueListWidget
+
+        def entries_for(queue):
+            locked = queue.is_locked()
+            has_selection = bool(queue.selectedRows())
+            # A locked queue is being consumed by the running render: the actions are shown DISABLED rather than the
+            # whole list being disabled, so the user can still scroll it while the render runs.
+            return (
+                ContextMenuAction(
+                    "queue.remove", "Remove from queue",
+                    enabled=has_selection and not locked, danger=True,
+                ),
+                ContextMenuSeparator(),
+                ContextMenuAction("queue.up", "Move Up", enabled=has_selection and not locked),
+                ContextMenuAction("queue.down", "Move Down", enabled=has_selection and not locked),
+                ContextMenuSeparator(),
+                ContextMenuAction(
+                    "queue.clear", "Clear queue", enabled=bool(queue.getQueue()) and not locked, danger=True,
+                ),
+            )
+
+        def on_action(action_id: str, _data=None) -> None:
+            queue = self.parent.renderQueue
+            if action_id == "queue.remove":
+                queue.removeSelected()
+            elif action_id == "queue.up":
+                queue.moveSelected("up")
+            elif action_id == "queue.down":
+                queue.moveSelected("down")
+            elif action_id == "queue.clear":
+                queue.clear()
+
+        def on_context_menu(point) -> None:
+            # A FRESH menu per request: the toolkit's popup surface destroys itself when it hides, so reusing one
+            # instance raised "Internal C++ object (ContextMenu) already deleted" on the second right-click (measured).
+            menu = ContextMenu(widget, entries=entries_for(self.parent.renderQueue),
+                               on_triggered=on_action, surface="popup")
+            # `on_triggered` is constructor state (the toolkit keeps it as `_on_triggered`), so it is passed here and
+            # not assigned afterwards - an attribute set after construction would never fire.
+            self._queue_menu = menu
+            menu.popup_at(widget.mapToGlobal(point))
+
+        widget.customContextMenuRequested.connect(on_context_menu)
+
     def QConnect(self):
         # connect file select buttons
         self.parent.addToRenderQueueButton.clicked.connect(self.parent.addToRenderQueue)
-        self.parent.RemoveFromRenderQueue.clicked.connect(
-            self.parent.renderQueue.remove
-        )
-        self.parent.MoveUpRenderQueue.clicked.connect(
-            lambda: self.parent.renderQueue.moveitem("up")
-        )
-        self.parent.MoveDownRenderQueue.clicked.connect(
-            lambda: self.parent.renderQueue.moveitem("down")
-        )
+        self.installQueueMenu()
         self.parent.inputFileSelectButton.clicked.connect(self.parent.openInputFile)
         self.parent.batchSelectButton.clicked.connect(self.parent.openBatchFiles)
         self.parent.inputFileText.textChanged.connect(self.parent.loadVideo)
@@ -269,15 +320,23 @@ class ProcessTab:
                 pass
 
     def createPausedSharedMemory(self):
-        try:
-            self.pausedSharedMemory = shared_memory.SharedMemory(
-                name=PAUSED_STATE_SHARED_MEMORY_ID, create=True, size=1
-            )
-        except FileExistsError:
-            log("FileExistsError! Using existing paused shared memory")
-            self.pausedSharedMemory = shared_memory.SharedMemory(
-                name=PAUSED_STATE_SHARED_MEMORY_ID
-            )
+        """The one-byte paused flag the backend polls - created here, removed by `closePausedSharedMemory`.
+
+        `track=False` on purpose. With the default the segment is registered with `multiprocessing`'s resource tracker,
+        whose at-exit sweep then prints two warnings the owner saw on quit (2026-11-22): "1 leaked shared_memory
+        objects to clean up" and "No such file or directory: '//paused_state<pid>'" - CPython's `unlink` raises before
+        it unregisters, so a segment removed from another path (or by a previous run's cleanup) stays registered and is
+        reported as leaked. The name carries the pid, nothing else can own it, and this object releases it explicitly:
+        at the end of a render and in the window's close handler.
+        """
+        self.pausedSharedMemory = shared_flag.create(PAUSED_STATE_SHARED_MEMORY_ID)
+        shared_flag.register(lambda: getattr(self, "pausedSharedMemory", None))
+
+    def closePausedSharedMemory(self):
+        """Release the paused flag; safe to call twice, and safe when nothing was rendered."""
+        shm = getattr(self, "pausedSharedMemory", None)
+        self.pausedSharedMemory = None
+        shared_flag.release(shm)
 
     def renderToPipeThread(
         self,
@@ -317,6 +376,8 @@ class ProcessTab:
                 **kwargs,
             )
             textOutput = []
+            self._log_filter = RenderLogFilter()
+            self.renderLogLines = []
             for line in iter(self.renderProcess.stdout.readline, b""):
                 if self.renderProcess.poll() is not None:
                     break  # Exit the loop if the process has terminated
@@ -341,15 +402,23 @@ class ProcessTab:
                         self.status = "Building Engine, this may take a while."
 
 
-                    if any(char.isalpha() for char in line):
-                        textOutput.append(line)
-                    # self.setRenderOutputContent(textOutput)
+                    # The pane gets the EVENTS, not the telemetry: per-frame timings, the live progress line it already
+                    # shows as FPS/ETA, and the setup chatter repeats are dropped here (src/ui/render_log.py explains
+                    # each class and the numbers behind them).
+                    for entry in self._log_filter.feed(line):
+                        textOutput.append(entry.text)
+                        self.renderLogLines.append(entry)
                     self.renderTextOutputList = textOutput.copy()
                 except Exception as e:
                     pass
                 if "Time to complete render" in line:
                     break
             self.return_codes.append(self.renderProcess.wait())
+            summary = self._log_filter.hidden_summary()
+            if summary is not None:
+                textOutput.append(summary.text)
+                self.renderLogLines.append(summary)
+                self.renderTextOutputList = textOutput.copy()
             for line in textOutput:
                 if len(line) > 2:
                     log(line)
@@ -359,11 +428,7 @@ class ProcessTab:
             )  # add the file to the list widget
             self.workerThread.deleteSharedMemory()
 
-        try:
-            self.pausedSharedMemory.close()
-            self.pausedSharedMemory.unlink()
-        except Exception: # too lazy to patch why this errors maybe on exit
-            pass
+        self.closePausedSharedMemory()
 
         renderQueue.clear()
         self.onRenderCompletion()
@@ -476,16 +541,50 @@ class ProcessTab:
         that decision O(1) on the common path.
         """
         console = self.parent.renderOutput
-        lines = list(self.renderTextOutputList or [])
-        sent = getattr(self, "_console_sent_lines", [])
-        if len(lines) >= len(sent) and lines[:len(sent)] == sent:
-            new = lines[len(sent):]
+        entries = list(self.renderLogLines or [])
+        sent = getattr(self, "_console_sent_entries", [])
+        if len(entries) >= len(sent) and entries[:len(sent)] == sent:
+            new = entries[len(sent):]
             if new:
-                console.append_lines(new)
-                self._console_sent_lines = lines
+                console.append_console_lines(self._console_lines(new))
+                self._console_sent_entries = entries
             return
-        console.setPlainText(self.splitListIntoStringWithNewLines(lines))
-        self._console_sent_lines = lines
+        console.set_lines(self._console_lines(entries))
+        self._console_sent_entries = entries
+
+    @staticmethod
+    def _console_lines(entries) -> list["ConsoleLine"]:
+        """Map the filter's levels onto the console's paint slots (colour + emphasis), from theme tokens only."""
+        from PySide6.QtGui import QColor
+
+        from sli_ui_toolkit.theme import ThemeManager
+
+        manager = ThemeManager.get_instance()
+
+        def token(name: str, fallback: str) -> QColor:
+            try:
+                colour = QColor(manager.get_color(name))
+            except Exception:
+                colour = QColor()
+            return colour if colour.isValid() else QColor(fallback)
+
+        red = token("BrightText", "#ff0000")
+        accent = token("accent", "#0078d4")
+        from sli_ui_toolkit.ui.widgets.composite.console_view import ConsoleLine
+
+        lines: list[ConsoleLine] = []
+        for entry in entries:
+            level = getattr(entry, "level", "info")
+            text = getattr(entry, "text", str(entry))
+            if level == "error":
+                lines.append(ConsoleLine(text, QColor(red), True))
+            elif level == "warn":
+                lines.append(ConsoleLine(text, None, True))
+            elif level == "phase":
+                lines.append(ConsoleLine(text, QColor(accent), True))
+            else:
+                lines.append(ConsoleLine(text))
+        return lines
 
     def updateProcessTab(self, qimage: QtGui.QImage):
         """

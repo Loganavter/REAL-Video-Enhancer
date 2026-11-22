@@ -1,5 +1,8 @@
-from PySide6.QtWidgets import QListWidget
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # the widget is only a type here: the model is plain Python and imports without Qt
+    from sli_ui_toolkit.widgets import TextListWidget
 
 
 @dataclass
@@ -291,17 +294,40 @@ class RenderOptions:
 
 
 class RenderQueue:
-    def __init__(self, qlistwidget: QListWidget):
+    """The render queue: the options, the names, and the list the user picks them from.
+
+    Selection is the manager's business now: the page has no Remove / Move Up / Move Down buttons (owner, 2026-11-22),
+    the actions live in the right-click menu and operate on everything selected - which is what makes a rubber-band
+    selection worth having.
+
+    `locked` is the render lock: while a render walks this queue, its items are being consumed by the writer thread, so
+    removing or reordering them would change the list under it. A locked queue still SCROLLS - the old
+    `disableProcessPage` disabled the whole page, which froze the list mid-render, and a log of finished files is
+    exactly what a user scrolls through then.
+    """
+
+    def __init__(self, qlistwidget: "TextListWidget"):
         self.queue = []
         self.inputNameList = []  # this list links up 1:1 with the queue, storing input names allow for index searching
         self.qlistwidget = qlistwidget
+        self.locked = False
+
+    def set_locked(self, locked: bool) -> None:
+        self.locked = bool(locked)
+
+    def is_locked(self) -> bool:
+        return bool(self.locked)
 
     def add(self, renderable: RenderOptions):
+        if self.locked:
+            return
         self.queue.append(renderable)
         self.qlistwidget.addItem(renderable.inputFile)
         self.inputNameList.append(renderable.inputFile)
-    
+
     def addToStart(self, renderable: RenderOptions):
+        if self.locked:
+            return
         self.queue.insert(0, renderable)
         self.qlistwidget.insertItem(0, renderable.inputFile)
         self.inputNameList.insert(0, renderable.inputFile)
@@ -314,35 +340,68 @@ class RenderQueue:
     def getQueue(self) -> list[RenderOptions]:
         return self.queue
 
-    def _swapListPositions(self, list1, index1, index2):
-        list1[index1], list1[index2] = (
-            list1[index2],
-            list1[index1],
-        )  # flip
+    def selectedRows(self) -> list[int]:
+        rows = getattr(self.qlistwidget, "selectedRows", None)
+        if callable(rows):
+            return list(rows())
+        current = self.qlistwidget.currentRow()
+        return [current] if current >= 0 else []
+
+    def _refresh(self, selection, current: int | None = None) -> None:
+        """Rebuild the visible rows from the model and restore the selection."""
+        self.qlistwidget.setItems(self.inputNameList)
+        valid = [row for row in selection if 0 <= row < len(self.inputNameList)]
+        if valid:
+            self.qlistwidget.setSelectedRows(valid)
+            self.qlistwidget.setCurrentRow(valid[0] if current is None else current)
+
+    def removeSelected(self) -> int:
+        """Remove every selected row (descending, so the indices stay valid); returns how many went."""
+        if self.locked:
+            return 0
+        rows = sorted({row for row in self.selectedRows() if 0 <= row < len(self.queue)}, reverse=True)
+        if not rows:
+            return 0
+        first = min(rows)
+        for row in rows:
+            del self.queue[row]
+            del self.inputNameList[row]
+        self._refresh([], current=max(0, min(first, len(self.inputNameList) - 1)))
+        return len(rows)
+
+    def moveSelected(self, direction: str = "up") -> bool:
+        """Move the selected rows one place (a block moves as a block); returns True when anything moved."""
+        if self.locked:
+            return False
+        rows = sorted({row for row in self.selectedRows() if 0 <= row < len(self.queue)})
+        if not rows:
+            return False
+        selected = set(rows)
+        moved = False
+        # Ascending for up, descending for down: each row checks the neighbour it is moving towards, so a selected
+        # block slides together instead of collapsing into one row.
+        order = rows if direction != "down" else list(reversed(rows))
+        for row in order:
+            target = row + 1 if direction == "down" else row - 1
+            if target < 0 or target >= len(self.queue) or target in selected:
+                continue
+            self.queue[row], self.queue[target] = self.queue[target], self.queue[row]
+            self.inputNameList[row], self.inputNameList[target] = (
+                self.inputNameList[target],
+                self.inputNameList[row],
+            )
+            selected.discard(row)
+            selected.add(target)
+            moved = True
+        if moved:
+            order_after = sorted(selected)
+            self._refresh(order_after, current=order_after[0])
+        return moved
+
+    # -- the QListWidget-era names this manager answers (the toolkit control keeps the same calls) ------
 
     def remove(self):
-        try:
-            index = self.qlistwidget.currentRow()
-            del self.queue[index]
-            del self.inputNameList[index]
-            self.qlistwidget.takeItem(index)  # remove the item from the list widget
-        except IndexError:
-            pass
+        return self.removeSelected()
 
     def moveitem(self, direction="up"):
-        try:
-            index = self.qlistwidget.currentRow()
-            if direction == "down":
-                new_index = index + 1
-            else:
-                new_index = index - 1
-            self._swapListPositions(self.queue, index, new_index)
-            self._swapListPositions(
-                self.inputNameList, index, new_index
-            )  # swap in index
-
-            currentItem = self.qlistwidget.takeItem(index)
-            self.qlistwidget.insertItem(new_index, currentItem)  # swap in gui
-            self.qlistwidget.setCurrentRow(new_index)
-        except Exception:  # catches out of index errors, not that much of an issue
-            pass
+        return self.moveSelected(direction)

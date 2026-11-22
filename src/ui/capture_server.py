@@ -145,9 +145,52 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: probe {target}@({wx},{wy}) -> {len(report['chain'])} step(s)", flush=True)
 
+    def widget_state(name: str) -> None:
+        """The interactive state of one named widget: `state:<objectName>`.
+
+        Why: "not blocked during the render" is a claim about a WIDGET, not about a screenshot - a toolkit control paints
+        the same pixels whether or not it is disabled, so a grab cannot tell them apart. This answer can: `enabled`,
+        visibility, and the scroll range/value of whatever scrolls inside it.
+        """
+        from PySide6.QtWidgets import QWidget
+
+        target = window.findChild(QWidget, name.strip())
+        report = {"stamp": _stamp(), "kind": "state", "target": name.strip(), "error": None}
+        if target is None:
+            report["error"] = "widget not found"
+            _finish(report)
+            print(f"capture-server: state {name!r} -> widget not found", flush=True)
+            return
+        report.update({
+            "class": type(target).__name__,
+            "enabled": bool(target.isEnabled()),
+            "visible": bool(target.isVisible()),
+            "size": [target.width(), target.height()],
+        })
+        for attr in ("count", "currentRow", "selectedRows", "selectedCount"):
+            getter = getattr(target, attr, None)
+            if callable(getter):
+                try:
+                    value = getter()
+                except Exception:
+                    continue
+                report[attr] = sorted(value) if isinstance(value, list) else value
+        bar = getattr(target, "verticalScrollBar", None)
+        if callable(bar):
+            try:
+                scroll = bar()
+                report["scroll"] = {"value": int(scroll.value()), "max": int(scroll.maximum())}
+            except Exception:
+                pass
+        _finish(report)
+        print(f"capture-server: state {name!r} -> {report.get('enabled')} enabled", flush=True)
+
     def handle(wanted: str) -> None:
         if wanted.startswith("probe:"):
             probe(wanted[len("probe:"):])
+            return
+        if wanted.startswith("state:"):
+            widget_state(wanted[len("state:"):])
             return
         if wanted == "stack":
             # Every thread's Python stack, written next to the server's other answers. The render runs in a worker, and
