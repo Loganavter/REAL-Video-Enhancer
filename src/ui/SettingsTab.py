@@ -90,6 +90,9 @@ class SettingsTab:
     ):
         self.parent = parent
         self.input_file = None
+        #: True once the user has typed in the command line: from then on the app does NOT regenerate it (that is what
+        #: made it "reset on any little thing" - nine signals rewrote it from the settings on every change).
+        self.encoder_command_user = False
         self.ffmpegInfoWrapper = None
         self.color_space = None
         self.color_primaries = None
@@ -108,6 +111,7 @@ class SettingsTab:
         log("Settings: " + str(self.settings.settings))
         self.connectSettingText() # has to be in this order, otherwise settings wont stick because they get reset.
         self.connectWriteSettings()
+        self.restoreEncoderCommand()
         
 
         # disable half option if its not supported
@@ -121,6 +125,24 @@ class SettingsTab:
         
 
         self.updateFFMpegCommand()
+
+    def restoreEncoderCommand(self) -> None:
+        """A hand-edited command line comes back after a restart; an empty stored value means "generate it"."""
+        saved = str(self.settings.settings.get("encoder_command", "") or "")
+        if not saved:
+            return
+        self.encoder_command_user = True
+        self.parent.EncoderCommand.setText(saved)
+
+    def onEncoderCommandEdited(self) -> None:
+        """The user typed in the command line: stop regenerating it, and persist what they typed.
+
+        Clearing the field hands ownership back to the app: the next settings change regenerates it and the stored value
+        is dropped.
+        """
+        text = self.parent.EncoderCommand.text()
+        self.encoder_command_user = bool(text.strip())
+        self.settings.writeSetting("encoder_command", text if self.encoder_command_user else "")
 
     def updateFFMpegCommand(self):
         """
@@ -185,7 +207,8 @@ class SettingsTab:
             self.color_primaries,
             self.color_transfer,  
         ).build_command()
-        self.parent.EncoderCommand.setText(" ".join(command))
+        if not self.encoder_command_user:
+            self.parent.EncoderCommand.setText(" ".join(command))
         self.parent.updateVideoGUIText()
          
 
@@ -376,6 +399,9 @@ class SettingsTab:
         self.parent.subtitle_encoder.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
+        # `textEdited`, not `textChanged`: the latter also fires for the programmatic `setText` above, which would mark
+        # the field as user-owned the moment the app generated it.
+        self.parent.EncoderCommand.textEdited.connect(self.onEncoderCommandEdited)
 
     def onFrameReuseSwitch(self, *args):
         """The cel switch only means something while reuse is on - an option inside an option.
@@ -544,6 +570,9 @@ class Settings:
             "pytorch_backend": "CUDA",
             "auto_hdr_mode": "True",
             "quality_preset": "best",
+            # The generated ffmpeg command line, persisted so a hand-edited one survives a restart. Empty = "generate
+            # from the settings above", which is the state the app starts in.
+            "encoder_command": "",
             # reuse of unchanged frames: on by default since 2026-11-20 (the gate refuses material it
             # cannot certify, so the default is safe; this switch is for people who want it off entirely)
             "temporal_reuse": "True",
@@ -554,6 +583,7 @@ class Settings:
             "temporal_reuse_statistic": "mean_abs",
         }
         self.allowedSettings = {
+            "encoder_command": "ANY",
             "precision": ("auto", "float32", "float16"),
             "tensorrt_optimization_level": ("0", "1", "2", "3", "4", "5"),
             "dynamic_tensorrt_engine": ("True", "False"),
@@ -619,7 +649,12 @@ class Settings:
         with open(self.settingsFile, "r") as file:
             try:
                 for line in file:
-                    key, value = line.strip().split(",")
+                    # `partition`, not `split(",")`: the encoder command is free text and legitimately contains commas
+                    # (`-vf "scale=…,…"`), and a bare split raised ValueError and rewrote ALL defaults (owner, 2026-11-22:
+                    # "the encoder line resets after any little thing").
+                    key, _, value = line.strip().partition(",")
+                    if not key:
+                        continue
                     self.settings[key] = value
             except (
                 ValueError
