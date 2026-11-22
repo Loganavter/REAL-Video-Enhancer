@@ -1034,6 +1034,16 @@ def main(file_to_open=None):
         if _timing:
             print(f"startup {_time.perf_counter() - _t0:6.2f}s  {label}", flush=True)
 
+    # Opaque surfaces, asked for BEFORE the platform plugin is up: QtWayland chooses the toplevel's buffer format from
+    # the default QSurfaceFormat, and a buffer with an alpha channel is what lets a compositor (and, on some stacks, the
+    # direct-scanout path) blend the desktop into pixels the app did not paint. Nothing in this app needs a translucent
+    # toplevel - the rounded corners are painted inside the surface - so ask for no alpha at all.
+    from PySide6.QtGui import QSurfaceFormat
+
+    _surface_format = QSurfaceFormat.defaultFormat()
+    _surface_format.setAlphaBufferSize(0)
+    QSurfaceFormat.setDefaultFormat(_surface_format)
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     # Before the theme: `toolkit_theme.install` imports the toolkit, and without the path it would "fail" into RVE's
