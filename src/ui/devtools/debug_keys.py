@@ -108,25 +108,30 @@ def install(window) -> QObject | None:
     if getattr(window, "_debug_keys", None) is not None:
         return None
 
-    from PySide6.QtCore import QEvent
+    from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QKeySequence
 
     class _Keys(QObject):
         def eventFilter(self, watched, event):  # noqa: N802 - Qt API
             if event.type() != QEvent.Type.KeyPress:
                 return False
-            sequence = QKeySequence(event.keyCombination())
-            text = sequence.toString()
-            try:
-                if text not in _ACTIONS:
-                    return False
-            except Exception:
+            modifiers = event.modifiers()
+            wanted = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+            if (modifiers & wanted) != wanted or (modifiers & Qt.KeyboardModifier.AltModifier):
                 return False
-            _log(window, f"key {text}")
+            # KEY CODES, not the sequence's text: on a Russian layout Ctrl+Shift+D arrives as "Ctrl+Shift+В" and a
+            # text match silently ignores it - `key()` carries the physical key, so the shortcut works in any layout
+            # (the owner pressed it, the filter was armed, and nothing was logged: 2026-11-22).
+            action = _ACTIONS.get(int(event.key()))
+            label = QKeySequence(event.keyCombination()).toString()
+            if action is None:
+                _log(window, f"key {label} (code {int(event.key())}) is not a debug key")
+                return False
+            _log(window, f"key {label} (code {int(event.key())})")
             try:
-                _ACTIONS[text]()
+                action()
             except Exception as error:                 # a broken probe must say so, not die silently
-                _log(window, f"key {text} failed: {type(error).__name__}: {error}")
+                _log(window, f"key {label} failed: {type(error).__name__}: {error}")
             return True
 
     def _repaint() -> None:
@@ -162,11 +167,13 @@ def install(window) -> QObject | None:
         _log(window, f"probe written: {path}")
 
     global _ACTIONS
+    from PySide6.QtCore import Qt as _Qt
+
     _ACTIONS = {
-        REPAINT_SHORTCUT: _repaint,
-        HIDE_SHORTCUT: _hide_under_cursor,
-        AUDIT_SHORTCUT: _audit,
-        PROBE_SHORTCUT: _probe,
+        int(_Qt.Key.Key_R): _repaint,
+        int(_Qt.Key.Key_H): _hide_under_cursor,
+        int(_Qt.Key.Key_D): _audit,
+        int(_Qt.Key.Key_P): _probe,
     }
 
     app = QApplication.instance()
