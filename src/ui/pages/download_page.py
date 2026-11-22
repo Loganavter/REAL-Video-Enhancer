@@ -311,6 +311,13 @@ class DownloadPagePage:
         self.label_28.setObjectName(u"label_28")
         self.horizontalLayout_8.addWidget(self.label_28)
         self.verticalLayout_13.addWidget(self.directMLBackendInstallerContainer)
+        # A settings column is a list of ROWS: the layout's leftover height is not theirs to share. Every container here
+        # is a plain `QWidget`, whose default Preferred vertical policy grows, so the box layout handed it the slack and
+        # a 33 px row became 168 px tall on a 1920x1080 window - the control floated in the middle of a huge band, and
+        # the height changed with the window and with every section another control opened (measured 2026-11-22). The
+        # filler takes the slack instead: a row is always its own height.
+        self._settingsFiller = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        self.verticalLayout_13.addItem(self._settingsFiller)
         self.scrollArea_2.setWidget(self.scrollAreaWidgetContents_2)
         self.verticalLayout_11.addWidget(self.scrollArea_2)
         self.gridLayout_5.addWidget(self.backendSelectContainer, 1, 0, 1, 1)

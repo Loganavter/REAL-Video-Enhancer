@@ -178,6 +178,14 @@ class AdvancedSettingsPage:
         self.tileSizeComboBox.setObjectName(u"tileSizeComboBox")
         self.horizontalLayout_18.addWidget(self.tileSizeComboBox)
         self.verticalLayout_16.addWidget(self.tileSizeContainer)
+        # The Designer gives this group a fixed minimum height of 128 px - room for the heading + BOTH rows - so the
+        # group does not resize when the tiling row opens. The surplus has to go somewhere, and a vbox hands it to the
+        # last item that can grow: that was the `tilingContainer` row itself, which stretched 50 -> 100 px and pushed
+        # its label and the switch 25 px down whenever tile size was hidden. Toggling then moved the very control
+        # under the cursor (measured 2026-11-22: label y 258 -> 233, checkbox y 254 -> 229 on a single click). The
+        # filler takes the surplus instead, so the row keeps its own height in both states and the group stays 128.
+        self._tileSizeFiller = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        self.verticalLayout_16.addItem(self._tileSizeFiller)
         self.verticalLayout_33.addWidget(self.upscaleContainer, 0, Qt.AlignmentFlag.AlignTop)
         self.interpolateContainer_2 = QWidget(self.scrollAreaWidgetContents_5)
         self.interpolateContainer_2.setObjectName(u"interpolateContainer_2")

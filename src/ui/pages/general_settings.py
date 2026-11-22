@@ -628,6 +628,14 @@ class GeneralSettingsPage:
 "<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Bit Depth:</span></p></body></html>")
         self.horizontalLayout_22.addWidget(self.inputVideoInfoTextEdit)
         self.verticalLayout_32.addWidget(self.widget_26)
+        # The list is a column of fixed rows; the layout's leftover height is NOT theirs to share. Without a spacer the
+        # box layout hands the slack to the rows (each `QWidget` defaults to a Preferred vertical policy, which grows),
+        # so a row was 47 px when the page had room and 30 px the moment a settings section took that room: every row
+        # in the column changed height together and the tab looked like it was breathing (measured 2026-11-22 on a
+        # 1920x1080 window: `inputFileContainer` 47 -> 30 px on one checkbox click, layout hint 779 -> 910). The spacer
+        # takes the slack instead, so a row is always its own height and opening a section only inserts that section.
+        self._settingsFiller = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        self.verticalLayout_32.addItem(self._settingsFiller)
         self.scrollArea_4.setWidget(self.scrollAreaWidgetContents_4)
         self.horizontalLayout_13.addWidget(self.scrollArea_4)
         self.verticalLayout_10.addWidget(self.widget_5)

@@ -185,6 +185,13 @@ class Tab2Page:
         self.auto_border_cropping.setObjectName(u"auto_border_cropping")
         self.horizontalLayout_25.addWidget(self.auto_border_cropping)
         self.verticalLayout_25.addWidget(self.widget_9)
+        # A settings column is a list of ROWS: the layout's leftover height is not theirs to share. Every container here
+        # is a plain `QWidget`, whose default Preferred vertical policy grows, so the box layout handed it the slack and
+        # a 33 px row became 168 px tall on a 1920x1080 window - the control floated in the middle of a huge band, and
+        # the height changed with the window and with every section another control opened (measured 2026-11-22). The
+        # filler takes the slack instead: a row is always its own height.
+        self._settingsFiller = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        self.verticalLayout_25.addItem(self._settingsFiller)
         self.scrollArea_3.setWidget(self.scrollAreaWidgetContents_3)
         self.verticalLayout_19.addWidget(self.scrollArea_3)
         self.verticalLayout_17.addWidget(self.VideoSettingsContainer)
