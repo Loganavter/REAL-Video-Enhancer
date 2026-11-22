@@ -242,7 +242,18 @@ class MainWindowShell:
         # alpha there, and `MainWindow.paintEvent` guarantees the fill really covers every pixel.
         window._backdrop_colour = _backdrop
         window.setAutoFillBackground(False)
-        window.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        # `RVE_UI_FORCE_COMPOSITE=1` withholds the opaque DECLARATION only: the window still paints its own backdrop, so
+        # the picture is identical, but the compositor has to blend it instead of trusting the opaque region. That is the
+        # scanout test - and it must not touch the decorations. (Marking the window translucent did force compositing,
+        # but Qt gives a translucent window NO frame, so the title bar - the only place to grab the window - vanished;
+        # owner, 2026-11-22.)
+        import os as _os
+
+        if _os.environ.get("RVE_UI_FORCE_COMPOSITE"):
+            print("[window] composite test: the opaque region is NOT declared - the compositor must blend this window",
+                  flush=True)
+        else:
+            window.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         _window_palette = window.palette()
         _window_palette.setColor(QPalette.ColorRole.Window, _backdrop)
         window.setPalette(_window_palette)

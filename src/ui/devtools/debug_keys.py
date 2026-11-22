@@ -95,19 +95,14 @@ def install(window) -> QObject | None:
 
 
 def force_composite(window) -> bool:
-    """Make the compositor BLEND this window instead of serving it from a scanout plane.
+    """Kept as the documented switch for the scanout test; the work itself happens in `MainWindowShell.build`.
 
-    A compositing WM may scan an opaque window out directly (KMS plane, no compositing pass), and that path is where a
-    whole class of artifacts lives - a plane offset, a format/stride mismatch, a colour transform - which the composited
-    stage never shows. Every capture (screenshot, screencast, `grabWindow`) re-composites, which is why exactly those
-    artifacts can be absent from a screenshot while plainly visible on the display.
-
-    `RVE_UI_FORCE_COMPOSITE=1` marks the window translucent. Alpha stays 255 (the window fills its whole rect with the
-    theme backdrop), so the picture does not change, but the compositor can no longer scan it out directly: if the
-    artifact disappears, the scanout path is the culprit and the app is not painting it.
+    Marking the window translucent here was the first attempt and it forced compositing for the wrong reason: Qt gives a
+    translucent window no frame, so the title bar - the only place to grab and move the window - disappeared (owner,
+    2026-11-22). The window now keeps its decorations and simply withholds the opaque DECLARATION, which is the same test
+    with the picture unchanged.
     """
     if not os.environ.get(ENV_FORCE_COMPOSITE):
         return False
-    window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-    _log(window, "composite test: window marked translucent - the compositor must blend it")
+    _log(window, "composite test: opaque region withheld (declaration skipped in MainWindowShell.build)")
     return True

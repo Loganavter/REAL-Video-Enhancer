@@ -36,7 +36,7 @@ def _log(label: QWidget, message: str) -> None:
     print(f"[preview-label] {message}", flush=True)
 
 
-def apply(label: QWidget) -> str:
+def cut(label: QWidget) -> str:
     """Apply the requested mode to the preview label; returns the mode actually applied."""
     active = mode()
     if active == "default":

@@ -177,7 +177,7 @@ class MainWindow(QMainWindow):
             debug_keys.force_composite(self)
             from src.ui.devtools import bisect
 
-            bisect.apply(self)
+            bisect.apply_mode(self)
         except Exception as _debug_keys_exc:
             log(f"debug keys failed: {_debug_keys_exc}")
         # The v2 runtime swap (`toolkit_swap.py`, `toolkit_spike.py`) is gone with W3: pages are built by their own

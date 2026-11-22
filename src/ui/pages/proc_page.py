@@ -98,7 +98,7 @@ class ProcPagePage:
         # is a no-op, and the module logs the mode it applied (src/ui/devtools/label_bisect.py).
         from src.ui.devtools import label_bisect
 
-        label_bisect.apply(self.previewLabel)
+        label_bisect.cut(self.previewLabel)
         self.verticalLayout_8.addWidget(self.previewLabel)
         self.VideoPreview = QWidget(self.previewSubContainer)
         self.VideoPreview.setObjectName(u"VideoPreview")

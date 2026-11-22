@@ -46,7 +46,7 @@ def _hide_subtree(widget: QWidget) -> None:
     widget.hide()
 
 
-def apply(window) -> bool:
+def apply_mode(window) -> bool:
     """Apply `RVE_UI_BISECT`; returns True when a mode was applied. Idempotent enough to call once at startup."""
     mode = os.environ.get(ENV_FLAG, "").strip()
     if not mode or getattr(window, "_ui_bisect_applied", False):
