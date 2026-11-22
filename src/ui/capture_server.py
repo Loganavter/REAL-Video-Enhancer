@@ -383,6 +383,10 @@ def install(window) -> None:
             "visible": bool(target.isVisible()),
             "size": [target.width(), target.height()],
             # The window's own attributes: `opaque_paint` is the flag that used to make the shell skip repaints.
+            "parent": type(target.parentWidget()).__name__ if target.parentWidget() else None,
+            "parent_name": target.parentWidget().objectName() if target.parentWidget() else None,
+            "parent_size": [target.parentWidget().width(), target.parentWidget().height()]
+            if target.parentWidget() else None,
             "opaque_paint": bool(target.testAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)),
             "translucent": bool(target.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)),
             "autofill": bool(target.autoFillBackground()),
