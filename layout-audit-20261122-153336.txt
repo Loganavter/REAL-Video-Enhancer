@@ -1,0 +1,4 @@
+layout audit 2026-11-22 15:33:36
+1 problem(s)
+window 1080,215 1163x700
+STALE-PAGE QStackedWidget#TopTabStack 480x519 page[4] SurfacePanel#tab_5 480x529 (hidden)

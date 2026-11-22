@@ -275,6 +275,14 @@ class MainWindowShell:
         # resize - the owner's "the right 15 % never repaints".
         from PySide6.QtCore import QEvent, QObject
 
+        # Bisect switches: the "fit every page + settle" pass is the newest geometry work in the shell and a Resize ->
+        # layout -> resize feedback loop would look exactly like the owner's staircase after a resize. Each switch
+        # removes one half so the loop can be attributed instead of guessed.
+        import os as _fit_env
+
+        _FIT_DISABLED = bool(_fit_env.environ.get("RVE_UI_NO_FIT_PAGES"))
+        _SETTLE_DISABLED = bool(_fit_env.environ.get("RVE_UI_NO_SETTLE"))
+
         class _PageStackFit(QObject):
             def eventFilter(self, watched, event):
                 if event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
@@ -282,6 +290,8 @@ class MainWindowShell:
                 return False
 
             def fit(self) -> None:
+                if _FIT_DISABLED:
+                    return
                 stack = window.stackedWidget
                 size = stack.size()
                 if size.isEmpty():
@@ -292,6 +302,8 @@ class MainWindowShell:
                         continue
                     if page.size() != size:
                         page.resize(size)
+                    if _SETTLE_DISABLED:
+                        continue
                     try:
                         from sli_ui_toolkit.ui.layout_settle import settle_layout
                     except Exception:
