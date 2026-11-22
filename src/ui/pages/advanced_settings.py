@@ -167,6 +167,7 @@ class AdvancedSettingsPage:
         self.horizontalSpacer_7 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_18.addItem(self.horizontalSpacer_7)
         self.tileSizeComboBox = ComboBox(self.tileSizeContainer)
+        self.tileSizeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.tileSizeComboBox.addItem("")
         self.tileSizeComboBox.addItem("")
         self.tileSizeComboBox.addItem("")

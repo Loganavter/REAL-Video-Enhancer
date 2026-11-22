@@ -101,8 +101,6 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
         ('src/ui/pages/general_settings.py', 'setMaximumSize(10000, 30)'): 1,
         ('src/ui/pages/general_settings.py', 'setMaximumSize(100000, 180)'): 1,
         ('src/ui/pages/general_settings.py', 'setMaximumSize(200, 35)'): 1,
-        ('src/ui/pages/general_settings.py', 'setMaximumSize(230, 30)'): 2,
-        ('src/ui/pages/general_settings.py', 'setMaximumSize(250, 30)'): 4,
         ('src/ui/pages/general_settings.py', 'setMaximumSize(30)'): 4,
         ('src/ui/pages/general_settings.py', 'setMaximumSize(42344, 200)'): 1,
         ('src/ui/pages/general_settings.py', 'setMaximumSize(75, 30)'): 2,

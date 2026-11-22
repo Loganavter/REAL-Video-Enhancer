@@ -132,6 +132,7 @@ class Tab2Page:
         self.horizontalSpacer_13 = QSpacerItem(305, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.horizontalLayout_27.addItem(self.horizontalSpacer_13)
         self.scene_change_detection_method = ComboBox(self.widget_12)
+        self.scene_change_detection_method.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.addItem("")
