@@ -46,6 +46,9 @@ AUDIT_SHORTCUT = "Ctrl+Shift+D"
 #: Cursor probe: names the painter at the cursor and compares what it RENDERS (`grab()`) with what the screen shows
 #: (`grabWindow`) - the pair that separates our painting from the compositor's.
 PROBE_SHORTCUT = "Ctrl+Shift+P"
+#: Function-key fallbacks: an input method (ibus here) can swallow `Ctrl+Shift+<letter>` before the app sees it.
+FUNCTION_AUDIT = "F9"
+FUNCTION_PROBE = "F10"
 
 
 def enabled() -> bool:
@@ -119,6 +122,8 @@ def install(window) -> QObject | None:
             wanted = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
             if (modifiers & wanted) != wanted or (modifiers & Qt.KeyboardModifier.AltModifier):
                 return False
+            if int(event.key()) in _MODIFIER_KEYS:
+                return False          # holding Ctrl+Shift auto-repeats the modifier itself; that is not a shortcut
             # KEY CODES, not the sequence's text: on a Russian layout Ctrl+Shift+D arrives as "Ctrl+Shift+В" and a
             # text match silently ignores it - `key()` carries the physical key, so the shortcut works in any layout
             # (the owner pressed it, the filter was armed, and nothing was logged: 2026-11-22).
@@ -181,13 +186,47 @@ def install(window) -> QObject | None:
         return None
     holder = _Keys(app)
     app.installEventFilter(holder)
+
+    # Real `QShortcut`s as well, because the event filter does NOT see everything: with ibus on this host a
+    # `Ctrl+Shift+<letter>` press never reached the filter (only the modifier's own auto-repeats did), while the same
+    # binding as a QShortcut fired - it did at 13:44, before the filter replaced it. Function keys are bound too: no
+    # input method claims them, so there is always one combination that works.
+    from PySide6.QtGui import QShortcut
+
+    def bind(sequence: str, action, label: str) -> None:
+        shortcut = QShortcut(QKeySequence(sequence), window)
+        shortcut.activated.connect(lambda: _fire(action, label))
+        holder.__dict__.setdefault("_shortcuts", []).append(shortcut)
+
+    def _fire(action, label: str) -> None:
+        _log(window, f"shortcut {label} fired")
+        try:
+            action()
+        except Exception as error:
+            _log(window, f"shortcut {label} failed: {type(error).__name__}: {error}")
+
+    bind(REPAINT_SHORTCUT, _repaint, REPAINT_SHORTCUT)
+    bind(HIDE_SHORTCUT, _hide_under_cursor, HIDE_SHORTCUT)
+    bind(AUDIT_SHORTCUT, _audit, AUDIT_SHORTCUT)
+    bind(PROBE_SHORTCUT, _probe, PROBE_SHORTCUT)
+    bind(FUNCTION_AUDIT, _audit, FUNCTION_AUDIT)
+    bind(FUNCTION_PROBE, _probe, FUNCTION_PROBE)
     window._debug_keys = holder
     _log(window, f"debug keys armed: {REPAINT_SHORTCUT} = repaint, {HIDE_SHORTCUT} = hide under cursor, "
-                 f"{AUDIT_SHORTCUT} = layout audit, {PROBE_SHORTCUT} = pixel probe (every press is logged)")
+                 f"{AUDIT_SHORTCUT}/{FUNCTION_AUDIT} = layout audit, {PROBE_SHORTCUT}/{FUNCTION_PROBE} = pixel probe "
+                 f"(every press is logged); if the Ctrl+Shift ones are swallowed by the input method, use the F keys")
     return holder
 
 
 _ACTIONS: dict = {}
+
+#: Modifier keys repeat while held; logging each repeat buried the real press under 17 identical lines.
+_MODIFIER_KEYS = frozenset({
+    0x01000021,  # Qt.Key_Control
+    0x01000020,  # Qt.Key_Shift
+    0x01000023,  # Qt.Key_Alt
+    0x01000022,  # Qt.Key_Meta
+})
 
 
 def force_composite(window) -> bool:
