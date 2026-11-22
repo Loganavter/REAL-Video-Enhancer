@@ -4,10 +4,11 @@ import requests
 from PySide6 import QtCore
 
 from ..Util import openLink
-from ..constants import CWD, TEMP_DOWNLOAD_PATH
+from ..constants import CWD
 
 RELEASES_URL = "https://api.github.com/repos/tntwise/real-video-enhancer/releases"
-CHANGELOG_CACHE = os.path.join(TEMP_DOWNLOAD_PATH, "changelog_cache.md")
+#: Not under TEMP_DOWNLOAD_PATH: the exit dialog wipes that folder, which made every start the first start.
+CHANGELOG_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "REAL-Video-Enhancer", "changelog_cache.md")
 SHIPPED_CHANGELOG = os.path.join(CWD, "CHANGELOG.md")
 
 
@@ -69,12 +70,21 @@ class HomeTab:
         return read_notes(SHIPPED_CHANGELOG) or read_notes(CHANGELOG_CACHE)
 
     def applyFetchedNotes(self, notes: str) -> None:
+        """Refresh the CACHE; never replace text the user is looking at.
+
+        The fetch runs on a thread and lands a few seconds after the window opens, and replacing the pane then re-laid
+        the whole notes block under the reader (owner report 2026-11-22: the left pane "unexpectedly updates"). The
+        shipped changelog is what the panel shows; the fetched copy is what the NEXT start shows.
+        """
         try:
             os.makedirs(os.path.dirname(CHANGELOG_CACHE), exist_ok=True)
             with open(CHANGELOG_CACHE, "w", encoding="utf-8") as fh:
                 fh.write(notes)
         except OSError:
             pass
+        current = self.parent.stackedWidget.currentWidget() if hasattr(self.parent, "stackedWidget") else None
+        if current is getattr(self.parent, "homePage", None):
+            return
         self.parent.changeLogText.setMarkdown(notes)
 
     def QConnect(self):
