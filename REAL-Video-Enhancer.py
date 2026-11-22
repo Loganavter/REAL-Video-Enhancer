@@ -12,7 +12,7 @@ os.environ["PYTHONNOUSERSITE"] = "1" # Prevents python from installing packages 
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["NVIDIA_TENSORRT_DISABLE_INTERNAL_PIP"] = "0"
 os.environ["PYTHON_JIT"] = "1" # enable python's experimental JIT for better performance in python 3.13
-from PySide6.QtCore import QLockFile
+from PySide6.QtCore import QLockFile, QTimer, Qt
 from PySide6.QtWidgets import (QStackedWidget, 
     QApplication,
     QMainWindow,
@@ -1130,6 +1130,22 @@ def main(file_to_open=None):
     # and down between reconfigurations (2026-11-22). One call states one state.
     if "--fullscreen" in sys.argv:
         window.showFullScreen()
+
+        def _assert_fullscreen() -> None:
+            """Re-state the state once if the compositor acknowledged the map with a normal window.
+
+            A Wayland compositor may answer the first commit with a normal-state configure (the request and the map
+            race), which leaves the window sized like a normal window while the surface was already laid out for the
+            screen: the owner saw the app "miss by ~50 px, now up, now down" - the title bar's height (2026-11-22).
+            One re-assert, logged, so a compositor that refuses is visible in the log instead of looking like a paint
+            bug.
+            """
+            if window.windowState() & Qt.WindowState.WindowFullScreen:
+                return
+            log("fullscreen: the state did not take on map - re-asserting once")
+            window.showFullScreen()
+
+        QTimer.singleShot(0, _assert_fullscreen)
     else:
         window.show()
     # Drain the event loop before handing control to app.exec(). `show()` only QUEUES the map and the first paint, and
