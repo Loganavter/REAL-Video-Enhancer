@@ -262,10 +262,14 @@ class ProcPagePage:
         self.horizontalLayout_39.setContentsMargins(0, 0, 0, 0)
         self.startRenderButton = Button(parent=self.widget_24, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(59, 55))
         self.startRenderButton.setObjectName(u"startRenderButton")
         self.startRenderButton.setEnabled(True)
         self.startRenderButton.setMaximumSize(QSize(59, 55))
+        # The Designer pinned this button at 59x55. The toolkit's hint is 60x50 (the icon is 40x45 and its box is square:
+        # 45 + 5 padding), so the ceiling alone left it 5 px short and 1 px wide. A minimum states the Designer's number,
+        # and with the ceiling above it the button is exactly 59x55 in any row.
+
         # QPushButton's own policy: as wide as it needs, exactly as tall as its hint - the toolkit button would
         # otherwise fill the cell and grow past the Designer's 55 px ceiling in a taller row.
         self.startRenderButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)

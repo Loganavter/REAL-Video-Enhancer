@@ -569,11 +569,14 @@ class GeneralSettingsPage:
         self.addToRenderQueueButton = Button(parent=self.widget_25,
             text=QCoreApplication.translate("MainWindow", u" Add to Render Queue", None), variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(200, 35))
         self.addToRenderQueueButton.setObjectName(u"addToRenderQueueButton")
         sizePolicy5.setHeightForWidth(self.addToRenderQueueButton.sizePolicy().hasHeightForWidth())
         self.addToRenderQueueButton.setSizePolicy(sizePolicy5)
         self.addToRenderQueueButton.setMaximumSize(QSize(200, 35))
+        # The Designer pinned 200x35; the toolkit's hint at RVE's 12 px control font is 187x33 (text + 10/10 padding +
+        # 5/5), so the row handed it 2-5 px less. The Designer's numbers are the row's height here, not a preference.
+
         # No stylesheet: a toolkit button paints itself; the deleted rule only repeated its own alignment.
         icon2 = QIcon()
         icon2.addFile(u":/icons/icons/plus-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
