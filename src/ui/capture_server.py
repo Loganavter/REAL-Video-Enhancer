@@ -277,6 +277,87 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: drag {target}@({x1},{y1})->({x2},{y2}) selected={report['selectedRows']}", flush=True)
 
+    def queue(spec: str) -> None:
+        """Load a folder into the queue: `queue:<folder-or-file>` - the user's own clicks, without a file dialog.
+
+        A repaint artifact cannot be reproduced through `window.grab()` (it re-renders the tree and never reads the
+        backing store), so the live app has to be put into the state that shows it: several rows queued, some selected.
+        """
+        import os as _os
+
+        path = spec.strip()
+        report = {"stamp": _stamp(), "kind": "queue", "path": path, "error": None, "rows": 0}
+        if not _os.path.exists(path):
+            report["error"] = "path does not exist"
+            _finish(report)
+            return
+        if _os.path.isdir(path):
+            window.loadVideo(path, multi_file=True)
+        else:
+            window.loadVideo(path)
+        out = "/tmp/opencode/live-queue-out"
+        _os.makedirs(out, exist_ok=True)
+        window.outputFileText.setText(out)
+
+        def add(ticks: int = 0) -> None:
+            probe = getattr(window, "_batchProbe", None)
+            if probe is not None and probe.isRunning() and ticks < 200:
+                QTimer.singleShot(100, lambda: add(ticks + 1))
+                return
+            window.addToRenderQueue()
+            if window.renderQueueListWidget.count() == 0:
+                # No op runs without a model selected; the probe is a measurement tool, so it states one instead of
+                # reporting "0 rows" with no reason.
+                report["error"] = "nothing added (no model selected?)"
+                box = getattr(window, "upscaleCheckBox", None)
+                combo = getattr(window, "upscaleModelComboBox", None)
+                if box is not None and combo is not None:
+                    box.setChecked(True)
+                    if combo.count():
+                        combo.setCurrentIndex(combo.count() - 1)
+                    window.addToRenderQueue()
+            report["rows"] = window.renderQueueListWidget.count()
+            report["files"] = [row.inputFile for row in window.renderQueue.getQueue()]
+            _finish(report)
+            print(f"capture-server: queue {path} -> {report['rows']} rows", flush=True)
+
+        QTimer.singleShot(100, add)
+
+    def select(spec: str) -> None:
+        """Select rows by index: `select:renderQueueListWidget@0,1,2`."""
+        from PySide6.QtWidgets import QWidget
+
+        target, _, rows = spec.partition("@")
+        widget = window.findChild(QWidget, target.strip())
+        try:
+            indices = [int(part) for part in rows.split(",") if part.strip()]
+        except ValueError:
+            indices = []
+        report = {"stamp": _stamp(), "kind": "select", "error": None}
+        if widget is None or not hasattr(widget, "setSelectedRows"):
+            report["error"] = "no such list"
+        else:
+            widget.setSelectedRows(indices)
+            for _ in range(6):
+                QApplication.processEvents()
+            report["selectedRows"] = widget.selectedRows()
+        _finish(report)
+        print(f"capture-server: select {spec} -> {report.get('selectedRows')}", flush=True)
+
+    def move(direction: str) -> None:
+        """Run the queue's Move Up / Move Down on the current selection: `move:up`."""
+        queue_model = window.renderQueue
+        before = [row.inputFile for row in queue_model.getQueue()]
+        moved = queue_model.moveSelected(direction.strip())
+        for _ in range(8):
+            QApplication.processEvents()
+        widget = window.renderQueueListWidget
+        _finish({"stamp": _stamp(), "kind": "move", "moved": bool(moved),
+                 "rows": widget.count(), "selectedRows": widget.selectedRows(),
+                 "order": [row.inputFile for row in queue_model.getQueue()],
+                 "changed": before != [row.inputFile for row in queue_model.getQueue()]})
+        print(f"capture-server: move {direction} -> moved={moved} selected={widget.selectedRows()}", flush=True)
+
     def widget_state(name: str) -> None:
         """The interactive state of one named widget: `state:<objectName>`.
 
@@ -336,6 +417,15 @@ def install(window) -> None:
             return
         if wanted.startswith("drag:"):
             drag(wanted[len("drag:"):])
+            return
+        if wanted.startswith("queue:"):
+            queue(wanted[len("queue:"):])
+            return
+        if wanted.startswith("select:"):
+            select(wanted[len("select:"):])
+            return
+        if wanted.startswith("move:"):
+            move(wanted[len("move:"):])
             return
         if wanted == "stack":
             # Every thread's Python stack, written next to the server's other answers. The render runs in a worker, and

@@ -352,8 +352,11 @@ class RenderQueue:
         self.qlistwidget.setItems(self.inputNameList)
         valid = [row for row in selection if 0 <= row < len(self.inputNameList)]
         if valid:
-            self.qlistwidget.setSelectedRows(valid)
+            # Current row FIRST, selection after: `setCurrentRow` selects the one row it moves to (that is what a click
+            # does), so doing it second collapsed a moved block to a single row - the owner selected three, pressed Move
+            # Up and saw one highlighted (2026-11-22).
             self.qlistwidget.setCurrentRow(valid[0] if current is None else current)
+            self.qlistwidget.setSelectedRows(valid)
 
     def removeSelected(self) -> int:
         """Remove every selected row (descending, so the indices stay valid); returns how many went."""
