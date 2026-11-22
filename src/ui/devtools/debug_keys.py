@@ -28,6 +28,9 @@ from PySide6.QtWidgets import QApplication, QWidget
 #: Environment variable that arms the debug keys.
 ENV_FLAG = "RVE_UI_DEBUG_KEYS"
 
+#: Forcing the compositor to blend the window instead of scanning it out directly.
+ENV_FORCE_COMPOSITE = "RVE_UI_FORCE_COMPOSITE"
+
 REPAINT_SHORTCUT = "Ctrl+Shift+R"
 HIDE_SHORTCUT = "Ctrl+Shift+H"
 
@@ -89,3 +92,22 @@ def install(window) -> QObject | None:
     _log(window, f"debug keys: {REPAINT_SHORTCUT} = repaint the window, {HIDE_SHORTCUT} = hide the widget "
                  f"under the cursor")
     return holder
+
+
+def force_composite(window) -> bool:
+    """Make the compositor BLEND this window instead of serving it from a scanout plane.
+
+    A compositing WM may scan an opaque window out directly (KMS plane, no compositing pass), and that path is where a
+    whole class of artifacts lives - a plane offset, a format/stride mismatch, a colour transform - which the composited
+    stage never shows. Every capture (screenshot, screencast, `grabWindow`) re-composites, which is why exactly those
+    artifacts can be absent from a screenshot while plainly visible on the display.
+
+    `RVE_UI_FORCE_COMPOSITE=1` marks the window translucent. Alpha stays 255 (the window fills its whole rect with the
+    theme backdrop), so the picture does not change, but the compositor can no longer scan it out directly: if the
+    artifact disappears, the scanout path is the culprit and the app is not painting it.
+    """
+    if not os.environ.get(ENV_FORCE_COMPOSITE):
+        return False
+    window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    _log(window, "composite test: window marked translucent - the compositor must blend it")
+    return True
