@@ -1124,9 +1124,14 @@ def main(file_to_open=None):
     _warm_widget(window)
     window.grab()
     _stamp("first frame warmed")
+    # Mutually exclusive, not both: `show()` after `showFullScreen()` asks the platform for a NORMAL window again, and
+    # QtWayland/GNOME can end up with a state/frame that disagrees with the surface geometry - observed by the owner as
+    # the app "missing by ~50 px" (the title bar's height) with a strip of the desktop showing at one edge, flipping up
+    # and down between reconfigurations (2026-11-22). One call states one state.
     if "--fullscreen" in sys.argv:
         window.showFullScreen()
-    window.show()
+    else:
+        window.show()
     # Drain the event loop before handing control to app.exec(). `show()` only QUEUES the map and the first paint, and
     # the toolkit settles its controls on 0-timers (style/scale application, text layout, deferred re-layout): without
     # these turns the first frame the window manager presents is the pre-settle one - measured as a dark page until the
