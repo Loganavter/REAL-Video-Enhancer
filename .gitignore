@@ -33,3 +33,4 @@ harness/docs/wsp/ledger.db
 # backend runtime logs written next to the app
 /ffmpeg_log.txt
 /backend_log.txt
+.rve-control/

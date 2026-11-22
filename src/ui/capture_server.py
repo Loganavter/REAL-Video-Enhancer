@@ -27,8 +27,35 @@ import os
 import time
 
 
+#: Where the always-on channel lives: `<app root>/.rve-control`. Relative to the running script, so a launch from any
+#: directory still gives one predictable drop box next to `log.txt`.
+CONTROL_DIR_NAME = ".rve-control"
+
+
+def control_root() -> str:
+    """The request/reply directory: `RVE_UI_CAPTURE_SERVER` when set, else `<app root>/.rve-control`."""
+    explicit = os.environ.get("RVE_UI_CAPTURE_SERVER")
+    if explicit:
+        return explicit
+    import sys
+
+    script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else os.getcwd()
+    return os.path.join(os.path.dirname(script) or os.getcwd(), CONTROL_DIR_NAME)
+
+
 def enabled() -> bool:
-    return bool(os.environ.get("RVE_UI_CAPTURE_SERVER"))
+    """Always on unless explicitly switched off (`RVE_UI_CAPTURE_SERVER=0`).
+
+    Why always: automation through the keyboard was the wrong instrument on this host - `Ctrl+Shift+<letter>` is eaten by
+    the input method (only the modifier's auto-repeats reached the app), so a probe the owner pressed never ran. The
+    reference host answers this with an always-available in-app control server (`QLocalServer` + JSON lines,
+    BlinkTable `src/core/control/server.py`); this is the same idea over a drop-box directory that needs no listener and
+    no clipboard/grab. The owner can still switch it off with `RVE_UI_CAPTURE_SERVER=0`.
+    """
+    value = os.environ.get("RVE_UI_CAPTURE_SERVER")
+    if value is None:
+        return True
+    return str(value).strip().lower() not in ("0", "false", "no", "off")
 
 
 def _stamp() -> str:
@@ -42,7 +69,7 @@ def install(window) -> None:
 
     from src.ui import layout_dump, page_capture
 
-    root = os.environ["RVE_UI_CAPTURE_SERVER"]
+    root = control_root()
     os.makedirs(root, exist_ok=True)
     delay = int(os.environ.get("RVE_UI_CAPTURE_DELAY_MS", "40000"))
     step = int(os.environ.get("RVE_UI_CAPTURE_STEP_MS", "120"))
@@ -60,7 +87,16 @@ def install(window) -> None:
         except FileNotFoundError:
             pass
 
-    state = {"warming": True, "index": 0}
+    # The warm-up walk exists for measurement runs (every page touched once so the first grab is settled). The always-on
+    # diagnosis channel must NOT walk: it would switch pages under the owner's hands. It polls immediately and only warms
+    # a page when that page is asked for.
+    always_on = os.environ.get("RVE_UI_CAPTURE_SERVER") is None
+    state = {"warming": not always_on, "index": 0}
+
+    if always_on:
+        with open(ready_path, "w", encoding="utf-8") as ready_file:
+            ready_file.write(_stamp())
+        print(f"control channel: ready (no warm-up walk) in {root}", flush=True)
 
     def warm(index: int) -> None:
         if index >= len(steps):
@@ -92,6 +128,9 @@ def install(window) -> None:
             os.unlink(request_path)
             handle(wanted)
         QTimer.singleShot(120, poll)
+
+    if always_on:
+        QTimer.singleShot(0, poll)
 
     def probe(spec: str) -> None:
         """Name the painter at a point: `probe:<objectName>@<window_x>,<window_y>`.
@@ -454,6 +493,22 @@ def install(window) -> None:
     def handle(wanted: str) -> None:
         if wanted.startswith("probe:"):
             probe(wanted[len("probe:"):])
+            return
+        if wanted.startswith("probe_at:"):
+            from PySide6.QtCore import QPoint
+
+            from src.ui.devtools import layout_audit
+
+            try:
+                gx, gy = (int(value) for value in wanted[len("probe_at:"):].strip().split(","))
+            except ValueError:
+                _finish({"stamp": _stamp(), "kind": "probe_at", "error": "expected x,y in global coordinates"})
+                return
+            lines = layout_audit.probe_at(window, QPoint(gx, gy))
+            path = layout_audit.write_probe(window, control_root())
+            _finish({"stamp": _stamp(), "kind": "probe_at", "lines": lines, "path": path,
+                     "point": [gx, gy]})
+            print(f"capture-server: probe_at ({gx},{gy}) -> {len(lines)} line(s)", flush=True)
             return
         if wanted.startswith("audit:"):
             from src.ui.devtools import layout_audit
