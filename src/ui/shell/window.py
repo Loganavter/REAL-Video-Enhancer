@@ -272,6 +272,11 @@ class MainWindowShell:
         from src.ui.wheel_policy import apply_wheel_requires_focus
 
         apply_wheel_requires_focus(window)
+        # And one place for the clipped-edge fade: a scroll area that continues past its edge fades out instead of cutting
+        # the content with a hard line (owner asked for Google's look).
+        from src.ui.scroll_fade import apply_edge_fades
+
+        apply_edge_fades(window)
 
     def retranslate(self, window) -> None:
         window.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))

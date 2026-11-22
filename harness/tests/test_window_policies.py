@@ -30,12 +30,15 @@ def _calls_in(path: Path, function: str) -> set[str]:
     raise AssertionError(f"{path.name} has no {function}() - the pin is looking at nothing")
 
 
-def test_the_window_build_applies_both_window_wide_policies() -> None:
+def test_the_window_build_applies_every_window_wide_policy() -> None:
     calls = _calls_in(WINDOW, "build")
     assert "apply_control_fonts" in calls, "the 12 px control type is no longer stated per window"
     assert "apply_wheel_requires_focus" in calls, (
         "the wheel policy is gone: a wheel over a combo steps its value while scrolling the page (owner report "
         "2026-11-22)")
+    assert "apply_edge_fades" in calls, (
+        "the clipped-edge fade is gone: a scroll area cuts its content with a hard line instead of fading (owner asked "
+        "for the Google look, 2026-11-22)")
 
 
 def test_the_wheel_policy_turns_the_toolkit_flag_on_for_every_control_that_has_one() -> None:
