@@ -308,8 +308,11 @@ class GeneralSettingsPage:
         # `single_step=0.1` is the adapter's "Qt clamps and rounds to `decimals`" semantic, stated as the step the field
         # actually shows: the toolkit's `DoubleSpinBox.setValue` SNAPS to `single_step` (its default 1.0 turns a stored
         # `3.5` into `3.0`). The Designer then pins this box to `decimals(0)`, so the field shows whole multipliers.
+        # `show_step_buttons=True`, like every Designer spin box: the toolkit's DoubleSpinBox defaults the step gutter
+        # OFF, so this row rendered as a bare box while its neighbours (scene-change threshold, start/end time) had arrows
+        # (owner, 2026-11-22: "the arrows disappeared in the rows where they should be").
         self.interpolationMultiplierSpinBox = DoubleSpinBox(self.interpolationContainer2, single_step=0.1, decimals=1,
-            alignment=SPIN_ALIGNMENT)
+            show_step_buttons=True, alignment=SPIN_ALIGNMENT)
         self.interpolationMultiplierSpinBox.setObjectName(u"interpolationMultiplierSpinBox")
         sizePolicy5.setHeightForWidth(self.interpolationMultiplierSpinBox.sizePolicy().hasHeightForWidth())
         self.interpolationMultiplierSpinBox.setSizePolicy(sizePolicy5)
@@ -511,7 +514,8 @@ class GeneralSettingsPage:
         self.horizontalLayout_50.addWidget(self.label_72)
         # Same `single_step`/`decimals` statement as the interpolation multiplier: the toolkit field snaps `setValue`
         # to its step, and the Designer then pins this box to whole scale factors (`decimals(0)`).
-        self.upscaleScaleSpinBox = DoubleSpinBox(self.widget_42, single_step=0.1, decimals=1, alignment=SPIN_ALIGNMENT)
+        self.upscaleScaleSpinBox = DoubleSpinBox(self.widget_42, single_step=0.1, decimals=1, show_step_buttons=True,
+            alignment=SPIN_ALIGNMENT)
         self.upscaleScaleSpinBox.setObjectName(u"upscaleScaleSpinBox")
         sizePolicy5.setHeightForWidth(self.upscaleScaleSpinBox.sizePolicy().hasHeightForWidth())
         self.upscaleScaleSpinBox.setSizePolicy(sizePolicy5)

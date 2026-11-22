@@ -289,3 +289,28 @@ def test_splitter_would_emit_the_class_each_page_builds() -> None:
                 f"{HINT}")
         extra = set(decision[module]) - set(widgets)
         assert not extra, f"splitter would emit unpinned primitives in {module}: {sorted(extra)} - {HINT}"
+
+
+def test_every_page_spin_box_keeps_its_step_buttons() -> None:
+    """The Designer's `QSpinBox`/`QDoubleSpinBox` always had arrows; the toolkit spells that `show_step_buttons=True`
+    and its `DoubleSpinBox` defaults the gutter OFF, so a page that forgets the flag renders a bare box next to a
+    neighbour with arrows (owner, 2026-11-22). The int `Stepper` defaults it ON, so only the float fields need the pin.
+    """
+    offenders = []
+    for path in sorted(PAGES.glob("*.py")):
+        tree = _parse(path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            target = node.func
+            name = target.id if isinstance(target, ast.Name) else getattr(target, "attr", "")
+            if name != "DoubleSpinBox":
+                continue
+            flags = {keyword.arg: keyword.value for keyword in node.keywords if keyword.arg}
+            value = flags.get("show_step_buttons")
+            enabled = bool(value is not None and isinstance(value, ast.Constant) and value.value is True)
+            if not enabled:
+                offenders.append(f"{path.name}:{node.lineno}")
+    assert not offenders, (
+        "these DoubleSpinBox fields render without step buttons - pass show_step_buttons=True: " + ", ".join(offenders)
+    )
