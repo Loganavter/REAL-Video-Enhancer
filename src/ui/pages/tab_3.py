@@ -169,6 +169,11 @@ class Tab3Page:
         self.pytorch_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_3.addWidget(self.pytorch_gpu_id)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_3)
+        # Rows are HORIZONTAL sub-layouts here, and the page is stretched to the tab pane: without a filler the box
+        # layout shares that height among the rows themselves, so at 1920x1080 six rows were 132 px apart with their
+        # controls floating in the middle of each band (measured 2026-11-22). The filler takes the slack.
+        self._settingsFiller = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        self.verticalLayout_12.addItem(self._settingsFiller)
         self.verticalLayout_22.addWidget(self.renderSettingsContainer)
         self.tensorrt_optimization_level.setCurrentIndex(2)
         self.retranslate()

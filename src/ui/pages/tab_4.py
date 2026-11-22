@@ -105,6 +105,11 @@ class Tab4Page:
         self.openRVEFolderBtn.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.verticalLayout_35.addWidget(self.openRVEFolderBtn)
         self.verticalLayout_20.addWidget(self.widget_29)
+        # Rows, not a stack: the tab page is stretched to the pane, and without a filler the box layout shares that
+        # height among the rows - at 1920x1080 the three rows sat 275 px apart with the switch floating in the middle of
+        # each band (measured 2026-11-22). The filler takes the slack; a row keeps its own height.
+        self._settingsFiller = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        self.verticalLayout_20.addItem(self._settingsFiller)
         self.verticalLayout_23.addWidget(self.GUIOptionsContainer)
         self.retranslate()
         return self.tab_4
