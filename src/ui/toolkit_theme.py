@@ -44,6 +44,9 @@ LOOK: dict[str, tuple[str, str]] = {
     "Palette().Button": ("Button", "#353535"),
     "Palette().ButtonText": ("ButtonText", "#ffffff"),
     "Palette().BrightText": ("BrightText", "#ff0000"),
+    # A link is the one place a monochrome look cannot stay monochrome: RVE's own link blue (the Qt palette role and the
+    # toolkit token are the same row, so the panes can ask for `link` and the dialogs get the same colour).
+    "Palette().Link": ("link", "#4da3ff"),
     "Palette().Highlight": ("Highlight", "#2a82da"),
     "Palette().HighlightedText": ("HighlightedText", "#000000"),
     # --- surfaces ----------------------------------------------------------------------------------------
@@ -105,7 +108,8 @@ QSS_OWNED: dict[str, str] = {
 #: so these are facts of the fallback look rather than colours a toolkit painter reads. They are the half of the old
 #: `QTstyle.Palette()` that `LOOK` does not cover - kept here because this module now owns that palette.
 FALLBACK_ROLES: dict[str, str] = {
-    "Link": "#2a82da",
+    # `Link` moved to LOOK: it is a theme token now (the toolkit palette carries `link`), so the table owns it and the
+    # audit compares one source instead of two.
 }
 FALLBACK_DISABLED_ROLES: dict[str, str] = {
     "Base": "#313131",
