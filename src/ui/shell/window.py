@@ -328,13 +328,14 @@ class MainWindowShell:
         from src.ui.wheel_policy import apply_wheel_requires_focus
 
         apply_wheel_requires_focus(window)
-        # The clipped-edge fade is OPT-IN and OFF by default while the render-time freeze is being diagnosed: the first
-        # implementation rendered the whole scroll content into a pixmap per paint, which is not affordable on a render log
-        # (owner, 2026-11-22: the window froze at ~80 % CPU after a render). `RVE_UI_EDGE_FADE=1` turns it back on for a
-        # measurement, never by default until the freeze is understood.
+        # The clipped-edge fade: content that continues past a scroll area's edge fades out by alpha instead of being cut
+        # by a hard line (owner's ongoing requirement). It was switched off while the render-time freeze was being
+        # diagnosed; the freeze turned out to be the render log re-wrapping itself (§24), and the fade is a cheap painted
+        # overlay again (24 px fill per edge, no QGraphicsEffect - an effect renders the whole widget per paint). So it is
+        # ON by default; `RVE_UI_EDGE_FADE=0` turns it off for an A/B.
         import os as _os
 
-        if _os.environ.get("RVE_UI_EDGE_FADE"):
+        if _os.environ.get("RVE_UI_EDGE_FADE", "1").strip().lower() not in ("0", "false", "no", "off"):
             from src.ui.scroll_fade import apply_edge_fades
 
             apply_edge_fades(window)

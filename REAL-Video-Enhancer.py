@@ -534,6 +534,15 @@ class MainWindow(QMainWindow):
         # set interpolation container visible if interpolate model is not none
         self.upscaleContainer.setVisible(isUpscale or isDeblur or isDenoise or isDecompress)
         self.generalUpscaleContainer.setVisible(isUpscale)
+        # Quality Preset / "Reuse unchanged frames" / "By cel" need an UPSCALE model specifically - denoise, deblur and
+        # decompress alone do not use them:
+        #   * `temporal_reuse` is only created when there is an upscale model (backend/src/RenderVideo.py:455:
+        #     `if temporal_reuse and self.upscaleModel and not self.interpolateModel ...`);
+        #   * `quality_preset` resolves the int8 BODY of the upscale model (RenderVideo.resolve_int8_fit ->
+        #     pytorch/UpscaleTorch._int8_body);
+        #   * the restoration models run on their own branch (RenderVideo.py:1098-1099).
+        # So the container follows `isUpscale` alone, not the whole "upscale body" group (owner's question, 2026-11-22).
+        self.qualityPresetContainer.setVisible(isUpscale)
         self.settings.readSettings()
         self.setDefaultOutputFile(self.inputFileText.text(), self.settings.settings["output_folder_location"])
         self.updateVideoGUIText()
