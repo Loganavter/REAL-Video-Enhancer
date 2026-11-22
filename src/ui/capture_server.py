@@ -91,7 +91,7 @@ def install(window) -> None:
     # diagnosis channel must NOT walk: it would switch pages under the owner's hands. It polls immediately and only warms
     # a page when that page is asked for.
     always_on = os.environ.get("RVE_UI_CAPTURE_SERVER") is None
-    state = {"warming": not always_on, "index": 0}
+    state = {"warming": not always_on, "index": 0, "request_id": None}
 
     if always_on:
         with open(ready_path, "w", encoding="utf-8") as ready_file:
@@ -491,8 +491,32 @@ def install(window) -> None:
         print(f"capture-server: state {name!r} -> {report.get('enabled')} enabled", flush=True)
 
     def handle(wanted: str) -> None:
+        request_id = None
+        if "#" in wanted:
+            wanted, _, request_id = wanted.rpartition("#")
+            wanted = wanted.strip()
+            request_id = request_id.strip() or None
+        state["request_id"] = request_id
         if wanted.startswith("probe:"):
             probe(wanted[len("probe:"):])
+            return
+        if wanted.startswith("repaint:"):
+            # A full repaint on demand: the same thing a window resize does, so "does this clear it" needs no keyboard.
+            before = _stamp()
+            window.repaint()
+            for _ in range(4):
+                QApplication.processEvents()
+            _finish({"stamp": before, "kind": "repaint", "done": True})
+            print("capture-server: repaint -> done", flush=True)
+            return
+        if wanted.startswith("grab:"):
+            target = wanted[len("grab:"):].strip() or os.path.join(root, f"grab-{_stamp()}.png")
+            os.makedirs(os.path.dirname(target) or root, exist_ok=True)
+            pixmap = window.grab()
+            saved = pixmap.save(target)
+            _finish({"stamp": _stamp(), "kind": "grab", "path": target, "saved": bool(saved),
+                     "size": [pixmap.width(), pixmap.height()]})
+            print(f"capture-server: grab -> {target} ({pixmap.width()}x{pixmap.height()})", flush=True)
             return
         if wanted.startswith("probe_at:"):
             from PySide6.QtCore import QPoint
@@ -555,6 +579,26 @@ def install(window) -> None:
         capture(wanted)
 
     def _finish(payload: dict) -> None:
+        payload.setdefault("request_id", state.get("request_id"))
+        """Publish an answer. `done` is the mailbox every older caller reads; `answers/<id>.json` is the race-free one.
+
+        One shared `done` file loses answers when two requests overlap: the waiter sees a payload of the wrong kind,
+        deletes it, and then waits for an answer that was already consumed - which looks exactly like the app hanging
+        (measured 2026-11-22: the owner closed the app while a probe client sat on that wait). The request may carry an
+        id as `verb#<id>`; the answer is then also written to `answers/<id>.json`, and a client that knows its id never
+        reads anybody else's reply.
+        """
+        answers_dir = os.path.join(root, "answers")
+        request_id = payload.get("request_id")
+        if request_id:
+            try:
+                os.makedirs(answers_dir, exist_ok=True)
+                target = os.path.join(answers_dir, f"{request_id}.json")
+                with open(target + ".tmp", "w", encoding="utf-8") as answer_file:
+                    json.dump(payload, answer_file)
+                os.replace(target + ".tmp", target)
+            except OSError:
+                pass
         tmp = done_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as done_file:
             json.dump(payload, done_file)
