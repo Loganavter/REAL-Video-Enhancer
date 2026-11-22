@@ -307,7 +307,9 @@ class GeneralSettingsPage:
         self.horizontalLayout_55.addWidget(self.label_11)
         # `single_step=0.1` is the adapter's "Qt clamps and rounds to `decimals`" semantic, stated as the step the field
         # actually shows: the toolkit's `DoubleSpinBox.setValue` SNAPS to `single_step` (its default 1.0 turns a stored
-        # `3.5` into `3.0`). The Designer then pins this box to `decimals(0)`, so the field shows whole multipliers.
+        # `3.5` into `3.0`). The Designer then pins this box to `decimals(0)`, so the field shows whole multipliers - and
+        # the toolkit raises its step to that display quantum, otherwise the ▲/▼ arrows move the value by a tenth the
+        # text cannot show and read as dead (owner, 2026-11-22: "the arrows do nothing").
         # `show_step_buttons=True`, like every Designer spin box: the toolkit's DoubleSpinBox defaults the step gutter
         # OFF, so this row rendered as a bare box while its neighbours (scene-change threshold, start/end time) had arrows
         # (owner, 2026-11-22: "the arrows disappeared in the rows where they should be").
@@ -318,8 +320,8 @@ class GeneralSettingsPage:
         self.interpolationMultiplierSpinBox.setSizePolicy(sizePolicy5)
         self.interpolationMultiplierSpinBox.setMinimumSize(QSize(75, 30))
         self.interpolationMultiplierSpinBox.setMaximumSize(QSize(75, 30))
-        # No `setButtonSymbols`: the toolkit field paints no ▲/▼ gutter and carries no symbol mode, so the Designer's
-        # `UpDownArrows` (the only mode it ever asks for) has nothing left to state here.
+        # No `setButtonSymbols`: the toolkit's gutter is not symbol-mode driven (it draws ▲/▼ whenever it is on), and
+        # `UpDownArrows` is the only mode the Designer ever asks for, so there is nothing left to state.
         self.interpolationMultiplierSpinBox.setDecimals(0)
         # Qt's `setMinimum` is the one range spelling the toolkit field does not answer (`DoubleSpinBox` carries
         # `setRange` only): the second bound is the layer's Qt default maximum (99.99), not the toolkit field's 100.0.
@@ -513,7 +515,8 @@ class GeneralSettingsPage:
         apply(self.label_72, BODY_PT)
         self.horizontalLayout_50.addWidget(self.label_72)
         # Same `single_step`/`decimals` statement as the interpolation multiplier: the toolkit field snaps `setValue`
-        # to its step, and the Designer then pins this box to whole scale factors (`decimals(0)`).
+        # to its step, the Designer pins this box to whole scale factors (`decimals(0)`), and the toolkit lifts the step
+        # to that quantum so one ▲ press is one visible scale factor.
         self.upscaleScaleSpinBox = DoubleSpinBox(self.widget_42, single_step=0.1, decimals=1, show_step_buttons=True,
             alignment=SPIN_ALIGNMENT)
         self.upscaleScaleSpinBox.setObjectName(u"upscaleScaleSpinBox")
@@ -521,8 +524,7 @@ class GeneralSettingsPage:
         self.upscaleScaleSpinBox.setSizePolicy(sizePolicy5)
         self.upscaleScaleSpinBox.setMinimumSize(QSize(75, 30))
         self.upscaleScaleSpinBox.setMaximumSize(QSize(75, 30))
-        # No `setButtonSymbols`: the toolkit field paints no ▲/▼ gutter and carries no symbol mode (see the
-        # interpolation multiplier above).
+        # No `setButtonSymbols`: the gutter is not symbol-mode driven (see the interpolation multiplier above).
         self.upscaleScaleSpinBox.setDecimals(0)
         # Qt's two range statements are the one call the toolkit field answers (`setRange`).
         self.upscaleScaleSpinBox.setRange(1.000000000000000, 4.000000000000000)
