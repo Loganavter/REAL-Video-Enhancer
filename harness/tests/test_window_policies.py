@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 WINDOW = ROOT / "src" / "ui" / "shell" / "window.py"
 POLICY = ROOT / "src" / "ui" / "wheel_policy.py"
+APP = ROOT / "REAL-Video-Enhancer.py"
 
 
 def _calls_in(path: Path, function: str) -> set[str]:
@@ -80,5 +81,30 @@ def test_the_window_backdrop_cannot_be_silently_skipped() -> None:
         ast.literal_eval(arg) for node in raises for arg in node.exc.args
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str))
     assert "surface.page" in messages, "the backdrop guard no longer explains the missing token"
-    source = WINDOW.read_text(encoding="utf-8")
-    assert "window.setAutoFillBackground(True)" in source, "the window no longer fills its own background"
+
+
+def test_the_window_declares_its_surface_opaque_and_paints_every_pixel() -> None:
+    """The fill alone is not enough: the surface must be declared opaque, or the compositor blends per pixel.
+
+    Every page and panel inside the window is `WA_TranslucentBackground`, and an `ImageLabel` with no pixmap paints
+    nothing - so a pixel the app leaves alone carries alpha 0 in the window's buffer and the compositing WM shows the
+    window behind (owner's terminal through the preview pane, 2026-11-22). `WA_OpaquePaintEvent` puts the whole window
+    rect into the surface's opaque region; the contract it leans on - "every pixel is painted here" - is the
+    `MainWindow.paintEvent` fill below, and the backdrop colour it uses comes from the shell.
+    """
+    shell = WINDOW.read_text(encoding="utf-8")
+    assert "WA_OpaquePaintEvent, True" in shell, (
+        "the window no longer declares its surface opaque - per-pixel alpha can bleed the desktop through")
+    assert "_backdrop_colour" in shell, "the shell no longer hands the backdrop colour to the window's paintEvent"
+
+    app = ast.parse(APP.read_text(encoding="utf-8"))
+    main_window = next((node for node in ast.walk(app)
+                        if isinstance(node, ast.ClassDef) and node.name == "MainWindow"), None)
+    assert main_window is not None, "MainWindow class is gone"
+    paint = next((node for node in main_window.body
+                  if isinstance(node, ast.FunctionDef) and node.name == "paintEvent"), None)
+    assert paint is not None, (
+        "MainWindow has no paintEvent: `WA_OpaquePaintEvent` would then promise an opaque surface nobody fills")
+    body = ast.dump(paint)
+    assert "fillRect" in body, "the window paintEvent no longer fills the rect"
+    assert "_backdrop_colour" in body, "the window paintEvent no longer uses the theme backdrop"

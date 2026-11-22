@@ -92,6 +92,24 @@ class MainWindow(QMainWindow):
         killRenderProcess(): Terminates the render process.
         closeEvent(event): Handles the close event of the main window."""
 
+    def paintEvent(self, event):
+        """Fill the window's own rect, so the surface can be declared opaque.
+
+        `MainWindowShell` sets `WA_OpaquePaintEvent`, which tells Qt (and through it the compositor) that every pixel of
+        this window is painted by the app. That claim has to hold: every page and panel inside is
+        `WA_TranslucentBackground`, so a widget that paints nothing shows whatever is under it - and without this fill
+        the "under it" was the other windows on the desktop (owner's terminal seen through the preview pane,
+        2026-11-22).
+        """
+        from PySide6.QtGui import QPainter
+
+        backdrop = getattr(self, "_backdrop_colour", None)
+        if backdrop is None:
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), backdrop)
+
     def __init__(self, file_to_open=None):
         super().__init__()
 

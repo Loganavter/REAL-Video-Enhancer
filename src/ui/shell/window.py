@@ -234,7 +234,15 @@ class MainWindowShell:
                 "window backdrop: the theme has no `surface.page` token, so the window would have no opaque "
                 "background and a compositing window manager would show the desktop through it. Install the toolkit "
                 "theme before MainWindowShell.build().")
-        window.setAutoFillBackground(True)
+        # Paint it ourselves and DECLARE the surface opaque. `autoFillBackground` alone fills the window, but Qt still
+        # reports a surface with per-pixel alpha to the compositor: any pixel a child leaves alone (every page/panel is
+        # WA_TranslucentBackground, and an `ImageLabel` with no pixmap paints nothing) is then blended against whatever
+        # window sits behind the app - the owner saw his terminal through the preview pane (2026-11-22). With
+        # WA_OpaquePaintEvent the whole window rect goes into the surface's opaque region, so the compositor ignores
+        # alpha there, and `MainWindow.paintEvent` guarantees the fill really covers every pixel.
+        window._backdrop_colour = _backdrop
+        window.setAutoFillBackground(False)
+        window.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         _window_palette = window.palette()
         _window_palette.setColor(QPalette.ColorRole.Window, _backdrop)
         window.setPalette(_window_palette)
