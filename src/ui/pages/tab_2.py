@@ -17,6 +17,7 @@ import resources_rc
 # `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, SurfacePanel,
     SurfaceScrollArea, Text)
+from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
@@ -133,6 +134,7 @@ class Tab2Page:
         self.horizontalLayout_27.addItem(self.horizontalSpacer_13)
         self.scene_change_detection_method = ComboBox(self.widget_12)
         self.scene_change_detection_method.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.scene_change_detection_method)
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.addItem("")

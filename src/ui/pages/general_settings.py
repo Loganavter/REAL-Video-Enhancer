@@ -18,6 +18,7 @@ import resources_rc
 # `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, RichTextView,
     SurfacePanel, SurfaceScrollArea, Text)
+from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 
 #: RVE's control text is 12 PIXELS (the Designer's sizing). The info pane's stock editor was 12 px, and
@@ -238,6 +239,7 @@ class GeneralSettingsPage:
         self.horizontalLayout_11.addWidget(self.label_12)
         self.backendComboBox = ComboBox(self.widget_3)
         self.backendComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.backendComboBox)
         self.backendComboBox.setObjectName(u"backendComboBox")
         sizePolicy8.setHeightForWidth(self.backendComboBox.sizePolicy().hasHeightForWidth())
         self.backendComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -285,6 +287,7 @@ class GeneralSettingsPage:
         self.horizontalLayout_45.addWidget(self.label_14)
         self.interpolateModelComboBox = ComboBox(self.widget_28)
         self.interpolateModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.interpolateModelComboBox)
         self.interpolateModelComboBox.setObjectName(u"interpolateModelComboBox")
         sizePolicy8.setHeightForWidth(self.interpolateModelComboBox.sizePolicy().hasHeightForWidth())
         self.interpolateModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -362,6 +365,7 @@ class GeneralSettingsPage:
         self.horizontalLayout_66.addWidget(self.label_87)
         self.decompressModelComboBox = ComboBox(self.decompressContainer)
         self.decompressModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.decompressModelComboBox)
         self.decompressModelComboBox.setObjectName(u"decompressModelComboBox")
         sizePolicy8.setHeightForWidth(self.decompressModelComboBox.sizePolicy().hasHeightForWidth())
         self.decompressModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -399,6 +403,7 @@ class GeneralSettingsPage:
         self.horizontalLayout_63.addWidget(self.label_83)
         self.denoiseModelComboBox = ComboBox(self.widget_44)
         self.denoiseModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.denoiseModelComboBox)
         self.denoiseModelComboBox.setObjectName(u"denoiseModelComboBox")
         sizePolicy8.setHeightForWidth(self.denoiseModelComboBox.sizePolicy().hasHeightForWidth())
         self.denoiseModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -439,6 +444,7 @@ class GeneralSettingsPage:
         self.horizontalLayout_60.addWidget(self.label_79)
         self.deblurModelComboBox = ComboBox(self.widget_43)
         self.deblurModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.deblurModelComboBox)
         self.deblurModelComboBox.setObjectName(u"deblurModelComboBox")
         sizePolicy8.setHeightForWidth(self.deblurModelComboBox.sizePolicy().hasHeightForWidth())
         self.deblurModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -485,6 +491,7 @@ class GeneralSettingsPage:
         self.horizontalLayout.addWidget(self.label_7)
         self.upscaleModelComboBox = ComboBox(self.widget)
         self.upscaleModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.upscaleModelComboBox)
         self.upscaleModelComboBox.setObjectName(u"upscaleModelComboBox")
         sizePolicy8.setHeightForWidth(self.upscaleModelComboBox.sizePolicy().hasHeightForWidth())
         self.upscaleModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -537,6 +544,7 @@ class GeneralSettingsPage:
         self.horizontalLayout_qualityPresetRow.addItem(self.horizontalSpacer_qualityPreset)
         self.qualityPresetComboBox = ComboBox(self.qualityPresetRow)
         self.qualityPresetComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.qualityPresetComboBox)
         self.qualityPresetComboBox.addItem("")
         self.qualityPresetComboBox.addItem("")
         self.qualityPresetComboBox.setObjectName(u"qualityPresetComboBox")

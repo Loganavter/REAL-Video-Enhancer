@@ -16,6 +16,7 @@ import resources_rc
 # `CheckBox` for a `QCheckBox` and `Stepper` for a `QSpinBox` (the toolkit `SpinBox` plus the step gutter RVE's
 # `::up-button`/`::down-button` rules drew). Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import CheckBox, ComboBox, Stepper, SurfacePanel, Text
+from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
@@ -70,6 +71,7 @@ class Tab3Page:
         self.precisionSettingsContainer.addWidget(self.label_3)
         self.precision = ComboBox(self.renderSettingsContainer)
         self.precision.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.precision)
         self.precision.addItem("")
         self.precision.addItem("")
         self.precision.addItem("")
@@ -85,6 +87,7 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer.addWidget(self.label_15)
         self.tensorrt_optimization_level = ComboBox(self.renderSettingsContainer)
         self.tensorrt_optimization_level.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.tensorrt_optimization_level)
         self.tensorrt_optimization_level.addItem("")
         self.tensorrt_optimization_level.addItem("")
         self.tensorrt_optimization_level.addItem("")

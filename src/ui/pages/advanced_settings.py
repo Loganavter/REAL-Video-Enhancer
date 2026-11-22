@@ -15,6 +15,7 @@ import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CheckBox` where it had a
 # `QCheckBox`, `ComboBox` where it had a `QComboBox`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import CheckBox, ComboBox, SurfacePanel, SurfaceScrollArea, Text
+from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
@@ -168,6 +169,7 @@ class AdvancedSettingsPage:
         self.horizontalLayout_18.addItem(self.horizontalSpacer_7)
         self.tileSizeComboBox = ComboBox(self.tileSizeContainer)
         self.tileSizeComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.tileSizeComboBox)
         self.tileSizeComboBox.addItem("")
         self.tileSizeComboBox.addItem("")
         self.tileSizeComboBox.addItem("")

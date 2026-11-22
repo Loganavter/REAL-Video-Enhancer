@@ -15,6 +15,7 @@ import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `ComboBox` where it had a
 # `QComboBox`, `CustomLineEdit` where it had a `QLineEdit`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import ComboBox, CustomLineEdit, OverlayScrollArea, SurfacePanel, Text
+from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
@@ -128,6 +129,7 @@ class Tab6Page:
         self.horizontalLayout_15.addItem(self.horizontalSpacer_9)
         self.encoder = ComboBox(self.widget_17)
         self.encoder.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.encoder)
         self.encoder.addItem("")
         self.encoder.addItem("")
         self.encoder.addItem("")
@@ -154,6 +156,7 @@ class Tab6Page:
         self.horizontalLayout_36.addItem(self.horizontalSpacer_22)
         self.video_encoder_speed = ComboBox(self.widget_16)
         self.video_encoder_speed.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.video_encoder_speed)
         self.video_encoder_speed.addItem("")
         self.video_encoder_speed.addItem("")
         self.video_encoder_speed.addItem("")
@@ -175,6 +178,7 @@ class Tab6Page:
         self.horizontalLayout_33.addItem(self.horizontalSpacer_17)
         self.video_quality = ComboBox(self.widget_18)
         self.video_quality.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.video_quality)
         self.video_quality.addItem("")
         self.video_quality.addItem("")
         self.video_quality.addItem("")
@@ -197,6 +201,7 @@ class Tab6Page:
         self.horizontalLayout_44.addItem(self.horizontalSpacer_19)
         self.video_container = ComboBox(self.widget_27)
         self.video_container.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.video_container)
         self.video_container.addItem("")
         self.video_container.addItem("")
         self.video_container.addItem("")
@@ -217,6 +222,7 @@ class Tab6Page:
         self.horizontalLayout_35.addItem(self.horizontalSpacer_20)
         self.video_pixel_format = ComboBox(self.widget_21)
         self.video_pixel_format.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.video_pixel_format)
         self.video_pixel_format.addItem("")
         self.video_pixel_format.addItem("")
         self.video_pixel_format.addItem("")
@@ -239,6 +245,7 @@ class Tab6Page:
         self.horizontalLayout_34.addItem(self.horizontalSpacer_30)
         self.audio_encoder = ComboBox(self.widget_20)
         self.audio_encoder.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.audio_encoder)
         self.audio_encoder.addItem("")
         self.audio_encoder.addItem("")
         self.audio_encoder.addItem("")
@@ -259,6 +266,7 @@ class Tab6Page:
         self.horizontalLayout_2.addItem(self.horizontalSpacer_18)
         self.audio_bitrate = ComboBox(self.widget_36)
         self.audio_bitrate.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.audio_bitrate)
         self.audio_bitrate.addItem("")
         self.audio_bitrate.addItem("")
         self.audio_bitrate.addItem("")
@@ -279,6 +287,7 @@ class Tab6Page:
         self.horizontalLayout_41.addItem(self.horizontalSpacer_35)
         self.subtitle_encoder = ComboBox(self.widget_41)
         self.subtitle_encoder.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cap_combo_to_row(self.subtitle_encoder)
         self.subtitle_encoder.addItem("")
         self.subtitle_encoder.addItem("")
         self.subtitle_encoder.addItem("")
