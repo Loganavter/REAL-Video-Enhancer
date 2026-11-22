@@ -16,13 +16,46 @@ and does not carry the mixin, so the video scrub bar keeps stepping on the wheel
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QApplication
+
+
+class _LateControlsWheelPolicy(QObject):
+    """Apply the policy to controls that appear AFTER the startup walk.
+
+    The walk covers everything that exists when the window is built, but the app also creates controls later - dialogs,
+    the inspector, a combo rebuilt with new items - and those were left on the toolkit default (the wheel steps them).
+    An application-wide filter closes that gap at the moment a widget is polished/shown, which is the earliest point a
+    control can receive the wheel.
+    """
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 - Qt API
+        if event.type() in (QEvent.Type.Polish, QEvent.Type.Show):
+            setter = getattr(obj, "setWheelRequiresFocus", None)
+            if setter is not None and not getattr(obj, "wheelRequiresFocus", lambda: False)():
+                setter(True)
+        return False
+
+
+def _install_late_policy(root) -> None:
+    app = QApplication.instance()
+    if app is None or getattr(app, "_wheel_requires_focus_guard", None) is not None:
+        return
+    guard = _LateControlsWheelPolicy(app)
+    app.installEventFilter(guard)
+    app._wheel_requires_focus_guard = guard
+
 
 def apply_wheel_requires_focus(root) -> int:
     """Make every value-stepping control under ``root`` require focus for the wheel; returns the count changed.
 
-    Idempotent: a control that already states the policy is skipped, so a second walk (a dialog built later, another
-    page) costs nothing.
+    Two layers: the walk over what exists now, and an application-wide filter for controls created later (dialogs,
+    rebuilt combos) - otherwise a control made after this call kept the toolkit default and stepped on the wheel while
+    the page scrolled (owner, 2026-11-22: "not every combo obeys the no-scroll policy").
+
+    Idempotent: a control that already states the policy is skipped, so a second walk costs nothing.
     """
+    _install_late_policy(root)
     changed = 0
     for widget in root.findChildren(object):
         setter = getattr(widget, "setWheelRequiresFocus", None)
