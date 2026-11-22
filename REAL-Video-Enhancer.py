@@ -170,8 +170,10 @@ class MainWindow(QMainWindow):
                 log("ui inspector: armed (Shift+click a widget; Ctrl+Shift+I raises the tool window)")
         except Exception as _inspector_exc:
             log(f"ui inspector failed: {_inspector_exc}")
-        # Two debug keys for "there is a rectangle on my screen": Ctrl+Shift+R repaints the window, Ctrl+Shift+H hides
-        # the widget under the cursor and logs its chain. Opt-in, like the inspector.
+        # Debug keys for "there is a rectangle on my screen": Ctrl+Shift+R repaints the window, Ctrl+Shift+H hides the
+        # widget under the cursor and logs its chain, Ctrl+Shift+D writes a layout audit (clipped children, stale stacked
+        # pages), Ctrl+Shift+P probes the pixel under the cursor (what it renders vs what the screen shows). Armed
+        # always: a tool the owner has to remember an env var for is a tool that silently answers nothing.
         try:
             from src.ui.devtools import debug_keys
 

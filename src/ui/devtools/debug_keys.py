@@ -28,7 +28,10 @@ from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QCursor, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QWidget
 
-#: Environment variable that arms the debug keys.
+#: Environment variable that DISARMS the debug keys (`RVE_UI_DEBUG_KEYS=0`). They used to be opt-in, and the owner
+#: pressed Ctrl+Shift+D on a normal launch: nothing happened, because the flag was not set - a diagnosis tool nobody
+#: remembers to arm is a diagnosis tool that does not exist. Armed by default now; the shortcuts are obscure enough
+#: (Ctrl+Shift+R/H/P/D) that they cannot be hit by accident.
 ENV_FLAG = "RVE_UI_DEBUG_KEYS"
 
 #: Forcing the compositor to blend the window instead of scanning it out directly.
@@ -46,8 +49,8 @@ PROBE_SHORTCUT = "Ctrl+Shift+P"
 
 
 def enabled() -> bool:
-    """True when the host asked for the debug keys (`RVE_UI_DEBUG_KEYS=1`)."""
-    return bool(os.environ.get(ENV_FLAG))
+    """True unless the host explicitly disarmed the keys (`RVE_UI_DEBUG_KEYS=0`)."""
+    return str(os.environ.get(ENV_FLAG, "1")).strip().lower() not in ("0", "false", "no", "off")
 
 
 def widget_chain(widget: QWidget | None) -> str:
@@ -59,6 +62,17 @@ def widget_chain(widget: QWidget | None) -> str:
         parts.append(f"{type(current).__name__}#{name}" if name else type(current).__name__)
         current = current.parentWidget()
     return " < ".join(parts) if parts else "(nothing under the cursor)"
+
+
+def _app_root() -> str:
+    """The directory of the running script (`REAL-Video-Enhancer.py`), i.e. where `log.txt` lives.
+
+    Not `os.getcwd()`: launched from a desktop entry or another terminal the reports would land somewhere nobody looks.
+    """
+    import sys
+
+    script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else os.getcwd()
+    return os.path.dirname(script) or os.getcwd()
 
 
 def _log(window, message: str) -> None:
@@ -103,7 +117,7 @@ def install(window) -> QObject | None:
     def _probe() -> None:
         from . import layout_audit
 
-        path = layout_audit.write_probe(window)
+        path = layout_audit.write_probe(window, _app_root())
         with open(path, encoding="utf-8") as handle:
             for line in handle.read().splitlines():
                 _log(window, f"probe: {line}")
