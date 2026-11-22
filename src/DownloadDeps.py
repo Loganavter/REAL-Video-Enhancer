@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
-from PySide6.QtWidgets import QMessageBox
 
 from .constants import (
     PLATFORM,
@@ -166,14 +165,13 @@ class Python(Dependency):
         is_update = not output == PYTHON_VERSION
 
         if is_update:
-            reply = QMessageBox.question(
+            from .ui.dialogs.toolkit_dialogs import confirm
+
+            if confirm(
                 None,
-                "Update Python?",
                 "The installed version of Python is older than the current version of RVE. Update?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,  # type: ignore
-            )
-            if reply == QMessageBox.Yes:  # type: ignore
+                title="Update Python?",
+            ):
                 self.is_update_available = True
                 print("Updating Python")
             else:

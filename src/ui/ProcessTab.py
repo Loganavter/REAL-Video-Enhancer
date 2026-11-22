@@ -8,7 +8,6 @@ from multiprocessing import shared_memory
 from PySide6 import QtGui
 from PySide6.QtGui import QPixmap, QPainter, QPainterPath, QColor, QFontMetrics
 from PySide6.QtCore import Qt, QSize, QUrl
-from PySide6.QtWidgets import QMessageBox
 
 from .RenderQueue import RenderQueue
 
@@ -217,14 +216,12 @@ class ProcessTab:
         # Set the text to the QTextEdit
 
     def questionToOverride(self):
-        reply = QMessageBox.question(
+        from src.ui.dialogs.toolkit_dialogs import confirm
+
+        return confirm(
             self.parent,
-            "",
             "Output files in render queue already exist, do you want to overwrite?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,  # type: ignore
         )
-        return reply == QMessageBox.Yes  # type: ignore
 
     def askForOverwrite(self, outputPath):
         if os.path.isfile(outputPath):

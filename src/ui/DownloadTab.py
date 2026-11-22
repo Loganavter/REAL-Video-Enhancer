@@ -1,5 +1,5 @@
 import os
-from PySide6.QtWidgets import QMainWindow, QMessageBox
+from PySide6.QtWidgets import QMainWindow
 from .QTcustom import RegularQTPopup, NetworkCheckPopup, remove_combobox_item_by_text
 from ..DownloadDeps import DownloadDependencies
 from .Updater import ApplicationUpdater
@@ -114,14 +114,9 @@ class DownloadTab:
         )
 
     def uninstallApp(self):
-        reply = QMessageBox.question(
-            self.parent,
-            "",
-            "Are you sure you want to uninstall?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,  # type: ignore
-        )
-        if reply == QMessageBox.Yes:  # type: ignore
+        from src.ui.dialogs.toolkit_dialogs import confirm
+
+        if confirm(self.parent, "Are you sure you want to uninstall?"):
             os.chdir(HOME_PATH) # fix for windows, as you cant delete a directory in use.
             FileHandler().removeFolder(CWD)
             os._exit(0)

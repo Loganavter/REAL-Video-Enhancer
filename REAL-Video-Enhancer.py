@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (QStackedWidget,
     QApplication,
     QMainWindow,
     QFileDialog,
-    QMessageBox,
 
 )
 from PySide6.QtGui import QIcon
@@ -233,14 +232,12 @@ class MainWindow(QMainWindow):
 
         self.anyBackendsInstalled = len(self.backends) > 0
         if not self.anyBackendsInstalled:
-            reply = QMessageBox.question(
-            self,
-            "",
-            "Do you want to use simple installation?\n(Recommended for most users)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,  # type: ignore
+            from src.ui.dialogs.toolkit_dialogs import confirm
+
+            automaticInstall = confirm(
+                self,
+                "Do you want to use simple installation?\n(Recommended for most users)",
             )
-            automaticInstall = reply == QMessageBox.Yes  # type: ignore
             if automaticInstall:
                 self.downloadTab = DownloadTab(parent=self, backends=self.backends, skip_info_popup=True)
                 self.downloadTab.installRecommended()
@@ -1011,14 +1008,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
 
-        reply = QMessageBox.question(
-            self,
-            "",
-            "Are you sure you want to exit?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,  # type: ignore
-        )
-        if reply == QMessageBox.Yes:  # type: ignore
+        from src.ui.dialogs.toolkit_dialogs import confirm
+
+        if confirm(self, "Are you sure you want to exit?"):
             FileHandler.removeFolder(TEMP_DOWNLOAD_PATH)
             if hasattr(self, "processTab"):
                 self.processTab.killRenderProcess()
@@ -1089,7 +1081,7 @@ def main(file_to_open=None):
     """if not "--unlock" in sys.argv:
         lock_file = QLockFile(LOCKFILE)
         if not lock_file.tryLock(10):
-            QMessageBox.warning(None, "Instance Running", "Another instance is already running.")
+            warn(None, "Another instance is already running.", title="Instance Running")
             sys.exit(0)"""
 
     # setting the pallette

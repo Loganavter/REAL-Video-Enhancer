@@ -677,8 +677,9 @@ class TextOutputPopup(ToolkitDialog):
 class RegularQTPopup(ToolkitDialog):
     """The app-wide message box: one label, one OK button, blocks like the old ``exec()`` dialog."""
 
-    def __init__(self, message, *, blocking: bool = True):
-        super().__init__(title="REAL Video Enhancer", min_width=400, min_height=100, modal=True)
+    def __init__(self, message, parent: QWidget | None = None, *, title: str = "REAL Video Enhancer",
+                 blocking: bool = True):
+        super().__init__(parent=parent, title=title, min_width=400, min_height=100, modal=True)
         self.message = message
         self.setFixedSize(400, 100)
 
@@ -693,6 +694,66 @@ class RegularQTPopup(ToolkitDialog):
 
         if blocking:
             self.exec()
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# 6b. ConfirmPopup - the toolkit counterpart of `QMessageBox.question`
+# --------------------------------------------------------------------------------------------------------------------
+class ConfirmPopup(ToolkitDialog):
+    """A Yes/No question on the toolkit's dialog chrome - the exit and install prompts.
+
+    `QMessageBox.question` was the last stock window in the app: its own frame, its own palette, a stock question-mark
+    icon and stock buttons, none of which follow the theme (owner, 2026-11-22: "why are the non-main windows not on the
+    toolkit"). This is the same dialog in the toolkit's clothes: painted surface, `Button`s with the app's padding and
+    radius, and **No** pre-focused, which is the default the stock question had.
+    """
+
+    def __init__(
+        self,
+        message,
+        parent: QWidget | None = None,
+        *,
+        title: str = "REAL Video Enhancer",
+        yes_text: str = "Yes",
+        no_text: str = "No",
+        blocking: bool = True,
+    ) -> None:
+        super().__init__(parent=parent, title=title, min_width=420, min_height=110, modal=True)
+        self.message = str(message)
+        self.label = Text(self.message, self, word_wrap=True)
+        self.root_layout.addWidget(self.label, 1)
+
+        row = _action_row()
+        self.no_button = _tk_button(no_text, self)
+        self.no_button.clicked.connect(self.reject)
+        self.yes_button = _tk_button(yes_text, self)
+        self.yes_button.clicked.connect(self.accept)
+        row.addWidget(self.no_button)
+        row.addWidget(self.yes_button)
+        self.root_layout.addLayout(row)
+        # The stock question defaulted to No; keep the same safe default (focus, not Enter-on-the-wrong-button).
+        self.no_button.setFocus(Qt.FocusReason.OtherFocusReason)
+
+        if blocking:
+            self.exec()
+
+    def confirmed(self) -> bool:
+        """True only when the user pressed Yes (a closed dialog is a No)."""
+        return self.result() == QDialog.DialogCode.Accepted
+
+
+def confirm(parent, message, *, title: str = "REAL Video Enhancer", yes_text: str = "Yes",
+            no_text: str = "No") -> bool:
+    """Ask a Yes/No question on the toolkit dialog; True for Yes. Replaces `QMessageBox.question`."""
+    dialog = ConfirmPopup(message, parent, title=title, yes_text=yes_text, no_text=no_text, blocking=False)
+    dialog.exec()
+    return dialog.confirmed()
+
+
+def warn(parent, message, *, title: str = "REAL Video Enhancer") -> None:
+    """A one-button message on the toolkit dialog; replaces `QMessageBox.warning`."""
+    dialog = RegularQTPopup(message, parent=parent, blocking=False, title=title)
+    dialog.exec()
 
 
 # --------------------------------------------------------------------------------------------------------------------

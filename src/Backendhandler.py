@@ -5,7 +5,6 @@ from .constants import BACKEND_PATH, PYTHON_EXECUTABLE_PATH, PYTHON_DIRECTORY, P
 from .Util import (
     FileHandler
 )
-from PySide6.QtWidgets import QMessageBox
 from .version import version
 
 
