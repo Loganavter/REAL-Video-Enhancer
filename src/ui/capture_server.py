@@ -628,6 +628,9 @@ def install(window) -> None:
         if wanted.startswith("render:"):
             render(wanted[len("render:"):].strip())
             return
+        if wanted.startswith("preview:"):
+            preview(wanted[len("preview:"):].strip())
+            return
         capture(wanted)
 
     def _finish(payload: dict) -> None:
@@ -655,6 +658,39 @@ def install(window) -> None:
         with open(tmp, "w", encoding="utf-8") as done_file:
             json.dump(payload, done_file)
         os.replace(tmp, done_path)
+
+    def select_a_backend() -> None:
+        """Prefer a backend that initialises in this runtime.
+
+        The default is TensorRT, and its engine build blocks forever here (measured: the backend child sits in
+        `futex_wait` at ~4 % CPU while the app waits on its stdout, ProcessTab.py:323). Torch/PyTorch runs.
+        """
+        combo = getattr(window, "backendComboBox", None)
+        if combo is None or not hasattr(combo, "count"):
+            return
+        for index in range(combo.count()):
+            text = combo.itemText(index).lower()
+            if "torch" in text and "tensorrt" not in text:
+                if combo.currentIndex() != index:
+                    combo.setCurrentIndex(index)
+                return
+
+    def select_a_model() -> None:
+        """The app refuses to queue without one: "Please select at least one model!" (REAL-Video-Enhancer.py:537).
+
+        The gate enables upscale (the model list is populated from the models directory) and picks the first model,
+        because a queue that cannot be filled would make the rest of the gate measure nothing.
+        """
+        boxes = ("interpolateCheckBox", "upscaleCheckBox", "deblurCheckBox", "denoiseCheckBox",
+                 "decompressCheckBox")
+        if any(getattr(window, name, None) is not None and getattr(window, name).isChecked() for name in boxes):
+            return
+        box = getattr(window, "upscaleCheckBox", None)
+        if box is not None:
+            box.setChecked(True)
+        combo = getattr(window, "upscaleModelComboBox", None)
+        if combo is not None and combo.currentIndex() < 0 and combo.count() > 0:
+            combo.setCurrentIndex(0)
 
     def render(video: str) -> None:
         """Queue and START a render through the same controls the user presses.
@@ -742,39 +778,6 @@ def install(window) -> None:
                 return
             QTimer.singleShot(100, lambda: press_start(ticks + 1))
 
-        def select_a_backend() -> None:
-            """Prefer a backend that initialises in this runtime.
-
-            The default is TensorRT, and its engine build blocks forever here (measured: the backend child sits in
-            `futex_wait` at ~4 % CPU while the app waits on its stdout, ProcessTab.py:323). Torch/PyTorch runs.
-            """
-            combo = getattr(window, "backendComboBox", None)
-            if combo is None or not hasattr(combo, "count"):
-                return
-            for index in range(combo.count()):
-                text = combo.itemText(index).lower()
-                if "torch" in text and "tensorrt" not in text:
-                    if combo.currentIndex() != index:
-                        combo.setCurrentIndex(index)
-                    return
-
-        def select_a_model() -> None:
-            """The app refuses to queue without one: "Please select at least one model!" (REAL-Video-Enhancer.py:537).
-
-            The gate enables upscale (the model list is populated from the models directory) and picks the first model,
-            because a queue that cannot be filled would make the rest of the gate measure nothing.
-            """
-            boxes = ("interpolateCheckBox", "upscaleCheckBox", "deblurCheckBox", "denoiseCheckBox",
-                     "decompressCheckBox")
-            if any(getattr(window, name, None) is not None and getattr(window, name).isChecked() for name in boxes):
-                return
-            box = getattr(window, "upscaleCheckBox", None)
-            if box is not None:
-                box.setChecked(True)
-            combo = getattr(window, "upscaleModelComboBox", None)
-            if combo is not None and combo.currentIndex() < 0 and combo.count() > 0:
-                combo.setCurrentIndex(0)
-
         def press_add() -> None:
             select_a_backend()
             select_a_model()
@@ -789,6 +792,77 @@ def install(window) -> None:
                 return
             if ticks > 150:                      # 15 s
                 press_add()                      # let the app refuse on its own terms; its error is the evidence
+                return
+            QTimer.singleShot(100, lambda: wait_loaded(ticks + 1))
+
+        window.inputFileText.setText(video)
+        QTimer.singleShot(300, wait_loaded)
+
+    def preview(video: str) -> None:
+        """START the preview render the Render Preview button starts (`RenderOptions.isPreview = True`).
+
+        `render:` cannot reach the LMB compare: a plain render leaves the preview pane empty, so pressing LMB compares
+        nothing (measured 2026-11-23: two root captures of the same tree while LMB was held were identical). The preview
+        path lives only behind `renderPreviewBtn` -> `MainWindow.renderPreview`, and the control channel could not press
+        a button by name - which left the whole preview surface outside the supervisor's instrument. This verb presses
+        that button, then answers with the preview file and what the pane holds, so the LMB check has a loop.
+        """
+        from src.constants import TEMP_DOWNLOAD_PATH
+
+        result = {"stamp": _stamp(), "kind": "preview", "video": video, "started": False, "finished": False,
+                  "seconds": 0.0, "output": None, "pane": None, "output_bytes": None, "error": None}
+        started_at = time.time()
+        expected = os.path.join(TEMP_DOWNLOAD_PATH, f"{os.path.basename(video)}_preview.mkv")
+
+        def pane_state() -> dict | None:
+            pane = getattr(window, "previewLabel", None)
+            if pane is None:
+                return None
+            frame = getattr(pane, "_frame", None)
+            return {"class": type(pane).__name__, "visible": bool(pane.isVisible()),
+                    "has_frame": frame is not None,
+                    "frame": [frame.width(), frame.height()] if frame is not None else None}
+
+        def finish(error: str | None = None) -> None:
+            result["seconds"] = round(time.time() - started_at, 1)
+            for candidate in (expected, getattr(window, "outputFileText", None) and
+                              str(window.outputFileText.text() or "")):
+                if candidate and os.path.exists(candidate):
+                    result["output"] = candidate
+                    result["output_bytes"] = os.path.getsize(candidate)
+                    break
+            result["pane"] = pane_state()
+            if error:
+                result["error"] = error
+            _finish(result)
+            print(f"capture-server: preview {result}", flush=True)
+
+        def wait_finish(ticks: int = 0) -> None:
+            if result["started"] and window.startRenderButton.isEnabled():
+                result["finished"] = True
+                finish()
+                return
+            if ticks > 3000:                     # 3000 * 100 ms = 5 min
+                finish("timeout waiting for the preview render to finish")
+                return
+            QTimer.singleShot(100, lambda: wait_finish(ticks + 1))
+
+        def press_preview() -> None:
+            select_a_backend()
+            select_a_model()
+            button = getattr(window, "renderPreviewBtn", None)
+            if button is None:
+                finish("no renderPreviewBtn on the window")
+                return
+            result["started"] = True
+            button.click()
+            QTimer.singleShot(400, wait_finish)
+
+        def wait_loaded(ticks: int = 0) -> None:
+            info = getattr(window, "inputVideoInfoTextEdit", None)
+            loaded = bool(info is not None and info.toPlainText().strip()) or getattr(window, "videoLength", 1) != 1
+            if loaded or ticks > 150:
+                press_preview()
                 return
             QTimer.singleShot(100, lambda: wait_loaded(ticks + 1))
 

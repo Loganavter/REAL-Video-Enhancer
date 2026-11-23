@@ -103,3 +103,15 @@ answer. `capture:` prefixed names are **not** a valid spec (the dispatcher passe
 Compare two captures with `python3 harness/scripts/ui_diff.py compare --stock-dumps A --new-dumps B --stock-png A
 --new-png B`. Two captures of the same tree are the instrument's A/A: 2026-11-23 it read 0.00 % on all 13 pages,
 142/142 widgets inside budget, 409/409 nodes identical — that is the floor the 0.05 % page budget is measured against.
+
+### Preview renders and the LMB compare
+
+`harness/scripts/live.sh ask "preview:/path/clip.mkv" 420` loads the clip and presses **Render Preview** — the one path
+that sets `RenderOptions.isPreview`, writes the fragmented preview file and feeds the pane (the plain `render:` verb
+leaves the pane empty). The answer names the preview file and what the pane holds (`class`, `visible`, `has_frame`).
+
+With a frame in the pane, the LMB compare is testable: hold the button with `xdotool mousedown 1` (a click is too fast
+to capture), take a root screenshot while it is held, then `mouseup 1`. 2026-11-23, on a letterboxed 160x120 clip with
+auto border cropping on: the render cropped to 160x64 (pane frame 320x128), and the held-LMB frame was the **source
+decoded with the same crop** — no bar rows in either picture, 26.5 % of the pane's pixels differ by more than 8 levels
+(source vs the upscale), framing identical.
