@@ -9,10 +9,16 @@ is exercised by the corpus check the supervisor runs.
 
 from __future__ import annotations
 
+import json
+import os
+
 import pytest
 
 from src.utils.BorderDetect import (
     BorderDetect,
+    cache_enabled,
+    cache_key,
+    cache_location,
     decide,
     decide_probes,
     format_decision,
@@ -297,3 +303,222 @@ def test_the_call_shape_is_unchanged_without_a_binary():
     # The reader expects four values even when nothing can be probed; the old pass answered (None, None, None, None).
     detect = BorderDetect("not-a-container.mkv", ffmpeg_path="definitely-not-ffmpeg")
     assert detect.getBorders() == (None, None, None, None)
+
+
+# -- the decision cache -----------------------------------------------------
+#
+# These pin the cache with a counting probe instead of media: a re-render of the same input must spawn
+# no ffmpeg at all, and every input or parameter change must send it back to the probes. No file here is
+# a video; only its stat() matters, which is exactly the cache key.
+
+
+def _source(tmp_path, payload=b"not really media", name="input.mkv"):
+    """A file with bytes in `tmp_path/input/`, so `stat()` has something to key on."""
+    directory = tmp_path / "input"
+    directory.mkdir(exist_ok=True)
+    path = directory / name
+    path.write_bytes(payload)
+    return path
+
+
+def _cache(tmp_path):
+    """The cache path beside an output, in its own directory (never the input's)."""
+    return tmp_path / "output" / ".crop.json"
+
+
+def _counting_probes(monkeypatch, calls, header=(6.0, 320, 240), crop=(320, 176, 0, 32)):
+    """Replace the two subprocess probes with counters that return one fixed crop."""
+    calls.setdefault("header", 0)
+    calls.setdefault("frame", 0)
+
+    def fake_header(self):
+        calls["header"] += 1
+        return header
+
+    def fake_frame(self, timestamp):
+        calls["frame"] += 1
+        return crop
+
+    monkeypatch.setattr(BorderDetect, "_probeHeader", fake_header)
+    monkeypatch.setattr(BorderDetect, "_probeFrame", fake_frame)
+
+
+def test_a_second_call_with_the_same_key_performs_zero_probes(tmp_path, monkeypatch):
+    source = _source(tmp_path)
+    calls = {}
+    _counting_probes(monkeypatch, calls)
+
+    first = BorderDetect(str(source), cache_path=str(_cache(tmp_path)))
+    assert first.getBorders() == (320, 176, 0, 32)
+    assert calls == {"header": 1, "frame": 9}
+
+    second = BorderDetect(str(source), cache_path=str(_cache(tmp_path)))
+    assert second.getBorders() == (320, 176, 0, 32)
+    # The probes are untouched: the decision came from the file beside the output.
+    assert calls == {"header": 1, "frame": 9}
+
+
+def test_a_changed_mtime_sends_the_decision_back_to_the_probes(tmp_path, monkeypatch):
+    source = _source(tmp_path)
+    calls = {}
+    _counting_probes(monkeypatch, calls)
+    borders = (320, 176, 0, 32)
+    assert BorderDetect(str(source), cache_path=str(_cache(tmp_path))).getBorders() == borders
+    assert calls["frame"] == 9
+
+    stat = source.stat()
+    os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    assert BorderDetect(str(source), cache_path=str(_cache(tmp_path))).getBorders() == borders
+    assert calls["frame"] == 18
+
+
+def test_a_changed_size_sends_the_decision_back_to_the_probes(tmp_path, monkeypatch):
+    source = _source(tmp_path)
+    calls = {}
+    _counting_probes(monkeypatch, calls)
+    assert BorderDetect(str(source), cache_path=str(_cache(tmp_path))).getBorders() == (320, 176, 0, 32)
+    source.write_bytes(b"not really media, but longer")
+    assert BorderDetect(str(source), cache_path=str(_cache(tmp_path))).getBorders() == (320, 176, 0, 32)
+    assert calls["frame"] == 18
+
+
+def test_changed_probe_params_send_the_decision_back_to_the_probes(tmp_path, monkeypatch):
+    source = _source(tmp_path)
+    calls = {}
+    _counting_probes(monkeypatch, calls)
+    assert BorderDetect(str(source), cache_path=str(_cache(tmp_path))).getBorders() == (320, 176, 0, 32)
+    assert calls["frame"] == 9
+
+    # Fewer previews change the decision, so the cache must not answer for the old parameter set.
+    fewer = BorderDetect(str(source), cache_path=str(_cache(tmp_path)), probes=5)
+    assert fewer.getBorders() == (320, 176, 0, 32)
+    assert calls["frame"] == 14
+
+    other_threshold = BorderDetect(str(source), cache_path=str(_cache(tmp_path)), crop_threshold_frames=3)
+    assert other_threshold.getBorders() == (320, 176, 0, 32)
+    assert calls["frame"] == 23
+
+
+@pytest.mark.parametrize("payload", [
+    b"{ not json",
+    b"",
+    b"[]",
+    b'{"version": 999, "key": {}, "borders": [320, 176, 0, 32]}',
+    b'{"version": 1, "key": {}, "borders": [320, 176, 0, 32]}',
+    b'{"version": 1, "key": {}, "borders": [320, 176]}',
+    b'{"version": 1, "key": {}, "borders": ["320", 176, 0, 32]}',
+])
+def test_a_corrupt_or_partial_cache_file_is_a_miss_not_an_exception(tmp_path, monkeypatch, payload):
+    source = _source(tmp_path)
+    cache = _cache(tmp_path)
+    cache.parent.mkdir()
+    cache.write_bytes(payload)
+    calls = {}
+    _counting_probes(monkeypatch, calls)
+
+    assert BorderDetect(str(source), cache_path=str(cache)).getBorders() == (320, 176, 0, 32)
+    assert calls == {"header": 1, "frame": 9}, "a damaged cache has to cost a re-probe, not a crash"
+    # The run also repairs the file, so the next call is a hit.
+    assert json.loads(cache.read_text())["version"] == 1
+
+
+def test_a_cached_no_crop_decision_is_reused_as_is(tmp_path, monkeypatch):
+    source = _source(tmp_path)
+    # A crop that reaches a quarter of the frame is rejected by every preview: no valid samples, so
+    # `decide` returns no crop and the sampled path still answers with the full frame. That answer is a
+    # decision and must not be re-probed either.
+    calls = {}
+    _counting_probes(monkeypatch, calls, crop=(320, 120, 0, 60))
+    first = BorderDetect(str(source), cache_path=str(_cache(tmp_path)))
+    assert first.getBorders() == (320, 240, 0, 0)
+    assert calls["frame"] == 9
+
+    second = BorderDetect(str(source), cache_path=str(_cache(tmp_path)))
+    assert second.getBorders() == (320, 240, 0, 0)
+    assert calls["frame"] == 9
+
+
+def test_the_fallback_flag_travels_with_the_cached_decision(tmp_path, monkeypatch):
+    source = _source(tmp_path)
+    calls = {"header": 0, "whole": 0}
+    monkeypatch.setattr(
+        BorderDetect, "_probeHeader",
+        lambda self: calls.__setitem__("header", calls["header"] + 1) or None,
+    )
+
+    def fake_whole(self):
+        calls["whole"] += 1
+        return (320, 176, 0, 32)
+
+    monkeypatch.setattr(BorderDetect, "_getBordersWholeFile", fake_whole)
+
+    first = BorderDetect(str(source), cache_path=str(_cache(tmp_path)))
+    assert first.getBorders() == (320, 176, 0, 32)
+    assert first.used_fallback is True
+    second = BorderDetect(str(source), cache_path=str(_cache(tmp_path)))
+    assert second.getBorders() == (320, 176, 0, 32)
+    assert second.used_fallback is True, "a cached fallback decision must stay flagged"
+    assert calls == {"header": 1, "whole": 1}, "the whole-file pass ran once, not again for the cache"
+
+
+def test_the_cache_logs_a_hit_and_a_miss(tmp_path, monkeypatch, capsys):
+    source = _source(tmp_path)
+    _counting_probes(monkeypatch, {})
+    BorderDetect(str(source), cache_path=str(_cache(tmp_path))).getBorders()
+    assert "borders: cache miss" in capsys.readouterr().err
+    BorderDetect(str(source), cache_path=str(_cache(tmp_path))).getBorders()
+    hit = capsys.readouterr().err
+    assert "borders: cache hit" in hit
+    assert "320x176+0+32" in hit
+
+
+def test_rve_border_cache_zero_bypasses_the_cache(tmp_path, monkeypatch):
+    source = _source(tmp_path)
+    cache = _cache(tmp_path)
+    calls = {}
+    _counting_probes(monkeypatch, calls)
+    monkeypatch.setenv("RVE_BORDER_CACHE", "0")
+
+    assert BorderDetect(str(source), cache_path=str(cache)).getBorders() == (320, 176, 0, 32)
+    assert BorderDetect(str(source), cache_path=str(cache)).getBorders() == (320, 176, 0, 32)
+    assert calls["frame"] == 18, "with the cache off every run probes"
+    assert not cache.exists(), "a disabled cache must not write one either"
+
+
+@pytest.mark.parametrize("value, expected", [
+    (None, True),
+    ("1", True),
+    ("true", True),
+    ("0", False),
+    ("false", False),
+    ("FALSE", False),
+    ("off", False),
+])
+def test_the_cache_gate_defaults_on(value, expected):
+    environ = {} if value is None else {"RVE_BORDER_CACHE": value}
+    assert cache_enabled(environ) is expected
+
+
+def test_the_cache_lives_beside_the_report_or_output_not_the_input(tmp_path):
+    report = tmp_path / "runs" / "report.json"
+    output = tmp_path / "out" / "render.mp4"
+
+    assert cache_location(output_path=str(output), report_path=str(report)) == str(
+        tmp_path / "runs" / ".crop.json"
+    )
+    assert cache_location(output_path=str(output)) == str(tmp_path / "out" / ".crop.json")
+    assert cache_location() is None
+
+
+def test_the_key_names_the_file_state_and_every_probe_parameter(tmp_path):
+    source = _source(tmp_path)
+    key = cache_key(str(source), probes=9, crop_threshold_frames=4, crop_threshold_pixels=9, sampled=True)
+    assert key["input"] == os.path.abspath(str(source))
+    assert key["size"] == source.stat().st_size
+    assert key["mtime_ns"] == source.stat().st_mtime_ns
+    assert key["probes"] == 9
+    assert key["crop_threshold_frames"] == 4
+    assert key["crop_threshold_pixels"] == 9
+    assert key["sampled"] is True
+    assert cache_key(str(tmp_path / "missing.mkv")) is None
+

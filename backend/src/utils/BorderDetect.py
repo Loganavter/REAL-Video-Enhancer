@@ -13,10 +13,17 @@ thin ``_probe*`` methods.
 ``RVE_BORDER_SAMPLE=0`` (or ``false``/``no``/``off``) restores the old whole-file pass. It is also the
 fallback when the container cannot be probed at all - no readable header, or not one preview returned a
 ``crop=`` line - and that fallback is logged as such.
+
+The decision is cached in ``.crop.json`` beside the render's report (or output) file, so re-rendering the
+same input performs no probes at all. The cache key is ``(input path, size, mtime_ns, probe params)``: a
+different file, a different size/mtime or different probe parameters is a miss. A cached "no crop" (the
+full frame) is a decision too and is reused as-is. A corrupt or partial file is ignored as a miss, never a
+crash, and ``RVE_BORDER_CACHE=0`` (or ``false``/``no``/``off``) disables the cache for A/B runs.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import statistics
@@ -41,6 +48,145 @@ def sampling_enabled(environ=None):
     """Whether the sampled path is on; ``RVE_BORDER_SAMPLE`` defaults to on and ``0``/``false`` turns it off."""
     raw = (environ if environ is not None else os.environ).get("RVE_BORDER_SAMPLE", "1")
     return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+
+# -- decision cache ------------------------------------------------------------
+
+#: The cache file name. It lives beside the render's report/output, never beside the input: sources are
+#: routinely mounted read-only, so a cache in the input directory could not be written at all.
+CACHE_FILENAME = ".crop.json"
+
+#: Bumped when the payload shape changes; an older file then reads as a miss instead of a bad decision.
+CACHE_VERSION = 1
+
+
+def cache_enabled(environ=None):
+    """Whether the decision cache is on; ``RVE_BORDER_CACHE`` defaults to on and ``0``/``false`` turns it off."""
+    raw = (environ if environ is not None else os.environ).get("RVE_BORDER_CACHE", "1")
+    return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+
+def cache_location(output_path=None, report_path=None):
+    """``.crop.json`` beside the run report (preferred) or the output file; ``None`` when neither is known.
+
+    The report is preferred because it names the run, while a preview/render output can be a temporary
+    container; both live in the writable destination tree, unlike the input.
+    """
+    for candidate in (report_path, output_path):
+        if not candidate:
+            continue
+        directory = os.path.dirname(os.path.abspath(os.fspath(candidate)))
+        return os.path.join(directory, CACHE_FILENAME)
+    return None
+
+
+def cache_key(input_path, probes=PROBES, crop_threshold_frames=DEFAULT_CROP_THRESHOLD_FRAMES,
+              crop_threshold_pixels=DEFAULT_CROP_THRESHOLD_PIXELS, sampled=None):
+    """The identity of a detection: input file state plus the parameters that change the probes.
+
+    ``sampled`` is the whole-file/sampled choice and is part of the key: the two paths run different
+    probes, so an A/B toggle must not read the other mode's answer. Returns ``None`` when the input
+    cannot be stat()ed - there is nothing to key on, so the run is a miss.
+    """
+    try:
+        stat = os.stat(input_path)
+    except OSError:
+        return None
+    if sampled is None:
+        sampled = sampling_enabled()
+    return {
+        "input": os.path.abspath(os.fspath(input_path)),
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "probes": int(probes),
+        "crop_threshold_frames": int(crop_threshold_frames),
+        "crop_threshold_pixels": int(crop_threshold_pixels),
+        "sampled": bool(sampled),
+    }
+
+
+def _valid_borders(borders):
+    """Four ints ``(width, height, x, y)`` with a positive frame; ``None`` and partial answers are not cached."""
+    if not isinstance(borders, (tuple, list)) or len(borders) != 4:
+        return False
+    if any(type(value) is not int for value in borders):
+        return False
+    width, height, x, y = borders
+    return width > 0 and height > 0 and x >= 0 and y >= 0
+
+
+def read_cache(path, key):
+    """The cached answer for ``key`` as ``{"borders", "used_fallback"}``, or ``None`` (a miss).
+
+    A missing, unreadable, truncated, wrong-version or wrong-key file is a miss. It must never raise: a
+    cache is an optimisation, and a damaged one has to cost a re-probe, not a render.
+    """
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != CACHE_VERSION:
+        return None
+    if payload.get("key") != key:
+        return None
+    borders = payload.get("borders")
+    if not _valid_borders(borders):
+        return None
+    used_fallback = payload.get("used_fallback", False)
+    if not isinstance(used_fallback, bool):
+        return None
+    return {"borders": tuple(borders), "used_fallback": used_fallback}
+
+
+def write_cache(path, key, borders, used_fallback):
+    """Store ``borders`` under ``key``; returns whether it was written.
+
+    The write is a temp file plus ``os.replace`` in the same directory, so a concurrent reader sees the
+    old file or the new one, never a half-written one. Any OS error is logged and swallowed: a destination
+    that is full or read-only must not take a render down.
+    """
+    if not path or key is None or not _valid_borders(borders):
+        return False
+    payload = {
+        "version": CACHE_VERSION,
+        "key": key,
+        "borders": list(borders),
+        "used_fallback": bool(used_fallback),
+    }
+    temporary = f"{path}.{os.getpid()}.tmp"
+    try:
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary, path)
+        return True
+    except OSError as exc:
+        log(f"borders: cache write failed ({path}): {exc}")
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        return False
+
+
+def _describe_key(key):
+    """The one-line identity the cache logs: file, size, mtime and the probe parameters."""
+    return (
+        f"{os.path.basename(key['input'])} {key['size']}B mtime_ns={key['mtime_ns']} "
+        f"probes={key['probes']} thresholds={key['crop_threshold_frames']}/{key['crop_threshold_pixels']} "
+        f"sampled={str(key['sampled']).lower()}"
+    )
+
+
+def _describe_borders(borders):
+    width, height, x, y = borders
+    return f"{width}x{height}+{x}+{y}"
 
 
 def probe_positions(duration, count=PROBES):
@@ -217,15 +363,18 @@ def decide_probes(crops, frame_w, frame_h, crop_threshold_frames=DEFAULT_CROP_TH
 class BorderDetect:
     def __init__(self, inputFile, ffmpeg_path="./bin/ffmpeg", probes=PROBES,
                  crop_threshold_frames=DEFAULT_CROP_THRESHOLD_FRAMES,
-                 crop_threshold_pixels=DEFAULT_CROP_THRESHOLD_PIXELS):
+                 crop_threshold_pixels=DEFAULT_CROP_THRESHOLD_PIXELS,
+                 cache_path=None):
         self.inputFile = inputFile
         self.ffmpeg_path = ffmpeg_path
         self.probes = probes
         self.crop_threshold_frames = crop_threshold_frames
         self.crop_threshold_pixels = crop_threshold_pixels
+        #: Where the decision is cached (beside the report/output); ``None`` disables caching for this run.
+        self.cachePath = cache_path
         #: True once a run had to fall back to the whole-file pass (the corpus check reads this).
         self.used_fallback = False
-        #: The last :func:`decide` dict, for logs and for tests.
+        #: The last :func:`decide` dict, for logs and for tests. ``None`` on a cache hit: no decision ran.
         self.last_decision = None
 
     # -- subprocess, thin --------------------------------------------------
@@ -396,6 +545,45 @@ class BorderDetect:
         return width, height, borderX, borderY
 
     def getBorders(self):
+        """The crop, from the cache when this exact input+params was decided before, else from the probes.
+
+        The cache is checked before anything is spawned, so a re-render of the same input performs zero
+        probes (``borders: cache hit``). A miss logs its reason and writes the fresh decision afterwards.
+        """
+        if not cache_enabled():
+            log("borders: cache disabled (RVE_BORDER_CACHE=0)")
+            return self._decideBorders()
+
+        key = cache_key(
+            self.inputFile,
+            self.probes,
+            self.crop_threshold_frames,
+            self.crop_threshold_pixels,
+            sampled=sampling_enabled(),
+        )
+        if key is None:
+            log(f"borders: cache miss (the input {self.inputFile!r} could not be stat()ed)")
+            return self._decideBorders()
+
+        cached = read_cache(self.cachePath, key)
+        if cached is not None:
+            self.used_fallback = cached["used_fallback"]
+            log(
+                f"borders: cache hit {self.cachePath} "
+                f"({_describe_key(key)} -> {_describe_borders(cached['borders'])})"
+            )
+            return cached["borders"]
+
+        log(f"borders: cache miss {self.cachePath or '(no report/output path)'} ({_describe_key(key)})")
+        borders = self._decideBorders()
+        # A None/partial answer means "nothing could be decided"; caching it would freeze a failed probe
+        # into every later run, so only a real decision (including the full frame) is stored.
+        if _valid_borders(borders):
+            write_cache(self.cachePath, key, borders, self.used_fallback)
+        return borders
+
+    def _decideBorders(self):
+        """The uncached decision: the sampled path, or the whole-file pass when that falls back."""
         if sampling_enabled():
             borders = self._getBordersSampled()
             if borders is not None:

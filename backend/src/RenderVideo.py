@@ -25,7 +25,7 @@ from .utils.SceneDetect import SceneDetect
 from .utils.Util import log, resize_frame_bytes, guard_render_thread
 from .utils.Frame import rgb_preview, payload_preview
 from .utils.PreviewStager import PreviewStager
-from .utils.BorderDetect import BorderDetect
+from .utils.BorderDetect import BorderDetect, cache_location
 from .utils.VideoInfo import OpenCVInfo
 import numpy as np
 
@@ -318,7 +318,13 @@ class Render:
 
         if border_detect:  # border detect has to be put before everything, to overwrite the width and height
             print("Detecting borders", file=sys.stderr)
-            borderDetect = BorderDetect(inputFile=self.inputFile, ffmpeg_path=ffmpeg_path)
+            # Cache beside the report (or the output): the input can be a read-only source, so the
+            # decision never goes into its directory. A second render of the same input re-reads it.
+            borderDetect = BorderDetect(
+                inputFile=self.inputFile,
+                ffmpeg_path=ffmpeg_path,
+                cache_path=cache_location(output_path=outputFile, report_path=report_path),
+            )
             self.width, self.height, self.borderX, self.borderY = (
                 borderDetect.getBorders()
             )
