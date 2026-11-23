@@ -207,11 +207,19 @@ class ProcessTab:
         import re
 
         combo = self.page_handles.general.upscaleModelComboBox
+        if combo.count() == 0:
+            return
+        remembered = str(self.settings.settings.get("last_upscale_model", "") or "")
+        if remembered:
+            index = combo.findText(remembered)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+                return
         try:
             wanted = int(round(float(self.page_handles.general.upscaleScaleSpinBox.value())))
         except Exception:
             return
-        if combo.count() == 0 or wanted < 2:
+        if wanted < 2:
             return
             return
         for index in range(combo.count()):

@@ -53,6 +53,9 @@ class Settings:
             "subtitle_encoder": "copy_subtitle",
             "audio_bitrate": "192k",
             "preview_enabled": "True",
+            # The upscale model the last job ran with: the list's first entry is an accident of the file listing (a 4x
+            # model on top, which ran a 4x forward pass for a 2x request until 2026-11-23), and the choice should stick.
+            "last_upscale_model": "",
             "scene_change_detection_method": "sudo_scene_detect",
             "scene_change_detection_enabled": "True",
             "scene_change_detection_threshold": "3.5",
@@ -104,6 +107,7 @@ class Settings:
             "audio_bitrate": "ANY",
             "subtitle_encoder": ("copy_subtitle","srt","ass","webvtt"),
             "preview_enabled": ("True", "False"),
+            "last_upscale_model": "ANY",
             "scene_change_detection_method": (
                 "mean",
                 "mean_segmented",

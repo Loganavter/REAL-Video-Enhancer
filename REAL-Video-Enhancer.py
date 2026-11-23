@@ -798,6 +798,16 @@ class MainWindow(QMainWindow):
         self.renderQueue.add(renderOptions)
 
     def startRender(self, renderQueue=None):
+        # Remember the model this job runs with: the upscale list's first entry is an accident of the file listing (a 4x
+        # model on top), and the next start should open with the model the user actually chose.
+        try:
+            general = self.page_handles.general
+            if general.upscaleCheckBox.isChecked():
+                chosen = general.upscaleModelComboBox.currentText()
+                if chosen and str(self.settings.settings.get("last_upscale_model", "")) != str(chosen):
+                    self.settings.writeSetting("last_upscale_model", str(chosen))
+        except Exception:
+            pass
         if not renderQueue:
             renderQueue = self.renderQueue
         if len(renderQueue.queue) == 0:
