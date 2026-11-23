@@ -509,6 +509,19 @@ def install(window) -> None:
             _finish({"stamp": before, "kind": "repaint", "done": True})
             print("capture-server: repaint -> done", flush=True)
             return
+        if wanted.startswith("rhi:"):
+            # Live proof that a QRhiWidget renders inside THIS window (plan-rve-video-preview-widget: P0 item 4). The
+            # probe is created in the running window, renders a few frames, writes a readback PNG and is removed again.
+            # `rhi:` (no argument) is enough; the answer is written into the usual JSON answer file.
+            try:
+                from src.ui.devtools.rhi_probe import probe as rhi_probe
+
+                report = rhi_probe(window, out_dir=root)
+            except Exception as exc:  # the experiment failing is a result, not a broken control channel
+                report = {"error": f"{type(exc).__name__}: {exc}"}
+            _finish({"stamp": _stamp(), "kind": "rhi", **report})
+            print(f"capture-server: rhi -> {report}", flush=True)
+            return
         if wanted.startswith("grab:"):
             target = wanted[len("grab:"):].strip() or os.path.join(root, f"grab-{_stamp()}.png")
             os.makedirs(os.path.dirname(target) or root, exist_ok=True)
