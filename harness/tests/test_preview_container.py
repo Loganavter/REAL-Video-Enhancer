@@ -108,8 +108,13 @@ def test_a_preview_render_in_matroska_is_left_alone(tmp_path):
     assert FASTSTART not in command
 
 
-def test_the_preview_and_the_export_differ_only_in_the_movflags_value(tmp_path):
-    """The switch is explicit: same parameters, one entry of the argument list apart."""
+def test_the_preview_and_the_export_differ_only_in_the_streamability_flags(tmp_path):
+    """The switch is explicit: same parameters, two entries apart - the movflags value and the preview's short GOP.
+
+    The GOP is not cosmetic (measure-video-preview-2026-11-23): `+frag_keyframe` writes one fragment per keyframe, and a
+    default 250-frame GOP would hand the tail reader new data once per ~8 s; it also makes a seek cost a GOP of decode
+    (480 ms mean / 932 ms p95 measured on a 4K clip with the default).
+    """
     preview = _writer(str(tmp_path / "render.mp4"), preview=True).command()
     export = _writer(str(tmp_path / "render.mp4"), preview=False).command()
 
@@ -118,11 +123,18 @@ def test_the_preview_and_the_export_differ_only_in_the_movflags_value(tmp_path):
     assert preview[preview_at + 1] == FRAGMENTED
     assert export[export_at + 1] == FASTSTART
 
-    def without_movflags(command: list[str], at: int) -> list[str]:
-        return command[:at] + command[at + 2:]
+    # The preview carries `-g <one second of output frames>`; an export carries no GOP at all.
+    gop_at = preview.index("-g")
+    assert int(preview[gop_at + 1]) >= 1
+    assert gop_at > preview_at, "the GOP statement follows the movflags statement"
+    assert "-g" not in export
 
-    assert without_movflags(preview, preview_at) == without_movflags(export, export_at)
-    assert len(preview) == len(export)
+    # Remove both statements from the preview and it must equal the export exactly.
+    preview_rest = preview[:gop_at] + preview[gop_at + 2:]
+    preview_at = preview_rest.index("-movflags")
+    preview_rest = preview_rest[:preview_at] + preview_rest[preview_at + 2:]
+    export_rest = export[:export_at] + export[export_at + 2:]
+    assert preview_rest == export_rest
 
 
 def test_resolve_movflags_edge_cases():
