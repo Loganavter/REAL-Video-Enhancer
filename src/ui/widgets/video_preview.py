@@ -438,6 +438,16 @@ class VideoPreviewSurface(QRhiWidget):
         after any window resize or sibling repaint. That is the "the preview turns transparent at any sneeze" defect.
         """
         rhi = self.rhi()
+        if rhi is None:
+            # The platform has no QRhi at all (measured 2026-11-23 on the owner's Wayland/NVIDIA session: Qt prints
+            # `QRhiWidget: No QRhi` after `eglSwapBuffers failed with 0x300d` and the widget is never composited).
+            # Building anything here is meaningless and calling into a null RHI is how a paint path crashes; the pane
+            # stays an empty plate and the log says which fallback exists (`RVE_UI_RASTER_PREVIEW=1`).
+            if not getattr(self, "_no_rhi_logged", False):
+                self._no_rhi_logged = True
+                print("[preview] no QRhi on this platform: the pane cannot draw (set RVE_UI_RASTER_PREVIEW=1 "
+                      "for the pixmap fallback)", flush=True)
+            return
         same_context = rhi is getattr(self, "_rhi", None) and getattr(self, "_pipeline", None) is not None
         if same_context:
             # Same RHI, just a new target size: keep every resource and re-upload the frame we already hold, so the
@@ -635,7 +645,7 @@ class VideoPreviewSurface(QRhiWidget):
 
     def render(self, command_buffer) -> None:  # noqa: N802 - Qt spelling
         target = self.renderTarget()
-        if target is None:
+        if target is None or self.rhi() is None:
             return
         if self._frame is None:
             # Nothing to show yet: an OPAQUE clear on EVERY render, so the pane reads as an empty plate rather than a
