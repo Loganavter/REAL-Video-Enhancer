@@ -9,8 +9,11 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QSize, Qt)
-from PySide6.QtGui import QIcon
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
+
+from PySide6.QtCore import (QCoreApplication, QEvent, QObject, QSize, Qt)
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
     QWidget)
 import resources_rc
@@ -38,6 +41,174 @@ from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, Minimalis
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
 SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+
+# --- the tab strip's geometry policy (host side) ------------------------------------------------
+#
+# Owner, 2026-11-21: "the Log label is clipped and scroller arrows appear". Both halves of that are the strip's
+# geometry, and the strip is a host component here: the toolkit's `TopTabBar` fixes each tab to its own `sizeHint`
+# and the strip to the sum, so a bar narrower than that sum draws its last tabs past its own edge - they are not
+# reachable at all, because the overflow bar is a HOVER-only affordance (it cannot be found by a user who does not
+# already know it is there). The host's job is the answer, not the drawing: measure the labels, say whether they
+# fit, and if they do not, expose the overflow where a pointer and a wheel can reach it and keep the SELECTED tab
+# on screen (a selection you cannot see is the same defect as a label you cannot read).
+#
+# The arithmetic is a pure function with no Qt in it, so the answer for a strip can be pinned without a display.
+
+
+@dataclass(frozen=True)
+class TabStripFit:
+    """Whether a strip of ``widths`` fits in ``available`` pixels, and by how much it does not."""
+
+    widths: tuple[int, ...]
+    available: int
+    #: Everything in the strip that is not a label: the bar's own side margins plus the gaps between tabs.
+    gap: int
+
+    @property
+    def needed(self) -> int:
+        """The width the whole strip occupies at its natural tab widths."""
+        return sum(self.widths) + self.gap
+
+    @property
+    def overflow(self) -> int:
+        """Pixels of strip that the bar cannot show; 0 when every tab fits."""
+        return max(0, self.needed - max(0, int(self.available)))
+
+    @property
+    def fits(self) -> bool:
+        return self.overflow == 0
+
+
+def fit_tab_strip(label_widths: Iterable[int], available: int, *, gap: int = 0) -> TabStripFit:
+    """The strip's geometry: every tab at its natural width, plus how much of the strip does not fit.
+
+    ``label_widths`` are the tab buttons' own hints (label + padding + any floor the style asks for), and ``gap`` is
+    the strip's non-label width, so the answer is exactly "do the buttons fit in the bar" - no guessed constants
+    that could drift away from the toolkit's own numbers. Callers that can widen the strip use ``fits``; a caller
+    that cannot (this page's column is capped at 500 px) uses ``overflow`` to size and expose its affordance.
+    """
+    widths = tuple(max(0, int(width)) for width in label_widths)
+    return TabStripFit(widths=widths, available=max(0, int(available)), gap=max(0, int(gap)))
+
+
+def overflow_style(style):
+    """The shared strip look with the overflow bar ALWAYS visible instead of hover-only.
+
+    The toolkit reserves the bar's row (`reserve_scroll_row=True`) so its appearance cannot reflow the strip; what it
+    does not do by default is SHOW the bar while the tabs overflow, and a bar that appears only under the pointer is
+    not an affordance - it is a discovery puzzle. Everything else here is the shared style, untouched.
+    """
+    return replace(style, scroll_policy=Qt.ScrollBarPolicy.ScrollBarAlwaysOn, reserve_scroll_row=True)
+
+
+class TabButtonFactory:
+    """The shared tab-button look, remembering the buttons it built.
+
+    `TopTabBar` exposes no per-tab button (its `TabItem` carries text and data only), and the host's own factory is
+    the one place that sees what it builds - so the host keeps them, in tab order, for the geometry answer and for
+    the selected plate. A strip is built once; nothing here rebuilds tabs.
+    """
+
+    def __init__(self) -> None:
+        self.buttons: list = []
+
+    def __call__(self, text: str, tab_height: int, style):
+        button = tab_button(text, tab_height, style)
+        self.buttons.append(button)
+        return button
+
+
+class TabStripHost(QObject):
+    """The host half of a `TopTabHost`'s strip: measure it, expose its overflow, paint the selection from a token.
+
+    Three things the toolkit leaves to the host, done in one place so the process and settings strips cannot drift:
+
+    * **the answer** - `strip_fit()` reports whether the labels fit and how much does not (`fit_tab_strip`);
+    * **reach** - any resize re-measures; a strip that overflows keeps the SELECTED tab scrolled into view, and a
+      strip that fits drops any stale offset (a widened window must not leave the first tabs pushed out);
+    * **the selection's colour** - the plate is the host's `TabStyle.selected_token`, resolved at paint time, so a
+      theme restyles the selected tab without touching this page. The toolkit paints a host-built button from its
+      own variant token (and recolours only the tab's TEXT from `accent`), so the plate is the host's to state.
+    """
+
+    def __init__(self, host, style, factory: TabButtonFactory) -> None:
+        super().__init__(host)
+        self._host = host
+        self._style = style
+        self._factory = factory
+        self._bar = host.tabBar()
+        self._bar.installEventFilter(self)
+        host.currentChanged.connect(self._on_current_changed)
+        try:
+            from sli_ui_toolkit.theme import ThemeManager
+
+            ThemeManager.get_instance().theme_changed.connect(self.refresh)
+        except Exception:                     # a host without a theme manager still gets geometry
+            pass
+        self.refresh()
+
+    # -- the answer -------------------------------------------------------------------------------
+
+    def strip_fit(self) -> TabStripFit:
+        """This strip, measured now: the buttons' natural hints and everything around them."""
+        hints = [button.sizeHint().width() for button in self._factory.buttons]
+        # The gap is what the bar needs on top of those buttons - its own margins and the spacing between tabs,
+        # reported by the bar itself so no number is duplicated here.
+        gap = max(0, self._bar.required_width() - sum(hints))
+        return fit_tab_strip(hints, self._bar.width(), gap=gap)
+
+    # -- reach ------------------------------------------------------------------------------------
+
+    def refresh(self, *_args) -> None:
+        """Re-measure after anything that changes widths: resize, theme, a new selection."""
+        fit = self.strip_fit()
+        if fit.fits:
+            self._bar.set_scroll_offset(0)
+        else:
+            self.reveal(self._host.currentIndex())
+        self._paint_selection()
+
+    def reveal(self, index: int) -> None:
+        """Scroll the strip so tab ``index`` is whole inside the bar, if the strip is offset at all."""
+        if not 0 <= index < len(self._factory.buttons):
+            return
+        button = self._factory.buttons[index]
+        left = button.x()
+        right = left + button.width()
+        offset = self._bar.scroll_offset()
+        width = self._bar.width()
+        if left < offset:
+            self._bar.set_scroll_offset(left)
+        elif right > offset + width:
+            self._bar.set_scroll_offset(right - width)
+
+    def _on_current_changed(self, index: int) -> None:
+        self.reveal(index)
+        self._paint_selection()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API
+        if watched is self._bar and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self.refresh()
+        return super().eventFilter(watched, event)
+
+    # -- the selection's colour -------------------------------------------------------------------
+
+    def _paint_selection(self) -> None:
+        """The selected tab's plate is the host's token, read now (not a colour frozen at build time)."""
+        colour = None
+        try:
+            from sli_ui_toolkit.theme import ThemeManager
+
+            colour = ThemeManager.get_instance().try_get_color(self._style.selected_token)
+        except Exception:
+            colour = None
+        current = self._host.currentIndex()
+        for index, button in enumerate(self._factory.buttons):
+            selected = index == current
+            # `set_override_bg_color` is the toolkit's exact-base-fill spelling: a checked button with an override
+            # keeps the override as its plate (the variant's checked layer is skipped) and still answers hover.
+            button.set_override_bg_color(QColor(colour) if (selected and colour is not None) else None)
 
 
 class ProcPagePage:
@@ -243,9 +414,13 @@ class ProcPagePage:
         self.verticalLayout_24.setContentsMargins(0, 0, 0, 0)
         # The original interface's tabs are BUTTONS standing apart from the content: no folder outline, no join cover,
         # a plate on the selected one and a gap under the strip. `TabStyle` is the toolkit's styling surface for that.
+        # The only difference from the shared style is the overflow row's policy (`overflow_style`): this column is
+        # capped at 500 px, so five labels do not always fit, and an affordance that waits for the pointer is not one.
+        strip_style = overflow_style(tab_style())
+        strip_buttons = TabButtonFactory()
         self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=TAB_HEIGHT, pane_radius=0, pane_inset=(10, 5, 10, 5),
-            tab_factory=tab_button,
-            tab_style=tab_style(),
+            tab_factory=strip_buttons,
+            tab_style=strip_style,
             chrome_inset=0, tab_radius=4, pane_fill_token=None)
         self.processSettingsContainer.setObjectName(u"processSettingsContainer")
         sizePolicy3.setHeightForWidth(self.processSettingsContainer.sizePolicy().hasHeightForWidth())
@@ -358,6 +533,10 @@ class ProcPagePage:
         self.verticalLayout_7.addWidget(self.bottomMenuSubContainer)
         self.gridLayout_3.addWidget(self.processContainer, 0, 1, 1, 1)
         self.processSettingsContainer.setCurrentIndex(0)
+        # The strip's host half (see `TabStripHost`): measures the labels, exposes an overflow the user can reach,
+        # and paints the selected plate from the host's token. It must come after the labels are set, or it would
+        # measure placeholders; `retranslate()` below re-runs `refresh()` for the final texts.
+        self._tab_strip = TabStripHost(self.processSettingsContainer, strip_style, strip_buttons)
         # The glue's typed edge over this page's own chrome (the tabs have their own groups). Required fields: a
         # missing widget is a TypeError here, not a silent `None` at first render.
         self._handles = ProcPageHandles(
@@ -387,6 +566,8 @@ class ProcPagePage:
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.renderQueueTab), QCoreApplication.translate("MainWindow", u"Render Queue", None))
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.advancedSettings), QCoreApplication.translate("MainWindow", u"Advanced", None))
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.tab_5), QCoreApplication.translate("MainWindow", u"Logs", None))
+        # The labels are what the strip measures: re-run the answer once they are the real ones.
+        self._tab_strip.refresh()
         self.startRenderButton.setText("")
         self.pauseRenderButton.setText("")
         self.killRenderButton.setText("")
