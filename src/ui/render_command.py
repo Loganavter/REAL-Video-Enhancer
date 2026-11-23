@@ -38,6 +38,12 @@ class RenderPaths:
     models_path: str
     custom_models_path: str
     paused_shared_memory_id: str
+    #: The pane's frame block, its box and the newest-wins seek block. All three are optional on purpose: the app
+    #: (`ProcessTab._render_paths`) fills them from the block it allocated, while a caller that models a job without a
+    #: pane (the pre-move golden in `test_render_command.py`) leaves them out and gets the command it always had.
+    display_state_id: str | None = None
+    display_size: str | None = None
+    seek_state_id: str | None = None
 
 
 def app_paths() -> RenderPaths:
@@ -119,6 +125,20 @@ def build_command(render_options, settings, is_overwrite: bool = False, paths: R
         f"{settings.settings['tensorrt_optimization_level']}",
         "--pause_shared_memory_id",
         f"{paths.paused_shared_memory_id}",
+        # the pane's channel, for EVERY job (a preview just leaves `wanted` at 0): the GUI allocates the block and the
+        # backend only ever attaches, so a render started before the window exists still has a block to find
+        *(
+            [
+                "--display_state_id",
+                f"{paths.display_state_id}",
+                "--display_size",
+                f"{paths.display_size}",
+                "--seek_state_id",
+                f"{paths.seek_state_id}",
+            ]
+            if paths.display_state_id and paths.display_size and paths.seek_state_id
+            else []
+        ),
         "--ncnn_gpu_id",
         f"{settings.settings['ncnn_gpu_id']}",
         "--pytorch_gpu_id",

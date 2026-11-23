@@ -16,6 +16,10 @@ from . import shared_flag
 
 from .AnimationHandler import AnimationHandler
 from .QTcustom import (
+    DEFAULT_DISPLAY_BOX,
+    DISPLAY_STATE_SHARED_MEMORY_ID,
+    SEEK_STATE_SHARED_MEMORY_ID,
+    DisplayReader,
     RegularQTPopup,
     UpdateGUIThread,
     show_layout_widgets,
@@ -120,6 +124,18 @@ class ProcessTab:
         #: The media time of the last frame the pane was given, so a paused hand-over to the finished file stands
         #: where the picture already is instead of jumping to 0.
         self._preview_playhead = 0.0
+        #: The export pane's display channel (`QTcustom.DisplayReader`): the block the GUI allocates before the backend
+        #: starts and the renderer publishes into while `wanted` is 1. `None` when no render has run.
+        self._display = None
+        #: The box the block was allocated at (the pane's device pixels, or `DEFAULT_DISPLAY_BOX`); the command's
+        #: `--display_size` has to be the same box, so it is kept for the whole render pass.
+        self._display_box = DEFAULT_DISPLAY_BOX
+        #: The playhead the standing compare (`sbs`/`split`) was last asked for: the 100 ms clock must not re-seek the
+        #: source decoder for a picture that is already on screen.
+        self._second_surface_pts = None
+        #: A paused pane may still be shown ONE frame - the one a strip press asked for. While this is set the request
+        #: byte stays 1 and the next published frame paints even though the transport is holding.
+        self._display_seek_pending = False
         #: monotonic stamp of the current render, for the "elapsed" half of the progress line
         self._render_started_mono = None
         self.animationHandler = AnimationHandler()
@@ -480,6 +496,12 @@ class ProcessTab:
         self.startDiscordRPC()
         self.settings.readSettings()
 
+        # The pane's block must exist before the first backend does: the renderer only attaches and publishes into
+        # what the GUI sized, so allocating after `Popen` would lose the first frames (and `wanted` would be a byte in
+        # a block nobody owns). This runs on the GUI thread, where the pane's size and the reader's signal belong.
+        # A preview render leaves `wanted` at 0 - its tail owns the pane - but the flags go on every job.
+        self._prepare_display_state()
+
         self.startGUIUpdate()
         writeThread = Thread(target=lambda: self.renderToPipeThread(renderQueue))
         writeThread.start()
@@ -511,6 +533,205 @@ class ProcessTab:
         self.pausedSharedMemory = None
         shared_flag.release(shm)
 
+    # -- the export pane's display channel ----------------------------------------------------------
+
+    def _pane_display_box(self) -> tuple[int, int]:
+        """The box the block is sized for: the pane's own device pixels, or the probe's constant.
+
+        The writer fits every frame into this box with the aspect kept (`DisplayStager.fit_box`), so the picture is
+        never stretched - a wrong box only letterboxes. Device pixels are cheap to read here (one `QWidget` call on the
+        GUI thread) and they are what makes the pane's own picture sharp instead of a scaled constant.
+        """
+        pane = getattr(self.page_handles.proc, "previewLabel", None)
+        try:
+            width = int(pane.width())
+            height = int(pane.height())
+            ratio = float(pane.devicePixelRatioF()) if hasattr(pane, "devicePixelRatioF") else 1.0
+            width, height = int(width * ratio), int(height * ratio)
+        except Exception:
+            return DEFAULT_DISPLAY_BOX
+        if width < 32 or height < 18:
+            # Not laid out yet (a page built but never shown): the probe's box is the honest stand-in.
+            return DEFAULT_DISPLAY_BOX
+        # RGB888 rows are happy at any width, but even dimensions keep the two slots and the strip geometry stable.
+        return width - (width & 1), height - (height & 1)
+
+    def _prepare_display_state(self) -> None:
+        """Allocate the pane's frame block (and the seek block) before the backend starts - GUI thread only.
+
+        The GUI is the owner: the renderer attaches to this name and never creates it, so a render started without a
+        window (or after it closed) pays nothing. One block per render pass; `_close_display_state` releases it.
+        """
+        self._close_display_state()
+        box = self._pane_display_box()
+        self._display_box = box
+        try:
+            reader = DisplayReader(
+                DISPLAY_STATE_SHARED_MEMORY_ID,
+                box=box,
+                seek_name=SEEK_STATE_SHARED_MEMORY_ID,
+            )
+        except Exception as exc:  # a pane that cannot allocate must not take the export down
+            log(f"display: cannot allocate the pane's block ({exc}); the export runs without it")
+            self._display = None
+            return
+        if not reader.attached:
+            log("display: the pane's block is not usable; the export runs without it")
+            reader.release()
+            self._display = None
+            return
+        reader.display_frame.connect(self._on_display_frame)
+        self._display = reader
+        # The strip and the compare need their signals for an export too: without this only a preview ever wire them,
+        # and a strip press during an export reached nothing (the seek then had two routes, neither connected).
+        self._wire_preview_strip()
+        log(f"display: block {DISPLAY_STATE_SHARED_MEMORY_ID} at {box[0]}x{box[1]}, "
+            f"seek {SEEK_STATE_SHARED_MEMORY_ID}")
+
+    def _close_display_state(self) -> None:
+        """Release the frame and seek blocks; safe twice, and safe when nothing was prepared."""
+        reader = getattr(self, "_display", None)
+        self._display = None
+        if reader is not None:
+            try:
+                reader.release()
+            except Exception:
+                pass
+
+    def _display_owns_pane(self) -> bool:
+        """Whether the display feed is the pane's painter right now (never during a preview: its tail owns it)."""
+        reader = getattr(self, "_display", None)
+        return reader is not None and reader.attached and not bool(getattr(self, "isPreview", False))
+
+    def _display_should_want(self) -> bool:
+        """`wanted` = the pane is visible AND the transport is playing AND a render is publishing into the block.
+
+        A paused picture must cost the renderer nothing: that is the one byte this whole channel exists to save.
+        """
+        if not self._display_owns_pane():
+            return False
+        if bool(getattr(self, "_preview_paused", True)) and not getattr(self, "_display_seek_pending", False):
+            # A held picture costs nothing - except the one frame a strip press asked for while it is held.
+            return False
+        process = getattr(self, "renderProcess", None)
+        if process is None or process.poll() is not None:
+            return False
+        pane = getattr(self.page_handles.proc, "previewLabel", None)
+        try:
+            return bool(pane.isVisible())
+        except Exception:
+            return True
+
+    def _update_display_wanted(self) -> None:
+        """Re-assert the request byte after anything that changes the answer (pause, job start, page hide)."""
+        reader = getattr(self, "_display", None)
+        if reader is None or not reader.attached:
+            return
+        reader.set_wanted(self._display_should_want())
+
+    def _tick_display(self) -> None:
+        """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
+        reader = getattr(self, "_display", None)
+        if reader is None or not reader.attached:
+            return
+        wanted = self._display_should_want()
+        reader.set_wanted(wanted)
+        if not wanted:
+            return
+        reader.poll()          # emits `display_frame` only when the sequence moved
+
+    def _on_display_frame(self, image) -> None:
+        """The renderer's composited frame for an EXPORT's pane (one picture, one painter).
+
+        A preview's pane is painted by its live tail, so a display frame is dropped there; while the transport holds a
+        frame, display frames are dropped too and the picture stays. The progress is republished with every fresh
+        frame because the strip's produced band is the render's own counters, not the picture's timestamp.
+        """
+        if image is None:
+            return
+        if not self._display_owns_pane():
+            return
+        holding = bool(getattr(self, "_preview_paused", True))
+        if holding and not getattr(self, "_display_seek_pending", False):
+            return
+        pane = self.page_handles.proc.previewLabel
+        if hasattr(pane, "set_frame"):
+            pane.set_frame(image)
+            if hasattr(pane, "set_progress"):
+                pane.set_progress(
+                    rendered=self.currentFrame,
+                    total=self.max_value,
+                    playhead=self._result_playhead(),
+                    duration=self._clip_duration(),
+                )
+        else:
+            pixmap = QtGui.QPixmap.fromImage(image)
+            pane.setPixmap(self.getRoundedPixmap(pixmap, corner_radius=10))
+        if holding:
+            # That was the requested frame (a held pane gets no other published ones): hold again from here, and let
+            # the renderer stop staging for a picture nobody is following.
+            self._display_seek_pending = False
+            self._update_display_wanted()
+
+    def _clip_duration(self) -> float:
+        """The clip's length in seconds, as far as the pane knows it: the opened file's duration, else frames / fps."""
+        duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
+        if duration > 0.0:
+            return duration
+        options = getattr(self, "currentRenderOptions", None)
+        frames = float(getattr(options, "videoFrameCount", 0) or 0)
+        fps = float(getattr(options, "videoFps", 0) or 0)
+        if frames > 0.0 and fps > 0.0:
+            return frames / fps
+        return 0.0
+
+    def _result_playhead(self) -> float:
+        """Where the RESULT's playhead is: the tail's or file decoder's PTS, else the render's produced share."""
+        playhead = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        if (getattr(self, "_live_tail", None) is not None
+                or getattr(self, "_preview_decoder", None) is not None) and playhead > 0.0:
+            return playhead
+        total = float(self.max_value or 0)
+        if total > 0.0:
+            produced = max(0.0, min(1.0, float(self.currentFrame or 0) / total))
+            return produced * self._clip_duration()
+        return playhead
+
+    def _tick_second_surface(self) -> None:
+        """Feed the standing original in `sbs`/`split` from the source decoder, on the pane's own 100 ms clock.
+
+        The surface also asks by itself when its playhead moves (`set_progress` -> `originalRequested`); this tick is
+        what keeps the left picture at the result's playhead when the result is a render (whose display frames carry no
+        timestamp), and `_second_surface_pts` makes the two routes ask for one decode, not two. `single` is untouched:
+        there the source appears only while LMB is held.
+        """
+        pane = getattr(self.page_handles.proc, "previewLabel", None)
+        view_mode = getattr(pane, "view_mode", None)
+        if view_mode is None:
+            return
+        try:
+            mode = view_mode()
+        except Exception:
+            return
+        if mode == "single":
+            self._second_surface_pts = None
+            return
+        has_frame = getattr(pane, "has_frame", None)
+        if callable(has_frame):
+            try:
+                if not has_frame():
+                    return
+            except Exception:
+                return
+        playhead = self._result_playhead()
+        if playhead <= 0.0:
+            return
+        previous = getattr(self, "_second_surface_pts", None)
+        if previous is not None and abs(playhead - previous) < 1e-3:
+            return
+        self._second_surface_pts = playhead
+        self._on_original_requested(playhead)
+
     def renderToPipeThread(
         self,
         renderQueue: RenderQueue,
@@ -525,12 +746,24 @@ class ProcessTab:
             # does the compare must not reuse the previous job's rectangle.
             self._source_crop = None
             self._source_crop_unknown_logged = False
+            # The previous job's playhead and duration say nothing about this clip, and the compare's clock must
+            # start from this job's first picture rather than from a stale second.
+            self._preview_playhead = 0.0
+            self._preview_duration = 0.0
+            self._second_surface_pts = None
+            self._display_seek_pending = False
+            # An EXPORT's pane follows the feed from its first published frame: its transport starts playing. A
+            # PREVIEW keeps the owner's default (stands paused until the button is pressed) - that is the preview's
+            # whole transport. The flag is read by the GUI tick, so setting it here is enough; the button paints on
+            # the next `_sync_preview_transport`.
+            if not self.isPreview and self._preview_paused:
+                self._preview_paused = False
+                self._sync_preview_transport()
             renderQueue.mark_rendering(renderOptions)
             self.refreshQueueRows()
 
-            # The preview block is a fixed-size thumbnail now, not the output frame: its
-            # geometry comes from one constant on both sides, so it is allocated before the
-            # backend starts and never depends on the output resolution.
+            # The display block is allocated once for the render pass at the pane's box (see `run`), and its size is
+            # in every job's command; here only the progress denominator belongs to the job.
             self.max_value = renderOptions.videoFrameCount * renderOptions.interpolateTimes
             command = self.build_command(renderOptions)
             log(str(command))
@@ -663,6 +896,11 @@ class ProcessTab:
         self.page_handles.proc.startRenderButton.setEnabled(True)
         self.page_handles.general.outputFileText.setEnabled(True)
         self.page_handles.general.inputFileText.setEnabled(True)
+        # The job is over: no backend publishes any more, so the block and the seek request are released here (the
+        # GUI thread) rather than left for a tick that may never come. The pane's own clear below follows.
+        self._second_surface_pts = None
+        self._display_seek_pending = False
+        self._close_display_state()
         if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             self.page_handles.proc.previewLabel.set_frame(None)
         else:
@@ -783,6 +1021,8 @@ class ProcessTab:
         comes IN with the signal, so the handler cannot act on a half-applied toggle.
         """
         self._preview_paused = bool(paused)
+        # A one-shot seek frame belongs to the state it was asked in: leaving or re-entering the hold ends it.
+        self._display_seek_pending = False
         # One line per change, with the owner: the pane can be painted by three different things, and "the button did
         # nothing" needs to be answerable from log.txt alone.
         owner = "tail" if getattr(self, "_live_tail", None) is not None else (
@@ -800,6 +1040,9 @@ class ProcessTab:
                 decoder.pause() if self._preview_paused else decoder.play()
             except Exception as exc:
                 log(f"preview transport: {exc}")
+        # A held picture clears `wanted`: the renderer must stop staging frames for a pane that is not following
+        # (the whole cost of the channel when nobody watches is one byte read per frame).
+        self._update_display_wanted()
         self._sync_preview_transport()
 
     def _sync_preview_transport(self) -> None:
@@ -923,6 +1166,30 @@ class ProcessTab:
         duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
         if decoder is not None and duration > 0:
             decoder.seek(fraction * duration)
+            return
+        # EXPORT, third route: no tail and no file decoder, but a renderer is alive and publishing into the pane's
+        # block. The strip's share becomes a newest-wins request - `(seconds, generation + 1)` - and the renderer
+        # decodes that one frame through the model path and publishes it without writing it to the export. A request
+        # only ever goes out while something renders; with no process the block is left alone (nothing would answer).
+        if bool(getattr(self, "isPreview", False)):
+            return
+        reader = getattr(self, "_display", None)
+        if reader is None or not reader.attached:
+            return
+        process = getattr(self, "renderProcess", None)
+        if process is None or process.poll() is not None:
+            return
+        clip = self._clip_duration()
+        if clip <= 0.0:
+            return                      # the timeline length is unknown, so a share cannot become seconds
+        target = fraction * clip
+        generation = reader.request_seek(target)
+        if bool(getattr(self, "_preview_paused", True)):
+            # A held pane has `wanted` 0, so the renderer would stage the requested frame and never publish it. Ask
+            # for exactly that one frame: `_on_display_frame` paints it and clears this again.
+            self._display_seek_pending = True
+            reader.set_wanted(True)
+        log(f"seek: requested {target:.3f}s (generation {generation}) from the running render")
 
     def _live_produced_fraction(self) -> float:
         """The share of the timeline the renderer has produced, from the same counters the strip fills with."""
@@ -956,6 +1223,9 @@ class ProcessTab:
         then cropped to the box the render reported (`BORDERS`, parsed out of this job's output) - see
         `_on_original_frame`.
         """
+        # The pane's own `originalRequested` (a compare mode's playhead moved) and the 100 ms tick both arrive here;
+        # recording what was asked keeps one moved playhead to one source decode.
+        self._second_surface_pts = float(seconds)
         decoder = getattr(self, "_source_decoder", None)
         try:
             if decoder is None:
@@ -1022,9 +1292,17 @@ class ProcessTab:
         self._preview_duration = float(duration) or 0.0
 
     def _on_preview_frame(self, frame) -> None:
-        """One decoded frame from a finished preview: RGB24 bytes -> QImage -> the pane."""
+        """One decoded frame from a preview's live tail (or a finished file): RGB24 bytes -> QImage -> the pane.
+
+        An EXPORT's pane has two possible painters if the output is followable: the display feed and the tail. One
+        picture, one painter - the display feed wins and the tail's frame is dropped here. That is the rule the deleted
+        640x360 channel broke: two writers raced for the same surface, so the pane flickered between a thumbnail and a
+        decoded frame and neither could be trusted. A preview keeps its tail as the only painter (`wanted` stays 0).
+        """
         from PySide6.QtGui import QImage
 
+        if self._display_owns_pane():
+            return
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
         pane = self.page_handles.proc.previewLabel
@@ -1161,8 +1439,9 @@ class ProcessTab:
     def updateProcessTab(self):
         """The panel's 100 ms tick: progress, log, FPS/ETA/status - and the pane's owners.
 
-        It used to be called with a 640x360 thumbnail from shared memory; that channel is gone (the pane is fed from
-        the preview file at full resolution), so this is a clock, and the picture is never painted from here.
+        It used to be called with a 640x360 thumbnail from shared memory. The picture now has two routes, both starting
+        here: a preview's live tail decodes the file it follows (`_ensure_live_tail`), an export's display channel reads
+        one new `seq` from the block the GUI owns (`_tick_display`). Exactly one of them paints a given pane.
         """
 
         # The pane's 100 ms clock is also the live tail's start point: it is the only GUI-thread tick during a
@@ -1172,6 +1451,10 @@ class ProcessTab:
         # enabled button that holds nothing, or a disabled one that holds the picture, is worse than no button.
         self._sync_preview_transport()
         self._refresh_held_progress()
+        # The export pane's feed and the standing original both run on this same clock: the reader takes at most one
+        # new `seq` per tick, and the compare's source decode is coalesced to the playhead the result just reached.
+        self._tick_display()
+        self._tick_second_surface()
 
 
         if self.renderTextOutputList is not None:
@@ -1213,4 +1496,25 @@ class ProcessTab:
             renderOptions,
             self.settings,
             is_overwrite=self.isOverwrite,
+            paths=self._render_paths(),
+        )
+
+    def _render_paths(self):
+        """The install's paths plus THIS pane's display block, which no constant can know.
+
+        `render_command.app_paths()` stays free of the pane (it is importable without a window); the block's name comes
+        from the pid like the paused flag's, and its box from the block actually allocated, so the command's
+        `--display_size` and the segment can never disagree.
+        """
+        from dataclasses import replace
+
+        from .render_command import app_paths
+
+        box = getattr(self, "_display_box", None) or DEFAULT_DISPLAY_BOX
+        width, height = int(box[0]), int(box[1])
+        return replace(
+            app_paths(),
+            display_state_id=DISPLAY_STATE_SHARED_MEMORY_ID,
+            display_size=f"{width}x{height}",
+            seek_state_id=SEEK_STATE_SHARED_MEMORY_ID,
         )
