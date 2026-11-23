@@ -272,11 +272,19 @@ def test_a_container_that_never_opens_is_reported_once_after_the_grace_window(sc
     assert len(harness.errors) == 1, "a repeat at every growth would be noise, not a report"
 
 
-def test_a_missing_file_is_refused_at_open(scratch_dir):
+def test_a_missing_file_is_a_wait_not_an_error(scratch_dir):
+    """The renderer creates its output when the encoder starts, so a reader that begins at "render just launched"
+    sees nothing for a moment. `False` means "try again", and the log stays quiet - measured against a real preview
+    render, where the old behaviour printed ten "no such file" lines before the first fragment."""
     harness = _Harness(os.path.join(scratch_dir, "not-there.mp4"))
     assert harness.reader.open(os.path.join(scratch_dir, "not-there.mp4")) is False
-    assert len(harness.errors) == 1 and "no such file" in harness.errors[0]
+    assert harness.errors == [], "a missing file is not an error the caller has to handle"
     assert harness.reader.poll() == 0, "a reader with no file does nothing"
+    # and it becomes usable as soon as the writer creates the file
+    path = os.path.join(scratch_dir, "appears.mp4")
+    harness.append(0) if False else None
+    open(path, "wb").write(b"")
+    assert harness.reader.open(path) is True
 
 
 def test_close_releases_the_container_and_stops_polling(scratch_dir):

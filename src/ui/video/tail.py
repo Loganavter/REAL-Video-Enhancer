@@ -88,11 +88,16 @@ class TailReader(QObject):
     # -- lifecycle ---------------------------------------------------------------------------------
 
     def open(self, path: str) -> bool:
-        """Point the reader at a growing file; the container itself opens lazily on the first bytes."""
+        """Point the reader at a growing file; the container itself opens lazily on the first bytes.
+
+        A missing file is NOT an error here: the renderer creates its output when the encoder starts, so a reader that
+        begins at "the render just launched" legitimately sees nothing for a moment. `False` means "wait and try again",
+        and it is deliberately silent - a preview that spams the log before the first byte is worse than one that waits
+        (measured against a real preview render: ten "no such file" lines before the first fragment).
+        """
         self.close()
         path = str(path)
         if not os.path.isfile(path):
-            self.error.emit(f"tail: no such file: {path}")
             return False
         self._path = path
         return True
