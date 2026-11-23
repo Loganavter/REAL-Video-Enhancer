@@ -1,0 +1,109 @@
+"""The preview surface's geometry, without a GPU: fit, 1:1, zoom, the strip and its fractions.
+
+Why these can be pinned without rendering: every number the shader receives is computed on the CPU (the mvp, the strip
+rect, the HUD vertices), and those are exactly the numbers that were wrong during the build - a flipped texture, a
+1:1 view that was not 1:1, a strip whose click mapped to the wrong time. The pixels themselves are proven on a live
+display through `grabFramebuffer()` (harness/docs/LIVE-TESTING.md); this file keeps the arithmetic honest on any
+interpreter with PySide6.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtCore import QPointF, QRectF, QSize  # noqa: E402
+from PySide6.QtGui import QColor, QImage  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from src.ui.widgets.video_preview import VideoPreviewSurface  # noqa: E402
+
+
+@pytest.fixture()
+def surface():
+    """A fresh surface per test: the harness sweeps top-level widgets after each test, so a module-scoped one would be
+    a deleted C++ object by the second test (measured: "Internal C++ object already deleted")."""
+    _app = QApplication.instance() or QApplication([])
+    widget = VideoPreviewSurface()
+    widget.resize(800, 600)
+    image = QImage(1600, 900, QImage.Format.Format_RGBA8888)
+    image.fill(QColor("#204060"))
+    widget.set_frame(image)
+    return widget
+
+
+def test_fit_keeps_the_frame_inside_the_pane_and_its_aspect(surface):
+    rect = surface._frame_rect()
+    assert rect.width() <= surface.width() + 0.5
+    assert rect.height() <= surface.height() + 0.5
+    assert abs(rect.width() / rect.height() - 1600 / 900) < 1e-6, "letterboxing must not change the aspect"
+    assert abs(rect.center().x() - surface.width() / 2) < 0.5, "a fitted frame is centred"
+
+
+def test_one_to_one_is_the_frames_own_size_and_may_overflow(surface):
+    surface.reset_view(actual_size=True)
+    rect = surface._frame_rect()
+    assert (round(rect.width()), round(rect.height())) == (1600, 900)
+    assert rect.width() > surface.width(), "1:1 on a smaller pane overflows instead of downscaling"
+    surface.reset_view()
+
+
+def test_zoom_is_clamped_and_anchored_at_the_cursor(surface):
+    surface.reset_view()
+    surface.set_zoom(100.0)
+    assert surface.zoom() == pytest.approx(8.0), "the ceiling is 8x"
+    surface.reset_view()
+    surface.set_zoom(0.0001)
+    assert surface.zoom() == pytest.approx(surface._fit_scale(), rel=1e-6), (
+        "the wheel's floor is the fit scale: any smaller would leave gutters")
+    surface.reset_view()
+    surface.set_zoom(2.0, around=QRectF(QPointF(0, 0), QSize(1, 1)))
+    after = surface._frame_rect()
+    assert after.width() == pytest.approx(1600 * 2.0, rel=1e-6), (
+        "zoom is a source-pixel scale: 2x a 1600 px frame is 3200 px on screen")
+    surface.reset_view()
+
+
+def test_pan_is_clamped_to_the_picture(surface):
+    surface.reset_view(actual_size=True)
+    surface.pan_by(10_000, 10_000)
+    rect = surface._frame_rect()
+    assert rect.left() <= 0.5 and rect.top() <= 0.5, "the picture cannot be dragged away from the top-left"
+    assert rect.right() >= surface.width() - 0.5, "and never leaves a gutter on the right"
+    surface.reset_view()
+
+
+def test_the_strip_maps_a_click_to_the_same_fraction(surface):
+    surface.reset_view()
+    strip = surface._strip_rect()
+    assert strip.width() > 0
+    assert surface._fraction_at(strip.left()) == pytest.approx(0.0)
+    assert surface._fraction_at(strip.left() + strip.width() * 0.25) == pytest.approx(0.25)
+    assert surface._fraction_at(strip.right()) == pytest.approx(1.0)
+    assert surface._fraction_at(strip.left() - 500) == 0.0, "outside the strip clamps, never goes negative"
+    assert surface._fraction_at(strip.right() + 500) == 1.0
+
+
+def test_the_hud_has_one_rect_per_marker_and_a_track(surface):
+    surface.reset_view()
+    surface.set_progress(rendered=5.0, total=20.0, playhead=2.5, duration=20.0)
+    vertices = surface._hud_vertices()
+    # track + rendered range + render head + playhead + handle = 5 rects, 6 vertices each, 6 floats per vertex
+    assert len(vertices) == 5 * 6 * 6
+    surface.set_progress(0.0, 0.0, 0.0, 0.0)
+    assert len(surface._hud_vertices()) == 1 * 6 * 6, "with no progress only the track is drawn"
+
+
+def test_the_strip_can_be_switched_off(surface):
+    surface.set_strip_visible(False)
+    assert surface._strip_rect().isEmpty()
+    assert surface._hud_vertices() == []
+    surface.set_strip_visible(True)
+
+
+def test_the_original_flag_is_what_swaps_the_picture(surface):
+    surface.set_original(QImage(1600, 900, QImage.Format.Format_RGBA8888))
+    assert surface._original is not None
+    surface.set_original(None)
+    assert surface._original is None

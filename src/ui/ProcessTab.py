@@ -446,6 +446,8 @@ class ProcessTab:
                 command,
                 **kwargs,
             )
+            if renderOptions.isPreview:
+                self._start_live_tail(renderOptions.outputPath)
             textOutput = []
             self._log_filter = RenderLogFilter()
             self.renderLogLines = []
@@ -546,8 +548,66 @@ class ProcessTab:
 
         self._restoreQueueAfterPreview()
         if self.currentRenderOptions.isPreview:
+            self._stop_live_tail()
             self._start_preview_playback(self.currentRenderOptions.outputPath)
 
+
+    def _start_live_tail(self, path: str) -> None:
+        """Follow the preview file the backend is writing, at full resolution, while it grows.
+
+        This is the live preview: the renderer pays nothing for it (it writes the file anyway), the pane decodes what has
+        been produced so far, and the strip's render head tracks the produced range.
+        """
+        from PySide6.QtCore import QTimer
+
+        from .video.tail import TailReader
+
+        try:
+            self._stop_live_tail()
+            reader = TailReader(pixel_format="rgb24")
+            reader.frame_ready.connect(self._on_preview_frame)
+            reader.error.connect(lambda message: log(f"preview tail: {message}"))
+            self._live_tail = reader
+            self._live_tail_path = str(path)
+            timer = QTimer(self)
+            timer.setInterval(120)
+            timer.timeout.connect(self._poll_live_tail)
+            timer.start()
+            self._live_tail_timer = timer
+        except Exception as exc:  # a preview that cannot follow must not take the render down
+            log(f"preview tail failed: {exc}")
+
+    def _poll_live_tail(self) -> None:
+        reader = getattr(self, "_live_tail", None)
+        if reader is None:
+            return
+        try:
+            if not getattr(self, "_live_tail_open", False):
+                # The container does not exist for the first moment of the render (ffmpeg writes a fragment first);
+                # the reader's own grace period handles the "not yet a container" case.
+                self._live_tail_open = bool(reader.open(self._live_tail_path))
+                return
+            reader.poll()
+        except Exception as exc:
+            log(f"preview tail poll failed: {exc}")
+            self._stop_live_tail()
+
+    def _stop_live_tail(self) -> None:
+        timer = getattr(self, "_live_tail_timer", None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                pass
+            self._live_tail_timer = None
+        reader = getattr(self, "_live_tail", None)
+        if reader is not None:
+            try:
+                reader.close()
+            except Exception:
+                pass
+            self._live_tail = None
+        self._live_tail_open = False
 
     def _start_preview_playback(self, path: str) -> None:
         """Play the finished preview file through our own decoder into the preview pane.
@@ -884,6 +944,11 @@ class ProcessTab:
                     renderOptions.decompressModelFile,
                 ),
             ]
+
+        if renderOptions.isPreview:
+            # The preview file is read WHILE it is written (the pane tail-follows it): the backend writes a fragmented
+            # container with a short GOP for exactly this job, and keeps `+faststart` for real exports.
+            command += ["--preview_render"]
 
         if self.settings.settings["auto_border_cropping"] == "True":
             command += [

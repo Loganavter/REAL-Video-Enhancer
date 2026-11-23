@@ -45,6 +45,8 @@ from PySide6.QtWidgets import QRhiWidget
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 
 SHADER_DIR = "shaders"
+#: 8 source pixels per screen pixel at most; the floor is the FIT scale (computed per frame), not 1:1 - see
+#: `_min_zoom`. Zoom is a source-pixel scale, so "1:1" is a meaningful step inside the range.
 MAX_ZOOM = 8.0
 MIN_ZOOM = 1.0
 
@@ -227,9 +229,18 @@ class VideoPreviewSurface(QRhiWidget):
     def zoom(self) -> float:
         return self._zoom
 
+    def _min_zoom(self) -> float:
+        """The wheel's floor: the whole frame visible. Zooming further out would leave gutters for no reason, and the
+        initial view already is that scale."""
+        return max(1e-6, self._fit_scale())
+
     def set_zoom(self, zoom: float, *, around: QRectF | None = None) -> None:
-        """Set the zoom factor, clamped to [1, 8]; `around` keeps that rect (the cursor area) put."""
-        target = max(MIN_ZOOM, min(MAX_ZOOM, float(zoom)))
+        """Set the zoom factor, clamped to [fit, 8]; `around` keeps that rect (the cursor area) put.
+
+        The factor is a SOURCE-pixel scale, so 1.0 means one frame pixel per screen pixel; on a large frame inside a
+        small pane `fit` is below 1 and the range is [fit, 8].
+        """
+        target = max(self._min_zoom(), min(MAX_ZOOM, float(zoom)))
         if around is not None and self._zoom > 0:
             centre = self._frame_rect().center()
             offset = around.center() - centre
