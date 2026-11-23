@@ -633,11 +633,17 @@ class ProcessTab:
                     pane.seekRequested.connect(self._on_preview_seek)
                 except Exception:
                     pass
+            if hasattr(pane, "originalRequested"):
+                try:
+                    pane.originalRequested.connect(self._on_original_requested)
+                except Exception:
+                    pass
             decoder.play()
         except Exception as exc:  # a preview that cannot play must not take the render down
             log(f"preview playback failed: {exc}")
 
     def _stop_preview_playback(self) -> None:
+        self._stop_source_decoder()
         decoder = getattr(self, "_preview_decoder", None)
         if decoder is not None:
             try:
@@ -651,6 +657,47 @@ class ProcessTab:
         duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
         if decoder is not None and duration > 0:
             decoder.seek(max(0.0, min(1.0, float(fraction))) * duration)
+
+    def _on_original_requested(self, seconds: float) -> None:
+        """Decode ONE source frame at the playhead for the LMB compare (the input file, never the renderer).
+
+        The image is what the platform's decoder produces from the input, which is the honest comparison: the renderer's
+        own source buffer would need a second channel and would make the render pay for a preview-only action.
+        """
+        decoder = getattr(self, "_source_decoder", None)
+        try:
+            if decoder is None:
+                from .video.decode import VideoDecoder
+
+                decoder = VideoDecoder(pixel_format="rgb24")
+                decoder.frame_ready.connect(self._on_original_frame)
+                decoder.error.connect(lambda message: log(f"source decoder: {message}"))
+                path = getattr(self.currentRenderOptions, "inputFile", "") or ""
+                if not decoder.open(str(path)):
+                    log(f"source decoder: cannot open {path}")
+                    return
+                self._source_decoder = decoder
+            decoder.request_frame(max(0.0, float(seconds)))
+        except Exception as exc:
+            log(f"original frame failed: {exc}")
+
+    def _on_original_frame(self, frame) -> None:
+        from PySide6.QtGui import QImage
+
+        image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
+                       QImage.Format.Format_RGB888).copy()
+        pane = self.parent.previewLabel
+        if hasattr(pane, "set_original"):
+            pane.set_original(image)
+
+    def _stop_source_decoder(self) -> None:
+        decoder = getattr(self, "_source_decoder", None)
+        if decoder is not None:
+            try:
+                decoder.close()
+            except Exception:
+                pass
+            self._source_decoder = None
 
     def _on_preview_opened(self, duration: float, fps: float, frames_total: float) -> None:
         self._preview_duration = float(duration) or 0.0

@@ -124,8 +124,23 @@ class VideoPreviewSurface(QRhiWidget):
         return self._frame is not None
 
     def set_original(self, image: QImage | None) -> None:
-        """The source frame for the LMB compare; `None` returns to the rendered picture."""
-        self._original = None if image is None else image.convertToFormat(QImage.Format_RGBA8888)
+        """The source frame for the LMB compare; `None` returns to the rendered picture.
+
+        The source is **stretched up to the rendered frame's size with nearest-neighbour** (`FastTransformation`): the
+        cheapest interpolation there is, and the only one that adds no information. The comparison then shows two
+        pictures of the same pixel size, so every difference on screen is one the upscaler produced rather than a
+        smoothing artefact of the viewer, and the source pixel at (x, y) lands on the same screen point in both states
+        (owner, 2026-11-23).
+        """
+        if image is None:
+            self._original = None
+        else:
+            picture = image.convertToFormat(QImage.Format.Format_RGBA8888)
+            if self._frame is not None and picture.size() != self._frame.size():
+                picture = picture.scaled(self._frame.size(), Qt.AspectRatioMode.IgnoreAspectRatio,
+                                         Qt.TransformationMode.FastTransformation)
+            self._original = picture
+        self._texture_dirty = True
         self.update()
 
     def set_tint(self, rgba: tuple[float, float, float, float]) -> None:
@@ -157,8 +172,9 @@ class VideoPreviewSurface(QRhiWidget):
         self._hud_dirty = True
         self.update()
 
-    seekRequested = Signal(float)   # fraction 0..1 of the strip
-    zoomChanged = Signal(float)     # the new zoom factor
+    seekRequested = Signal(float)     # fraction 0..1 of the strip
+    zoomChanged = Signal(float)       # the new zoom factor
+    originalRequested = Signal(float)  # playhead seconds: the host decodes the SOURCE frame at this time
 
     # -- interaction -----------------------------------------------------
 
@@ -184,9 +200,13 @@ class VideoPreviewSurface(QRhiWidget):
                 self.seekRequested.emit(self._fraction_at(position.x()))
                 event.accept()
                 return
-            if self._original is not None:
-                self._showing_original = True
-                self.update()
+            # LMB = "show the original": the surface asks the host for the source frame at the playhead and draws it as
+            # soon as `set_original` arrives. The request carries the media time, so the host decodes one frame, not a
+            # stream - the renderer's own original is never involved (plan: 3b, GUI-only).
+            self._showing_original = True
+            _, _, playhead, _ = self._progress
+            self.originalRequested.emit(float(playhead))
+            self.update()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -214,7 +234,7 @@ class VideoPreviewSurface(QRhiWidget):
             self._scrubbing = False
             if self._showing_original:
                 self._showing_original = False
-                self.update()
+                self.set_original(None)   # one frame is held at a time; the next press asks again
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -286,7 +306,10 @@ class VideoPreviewSurface(QRhiWidget):
     # -- geometry ---------------------------------------------------------
 
     def _image_size(self) -> tuple[int, int]:
-        image = self._original or self._frame
+        # Geometry always comes from the RENDERED frame, even while the original is shown: the compare must not move or
+        # resize anything, or the eye compares two framings instead of two pictures (the source is drawn into the same
+        # screen rect, which is also what "hold to see the original" means in the reference app).
+        image = self._frame
         if image is None or image.isNull():
             return (0, 0)
         return (image.width(), image.height())
@@ -526,15 +549,18 @@ class VideoPreviewSurface(QRhiWidget):
             self._release()
             self._rhi = self.rhi()
             self._create_resources(command_buffer)
-        if self._texture_dirty and self._frame is not None:
-            self._ensure_texture(self._frame.size())
+        picture = self._original if (self._showing_original and self._original is not None) else self._frame
+        if picture is None:
+            return
+        if self._texture_dirty and picture is not None:
+            self._ensure_texture(picture.size())
         if getattr(self, "_pipeline", None) is None:
             self._build_pipeline()
             if self._pipeline is None:
                 return
         updates = self.rhi().nextResourceUpdateBatch()
-        if self._texture_dirty and self._frame is not None:
-            updates.uploadTexture(self._texture, self._frame)
+        if self._texture_dirty:
+            updates.uploadTexture(self._texture, picture)
             self._texture_dirty = False
         updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(self._mvp_floats()))
         updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(list(self._tint)))
