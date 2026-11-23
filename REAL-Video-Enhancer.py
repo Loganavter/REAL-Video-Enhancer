@@ -1221,6 +1221,11 @@ def main(file_to_open=None):
             stack.setCurrentIndex(current)
 
     _stamp("pages polished")
+    # The warm pass grabs widgets, and a grab PAINTS them. A `QRhiWidget` painted before its top-level has a platform
+    # window cannot get an RHI: Qt prints `QRhiWidget: No QRhi`, emits renderFailed and - measured on headless weston
+    # 2026-11-23 - draws nothing, so a pane painted in this window is literally transparent afterwards. Creating the
+    # window (without showing it) before the warm pass gives the grab a backingstore to paint into.
+    window.create()
     _warm_widget(window)
     window.grab()
     _stamp("first frame warmed")

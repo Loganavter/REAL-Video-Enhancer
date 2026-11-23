@@ -90,6 +90,14 @@ def install_rhi_primer(window: QWidget) -> None:
         primer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         configure_rhi_widget(primer)
         primer.setGeometry(0, 0, 1, 1)
+        window._rhi_surface_primer = primer
+
+        # Shown immediately, as BlinkTable does. Deferring this to the window's Show event was measured to change
+        # nothing (a primer under a hidden top-level is never painted, so it cannot promote anything either) and it
+        # crashed the app once the window had a real platform window: the primer self-destructs on its first
+        # initialize(), and the deferred `show()` then ran on a deleted C++ object. The startup warnings the deferral
+        # was meant to cure come from RVE's own pre-show `grab()` pass, not from this widget - see the `window.create()`
+        # call in REAL-Video-Enhancer.py's startup.
         primer.show()
         window._rhi_surface_primer = primer
     except Exception as error:  # a primer that cannot be built must not cost the window
