@@ -607,7 +607,7 @@ class ProcessTab:
         self.page_handles.proc.startRenderButton.setEnabled(True)
         self.page_handles.general.outputFileText.setEnabled(True)
         self.page_handles.general.inputFileText.setEnabled(True)
-        if getattr(self.parent, "preview_label_is_surface", False):
+        if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             self.page_handles.proc.previewLabel.set_frame(None)
         else:
             self.page_handles.proc.previewLabel.clear()
@@ -822,7 +822,7 @@ class ProcessTab:
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
         pane = self.page_handles.proc.previewLabel
-        if getattr(self.parent, "preview_label_is_surface", False):
+        if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             pane.set_frame(image)
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
             running = self.renderProcess is not None and self.renderProcess.poll() is None
@@ -982,7 +982,7 @@ class ProcessTab:
             self.page_handles.proc.STATUS.setText(f"Status: {self.status}")
         if not qimage.isNull():
             preview = self.page_handles.proc.previewLabel
-            if getattr(self.parent, "preview_label_is_surface", False):
+            if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
                 # The surface fits, zooms and letterboxes itself and always keeps the frame's own resolution; the
                 # backend's thumbnail is what a live render can afford (the full-resolution path is the preview file).
                 preview.set_frame(qimage)

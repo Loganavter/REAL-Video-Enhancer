@@ -834,7 +834,7 @@ def install(window) -> None:
             print(f"capture-server: preview {result}", flush=True)
 
         def wait_finish(ticks: int = 0) -> None:
-            if result["started"] and window.startRenderButton.isEnabled():
+            if result["started"] and window.page_handles.proc.startRenderButton.isEnabled():
                 result["finished"] = True
                 finish()
                 return
@@ -862,7 +862,7 @@ def install(window) -> None:
                 return
             QTimer.singleShot(100, lambda: wait_loaded(ticks + 1))
 
-        window.inputFileText.setText(video)
+        window.page_handles.general.inputFileText.setText(video)
         QTimer.singleShot(300, wait_loaded)
 
     def capture(wanted: str) -> None:
