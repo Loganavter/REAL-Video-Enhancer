@@ -16,7 +16,7 @@ import os
 import time
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QRhiDepthStencilClearValue
 from PySide6.QtWidgets import QRhiWidget
 
 
@@ -43,12 +43,15 @@ class _Probe(QRhiWidget):
         target = self.renderTarget()
         if target is None:
             return
-        command_buffer.beginPass(target, QColor("#2f6f4f"), (1.0, 0))
+        # `beginPass` takes a QRhiDepthStencilClearValue, not a tuple (a tuple raises a TypeError inside the
+        # Python override, which Qt reports as a render failure - the first run of this probe proved it).
+        command_buffer.beginPass(target, QColor("#2f6f4f"), QRhiDepthStencilClearValue(1.0, 0))
         command_buffer.endPass()
         self.frames += 1
 
 
-def probe(window, out_dir: str, *, settle: int = 12, delay_s: float = 0.02) -> dict:
+def probe(window, out_dir: str, *, settle: int = 12, delay_s: float = 0.02, hold_ms: int = 0,
+          place: tuple[int, int] | None = None) -> dict:
     """Run the experiment in `window`, save a readback PNG into `out_dir`, return a JSON-able report."""
     from PySide6.QtWidgets import QApplication
 
@@ -59,11 +62,22 @@ def probe(window, out_dir: str, *, settle: int = 12, delay_s: float = 0.02) -> d
         widget.renderFailed.connect(lambda: failures.append("renderFailed"))
     except Exception:
         pass
-    widget.move(40, 40)
+    widget.move(*(place or (40, 40)))
     widget.show()
+    # A QMainWindow keeps its central widget on top of later siblings unless the probe is raised explicitly; without
+    # this the widget renders (the readback is proof) but no pixel of it reaches the window.
+    widget.raise_()
     for _ in range(settle):
         QApplication.processEvents()
         time.sleep(delay_s)
+
+    # A hold keeps the probe on screen for a real root screenshot (the X framebuffer, not a re-render): that is how
+    # "is it composited with the page around it" is answered on a live display.
+    if hold_ms > 0:
+        deadline = time.time() + hold_ms / 1000.0
+        while time.time() < deadline:
+            QApplication.processEvents()
+            time.sleep(delay_s)
 
     image = None
     try:
@@ -80,6 +94,17 @@ def probe(window, out_dir: str, *, settle: int = 12, delay_s: float = 0.02) -> d
     else:
         saved_path = None
 
+    # The whole window as a tree would paint it: proves the probe is composited with the rest, not only in its own
+    # backing texture. `window.grab()` re-renders (it does not read the framebuffer), which is why the readback above
+    # is the pixel proof and this one is the layout proof.
+    window_path = os.path.join(out_dir, f"rhi-window-{time.strftime('%Y%m%d-%H%M%S')}.png")
+    window_saved = False
+    try:
+        window_saved = bool(window.grab().save(window_path))
+    except Exception as exc:
+        failures.append(f"window.grab: {type(exc).__name__}: {exc}")
+        window_path = None
+
     report = {
         "initialized": widget.initialized,
         "frames": widget.frames,
@@ -88,6 +113,8 @@ def probe(window, out_dir: str, *, settle: int = 12, delay_s: float = 0.02) -> d
         "grab_saved": saved,
         "grab_path": saved_path,
         "grab_size": size,
+        "window_saved": window_saved,
+        "window_path": window_path,
         "failures": failures,
         "seconds": round(time.time() - started, 3),
     }

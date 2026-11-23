@@ -516,7 +516,19 @@ def install(window) -> None:
             try:
                 from src.ui.devtools.rhi_probe import probe as rhi_probe
 
-                report = rhi_probe(window, out_dir=root)
+                argument = wanted[len("rhi:"):].strip()
+                hold_ms = int(argument) if argument.isdigit() else 0
+                # Optional placement: "rhi:hold@x,y" puts the probe where a screenshot can judge compositing.
+                place = None
+                if "@" in argument:
+                    hold_text, _, coordinates = argument.partition("@")
+                    hold_ms = int(hold_text) if hold_text.isdigit() else 0
+                    try:
+                        x_text, _, y_text = coordinates.partition(",")
+                        place = (int(x_text), int(y_text))
+                    except (TypeError, ValueError):
+                        place = None
+                report = rhi_probe(window, out_dir=root, hold_ms=hold_ms, place=place)
             except Exception as exc:  # the experiment failing is a result, not a broken control channel
                 report = {"error": f"{type(exc).__name__}: {exc}"}
             _finish({"stamp": _stamp(), "kind": "rhi", **report})
