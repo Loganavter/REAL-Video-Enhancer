@@ -9,15 +9,15 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QSize, Qt)
-from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
+from PySide6.QtCore import (QSize, Qt)
+from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
 
 # The page builds the toolkit's own controls: `Button` where the Designer had a `QPushButton`, `Text` where it had a
 # `QLabel`. Nothing here needs a Qt-shaped compatibility adapter.
-from sli_ui_toolkit.widgets import SurfacePanel, Text, TextListWidget
+from sli_ui_toolkit.widgets import SurfacePanel, TextListWidget
 from src.ui.pages.handles import RenderQueueHandles
 
 
