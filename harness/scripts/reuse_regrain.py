@@ -1,6 +1,6 @@
 """Prototype step 2: put the grain back on every frame, from the source, at the output resolution.
 
-The architecture in harness/docs/wsp/REVIEW-reuse-gate-2026-11-19-REPLY.md: the plate is what the gate and the network
+The architecture in projects/rve/docs/notes/REVIEW-reuse-gate-2026-11-19-REPLY.md: the plate is what the gate and the network
 see, and the grain is re-added afterwards on ALL frames - rendered and reused alike - otherwise the reused
 frames carry dead grain while the rendered ones carry fresh grain and the difference pulses at the held-frame
 rate.

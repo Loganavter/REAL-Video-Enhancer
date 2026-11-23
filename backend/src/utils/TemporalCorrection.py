@@ -28,7 +28,7 @@ Two alternatives are measured and refused, so they are not implemented here. War
 field: the codec's own vectors reference a picture that is not the one the gate holds, and a DIS flow from the held
 frame fails on the same frames (`harness/docs/wsp/verified/reuse-mv-reference.txt`). Clamping the result into the local
 colour range: it does not move the failures and costs 35x on frames that pass
-(`harness/docs/wsp/PRIOR-ART-reuse-detail-2026-11-20.md`).
+(`projects/rve/docs/notes/PRIOR-ART-reuse-detail-2026-11-20.md`).
 
 What IS here, and is a different object from those two: :meth:`ReferenceFrameCorrector.align`, a single translation
 supplied by the gate itself (the scan's wobble, measured by the coarse statistic's registration). A motion *field*
