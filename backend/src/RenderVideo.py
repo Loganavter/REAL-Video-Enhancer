@@ -22,7 +22,7 @@ from .FFmpegBuffers import FFmpegRead, FFmpegWrite, MPVOutput
 from .FFmpeg import InformationWriteOut
 from .utils.Encoders import EncoderSettings
 from .utils.SceneDetect import SceneDetect
-from .utils.Util import log, resize_image_bytes
+from .utils.Util import log, resize_frame_bytes, guard_render_thread
 from .utils.Frame import rgb_preview, payload_preview
 from .utils.PreviewStager import PreviewStager
 from .utils.BorderDetect import BorderDetect
@@ -549,7 +549,17 @@ class Render:
         # the gate stores only its LR reference; the HR frame we may re-emit lives here
         self._lastRenderedFrame = None
 
-        self.renderThread = Thread(target=self.render)
+        # The render body is wrapped (utils.Util.guard_render_thread): an exception here used to kill
+        # only this thread, leaving the reader/writer threads blocked on a queue nobody feeds - a live
+        # process at 0 FPS, `Status: Rendering` forever and no error anywhere (2026-11-22). The
+        # wrapper logs one `RENDER FAILED: <type>: <msg>` line plus the traceback and exits non-zero
+        # at once, so the GUI's stdout loop ends the job and shows the failure.
+        self.renderThread = Thread(
+            target=guard_render_thread,
+            args=(self.render,),
+            kwargs={"path": "RenderVideo.render"},
+            name="render",
+        )
         self.ffmpegReadThread = Thread(target=self.readBuffer.read_frames_into_queue)
         self.ffmpegWriteThread = Thread(target=self.writeBuffer.write_out_frames)
         self.sharedMemoryThread = Thread(
@@ -1118,12 +1128,14 @@ class Render:
                                 interpolated_frame
                             )
                         if self.override_upscale_scale:
-                            interpolated_frame = resize_image_bytes(interpolated_frame.get_frame_bytes(),
-                                               width=self.width*self.modelScale,
-                                               height=self.height*self.modelScale,
-                                               target_width=self.width*self.override_upscale_scale,
-                                               target_height=self.height*self.override_upscale_scale,)
-                        self._publish_preview(interpolated_frame)
+                            interpolated_frame = resize_frame_bytes(
+                                interpolated_frame,
+                                target_width=self.width * self.override_upscale_scale,
+                                target_height=self.height * self.override_upscale_scale,
+                                path="RenderVideo.render:interpolated-frame override_upscale_scale",
+                            )
+                        if type(interpolated_frame) is not bytes:
+                            self._publish_preview(interpolated_frame)
                         self.informationHandler.setFramesRendered(frames_rendered)
                         self.writeBuffer.writeQueue.put(interpolated_frame.get_frame_bytes() if type(interpolated_frame) != bytes else interpolated_frame)
                 
@@ -1203,11 +1215,18 @@ class Render:
                 
                 
                 if self.override_upscale_scale:
-                    frame = resize_image_bytes(frame.get_frame_bytes(),
-                                               width=self.width*self.modelScale,
-                                               height=self.height*self.modelScale,
-                                               target_width=self.width*self.override_upscale_scale,
-                                               target_height=self.height*self.override_upscale_scale,)
+                    # Source geometry comes from the frame the upscaler returned, never from
+                    # `width * modelScale`: on `4xNomos8k_span_otf_weak_no_update_params.pth` the
+                    # frame came back at 2x (320x240) while the descriptor claimed 4x (640x480), and
+                    # the old call fed that payload to a 640x480 reshape - an opaque reshape error,
+                    # then a dead render thread (2026-11-22). A frame whose payload disagrees with
+                    # its own geometry now raises a named ValueError instead.
+                    frame = resize_frame_bytes(
+                        frame,
+                        target_width=self.width * self.override_upscale_scale,
+                        target_height=self.height * self.override_upscale_scale,
+                        path="RenderVideo.render:override_upscale_scale",
+                    )
 
                 
                 # opt in before the preview so preview and writer share one payload
@@ -1215,7 +1234,9 @@ class Render:
                     frame.pooled_output = True
                 self.informationHandler.setFramesRendered(frames_rendered)
                 _t_prev = _perf_counter()
-                preview_built = self._publish_preview(frame)
+                # after the override resize the frame is plain bytes (no tensor to thumbnail)
+                preview_built = (False if type(frame) is bytes
+                                 else self._publish_preview(frame))
                 _preview_ms = (_perf_counter() - _t_prev) * 1000.0
                 self._profile["preview"] += _preview_ms
                 if preview_built:
