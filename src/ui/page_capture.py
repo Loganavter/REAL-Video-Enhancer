@@ -97,6 +97,64 @@ def _tab_host(page):
     return None
 
 
+def _tab_hosts(window) -> list:
+    """Every tab host the walk will switch, in walk order (the hosts `steps()` writes `-tabN` stems for)."""
+    stack = _page_stack(window)
+    if stack is None:
+        return []
+    hosts = []
+    for index in range(stack.count()):
+        host = _tab_host(stack.widget(index))
+        if host is not None and host.count() > 1:
+            hosts.append(host)
+    return hosts
+
+
+def walk_state(window) -> dict:
+    """Where the interface is right now, in the terms the walk changes it: ``{"page": index, "tabs": {id: index}}``.
+
+    The counterpart of `restore_walk_state`: the capture walk must be able to hand the interface back, or every probe
+    that waits for the server's `ready` file measures the walk's last page (see `restore_walk_state`).
+    """
+    stack = _page_stack(window)
+    if stack is None:
+        return {"page": None, "tabs": {}}
+    return {"page": stack.currentIndex(),
+            "tabs": {id(host): host.currentIndex() for host in _tab_hosts(window)}}
+
+
+def restore_walk_state(window, state) -> None:
+    """Put the page stack and every tab host the walk switched back where `walk_state` found them.
+
+    The walk is a measurement instrument, not a user: it makes every page and every tab current once so their geometry
+    settles, and until 2026-11-24 it left the window on the last page's last tab. On a fresh instance that was the Logs
+    tab of the settings-nested host - an empty console that a screenshot reads as a blank page, and every probe that
+    waited for `ready` then measured the instrument instead of the interface (measured live:
+    `state:processSettingsContainer -> currentIndex: 4`, `state:tabWidget -> currentIndex: 2`; one click on a tab fixed
+    the view and the page rendered correctly).
+
+    The hosts are re-discovered instead of being kept alive inside `state`, so the answer stays a plain dict: the ids
+    are the identity, and a host this window no longer has is simply not restored.
+    """
+    if not state:
+        return
+    stack = _page_stack(window)
+    if stack is None:
+        return
+    page = state.get("page")
+    if page is not None:
+        stack.setCurrentIndex(page)
+    tabs = state.get("tabs") or {}
+    for host in _tab_hosts(window):
+        index = tabs.get(id(host))
+        if index is not None and host.currentIndex() != index:
+            host.setCurrentIndex(index)
+    if page is not None and stack.currentIndex() != page:
+        # A tab host can own page switching on its page, so selecting a tab may pull the stack away again; the page's
+        # own index has the last word.
+        stack.setCurrentIndex(page)
+
+
 def is_current(window, name: str) -> bool:
     """Is the interface actually showing the page `name` (a walker stem like `nav2` or `nav3-tab1`)?
 

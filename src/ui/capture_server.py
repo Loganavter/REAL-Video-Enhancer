@@ -91,7 +91,7 @@ def install(window) -> None:
     # diagnosis channel must NOT walk: it would switch pages under the owner's hands. It polls immediately and only warms
     # a page when that page is asked for.
     always_on = os.environ.get("RVE_UI_CAPTURE_SERVER") is None
-    state = {"warming": not always_on, "index": 0, "request_id": None}
+    state = {"warming": not always_on, "index": 0, "request_id": None, "walk_before": None}
 
     if always_on:
         with open(ready_path, "w", encoding="utf-8") as ready_file:
@@ -99,11 +99,24 @@ def install(window) -> None:
         print(f"control channel: ready (no warm-up walk) in {root}", flush=True)
 
     def warm(index: int) -> None:
+        if index == 0:
+            # The walk is an INSTRUMENT, not a user: remember where the interface is before step 0, so finishing the
+            # walk does not leave the window on the last page's last tab. On a fresh boot that leftover was the empty
+            # Logs tab of the settings-nested host, and every probe that waited for `ready` photographed it (measured
+            # 2026-11-24: `state:processSettingsContainer -> currentIndex: 4`, `state:tabWidget -> currentIndex: 2`;
+            # one click on any tab fixed the view).
+            state["walk_before"] = page_capture.walk_state(window)
         if index >= len(steps):
+            # Restore BEFORE `ready` is written: a client that waits for the file must never observe a half-walked
+            # interface. A capture ON REQUEST keeps its own behaviour (it ends on the last requested stem).
+            before = state.pop("walk_before", None)
+            page_capture.restore_walk_state(window, before)
+            QApplication.processEvents()
             state["warming"] = False
             with open(ready_path, "w", encoding="utf-8") as ready_file:
                 ready_file.write(_stamp())
             print(f"capture-server: ready ({len(steps)} pages) in {root}", flush=True)
+            print(f"capture-server: walk restored to page {before.get('page') if before else None}", flush=True)
             QTimer.singleShot(0, poll)
             return
         _name, action = steps[index]
