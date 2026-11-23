@@ -588,6 +588,10 @@ class ProcessTab:
         # The strip and the compare need their signals for an export too: without this only a preview ever wire them,
         # and a strip press during an export reached nothing (the seek then had two routes, neither connected).
         self._wire_preview_strip()
+        # An export's feed renders any frame on demand, so the strip may seek the whole timeline instead of only the
+        # produced band (measured live, 2026-11-24: a 30 % drag during a 7.5 %-produced export did nothing). This also
+        # clears the ceiling when the allocation failed or the job is a preview (whose tail owns the edge).
+        self._apply_seek_ceiling()
         log(f"display: block {DISPLAY_STATE_SHARED_MEMORY_ID} at {box[0]}x{box[1]}, "
             f"seek {SEEK_STATE_SHARED_MEMORY_ID}")
 
@@ -600,6 +604,26 @@ class ProcessTab:
                 reader.release()
             except Exception:
                 pass
+        # Whoever owns the pane next (a tail, a finished file) decides its own reach: the feed's ceiling must not
+        # outlive the feed, or a live tail would accept seeks into frames nobody has written.
+        self._apply_seek_ceiling()
+
+    def _apply_seek_ceiling(self) -> None:
+        """Tell the pane how far its strip may seek, from who paints it.
+
+        The display feed is the pane's painter for an EXPORT with a usable block, and it can render any timeline frame
+        on demand - so that pane may seek to 1.0. A preview's tail (and an export's fallback tail) only has what the
+        renderer has written, so the widget keeps its produced-edge rule there (`None`).
+        """
+        handles = getattr(self, "page_handles", None)
+        pane = getattr(getattr(handles, "proc", None), "previewLabel", None)
+        setter = getattr(pane, "set_seek_ceiling", None)
+        if setter is None:
+            return
+        try:
+            setter(1.0 if self._display_owns_pane() else None)
+        except Exception:
+            pass
 
     def _display_owns_pane(self) -> bool:
         """Whether the display feed is the pane's painter right now (never during a preview: its tail owns it)."""
@@ -1511,6 +1535,9 @@ class ProcessTab:
         # The pane's 100 ms clock is also the live tail's start point: it is the only GUI-thread tick during a
         # render, and the tail must be built and wired there (see `_start_live_tail`).
         self._ensure_live_tail()
+        # The block is allocated once per pass, before the job's own `isPreview` is known (the worker sets it), so the
+        # pane's seek reach is re-asserted here, on the GUI thread, once the owner is unambiguous.
+        self._apply_seek_ceiling()
         # Keep the transport honest for whichever painter owns the pane this tick (the tail or the file decoder): an
         # enabled button that holds nothing, or a disabled one that holds the picture, is worse than no button.
         self._sync_preview_transport()

@@ -120,6 +120,9 @@ class VideoPreviewSurface(QRhiWidget):
         #: hovered position on the strip (fraction 0..1), and whether it is past the produced edge
         self._hover_fraction: float | None = None
         self._hover_blocked = False
+        #: how far the strip may seek, when the owner can render any frame on demand (an export's display feed).
+        #: `None` = follow the produced edge (the live tail's honest limit); see `set_seek_ceiling`.
+        self._seek_ceiling: float | None = None
         #: Opaque clear colour for the pane. QRhiWidgets composite by OVERWRITING their rect, so a clear with alpha
         #: below 255 punches a hole (black on Wayland, white on xcb) instead of letting the page show through - the
         #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
@@ -294,8 +297,24 @@ class VideoPreviewSurface(QRhiWidget):
         self._hud_dirty = True
         self.update()
 
-    seekRequested = Signal(float)     # fraction 0..1 of the strip (only inside the produced range)
-    seekBlocked = Signal(float)       # a seek was asked for past the produced edge; nothing moved
+    def set_seek_ceiling(self, fraction: float | None) -> None:
+        """How far the strip may seek: `None` = the produced edge, a fraction = the owner's own reach.
+
+        The produced edge is the honest limit while the pane follows a live tail: nothing exists past it. An export's
+        display feed is different - it renders any frame of the timeline on demand - so the host lifts the edge to
+        1.0 there and restores `None` when the tail owns the pane again. The hover cursor follows, so the strip stops
+        claiming the rest of the timeline is unreachable while the feed can serve it.
+        """
+        ceiling = None if fraction is None else max(0.0, min(1.0, float(fraction)))
+        if ceiling == self._seek_ceiling:
+            return                      # the host re-asserts this every tick; an unchanged edge repaints nothing
+        self._seek_ceiling = ceiling
+        self._hover_fraction = None
+        self.unsetCursor()
+        self.update()
+
+    seekRequested = Signal(float)     # fraction 0..1 of the strip (inside the produced range, or the host's ceiling)
+    seekBlocked = Signal(float)       # a seek was asked for past the reachable edge; nothing moved
     zoomChanged = Signal(float)       # the new zoom factor
     originalRequested = Signal(float)  # playhead seconds: the host decodes the SOURCE frame at this time
 
@@ -327,8 +346,8 @@ class VideoPreviewSurface(QRhiWidget):
             if self._strip_visible and self._strip_rect().contains(position):
                 fraction = self._fraction_at(position.x())
                 if not self._seekable(fraction):
-                    # Past the produced edge there is nothing to seek to. Refusing is the honest answer: emitting a
-                    # seek the renderer cannot satisfy would move the playhead over a picture that does not exist.
+                    # Past the reachable edge there is nothing to seek to. Refusing is the honest answer: emitting a
+                    # seek the owner cannot satisfy would move the playhead over a picture that does not exist.
                     self.seekBlocked.emit(fraction)
                     event.accept()
                     return
@@ -356,9 +375,9 @@ class VideoPreviewSurface(QRhiWidget):
         position = event.position()
         if self._scrubbing:
             fraction = self._fraction_at(position.x())
-            # A drag is clamped at the produced edge instead of jumping into the dark part: the playhead never leaves
-            # frames that exist.
-            self.seekRequested.emit(min(fraction, self._produced_fraction()))
+            # A drag is clamped at the seek's own edge instead of jumping into the dark part: the playhead never
+            # leaves frames the owner can actually show (the produced band, or the whole timeline on a feed).
+            self.seekRequested.emit(min(fraction, self._seek_limit()))
             event.accept()
             return
         if self._panning:
@@ -428,8 +447,14 @@ class VideoPreviewSurface(QRhiWidget):
             return 1.0
         return max(0.0, min(1.0, rendered / total))
 
+    def _seek_limit(self) -> float:
+        """The edge the strip may seek to: the host's ceiling when it set one, else the produced share."""
+        if self._seek_ceiling is not None:
+            return self._seek_ceiling
+        return self._produced_fraction()
+
     def _seekable(self, fraction: float) -> bool:
-        return fraction <= self._produced_fraction() + 1e-6
+        return fraction <= self._seek_limit() + 1e-6
 
     def _fraction_at(self, x: float) -> float:
         rect = self._strip_rect()
