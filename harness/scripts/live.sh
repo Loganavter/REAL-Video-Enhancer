@@ -31,7 +31,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"            # the RVE 
 TOOLKIT="${RVE_TOOLKIT_PATH:-$(dirname "$ROOT")/sli-ui-toolkit/src}"
 VENV="${RVE_VENV:-/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/venv}"
 STATE="${RVE_LIVE_STATE:-/tmp/opencode/live}"
-CONTROL="${RVE_CONTROL_DIR:-/tmp/opencode/.rve-control}"
+# The app derives its drop box from the directory of argv[0], so a boot from harness/scripts would put it under
+# harness/scripts and every waiter would watch the wrong path. State it explicitly and wait on that exact path.
+CONTROL="${RVE_UI_CAPTURE_SERVER:-${RVE_CONTROL_DIR:-$STATE/control}}"
 DISPLAY_NUMBER="${RVE_LIVE_DISPLAY:-90}"
 
 mkdir -p "$STATE"
@@ -86,9 +88,10 @@ cmd_up() {
     fi
     [ -f "$STATE/app.pid" ] && kill -0 "$(cat "$STATE/app.pid")" 2>/dev/null && die "an app is already running (pid $(cat "$STATE/app.pid")) — live.sh down first"
     rm -f "$CONTROL/ready"
-    echo "live: booting the app on $display"
+    echo "$CONTROL" > "$STATE/control_dir"
+    echo "live: booting the app on $display (control $CONTROL)"
     # shellcheck disable=SC2046
-    env $(app_env "$display") PYTHONPATH="$ROOT:$ROOT/src:$TOOLKIT" RVE_TOOLKIT_PATH="$TOOLKIT" \
+    env $(app_env "$display") RVE_UI_CAPTURE_SERVER="$CONTROL" PYTHONPATH="$ROOT:$ROOT/src:$TOOLKIT" RVE_TOOLKIT_PATH="$TOOLKIT" \
         PYTHONDONTWRITEBYTECODE=1 "$VENV/bin/python" -u "$ROOT/harness/scripts/live_boot.py" \
         > "$STATE/app.log" 2>&1 &
     echo $! > "$STATE/app.pid"

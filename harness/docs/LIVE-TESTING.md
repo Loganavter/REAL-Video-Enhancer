@@ -56,3 +56,38 @@ run is still the final word for the shipped platform.
    first for "what should be there", the second for "what is actually there".
 6. The app's control directory is the server's choice, not the repo's: read it from the boot log (`control channel: ready
    in …`) or set `RVE_CONTROL_DIR`.
+
+## The same surface as an MCP server (`harness/mcp-server/app`)
+
+`live.sh` is the shell handle; the MCP server is the typed one, and it is what an agent should call.
+
+```
+python3 harness/mcp-server/app/server.py --check   # catalog + protocol revision
+python3 harness/mcp-server/app/server.py           # serve MCP over stdio (no third-party deps)
+```
+
+17 tools: `instance_boot|stop|status`, `window_screenshot` (root framebuffer, screen truth), `window_grab` (re-render),
+`where`, `state`, `control_inventory`, `widget_at`, `rhi_probe`, `click_at`, `drag_from_to`, `key_press`, `type_text`,
+`repaint`, `control_read`, `control_write`. Reads never share a tool with writes; `control_*` accept only the app's own
+read/write verb sets. The transport is BlinkTable's hardened one (MCP `2026-07-28` plus the legacy handshake).
+
+Wiring (opencode config — the key is `mcp`, not BlinkTable's doc's `mcpServers`; verified against the SDK's
+`McpLocalConfig`):
+
+```jsonc
+"mcp": {
+  "rve": {
+    "type": "local",
+    "command": ["python3", "<repo>/harness/mcp-server/app/server.py"],
+    "cwd": "<repo>",
+    "environment": {"RVE_REPO_ROOT": "<repo>"},
+    "enabled": true
+  }
+}
+```
+
+Measured against the real client: opencode sends `params._meta` with trace fields and **no** `protocolVersion` on every
+call. Treating any `_meta` as the modern stateless envelope rejected every tool with "missing the required envelope
+key(s)" while `tools/list` worked — a connected-looking server whose every call failed. The transport now detects the
+envelope by `protocolVersion`, and `test_mcp_server.py` pins that case. A running server does not reload code: after an
+edit, the session must be reopened (the catalog is cached at start).
