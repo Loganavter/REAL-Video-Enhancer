@@ -834,6 +834,12 @@ def install(window) -> None:
             print(f"capture-server: preview {result}", flush=True)
 
         def wait_finish(ticks: int = 0) -> None:
+            if ticks == 10 and getattr(window, "renderProcess", None) is None:
+                # The button was clicked but no backend exists one second later: the app refused (it shows its own
+                # notification - "Please select at least one model!", "Video is not loaded!"). Say so instead of
+                # reporting a job that started and vanished.
+                finish("the app refused the preview: no model ticked or the video is not loaded")
+                return
             if result["started"] and window.page_handles.proc.startRenderButton.isEnabled():
                 result["finished"] = True
                 finish()

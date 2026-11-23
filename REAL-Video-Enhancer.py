@@ -377,6 +377,13 @@ class MainWindow(QMainWindow):
         self._queue_after_preview = list(self.renderQueue.getQueue())
         self.renderQueue.clear()
         renderOptions = self.getCurrentRenderOptions()
+        # `getCurrentRenderOptions()` answers `1` when it refuses (no video loaded, no model ticked) and has already
+        # shown its own notification. Reading it as an object raised `AttributeError: 'int' object has no attribute
+        # 'inputFile'` inside a slot - the button did nothing, the refusal never reached the user, and a control-channel
+        # client saw "started" with no render (measured 2026-11-23: a preview job that finished in 0.9 s with no
+        # output). One shape for the refusal, checked here.
+        if not isinstance(renderOptions, RenderOptions):
+            return
         renderOptions.outputPath = os.path.join(TEMP_DOWNLOAD_PATH, f"{os.path.basename(renderOptions.inputFile)}_preview.mkv")
         renderOptions.startTime = self.page_handles.proc.startTimeSpinBox.value()
         FileHandler().removeFile(renderOptions.outputPath)
@@ -387,9 +394,8 @@ class MainWindow(QMainWindow):
 
 
         renderOptions.isPreview = True
-        if renderOptions:
-            self.renderQueue.add(renderOptions)
-            self.startRender(self.renderQueue)
+        self.renderQueue.add(renderOptions)
+        self.startRender(self.renderQueue)
 
 
     def setButtonsUnchecked(self, buttonToIgnore):
