@@ -1,3 +1,4 @@
+import math
 import os
 
 import torch
@@ -9,6 +10,122 @@ from .VSRArchs.AnimeSR.animesr_arch import AnimeSR
 from .VSRArchs.TSPAN.vsr_inference_helper import TemporalSPANInferenceHelper
 from .VSRArchs.TSPAN.tspan import TemporalSPAN
 HEAD_PAD_MULTIPLE = 8
+# Frames are small on purpose: the stride is a property of the graph, not of the frame, and 64 is the
+# size `__test_model_precision` already forwards through every model this wrapper loads.
+# `RVE_MODEL_SCALE_PROBE=0` turns the probe off, which leaves the scale DECLARED by the descriptor
+# (logged as such) - the control arm for "should the probe run".
+PROBE_SIZE = 64
+
+
+class ScaleMismatch(ValueError):
+    """The scale a model claims and the scale its own forward pass emits disagree.
+
+    Named so a caller can tell this apart from a malformed descriptor: the two cases want different
+    fixes, and this one is never resolved by guessing.
+    """
+
+
+def resolve_scale(descriptor_scale, probed_scale, model_path="<unknown>"):
+    """The one scale the writer and the model must agree on.
+
+    `descriptor_scale` is what the model CLAIMS - a spandrel descriptor, a file name, a family default
+    in this file. `probed_scale` is what a forward pass on the loaded model MEASURED, or None when no
+    probe could run (no weights, no torch, or `RVE_MODEL_SCALE_PROBE=0`).
+
+    Returns the agreed scale as an int:
+      * both known and equal -> that scale;
+      * the probe is None -> the descriptor's number (the caller must say it is declared, not observed);
+      * the descriptor is None -> the measured number;
+      * both known and different -> nothing. See the raise below.
+
+    Raises `ScaleMismatch` (a `ValueError`) when both numbers are known and differ, naming both and the
+    model path. This is the defect measured 2026-11-23 on `4xNomos8k_span_otf_weak_no_update_params.pth`:
+    the descriptor said 4x and every 160x120 frame came back 320x240, so `RenderVideo` sized the output
+    from one number while the frames arrived at the other - a lie that survives until a resize dies in
+    the render thread, where nobody is looking.
+    """
+    declared = None if descriptor_scale is None else int(descriptor_scale)
+    probed = None if probed_scale is None else int(probed_scale)
+    for name, value in (("descriptor", declared), ("probe", probed)):
+        if value is not None and value < 1:
+            raise ScaleMismatch(f"{name} scale for {model_path} must be >= 1, got {value}")
+    if declared is None and probed is None:
+        raise ScaleMismatch(
+            f"no scale for {model_path}: the descriptor has none and the probe did not run, so nothing "
+            f"here can say how large a frame this model returns")
+    if declared is None:
+        return probed
+    if probed is None or probed == declared:
+        return declared
+    raise ScaleMismatch(
+        f"model scale disagreement for {model_path}: the descriptor declares {declared}x and the model's "
+        f"own forward pass emits {probed}x. Refusing to pick one silently: the writer sizes the output "
+        f"from one of these numbers while every frame arrives at the other, which is a cropped picture "
+        f"or a reshape failure in the render thread - not an error anyone sees")
+
+
+def resolve_loaded_scale(descriptor_scale, probed_scale, model_path="<unknown>", *,
+                         probe_error=None, emit=log):
+    """Settle a loaded model's scale, and say in one line which number won and why.
+
+    `resolve_scale` answers "do these agree"; this is the loader's policy on top of it, kept pure so
+    the decision is testable without torch:
+
+      * a measurement is used whenever it exists, and a disagreement is logged with the refusal's own
+        words - a forward pass on the loaded model is what its frames do, the descriptor is a claim
+        about them (measured: a file named `4x...` whose frames were 2x);
+      * with no measurement the descriptor is used and the line says DECLARED, not observed, with the
+        reason - never silent, because that is the state every earlier version of this file was in.
+
+    `emit` is the log sink (the app's `log`, or a list in a test); it receives one to three lines.
+    """
+    probed = None if probed_scale is None else int(probed_scale)
+    if probed is None:
+        scale = resolve_scale(descriptor_scale, None, model_path)
+        emit(f"model scale: {scale}x DECLARED by the descriptor, not observed ({probe_error or 'no probe'}); "
+             f"the writer sizes the output from it")
+        return scale
+    try:
+        scale = resolve_scale(descriptor_scale, probed, model_path)
+    except ScaleMismatch as mismatch:
+        emit(str(mismatch))
+        emit(f"model scale: using the MEASURED {probed}x for this render (a forward pass on the loaded "
+             f"model is what its frames do; the descriptor is a claim about them)")
+        return probed
+    emit(f"model scale: {scale}x (descriptor and the model's own forward pass agree)")
+    return scale
+
+
+def tspan_scale_from_state_dict(state_dict, out_channels=(3, 1, 4)):
+    """The stride a TemporalSPAN checkpoint encodes in its own upsampler weights, or None.
+
+    `pixelshuffle_block` closes the architecture with `conv(feature -> out_ch * scale**2)` followed by
+    `PixelShuffle(scale)`, so the first upsampler convolution's output channel count is
+    `out_ch * scale * scale` - the same rule spandrel applies to the spatial SPAN family
+    (`spandrel/architectures/SPAN/__init__.py: get_scale_and_output_channels`). Reading it from the
+    checkpoint is what makes the number the model's own; the loader used to hardcode 2 here, which is
+    right for the 2x checkpoints this branch was written for and a lie for any other file. The probe
+    forward then confirms the stride of the model actually built.
+
+    Needs only `shape[0]` of `upsampler.0.weight`, so it runs on a real state dict or a stand-in.
+    """
+    try:
+        weight = state_dict["upsampler.0.weight"]
+    except (KeyError, TypeError):
+        return None
+    try:
+        channels = int(getattr(weight, "shape")[0])
+    except (AttributeError, IndexError, TypeError):
+        return None
+    if channels < 1:
+        return None
+    for out in out_channels:
+        if channels % out:
+            continue
+        root = math.isqrt(channels // out)
+        if root >= 1 and root * root * out == channels:
+            return root
+    return None
 
 
 class PadInputConv(torch.nn.Module):
@@ -155,6 +272,52 @@ class UpscaleModelWrapper:
         """Channels of zero padding applied to the head convolution (0 = untouched)."""
         return int(self.__head_pad or 0)
 
+    def __make_inference_helper(self):
+        """A helper for a probe forward - never the render's own (the temporal ones cache frames)."""
+        if self.__inference_mode == 'animesr':
+            return AnimeSRInferenceHelper(model=self.__model, scale=self.__scale)
+        if self.__inference_mode == 'tspan':
+            return TemporalSPANInferenceHelper(model=self.__model, scale=self.__scale)
+        return self.__model
+
+    def __probe_scale(self, size: int = PROBE_SIZE):
+        """Measure the stride of the frames this wrapper will emit, by emitting one.
+
+        The probe goes through a helper built for it: `TemporalSPANInferenceHelper` caches five frames
+        and the probe's zeros must not enter the first real frame. It runs on the model's own device
+        and dtype (so it works before `set_precision`), and it measures the HELPER's output - the unit
+        the render actually calls - not the raw graph, because that is what the writer will receive.
+
+        Raises on an output that is not a whole stride; the caller turns that into "declared, not
+        observed" rather than a load failure.
+        """
+        helper = self.__make_inference_helper()
+        parameter = next(iter(self.__model.parameters()), None)
+        dtype = parameter.dtype if parameter is not None else torch.float32
+        device = parameter.device if parameter is not None else self.__device
+        sample = torch.zeros(1, self.__channels, size, size, dtype=dtype, device=device)
+        with torch.inference_mode():
+            output = helper(sample)
+        height, width = int(output.shape[-2]), int(output.shape[-1])
+        if width % size or height % size:
+            raise ValueError(f"a {width}x{height} output from a {size}x{size} probe is not a whole stride")
+        if width // size != height // size:
+            raise ValueError(f"a {width}x{height} output from a {size}x{size} probe scales the axes "
+                             f"differently")
+        return width // size
+
+    def __resolve_scale(self, declared_scale):
+        """Settle `self.__scale` from the loaded model, and log which number won."""
+        probed, probe_error = None, None
+        if os.environ.get("RVE_MODEL_SCALE_PROBE", "1") == "0":
+            probe_error = "RVE_MODEL_SCALE_PROBE=0"
+        else:
+            try:
+                probed = self.__probe_scale()
+            except Exception as error:  # noqa: BLE001 - a probe that cannot run must not cost the model
+                probe_error = f"{type(error).__name__}: {str(error).splitlines()[0][:120]}"
+        return resolve_loaded_scale(declared_scale, probed, self.__model_path, probe_error=probe_error)
+
     def load_state_dict(self, state_dict):
         self.__model.load_state_dict(state_dict)
 
@@ -193,6 +356,7 @@ class UpscaleModelWrapper:
             try:
                 model = ModelLoader().load_from_file(self.__model_path)
                 assert isinstance(model, ImageModelDescriptor)
+                # what the descriptor claims; the probe below is what the model does
                 self.__scale = model.scale
                 model = model.model
                 self.__model = model
@@ -200,6 +364,7 @@ class UpscaleModelWrapper:
                 self.inference_helper = self.__model
                 self.__dummy_input_pre_channels = [1]
                 self.__inference_mode = 'spandrel'
+                self.__scale = self.__resolve_scale(self.__scale)
 
             except (UnsupportedModelError) as e:
                 try:
@@ -212,16 +377,22 @@ class UpscaleModelWrapper:
                     self.inference_helper = AnimeSRInferenceHelper(model=self.__model, scale=self.__scale)
                     self.__dummy_input_pre_channels = [3]
                     self.__inference_mode = 'animesr'
+                    self.__scale = self.__resolve_scale(self.__scale)
                 except Exception as e:
                     try:
-                        self.__scale = 2
+                        state_dict = torch.load(self.__model_path, map_location=self.__device)
+                        payload = state_dict['params_ema']
+                        # The stride comes from the checkpoint's upsampler weights (see
+                        # tspan_scale_from_state_dict); 2 is only the construction default for a
+                        # checkpoint that does not carry them, and the probe below decides.
+                        self.__scale = tspan_scale_from_state_dict(payload) or 2
                         self.__dummy_input_pre_channels = [1, 5,]
                         model = TemporalSPAN(upscale=self.__scale)
-                        state_dict = torch.load(self.__model_path, map_location=self.__device)
-                        model.load_state_dict(state_dict=state_dict['params_ema'], strict=False)
+                        model.load_state_dict(state_dict=payload, strict=False)
                         self.__model = model.to(self.__device, dtype=self.__precision)
                         self.inference_helper = TemporalSPANInferenceHelper(model=self.__model, scale=self.__scale)
                         self.__inference_mode = 'tspan'
+                        self.__scale = self.__resolve_scale(self.__scale)
                     except Exception as e:
                         log(f"Model at {self.__model_path} is not supported: {e}")
                         raise e
