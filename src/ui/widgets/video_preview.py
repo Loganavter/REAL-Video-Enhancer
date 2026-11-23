@@ -100,6 +100,7 @@ class VideoPreviewSurface(QRhiWidget):
         """Show this picture. A `None` clears the pane (no frame yet)."""
         self._frame = None if image is None else image.convertToFormat(QImage.Format.Format_RGBA8888)
         self._texture_dirty = self._frame is not None
+        self._cleared_empty = False
         if self._texture_dirty and getattr(self, "_texture", None) is not None:
             # Create the texture OUTSIDE a frame: QRhi resources are created between frames, and a create() issued
             # while a frame is being recorded is refused by the backend without an exception (the frame then samples
@@ -486,7 +487,13 @@ class VideoPreviewSurface(QRhiWidget):
         if target is None:
             return
         if self._frame is None:
-            return  # nothing to show yet; resources are built with the first frame
+            # Nothing to show yet: clear to transparent once, so the page behind shows through instead of an
+            # uninitialised (black) backing texture. Resources are built with the first frame.
+            if not getattr(self, "_cleared_empty", False):
+                self._cleared_empty = True
+                command_buffer.beginPass(target, QColor(0, 0, 0, 0), QRhiDepthStencilClearValue(1.0, 0))
+                command_buffer.endPass()
+            return
         if getattr(self, "_deferred", False) or getattr(self, "_rhi", None) is None:
             self._release()
             self._rhi = self.rhi()

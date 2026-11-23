@@ -529,7 +529,10 @@ class ProcessTab:
         self.parent.startRenderButton.setEnabled(True)
         self.parent.outputFileText.setEnabled(True)
         self.parent.inputFileText.setEnabled(True)
-        self.parent.previewLabel.clear()
+        if getattr(self.parent, "preview_label_is_surface", False):
+            self.parent.previewLabel.set_frame(None)
+        else:
+            self.parent.previewLabel.clear()
         self.parent.startRenderButton.clicked.disconnect()
         self.parent.startRenderButton.clicked.connect(self.parent.startRender)
         self.parent.enableProcessPage()
@@ -543,28 +546,69 @@ class ProcessTab:
 
         self._restoreQueueAfterPreview()
         if self.currentRenderOptions.isPreview:
-            from PySide6.QtMultimedia import QMediaPlayer
+            self._start_preview_playback(self.currentRenderOptions.outputPath)
+
+
+    def _start_preview_playback(self, path: str) -> None:
+        """Play the finished preview file through our own decoder into the preview pane.
+
+        Replaces the old `QMediaPlayer` stub, which handed a plain QWidget to `setVideoOutput` (no surface at all) and
+        wired the scrollbar with two different time units - it could not have shown a frame.
+        """
+        from .video.decode import VideoDecoder
+
+        try:
+            self._stop_preview_playback()
+            decoder = VideoDecoder(pixel_format="rgb24")
+            decoder.frame_ready.connect(self._on_preview_frame)
+            decoder.opened.connect(self._on_preview_opened)
+            decoder.error.connect(lambda message: log(f"preview decoder: {message}"))
+            if not decoder.open(str(path)):
+                log(f"preview decoder: cannot open {path}")
+                return
+            self._preview_decoder = decoder
+            pane = self.parent.previewLabel
+            if hasattr(pane, "seekRequested"):
+                try:
+                    pane.seekRequested.connect(self._on_preview_seek)
+                except Exception:
+                    pass
+            decoder.play()
+        except Exception as exc:  # a preview that cannot play must not take the render down
+            log(f"preview playback failed: {exc}")
+
+    def _stop_preview_playback(self) -> None:
+        decoder = getattr(self, "_preview_decoder", None)
+        if decoder is not None:
             try:
-                def onScroll(preview:QMediaPlayer, value):
-                    preview.setPosition(value)
+                decoder.close()
+            except Exception:
+                pass
+            self._preview_decoder = None
 
-                
+    def _on_preview_seek(self, fraction: float) -> None:
+        decoder = getattr(self, "_preview_decoder", None)
+        duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
+        if decoder is not None and duration > 0:
+            decoder.seek(max(0.0, min(1.0, float(fraction))) * duration)
 
-                player = QMediaPlayer()
-                player.setSource(QUrl.fromLocalFile(self.currentRenderOptions.outputPath))
-                player.setVideoOutput(self.parent.VideoPreview)
-                player.play()
-                player.pause()
-                player.setPosition(5)
-                self.parent.VideoPreview.show()
-                self.parent.VideoPreview.setVisible(True)
-                self.parent.previewLabel.setVisible(False)
-                self.parent.timeInVideoScrollBar.setRange(0, (((self.currentRenderOptions.endTime-self.currentRenderOptions.startTime))*10)-1) # convert to ms
-                self.parent.timeInVideoScrollBar.valueChanged.connect(lambda: onScroll(player, int(self.parent.timeInVideoScrollBar.value()*100)))
+    def _on_preview_opened(self, duration: float, fps: float, frames_total: float) -> None:
+        self._preview_duration = float(duration) or 0.0
 
-            except Exception as e:
-                log(f"Error: {e}")
+    def _on_preview_frame(self, frame) -> None:
+        """One decoded frame from a finished preview: RGB24 bytes -> QImage -> the pane."""
+        from PySide6.QtGui import QImage
 
+        image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
+                       QImage.Format.Format_RGB888).copy()
+        pane = self.parent.previewLabel
+        if getattr(self.parent, "preview_label_is_surface", False):
+            pane.set_frame(image)
+            duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
+            pane.set_progress(rendered=frame.pts, total=duration, playhead=frame.pts, duration=duration)
+        else:
+            pixmap = QtGui.QPixmap.fromImage(image)
+            pane.setPixmap(self.getRoundedPixmap(pixmap, corner_radius=10))
 
     def onRenderCompletion(self):
         self.eta = 0
@@ -708,19 +752,26 @@ class ProcessTab:
                 self.parent.ETA.setVisible(False)
             self.parent.STATUS.setText(f"Status: {self.status}")
         if not qimage.isNull():
-            # The backend already shrank the frame to the preview box, so nothing 4K ever
-            # reaches this thread. The thumbnail keeps the picture's aspect ratio (640x480
-            # for a 4:3 source), so it can still be a little larger than the panel: fit it
-            # down when it is, never scale it up.
-            area = self.parent.previewLabel.size()
-            if qimage.width() > area.width() or qimage.height() > area.height():
-                qimage = qimage.scaled(
-                    area, Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            pixmap = QtGui.QPixmap.fromImage(qimage)
-            roundedPixmap = self.getRoundedPixmap(pixmap, corner_radius=10)
-            self.parent.previewLabel.setPixmap(roundedPixmap)
+            preview = self.parent.previewLabel
+            if getattr(self.parent, "preview_label_is_surface", False):
+                # The surface fits, zooms and letterboxes itself and always keeps the frame's own resolution; the
+                # backend's thumbnail is what a live render can afford (the full-resolution path is the preview file).
+                preview.set_frame(qimage)
+                preview.set_progress(self.currentFrame, self.max_value)
+            else:
+                # The backend already shrank the frame to the preview box, so nothing 4K ever
+                # reaches this thread. The thumbnail keeps the picture's aspect ratio (640x480
+                # for a 4:3 source), so it can still be a little larger than the panel: fit it
+                # down when it is, never scale it up.
+                area = preview.size()
+                if qimage.width() > area.width() or qimage.height() > area.height():
+                    qimage = qimage.scaled(
+                        area, Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                pixmap = QtGui.QPixmap.fromImage(qimage)
+                roundedPixmap = self.getRoundedPixmap(pixmap, corner_radius=10)
+                preview.setPixmap(roundedPixmap)
 
     def build_command(self, renderOptions: RenderOptions):
         if (

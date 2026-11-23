@@ -86,21 +86,33 @@ class ProcPagePage:
         # The stock label's own sheet was `QLabel{color:#fff; background-color:#1f232a}`: the colour had no subject (a
         # pixmap label has no text channel) and the background is `#previewSubContainer`'s own plate, painted by the
         # container's QSS, so the label keeps no surface of its own and the parent shows through.
-        self.previewLabel = ImageLabel(self.previewSubContainer,
-            alignment=Qt.AlignmentFlag.AlignCenter)
-        self.previewLabel.setObjectName(u"previewLabel")
+        # The pane is the GPU surface (plan-rve-video-preview-widget-2026-11-23): a full-resolution frame with zoom,
+        # the strip and its markers, all in one QRhi pass. `RVE_UI_RASTER_PREVIEW=1` keeps the old pixmap label for one
+        # A/B - the fallback exists because a first QRhiWidget changes the window's compositing path on this stack.
+        import os as _preview_env
+
+        if _preview_env.environ.get("RVE_UI_RASTER_PREVIEW", "0").strip().lower() in ("1", "true", "yes", "on"):
+            self.previewLabel = ImageLabel(self.previewSubContainer,
+                alignment=Qt.AlignmentFlag.AlignCenter)
+            self.previewLabel.setObjectName(u"previewLabel")
+            self.previewLabel.setScaledContents(False)
+            self.previewLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # `RVE_UI_PREVIEW_LABEL=default|opaque|fill|hide|small` cuts THIS label down one property at a time.
+            from src.ui.devtools import label_bisect
+
+            label_bisect.cut(self.previewLabel)
+            self.preview_label_is_surface = False
+        else:
+            from src.ui.widgets.video_preview import VideoPreviewSurface
+
+            self.previewLabel = VideoPreviewSurface(self.previewSubContainer)
+            self.previewLabel.setObjectName(u"previewLabel")
+            self.preview_label_is_surface = True
         sizePolicy4 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         sizePolicy4.setHorizontalStretch(0)
         sizePolicy4.setVerticalStretch(0)
         sizePolicy4.setHeightForWidth(self.previewLabel.sizePolicy().hasHeightForWidth())
         self.previewLabel.setSizePolicy(sizePolicy4)
-        self.previewLabel.setScaledContents(False)
-        self.previewLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # `RVE_UI_PREVIEW_LABEL=default|opaque|fill|hide|small` cuts THIS label down one property at a time; the default
-        # is a no-op, and the module logs the mode it applied (src/ui/devtools/label_bisect.py).
-        from src.ui.devtools import label_bisect
-
-        label_bisect.cut(self.previewLabel)
         self.verticalLayout_8.addWidget(self.previewLabel)
         self.VideoPreview = QWidget(self.previewSubContainer)
         self.VideoPreview.setObjectName(u"VideoPreview")
