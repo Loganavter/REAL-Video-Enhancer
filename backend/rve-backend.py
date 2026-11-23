@@ -793,9 +793,11 @@ def _release_named_segments(names) -> None:
             continue
         try:
             try:
-                stale = shared_memory.SharedMemory(name=name, track=False)
-            except TypeError:  # Python < 3.13 has no `track=`
-                stale = shared_memory.SharedMemory(name=name)
+                from src.utils.shm import attach as _attach
+
+                stale = _attach(name)
+            except Exception:
+                continue
         except Exception:
             continue
         try:

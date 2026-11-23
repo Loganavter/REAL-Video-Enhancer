@@ -81,7 +81,10 @@ class PreviewChannel:
         announced = False
         while True:
             try:
-                self.shm = shared_memory.SharedMemory(name=shm_id)
+                # The block belongs to the GUI (its name carries the GUI's pid): attach without registering it here.
+                from .shm import attach as _attach
+
+                self.shm = _attach(shm_id)
                 break
             except FileNotFoundError:
                 if time.time() >= deadline:

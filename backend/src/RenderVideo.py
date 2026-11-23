@@ -32,7 +32,9 @@ import numpy as np
 
 def remove_shared_memory_block(name):
     try:
-        existing_shm = shared_memory.SharedMemory(name=name)
+        from .utils.shm import attach as _attach
+
+        existing_shm = _attach(name)
         existing_shm.close()
         existing_shm.unlink()
         print(f"Shared memory block '{name}' removed.")

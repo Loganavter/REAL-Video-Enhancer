@@ -39,15 +39,17 @@ class PauseManager:
         self.prevState = None
         self.paused_shared_memory_id = paused_shared_memory_id
         if self.paused_shared_memory_id is not None:
+            # The segment is named after the GUI process and owned by it: attach through `utils.shm`, which keeps this
+            # process's resource tracker out of it (otherwise the tracker unlinks the GUI's flag on the way out, and
+            # prints `KeyError: '//paused_state<pid>'` when the GUI got there first - measured 2026-11-23 on a forced
+            # kill of the render process).
+            from .utils.shm import attach as _attach, create as _create
+
             try:
-                self.pausedSharedMemory = shared_memory.SharedMemory(
-                    name=self.paused_shared_memory_id
-                )
+                self.pausedSharedMemory = _attach(self.paused_shared_memory_id)
             except FileNotFoundError:
                 log(f"FileNotFoundError! Creating new paused shared memory: {self.paused_shared_memory_id}")
-                self.pausedSharedMemory = shared_memory.SharedMemory(
-                    name=self.paused_shared_memory_id, create=True, size=1
-                )
+                self.pausedSharedMemory = _create(self.paused_shared_memory_id, 1)
     def pause_manager(self):
         if self.paused_shared_memory_id is not None:
             return self.pausedSharedMemory.buf[0] == 1
