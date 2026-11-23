@@ -16,6 +16,11 @@ appended to at 4K, and a demuxer is not built for that. The rules this class exi
   written data) on the next growth; nothing is skipped without being decoded.
 * **No duplicates.** Resuming re-decodes from the previous keyframe; frames at or before the last
   published PTS are skipped, so the surface sees each frame exactly once.
+* **A seek repositions inside what is written.** The owner can drag the strip while the render still
+  runs. The target becomes the de-duplication floor, the container is dropped, and the next `poll`
+  reopens the file at that frame - so the picture follows the strip within one poll instead of at the
+  renderer's next fragment. Past the produced edge there is nothing to show, so such a target is
+  clamped to the edge, which is exactly follow-live.
 
 `import av` happens in the default container factory, not at module scope: the surface can import
 this module on an interpreter without PyAV and gets an `error` signal only if it actually tails a
@@ -80,6 +85,10 @@ class TailReader(QObject):
         self._fps = 0.0
         self._emitted = 0
         self._last_pts: float | None = None
+        #: The highest PTS this reader has published - the produced edge as far as the reader knows it.
+        #: Unlike `_last_pts` (the de-duplication floor) a seek never lowers it: it is what a seek is
+        #: clamped to.
+        self._edge_pts: float | None = None
         self._exhausted = True      # the current demux position has nothing left to give
         self._open_failures = 0
         self._decode_failures = 0
@@ -108,6 +117,7 @@ class TailReader(QObject):
         self._size = 0
         self._emitted = 0
         self._last_pts = None
+        self._edge_pts = None
         self._exhausted = True
         self._open_failures = 0
         self._decode_failures = 0
@@ -159,6 +169,51 @@ class TailReader(QObject):
             emitted = self._read()
         return emitted
 
+    # -- seeking -----------------------------------------------------------------------------------
+
+    @property
+    def produced_seconds(self) -> float:
+        """Media time of the last frame this reader published: the produced edge, as far as it knows."""
+        return float(self._edge_pts or 0.0)
+
+    @property
+    def published_frames(self) -> int:
+        """How many frames the surface has seen from this reader (0 until the first one)."""
+        return int(self._emitted)
+
+    def seek(self, seconds: float) -> float:
+        """Move the playhead inside the already-written part; return where it landed, in seconds.
+
+        Only `poll` reads, so a seek is cheap and a drag coalesces: it moves the de-duplication
+        floor, drops the demuxer and marks the reader as having work. The next `poll` reopens the
+        file at the target and emits its frames from there, which is what makes the picture follow
+        the strip within one poll instead of at the renderer's next produced frame.
+
+        The target is clamped to the produced edge - in front of it nothing is written yet, so the
+        edge (follow-live) is the only honest answer. After the seek, following resumes: the frames
+        up to the edge are read in order, each once, and new ones as the file grows.
+        """
+        if self._path is None:
+            return 0.0
+        try:
+            size = os.path.getsize(self._path)
+        except OSError as exc:
+            self._fail(("stat",), f"tail: cannot stat {self._path}: {exc}")
+            return 0.0
+        if size < self._size:
+            # A new render at the same path: the old playhead says nothing about this file.
+            self._restart()
+        target = max(0.0, float(seconds))
+        edge = self.produced_seconds
+        if target > edge:
+            target = edge
+        # The floor sits just under the target: the frame AT the target is emitted, while the frames
+        # of the keyframe re-read behind it stay de-duplicated.
+        self._last_pts = target - self._interval() * 0.5 if target > 0.0 else None
+        self._drop_container()
+        self._exhausted = False      # there is work at the new position even if the file has not grown
+        return target
+
     def _read(self) -> int:
         """One decode pass at the current end of the file, with the failure policy in one place."""
         try:
@@ -198,6 +253,8 @@ class TailReader(QObject):
             self._emitted += 1
             index = int(round(pts * fps)) if fps > 0 else self._emitted
             self._last_pts = pts
+            if self._edge_pts is None or pts > self._edge_pts:
+                self._edge_pts = pts
             self.frame_ready.emit(pack_frame(decoded, index, self._pixel_format, pts=pts))
             emitted += 1
         return emitted
@@ -291,6 +348,7 @@ class TailReader(QObject):
         self._size = 0
         self._emitted = 0
         self._last_pts = None
+        self._edge_pts = None
         self._decode_failures = 0
         self._signature = None
 

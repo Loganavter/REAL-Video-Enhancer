@@ -312,3 +312,107 @@ def test_poll_without_growth_does_not_open_a_second_container(scratch_dir):
         assert harness.reader.poll() == 0
 
     assert len(harness.containers) == 1, "an idle reader is not an I/O loop"
+
+
+# -- seeking while the file is still being written -----------------------------------------------
+#
+# The owner drags the strip mid-render. Before `TailReader.seek` existed the reader only ever stood at
+# the written edge, so every emitted frame put the picture back there ("на каждом новом кадре ставим
+# воспроизведение в конец"). A seek must show its target on the very next poll - the tail polls every
+# 120 ms - and following must then continue from the target, once per frame.
+
+
+def test_a_backward_seek_shows_the_target_on_the_next_poll(scratch_dir):
+    path = _emptied(scratch_dir)
+    # One frame per poll: "visible within one poll" is then exactly one emitted frame.
+    harness = _Harness(path, max_frames_per_poll=1)
+    harness.reader.open(path)
+    harness.append(10)                         # 0.0 .. 0.9 s, the produced edge is 0.9
+    for _ in range(10):
+        assert harness.reader.poll() == 1
+    assert [round(frame.pts, 3) for frame in harness.frames] == [round(i / FPS, 3) for i in range(10)]
+
+    landed = harness.reader.seek(0.3)
+    assert round(landed, 3) == 0.3, "the seek reports where it landed"
+
+    assert harness.reader.poll() == 1, "the next poll has work even though the file did not grow"
+    assert round(harness.frames[10].pts, 3) == 0.3, \
+        "the poll after a seek shows the TARGET, not the produced edge (0.9)"
+    assert harness.errors == [], "a seek inside written data is not a failure"
+
+
+def test_following_after_a_seek_emits_each_frame_once_in_order(scratch_dir):
+    path = _emptied(scratch_dir)
+    harness = _Harness(path, max_frames_per_poll=100)
+    harness.reader.open(path)
+    harness.append(10)                         # 0.0 .. 0.9
+    assert harness.reader.poll() == 10
+
+    harness.reader.seek(0.3)
+    assert harness.reader.poll() == 7
+    assert [round(frame.pts, 3) for frame in harness.frames[10:]] == \
+        [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], \
+        "the seek replays from the target to the produced edge, in order"
+
+    harness.append(2, start=10)                # the renderer writes two more frames
+    assert harness.reader.poll() == 2
+    assert [round(frame.pts, 3) for frame in harness.frames[17:]] == [1.0, 1.1], \
+        "frames that arrive later are emitted exactly once, in order"
+    assert harness.reader.poll() == 0
+    assert harness.reader.poll() == 0
+    assert [round(frame.pts, 3) for frame in harness.frames[17:]] == [1.0, 1.1], \
+        "an idle poll repeats nothing - the playhead does not jump back to the edge"
+
+    harness.append(1, start=12)
+    assert harness.reader.poll() == 1
+    assert round(harness.frames[-1].pts, 3) == 1.2, "the playhead advances with the new frames"
+
+
+def test_seeking_to_the_produced_edge_is_follow_live(scratch_dir):
+    path = _emptied(scratch_dir)
+    harness = _Harness(path, max_frames_per_poll=100)
+    harness.reader.open(path)
+    harness.append(4)                          # 0.0 .. 0.3
+    assert harness.reader.poll() == 4
+
+    edge = harness.reader.produced_seconds
+    assert round(edge, 3) == 0.3, "the produced edge is the last frame the surface has seen"
+
+    assert round(harness.reader.seek(edge), 3) == 0.3
+    assert harness.reader.poll() == 1, "the edge frame is drawn once, like any frame that just arrived"
+    assert round(harness.frames[-1].pts, 3) == 0.3
+
+    harness.append(1, start=4)
+    assert harness.reader.poll() == 1, "follow-live continues after a seek to the edge"
+    assert round(harness.frames[-1].pts, 3) == 0.4
+    assert harness.reader.poll() == 0
+
+
+def test_a_seek_past_the_produced_edge_is_clamped_to_it(scratch_dir):
+    path = _emptied(scratch_dir)
+    harness = _Harness(path, max_frames_per_poll=100)
+    harness.reader.open(path)
+    harness.append(3)                          # 0.0 .. 0.2
+    assert harness.reader.poll() == 3
+
+    landed = harness.reader.seek(60.0)
+    assert round(landed, 3) == 0.2, "nothing exists in front of the produced edge"
+    assert harness.reader.poll() == 1
+    assert round(harness.frames[-1].pts, 3) == 0.2
+
+    offset, backward = harness.containers[-1].seeks[-1]
+    assert backward is True, "the seek may not look past what was written"
+    assert offset <= round(0.2 * 1_000_000)
+    assert [round(frame.pts, 3) for frame in harness.frames[3:]] == [0.2], "no frame beyond the edge"
+    assert harness.errors == []
+
+
+def test_a_seek_with_nothing_produced_lands_at_the_start(scratch_dir):
+    path = _emptied(scratch_dir)
+    harness = _Harness(path, max_frames_per_poll=100)
+    harness.reader.open(path)
+
+    assert harness.reader.seek(5.0) == 0.0, "with no frame written there is only one place to stand"
+    harness.append(2)
+    assert harness.reader.poll() == 2, "and the tail follows as if nothing had been asked"
+    assert [round(frame.pts, 3) for frame in harness.frames] == [0.0, 0.1]

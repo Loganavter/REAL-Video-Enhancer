@@ -109,6 +109,9 @@ class ProcessTab:
         self._source_crop = None
         #: True once "the box is unknown" was logged for this job - one line per render, not per LMB press.
         self._source_crop_unknown_logged = False
+        #: The video pane whose strip signals are already wired. Wired once per pane object, because the live
+        #: tail and the finished-file playback both need them and two connections would double every seek.
+        self._preview_strip_wired_for = None
         #: monotonic stamp of the current render, for the "elapsed" half of the progress line
         self._render_started_mono = None
         self.animationHandler = AnimationHandler()
@@ -653,6 +656,9 @@ class ProcessTab:
             reader.error.connect(lambda message: log(f"preview tail: {message}"))
             self._live_tail = reader
             self._live_tail_path = str(path)
+            # A live render needs the strip's signals too: a press on it must seek the tail (the finished-file
+            # decoder is not connected yet, and the LMB compare must decode the source at the current playhead).
+            self._wire_preview_strip()
             timer = QTimer(self)
             timer.setInterval(120)
             timer.timeout.connect(self._poll_live_tail)
@@ -693,6 +699,27 @@ class ProcessTab:
             self._live_tail = None
         self._live_tail_open = False
 
+    def _wire_preview_strip(self) -> None:
+        """Connect the pane's strip signals once, whoever owns the picture (live tail or finished file).
+
+        Both paths need them: live, `seekRequested` must move the playhead inside what the renderer has already
+        written; finished, it seeks the file decoder. A second connection per pane would run every seek twice.
+        """
+        pane = self.page_handles.proc.previewLabel
+        if getattr(self, "_preview_strip_wired_for", None) is pane:
+            return
+        if hasattr(pane, "seekRequested"):
+            try:
+                pane.seekRequested.connect(self._on_preview_seek)
+            except Exception:
+                pass
+        if hasattr(pane, "originalRequested"):
+            try:
+                pane.originalRequested.connect(self._on_original_requested)
+            except Exception:
+                pass
+        self._preview_strip_wired_for = pane
+
     def _start_preview_playback(self, path: str) -> None:
         """Play the finished preview file through our own decoder into the preview pane.
 
@@ -711,17 +738,7 @@ class ProcessTab:
                 log(f"preview decoder: cannot open {path}")
                 return
             self._preview_decoder = decoder
-            pane = self.page_handles.proc.previewLabel
-            if hasattr(pane, "seekRequested"):
-                try:
-                    pane.seekRequested.connect(self._on_preview_seek)
-                except Exception:
-                    pass
-            if hasattr(pane, "originalRequested"):
-                try:
-                    pane.originalRequested.connect(self._on_original_requested)
-                except Exception:
-                    pass
+            self._wire_preview_strip()
             decoder.play()
         except Exception as exc:  # a preview that cannot play must not take the render down
             log(f"preview playback failed: {exc}")
@@ -737,10 +754,51 @@ class ProcessTab:
             self._preview_decoder = None
 
     def _on_preview_seek(self, fraction: float) -> None:
+        """A press or drag on the strip seeks whoever owns the picture.
+
+        Live, that is the tail: it repositions inside what the renderer has already written, and the next poll
+        (120 ms) shows the target. A finished file seeks its own decoder. The strip reports a share of the WHOLE
+        timeline, so while the timeline length is unknown the produced share stands in for it - which is the same
+        assumption the strip itself makes when it fills its white band.
+        """
+        fraction = max(0.0, min(1.0, float(fraction)))
+        live = getattr(self, "_live_tail", None)
+        if live is not None:
+            edge = float(getattr(live, "produced_seconds", 0.0) or 0.0)
+            if edge <= 0.0:
+                return                      # nothing is written yet, so there is nothing to seek to
+            produced = self._live_produced_fraction()
+            timeline = edge / produced if produced > 0.0 else edge
+            live.seek(fraction * timeline)
+            return
         decoder = getattr(self, "_preview_decoder", None)
         duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
         if decoder is not None and duration > 0:
-            decoder.seek(max(0.0, min(1.0, float(fraction))) * duration)
+            decoder.seek(fraction * duration)
+
+    def _live_produced_fraction(self) -> float:
+        """The share of the timeline the renderer has produced, from the same counters the strip fills with."""
+        rendered = float(self.currentFrame or 0)
+        total = float(self.max_value or 0)
+        if total <= 0:
+            return 0.0
+        return max(0.0, min(1.0, rendered / total))
+
+    def _live_duration_estimate(self) -> float:
+        """The timeline length the produced share implies, so the strip can draw a playhead mid-render.
+
+        `edge seconds / share produced` is exact while the renderer emits its frames uniformly, which is what the
+        strip's own `rendered/total` fill already assumes. A finished file reports its real duration instead; a
+        live render with no frame yet reports 0, and the strip hides a marker it cannot place honestly.
+        """
+        live = getattr(self, "_live_tail", None)
+        if live is None:
+            return 0.0
+        edge = float(getattr(live, "produced_seconds", 0.0) or 0.0)
+        produced = self._live_produced_fraction()
+        if edge <= 0.0 or produced <= 0.0:
+            return 0.0
+        return edge / produced
 
     def _on_original_requested(self, seconds: float) -> None:
         """Decode ONE source frame at the playhead for the LMB compare (the input file, never the renderer).
@@ -825,12 +883,15 @@ class ProcessTab:
         if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             pane.set_frame(image)
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
+            live_tail = getattr(self, "_live_tail", None)
             running = self.renderProcess is not None and self.renderProcess.poll() is None
-            if running:
+            if live_tail is not None or running:
                 # Live: the white part is what the RENDERER has produced (`currentFrame/max_value`), the playhead is
-                # where the tail stands. The file's duration is not known yet, so no duration marker.
+                # where the tail stands - which lags the edge after a seek, so the strip must show it. The duration is
+                # the estimate the produced share implies; without it the strip would draw no playhead at all and a
+                # seek would be invisible until the renderer caught up with the target.
                 pane.set_progress(rendered=self.currentFrame, total=self.max_value,
-                                  playhead=frame.pts, duration=0.0)
+                                  playhead=frame.pts, duration=self._live_duration_estimate())
             else:
                 # Finished file: everything exists, so the strip is fully produced; the playhead is the only marker.
                 pane.set_progress(rendered=duration, total=duration,
@@ -981,6 +1042,14 @@ class ProcessTab:
                 self.page_handles.proc.ETA.setVisible(False)
             self.page_handles.proc.STATUS.setText(f"Status: {self.status}")
         if not qimage.isNull():
+            live_tail = getattr(self, "_live_tail", None)
+            if live_tail is not None and getattr(live_tail, "published_frames", 0) > 0:
+                # The pane belongs to the 4K picture the tail reads from the preview file. A 640x360 thumbnail
+                # landing between two tail frames would stutter the resolution AND drag the picture back to the
+                # renderer's edge - the thumbnail IS the edge - undoing a seek 100 ms after it was made. The text
+                # above keeps updating on this tick; only the picture is skipped. (Until the tail's first frame
+                # the thumbnail still fills the pane, so it is never blank while the decoder warms up.)
+                return
             preview = self.page_handles.proc.previewLabel
             if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
                 # The surface fits, zooms and letterboxes itself and always keeps the frame's own resolution; the
