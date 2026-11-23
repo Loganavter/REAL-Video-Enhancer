@@ -107,6 +107,6 @@ def parse_backend_report(full_output: str) -> BackendReport:
 
 def _dependency_types() -> Sequence[type]:
     """The app's dependency classes, in definition order - the order the window used to iterate."""
-    from ..DownloadDeps import Dependency
+    from ...DownloadDeps import Dependency
 
     return tuple(Dependency.__subclasses__())
