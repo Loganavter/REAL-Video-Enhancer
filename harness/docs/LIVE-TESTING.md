@@ -91,3 +91,15 @@ call. Treating any `_meta` as the modern stateless envelope rejected every tool 
 key(s)" while `tools/list` worked — a connected-looking server whose every call failed. The transport now detects the
 envelope by `protocolVersion`, and `test_mcp_server.py` pins that case. A running server does not reload code: after an
 edit, the session must be reopened (the catalog is cached at start).
+
+### Capturing the 13 pages (A/A and regression tables)
+
+`harness/scripts/live.sh ask "all" 600` walks every page stem (`nav0..nav4`, the tab variants) and writes a
+`<stamp>/` directory under the control dir with a `.png` and a `.json` per page. The whole walk takes about four
+minutes on this host — a client timeout below that gives up while the server is still working, and the files are the
+answer. `capture:` prefixed names are **not** a valid spec (the dispatcher passes the raw text through), the bare word
+`all` is.
+
+Compare two captures with `python3 harness/scripts/ui_diff.py compare --stock-dumps A --new-dumps B --stock-png A
+--new-png B`. Two captures of the same tree are the instrument's A/A: 2026-11-23 it read 0.00 % on all 13 pages,
+142/142 widgets inside budget, 409/409 nodes identical — that is the floor the 0.05 % page budget is measured against.
