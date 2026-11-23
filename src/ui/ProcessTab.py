@@ -346,7 +346,11 @@ class ProcessTab:
         self.page_handles.proc.killRenderButton.clicked.connect(self.killRenderProcess)
         # The preview's own transport: it stands PAUSED until this is pressed (owner, 2026-11-23), and the toggle's
         # checked state is the truth for both owners of the pane (the live tail and the finished-file decoder).
-        self.page_handles.proc.previewPauseButton.clicked.connect(self.toggle_preview_pause)
+        # `toggled(bool)` rather than `clicked()`: the handler then receives the state the user asked for instead of
+        # reading it back out of the widget - a read-back depends on when the toolkit lands its own toggle, and one
+        # early run showed a click that left the button checked with nothing moved (2026-11-23, not reproduced after
+        # the switch, and the state can no longer disagree with the signal that carries it).
+        self.page_handles.proc.previewPauseButton.toggled.connect(self._on_preview_pause_toggled)
         self._sync_preview_transport()
 
     def killRenderProcess(self):
@@ -706,14 +710,14 @@ class ProcessTab:
             self._live_tail = None
         self._sync_preview_transport()
 
-    def toggle_preview_pause(self) -> None:
-        """Hold the preview on this frame, or let it follow the render again.
+    def _on_preview_pause_toggled(self, paused: bool) -> None:
+        """Hold the preview on this frame, or let it follow the render again (the button's `toggled(bool)`).
 
         One state for both owners of the pane: the live tail simply stops polling (no decode, no I/O, the picture
-        stands, and a strip press still repositions it), the finished-file decoder pauses on its frame. The toggle's
-        own checked state is the truth, so a pane rebuilt by a new job cannot disagree with the button.
+        stands, and a strip press still repositions it), the finished-file decoder pauses on its frame. The state
+        comes IN with the signal, so the handler cannot act on a half-applied toggle.
         """
-        self._preview_paused = bool(self.page_handles.proc.previewPauseButton.isChecked())
+        self._preview_paused = bool(paused)
         tail = getattr(self, "_live_tail", None)
         if tail is not None:
             try:
@@ -746,10 +750,14 @@ class ProcessTab:
             return
         paused = bool(getattr(self, "_preview_paused", True))
         try:
+            # `emit=False`: painting the state must not look like a user toggle (that would call this handler again).
+            button.setChecked(paused, emit=False)
+        except TypeError:      # a toolkit older than the keyword
             button.blockSignals(True)
-            button.setChecked(paused)
-        finally:
-            button.blockSignals(False)
+            try:
+                button.setChecked(paused)
+            finally:
+                button.blockSignals(False)
         button.setToolTip(
             "Paused: the preview holds this frame. Press to follow the render."
             if paused else "Following the render. Press to hold this frame."
