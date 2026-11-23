@@ -18,7 +18,8 @@ import resources_rc
 # paints through the widget style (so the page QSS styled them) while these paint themselves and read theme tokens.
 # `Button` is the toolkit's `QPushButton`; the page imports no compatibility adapter.
 from sli_ui_toolkit.widgets import Button, SurfacePanel, SurfaceScrollArea, TopTabHost
-from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
+from src.ui.pages.proc_page import TabButtonFactory, TabStripHost, overflow_style
+from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_style
 from src.ui.pages.handles import SettingsPageHandles
 from src.ui.pages.tab_2 import Tab2Page
 from src.ui.pages.tab_3 import Tab3Page
@@ -58,10 +59,13 @@ class SettingsPagePage:
         # box (`QTabWidget::pane { background: transparent }`, no radius), so `pane_radius=0` instead of the toolkit's
         # rounded 10 px pane (which would also inset the content by 10 px a side).
         # The same strip as the process page: one style and one button factory live in `src/ui/widgets/tab_strip.py`,
-        # so the two cannot drift into two looks again.
+        # so the two cannot drift into two looks again. The overflow row's policy and the strip's host half live with
+        # the process page's strip (`overflow_style`, `TabStripHost`) for the same reason - one answer for both.
+        strip_style = overflow_style(tab_style())
+        strip_buttons = TabButtonFactory()
         self.tabWidget = TopTabHost(self.scrollAreaWidgetContents, tab_height=TAB_HEIGHT, pane_radius=0,
                                    pane_inset=(10, 5, 10, 5), chrome_inset=0, tab_radius=8,
-                                   pane_fill_token=None, tab_factory=tab_button, tab_style=tab_style())
+                                   pane_fill_token=None, tab_factory=strip_buttons, tab_style=strip_style)
         self.tabWidget.setObjectName(u"tabWidget")
         self.tab_2_page = Tab2Page()
         self.tab_2 = self.tab_2_page.build()
@@ -91,6 +95,7 @@ class SettingsPagePage:
         self.scrollArea.setWidget(self.scrollAreaWidgetContents)
         self.verticalLayout_14.addWidget(self.scrollArea)
         self.tabWidget.setCurrentIndex(0)
+        self._tab_strip = TabStripHost(self.tabWidget, strip_style, strip_buttons)
         self._handles = SettingsPageHandles(resetSettingsBtn=self.resetSettingsBtn)
         self.retranslate()
         return self.settingsPage
@@ -99,4 +104,6 @@ class SettingsPagePage:
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_2), QCoreApplication.translate("MainWindow", u"Output Settings", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_3), QCoreApplication.translate("MainWindow", u"Render Settings", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_4), QCoreApplication.translate("MainWindow", u"RVE Settings", None))
+        # The strip measures the real labels, not the placeholders it was built with.
+        self._tab_strip.refresh()
         self.resetSettingsBtn.setText(QCoreApplication.translate("MainWindow", u"Reset Settings", None))
