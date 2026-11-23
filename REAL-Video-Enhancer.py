@@ -1154,7 +1154,7 @@ def main(file_to_open=None):
     # The surface format stays the platform default, like every other Qt application on this machine: the reference app
     # (Telegram Desktop 7.2.9) never touches `QSurfaceFormat`, and the "desktop shows through the window" artifact turned
     # out to be environment-level (it reproduces in BlinkTable and tdesktop on the same GNOME/NVIDIA session and is
-    # invisible in screenshots - harness/docs/wsp/session-2026-11-22.md §20). Asking for an alpha-less surface is kept as
+    # invisible in screenshots - projects/rve/docs/sessions/session-2026-11-22.md §20). Asking for an alpha-less surface is kept as
     # an explicit experiment, not as a default deviation.
     if os.environ.get("RVE_UI_ALPHA0"):
         from PySide6.QtGui import QSurfaceFormat

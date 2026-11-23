@@ -4,7 +4,7 @@ Measured 2026-11-20 on `2x-Futsuu-Anime(1).pth`, 1920x1080, calibrated on 8 fram
 from the same two bluray cuts. Records `int8-beacon-scale.jsonl` (BK001-BK014), raw
 `logs/beacon/beacon.json`, `logs/beacon/beacon-clipping.json`, probe `harness/scripts/beacon_scale_probe.py`.
 
-The question came out of the prior-art pass (`PRIOR-ART-STARTUP-2026-11-20.md`): Beacon (arXiv:2508.20293) says the
+The question came out of the prior-art pass (`projects/rve/docs/notes/PRIOR-ART-STARTUP-2026-11-20.md`): Beacon (arXiv:2508.20293) says the
 scale does not have to be searched - pick the integer codes on an unscaled grid, then take the least-squares
 optimal scale, `c = <Xw,Xq>/||Xq||²` per channel. Our grid clamp K *is* a scale search: two candidate builds, six
 frames, a render to decide. If the closed form works, the sweep and its start-up guard disappear.

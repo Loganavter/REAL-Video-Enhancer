@@ -12,7 +12,7 @@ rounds, and the tactic name of the body convolutions. The question is not "is th
 not the arithmetic - is what eats the MAC saving (E30a, reproduced four times).
 
 The whole 16-block body is used, not one block: a single-block probe chooses a different tactic family
-than the engine does (2.06x apart at C=32, B2 confound in queue.yaml), so a block verdict does not
+than the engine does (2.06x apart at C=32, B2 confound in projects/rve/docs/backlog/queue.yaml), so a block verdict does not
 transfer. Geometry and export path are `make_width_probe.py`'s, so a number here is comparable to the
 recorded C=64/48/32 builds (50.2-56.5 / 42.4 / 40.6-41.4 ms).
 

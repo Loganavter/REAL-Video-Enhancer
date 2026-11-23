@@ -2,7 +2,7 @@
 
 Measured 2026-11-20/21 (local), the app's own renderer (TensorRT, 2x Futsuu Anime, 1440x1080 -> 2880x2160, ffv1
 lossless sink). Queue row: `rve-reuse-structural-gate-2026-11-20`. Evidence trail that led here:
-`harness/docs/wsp/FINDINGS-reuse-boiling-material-2026-11-20.md`.
+`projects/rve/docs/notes/FINDINGS-reuse-boiling-material-2026-11-20.md`.
 
 The row's premise, from that trail: the shipped statistic (max over 32 px blocks of the mean |difference| at full
 resolution) qualifies 6.7% of consecutive pairs on calm Pink Panther material, and a 2 px low-pass plus a

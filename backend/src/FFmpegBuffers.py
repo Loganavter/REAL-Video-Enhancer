@@ -589,7 +589,7 @@ class FFmpegWrite(Buffer):
                 if movflags:
                     command += ["-movflags", *movflags]
                 # A preview render also gets a SHORT GOP (~one second of output frames). Two measured reasons
-                # (docs/measurements/measure-video-preview-2026-11-23.md): with the encoder's default GOP a seek costs
+                # (projects/rve/docs/measurements/measure-video-preview-2026-11-23.md): with the encoder's default GOP a seek costs
                 # ~0.5-1 s of decode (480 ms mean, 932 ms p95 on a 4K clip), and `+frag_keyframe` emits a fragment per
                 # keyframe - so a 250-frame GOP would hand the tail reader new data once per ~8 s instead of ~1 Hz.
                 # `-g` is AVCodecContext's gop_size: generic for every encoder this app exposes. Exports keep theirs.

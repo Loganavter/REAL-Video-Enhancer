@@ -25,7 +25,7 @@ call, i.e. Triton compiling its kernels), on top of 2.4 s of interpreter and ffp
   that used to ride on it added 33.4 s more (`int8-certificate-removal.txt` - withdrawn, and withdrawing it
   changed the picture, not just the clock). With a **calibration cache hit** the frames half disappears: the same
   configuration then reads 28.48 s in total against 26.6 s for the fp16 arm, i.e. the int8 premium is ~1.9 s
-  (`REVIEW-int8-grid-k-predictor.md` section 7, a different session - the comparison is same-instrument but not
+  (`projects/rve/docs/notes/REVIEW-int8-grid-k-predictor.md` section 7, a different session - the comparison is same-instrument but not
   same-day).
 - **6.56 s - the body's first call.** Not inference: the host timeline shows `model-call 6603.90 ms` and the next
   frame is normal, so this is Triton compiling the head/hop/tail kernels for this shape and precision. It is paid

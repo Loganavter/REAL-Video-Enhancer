@@ -41,7 +41,7 @@ Read the three rows that matter together:
    default was not "safe reuse", it was "no reuse", and the 69.8% recorded there came from the re-encode.
 3. **The channel-max cell that passes the share concentrates the damage**: 0.07337% with zero frames
    over the bar, but block mean 20.90 and peak 142 on a saturated edge, against the 7.57 the owner
-   rejected by eye. The eye (`EYE-CHECK-2026-11-18.md`) agrees with the block mean, not the share.
+   rejected by eye. The eye (`projects/rve/docs/notes/EYE-CHECK-2026-11-18.md`) agrees with the block mean, not the share.
 
 ## The noise floor rises when the re-encode is replaced by the BD
 

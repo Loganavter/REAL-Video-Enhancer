@@ -9,7 +9,7 @@ indices and reading the names, not by guessing.
 Two graph sizes, on purpose:
   --graph block  one Conv+PReLU at 1920x1080. Cheap, but a single block chooses a DIFFERENT tactic
                  family than the engine does at C=32 (winograd vs indexed_wo_smem, 2.06x apart),
-                 so a verdict from it alone does not transfer - see the confound note in queue.yaml.
+                 so a verdict from it alone does not transfer - see the confound note in projects/rve/docs/backlog/queue.yaml.
   --graph body   N body blocks of the same shape. Detects fusion per layer; 4 blocks build ~4x
                  faster than 16, and every body block has the same shape, so the scan is run at 4
                  and the winner confirmed at 16.
