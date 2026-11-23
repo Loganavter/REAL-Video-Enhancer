@@ -506,6 +506,9 @@ class Render:
         # that finds nothing pays a 12-byte read before it blocks on the reader.
         self.seekState = None
         self.lastSeekSeconds = None
+        #: The resident preview decoder (`utils/SeekReader.py`), built by the first seek request and kept
+        #: for the rest of the render; closed with the other resources at the end of `render()`.
+        self._seekReader = None
         if seek_state_id:
             try:
                 from .utils.DisplayChannel import SeekState
@@ -1138,38 +1141,43 @@ class Render:
             self.seekState = None
             return None
 
-    def _open_reader_at(self, seconds: float):
-        """A one-shot source reader starting at `seconds` (the same options as the export's reader).
+    def _seek_reader(self, seconds: float):
+        """The resident preview decoder, built on the first seek and reused for the rest of the render.
 
         A seek cannot reuse the export's reader: its ffmpeg is already streaming the sequential range
         down a pipe, and restarting it would either drop frames the writer is still waiting for or put
-        the output out of order. A second decoder on the same file is cheap (one frame, then closed) and
-        leaves the export's stream untouched.
+        the output out of order. So the seek path owns a decoder of its own - but ONE, not one per
+        request: the pane's request block is newest-wins, and a scrub used to be served by a chain of
+        ffmpeg spawns (start-up + demux seek + decoder init each). `utils/SeekReader.py` walks the
+        resident decoder forward instead and re-opens it only for a request behind it or further ahead
+        than a walk is worth. The options are the export's own, so a seek frame is the export's frame.
         """
-        from .FFmpegBuffers import FFmpegRead
+        if getattr(self, "_seekReader", None) is None:
+            from .utils.SeekReader import SeekReader
 
-        reader = self.readBuffer
-        return FFmpegRead(
-            inputFile=self.inputFile,
-            width=reader.width,
-            height=reader.height,
-            start_time=float(seconds),
-            end_time=None,
-            borderX=reader.borderX,
-            borderY=reader.borderY,
-            hdr_mode=reader.hdr_mode,
-            high_bitdepth=reader.high_bitdepth,
-            backend=reader.backend,
-            device=reader.device,
-            gpu_id=reader.gpu_id,
-            dtype=reader.dtype,
-            color_space=reader.color_space,
-            color_primaries=reader.color_primaries,
-            color_transfer=reader.color_transfer,
-            color_range=reader.color_range,
-            input_pixel_format=reader.input_pixel_format,
-            ffmpeg_path=reader.ffmpeg_path,
-        )
+            reader = self.readBuffer
+            self._seekReader = SeekReader(
+                inputFile=self.inputFile,
+                width=reader.width,
+                height=reader.height,
+                start_time=float(seconds),
+                end_time=None,
+                borderX=reader.borderX,
+                borderY=reader.borderY,
+                hdr_mode=reader.hdr_mode,
+                high_bitdepth=reader.high_bitdepth,
+                backend=reader.backend,
+                device=reader.device,
+                gpu_id=reader.gpu_id,
+                dtype=reader.dtype,
+                color_space=reader.color_space,
+                color_primaries=reader.color_primaries,
+                color_transfer=reader.color_transfer,
+                color_range=reader.color_range,
+                input_pixel_format=reader.input_pixel_format,
+                ffmpeg_path=reader.ffmpeg_path,
+            )
+        return self._seekReader
 
     def _seek_preview(self, seconds: float) -> None:
         """Decode one frame at `seconds`, run it through the model path and show it - nothing else.
@@ -1193,19 +1201,11 @@ class Render:
                 log("seek: preview disabled - this upscaler emits frames N-1 late (tensorrt, "
                     "trt_streams > 1), and a seek frame through it would corrupt the export")
             return
-        reader = None
         try:
-            reader = self._open_reader_at(seconds)
-            chunk = reader.read_frame()
+            chunk = self._seek_reader(seconds).frame_at(seconds)
         except Exception as exc:
             log(f"seek: could not decode a frame at {seconds:.3f}s ({exc})")
             return
-        finally:
-            if reader is not None:
-                try:
-                    reader.close()
-                except Exception:
-                    pass
         if chunk is None:
             return
         try:
@@ -1466,6 +1466,16 @@ class Render:
                     _block.close()
                 except Exception:
                     pass
+        # The preview decoder is this render's own ffmpeg, not the export's: it is closed here, and its
+        # line says what the seek path actually cost (one spawn vs one per request).
+        _seek_reader = getattr(self, "_seekReader", None)
+        if _seek_reader is not None:
+            try:
+                log(_seek_reader.stats())
+                _seek_reader.close()
+            except Exception:
+                pass
+            self._seekReader = None
         """
         tracer.stop()
         tracer.save()
