@@ -4,9 +4,10 @@ Today's pages carry the Designer's font temporaries (``font``, ``font1`` .. ``fo
 ``setFont`` calls. Those temporaries are gone; every widget asks this module for its font instead, so a size is named
 once and the rendered result stays byte-identical.
 
-The values below were measured from the Designer's own compiled output,
-``harness/fixtures/designer_mainwindow.py`` (the nine ``QFont()`` temporaries and their ``setPointSize`` /
-``setBold`` / ``setUnderline`` / ``setFamilies`` calls):
+The values below were measured, once, from the Designer's compiled output (the nine ``QFont()`` temporaries and their
+``setPointSize`` / ``setBold`` / ``setUnderline`` / ``setFamilies`` calls). That fixture is retired as of 2026-11-23 -
+the Designer is no longer a reference in this tree - so the table below is the record; the last commit that carried
+the fixture is `8d607cad`.
 
     temporary  resolved spec                        widgets
     ---------  -----------------------------------  ------------------------------------------------------
