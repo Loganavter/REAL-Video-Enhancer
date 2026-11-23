@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from .frames import FORMATS, frame_pts, pack_frame
 
@@ -360,3 +360,87 @@ class TailReader(QObject):
             return
         self._signature = signature
         self.error.emit(message)
+
+
+class LiveTailThread(QThread):
+    """Drive a `TailReader` from its own thread.
+
+    The reader needs a clock. The first attempt gave it a `QTimer` built inside the render's worker
+    (`threading.Thread`) - a thread with no Qt event loop, so the timer never fired and the pane never
+    showed a live frame (measured 2026-11-23: a 12 s preview left the pane on the 640x360 thumbnail; the
+    only trace was one swallowed `TypeError` in log.txt). The GUI thread is not an option either: one
+    poll decodes up to `max_frames_per_poll` frames, which is exactly the work a 4K preview must not do
+    between paints.
+
+    So the loop lives here, and the two things that cross the thread boundary are explicit:
+
+    * `frame_ready` / `error` are signals, delivered to whoever the owner connected (the GUI thread);
+    * a seek arrives as a *pending target* - `seek` only stores it, and the loop applies it between
+      polls. `TailReader`'s state is then touched by one thread only.
+    """
+
+    #: One `FrameRef`, in presentation order (re-emitted from the reader).
+    frame_ready = Signal(object)
+    #: A failure worth reporting (re-emitted from the reader).
+    error = Signal(str)
+
+    def __init__(self, path: str, parent: QObject | None = None, *, interval_ms: int = 120,
+                 **reader_kwargs) -> None:
+        super().__init__(parent)
+        self._path = str(path)
+        self._interval_ms = max(20, int(interval_ms))
+        self._reader_kwargs = reader_kwargs
+        self._reader: TailReader | None = None
+        self._pending_seek: float | None = None
+        self._stop_requested = False
+
+    # -- what the owner reads while the loop runs ----------------------------------------------------
+
+    @property
+    def path(self) -> str:
+        return self._path
+
+    @property
+    def published_frames(self) -> int:
+        reader = self._reader
+        return int(reader.published_frames) if reader is not None else 0
+
+    @property
+    def produced_seconds(self) -> float:
+        reader = self._reader
+        return float(reader.produced_seconds) if reader is not None else 0.0
+
+    def seek(self, seconds: float) -> None:
+        """Ask the loop to reposition before its next poll; coalesces while a drag is in flight."""
+        self._pending_seek = max(0.0, float(seconds))
+
+    def stop_and_wait(self, timeout_ms: int = 3000) -> None:
+        self._stop_requested = True
+        self.wait(timeout_ms)
+
+    # -- the loop ------------------------------------------------------------------------------------
+
+    def run(self) -> None:
+        reader = TailReader(pixel_format="rgb24", **self._reader_kwargs)
+        reader.frame_ready.connect(self.frame_ready)
+        reader.error.connect(self.error)
+        self._reader = reader
+        opened = False
+        try:
+            while not self._stop_requested:
+                pending, self._pending_seek = self._pending_seek, None
+                if pending is not None:
+                    reader.seek(pending)
+                if not opened:
+                    # The container does not exist for the first moment of a render; the reader's own grace
+                    # period turns "not yet a container" into a wait.
+                    opened = bool(reader.open(self._path))
+                elif not self._stop_requested:
+                    reader.poll()
+                if not self._stop_requested:
+                    self.msleep(self._interval_ms)
+        finally:
+            try:
+                reader.close()
+            finally:
+                self._reader = None

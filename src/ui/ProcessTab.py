@@ -112,6 +112,11 @@ class ProcessTab:
         #: The video pane whose strip signals are already wired. Wired once per pane object, because the live
         #: tail and the finished-file playback both need them and two connections would double every seek.
         self._preview_strip_wired_for = None
+        #: The preview file this job wants followed, and whether the GUI tick has built the reader for it yet.
+        #: The request is made from the render's worker thread, which has no Qt event loop (see `_start_live_tail`).
+        self._live_tail_path = None
+        self._live_tail_wanted = False
+        self._live_tail = None
         #: monotonic stamp of the current render, for the "elapsed" half of the progress line
         self._render_started_mono = None
         self.animationHandler = AnimationHandler()
@@ -640,64 +645,54 @@ class ProcessTab:
 
 
     def _start_live_tail(self, path: str) -> None:
-        """Follow the preview file the backend is writing, at full resolution, while it grows.
+        """Ask for the live tail; the pane's own GUI tick creates it.
 
-        This is the live preview: the renderer pays nothing for it (it writes the file anyway), the pane decodes what has
-        been produced so far, and the strip's render head tracks the produced range.
+        This is the live preview: the renderer pays nothing for it (it writes the file anyway), the pane decodes what
+        has been produced so far, and the strip's render head tracks the produced range.
+
+        It is called from the render's worker (`threading.Thread`, ProcessTab.py:429) - a thread with no Qt event
+        loop. A `QTimer` built here never fires, and a signal connected here is queued to a thread that never runs
+        its queue: both mistakes were live at once (measured 2026-11-23: the pane showed the 640x360 thumbnail for a
+        whole 12 s preview and a strip press during the render did nothing, while the seek wiring and the timer looked
+        present in the code). So this only records the request; `_ensure_live_tail` runs on the GUI thread from
+        `updateProcessTab`, which is the pane's 100 ms clock.
         """
-        from PySide6.QtCore import QTimer
+        self._stop_live_tail()
+        self._live_tail_path = str(path)
+        self._live_tail_wanted = True
 
-        from .video.tail import TailReader
+    def _ensure_live_tail(self) -> None:
+        """Build the tail and wire the strip - on the GUI thread, once per job (see `_start_live_tail`)."""
+        if not getattr(self, "_live_tail_wanted", False) or getattr(self, "_live_tail", None) is not None:
+            return
+        path = getattr(self, "_live_tail_path", None)
+        if not path:
+            return
+        from .video.tail import LiveTailThread
 
         try:
-            self._stop_live_tail()
-            reader = TailReader(pixel_format="rgb24")
-            reader.frame_ready.connect(self._on_preview_frame)
-            reader.error.connect(lambda message: log(f"preview tail: {message}"))
-            self._live_tail = reader
-            self._live_tail_path = str(path)
-            # A live render needs the strip's signals too: a press on it must seek the tail (the finished-file
-            # decoder is not connected yet, and the LMB compare must decode the source at the current playhead).
+            tail = LiveTailThread(path)
+            tail.frame_ready.connect(self._on_preview_frame)
+            tail.error.connect(lambda message: log(f"preview tail: {message}"))
+            # The strip's signals too: a press must seek the tail, and the LMB compare must decode the source at the
+            # current playhead. Connected here (GUI thread) or the seek lands in a queue nobody drains.
             self._wire_preview_strip()
-            timer = QTimer(self)
-            timer.setInterval(120)
-            timer.timeout.connect(self._poll_live_tail)
-            timer.start()
-            self._live_tail_timer = timer
+            self._live_tail = tail
+            self._live_tail_wanted = False
+            tail.start()
         except Exception as exc:  # a preview that cannot follow must not take the render down
+            self._live_tail_wanted = False
             log(f"preview tail failed: {exc}")
 
-    def _poll_live_tail(self) -> None:
-        reader = getattr(self, "_live_tail", None)
-        if reader is None:
-            return
-        try:
-            if not getattr(self, "_live_tail_open", False):
-                # The container does not exist for the first moment of the render (ffmpeg writes a fragment first);
-                # the reader's own grace period handles the "not yet a container" case.
-                self._live_tail_open = bool(reader.open(self._live_tail_path))
-                return
-            reader.poll()
-        except Exception as exc:
-            log(f"preview tail poll failed: {exc}")
-            self._stop_live_tail()
-
     def _stop_live_tail(self) -> None:
-        timer = getattr(self, "_live_tail_timer", None)
-        if timer is not None:
+        self._live_tail_wanted = False
+        tail = getattr(self, "_live_tail", None)
+        if tail is not None:
             try:
-                timer.stop()
-            except Exception:
-                pass
-            self._live_tail_timer = None
-        reader = getattr(self, "_live_tail", None)
-        if reader is not None:
-            try:
-                reader.close()
+                tail.stop_and_wait()
             except Exception:
                 pass
             self._live_tail = None
-        self._live_tail_open = False
 
     def _wire_preview_strip(self) -> None:
         """Connect the pane's strip signals once, whoever owns the picture (live tail or finished file).
@@ -1013,6 +1008,10 @@ class ProcessTab:
         """
         Called by the worker QThread, and updates the GUI elements: Progressbar, Preview, FPS
         """
+
+        # The pane's 100 ms clock is also the live tail's start point: it is the only GUI-thread tick during a
+        # render, and the tail must be built and wired there (see `_start_live_tail`).
+        self._ensure_live_tail()
 
         if self.renderTextOutputList is not None:
             self.page_handles.proc.progressBar.setRange(

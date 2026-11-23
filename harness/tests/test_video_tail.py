@@ -21,13 +21,14 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import time
 import types
 
 import pytest
 
 pytest.importorskip("PySide6")
 
-from src.ui.video.tail import TailReader
+from src.ui.video.tail import LiveTailThread, TailReader
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRATCH = os.path.join(ROOT, "scratch")
@@ -416,3 +417,55 @@ def test_a_seek_with_nothing_produced_lands_at_the_start(scratch_dir):
     harness.append(2)
     assert harness.reader.poll() == 2, "and the tail follows as if nothing had been asked"
     assert [round(frame.pts, 3) for frame in harness.frames] == [0.0, 0.1]
+
+
+def test_the_live_tail_thread_polls_without_a_caller_clock_and_takes_a_seek(qapp, scratch_dir):
+    """The tail must run on its own thread: a QTimer built in the render's worker never fires there.
+
+    Measured 2026-11-23: the pane showed the 640x360 thumbnail for a whole 12 s preview because the reader's clock
+    was a `QTimer` on a `threading.Thread` (no Qt event loop), and the strip's signals were connected on that same
+    thread - so even a working reader would have had its seek queued into nothing. This drives the shipped loop the
+    way ProcessTab does: start it, deliver its signals through the test's event loop, and hand it a seek from
+    outside.
+    """
+    path = _emptied(scratch_dir)
+    with open(path, "ab") as handle:
+        for index in range(4):
+            handle.write(bytes([index + 1]) * FRAME_BYTES)
+
+    containers: list[_FakeContainer] = []
+
+    def factory(target: str) -> _FakeContainer:
+        container = _FakeContainer(target)
+        containers.append(container)
+        return container
+
+    thread = LiveTailThread(path, interval_ms=20, max_frames_per_poll=100, container_factory=factory)
+    frames = []
+    errors = []
+    thread.frame_ready.connect(frames.append)
+    thread.error.connect(errors.append)
+    thread.start()
+    try:
+        deadline = time.time() + 5
+        while len(frames) < 4 and time.time() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert [round(frame.pts, 3) for frame in frames] == [0.0, 0.1, 0.2, 0.3], \
+            "the loop reads the written part with no clock from its owner"
+        assert thread.published_frames == 4
+        assert round(thread.produced_seconds, 3) == 0.3
+
+        # A seek is asked for from another thread: it must be applied between polls, not raced into the reader.
+        thread.seek(0.1)
+        deadline = time.time() + 5
+        while len(frames) < 7 and time.time() < deadline:
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert [round(frame.pts, 3) for frame in frames[4:]] == [0.1, 0.2, 0.3], \
+            "the replay starts at the target and skips nothing behind it"
+        assert errors == []
+    finally:
+        thread.stop_and_wait()
+    assert thread.isRunning() is False, "the loop stops when its owner says so"
+    assert containers and containers[-1].closed is True, "the demuxer is released, not leaked"

@@ -108,6 +108,23 @@ def test_a_preview_render_in_matroska_is_left_alone(tmp_path):
     assert FASTSTART not in command
 
 
+def test_a_preview_mkv_flushes_a_cluster_every_second(tmp_path):
+    """Readable-while-growing is not enough: matroska holds a cluster until it has ~5 s of content.
+
+    Measured 2026-11-23 on a 12 s 720p clip: the preview file grew 0 -> 786 kB -> 1.5 MB in ~3.5 s steps, one cluster
+    each, so the tail reader had nothing to show for seconds at a time. A preview asks the muxer for one second per
+    cluster; an export keeps the default (its file is not read while it is written).
+    """
+    preview = _writer(str(tmp_path / "preview.mkv"), preview=True).command()
+    export = _writer(str(tmp_path / "export.mkv"), preview=False).command()
+
+    at = preview.index("-cluster_time_limit")
+    assert int(preview[at + 1]) <= 1000
+    assert preview.index("-cluster_time_limit") < preview.index(str(tmp_path / "preview.mkv")), \
+        "the muxer option must precede the output file it applies to"
+    assert "-cluster_time_limit" not in export
+
+
 def test_the_preview_and_the_export_differ_only_in_the_streamability_flags(tmp_path):
     """The switch is explicit: same parameters, two entries apart - the movflags value and the preview's short GOP.
 
@@ -144,3 +161,30 @@ def test_resolve_movflags_edge_cases():
     assert resolve_movflags("out.ts", "ts", preview=True) == []
     assert resolve_movflags("out.mp4", "mp4", preview=False) == [FASTSTART]
     assert resolve_movflags("out.mp4", "mp4", preview=True) == [FRAGMENTED]
+
+
+def test_a_custom_encoder_line_does_not_skip_the_preview_streamability_flags(tmp_path):
+    """The app's default encoder is a custom `-c:v` line, and that branch used to skip every preview flag.
+
+    `encoder_command` in settings is passed verbatim as `custom_encoder`, so the whole `else` branch - movflags, the
+    short GOP, the cluster limit - never ran on this machine: the preview was a plain matroska with a 250-frame GOP
+    and 5 s clusters, which is exactly why the live pane showed nothing until the render closed the file (measured
+    2026-11-23). Streamability is a property of the output, so it is emitted after either encoder branch.
+    """
+    writer = _writer(str(tmp_path / "preview.mkv"), preview=True)
+    writer.custom_encoder = "-c:v hevc_nvenc -preset p1 -tune hq -cq:v 18 -pix_fmt yuv420p10le"
+    command = writer.command()
+
+    assert "-cluster_time_limit" in command
+    assert "-g" in command
+    assert command.index("-cluster_time_limit") < command.index(str(tmp_path / "preview.mkv"))
+
+    mp4 = _writer(str(tmp_path / "preview.mp4"), preview=True)
+    mp4.custom_encoder = "-c:v hevc_nvenc -cq:v 18"
+    flags = _movflags(mp4.command())
+    assert flags is not None and "+frag_keyframe" in flags and "+empty_moov" in flags
+
+    export = _writer(str(tmp_path / "export.mp4"), preview=False)
+    export.custom_encoder = "-c:v hevc_nvenc -cq:v 18"
+    assert _movflags(export.command()) is None, \
+        "an export with a user's own encoder line is left exactly as it was: no faststart rewrite it did not ask for"

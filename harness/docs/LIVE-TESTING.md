@@ -106,9 +106,24 @@ Compare two captures with `python3 harness/scripts/ui_diff.py compare --stock-du
 
 ### Preview renders and the LMB compare
 
-`harness/scripts/live.sh ask "preview:/path/clip.mkv" 420` loads the clip and presses **Render Preview** — the one path
-that sets `RenderOptions.isPreview`, writes the fragmented preview file and feeds the pane (the plain `render:` verb
-leaves the pane empty). The answer names the preview file and what the pane holds (`class`, `visible`, `has_frame`).
+`harness/scripts/live.sh ask "preview:/path/clip.mkv" 420` loads the clip, switches to the processing page and presses
+**Render Preview** — the one path that sets `RenderOptions.isPreview`, writes the streamable preview file and feeds the
+pane (the plain `render:` verb leaves the pane empty). The answer names the preview file, its size, and what the pane
+holds: `class`, `visible`, `has_frame`, `frame` and `progress` (rendered, total, playhead, duration).
+
+Three answers this verb learned to give the hard way (2026-11-23):
+
+- **A refusal is named, with the app's own words.** A click that leaves no backend and an enabled button is a refusal,
+  not a render that finished in 0.9 s: `error` carries the toast text (`Video is not loaded!`, `Not a valid input!`,
+  `End time must be greater than start time!`). Nothing about a refusal reaches the app log.
+- **The backend child lives on the ProcessTab** (`processTab.renderProcess`); `window.renderProcess` does not exist,
+  and reading it made every real render look refused.
+- **The answer is bound to its own request id**, because the verb answers from timers seconds later: without that, a
+  `state:` probe sent meanwhile claims the preview's answer and the caller sees `widget not found`.
+
+`state:<objectName>` on a pane also reports `progress` and `strip` (`[x, y, w, h]` of the seek strip), which is what a
+live seek is measured with: press the strip with `drag:previewLabel@x1,y1:x2,y2` and watch `playhead` fall behind
+`rendered` instead of being dragged back to the edge.
 
 With a frame in the pane, the LMB compare is testable: hold the button with `xdotool mousedown 1` (a click is too fast
 to capture), take a root screenshot while it is held, then `mouseup 1`. 2026-11-23, on a letterboxed 160x120 clip with

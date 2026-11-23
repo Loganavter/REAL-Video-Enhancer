@@ -582,19 +582,35 @@ class FFmpegWrite(Buffer):
 
                 ]
 
-                # MP4/MOV: an export moves the moov atom to the front; a preview render fragments instead so the
-                # written part is a readable stream while the file is still growing (see resolve_movflags).
+            # Streamability, for both encoder branches - a preview is a file that is READ while it is written, and
+            # this used to sit inside the `else` above: a custom `-c:v` line, which is this app's default
+            # (`encoder_command` in settings), skipped all of it. The preview then wrote a plain matroska with the
+            # encoder's default GOP and 5 s clusters, and the tail reader had nothing to show until the file closed
+            # (measured 2026-11-23: the pane stayed on the thumbnail for a whole 12 s preview while the code that
+            # should have prevented it never ran).
+            #
+            # An EXPORT's command line stays exactly as it was: the flag is added there only by the branch that always
+            # added it, so a user's own `-c:v` line is never joined by a faststart rewrite it did not ask for.
+            if self.preview or self.custom_encoder is None:
+                # MP4/MOV: an export moves the moov atom to the front; a preview fragments instead so the written part
+                # is a readable stream while the file is still growing (see resolve_movflags).
                 movflags = resolve_movflags(
                     self.outputFile, getattr(self, "outputFileExtension", None), self.preview)
                 if movflags:
                     command += ["-movflags", *movflags]
-                # A preview render also gets a SHORT GOP (~one second of output frames). Two measured reasons
-                # (projects/rve/docs/measurements/measure-video-preview-2026-11-23.md): with the encoder's default GOP a seek costs
-                # ~0.5-1 s of decode (480 ms mean, 932 ms p95 on a 4K clip), and `+frag_keyframe` emits a fragment per
-                # keyframe - so a 250-frame GOP would hand the tail reader new data once per ~8 s instead of ~1 Hz.
-                # `-g` is AVCodecContext's gop_size: generic for every encoder this app exposes. Exports keep theirs.
-                if self.preview:
-                    command += ["-g", str(max(1, int(round(float(self.outputFPS or 30)))))]
+            if self.preview:
+                # A SHORT GOP (~one second of output frames). Two measured reasons
+                # (projects/rve/docs/measurements/measure-video-preview-2026-11-23.md): with the encoder's default GOP
+                # a seek costs ~0.5-1 s of decode (480 ms mean, 932 ms p95 on a 4K clip), and `+frag_keyframe` emits a
+                # fragment per keyframe - a 250-frame GOP would hand the tail reader new data once per ~8 s instead of
+                # ~1 Hz. `-g` is AVCodecContext's gop_size: generic for every encoder this app exposes.
+                command += ["-g", str(max(1, int(round(float(self.outputFPS or 30)))))]
+                # And a short CLUSTER for matroska, which holds one until it has ~5 s of content by default: the file
+                # then grows 0 -> 786 kB -> 1.5 MB in ~3.5 s steps (measured) and the preview moves like a slideshow.
+                # Exports keep the muxer's default; only a file that is read while it is written pays this.
+                if str(getattr(self, "outputFileExtension", "") or "").lower() in ("mkv", "mka", "mks", "webm"):
+                    command += ["-cluster_time_limit", "1000"]
+
             if str(self.outputFile) == "null":
                 # Fixed-cost measurement path: rawvideo encoding is a memcpy and the null muxer
                 # discards the packets, so the wall measures read + gate + inference only. Without

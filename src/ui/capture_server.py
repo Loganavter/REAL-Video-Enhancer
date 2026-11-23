@@ -471,6 +471,19 @@ def install(window) -> None:
             "translucent": bool(target.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)),
             "autofill": bool(target.autoFillBackground()),
         })
+        progress = getattr(target, "_progress", None)
+        if progress:
+            # A pane's two time bases: (rendered, total, playhead, duration). "A seek holds while the renderer
+            # advances" is a claim about `playhead` versus `rendered`, so the answer must carry both.
+            report["progress"] = list(progress)
+            report["strip_visible"] = bool(getattr(target, "_strip_visible", False))
+            strip_rect = getattr(target, "_strip_rect", None)
+            if callable(strip_rect):
+                try:
+                    rect = strip_rect()
+                    report["strip"] = [round(rect.x()), round(rect.y()), round(rect.width()), round(rect.height())]
+                except Exception:
+                    pass
         for attr in ("count", "currentRow", "selectedRows", "selectedCount"):
             getter = getattr(target, attr, None)
             if callable(getter):
@@ -700,6 +713,8 @@ def install(window) -> None:
         stamp = _stamp()
         result = {"stamp": stamp, "kind": "render", "video": video, "backend": None, "queued": 0, "started": False,
                   "finished": False, "seconds": 0.0, "output": None, "error": None}
+        # This verb answers from timers, seconds after the request: bind the answer's id now (see `preview`).
+        result["request_id"] = state.get("request_id")
         started_at = time.time()
 
         def output_of_last_item() -> str | None:
@@ -808,6 +823,11 @@ def install(window) -> None:
 
         result = {"stamp": _stamp(), "kind": "preview", "video": video, "started": False, "finished": False,
                   "seconds": 0.0, "output": None, "pane": None, "output_bytes": None, "error": None}
+        # Bind the answer to THIS request now: `_finish` publishes under the id it is given, and the verb answers
+        # seconds later from a timer. Without this, a request that arrived meanwhile claims the preview's answer and
+        # the caller sees a payload of the wrong kind (measured 2026-11-23: `preview:` answered "widget not found",
+        # which belonged to a `state:` probe).
+        result["request_id"] = state.get("request_id")
         started_at = time.time()
         expected = os.path.join(TEMP_DOWNLOAD_PATH, f"{os.path.basename(video)}_preview.mkv")
 
@@ -818,7 +838,41 @@ def install(window) -> None:
             frame = getattr(pane, "_frame", None)
             return {"class": type(pane).__name__, "visible": bool(pane.isVisible()),
                     "has_frame": frame is not None,
-                    "frame": [frame.width(), frame.height()] if frame is not None else None}
+                    "frame": [frame.width(), frame.height()] if frame is not None else None,
+                    # (rendered, total, playhead, duration): the strip's two bases, so a live seek can be read
+                    # from outside instead of guessed from a screenshot.
+                    "progress": list(getattr(pane, "_progress", ()) or ())}
+
+        def render_process():
+            """The backend child lives on the ProcessTab, NOT on the window.
+
+            The first refusal check read `window.renderProcess`, which does not exist - so `getattr(..., None)` was
+            always None and a legitimate render was declared a refusal (measured 2026-11-23 22:05: a 12 s clip
+            rendered 300 frames in ~14 s while the verb answered "the app refused the preview").
+            """
+            tab = getattr(window, "processTab", None)
+            return getattr(tab, "renderProcess", None) if tab is not None else None
+
+        def toast_texts() -> list:
+            """Whatever the app is telling the user right now.
+
+            A refusal ("Video is not loaded!", "End time must be greater than start time!", "Please select at least
+            one model!") is delivered as a toolkit toast and reaches nothing else - the app log stays silent, which is
+            why a refused preview looked like a job that started and vanished.
+            """
+            try:
+                from .dialogs.toolkit_dialogs import _toast_manager_for
+
+                manager = _toast_manager_for(window)
+                texts = []
+                for toast in getattr(manager, "_toasts", {}).values():
+                    label = getattr(toast, "message_label", None)
+                    text = label.text() if label is not None else ""
+                    if text:
+                        texts.append(str(text))
+                return texts
+            except Exception:
+                return []
 
         def finish(error: str | None = None) -> None:
             result["seconds"] = round(time.time() - started_at, 1)
@@ -828,17 +882,28 @@ def install(window) -> None:
                     result["output_bytes"] = os.path.getsize(candidate)
                     break
             result["pane"] = pane_state()
+            result["toasts"] = toast_texts()
             if error:
                 result["error"] = error
             _finish(result)
             print(f"capture-server: preview {result}", flush=True)
 
+        def confirm_refusal() -> None:
+            """A click that leaves no backend and no disabled button did nothing - say why, in the app's own words."""
+            if render_process() is None and window.page_handles.proc.startRenderButton.isEnabled():
+                reason = "; ".join(toast_texts()) or "no toast was shown"
+                finish(f"the app refused the preview: {reason}")
+                return
+            wait_finish(1)
+
         def wait_finish(ticks: int = 0) -> None:
-            if ticks == 10 and getattr(window, "renderProcess", None) is None:
-                # The button was clicked but no backend exists one second later: the app refused (it shows its own
-                # notification - "Please select at least one model!", "Video is not loaded!"). Say so instead of
-                # reporting a job that started and vanished.
-                finish("the app refused the preview: no model ticked or the video is not loaded")
+            if ticks == 0 and render_process() is None \
+                    and window.page_handles.proc.startRenderButton.isEnabled():
+                # "started" is what the click asked for, not what happened: a refusal returns from the slot before
+                # any backend exists and leaves the button enabled - indistinguishable from a render that finished
+                # in under a second (measured: a preview answered "finished in 0.9 s, no output" for exactly this
+                # reason while the real cause was a missing input file). Give the toast 600 ms, then read it.
+                QTimer.singleShot(600, confirm_refusal)
                 return
             if result["started"] and window.page_handles.proc.startRenderButton.isEnabled():
                 result["finished"] = True
@@ -852,6 +917,12 @@ def install(window) -> None:
         def press_preview() -> None:
             select_a_backend()
             select_a_model()
+            # The button lives on the processing page and so does the pane: pressing it from another page would start a
+            # render nobody can see (and make the strip unclickable for a live seek proof).
+            try:
+                window.switchToProcessingPage()
+            except Exception:
+                pass
             button = window.page_handles.proc.renderPreviewBtn
             if button is None:
                 finish("no renderPreviewBtn on the window")
