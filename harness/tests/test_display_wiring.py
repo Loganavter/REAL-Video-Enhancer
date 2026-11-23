@@ -492,6 +492,194 @@ def test_a_tail_frame_is_dropped_while_the_exports_display_feed_owns_the_pane():
     assert pane.frames == [], "one picture, one painter: the display feed wins an export's pane"
 
 
+# --- one painter, decided before the job starts ----------------------------------------------------
+
+
+def _job(*, preview: bool = False, path: str = "/tmp/out.mkv"):
+    """The shape `_tail_should_run` reads from a queued job (the same fields `_followable` uses)."""
+    return SimpleNamespace(isPreview=bool(preview), outputPath=path)
+
+
+def _painters(*, preview: bool, reader) -> ProcessTab:
+    tab = _tab(preview=preview, paused=False, reader=reader)
+    tab.settings = SimpleNamespace(settings={"preview_enabled": "True"})
+    return tab
+
+
+def test_an_export_whose_pane_is_fed_by_the_display_starts_no_tail():
+    """The invariant is not "the display wins by arriving later": this job's tail is never built."""
+    tab = _painters(preview=False, reader=_Reader())
+    assert tab._tail_should_run(_job()) is False, (
+        "an export whose pane the display block feeds must not also decode its own growing file")
+
+
+def test_a_preview_still_follows_its_own_file():
+    """The preview's tail IS the picture (and the strip's seek lives on it), so it always starts."""
+    tab = _painters(preview=True, reader=_Reader())
+    assert tab._tail_should_run(_job(preview=True, path="/tmp/preview.mp4")) is True
+
+
+def test_an_export_without_a_usable_display_block_keeps_the_tail_as_its_fallback():
+    """A pane with no block would otherwise stay black on a plain render (the reason the tail was added)."""
+    tab = _painters(preview=False, reader=None)
+    assert tab._tail_should_run(_job()) is True
+
+
+def test_an_export_file_the_tail_cannot_follow_starts_no_tail():
+    tab = _painters(preview=False, reader=None)
+    assert tab._tail_should_run(_job(path="/tmp/out.mp4")) is False, "a growing mp4 has its index at the end"
+
+
+def test_the_preview_switch_off_starts_no_tail():
+    tab = _painters(preview=False, reader=None)
+    tab.settings = SimpleNamespace(settings={"preview_enabled": "False"})
+    assert tab._tail_should_run(_job()) is False
+
+
+def test_a_tail_frame_from_a_tail_that_is_gone_does_not_reach_the_surface():
+    """`frame_ready` is queued: a stopped tail can still deliver a frame, and it must not paint over the picture."""
+    pane = _Pane()
+    tab = _tab(pane=pane, preview=False, paused=False, alive=False, reader=None)
+    frame = FrameRef(buffer=bytes(2 * 2 * 3), width=2, height=2, format="rgb24", stride=6, pts=8.97,
+                     index=0)
+    tab._on_preview_frame(frame)
+    assert pane.frames == [], "a retired tail is not a painter"
+
+
+def test_a_preview_paints_from_its_tail():
+    """The other side of the same gate: a live preview's tail is the picture."""
+    pane = _Pane()
+    tab = _tab(pane=pane, preview=True, paused=False, alive=True, reader=_Reader())
+    tab._live_tail = SimpleNamespace(produced_seconds=0.0)
+    frame = FrameRef(buffer=bytes(2 * 2 * 3), width=2, height=2, format="rgb24", stride=6, pts=1.0,
+                     index=0)
+    tab._on_preview_frame(frame)
+    assert len(pane.frames) == 1
+    assert pane.progress and pane.progress[-1]["playhead"] == pytest.approx(1.0)
+
+
+def test_a_paused_export_keeps_its_produced_band_honest_without_a_tail():
+    """Removing the export's tail must not freeze the strip while the held pane waits: the feed paints, so the band
+    still follows the renderer's counters (the picture's playhead stays where the hold left it)."""
+    pane = _Pane()
+    pane._progress = (0, 100, 5.0, 10.0)        # what the last display frame painted
+    tab = _tab(pane=pane, preview=False, paused=True, reader=_Reader())
+    tab.max_value = 100
+    tab.currentFrame = 60
+
+    tab._refresh_held_progress()
+
+    assert pane.progress[-1] == {"rendered": 60, "total": 100, "playhead": 5.0, "duration": 10.0}
+
+
+# --- the job's end: no painter outlives it ---------------------------------------------------------
+
+
+class _Signal:
+    def connect(self, slot) -> None:  # noqa: D401 - Qt spelling
+        pass
+
+    def disconnect(self) -> None:
+        pass
+
+
+class _Button:
+    def __init__(self) -> None:
+        self.clicked = _Signal()
+        self.enabled = None
+        self.visible = None
+
+    def setEnabled(self, value) -> None:  # noqa: N802 - Qt spelling
+        self.enabled = bool(value)
+
+    def setVisible(self, value) -> None:  # noqa: N802 - Qt spelling
+        self.visible = bool(value)
+
+
+class _Text:
+    def setText(self, text) -> None:  # noqa: N802 - Qt spelling
+        self.text = str(text)
+
+    def setEnabled(self, value) -> None:  # noqa: N802 - Qt spelling
+        self.enabled = bool(value)
+
+
+class _Tail:
+    """A live tail as the completion path sees it: `stop_and_wait` is the whole contract there."""
+
+    def __init__(self, events) -> None:
+        self.events = events
+        self.stops = 0
+        self.produced_seconds = 0.0
+
+    def stop_and_wait(self) -> None:
+        self.stops += 1
+        self.events.append("tail")
+
+
+class _ReleasingReader(_Reader):
+    """The pane's block; `release()` is recorded so the ordering against the tail is visible."""
+
+    def __init__(self, events) -> None:
+        super().__init__()
+        self.events = events
+
+    def release(self) -> None:
+        self.events.append("block")
+
+
+def _completion_tab(*, preview: bool, reader, tail) -> ProcessTab:
+    tab = _tab(pane=_Pane(), preview=preview, paused=False, alive=False, reader=reader)
+    tab._live_tail = tail
+    tab.return_codes = [0]
+    tab.userKilled = False
+    tab._render_started_mono = 1.0
+    tab.currentRenderOptions = SimpleNamespace(isPreview=preview, outputPath="/tmp/out.mkv")
+    tab.parent = SimpleNamespace(enableProcessPage=lambda: None, startRender=lambda: None)
+    tab.setProgressDetail = lambda text: None
+    tab.setStatus = lambda status: None
+    tab.syncRenderConsole = lambda: None
+    tab._restoreQueueAfterPreview = lambda: None
+    tab._start_preview_playback = lambda path: None
+    proc = tab.page_handles.proc
+    proc.onRenderButtonsContiainer = object()
+    proc.startRenderButton = _Button()
+    proc.FPS = _Text()
+    proc.ETA = _Text()
+    tab.page_handles.general = SimpleNamespace(outputFileText=_Text(), inputFileText=_Text())
+    return tab
+
+
+def test_a_plain_exports_completion_stops_its_tail_before_releasing_the_block(monkeypatch):
+    """Measured live (2026-11-24): the tail outlived its export and painted a lagging cluster over the last frame."""
+    events = []
+    reader = _ReleasingReader(events)
+    tail = _Tail(events)
+    tab = _completion_tab(preview=False, reader=reader, tail=tail)
+    monkeypatch.setattr(sys.modules[ProcessTab.__module__], "hide_layout_widgets", lambda widget: None)
+
+    tab.guiChangesOnRenderCompletion()
+
+    assert tail.stops == 1, "a tail left running keeps decoding a file nobody writes"
+    assert tab._live_tail is None
+    assert events == ["tail", "block"], "the tail goes first; the block it would paint over goes second"
+    assert tab._display is None
+
+
+def test_a_previews_completion_stops_the_tail_before_playback_starts(monkeypatch):
+    events = []
+    reader = _ReleasingReader(events)
+    tail = _Tail(events)
+    tab = _completion_tab(preview=True, reader=reader, tail=tail)
+    tab._start_preview_playback = lambda path: events.append("playback")
+    monkeypatch.setattr(sys.modules[ProcessTab.__module__], "hide_layout_widgets", lambda widget: None)
+
+    tab.guiChangesOnRenderCompletion()
+
+    assert tail.stops == 1
+    assert events == ["tail", "block", "playback"], "the finished file plays after the tail that followed it stops"
+
+
 def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     """In `sbs`/`split` the standing original follows the result on the pane's clock, one decode per moved playhead."""
     pane = _Pane()
