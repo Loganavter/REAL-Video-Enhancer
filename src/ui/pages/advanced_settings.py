@@ -19,6 +19,7 @@ import resources_rc
 from sli_ui_toolkit.widgets import CheckBox, ComboBox, SurfacePanel, SurfaceScrollArea, Text
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
+from src.ui.pages.handles import AdvancedSettingsHandles
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
 #: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
@@ -239,6 +240,11 @@ class AdvancedSettingsPage:
         self.verticalLayout_33.addItem(self.verticalSpacer)
         self.scrollArea_5.setWidget(self.scrollAreaWidgetContents_5)
         self.verticalLayout_29.addWidget(self.scrollArea_5)
+        self._handles = AdvancedSettingsHandles(
+            tilingCheckBox=self.tilingCheckBox,
+            tileSizeContainer=self.tileSizeContainer,
+            interpolateContainer_2=self.interpolateContainer_2,
+        )
         self.retranslate()
         return self.advancedSettings
 

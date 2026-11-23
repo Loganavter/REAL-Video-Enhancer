@@ -35,6 +35,7 @@ from src.ui.pages.more_page import MorePagePage
 from src.ui.pages.proc_page import ProcPagePage
 from src.ui.pages.settings_page import SettingsPagePage
 from src.ui.pages.download_page import DownloadPagePage
+from src.ui.pages.handles import MenuHandles, PAGE_NAMES, PageSelector, WindowHandles
 
 #: The page gutter the deleted window stylesheet applied (`QStackedWidget{padding:5px 10px}`). It was the only
 #: geometry in that sheet; deleting the sheet without moving the number moved every page 10 px left, 5 px up and made
@@ -220,7 +221,31 @@ class MainWindowShell:
         self.verticalLayout.addWidget(self.leftMenuSubContainer)
         self.gridLayout.addWidget(self.leftMenuContainer, 0, 0, 1, 1)
         window.setCentralWidget(self.centralwidget)
-        self.stackedWidget.setCurrentIndex(2)
+        # The glue's typed edge over the pages and the nav stack. Each page built its own group in `build()`; this
+        # composes them once, so glue reads `window.page_handles.<group>.<name>` and a missing widget is a
+        # `TypeError` at page build. The selector keeps the stack's index contract behind a page NAME.
+        self.page_handles = WindowHandles(
+            general=self.procPage_page.generalSettings_page._handles,
+            proc=self.procPage_page._handles,
+            queue=self.procPage_page.renderQueueTab_page._handles,
+            settings=self.settingsPage_page._handles,
+            output=self.settingsPage_page.tab_2_page._handles,
+            render_settings=self.settingsPage_page.tab_3_page._handles,
+            app_settings=self.settingsPage_page.tab_4_page._handles,
+            encoder=self.procPage_page.tab_6_page._handles,
+            logs=self.procPage_page.tab_5_page._handles,
+            advanced=self.procPage_page.advancedSettings_page._handles,
+            download=self.downloadPage_page._handles,
+            menu=MenuHandles(
+                stackedWidget=self.stackedWidget,
+                pages=PageSelector(stack=self.stackedWidget, names=PAGE_NAMES),
+                homeBtn=self.homeBtn,
+                processBtn=self.processBtn,
+                settingsBtn=self.settingsBtn,
+                downloadBtn=self.downloadBtn,
+            ),
+        )
+        self.page_handles.menu.pages.show("proc")
         QMetaObject.connectSlotsByName(window)
         # The window paints the page colour itself. Every surface inside is token-painted, and a surface that fails to
         # paint (a missing token, a widget built before the theme) then shows the DESKTOP through a compositing WM -
