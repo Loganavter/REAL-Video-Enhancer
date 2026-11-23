@@ -17,6 +17,8 @@ class DownloadTab:
         skip_info_popup: bool = False,
     ):
         self.parent = parent
+        #: The typed page surface (`window.page_handles`); the window no longer copies page widgets onto itself.
+        self.page_handles = parent.page_handles
         self.torch_versions:list[TorchVersion] = [version for version in TorchVersion.__subclasses__()]
         self.downloadDeps = DownloadDependencies()
         self.backends = backends
@@ -28,88 +30,88 @@ class DownloadTab:
             minimum_space_required = 7
         else:
             minimum_space_required = 15
-        self.parent.low_storage_label.setVisible(False)
+        self.page_handles.download.low_storage_label.setVisible(False)
         if FileHandler.getFreeSpace() < minimum_space_required:
-            self.parent.downloadTorchBtn.setEnabled(False)
-            self.parent.downloadTensorRTBtn.setEnabled(False)
-            self.parent.low_storage_label.setVisible(True)
+            self.page_handles.download.downloadTorchBtn.setEnabled(False)
+            self.page_handles.download.downloadTensorRTBtn.setEnabled(False)
+            self.page_handles.download.low_storage_label.setVisible(True)
             self.has_enough_space = False
         # disable as it is not complete
         try:
-            self.parent.downloadDirectMLBtn.setEnabled(False)
+            self.page_handles.download.downloadDirectMLBtn.setEnabled(False)
             if PLATFORM != "win32":
-                self.parent.downloadDirectMLBtn.setEnabled(False)
+                self.page_handles.download.downloadDirectMLBtn.setEnabled(False)
         except Exception as e:
             print(e)
 
 
         # set this all to not visible, as scrapping the idea for now.
         if PLATFORM != "linux":
-            remove_combobox_item_by_text(self.parent.pytorch_backend, "ROCm")
+            remove_combobox_item_by_text(self.page_handles.download.pytorch_backend, "ROCm")
         else:
             if CPU_ARCH == "arm64":
-                remove_combobox_item_by_text(self.parent.pytorch_backend, "XPU")
-                remove_combobox_item_by_text(self.parent.pytorch_backend, "ROCm")
+                remove_combobox_item_by_text(self.page_handles.download.pytorch_backend, "XPU")
+                remove_combobox_item_by_text(self.page_handles.download.pytorch_backend, "ROCm")
         if IS_FLATPAK:
-            remove_combobox_item_by_text(self.parent.pytorch_backend, "XPU")
-            remove_combobox_item_by_text(self.parent.pytorch_backend, "ROCm")
+            remove_combobox_item_by_text(self.page_handles.download.pytorch_backend, "XPU")
+            remove_combobox_item_by_text(self.page_handles.download.pytorch_backend, "ROCm")
         if PLATFORM == "darwin":
             if CPU_ARCH == "arm64":
-                self.parent.pytorch_backend.clear()
-                self.parent.pytorch_backend.addItems(
+                self.page_handles.download.pytorch_backend.clear()
+                self.page_handles.download.pytorch_backend.addItems(
                     ["MPS (Apple Silicon)"]
                 )
                 # force 2.9.0 as it should include support for uint16
-                self.parent.pytorch_version.setEnabled(False)
+                self.page_handles.download.pytorch_version.setEnabled(False)
 
-                self.parent.pytorch_backend.setCurrentText("MPS (Apple Silicon)")
-                self.parent.pytorch_backend.setEnabled(False)
+                self.page_handles.download.pytorch_backend.setCurrentText("MPS (Apple Silicon)")
+                self.page_handles.download.pytorch_backend.setEnabled(False)
                 
-                self.parent.downloadTorchBtn.setEnabled(True)
-            self.parent.downloadTensorRTBtn.setEnabled(False)
+                self.page_handles.download.downloadTorchBtn.setEnabled(True)
+            self.page_handles.download.downloadTensorRTBtn.setEnabled(False)
         if IS_FLATPAK or USE_LOCAL_BACKEND:
-            self.parent.uninstallAppBtn.setDisabled(True)
+            self.page_handles.download.uninstallAppBtn.setDisabled(True)
         else:
-            self.parent.uninstallAppBtn.clicked.connect(self.uninstallApp)
+            self.page_handles.download.uninstallAppBtn.clicked.connect(self.uninstallApp)
 
-        self.parent.ApplicationUpdateContainer.setVisible(False)
+        self.page_handles.download.ApplicationUpdateContainer.setVisible(False)
         self.QButtonConnect()
     
     
     def QButtonConnect(self):
-        self.parent.downloadNCNNBtn.clicked.connect(lambda: self.download("ncnn", True))
-        self.parent.downloadTorchBtn.clicked.connect(
+        self.page_handles.download.downloadNCNNBtn.clicked.connect(lambda: self.download("ncnn", True))
+        self.page_handles.download.downloadTorchBtn.clicked.connect(
             lambda: self.download("torch", True)
         )
-        self.parent.downloadTensorRTBtn.clicked.connect(
+        self.page_handles.download.downloadTensorRTBtn.clicked.connect(
             lambda: self.download("tensorrt", True)
         )
-        self.parent.downloadDirectMLBtn.clicked.connect(
+        self.page_handles.download.downloadDirectMLBtn.clicked.connect(
             lambda: self.download("directml", True)
         )
-        self.parent.downloadRecommendedBtn.clicked.connect(
+        self.page_handles.download.downloadRecommendedBtn.clicked.connect(
             self.installRecommended
         )
         
-        self.parent.uninstallNCNNBtn.clicked.connect(
+        self.page_handles.download.uninstallNCNNBtn.clicked.connect(
             lambda: self.download("ncnn", False)
         )
-        self.parent.uninstallTorchBtn.clicked.connect(
+        self.page_handles.download.uninstallTorchBtn.clicked.connect(
             lambda: self.download("torch", False)
         )
-        self.parent.uninstallTensorRTBtn.clicked.connect(
+        self.page_handles.download.uninstallTensorRTBtn.clicked.connect(
             lambda: self.download("tensorrt", False)
         )
-        self.parent.uninstallDirectMLBtn.clicked.connect(
+        self.page_handles.download.uninstallDirectMLBtn.clicked.connect(
             lambda: self.download("directml", False)
         )
-        self.parent.selectPytorchCustomModel.clicked.connect(
+        self.page_handles.download.selectPytorchCustomModel.clicked.connect(
             lambda: self.parent.importCustomModel("pytorch")
         )
-        self.parent.selectNCNNCustomModel.clicked.connect(
+        self.page_handles.download.selectNCNNCustomModel.clicked.connect(
             lambda: self.parent.importCustomModel("ncnn")
         )
-        self.parent.pytorch_version.addItems(
+        self.page_handles.download.pytorch_version.addItems(
             [version.torch_version for version in self.torch_versions]
         )
 
@@ -124,36 +126,36 @@ class DownloadTab:
 
         
     def hideUninstallButtons(self):
-        self.parent.uninstallTorchBtn.setVisible(False)
-        self.parent.uninstallNCNNBtn.setVisible(False)
-        self.parent.uninstallTensorRTBtn.setVisible(False)
-        self.parent.uninstallDirectMLBtn.setVisible(False)
+        self.page_handles.download.uninstallTorchBtn.setVisible(False)
+        self.page_handles.download.uninstallNCNNBtn.setVisible(False)
+        self.page_handles.download.uninstallTensorRTBtn.setVisible(False)
+        self.page_handles.download.uninstallDirectMLBtn.setVisible(False)
 
     def showUninstallButton(self, backends):
         if "pytorch (cuda)" in backends:
-            self.parent.downloadTorchBtn.setVisible(False)
-            self.parent.uninstallTorchBtn.setVisible(True)
+            self.page_handles.download.downloadTorchBtn.setVisible(False)
+            self.page_handles.download.uninstallTorchBtn.setVisible(True)
         if "pytorch (rocm)" in backends:
-            self.parent.downloadTorchBtn.setVisible(False)
-            self.parent.uninstallTorchBtn.setVisible(True)
+            self.page_handles.download.downloadTorchBtn.setVisible(False)
+            self.page_handles.download.uninstallTorchBtn.setVisible(True)
         if "pytorch (xpu)" in backends:
-            self.parent.downloadTorchBtn.setVisible(False)
-            self.parent.uninstallTorchBtn.setVisible(True)
+            self.page_handles.download.downloadTorchBtn.setVisible(False)
+            self.page_handles.download.uninstallTorchBtn.setVisible(True)
         if "pytorch (mps)" in backends:
-            self.parent.downloadTorchBtn.setVisible(False)
-            self.parent.uninstallTorchBtn.setVisible(True)
+            self.page_handles.download.downloadTorchBtn.setVisible(False)
+            self.page_handles.download.uninstallTorchBtn.setVisible(True)
         if "ncnn" in backends:
-            self.parent.downloadNCNNBtn.setVisible(False)
-            self.parent.uninstallNCNNBtn.setVisible(True)
+            self.page_handles.download.downloadNCNNBtn.setVisible(False)
+            self.page_handles.download.uninstallNCNNBtn.setVisible(True)
         if "tensorrt" in backends:
-            self.parent.downloadTensorRTBtn.setVisible(False)
-            self.parent.uninstallTensorRTBtn.setVisible(True)
+            self.page_handles.download.downloadTensorRTBtn.setVisible(False)
+            self.page_handles.download.uninstallTensorRTBtn.setVisible(True)
 
         # disable as it is not complete
         try:
-            self.parent.downloadDirectMLBtn.setEnabled(False)
+            self.page_handles.download.downloadDirectMLBtn.setEnabled(False)
             if PLATFORM != "win32":
-                self.parent.downloadDirectMLBtn.setEnabled(False)
+                self.page_handles.download.downloadDirectMLBtn.setEnabled(False)
         except Exception as e:
             print(e)
 
@@ -175,8 +177,8 @@ class DownloadTab:
         - None
         """
         pytorch_ver:TorchVersion|None = None
-        current_pytorch_version = self.parent.pytorch_version.currentText().split()[0]
-        current_pytorch_backend = self.parent.pytorch_backend.currentText().split()[0].lower() if not pytorch_backend else pytorch_backend
+        current_pytorch_version = self.page_handles.download.pytorch_version.currentText().split()[0]
+        current_pytorch_backend = self.page_handles.download.pytorch_backend.currentText().split()[0].lower() if not pytorch_backend else pytorch_backend
         for version in self.torch_versions:
             if version.torch_version == current_pytorch_version:
                 pytorch_ver = version

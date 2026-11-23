@@ -26,6 +26,8 @@ from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 # `QPushButton`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import Button, ImageLabel, RichTextView, SurfacePanel, Text
 
+from src.ui.pages.handles import HomePageHandles
+
 
 class HomePagePage:
     """`homePage` - placed by its parent with `addWidget`."""
@@ -118,6 +120,14 @@ class HomePagePage:
         self.systemInfoText.setReadOnly(True)
         self.horizontalLayout_30.addWidget(self.systemInfoText)
         self.gridLayout_2.addLayout(self.horizontalLayout_30, 2, 0, 1, 1)
+        # The glue's typed edge over this page; every field is required, so a widget that stops being built fails here
+        # (TypeError) instead of surfacing as an AttributeError or a silent `getattr(..., None)` at fetch time.
+        self._handles = HomePageHandles(
+            changeLogText=self.changeLogText,
+            systemInfoText=self.systemInfoText,
+            githubBtn=self.githubBtn,
+            kofiBtn=self.kofiBtn,
+        )
         self.retranslate()
         return self.homePage
 

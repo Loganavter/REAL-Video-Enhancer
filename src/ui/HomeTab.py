@@ -55,6 +55,8 @@ class NotesFetcher(QtCore.QThread):
 class HomeTab:
     def __init__(self, parent):
         self.parent = parent
+        #: The typed page surface (`window.page_handles`); the window no longer copies page widgets onto itself.
+        self.page_handles = parent.page_handles
         self._fetcher = None
         self.QConnect()
 
@@ -82,20 +84,21 @@ class HomeTab:
                 fh.write(notes)
         except OSError:
             pass
-        current = self.parent.stackedWidget.currentWidget() if hasattr(self.parent, "stackedWidget") else None
-        if current is getattr(self.parent, "homePage", None):
+        current = self.page_handles.menu.pages.name_of()
+        if current == "home":
             return
-        self.parent.changeLogText.setMarkdown(notes)
+        self.page_handles.home.changeLogText.setMarkdown(notes)
 
     def QConnect(self):
-        self.parent.githubBtn.clicked.connect(
+        self.page_handles.home.githubBtn.clicked.connect(
             lambda: openLink("https://github.com/tntwise/REAL-Video-Enhancer")
         )
-        self.parent.kofiBtn.clicked.connect(
+        self.page_handles.home.kofiBtn.clicked.connect(
             lambda: openLink("https://ko-fi.com/tntwise")
         )
-        self.parent.changeLogText.setVisible(True)
-        self.parent.changeLogText.setMarkdown(self.getChangelog() or "_No release notes bundled._")
+        panel = self.page_handles.home.changeLogText
+        panel.setVisible(True)
+        panel.setMarkdown(self.getChangelog() or "_No release notes bundled._")
         self._fetcher = NotesFetcher(self.parent)
         self._fetcher.fetched.connect(self.applyFetchedNotes)
         self._fetcher.start()

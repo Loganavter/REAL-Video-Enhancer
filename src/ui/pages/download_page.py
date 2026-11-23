@@ -332,6 +332,21 @@ class DownloadPagePage:
         self._handles = DownloadPageHandles(
             pytorch_version=self.pytorch_version,
             pytorch_backend=self.pytorch_backend,
+            ApplicationUpdateContainer=self.ApplicationUpdateContainer,
+            directMLBackendInstallerContainer=self.directMLBackendInstallerContainer,
+            low_storage_label=self.low_storage_label,
+            downloadRecommendedBtn=self.downloadRecommendedBtn,
+            downloadTorchBtn=self.downloadTorchBtn,
+            uninstallTorchBtn=self.uninstallTorchBtn,
+            downloadNCNNBtn=self.downloadNCNNBtn,
+            uninstallNCNNBtn=self.uninstallNCNNBtn,
+            downloadTensorRTBtn=self.downloadTensorRTBtn,
+            uninstallTensorRTBtn=self.uninstallTensorRTBtn,
+            downloadDirectMLBtn=self.downloadDirectMLBtn,
+            uninstallDirectMLBtn=self.uninstallDirectMLBtn,
+            uninstallAppBtn=self.uninstallAppBtn,
+            selectPytorchCustomModel=self.selectPytorchCustomModel,
+            selectNCNNCustomModel=self.selectNCNNCustomModel,
         )
         return self.downloadPage
 

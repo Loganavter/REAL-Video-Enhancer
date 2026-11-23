@@ -9,7 +9,8 @@ Designer:
   against the Designer's ``QFont`` temporaries);
 * every page ``DoubleSpinBox`` keeps its step arrows - the Designer's ``QSpinBox`` always had them, and the toolkit
   spells that ``show_step_buttons=True``;
-* an attribute the shell exposes on the window may not shadow a ``QMainWindow`` member;
+* an attribute the shell exposes on the window may not shadow a ``QMainWindow`` member - and since 2026-11-23 the
+  declared surface is the typed handle set, not a copy of the pages' attributes;
 * the three shapes the Designer left behind may not grow: generated ``name_<N>`` object names, bare ``QWidget``/``QFrame``
   wrappers that exist only to hold a layout, and ``QSpacerItem`` spacers. Each is a per-file count that may only shrink;
   removing one means dropping the same count here, which is the point (a baseline that does not shrink is rot).
@@ -21,8 +22,11 @@ The three counts are a ratchet, not a wall: they are accepted debt on the pages 
 from __future__ import annotations
 
 import ast
+import dataclasses
 import re
 from pathlib import Path
+
+from src.ui.pages import handles
 
 ROOT = Path(__file__).resolve().parents[2]
 PAGES = ROOT / "src" / "ui" / "pages"
@@ -79,14 +83,11 @@ KNOWN_SPACERS: dict[str, int] = {
     "tab_6.py": 9,
 }
 
-#: Exposed names that collide with a `QMainWindow` member (a later call to the Qt method/property would
-#: hit the widget instead).
-SHADOWED_QT_ATTRIBUTES: dict[str, str] = {
-    "centralWidget": ("window.py:267 assigns a QWidget under QMainWindow.centralWidget's own name, so "
-                      "window.centralWidget() is a TypeError; reachable through expose()"),
-}
-
-#: `dir(QMainWindow)` public members, as data: generated once from PySide6 6.11 (the app's Qt) so this
+#: Window attributes that collide with a `QMainWindow` member (a later call to the Qt method/property would hit the
+#: widget instead). Empty since 2026-11-23: `centralWidget` was the one record, and it was a collision the deleted
+#: page-attribute copy created (`window.centralWidget` was a QWidget, so `window.centralWidget()` was a TypeError).
+#: The dict stays as the place a deliberate collision has to be recorded, not deleted.
+SHADOWED_QT_ATTRIBUTES: dict[str, str] = {}#: `dir(QMainWindow)` public members, as data: generated once from PySide6 6.11 (the app's Qt) so this
 #: file can assert the shadow direction without importing Qt. Inherited QWidget/QObject names included.
 QT_MAINWINDOW_ATTRIBUTES = frozenset("""
 DockOption PaintDeviceMetric RenderFlag acceptDrops accessibleDescription accessibleIdentifier accessibleName
@@ -185,75 +186,30 @@ def test_every_page_spin_box_keeps_its_step_buttons() -> None:
         ", ".join(offenders))
 
 
-def _is_self(node: ast.AST) -> bool:
-    return (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
-            and node.value.id == "self")
+def _handle_names() -> set[str]:
+    """Every name the typed edge declares: the handle groups' fields.
+
+    Until 2026-11-23 the shell copied each page's public attributes onto the window, and THIS was the surface a
+    `QMainWindow` member could collide with: `centralWidget` was one of the copied names, so `window.centralWidget()`
+    was a `TypeError`. The copy is gone; the declared surface is `WindowHandles`, so the names come from there - the
+    same set `harness/tests/test_page_handles.py` requires the glue to read through.
+    """
+    names: set[str] = set()
+    for field in dataclasses.fields(handles.WindowHandles):
+        annotation = field.type
+        group = getattr(handles, annotation if isinstance(annotation, str) else annotation.__name__)
+        names |= {member.name for member in dataclasses.fields(group)}
+    assert names, "WindowHandles declares no field - this pin would measure an empty surface"
+    return names
 
 
-def _function(node: ast.AST, name: str) -> ast.FunctionDef | None:
-    for child in ast.walk(node):
-        if isinstance(child, ast.FunctionDef) and child.name == name:
-            return child
-    return None
-
-
-def _self_assignments(node: ast.AST) -> dict[str, ast.expr]:
-    """`self.<name> = <value>` inside `node`; a later assignment wins, as it would at runtime."""
-    found: dict[str, ast.expr] = {}
-    for child in ast.walk(node):
-        if isinstance(child, ast.Assign):
-            for target in child.targets:
-                if _is_self(target):
-                    found[target.attr] = child.value
-    return found
-
-
-def _page_classes() -> dict[str, dict[str, ast.expr]]:
-    classes: dict[str, dict[str, ast.expr]] = {}
-    for tree in _page_trees().values():
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                classes[node.name] = _self_assignments(node)
-    return classes
-
-
-def _exposed() -> set[str]:
-    """The attributes `MainWindowShell.build` puts on the window, walking the same `expose()` recursion it uses."""
-    shell_class = next((node for node in _parse(SHELL).body if isinstance(node, ast.ClassDef)), None)
-    assert shell_class is not None, "window.py has no shell class"
-    build = _function(shell_class, "build")
-    assert build is not None, f"{shell_class.name} has no build()"
-    calls = [node for node in ast.walk(build) if isinstance(node, ast.Call)
-             and isinstance(node.func, ast.Name) and node.func.id == "expose"]
-    assert calls, "MainWindowShell.build no longer calls expose(window, self) - the surface this test pins is gone"
-    classes = _page_classes()
-    exposed: set[str] = set()
-
-    def visit(assignments: dict[str, ast.expr]) -> None:
-        for name, value in assignments.items():
-            if name.startswith("_"):
-                continue
-            if not name.endswith("_page"):
-                exposed.add(name)
-                continue
-            called = value.func.id if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) else None
-            assert called in classes, (
-                f"page object {name} builds {ast.unparse(value)}; the walk only follows classes declared in "
-                f"{PAGES.name}/ - teach this walk the new page module")
-            visit(classes[called])
-
-    visit(_self_assignments(build))
-    assert exposed, "the walk produced an empty surface - nothing was parsed"
-    return exposed
-
-
-def test_no_exposed_name_shadows_a_qmainwindow_attribute() -> None:
-    shadows = sorted(_exposed() & QT_MAINWINDOW_ATTRIBUTES)
+def test_no_handle_name_shadows_a_qmainwindow_attribute() -> None:
+    shadows = sorted(_handle_names() & QT_MAINWINDOW_ATTRIBUTES)
     unrecorded = [name for name in shadows if name not in SHADOWED_QT_ATTRIBUTES]
     stale = sorted(set(SHADOWED_QT_ATTRIBUTES) - set(shadows))
     assert not unrecorded, (
-        f"these exposed attributes shadow a QMainWindow method or property of the same name: {unrecorded} - "
-        "rename the widget, or record the deliberate collision in SHADOWED_QT_ATTRIBUTES with the reason")
+        f"these handle names are also QMainWindow methods or properties: {unrecorded} - rename the widget, or record "
+        "the deliberate collision in SHADOWED_QT_ATTRIBUTES with the reason")
     assert not stale, f"SHADOWED_QT_ATTRIBUTES records collisions that no longer exist: {stale} - drop them"
 
 

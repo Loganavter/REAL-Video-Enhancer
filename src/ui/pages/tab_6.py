@@ -324,6 +324,7 @@ class Tab6Page:
             audio_encoder=self.audio_encoder,
             audio_bitrate=self.audio_bitrate,
             subtitle_encoder=self.subtitle_encoder,
+            encoderSettings=self.encoderSettings,
         )
         self.retranslate()
         return self.tab_6

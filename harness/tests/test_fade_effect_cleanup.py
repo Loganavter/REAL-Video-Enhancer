@@ -63,5 +63,5 @@ def test_the_window_and_its_page_stack_carry_no_graphics_effect():
     window = QMainWindow()
     MainWindowShell().build(window)
     assert window.graphicsEffect() is None, "the window must not be painted through an opacity surface"
-    assert window.stackedWidget.graphicsEffect() is None, "the page stack must paint directly"
+    assert window.page_handles.menu.stackedWidget.graphicsEffect() is None, "the page stack must paint directly"
     app.processEvents()

@@ -550,6 +550,12 @@ class ProcPagePage:
             FPS=self.FPS,
             ETA=self.ETA,
             STATUS=self.STATUS,
+            VideoPreview=self.VideoPreview,
+            RenderedPreviewControlsContainer=self.RenderedPreviewControlsContainer,
+            renderPreviewBtn=self.renderPreviewBtn,
+            startTimeSpinBox=self.startTimeSpinBox,
+            endTimeSpinBox=self.endTimeSpinBox,
+            timeInVideoScrollBar=self.timeInVideoScrollBar,
         )
         self.retranslate()
         return self.procPage

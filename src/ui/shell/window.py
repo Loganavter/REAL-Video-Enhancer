@@ -13,10 +13,13 @@ colours are `button.dialog.default.*` tokens, and the pages bring their own surf
 no-op on those widgets - the painter owns their pixels - which is exactly what `qss-on-adapter` in
 `harness/scripts/ui_gates.py` now catches in this directory too.
 
-The one deliberate difference: RVE's glue binds widgets as attributes of the window (`self.output_folder_location`,
-`self.label_20`, ...), and pages keep theirs as attributes of the page object. `expose()` merges the two worlds once,
-recursively, so glue written against `Ui_MainWindow` keeps working unchanged - which is what makes the shell removable
-from the glue's point of view.
+The window copies no page widget onto itself any more. RVE's glue used to reach every page widget as an attribute of
+the window (`self.output_folder_location`, `self.label_20`, ...), which a recursive page-attribute copy produced by
+putting a page's (and its descendants') attributes on the window. That is gone (2026-11-23): the names were never
+declared anywhere, so a widget that stopped being built failed at first click, and 16 of the 459 copied names were
+reachable only through `getattr(..., None)` and failed silently. The window now composes `page_handles`
+(`src/ui/pages/handles.py`) once and copies nothing; its own glue and the page glue read
+`self.page_handles.<group>.<name>`, a required dataclass field that the owning page builds.
 """
 
 from __future__ import annotations
@@ -44,13 +47,9 @@ PAGE_INSET_H = 10
 PAGE_INSET_V = 5
 
 
-def expose(window, page) -> None:
-    """Put a page's (and its descendants') widgets on the window - the surface RVE's glue already binds."""
-    for name, value in vars(page).items():
-        if name.endswith("_page"):
-            expose(window, value)
-        elif not name.startswith("_"):
-            setattr(window, name, value)
+# The page-attribute copy lived here until 2026-11-23: it copied every public attribute of each page onto the window,
+# recursively. The typed handles in `src/ui/pages/handles.py` replace it and no shim re-creates the old surface - a
+# name that comes back through a compatibility copy is a name nobody declares again.
 
 
 class MainWindowShell:
@@ -228,13 +227,15 @@ class MainWindowShell:
         self.gridLayout.addWidget(self.leftMenuContainer, 0, 0, 1, 1)
         window.setCentralWidget(self.centralwidget)
         # The glue's typed edge over the pages and the nav stack. Each page built its own group in `build()`; this
-        # composes them once, so glue reads `window.page_handles.<group>.<name>` and a missing widget is a
-        # `TypeError` at page build. The selector keeps the stack's index contract behind a page NAME.
+        # composes them once, on the WINDOW, so glue reads `window.page_handles.<group>.<name>` and a missing widget is a
+        # `TypeError` at page build. Nothing is copied onto the window beside this object (the deleted page-attribute
+        # copy did). The selector keeps the stack's index contract behind a page NAME.
         self.page_handles = WindowHandles(
             general=self.procPage_page.generalSettings_page._handles,
             proc=self.procPage_page._handles,
             queue=self.procPage_page.renderQueueTab_page._handles,
             settings=self.settingsPage_page._handles,
+            home=self.homePage_page._handles,
             output=self.settingsPage_page.tab_2_page._handles,
             render_settings=self.settingsPage_page.tab_3_page._handles,
             app_settings=self.settingsPage_page.tab_4_page._handles,
@@ -252,6 +253,7 @@ class MainWindowShell:
             ),
         )
         self.page_handles.menu.pages.show("proc")
+        window.page_handles = self.page_handles
         QMetaObject.connectSlotsByName(window)
         # The window paints the page colour itself. Every surface inside is token-painted, and a surface that fails to
         # paint (a missing token, a widget built before the theme) then shows the DESKTOP through a compositing WM -
@@ -299,8 +301,6 @@ class MainWindowShell:
         _window_palette.setColor(QPalette.ColorRole.Window, _backdrop)
         window.setPalette(_window_palette)
 
-        expose(window, self)
-
         # The nav stack needs the same guarantee `TopTabHost` gives its sub-tabs: `QStackedLayout` in StackOne mode lays
         # out only the page it shows, so `procPage`/`settingsPage`/`downloadPage` sat at Qt's 640x480 while hidden and
         # the audit caught exactly that (2026-11-22). Showing one then clips its content at the old width until a window
@@ -314,6 +314,7 @@ class MainWindowShell:
 
         _FIT_DISABLED = bool(_fit_env.environ.get("RVE_UI_NO_FIT_PAGES"))
         _SETTLE_DISABLED = bool(_fit_env.environ.get("RVE_UI_NO_SETTLE"))
+        _stack = self.stackedWidget
 
         class _PageStackFit(QObject):
             def eventFilter(self, watched, event):
@@ -333,7 +334,7 @@ class MainWindowShell:
                 """
                 if _FIT_DISABLED:
                     return
-                stack = window.stackedWidget
+                stack = _stack
                 # The page's box is the stack MINUS its page inset (`setContentsMargins(PAGE_INSET_H, PAGE_INSET_V, ...)`),
                 # not the stack's outer rect: the outer size is 2*PAGE_INSET_H wider and 2*PAGE_INSET_V taller than the
                 # box `QStackedLayout` actually gives a page. Laying every page out for the outer size (and leaving it
@@ -364,12 +365,12 @@ class MainWindowShell:
 
         _page_fit = _PageStackFit(window)
         _page_fit.fit()
-        window.stackedWidget.installEventFilter(_page_fit)
+        _stack.installEventFilter(_page_fit)
         # A page switch is not a Resize/Show of the stack, so the filter above never sees it: the newly current page
         # would keep its children laid out for the box it had while hidden until the queued layout request ran. Settle
         # the page that was just shown, in the same turn the switch happens.
-        window.stackedWidget.currentChanged.connect(
-            lambda index: _page_fit.fit(only=window.stackedWidget.widget(index))
+        _stack.currentChanged.connect(
+            lambda index: _page_fit.fit(only=_stack.widget(index))
         )
 
         window._page_stack_fit = _page_fit

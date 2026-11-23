@@ -336,7 +336,7 @@ def install(window) -> None:
             window.loadVideo(path)
         out = "/tmp/opencode/live-queue-out"
         _os.makedirs(out, exist_ok=True)
-        window.outputFileText.setText(out)
+        window.page_handles.general.outputFileText.setText(out)
 
         def add(ticks: int = 0) -> None:
             probe = getattr(window, "_batchProbe", None)
@@ -344,18 +344,17 @@ def install(window) -> None:
                 QTimer.singleShot(100, lambda: add(ticks + 1))
                 return
             window.addToRenderQueue()
-            if window.renderQueueListWidget.count() == 0:
+            if window.page_handles.queue.renderQueueListWidget.count() == 0:
                 # No op runs without a model selected; the probe is a measurement tool, so it states one instead of
                 # reporting "0 rows" with no reason.
                 report["error"] = "nothing added (no model selected?)"
-                box = getattr(window, "upscaleCheckBox", None)
-                combo = getattr(window, "upscaleModelComboBox", None)
-                if box is not None and combo is not None:
-                    box.setChecked(True)
-                    if combo.count():
-                        combo.setCurrentIndex(combo.count() - 1)
-                    window.addToRenderQueue()
-            report["rows"] = window.renderQueueListWidget.count()
+                box = window.page_handles.general.upscaleCheckBox
+                combo = window.page_handles.general.upscaleModelComboBox
+                box.setChecked(True)
+                if combo.count():
+                    combo.setCurrentIndex(combo.count() - 1)
+                window.addToRenderQueue()
+            report["rows"] = window.page_handles.queue.renderQueueListWidget.count()
             report["files"] = [row.inputFile for row in window.renderQueue.getQueue()]
             _finish(report)
             print(f"capture-server: queue {path} -> {report['rows']} rows", flush=True)
@@ -390,7 +389,7 @@ def install(window) -> None:
         moved = queue_model.moveSelected(direction.strip())
         for _ in range(8):
             QApplication.processEvents()
-        widget = window.renderQueueListWidget
+        widget = window.page_handles.queue.renderQueueListWidget
         _finish({"stamp": _stamp(), "kind": "move", "moved": bool(moved),
                  "rows": widget.count(), "selectedRows": widget.selectedRows(),
                  "order": [row.inputFile for row in queue_model.getQueue()],
@@ -579,7 +578,7 @@ def install(window) -> None:
                 window.renderQueue.mark_finished(job)
             elif fraction_text:
                 window.renderQueue.update_progress(job, float(fraction_text))
-            window.renderQueueListWidget.update()
+            window.page_handles.queue.renderQueueListWidget.update()
             for _ in range(4):
                 QApplication.processEvents()
             report["state"] = (job.state.status, job.state.progress)
@@ -693,28 +692,27 @@ def install(window) -> None:
 
         def backend_of() -> str | None:
             """Which backend the job actually runs on - the payload has to say, or a stall cannot be attributed."""
-            for attr in ("backendComboBox", "backend_combo", "backend"):
-                combo = getattr(window, attr, None)
-                if combo is not None and hasattr(combo, "currentText"):
-                    try:
-                        text = combo.currentText()
-                    except Exception:
-                        continue
-                    if text:
-                        return str(text)
+            combo = window.page_handles.general.backendComboBox
+            if combo is not None and hasattr(combo, "currentText"):
+                try:
+                    text = combo.currentText()
+                except Exception:
+                    text = ""
+                if text:
+                    return str(text)
             return None
 
         def progress_sample() -> dict:
             """What the UI says about the job right now - a timeout without this cannot tell a slow model load from a
             frame loop that never advances, and the previous run's `finished: False` said only that."""
-            bar = getattr(window, "progressBar", None)
+            bar = window.page_handles.proc.progressBar
             queue = getattr(window, "renderQueue", None)
             sample = {
-                "bar": int(bar.value()) if bar is not None else None,
-                "bar_max": int(bar.maximum()) if bar is not None else None,
+                "bar": int(bar.value()),
+                "bar_max": int(bar.maximum()),
                 "queue": len(getattr(queue, "queue", []) or []) if queue is not None else None,
-                "start_enabled": bool(window.startRenderButton.isEnabled()),
-                "status": (getattr(window, "STATUS", None).text() if getattr(window, "STATUS", None) is not None else None),
+                "start_enabled": bool(window.page_handles.proc.startRenderButton.isEnabled()),
+                "status": window.page_handles.proc.STATUS.text(),
                 "backend": backend_of(),
             }
             return sample
@@ -722,7 +720,7 @@ def install(window) -> None:
         def wait_finish(ticks: int = 0) -> None:
             if ticks % 50 == 0:                  # one sample every 5 s, so 15 per minute of a long model load
                 result.setdefault("trace", []).append({"t": round(time.time() - started_at, 1), **progress_sample()})
-            if window.startRenderButton.isEnabled() and result["started"]:
+            if window.page_handles.proc.startRenderButton.isEnabled() and result["started"]:
                 result["finished"] = True
                 finish()
                 return
@@ -734,7 +732,7 @@ def install(window) -> None:
         def press_start(ticks: int = 0) -> None:
             if len(getattr(window.renderQueue, "queue", []) or []) > 0:
                 result["started"] = True
-                window.startRenderButton.click()
+                window.page_handles.proc.startRenderButton.click()
                 QTimer.singleShot(250, wait_finish)
                 return
             if ticks > 100:                      # 100 * 100 ms = 10 s
@@ -748,7 +746,7 @@ def install(window) -> None:
             The default is TensorRT, and its engine build blocks forever here (measured: the backend child sits in
             `futex_wait` at ~4 % CPU while the app waits on its stdout, ProcessTab.py:323). Torch/PyTorch runs.
             """
-            combo = getattr(window, "backendComboBox", None)
+            combo = window.page_handles.general.backendComboBox
             if combo is None or not hasattr(combo, "count"):
                 return
             for index in range(combo.count()):
@@ -764,26 +762,29 @@ def install(window) -> None:
             The gate enables upscale (the model list is populated from the models directory) and picks the first model,
             because a queue that cannot be filled would make the rest of the gate measure nothing.
             """
-            boxes = ("interpolateCheckBox", "upscaleCheckBox", "deblurCheckBox", "denoiseCheckBox",
-                     "decompressCheckBox")
-            if any(getattr(window, name, None) is not None and getattr(window, name).isChecked() for name in boxes):
+            boxes = (
+                window.page_handles.general.interpolateCheckBox,
+                window.page_handles.general.upscaleCheckBox,
+                window.page_handles.general.deblurCheckBox,
+                window.page_handles.general.denoiseCheckBox,
+                window.page_handles.general.decompressCheckBox,
+            )
+            if any(box.isChecked() for box in boxes):
                 return
-            box = getattr(window, "upscaleCheckBox", None)
-            if box is not None:
-                box.setChecked(True)
-            combo = getattr(window, "upscaleModelComboBox", None)
-            if combo is not None and combo.currentIndex() < 0 and combo.count() > 0:
+            combo = window.page_handles.general.upscaleModelComboBox
+            window.page_handles.general.upscaleCheckBox.setChecked(True)
+            if combo.currentIndex() < 0 and combo.count() > 0:
                 combo.setCurrentIndex(0)
 
         def press_add() -> None:
             select_a_backend()
             select_a_model()
-            window.addToRenderQueueButton.click()
+            window.page_handles.general.addToRenderQueueButton.click()
             QTimer.singleShot(200, press_start)
 
         def wait_loaded(ticks: int = 0) -> None:
-            info = getattr(window, "inputVideoInfoTextEdit", None)
-            loaded = bool(info is not None and info.toPlainText().strip()) or getattr(window, "videoLength", 1) != 1
+            info = window.page_handles.general.inputVideoInfoTextEdit
+            loaded = bool(info.toPlainText().strip()) or getattr(window, "videoLength", 1) != 1
             if loaded:
                 press_add()
                 return
@@ -792,7 +793,7 @@ def install(window) -> None:
                 return
             QTimer.singleShot(100, lambda: wait_loaded(ticks + 1))
 
-        window.inputFileText.setText(video)
+        window.page_handles.general.inputFileText.setText(video)
         QTimer.singleShot(300, wait_loaded)
 
     def capture(wanted: str) -> None:

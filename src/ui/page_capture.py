@@ -28,6 +28,21 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (text or "page").lower()).strip("-") or "page"
 
 
+def _page_stack(window):
+    """The nav stack: the typed handle when the window carries one, else the stack's object name.
+
+    Until 2026-11-23 the stack was also an attribute of the window (a page-attribute copy); the handles
+    (`src/ui/pages/handles.py`) are the declared edge now, and the object-name fallback keeps a dump harness's stub
+    window working.
+    """
+    from PySide6.QtWidgets import QStackedWidget
+
+    handles = getattr(window, "page_handles", None)
+    if handles is not None:
+        return handles.menu.stackedWidget
+    return window.findChild(QStackedWidget, "stackedWidget")
+
+
 def steps(window) -> list[tuple[str, object]]:
     """Every page of the window as ``(name, action that shows it)``.
 
@@ -36,7 +51,7 @@ def steps(window) -> list[tuple[str, object]]:
     """
     from PySide6.QtWidgets import QTabWidget
 
-    stack = getattr(window, "stackedWidget", None)
+    stack = _page_stack(window)
     if stack is None:
         return []
     found: list[tuple[str, object]] = []
@@ -90,7 +105,7 @@ def is_current(window, name: str) -> bool:
     `shot nav2-tab1` wrote the download page, and the comparison charged that mismatch to the branch.
     """
     match = re.fullmatch(r"nav(\d+)(?:-tab(\d+))?", name)
-    stack = getattr(window, "stackedWidget", None)
+    stack = _page_stack(window)
     if match is None or stack is None:
         return False
     index = int(match.group(1))
@@ -199,8 +214,10 @@ def _stabilise_state(window) -> None:
     # is a different encoder in two builds (stock `libx264`, ours `x265_nvenc`) and the page then differs in the command
     # line it shows - a state difference, not a UI one.
     wanted = {"encoder": "libx264", "upscaleModelComboBox": None}
+    handles = window.page_handles
+    pinned = {"encoder": handles.encoder.encoder, "upscaleModelComboBox": handles.general.upscaleModelComboBox}
     for name, preferred in wanted.items():
-        combo = getattr(window, name, None)
+        combo = pinned[name]
         if not _is_combo(combo) or combo.count() == 0:
             continue
         target = 0
