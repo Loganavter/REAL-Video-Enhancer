@@ -499,6 +499,28 @@ class UpscalePytorch:
             frames.append(f)
         return frames
 
+    def _assert_model_geometry(self, output, *, expected=None, path: str = "") -> None:
+        """Refuse an output tensor whose geometry is not the one the writer was told.
+
+        `Frame(...)` is built at `videoWidth * scale` and everything downstream - the override resize,
+        the pipe, the writer's `-s` - is told that size, so a model emitting another stride turns into
+        a silent crop or a reshape failure in a thread with no window to report it. The load-time probe
+        in `UpscaleModelWrapper` is what makes the scale true; this is the check that a tensor which
+        contradicts it cannot reach a writer that trusts it (measured live 2026-11-23: a descriptor at
+        4x, frames at 2x).
+        """
+        shape = getattr(output, "shape", None)
+        if shape is None or len(shape) != 4:
+            return  # the int8 tail hands back a packed uint8 payload, not an image tensor
+        want_h, want_w = expected if expected is not None else (
+            int(self.videoHeight) * int(self.scale), int(self.videoWidth) * int(self.scale))
+        got_h, got_w = int(shape[-2]), int(shape[-1])
+        if (got_h, got_w) != (int(want_h), int(want_w)):
+            raise ValueError(
+                f"model {os.path.basename(self.modelPath)} returned {got_w}x{got_h}, but this render "
+                f"sizes its output for scale {self.scale} ({want_w}x{want_h}); the model's own stride "
+                f"and the scale the writer will be told disagree ({path or 'render path'})")
+
     @torch.inference_mode()
     def _call_single(self, image: Frame) -> Frame:
         dtype = image.dtype
@@ -561,6 +583,8 @@ class UpscalePytorch:
                 self._fp16_ev = (_fs, _fe)
             else:
                 output = self.renderTiledImage(image_tensor)
+
+            self._assert_model_geometry(output, path="UpscaleTorch._call_single")
 
             # Split of the timed region: the engine call, the output Frame's own
             # construction, and the handover. `last_inference_ms` measures the whole block,
@@ -783,6 +807,13 @@ class UpscalePytorch:
                 output_tile = self.upscale_model_wrapper(
                     input_tile
                 )
+                # the crop below silently shrinks a tile whose stride is not `scale`, and the pasted
+                # picture is then a mosaic of one scale on a canvas of another
+                self._assert_model_geometry(
+                    output_tile,
+                    expected=(int(input_tile.shape[-2]) * int(scale),
+                              int(input_tile.shape[-1]) * int(scale)),
+                    path="UpscaleTorch.renderTiledImage")
 
                 output_tile = output_tile[:, :, : h * scale, : w * scale]
 
