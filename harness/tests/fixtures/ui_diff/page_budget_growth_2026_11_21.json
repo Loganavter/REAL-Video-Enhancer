@@ -1,0 +1,60 @@
+{
+  "provenance": "harness/docs/wsp/verified/logs/ui-page-diff-2026-11-21.json (pages.*.over8_pct, budget) @ 9ddb7322",
+  "provenance_note": "The measured run the per-page ratchet replaced: 13 pages compared against the Designer build, a flat budget of 0.05, six pages over it (budget 0.05, failed contains nav0/nav2-tab0/nav2-tab1/nav2/nav3-tab0/nav3). Against today's PAGE_BASELINE the same rows still refuse four pages (nav0 0.168, nav2-tab1 0.748, nav3-tab0 3.137, nav3 3.137 - all above the 0.05 floor) and now pass the two Process rows (nav2-tab0 and nav2 at 0.393, inside the measured 6.0), which is the per-page entry doing its job. The numbers are history, not the current baseline: the table's docstring says a number from the Designer-era run must not be re-baselined.",
+  "refused": 4,
+  "page": "nav3-tab0.png",
+  "rows": [
+    {
+      "page": "nav0.png",
+      "over8_pct": 0.168
+    },
+    {
+      "page": "nav1.png",
+      "over8_pct": 0.0
+    },
+    {
+      "page": "nav2-tab0.png",
+      "over8_pct": 0.393
+    },
+    {
+      "page": "nav2-tab1.png",
+      "over8_pct": 0.748
+    },
+    {
+      "page": "nav2-tab2.png",
+      "over8_pct": 0.0
+    },
+    {
+      "page": "nav2-tab3.png",
+      "over8_pct": 0.0
+    },
+    {
+      "page": "nav2-tab4.png",
+      "over8_pct": 0.0
+    },
+    {
+      "page": "nav2.png",
+      "over8_pct": 0.393
+    },
+    {
+      "page": "nav3-tab0.png",
+      "over8_pct": 3.137
+    },
+    {
+      "page": "nav3-tab1.png",
+      "over8_pct": 0.0
+    },
+    {
+      "page": "nav3-tab2.png",
+      "over8_pct": 0.0
+    },
+    {
+      "page": "nav3.png",
+      "over8_pct": 3.137
+    },
+    {
+      "page": "nav4.png",
+      "over8_pct": 0.0
+    }
+  ]
+}
