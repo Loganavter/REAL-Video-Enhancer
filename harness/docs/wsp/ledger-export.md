@@ -921,7 +921,7 @@ rather than on a hunch.
    The cost is one hour: force `CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD` on a single 3x3 64->64 conv at
    1920x1080 fp16 NHWC, with fp32 NCHW as a control, and print the algorithm the v7 query returns.
    Both outcomes are informative and neither is currently known. Queue entry:
-   `harness/docs/backlog/queue.yaml` `rve-winograd-tactics-2026-11-15`.
+   `docs/backlog/queue.yaml` `rve-winograd-tactics-2026-11-15`.
    (E17 used to be listed here as a micro-optimisation; it is now part of E9' above, where it turned
    out not to unlock anything.)
 4. **P8 / P9 / N2 / N3 / N4** - quality-of-life and encoder-side, only if x265 or per-plane tile
@@ -2932,7 +2932,7 @@ Written down because these are structural closures - true by the shape of our ne
 by us - and because the reopened item was previously dismissed on a measurement that does not answer
 the question it was cited for. Nothing in this section is our measurement; every number attributed
 to a paper is the paper's, about its own hardware. The queue that turns the open ones into
-experiments is `harness/docs/backlog/queue.yaml`; who runs what is `harness/docs/backlog/DELEGATION.md`.
+experiments is `docs/backlog/queue.yaml`; who runs what is `harness/docs/backlog/DELEGATION.md`.
 
 **Closed by construction, so nobody re-enters them:**
 

@@ -131,7 +131,7 @@ the model for a smaller one (owner decision - the model menu is the product); fr
 
 - Numbers live in `harness/docs/wsp/verified/` with records; this page cites ids and dates, and a value that moves is
   changed here only after its record moves.
-- Work items live in `harness/docs/backlog/queue.yaml` with `gpu:`, `refutes:` and `acceptance:`; a probe that this
+- Work items live in `docs/backlog/queue.yaml` with `gpu:`, `refutes:` and `acceptance:`; a probe that this
   page lists as worth its cost must exist there before it is run.
 - **The lane ratio (1.141x) is a lane-level number, not a per-change one.** It is re-taken when a MATERIAL
   change lands (one that could move the frame by more than the digest of the changes since), or when a
