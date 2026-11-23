@@ -103,6 +103,10 @@ class VideoPreviewSurface(QRhiWidget):
         #: precedents. The pane is therefore always opaque, with the page's own colour.
         self._clear_colour = self.palette().window().color()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # Hover feedback on the strip (marker + forbidden cursor over the unprocessed part) needs move events while no
+        # button is held; without tracking, `mouseMoveEvent` only arrives during a drag (measured: the cursor never
+        # changed in the hover test).
+        self.setMouseTracking(True)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt spelling
         """A floor for the pane, in design px through the toolkit scale.
@@ -143,7 +147,11 @@ class VideoPreviewSurface(QRhiWidget):
         else:
             picture = image.convertToFormat(QImage.Format.Format_RGBA8888)
             if self._frame is not None and picture.size() != self._frame.size():
-                picture = picture.scaled(self._frame.size(), Qt.AspectRatioMode.IgnoreAspectRatio,
+                # KEEP the source's proportions. The source and the render normally share an aspect, but a render can
+                # change dimensions (border-detect crops, an odd scale) and a stretched compare would then show a
+                # straight line where the picture has a curve - a difference the viewer invented. Nearest is still the
+                # filter: cheapest, and it adds no information.
+                picture = picture.scaled(self._frame.size(), Qt.AspectRatioMode.KeepAspectRatio,
                                          Qt.TransformationMode.FastTransformation)
             self._original = picture
         self._texture_dirty = True

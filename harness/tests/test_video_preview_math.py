@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPointF, QRectF, QSize  # noqa: E402
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt  # noqa: E402
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -89,8 +89,8 @@ def test_the_hud_has_one_rect_per_marker_and_a_track(surface):
     surface.reset_view()
     surface.set_progress(rendered=5.0, total=20.0, playhead=2.5, duration=20.0)
     vertices = surface._hud_vertices()
-    # track + rendered range + render head + playhead + handle = 5 rects, 6 vertices each, 6 floats per vertex
-    assert len(vertices) == 5 * 6 * 6
+    # track + rendered range + playhead halo + playhead line + handle halo + handle = 6 rects, 6 vertices, 6 floats
+    assert len(vertices) == 6 * 6 * 6
     surface.set_progress(0.0, 0.0, 0.0, 0.0)
     assert len(surface._hud_vertices()) == 1 * 6 * 6, "with no progress only the track is drawn"
 
@@ -107,3 +107,43 @@ def test_the_original_flag_is_what_swaps_the_picture(surface):
     assert surface._original is not None
     surface.set_original(None)
     assert surface._original is None
+
+
+def test_the_compare_keeps_the_sources_proportions(surface):
+    """An upscaler can change the frame's aspect (border-detect crops). The source is stretched to the RENDER's size to
+    make the compare pixel-aligned, but never distorted: with `IgnoreAspectRatio` a straight line would appear where the
+    picture has a curve, and the viewer would be comparing its own artefact."""
+    surface.reset_view()
+    wide = QImage(800, 200, QImage.Format.Format_RGBA8888)
+    wide.fill(QColor("white"))
+    surface.set_original(wide)
+    frame = surface._frame.size()
+    expected_height = round(frame.width() * 200 / 800)   # 4:1 kept: width fills, height follows
+    assert surface._original.size() == QSize(frame.width(), expected_height), (
+        f"800x200 into a {frame.width()}x{frame.height()} render must letterbox, not stretch: "
+        f"{surface._original.size().toTuple()}")
+    surface.set_original(None)
+
+
+def test_the_strip_refuses_a_seek_past_the_produced_edge(surface):
+    surface.reset_view()
+    surface.set_progress(rendered=12.0, total=20.0, playhead=6.0, duration=20.0)   # 60 % produced
+    assert surface._seekable(0.5)
+    assert not surface._seekable(0.75)
+    assert surface._seekable(0.0)
+    surface.set_progress(0.0, 0.0, 6.0, 20.0)   # a finished file: everything is there
+    assert surface._seekable(1.0)
+
+
+def test_hover_marks_the_unprocessed_part_with_a_forbidden_cursor(surface):
+    surface.reset_view()
+    surface.set_progress(rendered=12.0, total=20.0, playhead=6.0, duration=20.0)
+    strip = surface._strip_rect()
+    surface._update_hover(QPointF(strip.left() + strip.width() * 0.3, strip.center().y()))
+    assert surface._hover_blocked is False
+    assert surface.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    surface._update_hover(QPointF(strip.left() + strip.width() * 0.85, strip.center().y()))
+    assert surface._hover_blocked is True
+    assert surface.cursor().shape() == Qt.CursorShape.ForbiddenCursor, (
+        "the pointer must say that nothing has been produced there")
+    assert surface._hover_fraction is not None
