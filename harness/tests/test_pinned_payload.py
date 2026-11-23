@@ -41,7 +41,6 @@ from src.utils.Frame import (  # noqa: E402
     PinnedSlotPool,
     _as_byte_view,
 )
-from src.utils.PreviewChannel import FMT_YUV420 as PREVIEW_FMT_YUV420  # noqa: E402
 
 # 4320x7680 is the geometry the task is written against (8K 16:9)
 W8K, H8K = 7680, 4320
@@ -835,23 +834,6 @@ def test_a_packed_payload_without_the_ring_is_handed_on_as_bytes():
     out = frame.get_frame_bytes()
     assert isinstance(out, np.ndarray) and out.dtype == np.uint8
     assert out.tobytes() == data.numpy().tobytes()
-
-
-def test_a_packed_payload_preview_is_sampled_yuv():
-    """The information channel takes the payload's own planes at thumbnail size: Y at
-    `w*h`, U and V at `(w+1)//2` x `(h+1)//2`. Grey in, grey out pins shape and range, and
-    the assertion that it is *not* RGB pins the format the reader must decode."""
-    torch, FrameModule = _torch_env()
-    width, height = 8, 6
-    frame, _data = _payload_frame(FrameModule, torch, width, height, pooled=False)
-    frame._tensor = torch.full((width * height + 2 * (height // 2) * (width // 2),), 128,
-                               dtype=torch.uint8)
-    payload, fmt = frame.preview_small(width, height)
-    assert fmt == PREVIEW_FMT_YUV420
-    expected = width * height + 2 * ((width + 1) // 2) * ((height + 1) // 2)
-    assert len(payload) == expected, "sampled planes, not an rgb picture"
-    levels = np.frombuffer(payload, np.uint8)
-    assert levels.min() == 128 and levels.max() == 128, "128 stays 128 through the sampler"
 
 
 def test_an_image_tensor_is_never_mistaken_for_a_payload():

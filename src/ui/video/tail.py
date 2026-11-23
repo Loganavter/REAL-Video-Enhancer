@@ -52,6 +52,7 @@ def _default_container_factory(path: str):
     return av.open(path, mode="r")
 
 
+
 class TailReader(QObject):
     """Decode what a growing file has already written; poll for the rest."""
 

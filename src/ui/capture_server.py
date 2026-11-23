@@ -455,6 +455,42 @@ def install(window) -> None:
         print(f"capture-server: where -> app {report['app_repo'].get('head')} toolkit "
               f"{report['toolkit_repo'].get('head') if report['toolkit_repo'] else 'n/a'}", flush=True)
 
+    def tail_state() -> None:
+        """The live preview reader's own state: `tail:`.
+
+        "The pane shows nothing" has four different causes - no reader, a file that will not open, a reader that
+        opened and read nothing, a reader that is held by the transport - and they look identical from outside. This
+        answer tells them apart without a screenshot.
+        """
+        tab = getattr(window, "processTab", None)
+        tail = getattr(tab, "_live_tail", None) if tab is not None else None
+        report = {"stamp": _stamp(), "kind": "tail", "path": getattr(tab, "_live_tail_path", None),
+                  "wanted": bool(getattr(tab, "_live_tail_wanted", False)), "paused": None,
+                  "published": None, "produced": None, "thread": None, "reader": None, "error": None}
+        if tail is None:
+            report["error"] = "no live tail"
+            _finish(report)
+            return
+        reader = getattr(tail, "_reader", None)
+        report.update({
+            "paused": bool(getattr(tail, "paused", False)),
+            "published": int(getattr(tail, "published_frames", 0) or 0),
+            "produced": float(getattr(tail, "produced_seconds", 0.0) or 0.0),
+            "thread": "running" if tail.isRunning() else "stopped",
+            "reader": None if reader is None else {
+                "path": getattr(reader, "_path", None),
+                "size": getattr(reader, "_size", None),
+                "emitted": getattr(reader, "_emitted", None),
+                "last_pts": getattr(reader, "_last_pts", None),
+                "exhausted": getattr(reader, "_exhausted", None),
+                "open_failures": getattr(reader, "_open_failures", None),
+                "decode_failures": getattr(reader, "_decode_failures", None),
+                "container": type(getattr(reader, "_container", None)).__name__,
+            },
+        })
+        _finish(report)
+        print(f"capture-server: tail {report}", flush=True)
+
     def widget_state(name: str) -> None:
         """The interactive state of one named widget: `state:<objectName>`.
 
@@ -474,11 +510,17 @@ def install(window) -> None:
             _finish(report)
             print(f"capture-server: state {name!r} -> widget not found", flush=True)
             return
+        from PySide6.QtCore import QPoint as _QPoint
+
+        origin = target.mapToGlobal(_QPoint(0, 0))
         report.update({
             "class": type(target).__name__,
             "enabled": bool(target.isEnabled()),
             "visible": bool(target.isVisible()),
             "size": [target.width(), target.height()],
+            # Where the widget actually is on the screen: a screenshot diff of "does this pane move" needs the
+            # rectangle, and the window can be placed anywhere on the X root by the environment.
+            "global": [origin.x(), origin.y()],
             # The window's own attributes: `opaque_paint` is the flag that used to make the shell skip repaints.
             "parent": type(target.parentWidget()).__name__ if target.parentWidget() else None,
             "parent_name": target.parentWidget().objectName() if target.parentWidget() else None,
@@ -634,6 +676,9 @@ def install(window) -> None:
             return
         if wanted.startswith("state:"):
             widget_state(wanted[len("state:"):])
+            return
+        if wanted.startswith("tail:"):
+            tail_state()
             return
         if wanted.startswith("click:"):
             click(wanted[len("click:"):])

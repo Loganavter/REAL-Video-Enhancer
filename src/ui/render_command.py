@@ -38,9 +38,6 @@ class RenderPaths:
     models_path: str
     custom_models_path: str
     paused_shared_memory_id: str
-    preview_shared_memory_id: str
-    preview_width: int
-    preview_height: int
 
 
 def app_paths() -> RenderPaths:
@@ -49,12 +46,9 @@ def app_paths() -> RenderPaths:
         BACKEND_PATH,
         CWD,
         FFMPEG_PATH,
-        IMAGE_SHARED_MEMORY_ID,
         MODELS_PATH,
         CUSTOM_MODELS_PATH,
         PAUSED_STATE_SHARED_MEMORY_ID,
-        PREVIEW_HEIGHT,
-        PREVIEW_WIDTH,
         PYTHON_EXECUTABLE_PATH,
     )
 
@@ -66,9 +60,6 @@ def app_paths() -> RenderPaths:
         models_path=MODELS_PATH,
         custom_models_path=CUSTOM_MODELS_PATH,
         paused_shared_memory_id=PAUSED_STATE_SHARED_MEMORY_ID,
-        preview_shared_memory_id=IMAGE_SHARED_MEMORY_ID,
-        preview_width=PREVIEW_WIDTH,
-        preview_height=PREVIEW_HEIGHT,
     )
 
 
@@ -240,14 +231,6 @@ def build_command(render_options, settings, is_overwrite: bool = False, paths: R
     # shipped statistic, so an old settings.txt that predates the key cannot mean something else.
     elif settings.settings.get("temporal_reuse_statistic", "mean_abs") == "coarse":
         command += ["--temporal_reuse_statistic", "coarse"]
-
-    if settings.settings["preview_enabled"] == "True":
-        command += [
-            "--preview_shared_memory_id",
-            f"{paths.preview_shared_memory_id}",
-            "--preview_size",
-            f"{paths.preview_width}x{paths.preview_height}",
-        ]
 
     if settings.settings["scene_change_detection_enabled"] == "False":
         command += ["--scene_detect_method", "none"]

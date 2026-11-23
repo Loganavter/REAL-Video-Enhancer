@@ -26,10 +26,7 @@ from ..constants import (
     PYTHON_EXECUTABLE_PATH,
     MODELS_PATH,
     CUSTOM_MODELS_PATH,
-    IMAGE_SHARED_MEMORY_ID,
     PAUSED_STATE_SHARED_MEMORY_ID,
-    PREVIEW_WIDTH,
-    PREVIEW_HEIGHT,
     INPUT_TEXT_FILE,
     FFMPEG_PATH,
     CWD,
@@ -381,11 +378,8 @@ class ProcessTab:
 
     def startGUIUpdate(self):
         
-        self.workerThread = UpdateGUIThread(
-            parent=self,
-            imagePreviewSharedMemoryID=IMAGE_SHARED_MEMORY_ID,
-        )
-        self.workerThread.latestPreviewPixmap.connect(self.updateProcessTab)
+        self.workerThread = UpdateGUIThread(parent=self)
+        self.workerThread.tick.connect(self.updateProcessTab)
         self.workerThread.finished.connect(self.guiChangesOnRenderCompletion)
         self.workerThread.finished.connect(self.workerThread.deleteLater)
         self.workerThread.finished.connect(self.workerThread.quit)
@@ -428,6 +422,13 @@ class ProcessTab:
     ):
         self.return_codes = [] # reset return codes
         self.userKilled = False # reset userkilled
+        # The previous job's picture must not keep playing into this one's pane: a finished preview left a file
+        # decoder running, and its frames would land on top of the live render (and onto the transport's state).
+        self._stop_preview_playback()
+        self._stop_live_tail()
+        # A render is an owner of the pane from its first thumbnail, so the transport must say so now rather than
+        # keep a state left over from the previous job (an enabled button that holds nothing is the trap this closes).
+        self._sync_preview_transport()
         # gui changes
         from time import monotonic
 
@@ -495,7 +496,6 @@ class ProcessTab:
             # The preview block is a fixed-size thumbnail now, not the output frame: its
             # geometry comes from one constant on both sides, so it is allocated before the
             # backend starts and never depends on the output resolution.
-            self.workerThread.createNewSharedMemory(PREVIEW_WIDTH, PREVIEW_HEIGHT)
             self.max_value = renderOptions.videoFrameCount * renderOptions.interpolateTimes
             command = self.build_command(renderOptions)
             log(str(command))
@@ -518,7 +518,7 @@ class ProcessTab:
                 command,
                 **kwargs,
             )
-            if renderOptions.isPreview:
+            if renderOptions.isPreview and self._preview_enabled():
                 self._start_live_tail(renderOptions.outputPath)
             textOutput = []
             self._log_filter = RenderLogFilter()
@@ -596,7 +596,6 @@ class ProcessTab:
 
             renderQueue.mark_finished(renderOptions, ok=ok, error="" if ok else render_failure)
             self.refreshQueueRows()
-            self.workerThread.deleteSharedMemory()
 
         self.closePausedSharedMemory()
 
@@ -675,6 +674,37 @@ class ProcessTab:
         self._live_tail_path = str(path)
         self._live_tail_wanted = True
 
+    def _refresh_held_progress(self) -> None:
+        """While the preview is paused, keep the strip's PRODUCED band honest without touching the playhead.
+
+        The pane's `rendered` is a snapshot taken when a frame was painted, so a paused preview froze the band at
+        whatever the renderer had produced at the moment of the pause - and a seek could not reach what had been
+        produced since. The playhead must not move: only the two produced counters are refreshed.
+        """
+        if not getattr(self, "_preview_paused", False):
+            return
+        tail = getattr(self, "_live_tail", None)
+        if tail is None:
+            return
+        pane = self.page_handles.proc.previewLabel
+        progress = getattr(pane, "_progress", None)
+        if not progress or len(progress) < 4:
+            return
+        playhead, duration = float(progress[2]), float(progress[3])
+        pane.set_progress(rendered=self.currentFrame, total=self.max_value,
+                          playhead=playhead, duration=duration)
+
+    def _preview_enabled(self) -> bool:
+        """The user's "Preview Enabled" switch (`Settings -> GUI Options`).
+
+        It used to gate the shared-memory thumbnail; with that channel gone it gates the one thing it can still mean:
+        whether a preview render follows its own output file at full resolution.
+        """
+        try:
+            return str(self.settings.settings.get("preview_enabled", "True")) == "True"
+        except Exception:
+            return True
+
     def _ensure_live_tail(self) -> None:
         """Build the tail and wire the strip - on the GUI thread, once per job (see `_start_live_tail`)."""
         if not getattr(self, "_live_tail_wanted", False) or getattr(self, "_live_tail", None) is not None:
@@ -718,6 +748,11 @@ class ProcessTab:
         comes IN with the signal, so the handler cannot act on a half-applied toggle.
         """
         self._preview_paused = bool(paused)
+        # One line per change, with the owner: the pane can be painted by three different things, and "the button did
+        # nothing" needs to be answerable from log.txt alone.
+        owner = "tail" if getattr(self, "_live_tail", None) is not None else (
+            "file" if getattr(self, "_preview_decoder", None) is not None else "thumbnail")
+        log(f"preview transport: {'paused' if self._preview_paused else 'playing'} (owner={owner})")
         tail = getattr(self, "_live_tail", None)
         if tail is not None:
             try:
@@ -743,7 +778,7 @@ class ProcessTab:
             return
         from PySide6.QtCore import QThread, QTimer
 
-        if QThread.currentThread() is not button.thread():
+        if QThread.currentThread() != button.thread():
             # `_stop_live_tail` runs in the render's worker thread, which has no event loop to paint from: hand the
             # widget work to the button's own thread instead of writing to a widget cross-thread.
             QTimer.singleShot(0, button, self._sync_preview_transport)
@@ -762,8 +797,13 @@ class ProcessTab:
             "Paused: the preview holds this frame. Press to follow the render."
             if paused else "Following the render. Press to hold this frame."
         )
+        # A render paints the pane through the thumbnail even before a tail exists, so a running render is an owner
+        # too: the transport must be able to hold THAT picture, and must not look pressable when nothing paints.
+        process = getattr(self, "renderProcess", None)
+        rendering = process is not None and process.poll() is None
         owns_picture = (getattr(self, "_live_tail", None) is not None
-                        or getattr(self, "_preview_decoder", None) is not None)
+                        or getattr(self, "_preview_decoder", None) is not None
+                        or rendering)
         button.setEnabled(bool(owns_picture))
 
     def _wire_preview_strip(self) -> None:
@@ -1083,14 +1123,21 @@ class ProcessTab:
                 lines.append(ConsoleLine(text))
         return lines
 
-    def updateProcessTab(self, qimage: QtGui.QImage):
-        """
-        Called by the worker QThread, and updates the GUI elements: Progressbar, Preview, FPS
+    def updateProcessTab(self):
+        """The panel's 100 ms tick: progress, log, FPS/ETA/status - and the pane's owners.
+
+        It used to be called with a 640x360 thumbnail from shared memory; that channel is gone (the pane is fed from
+        the preview file at full resolution), so this is a clock, and the picture is never painted from here.
         """
 
         # The pane's 100 ms clock is also the live tail's start point: it is the only GUI-thread tick during a
         # render, and the tail must be built and wired there (see `_start_live_tail`).
         self._ensure_live_tail()
+        # Keep the transport honest for whichever painter owns the pane this tick (the tail or the file decoder): an
+        # enabled button that holds nothing, or a disabled one that holds the picture, is worse than no button.
+        self._sync_preview_transport()
+        self._refresh_held_progress()
+
 
         if self.renderTextOutputList is not None:
             self.page_handles.proc.progressBar.setRange(
@@ -1119,35 +1166,6 @@ class ProcessTab:
             else:
                 self.page_handles.proc.ETA.setVisible(False)
             self.page_handles.proc.STATUS.setText(f"Status: {self.status}")
-        if not qimage.isNull():
-            live_tail = getattr(self, "_live_tail", None)
-            if live_tail is not None and getattr(live_tail, "published_frames", 0) > 0:
-                # The pane belongs to the 4K picture the tail reads from the preview file. A 640x360 thumbnail
-                # landing between two tail frames would stutter the resolution AND drag the picture back to the
-                # renderer's edge - the thumbnail IS the edge - undoing a seek 100 ms after it was made. The text
-                # above keeps updating on this tick; only the picture is skipped. (Until the tail's first frame
-                # the thumbnail still fills the pane, so it is never blank while the decoder warms up.)
-                return
-            preview = self.page_handles.proc.previewLabel
-            if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
-                # The surface fits, zooms and letterboxes itself and always keeps the frame's own resolution; the
-                # backend's thumbnail is what a live render can afford (the full-resolution path is the preview file).
-                preview.set_frame(qimage)
-                preview.set_progress(self.currentFrame, self.max_value)
-            else:
-                # The backend already shrank the frame to the preview box, so nothing 4K ever
-                # reaches this thread. The thumbnail keeps the picture's aspect ratio (640x480
-                # for a 4:3 source), so it can still be a little larger than the panel: fit it
-                # down when it is, never scale it up.
-                area = preview.size()
-                if qimage.width() > area.width() or qimage.height() > area.height():
-                    qimage = qimage.scaled(
-                        area, Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                pixmap = QtGui.QPixmap.fromImage(qimage)
-                roundedPixmap = self.getRoundedPixmap(pixmap, corner_radius=10)
-                preview.setPixmap(roundedPixmap)
 
     def build_command(self, renderOptions: RenderOptions):
         """The backend command for one job.

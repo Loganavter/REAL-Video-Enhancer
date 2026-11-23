@@ -6,7 +6,6 @@ try:
 except ImportError:
     pass
 from .Util import resize_image_np, log
-from .PreviewChannel import FMT_RGB888 as PREVIEW_FMT_RGB888, FMT_YUV420 as PREVIEW_FMT_YUV420
 _pytorch_device = None
 _pytorch_dtype = None
 _pytorch_stream = None
@@ -214,106 +213,6 @@ class PinnedSlotPool:
         )
 
 
-
-def rgb_planes(image, thumb_width: int, thumb_height: int, out=None, scratch=None):
-    """Sampled RGB thumbnail as a CHW uint8 tensor on the device (no transfer).
-
-    Module-level so the renderer can warm the op mix once at startup without owning a
-    frame (`RenderVideo._warm_preview`), and so the asynchronous stager can enqueue the
-    copy instead of waiting for it.
-
-    `out` (CHW uint8) and `scratch` (CHW fp16, same shape) keep this allocation-free. That
-    is not tidiness: with a per-call 2.8 MB fp32 temporary this function measured 0.06 ms
-    at the median and 24-26 ms at the maximum over 60 calls, while the payload gather
-    three functions below - same kind of work, no fp32 temporary - never exceeded 0.15 ms.
-    On this host a fresh multi-megabyte allocation occasionally costs tens of
-    milliseconds, and the loop's budget is a maximum.
-    """
-    if _torch is None or not isinstance(image, _torch.Tensor) or image.dim() != 3:
-        return None
-    if int(image.shape[0]) < 3:
-        return None
-    h, w = int(image.shape[1]), int(image.shape[2])
-    sy, sx = max(1, h // thumb_height), max(1, w // thumb_width)
-    small = image[:3, ::sy, ::sx][:, :thumb_height, :thumb_width]
-    if tuple(small.shape) != (3, thumb_height, thumb_width):
-        return None
-    if small.dtype == _torch.uint8:
-        return small.contiguous()
-    if out is not None and scratch is not None and scratch.shape == small.shape:
-        # clamp in place would corrupt the frame (the slice is a view of it), so the copy
-        # into the caller's scratch comes first. `copy_` is the one op that also resolves
-        # the strided source: `clamp(out=)` with a non-contiguous input asks ATen for a
-        # temporary, and a per-call temporary is what this path was paying for.
-        scratch.copy_(small)
-        scratch.clamp_(0.0, 1.0)
-        scratch.mul_(255.0)
-        # FMT_RGB888 is interleaved HWC. The transpose has to happen HERE, once, on the
-        # thumbnail: shipping the CHW planes under an RGB888 label is what turned every
-        # fp16 preview into three sheared bands (it looked like a 3x3 grid of the frame).
-        out.copy_(scratch.permute(1, 2, 0))
-        return out
-    return (small.clamp(0.0, 1.0) * 255.0).to(_torch.uint8).contiguous()
-
-
-def payload_planes(tensor, height: int, width: int, thumb_width: int, thumb_height: int,
-                   out=None):
-    """Sampled yuv420 planes as one flat uint8 device tensor (no transfer).
-
-    The planes are sampled, not converted: only `thumb_height` x `thumb_width` samples of
-    Y and a quarter of that of each chroma plane leave the device, so the transfer is
-    0.35 MB instead of the whole 12.4 MB payload, and the colour matrix stays in the
-    reader. `None` when the geometry does not match the buffer - a preview that cannot be
-    built is dropped, never drawn from stale bytes.
-
-    `out` keeps the three plane copies allocation-free (see `rgb_planes`).
-    """
-    if _torch is None or not isinstance(tensor, _torch.Tensor):
-        return None
-    flat = tensor.reshape(-1)
-    n = int(height) * int(width)
-    c = (int(height) // 2) * (int(width) // 2)
-    if int(flat.numel()) != n + 2 * c:
-        return None
-    sy, sx = max(1, int(height) // thumb_height), max(1, int(width) // thumb_width)
-    ch, cw = (thumb_height + 1) // 2, (thumb_width + 1) // 2
-    try:
-        y = flat[:n].view(int(height), int(width))[::sy, ::sx][:thumb_height, :thumb_width]
-        u = flat[n:n + c].view(int(height) // 2, int(width) // 2)[::sy, ::sx][:ch, :cw]
-        v = flat[n + c:n + 2 * c].view(int(height) // 2, int(width) // 2)[::sy, ::sx][:ch, :cw]
-    except RuntimeError:
-        return None
-    if (tuple(y.shape) != (thumb_height, thumb_width)
-            or tuple(u.shape) != (ch, cw) or tuple(v.shape) != (ch, cw)):
-        return None
-    total = thumb_width * thumb_height + 2 * ch * cw
-    if out is None:
-        return _torch.cat((y.reshape(-1), u.reshape(-1), v.reshape(-1))).contiguous()
-    # the OUTPUT offsets are the thumbnail's, not the source frame's: `n` above is the
-    # source Y plane (8.3 Mpx at 4K), and using it here silently wrote past the buffer on
-    # every 4K frame
-    thumb_n = thumb_width * thumb_height
-    view = out[:total]
-    view[:thumb_n].copy_(y.reshape(-1))
-    view[thumb_n:thumb_n + ch * cw].copy_(u.reshape(-1))
-    view[thumb_n + ch * cw:].copy_(v.reshape(-1))
-    return view
-
-
-def rgb_preview(image, thumb_width: int, thumb_height: int):
-    """Synchronous RGB888 thumbnail `(payload, fmt)`; the stager is the loop's path."""
-    planes = rgb_planes(image, thumb_width, thumb_height)
-    if planes is None:
-        return None
-    return planes.cpu().numpy().tobytes(), PREVIEW_FMT_RGB888
-
-
-def payload_preview(tensor, height: int, width: int, thumb_width: int, thumb_height: int):
-    """Synchronous sampled-yuv thumbnail `(payload, fmt)`; the stager is the loop's path."""
-    planes = payload_planes(tensor, height, width, thumb_width, thumb_height)
-    if planes is None:
-        return None
-    return planes.cpu().numpy().tobytes(), PREVIEW_FMT_YUV420
 
 
 class Frame:
@@ -594,71 +493,6 @@ class Frame:
             _torch_utils.tensor_to_yuv420p(self._tensor, dest=dest)
         else:
             _torch_utils.tensor_to_frame(self._tensor, dest=dest)
-
-    def preview_small(self, width: int, height: int):
-        """Thumbnail of this frame, at most `width` x `height`, as `(payload, fmt)`.
-
-        `fmt` is 1 (RGB888) or 2 (sampled yuv420: Y `w*h`, then U and V at `(w+1)//2` x
-        `(h+1)//2`, all uint8). Samples the tensor - one row in `step`, one column in
-        `step` - instead of reading the frame. The preview is a thumbnail of a 4K upscale
-        shown in a ~600 px label, so a whole-frame cast plus host copy buys nothing: the
-        previous implementation (`raw_payload_preview`) cast 12.4 MB to float, ran the
-        BT.709 matrix over all 8.3 Mpx and transferred a full 4K frame on every frame of a
-        render whose viewer updates at ~2-5 Hz.
-
-        A payload frame ships YUV rather than colour: the matrix is the only arithmetic
-        left in that path, and the GUI already runs it for free at 2-5 Hz. What the render
-        loop pays is a gather and 0.35 MB, not 24.9 MB.
-
-        `None` when the frame has no tensor, or when its geometry does not match its
-        buffer: the caller keeps the previous preview instead of drawing garbage.
-        """
-        got = self.preview_planes(width, height)
-        if got is None:
-            return None
-        planes, fmt = got
-        return planes.cpu().numpy().tobytes(), fmt
-
-    def preview_source_size(self):
-        """`(W, H)` of the picture this frame would sample - the emitted one, not the input.
-
-        An upscaled frame's `width`/`height` can lag the tensor it holds, so the geometry is
-        taken from the tensor when there is one.
-        """
-        tensor = self._tensor
-        if tensor is None or _torch is None or not isinstance(tensor, _torch.Tensor):
-            return int(self.width), int(self.height)
-        if self._is_raw_payload():
-            return int(self.width), int(self.height)
-        image = tensor[0] if tensor.dim() == 4 else tensor
-        if image.dim() == 3:
-            return int(image.shape[2]), int(image.shape[1])
-        return int(self.width), int(self.height)
-
-    def preview_planes(self, width: int, height: int, out=None, scratch=None):
-        """`(device planes, fmt)` for the stager, or None when the frame cannot provide one.
-
-        Split from `preview_small` so the render loop can enqueue the transfer instead of
-        waiting for it (`utils/PreviewStager.py`): the gather is the same, the `.cpu()` is
-        what the loop must not do synchronously on this card.
-        """
-        tensor = self._tensor
-        if tensor is None or _torch is None or not isinstance(tensor, _torch.Tensor):
-            return None
-        width, height = int(width), int(height)
-        if width <= 0 or height <= 0:
-            return None
-        if self._is_raw_payload():
-            planes = payload_planes(tensor, int(self.height), int(self.width), width, height,
-                                    out=out)
-            return (planes, PREVIEW_FMT_YUV420) if planes is not None else None
-        image = tensor[0] if tensor.dim() == 4 else tensor
-        # the buffers are sized for the BOX; this frame's thumbnail is usually smaller
-        need = int(height) * int(width) * 3
-        rgb_out = None if out is None else out[:need].view(height, width, 3)
-        rgb_scratch = None if scratch is None else scratch[:need].view(3, height, width)
-        planes = rgb_planes(image, width, height, out=rgb_out, scratch=rgb_scratch)
-        return (planes, PREVIEW_FMT_RGB888) if planes is not None else None
 
     def release_payload(self) -> None:
         """Give a pooled output slot back to the pool. Idempotent; no-op when not pooled.

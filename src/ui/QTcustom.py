@@ -2,12 +2,9 @@ import sys
 import os
 import subprocess
 import requests
-import struct
 import time
-import numpy as np
 from multiprocessing import shared_memory
 
-from . import shared_flag
 import re
 import html
 
@@ -161,144 +158,36 @@ def show_layout_widgets(layout):
 
 
 class UpdateGUIThread(QThread):
+    """The process page's 100 ms clock.
+
+    It used to read a 640x360 thumbnail the renderer published through a shared-memory block. That channel is gone
+    (owner, 2026-11-23: "какая нахуй миниатюра? Я думал этот код удален уже как день"): the pane is fed at full
+    resolution from the preview file the renderer writes anyway, so the renderer pays nothing for the picture and the
+    pane has exactly one painter while a render runs. What is left is the tick - the log box, FPS/ETA and the status
+    label are repainted on the same 100 ms clock, and a render with no preview target used to freeze them.
     """
-    Reads the preview thumbnail the renderer publishes and hands it to the GUI as a QImage.
 
-    The block is small (a 640x360 thumbnail is 0.69 MB, a 4K frame is 24.9 MB), carries a
-    header that says what the pixels are, and has two slots so a reader never sees half of
-    one frame and half of the next. The `wanted` byte is the other half of the bargain: the
-    renderer builds a thumbnail only after this thread consumed the previous one, so a
-    viewer at 5 Hz cannot make the render loop pay 30 times a second.
-    """
+    #: One panel refresh. No payload on purpose: a picture comes from the preview file, never from this thread.
+    tick = Signal()
+    TICK_SECONDS = 0.1
 
-    latestPreviewPixmap = Signal(QtGui.QImage)
-
-    # Mirrors HEADER in backend/src/utils/PreviewChannel.py: two processes, two trees, one
-    # layout. Kept as a literal here so the GUI never imports backend code.
-    PREVIEW_HEADER = struct.Struct("<IHHBBBI")
-    PREVIEW_FMT_RGB888 = 1
-    PREVIEW_FMT_YUV420 = 2
-    PREVIEW_OFF_WANTED = 9
-    PREVIEW_POLL_SECONDS = 0.1
-
-    def __init__(self, parent, imagePreviewSharedMemoryID):
+    def __init__(self, parent=None):
         super().__init__()
         self._parent = parent
-        self.shm = None
-        self._stop_flag = False  # Boolean flag to control stopping
-        self._mutex = QMutex()  # Atomic flag to control stopping
-        self.imagePreviewSharedMemoryID = imagePreviewSharedMemoryID
-        self.previewWidth = 0
-        self.previewHeight = 0
-
-    def createNewSharedMemory(self, width: int, height: int):
-        """Allocate the thumbnail block: header + two slots of `width` x `height` RGB888."""
-        if self.shm is not None:
-            # a queued render re-creates the block; close the old mapping instead of leaking it
-            try:
-                self.shm.close()
-            finally:
-                self.shm = None
-        self.previewWidth = int(width)
-        self.previewHeight = int(height)
-        self.previewBoxW = int(width)
-        self.previewBoxH = int(height)
-        size = (
-            self.PREVIEW_HEADER.size
-            + 2 * self.previewBoxW * self.previewBoxH * 3
-        )
-        try:
-            self.shm = shared_flag.create_many(self.imagePreviewSharedMemoryID, size)
-        except FileExistsError:
-            # a crashed run leaves the block behind (POSIX keeps it until unlinked), and a
-            # restarted session can be handed the same name: drop the stale block, then
-            # allocate ours. Attaching to the old one would keep its size and header.
-            stale = shared_flag.attach(self.imagePreviewSharedMemoryID)
-            shared_flag.release(stale)
-            self.shm = shared_flag.create_many(self.imagePreviewSharedMemoryID, size)
-        self.shm.buf[self.PREVIEW_OFF_WANTED] = 1  # ask for the first frame
-        shared_flag.register(lambda: getattr(self, "shm", None))
-
-    def deleteSharedMemory(self):
-        shm, self.shm = self.shm, None
-        shared_flag.release(shm)
+        self._stop_flag = False
+        self._mutex = QMutex()
 
     def run(self):
-        last_seq = 0
         while True:
             with QMutexLocker(self._mutex):
                 if self._stop_flag:
-                    self.deleteSharedMemory()
                     break
-            try:
-                if self.shm is not None:
-                    seq, width, height, fmt, _wanted, _flags, _reserved = (
-                        self.PREVIEW_HEADER.unpack_from(self.shm.buf, 0)
-                    )
-                    if seq != last_seq and width and height and fmt in (
-                        self.PREVIEW_FMT_RGB888, self.PREVIEW_FMT_YUV420
-                    ):
-                        last_seq = seq
-                        # the slots were laid out for the BOX: a 4:3 frame's 640x480
-                        # thumbnail must not make the reader step into the other slot
-                        offset = (
-                            self.PREVIEW_HEADER.size
-                            + (seq & 1) * self.previewBoxW * self.previewBoxH * 3
-                        )
-                        length = self._payload_length(fmt, width, height)
-                        # bytes(): own the pixels, so the QImage cannot end up pointing at
-                        # a slot the renderer is already overwriting (the old reader built
-                        # a QImage over a numpy buffer that died on return)
-                        pixels = bytes(self.shm.buf[offset:offset + length])
-                        self.latestPreviewPixmap.emit(
-                            self._to_image(pixels, width, height, fmt)
-                        )
-                        self.shm.buf[self.PREVIEW_OFF_WANTED] = 1
-            except Exception as e:
-                log(f"Error in UpdateGUIThread: {e}")
-
-            # This loop is also the panel's refresh clock: the log box, FPS/ETA and the
-            # status label are painted by the same slot that shows a preview frame, so
-            # with no preview target (no shared block, or preview disabled) the whole
-            # panel used to freeze while the render ran. A null image is a tick, not a
-            # frame - the slot skips the pixmap branch and repaints the text.
-            self.latestPreviewPixmap.emit(QtGui.QImage())
-
-            time.sleep(self.PREVIEW_POLL_SECONDS)
-
-    @staticmethod
-    def _payload_length(fmt, width, height):
-        if fmt == UpdateGUIThread.PREVIEW_FMT_RGB888:
-            return width * height * 3
-        return width * height + 2 * ((width + 1) // 2) * ((height + 1) // 2)
-
-    @staticmethod
-    def _to_image(pixels, width, height, fmt):
-        """QImage from the block's payload; the colour matrix lives here, not in the render loop."""
-        if fmt == UpdateGUIThread.PREVIEW_FMT_RGB888:
-            return QtGui.QImage(
-                pixels, width, height, width * 3, QtGui.QImage.Format_RGB888
-            ).copy()
-        n = width * height
-        ch, cw = (height + 1) // 2, (width + 1) // 2
-        y = np.frombuffer(pixels[:n], np.uint8).reshape(height, width).astype(np.float32) - 16.0
-        u = np.frombuffer(pixels[n:n + ch * cw], np.uint8).reshape(ch, cw).astype(np.float32) - 128.0
-        v = np.frombuffer(pixels[n + ch * cw:n + 2 * ch * cw], np.uint8).reshape(ch, cw).astype(np.float32) - 128.0
-        u = np.repeat(np.repeat(u, 2, axis=0), 2, axis=1)[:height, :width]
-        v = np.repeat(np.repeat(v, 2, axis=0), 2, axis=1)[:height, :width]
-        r = np.clip(1.164 * y + 1.793 * v, 0.0, 255.0)
-        g = np.clip(1.164 * y - 0.213 * u - 0.533 * v, 0.0, 255.0)
-        b = np.clip(1.164 * y + 2.112 * u, 0.0, 255.0)
-        rgb = np.dstack((r, g, b)).astype(np.uint8)
-        return QtGui.QImage(
-            rgb.data, width, height, width * 3, QtGui.QImage.Format_RGB888
-        ).copy()
+            self.tick.emit()
+            time.sleep(self.TICK_SECONDS)
 
     def stop(self):
-        
         with QMutexLocker(self._mutex):
             self._stop_flag = True
-        
 
 
 # The threads the popups own and the seven popups themselves are toolkit-backed now. Their bodies live in

@@ -7,18 +7,6 @@ from src.version import __version__
 from src.utils.Util import log
 
 
-def parse_preview_size(value):
-    """`WxH` -> (W, H). The block is sized by the GUI from the same constant, so a bad
-    value here must fail loudly rather than silently pick a geometry nobody allocated."""
-    try:
-        width, height = (int(part) for part in str(value).lower().split("x", 1))
-    except (TypeError, ValueError):
-        raise SystemExit(f"--preview_size must be WxH (e.g. 640x360), got {value!r}")
-    if width <= 0 or height <= 0:
-        raise SystemExit(f"--preview_size must be positive, got {value!r}")
-    return width, height
-
-
 class HandleApplication:
     def __init__(self):
         self.args = self.handleArguments()
@@ -210,8 +198,6 @@ class HandleApplication:
             pause_shared_memory_id=self.args.pause_shared_memory_id,
             sceneDetectMethod=self.args.scene_detect_method,
             sceneDetectSensitivity=self.args.scene_detect_threshold,
-            sharedMemoryID=self.args.preview_shared_memory_id,
-            preview_size=parse_preview_size(self.args.preview_size),
             trt_optimization_level=self.args.tensorrt_opt_profile,
             trt_dynamic_shapes=self.args.tensorrt_dynamic_shapes,
             override_upscale_scale=self.args.override_upscale_scale,
@@ -690,20 +676,6 @@ class HandleApplication:
             default=False,
         )
         parser.add_argument(
-            "--preview_shared_memory_id",
-            help="Memory ID to share preview on",
-            type=str,
-            default=None,
-        )
-        parser.add_argument(
-            "--preview_size",
-            help="WxH of the preview thumbnail the shared memory block carries. The GUI "
-                 "sizes the block before it starts the backend, so both sides must agree: "
-                 "640x360 keeps the frame at 0.69 MB instead of a 4K frame's 24.9 MB.",
-            type=str,
-            default="640x360",
-        )
-        parser.add_argument(
             "--output_to_mpv",
             help="Outputs to mpv instead of an output file (requires mpv to be installed)",
             action="store_true",
@@ -854,14 +826,11 @@ def watch_parent(names=(), interval: float = 1.0) -> None:
 
 if __name__ == "__main__":
     _segments = []
-    for _flag in ("--pause_shared_memory_id", "--preview_shared_memory_id"):
+    for _flag in ("--pause_shared_memory_id",):
         if _flag in sys.argv:
             _index = sys.argv.index(_flag)
             if _index + 1 < len(sys.argv):
                 _segments.append(sys.argv[_index + 1])
-    # The preview block is allocated by the GUI whether or not the preview is switched on, so its name is derived the
-    # same way the GUI derives it (`src/constants.py`), not only taken from the flag the backend is given.
-    _segments.append("/image_preview" + str(os.getppid()))
     threading.Thread(target=watch_parent, args=(tuple(_segments),), name="parent-watchdog", daemon=True).start()
     HandleApplication()
     

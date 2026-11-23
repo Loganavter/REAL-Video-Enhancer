@@ -551,3 +551,18 @@ def test_a_seek_while_paused_shows_its_target_and_holds_it(qapp, scratch_dir):
         assert len(frames) == 6, "and the picture stands on the target afterwards, not at the edge"
     finally:
         thread.stop_and_wait()
+
+
+
+def test_a_reader_built_without_a_factory_has_the_real_demuxer(qapp):
+    """The default factory is what every live preview uses; a test that always injects one cannot see it disappear.
+
+    This is not hypothetical: deleting an unused helper next to it took `_default_container_factory` with it, and the
+    live pane went black while the whole suite stayed green - every test here injects a fake container (measured
+    2026-11-23 on a 1440x1080 preview render).
+    """
+    reader = TailReader(pixel_format="rgb24")
+    assert callable(reader._container_factory)
+    assert reader._container_factory.__name__ == "_default_container_factory"
+    thread = LiveTailThread("/never/created.mkv", interval_ms=20)
+    assert thread is not None, "the thread must be constructible with the default reader arguments"

@@ -3,7 +3,6 @@ import sys
 import time
 import numpy as np
 
-from .utils.PreviewChannel import FMT_RGB888, PreviewChannel
 
 if __name__ != "__main__":
     from .utils.Util import log, subprocess_popen_without_terminal, set_inplace_line
@@ -57,29 +56,18 @@ class PauseManager:
 class InformationWriteOut:
     def __init__(
         self,
-        sharedMemoryID,  # preview channel id, None = no viewer
         paused_shared_memory_id,
         outputWidth,
         outputHeight,
         totalOutputFrames,
-        preview_size=(640, 360),
     ):
         self.startTime = time.time()
-        self.sharedMemoryID = sharedMemoryID
         self.paused_shared_memory_id = paused_shared_memory_id
         self.width = outputWidth
         self.height = outputHeight
         self.totalOutputFrames = totalOutputFrames
         self.last_length = 0
         self.framesRendered = 1
-        # The preview is a thumbnail on its own small channel (utils/PreviewChannel.py):
-        # no full-size frame, no writer thread holding a copy of the last one.
-        # The box fixes the slot stride for the whole render: a 4:3 frame's 640x480
-        # thumbnail and a 16:9 frame's 640x360 one must not overlap in the block.
-        self.preview = (PreviewChannel(sharedMemoryID,
-                                       box=(int(preview_size[0]), int(preview_size[1])))
-                        if sharedMemoryID else None)
-        self.previewWidth, self.previewHeight = int(preview_size[0]), int(preview_size[1])
 
         self.pausedManager = PauseManager(paused_shared_memory_id)
         self.isPaused = False
@@ -124,39 +112,22 @@ class InformationWriteOut:
         hours, minutes, seconds = convertTime(remaining_time)
         return f"{hours}:{minutes}:{seconds}"
 
-    def previewAttached(self):
-        """True when a viewer allocated the block (used to decide whether to warm up)."""
-        return self.preview is not None and self.preview.attached
-
-    def previewWanted(self):
-        """True when the viewer consumed the last thumbnail and wants the next one."""
-        return self.preview is not None and self.preview.wanted()
-
-    def publishPreview(self, payload, width, height, fmt=None, high_bitdepth=False):
-        """Hand one thumbnail to the channel; cheap, and only called when wanted."""
-        return self.preview.publish(
-            payload, width, height,
-            fmt=fmt if fmt is not None else FMT_RGB888,
-            high_bitdepth=high_bitdepth,
-        )
 
     def setFramesRendered(self, framesRendered: int):
         self.framesRendered = framesRendered
 
     def stopWriting(self):
         self.stop = True
-        if self.preview is not None:
-            self.preview.close()
 
     def writeOutInformation(self):
         """Print FPS/ETA for the GUI's progress line.
 
-        The preview used to ride on this thread as a full-size frame copy every 0.5 s;
-        it now lives on its own small channel and is published by the render loop, so
-        this loop only formats a line - and `padFrame`/the chunk size are not needed.
+        The GUI's progress bar, the strip's produced band and the live seek all come from this one line ("FPS: ...
+        Current Frame: N ETA: ..."), so this loop must keep printing. It used to also announce the preview channel;
+        that channel is gone (the pane reads the preview file), and the leftover `self.preview` read took the whole
+        loop down with an AttributeError - the progress line stopped, and a seek had no produced band to aim at
+        (measured 2026-11-23 on the first run after the channel was deleted).
         """
-        if self.preview is not None and self.preview.attached:
-            log(f"Preview channel: {self.preview.name} ({self.previewWidth}x{self.previewHeight})")
         i = 0
         while not self.stop:
             if self.framesRendered > 0:

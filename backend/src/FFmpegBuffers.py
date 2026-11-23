@@ -607,9 +607,11 @@ class FFmpegWrite(Buffer):
                 command += ["-g", str(max(1, int(round(float(self.outputFPS or 30)))))]
                 # And a short CLUSTER for matroska, which holds one until it has ~5 s of content by default: the file
                 # then grows 0 -> 786 kB -> 1.5 MB in ~3.5 s steps (measured) and the preview moves like a slideshow.
-                # Exports keep the muxer's default; only a file that is read while it is written pays this.
+                # 250 ms of content, not 1000: the pane's FIRST picture is the first cluster, and a slow render produces
+                # 1 s of content in ~16 s at 1.5 fps (measured 2026-11-23 on a 1440x1080 clip) - a whole second of
+                # cluster is a black pane for that long. Exports keep the muxer's default.
                 if str(getattr(self, "outputFileExtension", "") or "").lower() in ("mkv", "mka", "mks", "webm"):
-                    command += ["-cluster_time_limit", "1000"]
+                    command += ["-cluster_time_limit", "250"]
 
             if str(self.outputFile) == "null":
                 # Fixed-cost measurement path: rawvideo encoding is a memcpy and the null muxer

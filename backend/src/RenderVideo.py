@@ -23,8 +23,6 @@ from .FFmpeg import InformationWriteOut
 from .utils.Encoders import EncoderSettings
 from .utils.SceneDetect import SceneDetect
 from .utils.Util import log, resize_frame_bytes, guard_render_thread
-from .utils.Frame import rgb_preview, payload_preview
-from .utils.PreviewStager import PreviewStager
 from .utils.BorderDetect import BorderDetect, cache_location
 from .utils.VideoInfo import OpenCVInfo
 import numpy as np
@@ -150,8 +148,6 @@ class Render:
         pause_shared_memory_id=None,
         sceneDetectMethod: str = "pyscenedetect",
         sceneDetectSensitivity: float = 3.0,
-        sharedMemoryID: Optional[str] = None,
-        preview_size: tuple = (640, 360),
         trt_optimization_level: int = 5,
         trt_dynamic_shapes: bool = False,
         override_upscale_scale: int | None = None,
@@ -250,11 +246,6 @@ class Render:
         self.sceneDetectModelPath = sceneDetectModel
         self.sceneDetectMethod = sceneDetectMethod
         self.sceneDetectSensitivty = sceneDetectSensitivity
-        self.sharedMemoryID = sharedMemoryID
-        # Thumbnail geometry of the preview channel. Fixed by the GUI (`--preview_size`)
-        # so the block is sized once, before the backend starts.
-        self.previewWidth, self.previewHeight = int(preview_size[0]), int(preview_size[1])
-        self._previewStager = None
         self.trt_optimization_level = trt_optimization_level
         self.trt_tiling_level = trt_tiling_level
         self.trt_timing_iters = trt_timing_iters
@@ -472,17 +463,11 @@ class Render:
         )
 
         self.informationHandler = InformationWriteOut(
-            sharedMemoryID=sharedMemoryID,
             paused_shared_memory_id=pause_shared_memory_id,
             outputWidth=self.originalWidth * (self.override_upscale_scale or self.upscaleTimes),
             outputHeight=self.originalHeight * (self.override_upscale_scale or self.upscaleTimes),
             totalOutputFrames=self.totalOutputFrames,
-            preview_size=(self.previewWidth, self.previewHeight),
         )
-        if self.informationHandler.previewAttached():
-            self._previewStager = PreviewStager(self.previewWidth, self.previewHeight)
-            self._warm_preview()
-        
 
         self.reportPath = report_path
         self.temporalReuse = None
@@ -626,77 +611,6 @@ class Render:
         # Convert the BGR image to RGB
         frame_array = cv2.cvtColor(frame_array, cv2.COLOR_BGR2RGB)
         cv2.imwrite("frame.jpg", frame_array)
-
-    def _preview_geometry(self, frame):
-        """Thumbnail `(w, h)` for this frame: long side fits the box, both axes equally.
-
-        A fixed 640x360 was wrong for anything but 16:9: a 4:3 frame sampled 720 columns and
-        kept 640 of them, so the preview both cropped the picture and stretched it 1.5x.
-        Scaling by one factor gives a uniform sample rate in both axes - the whole frame, the
-        picture's own aspect ratio.
-        """
-        w, h = frame.preview_source_size()
-        if w <= 0 or h <= 0:
-            return self.previewWidth, self.previewHeight
-        scale = min(self.previewWidth / w, self.previewHeight / h)
-        tw = max(2, int(round(w * scale)))
-        th = max(2, int(round(h * scale)))
-        return tw, th
-
-    def _publish_preview(self, frame):
-        """Publish the thumbnail that has arrived, and enqueue this frame's.
-
-        The loop never waits for the device: `take()` hands over the previous frame's
-        buffer once its copy completed, `submit()` starts this frame's gather and D2H.
-        Both are cheap and bounded; the device's latency is what used to show up as a
-        1.1-2.2 ms tail, and it is now outside the frame.
-        """
-        stager = self._previewStager
-        if stager is None or not self.informationHandler.previewWanted():
-            return False
-        # Everything is inside the guard: a preview that raises must cost nothing but the
-        # preview. It used to escape from here and tear down the render (the shm block can
-        # disappear under a running job when its owner exits).
-        published = False
-        try:
-            ready = stager.take()
-            if ready is not None:
-                payload, fmt, thumb_w, thumb_h, high_bitdepth = ready
-                published = bool(self.informationHandler.publishPreview(
-                    payload, thumb_w, thumb_h,
-                    fmt=fmt, high_bitdepth=high_bitdepth,
-                ))
-            if not stager.busy():
-                thumb_w, thumb_h = self._preview_geometry(frame)
-                stager.submit(frame, thumb_w, thumb_h,
-                              high_bitdepth=bool(getattr(frame, "hdr_mode", False)))
-        except Exception as exc:
-            log(f"preview: dropping this frame ({exc})")
-        return published
-
-    def _warm_preview(self):
-        """Pay the thumbnail's cold cost once, at startup, not on the first published frame.
-
-        The first call of this op mix loads the CUDA modules and stages the first transfer:
-        measured 8.2 ms once against 0.2-0.5 ms afterwards (`--preview_size` both arms).
-        The preview budget is a per-frame *maximum*, so that one-off belongs at init, where
-        it is not a frame - and only when a viewer is attached at all.
-        """
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        scale = self.override_upscale_scale or self.upscaleTimes
-        out_h = int(self.originalHeight) * int(scale)
-        out_w = int(self.originalWidth) * int(scale)
-        try:
-            # the real output geometry, because the cold cost is the allocator seeing this
-            # size for the first time - a warm-up at the input size does not prevent it
-            thumb_src = torch.empty((1, 3, out_h, out_w), dtype=torch.float16, device=device)
-            rgb_preview(thumb_src[0], self.previewWidth, self.previewHeight)
-            payload = torch.empty(out_h * out_w + 2 * (out_h // 2) * (out_w // 2),
-                                  dtype=torch.uint8, device=device)
-            payload_preview(payload, out_h, out_w, self.previewWidth, self.previewHeight)
-            del thumb_src, payload
-        except Exception as exc:
-            log(f"preview: warm-up skipped ({exc})")
 
     def _probe_ffmpeg_path(self) -> str:
         """ffmpeg for the probe: the app's bundled one when it is there, else PATH."""
@@ -1078,8 +992,8 @@ class Render:
             return round(prof.get(key, 0.0) / n, 3) if prof.get("frames") else None
 
         phases = {k: per_frame(k) for k in ("gate", "to_tensor", "up_wall", "infer", "model", "handover",
-                                            "conv", "preview", "pack", "read", "frame")}
-        named = sum(prof.get(k, 0.0) for k in ("gate", "up_wall", "read", "preview", "pack")) / n
+                                            "conv", "pack", "read", "frame")}
+        named = sum(prof.get(k, 0.0) for k in ("gate", "up_wall", "read", "pack")) / n
         phases["unaccounted"] = round(prof.get("frame", 0.0) / n - named, 3) if prof.get("frames") else None
         return {
             "provenance": stamp(".", model=self.upscaleModel),
@@ -1176,8 +1090,6 @@ class Render:
                                 target_height=self.height * self.override_upscale_scale,
                                 path="RenderVideo.render:interpolated-frame override_upscale_scale",
                             )
-                        if type(interpolated_frame) is not bytes:
-                            self._publish_preview(interpolated_frame)
                         self.informationHandler.setFramesRendered(frames_rendered)
                         self.writeBuffer.writeQueue.put(interpolated_frame.get_frame_bytes() if type(interpolated_frame) != bytes else interpolated_frame)
                 
@@ -1190,11 +1102,7 @@ class Render:
                                      # the three stages the old line did NOT name, which is why the
                                      # frame total sat above its own parts by 6.2 ms on 2026-11-18
                                      # (rve-frame-accounting-2026-11-19)
-                                     "up_wall": 0.0, "preview": 0.0, "pack": 0.0,
-                                     # every published thumbnail's cost, so the acceptance question
-                                     # ("no frame pays more than 1 ms") is answered by a distribution
-                                     # and not by a maximum that could be a single noisy call
-                                     "preview_n": 0, "preview_samples": []}
+                                     "up_wall": 0.0, "pack": 0.0}
                 _t_gate = _perf_counter()
                 if self.upscaleModel:
                     # during auto calibration every frame is rendered: otherwise the tuner only
@@ -1276,20 +1184,9 @@ class Render:
                     )
 
                 
-                # opt in before the preview so preview and writer share one payload
                 if type(frame) is not bytes and getattr(self, "pooled_output", False):
                     frame.pooled_output = True
                 self.informationHandler.setFramesRendered(frames_rendered)
-                _t_prev = _perf_counter()
-                # after the override resize the frame is plain bytes (no tensor to thumbnail)
-                preview_built = (False if type(frame) is bytes
-                                 else self._publish_preview(frame))
-                _preview_ms = (_perf_counter() - _t_prev) * 1000.0
-                self._profile["preview"] += _preview_ms
-                if preview_built:
-                    self._profile["preview_n"] += 1
-                    self._profile["preview_samples"].append(_preview_ms)
-                
                 _t_pack = _perf_counter()
                 if type(frame) is not bytes and getattr(frame, "pooled_output", False):
                     # acquire the pinned slot and fill it (blocks if the writer is a whole
@@ -1343,23 +1240,13 @@ class Render:
         if prof and prof["frames"]:
             n = prof["frames"]
             named = (prof["gate"] + prof.get("up_wall", 0.0) + prof.get("read", 0.0)
-                     + prof.get("preview", 0.0) + prof.get("pack", 0.0))
-            samples = prof.get("preview_samples", [])
-            if samples:
-                ordered = sorted(samples)
-                p95 = ordered[min(len(ordered) - 1, int(round(len(ordered) * 0.95)))]
-                preview_text = (f"preview {prof.get('preview', 0.0)/n:.2f} ms "
-                                f"({len(samples)} built: p50 {ordered[len(ordered)//2]:.2f}, "
-                                f"p95 {p95:.2f}, max {ordered[-1]:.2f}, first {samples[0]:.2f})")
-            else:
-                preview_text = f"preview {prof.get('preview', 0.0)/n:.2f} ms (0 built)"
+                     + prof.get("pack", 0.0))
             log(f"profile over {n} frames: gate {prof['gate']/n:.2f} ms "
                 f"(input to tensor {prof.get('to_tensor', 0.0)/n:.2f}), "
                 f"model wall {prof.get('up_wall', 0.0)/n:.2f} ms "
                 f"(self-reported {prof['infer']/n:.2f}, engine {prof.get('model', 0.0)/n:.2f}, "
                 f"frame handover {prof.get('handover', 0.0)/n:.2f}), "
                 f"input convert {prof['conv']/n:.2f} ms, "
-                f"{preview_text}, "
                 f"pack+queue {prof.get('pack', 0.0)/n:.2f} ms, "
                 f"read wait {prof.get('read', 0.0)/n:.2f} ms, "
                 f"named {(named/n):.2f} of frame total {prof['frame']/n:.2f} ms, "

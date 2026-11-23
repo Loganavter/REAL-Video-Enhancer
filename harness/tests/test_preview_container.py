@@ -119,7 +119,7 @@ def test_a_preview_mkv_flushes_a_cluster_every_second(tmp_path):
     export = _writer(str(tmp_path / "export.mkv"), preview=False).command()
 
     at = preview.index("-cluster_time_limit")
-    assert int(preview[at + 1]) <= 1000
+    assert int(preview[at + 1]) <= 250, "a slow render must not wait a whole second of content for its first picture"
     assert preview.index("-cluster_time_limit") < preview.index(str(tmp_path / "preview.mkv")), \
         "the muxer option must precede the output file it applies to"
     assert "-cluster_time_limit" not in export
