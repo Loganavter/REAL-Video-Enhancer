@@ -114,6 +114,14 @@ class MainWindow(QMainWindow):
     def __init__(self, file_to_open=None):
         super().__init__()
 
+        # Promote the top-level's backingstore to an RHI-capable surface BEFORE any real QRhiWidget exists. Qt does
+        # that lazily, and on a real Wayland session the promotion races the preview pane's first paint: Qt prints
+        # `QRhiWidget: No QRhi` and emits renderFailed (BlinkTable measured the same race; Telegram's lib_ui fixes it
+        # with `GL::EnsureWindowRhi`). This is that fix, ported in src/ui/rhi_surface.py.
+        from src.ui.rhi_surface import install_rhi_primer
+
+        install_rhi_primer(self)
+
         # set up base variables
         self.homeDir = os.path.expanduser("~")
         self.pipeInFrames = None

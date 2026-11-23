@@ -279,6 +279,10 @@ class ProcPagePage:
 
             self.previewLabel = VideoPreviewSurface(self.previewSubContainer)
             self.previewLabel.setObjectName(u"previewLabel")
+            # Ask for the configured backend explicitly and make a failure name itself (`RVE_UI_RHI_BACKEND`).
+            from src.ui.rhi_surface import configure_rhi_widget
+
+            configure_rhi_widget(self.previewLabel)
             # The pane is opaque (an RHI widget cannot alpha-blend with its siblings) and shows this colour wherever no
             # frame is drawn: the same token the plate under it uses, so an empty pane reads as part of the page.
             from sli_ui_toolkit.theme import ThemeManager
