@@ -122,7 +122,12 @@ def test_a_preview_mkv_flushes_a_cluster_every_second(tmp_path):
     assert int(preview[at + 1]) <= 250, "a slow render must not wait a whole second of content for its first picture"
     assert preview.index("-cluster_time_limit") < preview.index(str(tmp_path / "preview.mkv")), \
         "the muxer option must precede the output file it applies to"
-    assert "-cluster_time_limit" not in export
+    # An export is followed too now: a plain render shows its own file in the pane, and a 5 s cluster would refresh the
+    # picture once per five seconds (owner, 2026-11-24: the pane went black on a plain render).
+    assert "-cluster_time_limit" in export
+    assert int(export[export.index("-cluster_time_limit") + 1]) <= 250
+    # An mp4 takes no cluster option at all
+    assert "-cluster_time_limit" not in _writer(str(tmp_path / "export.mp4"), preview=False).command()
 
 
 def test_the_preview_and_the_export_differ_only_in_the_streamability_flags(tmp_path):

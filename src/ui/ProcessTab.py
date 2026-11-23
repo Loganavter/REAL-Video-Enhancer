@@ -553,7 +553,12 @@ class ProcessTab:
                 command,
                 **kwargs,
             )
-            if renderOptions.isPreview and self._preview_enabled():
+            if self._preview_enabled() and self._followable(renderOptions):
+                # ANY render writes a file, and a matroska one is readable while it grows - so the pane follows the
+                # export too, not only the preview job. Without this the pane went black on a plain render the moment
+                # the shared-memory thumbnail was deleted (owner, 2026-11-24: "видео куда-то пропало"). An mp4 keeps
+                # its index at the end (`+faststart` moves it there at close), so a growing mp4 is not followable and
+                # the pane stays empty there instead of showing a corrupt picture.
                 self._start_live_tail(renderOptions.outputPath)
             textOutput = []
             self._log_filter = RenderLogFilter()
@@ -728,6 +733,20 @@ class ProcessTab:
         playhead, duration = float(progress[2]), float(progress[3])
         pane.set_progress(rendered=self.currentFrame, total=self.max_value,
                           playhead=playhead, duration=duration)
+
+    @staticmethod
+    def _followable(renderOptions) -> bool:
+        """Whether the file this job writes can be read while it is still being written.
+
+        Matroska/TS are streamable; the mp4 family is not, because `+faststart` relocates the index at close (a preview
+        mp4 is written fragmented and IS readable - the preview job says so through `isPreview`).
+        """
+        import os
+
+        if getattr(renderOptions, "isPreview", False):
+            return True
+        extension = os.path.splitext(str(getattr(renderOptions, "outputPath", "") or ""))[1].lower()
+        return extension not in (".mp4", ".mov", ".m4v")
 
     def _preview_enabled(self) -> bool:
         """The user's "Preview Enabled" switch (`Settings -> GUI Options`).

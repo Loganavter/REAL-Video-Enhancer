@@ -549,7 +549,8 @@ def install(window) -> None:
                     report["strip"] = [round(rect.x()), round(rect.y()), round(rect.width()), round(rect.height())]
                 except Exception:
                     pass
-        for attr in ("count", "currentRow", "selectedRows", "selectedCount", "value", "text"):
+        for attr in ("count", "currentRow", "selectedRows", "selectedCount", "value", "text",
+                     "currentIndex", "currentText"):
             getter = getattr(target, attr, None)
             if callable(getter):
                 try:
@@ -673,6 +674,19 @@ def install(window) -> None:
             return
         if wanted.startswith("where:"):
             where(wanted[len("where:"):])
+            return
+        if wanted.startswith("page:"):
+            # `page:proc|general|settings|download`: the page stack is switched by name, so a probe can reach a control
+            # without guessing a menu button's coordinates.
+            name = wanted[len("page:"):].strip().lower()
+            call = {"home": "switchToHomePage", "proc": "switchToProcessingPage",
+                    "settings": "switchToSettingsPage", "download": "switchToDownloadPage"}.get(name)
+            if call is None or not hasattr(window, call):
+                _finish({"stamp": _stamp(), "kind": "page", "page": name, "error": "unknown page"})
+                return
+            getattr(window, call)()
+            QApplication.processEvents()
+            _finish({"stamp": _stamp(), "kind": "page", "page": name, "shown": True})
             return
         if wanted.startswith("state:"):
             widget_state(wanted[len("state:"):])

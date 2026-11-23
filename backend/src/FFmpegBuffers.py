@@ -604,6 +604,13 @@ class FFmpegWrite(Buffer):
                     self.outputFile, getattr(self, "outputFileExtension", None), self.preview)
                 if movflags:
                     command += ["-movflags", *movflags]
+            # Matroska holds a cluster until it has ~5 s of content by default, so a file being written grows in 5 s
+            # steps: the pane that follows it moves like a slideshow, and its first picture waits for the first
+            # cluster. 250 ms of content costs a few hundred bytes per cluster and keeps the file fully seekable.
+            # This is not a preview-only flag any more: a plain render is followed too, and an export that a user can
+            # watch benefits from the same granularity (owner, 2026-11-24: "видео куда-то пропало").
+            if str(getattr(self, "outputFileExtension", "") or "").lower() in ("mkv", "mka", "mks", "webm"):
+                command += ["-cluster_time_limit", "250"]
             if self.preview:
                 # A SHORT GOP (~one second of output frames). Two measured reasons
                 # (projects/rve/docs/measurements/measure-video-preview-2026-11-23.md): with the encoder's default GOP
@@ -611,13 +618,6 @@ class FFmpegWrite(Buffer):
                 # fragment per keyframe - a 250-frame GOP would hand the tail reader new data once per ~8 s instead of
                 # ~1 Hz. `-g` is AVCodecContext's gop_size: generic for every encoder this app exposes.
                 command += ["-g", str(max(1, int(round(float(self.outputFPS or 30)))))]
-                # And a short CLUSTER for matroska, which holds one until it has ~5 s of content by default: the file
-                # then grows 0 -> 786 kB -> 1.5 MB in ~3.5 s steps (measured) and the preview moves like a slideshow.
-                # 250 ms of content, not 1000: the pane's FIRST picture is the first cluster, and a slow render produces
-                # 1 s of content in ~16 s at 1.5 fps (measured 2026-11-23 on a 1440x1080 clip) - a whole second of
-                # cluster is a black pane for that long. Exports keep the muxer's default.
-                if str(getattr(self, "outputFileExtension", "") or "").lower() in ("mkv", "mka", "mks", "webm"):
-                    command += ["-cluster_time_limit", "250"]
 
             if str(self.outputFile) == "null":
                 # Fixed-cost measurement path: rawvideo encoding is a memcpy and the null muxer
