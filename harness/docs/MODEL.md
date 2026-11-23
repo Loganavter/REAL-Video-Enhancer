@@ -409,7 +409,7 @@ What is left is byte counting on the *shipping* plan: `ncu` runs here (counters 
 so the DRAM split can be measured; the bound in §6 item 2 is what the record has until that run.
 
 The living list of what is left, with costs, what would refute each item and which of them need the
-GPU, is `projects/rve/docs/backlog/queue.yaml` (lanes and the one-GPU rule: `projects/rve/docs/backlog/DELEGATION.md`). That
+GPU, is `projects/rve/docs/backlog/queue.yaml` (lanes and the one-GPU rule: `harness/docs/backlog/DELEGATION.md`). That
 file is the one to edit when a direction is added; this section stays the measured summary.
 
 ## 7. The lever that works today: fewer frames

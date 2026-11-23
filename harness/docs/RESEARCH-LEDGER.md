@@ -2336,7 +2336,7 @@ Written down because these are structural closures - true by the shape of our ne
 by us - and because the reopened item was previously dismissed on a measurement that does not answer
 the question it was cited for. Nothing in this section is our measurement; every number attributed
 to a paper is the paper's, about its own hardware. The queue that turns the open ones into
-experiments is `projects/rve/docs/backlog/queue.yaml`; who runs what is `projects/rve/docs/backlog/DELEGATION.md`.
+experiments is `projects/rve/docs/backlog/queue.yaml`; who runs what is `harness/docs/backlog/DELEGATION.md`.
 
 **Closed by construction, so nobody re-enters them:**
 
