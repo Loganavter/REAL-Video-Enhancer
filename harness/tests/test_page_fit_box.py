@@ -44,7 +44,7 @@ def _shell():
 
 
 def _assert_pages_fill_the_contents_rect(window) -> None:
-    stack = window.stackedWidget
+    stack = window.page_handles.menu.stackedWidget
     box = stack.contentsRect()
     assert box != stack.rect(), "the stack must keep its page inset, or this pin measures nothing"
     for index in range(stack.count()):
@@ -64,7 +64,7 @@ def test_every_page_keeps_the_box_it_gets_after_show():
 def test_a_resize_does_not_leave_a_correction_for_the_next_turn():
     """The fit pass must land the final geometry itself; a value that still changes on the next turn is a visible move."""
     app, window = _shell()
-    stack = window.stackedWidget
+    stack = window.page_handles.menu.stackedWidget
     window.resize(980, 760)
     before = [stack.widget(index).geometry().getRect() for index in range(stack.count())]
     for _ in range(6):
@@ -83,7 +83,7 @@ def test_a_page_switch_leaves_nothing_to_correct_on_the_next_turn():
     layout (measured on the settings page: a top tab host 1000x766 -> 1008x777 on the next turn).
     """
     app, window = _shell()
-    stack = window.stackedWidget
+    stack = window.page_handles.menu.stackedWidget
 
     def snapshot(page):
         return [(type(child).__name__, child.objectName(), child.geometry().getRect())

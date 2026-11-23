@@ -31,7 +31,9 @@ def enabled() -> bool:
 
 
 def _visible_root(window) -> QWidget | None:
-    return getattr(window, "centralWidget", None)
+    # The shell's own container, by the object name it sets (`centralWidget`, inside `centralwidget`). The window used
+    # to carry that QWidget as an attribute of the same name; it is looked up now that nothing is copied onto it.
+    return window.findChild(QWidget, "centralWidget")
 
 
 def _log(window, message: str) -> None:

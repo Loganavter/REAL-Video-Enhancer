@@ -248,6 +248,12 @@ class AdvancedSettingsPage:
             tilingCheckBox=self.tilingCheckBox,
             tileSizeContainer=self.tileSizeContainer,
             interpolateContainer_2=self.interpolateContainer_2,
+            advancedSettings=self.advancedSettings,
+            tileSizeComboBox=self.tileSizeComboBox,
+            benchmarkModeCheckBox=self.benchmarkModeCheckBox,
+            dynamicScaledOpticalFlowCheckBox=self.dynamicScaledOpticalFlowCheckBox,
+            ensembleCheckBox=self.ensembleCheckBox,
+            upscaleContainer=self.upscaleContainer,
         )
         self.retranslate()
         return self.advancedSettings

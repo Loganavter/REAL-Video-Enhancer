@@ -1,16 +1,17 @@
-"""Typed handles for the page widgets RVE's glue reads.
+"""Typed handles for the page widgets RVE's window and glue read.
 
-Why this module exists (2026-11-23): the shell exposes every page widget on the window (`expose()` in
-`src/ui/shell/window.py`), so glue such as `src/ui/ProcessTab.py` and `src/ui/SettingsTab.py` could reach a
-control through `self.parent.<name>`. That surface is a string contract, and a reparenting edit that lost a
-widget did not fail anything: the read simply raised `AttributeError` at first click, or - where the glue
-guarded it with `getattr(..., None)` - nothing happened at all (`qualityPresetInfoLabel` had been gone for a
-while, silently).
+Why this module exists (2026-11-23): the shell used to copy every page widget onto the window (the page-attribute
+copy in `src/ui/shell/window.py`, deleted), so glue such as `src/ui/ProcessTab.py` and the window's own `MainWindow`
+could reach a control through `self.parent.<name>` / `self.<name>`. That surface was a string contract, and a
+reparenting edit that lost a widget did not fail anything: the read simply raised `AttributeError` at first click, or
+- where the glue guarded it with `getattr(..., None)` - nothing happened at all (`qualityPresetInfoLabel` had been gone
+for a while, silently).
 
-These dataclasses are the typed edge instead. Every field is **required** (no defaults): a page that stops
-building one cannot construct its handles, so the loss is a `TypeError` at page build rather than a `None`
-at first use. The glue reads `self.page_handles.<group>.<name>`, and `harness/tests/test_page_handles.py`
-derives the expected names from the glue's own source.
+These dataclasses are the typed edge instead, and they are now the ONLY way to a page widget: the window copies
+nothing. Every field is **required** (no defaults): a page that stops building one cannot construct its handles, so
+the loss is a `TypeError` at page build rather than a `None` at first use. Glue reads
+`self.page_handles.<group>.<name>`, and `harness/tests/test_page_handles.py` derives the expected names from the
+glue's own source.
 
 `PageSelector` exists because `QStackedWidget` only speaks indices while the capture walker names stems
 `nav{index}`. The selector maps a page NAME to its index, so glue and captures stop hard-coding `2`/`3`.
@@ -30,7 +31,10 @@ if TYPE_CHECKING:  # pragma: no cover - annotations only; this module must impor
         ConsoleView,
         CustomLineEdit,
         DoubleSpinBox,
+        MinimalistScrollBar,
+        RichTextView,
         Stepper,
+        SurfaceScrollArea,
         Text,
         TextListWidget,
         ToastProgressBar,
@@ -82,7 +86,7 @@ class PageSelector:
 
 @dataclass(frozen=True)
 class GeneralSettingsHandles:
-    """The General tab's controls the glue reads (`src/ui/pages/general_settings.py`)."""
+    """The General tab's controls the window and the glue read (`src/ui/pages/general_settings.py`)."""
 
     inputFileSelectButton: "Button"
     batchSelectButton: "Button"
@@ -108,6 +112,23 @@ class GeneralSettingsHandles:
     frameReuse: "CheckBox"
     celReuse: "CheckBox"
     addToRenderQueueButton: "Button"
+    # The tab itself and the containers the window enables/disables as one group (`disableProcessPage`) or shows and
+    # hides as a section. They are widgets, so they belong on the typed edge rather than on the window.
+    # `widget_5` keeps its generated object name (captures and the page audits read it): it is the scroll area's outer
+    # frame, and the window toggles it with the row's controls while a render runs.
+    generalSettings: "QWidget"
+    inputVideoInfoTextEdit: "RichTextView"
+    widget_5: "QWidget"
+    scrollArea_4: "SurfaceScrollArea"
+    scrollAreaWidgetContents_4: "QWidget"
+    outputFileContainer: "QWidget"
+    interpolationContainer: "QWidget"
+    decompressContainer: "QWidget"
+    denoiseContainer: "QWidget"
+    deblurCheckBoxContainer: "QWidget"
+    deblurContainer: "QWidget"
+    generalUpscaleContainer: "QWidget"
+    qualityPresetContainer: "QWidget"
 
 
 @dataclass(frozen=True)
@@ -124,6 +145,14 @@ class ProcPageHandles:
     FPS: "Text"
     ETA: "Text"
     STATUS: "Text"
+    # The preview pane and its controls, and the two time fields plus the scrubber the window feeds the video length
+    # into. `VideoPreview` is the GPU surface page, not a control the glue configures.
+    VideoPreview: "QWidget"
+    RenderedPreviewControlsContainer: "QWidget"
+    renderPreviewBtn: "Button"
+    startTimeSpinBox: "DoubleSpinBox"
+    endTimeSpinBox: "DoubleSpinBox"
+    timeInVideoScrollBar: "MinimalistScrollBar"
 
 
 @dataclass(frozen=True)
@@ -187,6 +216,8 @@ class EncoderHandles:
     audio_encoder: "ComboBox"
     audio_bitrate: "ComboBox"
     subtitle_encoder: "ComboBox"
+    # The tab's own body: the window disables its children as a group while a render runs.
+    encoderSettings: "QWidget"
 
 
 @dataclass(frozen=True)
@@ -203,6 +234,12 @@ class AdvancedSettingsHandles:
     tilingCheckBox: "CheckBox"
     tileSizeContainer: "QWidget"
     interpolateContainer_2: "QWidget"
+    advancedSettings: "QWidget"
+    tileSizeComboBox: "ComboBox"
+    benchmarkModeCheckBox: "CheckBox"
+    dynamicScaledOpticalFlowCheckBox: "CheckBox"
+    ensembleCheckBox: "CheckBox"
+    upscaleContainer: "QWidget"
 
 
 @dataclass(frozen=True)
@@ -211,6 +248,30 @@ class DownloadPageHandles:
 
     pytorch_version: "ComboBox"
     pytorch_backend: "ComboBox"
+    ApplicationUpdateContainer: "QWidget"
+    directMLBackendInstallerContainer: "QWidget"
+    low_storage_label: "Text"
+    downloadRecommendedBtn: "Button"
+    downloadTorchBtn: "Button"
+    uninstallTorchBtn: "Button"
+    downloadNCNNBtn: "Button"
+    uninstallNCNNBtn: "Button"
+    downloadTensorRTBtn: "Button"
+    uninstallTensorRTBtn: "Button"
+    downloadDirectMLBtn: "Button"
+    uninstallDirectMLBtn: "Button"
+    uninstallAppBtn: "Button"
+    selectPytorchCustomModel: "Button"
+    selectNCNNCustomModel: "Button"
+
+
+@dataclass(frozen=True)
+class HomePageHandles:
+    """The home page panel's own widgets (`src/ui/pages/home_page.py`)."""
+    changeLogText: "RichTextView"
+    systemInfoText: "RichTextView"
+    githubBtn: "Button"
+    kofiBtn: "Button"
 
 
 @dataclass(frozen=True)
@@ -233,6 +294,7 @@ class WindowHandles:
     proc: ProcPageHandles
     queue: RenderQueueHandles
     settings: SettingsPageHandles
+    home: HomePageHandles
     output: OutputSettingsHandles
     render_settings: RenderSettingsHandles
     app_settings: AppSettingsHandles

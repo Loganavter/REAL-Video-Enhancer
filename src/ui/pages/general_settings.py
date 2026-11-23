@@ -681,6 +681,19 @@ class GeneralSettingsPage:
             frameReuse=self.frameReuse,
             celReuse=self.celReuse,
             addToRenderQueueButton=self.addToRenderQueueButton,
+            generalSettings=self.generalSettings,
+            inputVideoInfoTextEdit=self.inputVideoInfoTextEdit,
+            widget_5=self.widget_5,
+            scrollArea_4=self.scrollArea_4,
+            scrollAreaWidgetContents_4=self.scrollAreaWidgetContents_4,
+            outputFileContainer=self.outputFileContainer,
+            interpolationContainer=self.interpolationContainer,
+            decompressContainer=self.decompressContainer,
+            denoiseContainer=self.denoiseContainer,
+            deblurCheckBoxContainer=self.deblurCheckBoxContainer,
+            deblurContainer=self.deblurContainer,
+            generalUpscaleContainer=self.generalUpscaleContainer,
+            qualityPresetContainer=self.qualityPresetContainer,
         )
         self.retranslate()
         return self.generalSettings

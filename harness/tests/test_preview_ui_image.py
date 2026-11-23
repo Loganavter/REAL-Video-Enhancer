@@ -143,18 +143,23 @@ HT.NotesFetcher.run = lambda self: None          # no network in a test
 class P(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.githubBtn = QtWidgets.QPushButton(self)
-        self.kofiBtn = QtWidgets.QPushButton(self)
-        self.changeLogText = QtWidgets.QTextBrowser(self)
+        # The window surface after the typed handles: `HomeTab` reads `parent.page_handles`, never `parent.<widget>`.
+        # `name_of()` is the page the stack shows - "home" is what `MainWindow` sets at startup.
+        github, kofi, log = QtWidgets.QPushButton(self), QtWidgets.QPushButton(self), QtWidgets.QTextBrowser(self)
+        self.page_handles = types.SimpleNamespace(
+            home=types.SimpleNamespace(githubBtn=github, kofiBtn=kofi, changeLogText=log),
+            menu=types.SimpleNamespace(pages=types.SimpleNamespace(name_of=lambda: "home")),
+        )
 
 p = P()
+log = p.page_handles.home.changeLogText
 tab = HT.HomeTab(p)
-before = p.changeLogText.toPlainText()
+before = log.toPlainText()
 tab.applyFetchedNotes("# 9.9.9\nfrom the api")
 print(json.dumps({
     "shipped_chars": len(tab.getChangelog()),
     "panel_before_head": before.splitlines()[:1],
-    "panel_after_head": p.changeLogText.toPlainText().splitlines()[:2],
+    "panel_after_head": log.toPlainText().splitlines()[:2],
     "cache_written": open(cache).read().splitlines()[:2] if os.path.exists(cache) else None,
 }))
 """
