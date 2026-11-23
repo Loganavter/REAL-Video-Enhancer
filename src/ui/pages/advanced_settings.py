@@ -134,7 +134,10 @@ class AdvancedSettingsPage:
         self.upscaleContainer.setObjectName(u"upscaleContainer")
         sizePolicy2.setHeightForWidth(self.upscaleContainer.sizePolicy().hasHeightForWidth())
         self.upscaleContainer.setSizePolicy(sizePolicy2)
-        self.upscaleContainer.setMinimumSize(QSize(351, 128))
+        # The section follows its column and its content: no floor. The Designer stated 351x128 px, and a width floor
+        # is exactly what a section inside a page-wide scroll area may not state - below it the section is wider than
+        # the box it is given (`harness/tests/test_page_overflow.py`). The height had no separate job: the layout's own
+        # minimum keeps the section at its content's height.
         self.verticalLayout_16 = QVBoxLayout(self.upscaleContainer)
         self.verticalLayout_16.setSpacing(0)
         self.verticalLayout_16.setObjectName(u"verticalLayout_16")

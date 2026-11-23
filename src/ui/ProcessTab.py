@@ -6,7 +6,7 @@ from time import sleep
 from multiprocessing import shared_memory
 
 from PySide6 import QtGui
-from PySide6.QtGui import QPixmap, QPainter, QPainterPath, QColor, QFontMetrics
+from PySide6.QtGui import QPixmap, QPainter, QPainterPath, QColor
 from PySide6.QtCore import Qt, QSize, QUrl
 
 from .RenderQueue import RenderQueue
@@ -371,7 +371,10 @@ class ProcessTab:
         self.page_handles.general.backendComboBox.currentIndexChanged.connect(
             lambda: self.populateModels(self.page_handles.general.backendComboBox.currentText())
         )
-        self.page_handles.encoder.EncoderCommand.textChanged.connect(lambda: self.page_handles.encoder.EncoderCommand.setFixedWidth(max(50, QFontMetrics(self.page_handles.encoder.EncoderCommand.font()).horizontalAdvance(self.page_handles.encoder.EncoderCommand.text()) + 10)))
+        # No width is driven from the encoder command's text: the field belongs to its row and scrolls its own text
+        # (`src/ui/pages/tab_6.py`). Sizing it to `fontMetrics().horizontalAdvance(text)` gave it a ~900 px width in a
+        # ~480 px column, so it was painted outside the page and over the preview pane (owner, 2026-11-24; the gate is
+        # `harness/tests/test_page_overflow.py`).
         # connect up pausing
         hide_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
         self.page_handles.proc.pauseRenderButton.clicked.connect(self.pauseRender)

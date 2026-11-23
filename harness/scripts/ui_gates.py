@@ -154,7 +154,6 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
     "qss-on-adapter": {},
     "raw-chrome-px": {
         ('src/ui/pages/advanced_settings.py', 'setGeometry(460, 516)'): 1,
-        ('src/ui/pages/advanced_settings.py', 'setMinimumSize(351, 128)'): 1,
         ('src/ui/pages/download_page.py', 'QSize(30, 30)'): 10,
         ('src/ui/pages/download_page.py', 'setGeometry(928, 302)'): 1,
         ('src/ui/pages/download_page.py', 'setMaximumSize(50, 45)'): 10,
@@ -186,7 +185,6 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
         ('src/ui/pages/tab_6.py', 'setMaximumSize(100)'): 1,
         ('src/ui/pages/tab_6.py', 'setMaximumSize(50)'): 1,
         ('src/ui/pages/tab_6.py', 'setMinimumSize(50)'): 1,
-        ('src/ui/pages/tab_6.py', 'setMinimumSize(900, 30)'): 1,
         ('src/ui/shell/window.py', 'QSize(35, 35)'): 4,
         ('src/ui/shell/window.py', 'resize(1163, 700)'): 1,
         ('src/ui/shell/window.py', 'setMaximumSize(55)'): 4,
