@@ -30,15 +30,34 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"            # the RVE checkout
 TOOLKIT="${RVE_TOOLKIT_PATH:-$(dirname "$ROOT")/sli-ui-toolkit/src}"
 VENV="${RVE_VENV:-/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/venv}"
-STATE="${RVE_LIVE_STATE:-/tmp/opencode/live}"
+BASE_STATE="${RVE_LIVE_STATE:-/tmp/opencode/live}"
+STATE="$BASE_STATE"
 # The app derives its drop box from the directory of argv[0], so a boot from harness/scripts would put it under
 # harness/scripts and every waiter would watch the wrong path. State it explicitly and wait on that exact path.
 CONTROL="${RVE_UI_CAPTURE_SERVER:-${RVE_CONTROL_DIR:-$STATE/control}}"
 DISPLAY_NUMBER="${RVE_LIVE_DISPLAY:-90}"
+# One display per lane: a lease from the machine tool when it is installed (`live-lease alloc`), the free-:90 picker
+# below when it is not. A lease owns a per-instance runtime dir, so `up` moves the state dir there and leaves a pointer
+# in BASE_STATE - every later command (ask/shot/down/status) must find the instance it talks to.
+LANE="${RVE_LIVE_LANE:-rve}"
+TASK="${RVE_LIVE_TASK:-live}"
 
 mkdir -p "$STATE"
 
 die() { echo "live: $*" >&2; exit 1; }
+
+use_state() {                       # one state dir per instance: pid files, log, control dir, the lease id
+    STATE="$1"
+    mkdir -p "$STATE"
+    if [ -z "${RVE_UI_CAPTURE_SERVER:-}${RVE_CONTROL_DIR:-}" ]; then
+        CONTROL="$STATE/control"
+    fi
+    echo "$STATE" > "$BASE_STATE/state_dir"
+}
+
+if [ -f "$BASE_STATE/state_dir" ] && [ "${1:-}" != "up" ]; then
+    use_state "$(cat "$BASE_STATE/state_dir")"
+fi
 
 pick_display() {
     local n="$DISPLAY_NUMBER"
@@ -70,21 +89,50 @@ wait_ready() {
 }
 
 cmd_up() {
-    local display_number="${1:-}" started_xvfb=0
-    if [ -z "$display_number" ]; then
-        display_number="$(pick_display)"
+    local display_number="${1:-}" started_xvfb=0 display="" lease=""
+    local prev; prev="$(cat "$BASE_STATE/state_dir" 2>/dev/null || true)"
+    if [ -n "$prev" ] && [ -f "$prev/app.pid" ] && kill -0 "$(cat "$prev/app.pid")" 2>/dev/null; then
+        die "an app is already running (pid $(cat "$prev/app.pid"), state $prev) — live.sh down first"
     fi
-    local display=":$display_number"
-    if ! xdpyinfo -display "$display" >/dev/null 2>&1; then
-        echo "live: starting Xvfb $display"
-        Xvfb "$display" -screen 0 1400x1000x24 -nolisten tcp > "$STATE/xvfb.log" 2>&1 &
-        echo $! > "$STATE/xvfb.pid"
-        started_xvfb=1
-        for _ in $(seq 1 20); do
+    # A lease coordinates with the other lanes on this machine (and owns its Xvfb); the picker below is the fallback
+    # for a host without the tool. Never :0 — the owner's screen is not ours.
+    if [ -z "$display_number" ] && command -v live-lease >/dev/null 2>&1; then
+        lease="$(live-lease alloc --lane "$LANE" --task "$TASK" 2>/dev/null | tail -1)"
+        if [ -n "$lease" ] && eval "$(live-lease env "$lease" 2>/dev/null)"; then
+            display="${DISPLAY:-}"
+            if [ -n "$display" ]; then
+                echo "$lease" > "$STATE/lease"
+                # the lease's runtime dir is per-instance: two lanes must not share pid files or a control dir
+                [ -n "${RVE_LIVE_STATE:-}" ] || use_state "${XDG_RUNTIME_DIR:-$STATE}/rve-live"
+                echo "$lease" > "$STATE/lease"
+            fi
+        fi
+        if [ -z "$display" ] && [ -n "$lease" ]; then
+            live-lease release "$lease" >/dev/null 2>&1 && lease=""
+        fi
+    fi
+    if [ -z "$display" ]; then
+        if [ -z "$display_number" ]; then
+            display_number="$(pick_display)"
+        fi
+        display=":$display_number"
+        if ! xdpyinfo -display "$display" >/dev/null 2>&1; then
+            echo "live: starting Xvfb $display"
+            Xvfb "$display" -screen 0 1400x1000x24 -nolisten tcp > "$STATE/xvfb.log" 2>&1 &
+            echo $! > "$STATE/xvfb.pid"
+            started_xvfb=1
+            for _ in $(seq 1 20); do
+                xdpyinfo -display "$display" >/dev/null 2>&1 && break
+                sleep 0.25
+            done
+            xdpyinfo -display "$display" >/dev/null 2>&1 || { tail -5 "$STATE/xvfb.log" >&2; die "Xvfb $display did not come up"; }
+        fi
+    else
+        for _ in $(seq 1 40); do
             xdpyinfo -display "$display" >/dev/null 2>&1 && break
             sleep 0.25
         done
-        xdpyinfo -display "$display" >/dev/null 2>&1 || { tail -5 "$STATE/xvfb.log" >&2; die "Xvfb $display did not come up"; }
+        xdpyinfo -display "$display" >/dev/null 2>&1 || die "the leased display $display did not come up (lease ${lease:-?})"
     fi
     [ -f "$STATE/app.pid" ] && kill -0 "$(cat "$STATE/app.pid")" 2>/dev/null && die "an app is already running (pid $(cat "$STATE/app.pid")) — live.sh down first"
     rm -f "$CONTROL/ready"
@@ -111,12 +159,21 @@ cmd_down() {
         kill "$(cat "$STATE/xvfb.pid")" 2>/dev/null && echo "live: stopped Xvfb (pid $(cat "$STATE/xvfb.pid"))"
         rm -f "$STATE/xvfb.pid"
     fi
+    if [ -f "$STATE/lease" ]; then
+        local lease; lease="$(cat "$STATE/lease")"
+        live-lease release "$lease" >/dev/null 2>&1 && echo "live: released lease $lease"
+        rm -f "$STATE/lease"
+    fi
     rm -f "$CONTROL/ready"
+    rm -f "$BASE_STATE/state_dir"
 }
 
 cmd_status() {
     echo "display: $(cat "$STATE/display" 2>/dev/null || echo none)"
     echo "control: $CONTROL"
+    if [ -f "$STATE/lease" ]; then
+        echo "lease:   $(cat "$STATE/lease") ($(live-lease status "$(cat "$STATE/lease")" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state","?"))' 2>/dev/null || echo '?'))"
+    fi
     if [ -f "$STATE/app.pid" ] && kill -0 "$(cat "$STATE/app.pid")" 2>/dev/null; then
         echo "app: running (pid $(cat "$STATE/app.pid"))"
     else

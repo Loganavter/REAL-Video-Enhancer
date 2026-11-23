@@ -48,7 +48,16 @@ class RveBackend:
     def __init__(self, *, repo_root: Path | None = None, state_dir: Path | None = None,
                  control_dir: Path | None = None, timeout_s: float = DEFAULT_TIMEOUT_S) -> None:
         self.repo_root = (repo_root or _repo_root()).resolve()
-        self.state_dir = Path(state_dir or os.environ.get("RVE_LIVE_STATE", "/tmp/opencode/live"))
+        base_state = Path(state_dir or os.environ.get("RVE_LIVE_STATE", "/tmp/opencode/live"))
+        # live.sh writes the instance's state dir (a lease moves it under the lease's runtime dir) into
+        # <base>/state_dir; the server follows the same pointer, so `live.sh up` and the MCP tools agree on the
+        # instance without an explicit env var.
+        pointer = base_state / "state_dir"
+        try:
+            recorded = pointer.read_text().strip()
+        except OSError:
+            recorded = ""
+        self.state_dir = Path(recorded) if recorded else base_state
         self._control_override = control_dir or (Path(os.environ["RVE_CONTROL_DIR"])
                                                  if os.environ.get("RVE_CONTROL_DIR") else None)
         self.timeout_s = float(os.environ.get("RVE_MCP_TIMEOUT", timeout_s))
