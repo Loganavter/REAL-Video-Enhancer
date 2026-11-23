@@ -499,6 +499,37 @@ def test_a_line_shift_does_not_change_the_key(tmp_path: Path) -> None:
     assert [finding.key() for finding in first] == [finding.key() for finding in second]    # the ratchet did not
 
 
+def test_a_line_inserted_at_the_top_of_a_real_page_moves_no_key(tmp_path: Path) -> None:
+    """The measured tax, on the real page: +1 line at the top of `general_settings.py` used to re-key 29 entries.
+
+    The synthetic case above proves the key has no line in it; this one runs the real page through the real check and
+    compares the counts site by site. Only the reported line moves - the ratchet's record does not, so the change needs
+    no `--rekey`.
+    """
+    page = Path(ui_gates.__file__).resolve().parents[2] / "src" / "ui" / "pages" / "general_settings.py"
+    original = ui_gates.check_raw_px([page])
+    shifted = tmp_path / "general_settings.py"
+    shifted.write_text("# one line inserted above everything\n" + page.read_text(encoding="utf-8"), encoding="utf-8")
+    moved = ui_gates.check_raw_px([shifted])
+    assert [finding.line + 1 for finding in original] == [finding.line for finding in moved], "the report must move"
+
+    def sites(findings: list[ui_gates.Finding]) -> list[tuple[str, int]]:
+        return sorted((site, count) for (_, site), count in ui_gates.counts(findings).items())
+
+    assert sites(original) == sites(moved)
+    assert len(original) == len(moved) > 0
+
+
+def test_a_missing_newline_at_eof_does_not_change_a_key(tmp_path: Path) -> None:
+    """The other line-level edit a formatter makes: no trailing newline is still the same literals, same keys."""
+    page = Path(ui_gates.__file__).resolve().parents[2] / "src" / "ui" / "pages" / "general_settings.py"
+    text = page.read_text(encoding="utf-8").rstrip("\n")
+    trimmed = tmp_path / "general_settings.py"
+    trimmed.write_text(text, encoding="utf-8")
+    assert sorted(site for _, site in ui_gates.counts(ui_gates.check_raw_px([trimmed]))) == \
+        sorted(site for _, site in ui_gates.counts(ui_gates.check_raw_px([page])))
+
+
 @pytest.mark.parametrize("rule", ["empty-stylesheet", "silent-swallow", "backend-imports-ui", "page-process-http"])
 def test_every_new_rule_ratchets_in_both_directions(rule: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Per rule: a recorded finding passes, one more of the same fails, and an empty KNOWN covers nothing.
