@@ -451,12 +451,20 @@ class ProcessTab:
             textOutput = []
             self._log_filter = RenderLogFilter()
             self.renderLogLines = []
-            for line in iter(self.renderProcess.stdout.readline, b""):
-                if self.renderProcess.poll() is not None:
-                    break  # Exit the loop if the process has terminated
-
+            render_failure = ""
+            # Read to EOF, not "until poll() says the process is gone": the old loop checked poll()
+            # BEFORE handling the line it had just read, so the last lines of a dying render - the
+            # `RENDER FAILED: ...` summary included - were dropped on the floor and the job ended
+            # with no reason anywhere (2026-11-22). `readline` returns "" at EOF in text mode, which
+            # is the sentinel that actually terminates this iterator.
+            for line in iter(self.renderProcess.stdout.readline, ""):
                 try:
                     line = str(line.strip())
+                    if "RENDER FAILED" in line:
+                        # The backend's thread wrapper wrote its one summary line: this job is over,
+                        # whatever else arrives belongs to a traceback the pane should show.
+                        render_failure = line[len("BACKEND: "):] if line.startswith("BACKEND: ") else line
+                        self.setStatus("Failed")
                     if "it/s" in line:
                         textOutput = textOutput[:-1]
                     if "FPS" in line:
@@ -470,6 +478,7 @@ class ProcessTab:
                         # bounded to h:mm:ss: the stream can carry a log record on the same line
                         self.eta = re.search(r"ETA: (\d+(?::\d+){2})", line).group(1)
                         self.setStatus("Rendering")
+
 
                     if "this may take a while" in line.lower():
                         self.setStatus("Building engine…")
@@ -487,6 +496,16 @@ class ProcessTab:
                 if "Time to complete render" in line:
                     break
             self.return_codes.append(self.renderProcess.wait())
+            code = self.return_codes[-1]
+            ok = code in (0, 3221225477) and not render_failure
+            if not ok and not render_failure:
+                render_failure = f"render process exited with code {code} before the render finished"
+                self.setStatus("Failed")
+            if not ok:
+                # Whatever the exit code, the row's hover line and the popup both read this: the
+                # mark_finished(ok=False) path IS the error surface (src/ui/render_jobs.py state_text
+                # appends state.error to the row's line).
+                log(f"render failed: {render_failure}")
             summary = self._log_filter.hidden_summary()
             if summary is not None:
                 textOutput.append(summary.text)
@@ -496,7 +515,7 @@ class ProcessTab:
                 if len(line) > 2:
                     log(line)
 
-            renderQueue.mark_finished(renderOptions, ok=self.return_codes[-1] in (0, 3221225477))
+            renderQueue.mark_finished(renderOptions, ok=ok, error="" if ok else render_failure)
             self.refreshQueueRows()
             self.workerThread.deleteSharedMemory()
 
@@ -543,6 +562,14 @@ class ProcessTab:
         self.setProgressDetail("")
         finished_ok = all(code == 0 or code == 3221225477 for code in self.return_codes) or self.userKilled
         self.setStatus("Idle" if finished_ok else "Failed")
+        # The failure line has to be ON SCREEN, not only in the list: the pane is fed by the update
+        # thread's 100 ms tick and the last lines of a dying render can arrive after its last tick
+        # (2026-11-22: the process page showed `Status: Rendering` with no error). This runs on the
+        # GUI thread, so pushing the accumulated log here is legal and cannot be skipped.
+        try:
+            self.syncRenderConsole()
+        except Exception:
+            pass
         self.parent.FPS.setText("FPS: ")
         self.parent.ETA.setText("ETA: ")
 
