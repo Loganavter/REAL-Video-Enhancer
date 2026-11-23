@@ -123,7 +123,19 @@ Three answers this verb learned to give the hard way (2026-11-23):
 
 `state:<objectName>` on a pane also reports `progress` and `strip` (`[x, y, w, h]` of the seek strip), which is what a
 live seek is measured with: press the strip with `drag:previewLabel@x1,y1:x2,y2` and watch `playhead` fall behind
-`rendered` instead of being dragged back to the edge.
+`rendered` instead of being dragged back to the edge. On a checkable widget `state:` also reports `checked`, which is how
+the preview's transport toggle is read.
+
+The preview **stands paused**: `preview:` starts it holding the first frame it decodes, and it does not advance until
+`click:previewPauseButton@20,20` is sent (checked = paused; the glyph is the action a press performs - a play symbol
+while paused). A second press holds it again, and a finished render hands over to the file decoder *paused on the frame
+the pane already shows* rather than auto-playing. Measured 2026-11-23: at 52/300 produced frames the playhead stood at
+0.12 s, after the press it advanced 0.64 -> 2.84 s while `rendered` went 166 -> 230, and after the second press it held
+3.48 s through the end of the render.
+
+A `click:` on a widget that is not a painted list used to raise (`_rows` on a toolkit `Button` is a list of content
+rows, not the rows widget) and that exception **killed the poll loop** - every later request timed out. The loop now
+answers the error and keeps polling; the geometry chain guards both attributes.
 
 With a frame in the pane, the LMB compare is testable: hold the button with `xdotool mousedown 1` (a click is too fast
 to capture), take a root screenshot while it is held, then `mouseup 1`. 2026-11-23, on a letterboxed 160x120 clip with

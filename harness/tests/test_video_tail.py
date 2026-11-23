@@ -440,7 +440,8 @@ def test_the_live_tail_thread_polls_without_a_caller_clock_and_takes_a_seek(qapp
         containers.append(container)
         return container
 
-    thread = LiveTailThread(path, interval_ms=20, max_frames_per_poll=100, container_factory=factory)
+    thread = LiveTailThread(path, interval_ms=20, max_frames_per_poll=100, paused=False,
+                            container_factory=factory)
     frames = []
     errors = []
     thread.frame_ready.connect(frames.append)
@@ -469,3 +470,84 @@ def test_the_live_tail_thread_polls_without_a_caller_clock_and_takes_a_seek(qapp
         thread.stop_and_wait()
     assert thread.isRunning() is False, "the loop stops when its owner says so"
     assert containers and containers[-1].closed is True, "the demuxer is released, not leaked"
+
+
+def _wait_for(qapp, predicate, seconds: float = 5.0) -> bool:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_a_paused_tail_reads_the_first_frame_then_holds_the_picture(qapp, scratch_dir):
+    """The preview stands paused by default: one frame on screen, and then no polling at all.
+
+    "Из начально на ней и стояло" (owner, 2026-11-23) - but paused on a black pane would be paused on nothing, so the
+    loop reads until the first frame exists. After that the renderer may write as much as it likes: the picture, the
+    playhead and the reader's position do not move until the transport is pressed.
+    """
+    path = _emptied(scratch_dir)
+    with open(path, "ab") as handle:
+        handle.write(b"\x01" * (2 * FRAME_BYTES))
+
+    def factory(target: str) -> _FakeContainer:
+        return _FakeContainer(target)
+
+    thread = LiveTailThread(path, interval_ms=20, max_frames_per_poll=100, container_factory=factory)
+    frames = []
+    thread.frame_ready.connect(frames.append)
+    assert thread.paused is True, "a preview starts paused"
+    thread.start()
+    try:
+        assert _wait_for(qapp, lambda: len(frames) >= 2), "the first frame reaches the pane"
+        with open(path, "ab") as handle:            # the renderer keeps going
+            handle.write(b"\x02" * (3 * FRAME_BYTES))
+        time.sleep(0.6)
+        qapp.processEvents()
+        assert len(frames) == 2, f"a paused preview must not advance (got {len(frames)} frames)"
+        assert round(thread.produced_seconds, 3) == 0.1, "the produced edge does not advance while held"
+
+        thread.set_paused(False)
+        assert _wait_for(qapp, lambda: len(frames) >= 5), "pressing play reads the backlog that was written"
+        assert [round(frame.pts, 3) for frame in frames[2:5]] == [0.2, 0.3, 0.4]
+        thread.set_paused(True)
+        held = len(frames)
+        with open(path, "ab") as handle:
+            handle.write(b"\x03" * (2 * FRAME_BYTES))
+        time.sleep(0.5)
+        qapp.processEvents()
+        assert len(frames) == held, "pausing again holds the picture where it stood"
+    finally:
+        thread.stop_and_wait()
+
+
+def test_a_seek_while_paused_shows_its_target_and_holds_it(qapp, scratch_dir):
+    """A strip press must work on a held preview: it reads once, shows the target, and stands there."""
+    path = _emptied(scratch_dir)
+    with open(path, "ab") as handle:
+        handle.write(b"\x05" * (4 * FRAME_BYTES))
+
+    def factory(target: str) -> _FakeContainer:
+        return _FakeContainer(target)
+
+    thread = LiveTailThread(path, interval_ms=20, max_frames_per_poll=100, container_factory=factory)
+    frames = []
+    thread.frame_ready.connect(frames.append)
+    thread.start()
+    try:
+        assert _wait_for(qapp, lambda: len(frames) >= 4)
+        time.sleep(0.3)
+        qapp.processEvents()
+        assert len(frames) == 4, "held after the first poll"
+
+        thread.seek(0.2)
+        assert _wait_for(qapp, lambda: len(frames) > 4), "the seek is applied while paused"
+        assert [round(frame.pts, 3) for frame in frames[4:]] == [0.2, 0.3]
+        time.sleep(0.4)
+        qapp.processEvents()
+        assert len(frames) == 6, "and the picture stands on the target afterwards, not at the edge"
+    finally:
+        thread.stop_and_wait()

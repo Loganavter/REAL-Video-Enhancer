@@ -385,7 +385,7 @@ class LiveTailThread(QThread):
     error = Signal(str)
 
     def __init__(self, path: str, parent: QObject | None = None, *, interval_ms: int = 120,
-                 **reader_kwargs) -> None:
+                 paused: bool = True, **reader_kwargs) -> None:
         super().__init__(parent)
         self._path = str(path)
         self._interval_ms = max(20, int(interval_ms))
@@ -393,6 +393,9 @@ class LiveTailThread(QThread):
         self._reader: TailReader | None = None
         self._pending_seek: float | None = None
         self._stop_requested = False
+        #: A preview stands still until its transport is pressed (the owner's default), so `paused` starts True: the
+        #: loop still reads until the FIRST frame exists (an empty pane would be "paused on nothing"), then holds it.
+        self._paused = bool(paused)
 
     # -- what the owner reads while the loop runs ----------------------------------------------------
 
@@ -414,6 +417,19 @@ class LiveTailThread(QThread):
         """Ask the loop to reposition before its next poll; coalesces while a drag is in flight."""
         self._pending_seek = max(0.0, float(seconds))
 
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    def set_paused(self, paused: bool) -> None:
+        """Hold the picture (no polling at all) or let it follow the file again.
+
+        While paused the loop does no I/O: the renderer keeps writing and the reader's position is untouched, so
+        resuming reads the backlog and catches up at the per-poll frame rate. A pending seek still applies - a strip
+        press while paused must show its target - and that poll is the only read a paused loop performs.
+        """
+        self._paused = bool(paused)
+
     def stop_and_wait(self, timeout_ms: int = 3000) -> None:
         self._stop_requested = True
         self.wait(timeout_ms)
@@ -431,6 +447,11 @@ class LiveTailThread(QThread):
                 pending, self._pending_seek = self._pending_seek, None
                 if pending is not None:
                     reader.seek(pending)
+                elif self._paused and reader.published_frames > 0:
+                    # Held: no read, no decode, the pane keeps this frame. A seek above skips this branch exactly
+                    # once, so its target becomes visible.
+                    self.msleep(self._interval_ms)
+                    continue
                 if not opened:
                     # The container does not exist for the first moment of a render; the reader's own grace
                     # period turns "not yet a container" into a wait.

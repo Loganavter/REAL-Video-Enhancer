@@ -117,6 +117,12 @@ class ProcessTab:
         self._live_tail_path = None
         self._live_tail_wanted = False
         self._live_tail = None
+        #: A preview does not run away by itself: it stands paused on a frame until the transport is pressed (owner,
+        #: 2026-11-23: "добавь паузу и чтобы изначально на ней и стояло"). One flag for both owners of the pane.
+        self._preview_paused = True
+        #: The media time of the last frame the pane was given, so a paused hand-over to the finished file stands
+        #: where the picture already is instead of jumping to 0.
+        self._preview_playhead = 0.0
         #: monotonic stamp of the current render, for the "elapsed" half of the progress line
         self._render_started_mono = None
         self.animationHandler = AnimationHandler()
@@ -338,6 +344,10 @@ class ProcessTab:
         hide_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
         self.page_handles.proc.pauseRenderButton.clicked.connect(self.pauseRender)
         self.page_handles.proc.killRenderButton.clicked.connect(self.killRenderProcess)
+        # The preview's own transport: it stands PAUSED until this is pressed (owner, 2026-11-23), and the toggle's
+        # checked state is the truth for both owners of the pane (the live tail and the finished-file decoder).
+        self.page_handles.proc.previewPauseButton.clicked.connect(self.toggle_preview_pause)
+        self._sync_preview_transport()
 
     def killRenderProcess(self):
         try:  # kills  render process if necessary
@@ -671,7 +681,7 @@ class ProcessTab:
         from .video.tail import LiveTailThread
 
         try:
-            tail = LiveTailThread(path)
+            tail = LiveTailThread(path, paused=self._preview_paused)
             tail.frame_ready.connect(self._on_preview_frame)
             tail.error.connect(lambda message: log(f"preview tail: {message}"))
             # The strip's signals too: a press must seek the tail, and the LMB compare must decode the source at the
@@ -680,6 +690,7 @@ class ProcessTab:
             self._live_tail = tail
             self._live_tail_wanted = False
             tail.start()
+            self._sync_preview_transport()
         except Exception as exc:  # a preview that cannot follow must not take the render down
             self._live_tail_wanted = False
             log(f"preview tail failed: {exc}")
@@ -693,6 +704,59 @@ class ProcessTab:
             except Exception:
                 pass
             self._live_tail = None
+        self._sync_preview_transport()
+
+    def toggle_preview_pause(self) -> None:
+        """Hold the preview on this frame, or let it follow the render again.
+
+        One state for both owners of the pane: the live tail simply stops polling (no decode, no I/O, the picture
+        stands, and a strip press still repositions it), the finished-file decoder pauses on its frame. The toggle's
+        own checked state is the truth, so a pane rebuilt by a new job cannot disagree with the button.
+        """
+        self._preview_paused = bool(self.page_handles.proc.previewPauseButton.isChecked())
+        tail = getattr(self, "_live_tail", None)
+        if tail is not None:
+            try:
+                tail.set_paused(self._preview_paused)
+            except Exception as exc:
+                log(f"preview transport: {exc}")
+        decoder = getattr(self, "_preview_decoder", None)
+        if decoder is not None:
+            try:
+                decoder.pause() if self._preview_paused else decoder.play()
+            except Exception as exc:
+                log(f"preview transport: {exc}")
+        self._sync_preview_transport()
+
+    def _sync_preview_transport(self) -> None:
+        """Paint the toggle's state, its tooltip and whether it can do anything at all (GUI thread only).
+
+        The glyphs are the ACTION a press performs, like a player's own button: playing shows a pause symbol, paused
+        shows a play symbol. `enabled` is honest about the idle pane - there is nothing to hold when nothing owns it.
+        """
+        button = getattr(self.page_handles.proc, "previewPauseButton", None)
+        if button is None:
+            return
+        from PySide6.QtCore import QThread, QTimer
+
+        if QThread.currentThread() is not button.thread():
+            # `_stop_live_tail` runs in the render's worker thread, which has no event loop to paint from: hand the
+            # widget work to the button's own thread instead of writing to a widget cross-thread.
+            QTimer.singleShot(0, button, self._sync_preview_transport)
+            return
+        paused = bool(getattr(self, "_preview_paused", True))
+        try:
+            button.blockSignals(True)
+            button.setChecked(paused)
+        finally:
+            button.blockSignals(False)
+        button.setToolTip(
+            "Paused: the preview holds this frame. Press to follow the render."
+            if paused else "Following the render. Press to hold this frame."
+        )
+        owns_picture = (getattr(self, "_live_tail", None) is not None
+                        or getattr(self, "_preview_decoder", None) is not None)
+        button.setEnabled(bool(owns_picture))
 
     def _wire_preview_strip(self) -> None:
         """Connect the pane's strip signals once, whoever owns the picture (live tail or finished file).
@@ -734,7 +798,13 @@ class ProcessTab:
                 return
             self._preview_decoder = decoder
             self._wire_preview_strip()
-            decoder.play()
+            if self._preview_paused:
+                # A paused preview stands where the picture already was (the render's edge after a live tail), not at
+                # 0: `seek` publishes exactly one frame and stays paused.
+                decoder.seek(max(0.0, float(getattr(self, "_preview_playhead", 0.0))))
+            else:
+                decoder.play()
+            self._sync_preview_transport()
         except Exception as exc:  # a preview that cannot play must not take the render down
             log(f"preview playback failed: {exc}")
 
@@ -877,6 +947,7 @@ class ProcessTab:
         pane = self.page_handles.proc.previewLabel
         if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             pane.set_frame(image)
+            self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
             live_tail = getattr(self, "_live_tail", None)
             running = self.renderProcess is not None and self.renderProcess.poll() is None

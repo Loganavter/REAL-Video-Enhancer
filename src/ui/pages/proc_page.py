@@ -300,6 +300,23 @@ class ProcPagePage:
         sizePolicy4.setHeightForWidth(self.previewLabel.sizePolicy().hasHeightForWidth())
         self.previewLabel.setSizePolicy(sizePolicy4)
         self.verticalLayout_8.addWidget(self.previewLabel)
+        # The preview's transport: one toggle, and the preview stands PAUSED until it is pressed (owner, 2026-11-23:
+        # "добавь паузу и чтобы изначально на ней и стояло"). It lives next to the picture rather than in
+        # `RenderedPreviewControlsContainer`, which is hidden at start-up and therefore cannot carry a control a live
+        # preview needs. Checked = paused; the glyph is the ACTION the press performs, like a player's own button.
+        self.previewPauseButton = Button(
+            icon=(QIcon(u":/icons/icons/pause-circle.svg"), QIcon(u":/icons/icons/play-circle.svg")),
+            toggle=True, variant="surface",
+            content_align=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(8, 5, 8, 5), corner_radius=10, size=(40, 40), icon_size=26)
+        self.previewPauseButton.setObjectName(u"previewPauseButton")
+        self.previewPauseButton.setChecked(True)
+        self.previewPauseButton.setToolTip(QCoreApplication.translate(
+            "MainWindow", u"Paused: the preview holds this frame. Press to follow the render.", None))
+        self.previewPauseButton.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        # Straight into the pane's own column, aligned left: a wrapper `QWidget` around one button would be a bare
+        # container (the toolkit-native ratchet counts them, and proc_page has no budget for a new one).
+        self.verticalLayout_8.addWidget(self.previewPauseButton, 0, Qt.AlignmentFlag.AlignLeft)
         self.VideoPreview = QWidget(self.previewSubContainer)
         self.VideoPreview.setObjectName(u"VideoPreview")
         self.VideoPreview.setEnabled(True)
@@ -553,6 +570,7 @@ class ProcPagePage:
             killRenderButton=self.killRenderButton,
             onRenderButtonsContiainer=self.onRenderButtonsContiainer,
             previewLabel=self.previewLabel,
+            previewPauseButton=self.previewPauseButton,
             progressBar=self.progressBar,
             progressDetail=self.progressDetail,
             FPS=self.FPS,

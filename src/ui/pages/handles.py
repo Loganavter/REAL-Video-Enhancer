@@ -140,6 +140,8 @@ class ProcPageHandles:
     killRenderButton: "Button"
     onRenderButtonsContiainer: "QHBoxLayout"
     previewLabel: "QWidget"
+    #: The preview's transport toggle: checked = the preview holds this frame.
+    previewPauseButton: "Button"
     progressBar: "ToastProgressBar"
     progressDetail: "Text"
     FPS: "Text"

@@ -126,7 +126,17 @@ def install(window) -> None:
             except OSError:
                 wanted = ""
             os.unlink(request_path)
-            handle(wanted)
+            try:
+                handle(wanted)
+            except Exception as exc:
+                # This loop IS the channel, and a handler that raises also skips the reschedule below: one bad verb
+                # then silences every later request (measured 2026-11-23). Answer the error, keep polling.
+                print(f"capture-server: {wanted!r} failed: {type(exc).__name__}: {exc}", flush=True)
+                try:
+                    _finish({"stamp": _stamp(), "kind": "error",
+                             "error": f"{type(exc).__name__}: {exc}"})
+                except Exception:
+                    pass
         QTimer.singleShot(120, poll)
 
     if always_on:
@@ -220,6 +230,11 @@ def install(window) -> None:
         chain = []
         node = widget
         rows = getattr(widget, "_rows", None)
+        # A toolkit `Button` carries `_rows` too - a LIST of content rows, not the painted rows widget. Reading
+        # `.x()` off it raised, and the exception took the whole poll loop (the channel) down with it (measured
+        # 2026-11-23: `click:previewPauseButton@20,20` and then every later request timed out).
+        if rows is not None and not isinstance(rows, QWidget):
+            rows = None
         if rows is not None:
             chain.append({"what": "rows", "geom": [rows.x(), rows.y(), rows.width(), rows.height()],
                           "parent": type(rows.parent()).__name__,
@@ -231,6 +246,8 @@ def install(window) -> None:
                               Qt.WidgetAttribute.WA_TransparentForMouseEvents)),
                           "blocked_by_modal": bool(qt_widgets.QApplication.activeModalWidget()) if False else None})
         scroll = getattr(widget, "_scroll", None)
+        if scroll is not None and not isinstance(scroll, QWidget):
+            scroll = None
         if scroll is not None:
             viewport = scroll.viewport()
             chain.append({
@@ -471,6 +488,12 @@ def install(window) -> None:
             "translucent": bool(target.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)),
             "autofill": bool(target.autoFillBackground()),
         })
+        is_checked = getattr(target, "isChecked", None)
+        if callable(is_checked):
+            try:
+                report["checked"] = bool(is_checked())
+            except Exception:
+                pass
         progress = getattr(target, "_progress", None)
         if progress:
             # A pane's two time bases: (rendered, total, playhead, duration). "A seek holds while the renderer
