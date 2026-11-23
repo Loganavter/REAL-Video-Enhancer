@@ -38,6 +38,22 @@ def _theme(tmp_path: Path, source: str) -> list[ui_gates.Finding]:
     return ui_gates.check_theme_reads([_write(tmp_path, source)])
 
 
+def _empty_stylesheet(tmp_path: Path, source: str) -> list[ui_gates.Finding]:
+    return ui_gates.check_empty_stylesheets([_write(tmp_path, source)])
+
+
+def _swallow(tmp_path: Path, source: str) -> list[ui_gates.Finding]:
+    return ui_gates.check_silent_swallows([_write(tmp_path, source)])
+
+
+def _backend_ui(tmp_path: Path, source: str) -> list[ui_gates.Finding]:
+    return ui_gates.check_backend_imports_ui([_write(tmp_path, source)])
+
+
+def _page_io(tmp_path: Path, source: str) -> list[ui_gates.Finding]:
+    return ui_gates.check_page_process_http([_write(tmp_path, source)])
+
+
 # --- rule 1: no manual theming on a migrated widget -------------------------------------------------------
 
 def test_qss_on_an_adapter_is_a_finding(tmp_path: Path) -> None:
@@ -223,6 +239,197 @@ def test_a_non_hex_qcolor_at_import_is_left_to_the_literal_colour_gate(tmp_path:
     assert findings == []
 
 
+# --- rule 4: an empty stylesheet is dead text -------------------------------------------------------------
+
+def test_an_empty_stylesheet_is_a_finding(tmp_path: Path) -> None:
+    """`setStyleSheet("")` states no rule, so the call can never change a pixel - and it reads like theming.
+
+    Both quote styles and a whitespace-only literal are the same reset. The report names the widget, because the fix
+    is to delete one line at one widget, and the key stays `(file, that text)` like every other rule's.
+    """
+    findings = _empty_stylesheet(tmp_path, """
+class Page:
+    def build(self):
+        self.panel = QWidget(self.root)
+        self.panel.setStyleSheet(u"")
+        self.label = QLabel(self.root)
+        self.label.setStyleSheet('')
+        self.hint = QLabel(self.root)
+        self.hint.setStyleSheet(u"   \\n")
+""")
+    assert [finding.line for finding in findings] == [5, 7, 9]
+    assert {finding.rule for finding in findings} == {"empty-stylesheet"}
+    details = {finding.line: finding.detail for finding in findings}
+    assert details[5] == 'panel.setStyleSheet("")'
+    assert details[7] == 'label.setStyleSheet("")'
+
+
+@pytest.mark.parametrize("source", [
+    'self.w.setStyleSheet(u"QWidget{background-color:#1f232a}")',   # a rule: the QSS/adapter question
+    "self.w.setStyleSheet(self._rule)",                              # computed: may well be a rule at build time
+    "self.w.setStyleSheet(self._rule or '')",                        # computed, empty at runtime only
+])
+def test_a_stylesheet_that_may_state_a_rule_is_not_dead(tmp_path: Path, source: str) -> None:
+    findings = _empty_stylesheet(tmp_path, f"def build(self):\n    {source}\n")
+    assert findings == [], f"{source} -> {findings}"
+
+
+def test_the_two_stylesheet_rules_ask_different_questions(tmp_path: Path) -> None:
+    """One call, two rules: the adapter rule has no rule to retire, the dead-text rule has nothing else to say.
+
+    Pinning both halves keeps a later edit from "simplifying" the empty reset into `qss-on-adapter` (where it would
+    accuse every stock widget the Designer reset) or out of the gate entirely (where it stays unread dead text).
+    """
+    path = _write(tmp_path, """
+class Page:
+    def build(self):
+        self.addButton = QtButton(self.root)
+        self.addButton.setStyleSheet(u"")
+""")
+    assert ui_gates.check_qss([path]) == []
+    assert [finding.rule for finding in ui_gates.check_empty_stylesheets([path])] == ["empty-stylesheet"]
+
+
+# --- rule 5: a swallow that leaves no trace ---------------------------------------------------------------
+
+def test_a_silent_swallow_is_a_finding(tmp_path: Path) -> None:
+    """Bare, named and tuple handlers are the same shape; the finding sits on the `except`, where a reader looks."""
+    findings = _swallow(tmp_path, """
+def teardown(self):
+    try:
+        self.item.destroy()
+    except Exception:
+        pass
+    try:
+        self.thread.wait()
+    except (RuntimeError, TypeError):
+        pass
+    try:
+        self.window.close()
+    except:
+        pass
+""")
+    assert [finding.line for finding in findings] == [5, 9, 13]
+    assert [finding.detail for finding in findings] == [
+        "except Exception: pass", "except (RuntimeError, TypeError): pass", "except: pass"]
+
+
+def test_a_swallow_with_a_reason_or_a_trace_is_not_silent(tmp_path: Path) -> None:
+    """The escape hatch is a comment (this swallow is deliberate) or a body that does something (this one is not a
+    swallow at all). Both are how the next reader learns why the failure is acceptable."""
+    findings = _swallow(tmp_path, '''
+def teardown(self):
+    try:
+        self.item.destroy()
+    except RuntimeError:
+        pass  # already destroyed when the page tears down twice
+    try:
+        self.thread.wait()
+    except Exception:
+        log.warning("thread did not stop")
+    try:
+        self.thread.quit()
+    except Exception:
+        raise
+''')
+    assert findings == []
+
+
+def test_a_comment_on_the_except_line_is_a_note_too(tmp_path: Path) -> None:
+    """Teardown swallows are often one line; refusing a comment that does not sit on the `pass` would flag them."""
+    findings = _swallow(tmp_path, """
+try:
+    widget.close()
+except RuntimeError:  # the widget is gone on the second teardown
+    pass
+""")
+    assert findings == []
+
+
+# --- rule 6: the backend never imports the UI --------------------------------------------------------------
+
+def test_a_backend_module_importing_the_ui_is_a_finding(tmp_path: Path) -> None:
+    """Three spellings of the same edge: the package, a submodule, and `from src import ui`."""
+    findings = _backend_ui(tmp_path, """
+from src.ui.pages.download_page import DownloadPage
+import src.ui.widgets.qt_shaped as qt_shaped
+from src import ui
+""")
+    assert [finding.line for finding in findings] == [2, 3, 4]
+    assert [finding.detail for finding in findings] == [
+        "imports src.ui.pages.download_page", "imports src.ui.widgets.qt_shaped", "imports src.ui"]
+
+
+def test_the_backend_importing_its_own_tree_is_left_alone(tmp_path: Path) -> None:
+    """`backend/src` is the `src` package on the backend's path: its own imports and a relative one are not the UI."""
+    findings = _backend_ui(tmp_path, """
+from src.utils.Util import log
+import src.RenderVideo
+from src.utils import GetFFMpeg
+from .ui import helpers
+""")
+    assert findings == []
+
+
+def test_a_module_whose_name_merely_starts_with_src_ui_is_not_the_ui(tmp_path: Path) -> None:
+    """`src.ui_helpers` and `src.uix` are different packages; a prefix test without a dot boundary would flag them."""
+    findings = _backend_ui(tmp_path, """
+from src.ui_kit import thing
+import src.uix
+""")
+    assert findings == []
+
+
+# --- rule 7: a page or shell module does not spawn processes or do HTTP -----------------------------------
+
+def test_a_page_that_spawns_or_fetches_is_a_finding(tmp_path: Path) -> None:
+    """The import half catches the four sanctioned spellings plus `from os import system`; the call half catches
+    `os.system`, which imports only `os` and would otherwise be invisible."""
+    findings = _page_io(tmp_path, """
+import subprocess
+from os import system
+from requests import Session
+import urllib.request
+import httpx
+
+
+def build(self):
+    os.system("ffmpeg -i in.mp4 out.mkv")
+    os.popen("ffmpeg -version")
+""")
+    assert [finding.line for finding in findings] == [2, 3, 4, 5, 6, 10, 11]
+    assert [finding.detail for finding in findings] == [
+        "imports subprocess (process)", "imports os.system (process)", "imports requests (http)",
+        "imports urllib.request (http)", "imports httpx (http)", "os.system(...)", "os.popen(...)"]
+
+
+@pytest.mark.parametrize("source", [
+    "import os",
+    "import urllib.parse",                     # string handling, not a request
+    "from pathlib import Path",
+    "import subprocess_helpers",               # a different module
+    "self.os.system('not the os module')",
+    "os.path.join('a', 'b')",
+])
+def test_the_page_io_rule_leaves_the_neighbours_alone(tmp_path: Path, source: str) -> None:
+    findings = _page_io(tmp_path, f"def build(self):\n    {source}\n")
+    assert findings == [], f"{source} -> {findings}"
+
+
+def test_the_new_rules_scan_the_layer_they_protect() -> None:
+    """The boundaries are part of the contract, not an accident of `rglob`.
+
+    The legacy top-level tab modules stay out (the migration owns their catches and resets wholesale - a ratchet over
+    them would chase a rewrite), and `page-process-http` stops at the page/shell layer because the download dialog is
+    the one UI module whose job is a request and a child process.
+    """
+    migrated = {"src/ui/pages", "src/ui/shell", "src/ui/widgets", "src/ui/dialogs"}
+    assert set(ui_gates.SCOPES["empty-stylesheet"]) == migrated
+    assert set(ui_gates.SCOPES["silent-swallow"]) == migrated
+    assert ui_gates.SCOPES["backend-imports-ui"] == ("backend",)
+    assert set(ui_gates.SCOPES["page-process-http"]) == {"src/ui/pages", "src/ui/shell"}
+
+
 # --- the ratchet -----------------------------------------------------------------------------------------
 
 def test_the_module_does_not_import_qt() -> None:
@@ -292,6 +499,23 @@ def test_a_line_shift_does_not_change_the_key(tmp_path: Path) -> None:
     assert [finding.key() for finding in first] == [finding.key() for finding in second]    # the ratchet did not
 
 
+@pytest.mark.parametrize("rule", ["empty-stylesheet", "silent-swallow", "backend-imports-ui", "page-process-http"])
+def test_every_new_rule_ratchets_in_both_directions(rule: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per rule: a recorded finding passes, one more of the same fails, and an empty KNOWN covers nothing.
+
+    The last step is the one the two green rules (backend, page IO) depend on: their `KNOWN` is `{}` today, and the
+    test proves that `{}` is a refusal, not "this rule is decorative". Run for a synthetic key so the verdict does not
+    move when the tree's real counts move.
+    """
+    recorded = ui_gates.Finding("a.py", 10, rule, "site")
+    monkeypatch.setitem(ui_gates.KNOWN, rule, {("a.py", "site"): 1})
+    assert ui_gates.new_findings([recorded]) == []
+    assert [finding.line for finding in ui_gates.new_findings([recorded, ui_gates.Finding("a.py", 20, rule, "site")])
+            ] == [20]
+    monkeypatch.setitem(ui_gates.KNOWN, rule, {})
+    assert ui_gates.new_findings([recorded]) == [recorded]
+
+
 def test_stale_entries_are_named() -> None:
     stale = ui_gates.stale_known([])
     assert len(stale) == sum(len(entries) for entries in ui_gates.KNOWN.values())
@@ -311,6 +535,9 @@ def test_cli_is_clean_on_this_tree(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert "0 new" in out
     assert "no new violations" in out
+    # the four rules added on 2026-11-23 are part of the table, not a second mechanism beside it
+    for rule in ("empty-stylesheet", "silent-swallow", "backend-imports-ui", "page-process-http"):
+        assert rule in out, rule
 
 
 def test_cli_table_marks_a_new_finding(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
