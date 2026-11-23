@@ -94,3 +94,28 @@ def install_rhi_primer(window: QWidget) -> None:
         window._rhi_surface_primer = primer
     except Exception as error:  # a primer that cannot be built must not cost the window
         print(f"[preview] rhi primer not installed: {error}", flush=True)
+
+def gpu_preview_available() -> bool:
+    """Whether a GPU pane can exist in THIS process at all.
+
+    `QRhiWidget` needs a platform GL/EGL context. On a host whose EGL cannot create a screen (measured 2026-11-23 on
+    the owner's Wayland session: `MESA-EGL: driver (null)`, `failed to create dri2 screen`, `eglSwapBuffers failed
+    0x300d` after a driver/userland version mismatch) every QRhiWidget prints `No QRhi`, renders nothing and - before the
+    guards - crashed the process. Probing one context here lets the page pick the raster pane instead of showing an
+    empty one: `QOpenGLContext.create()` is the cheapest question that answers it.
+
+    Overrides: `RVE_UI_RASTER_PREVIEW=1` forces the raster pane (kept for A/B), `RVE_UI_RHI_AVAILABLE=0|1` answers the
+    probe by hand.
+    """
+    if (os.environ.get("RVE_UI_RASTER_PREVIEW", "0") or "0").strip().lower() in ("1", "true", "yes", "on"):
+        return False
+    override = os.environ.get("RVE_UI_RHI_AVAILABLE")
+    if override is not None:
+        return str(override).strip().lower() not in ("0", "false", "no", "off")
+    try:
+        from PySide6.QtGui import QOpenGLContext
+
+        context = QOpenGLContext()
+        return bool(context.create())
+    except Exception:
+        return False

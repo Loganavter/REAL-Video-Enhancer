@@ -263,7 +263,11 @@ class ProcPagePage:
         # A/B - the fallback exists because a first QRhiWidget changes the window's compositing path on this stack.
         import os as _preview_env
 
-        if _preview_env.environ.get("RVE_UI_RASTER_PREVIEW", "0").strip().lower() in ("1", "true", "yes", "on"):
+        from src.ui.rhi_surface import gpu_preview_available
+
+        # The raster pane is not only an A/B switch any more: when the process has no usable GL/EGL context every
+        # QRhiWidget renders nothing (`No QRhi`), so the page falls back on its own instead of showing an empty plate.
+        if not gpu_preview_available():
             self.previewLabel = ImageLabel(self.previewSubContainer,
                 alignment=Qt.AlignmentFlag.AlignCenter)
             self.previewLabel.setObjectName(u"previewLabel")
