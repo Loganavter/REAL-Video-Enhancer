@@ -19,6 +19,7 @@ import resources_rc
 # `Button` is the toolkit's `QPushButton`; the page imports no compatibility adapter.
 from sli_ui_toolkit.widgets import Button, SurfacePanel, SurfaceScrollArea, TopTabHost
 from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
+from src.ui.pages.handles import SettingsPageHandles
 from src.ui.pages.tab_2 import Tab2Page
 from src.ui.pages.tab_3 import Tab3Page
 from src.ui.pages.tab_4 import Tab4Page
@@ -90,6 +91,7 @@ class SettingsPagePage:
         self.scrollArea.setWidget(self.scrollAreaWidgetContents)
         self.verticalLayout_14.addWidget(self.scrollArea)
         self.tabWidget.setCurrentIndex(0)
+        self._handles = SettingsPageHandles(resetSettingsBtn=self.resetSettingsBtn)
         self.retranslate()
         return self.settingsPage
 

@@ -18,6 +18,7 @@ import resources_rc
 # `QCheckBox`, `Button` where it had a `QPushButton`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import Button, CheckBox, SurfacePanel, Text
 from src.ui.typography import apply, BODY_PT
+from src.ui.pages.handles import AppSettingsHandles
 
 
 def _row_checkbox(parent) -> CheckBox:
@@ -113,6 +114,11 @@ class Tab4Page:
         self._settingsFiller = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         self.verticalLayout_20.addItem(self._settingsFiller)
         self.verticalLayout_23.addWidget(self.GUIOptionsContainer)
+        self._handles = AppSettingsHandles(
+            preview_enabled=self.preview_enabled,
+            discord_rich_presence=self.discord_rich_presence,
+            openRVEFolderBtn=self.openRVEFolderBtn,
+        )
         self.retranslate()
         return self.tab_4
 

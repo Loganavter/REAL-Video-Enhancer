@@ -7,6 +7,7 @@ from .QTcustom import RegularQTPopup
 from ..GenerateFFMpegCommand import FFMpegCommand
 from ..VideoInfo import VideoLoader
 from ..video_probe import is_probeable_input
+from .pages.handles import WindowHandles
 
 # the combo box shows user words, the backend wants flag values.
 # this is the single place where the two are mapped.
@@ -39,17 +40,16 @@ QUALITY_PRESET_TOOLTIP = (
 )
 
 
-def applyQualityPresetTooltip(comboBox, infoLabel=None, extra: str = "") -> None:
+def applyQualityPresetTooltip(comboBox, extra: str = "") -> None:
     """Attach the explanation to the Best/Fast switch, from one place.
 
     The combo box and the "?" label next to it used different texts - the label still carried the pre-2026-11-18
-    wording about frame/tile reuse, which stopped being true when the switch became the fp16/int8 choice. Both are
-    set here so the pair cannot drift again.
+    wording about frame/tile reuse, which stopped being true when the switch became the fp16/int8 choice. The "?"
+    label no longer exists on the page, and the old read of it was a `getattr(..., None)` that hid that fact; the
+    tooltip now has exactly one subject, the combo box it explains.
     """
     text = QUALITY_PRESET_TOOLTIP + (f"\n{extra}" if extra else "")
-    for widget in (comboBox, infoLabel):
-        if widget is not None:
-            widget.setToolTip(text)
+    comboBox.setToolTip(text)
 
 
 def hide_int8_preset_if_unsupported(parent, settings) -> None:
@@ -59,9 +59,7 @@ def hide_int8_preset_if_unsupported(parent, settings) -> None:
     the kernels need int8 tensor cores (compute capability 7.5, Turing and later). The setting is clamped to Best
     so a machine that moves between cards cannot keep a value the combo no longer offers.
     """
-    combo = getattr(parent, "qualityPresetComboBox", None)
-    if combo is None:
-        return
+    combo = parent.page_handles.general.qualityPresetComboBox
     from .GPUDetect import int8_body_available
     available, reason = int8_body_available()
     if available:
@@ -75,8 +73,7 @@ def hide_int8_preset_if_unsupported(parent, settings) -> None:
         settings.writeSetting("quality_preset", "best")
         combo.setCurrentText("Best quality")
     applyQualityPresetTooltip(
-        combo, getattr(parent, "qualityPresetInfoLabel", None),
-        extra="Not offered on this card: it needs NVIDIA tensor cores (GTX 16-series / RTX or newer).")
+        combo, extra="Not offered on this card: it needs NVIDIA tensor cores (GTX 16-series / RTX or newer).")
 
 
 
@@ -89,6 +86,9 @@ class SettingsTab:
         total_ncnn_gpus,
     ):
         self.parent = parent
+        #: The typed page surface (`window.page_handles`). Required dataclass fields: a page that drops a widget
+        #: fails while building, instead of handing this glue an `AttributeError` or a silent `getattr(..., None)`.
+        self.page_handles: WindowHandles = parent.page_handles
         self.input_file = None
         #: True once the user has typed in the command line: from then on the app does NOT regenerate it (that is what
         #: made it "reset on any little thing" - nine signals rewrote it from the settings on every change).
@@ -100,11 +100,11 @@ class SettingsTab:
         self.in_pix_fmt = ""
         self.hdr_mode = False
         self.ffmpeg_settings_dict = {
-            "encoder": self.parent.encoder,
-            "audio_encoder": self.parent.audio_encoder,
-            "audio_bitrate": self.parent.audio_bitrate,
-            "video_pixel_format": self.parent.video_pixel_format,
-            "video_quality": self.parent.video_quality,
+            "encoder": self.page_handles.encoder.encoder,
+            "audio_encoder": self.page_handles.encoder.audio_encoder,
+            "audio_bitrate": self.page_handles.encoder.audio_bitrate,
+            "video_pixel_format": self.page_handles.encoder.video_pixel_format,
+            "video_quality": self.page_handles.encoder.video_quality,
 
         }
         self.settings = Settings()
@@ -116,12 +116,12 @@ class SettingsTab:
 
         # disable half option if its not supported
         if not halfPrecisionSupport:
-            self.parent.precision.removeItem(1)
+            self.page_handles.render_settings.precision.removeItem(1)
 
         # set max gpu id for combo boxs
-        self.parent.pytorch_gpu_id.setMaximum(total_pytorch_gpus)
-        self.parent.ncnn_gpu_id.setMaximum(total_ncnn_gpus)
-        self.parent.openRVEFolderBtn.clicked.connect(lambda:open_folder(currentDirectory()))
+        self.page_handles.render_settings.pytorch_gpu_id.setMaximum(total_pytorch_gpus)
+        self.page_handles.render_settings.ncnn_gpu_id.setMaximum(total_ncnn_gpus)
+        self.page_handles.app_settings.openRVEFolderBtn.clicked.connect(lambda:open_folder(currentDirectory()))
         
 
         self.updateFFMpegCommand()
@@ -132,7 +132,7 @@ class SettingsTab:
         if not saved:
             return
         self.encoder_command_user = True
-        self.parent.EncoderCommand.setText(saved)
+        self.page_handles.encoder.EncoderCommand.setText(saved)
 
     def onEncoderCommandEdited(self) -> None:
         """The user typed in the command line: stop regenerating it, and persist what they typed.
@@ -140,7 +140,7 @@ class SettingsTab:
         Clearing the field hands ownership back to the app: the next settings change regenerates it and the stored value
         is dropped.
         """
-        text = self.parent.EncoderCommand.text()
+        text = self.page_handles.encoder.EncoderCommand.text()
         self.encoder_command_user = bool(text.strip())
         self.settings.writeSetting("encoder_command", text if self.encoder_command_user else "")
 
@@ -162,7 +162,7 @@ class SettingsTab:
             }
         self.out_pixel_fmt = pxfmtDict[self.out_pixel_fmt]
 
-        input_file = self.parent.inputFileText.text()
+        input_file = self.page_handles.general.inputFileText.text()
         # Only ask the backend about a REAL file (or a URL): the field carries the batch sentinel `{ MULTIPLE_FILES }`
         # whenever a folder is loaded, and probing that produced no FPS line - which used to end in a ZeroDivisionError
         # on every encoder change (measured 2026-11-22).
@@ -208,200 +208,197 @@ class SettingsTab:
             self.color_transfer,  
         ).build_command()
         if not self.encoder_command_user:
-            self.parent.EncoderCommand.setText(" ".join(command))
+            self.page_handles.encoder.EncoderCommand.setText(" ".join(command))
         self.parent.updateVideoGUIText()
          
 
     def connectWriteSettings(self):
         
-        self.parent.subtitle_encoder.currentIndexChanged.connect(
+        self.page_handles.encoder.subtitle_encoder.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
-                "subtitle_encoder", self.parent.subtitle_encoder.currentText()
+                "subtitle_encoder", self.page_handles.encoder.subtitle_encoder.currentText()
             )
         )
 
-        self.parent.precision.currentIndexChanged.connect(
+        self.page_handles.render_settings.precision.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
-                "precision", self.parent.precision.currentText()
+                "precision", self.page_handles.render_settings.precision.currentText()
             )
         )
-        self.parent.tensorrt_optimization_level.currentIndexChanged.connect(
+        self.page_handles.render_settings.tensorrt_optimization_level.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "tensorrt_optimization_level",
-                self.parent.tensorrt_optimization_level.currentText(),
+                self.page_handles.render_settings.tensorrt_optimization_level.currentText(),
             )
         )
-        self.parent.preview_enabled.stateChanged.connect(
+        self.page_handles.app_settings.preview_enabled.stateChanged.connect(
             lambda: self.settings.writeSetting(
                 "preview_enabled",
-                "True" if self.parent.preview_enabled.isChecked() else "False",
+                "True" if self.page_handles.app_settings.preview_enabled.isChecked() else "False",
             )
         )
-        self.parent.scene_change_detection_enabled.stateChanged.connect(
+        self.page_handles.output.scene_change_detection_enabled.stateChanged.connect(
             lambda: self.settings.writeSetting(
                 "scene_change_detection_enabled",
                 "True"
-                if self.parent.scene_change_detection_enabled.isChecked()
+                if self.page_handles.output.scene_change_detection_enabled.isChecked()
                 else "False",
             )
         )
-        self.parent.discord_rich_presence.stateChanged.connect(
+        self.page_handles.app_settings.discord_rich_presence.stateChanged.connect(
             lambda: self.settings.writeSetting(
                 "discord_rich_presence",
-                "True" if self.parent.discord_rich_presence.isChecked() else "False",
+                "True" if self.page_handles.app_settings.discord_rich_presence.isChecked() else "False",
             )
         )
-        self.parent.scene_change_detection_method.currentIndexChanged.connect(
+        self.page_handles.output.scene_change_detection_method.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "scene_change_detection_method",
-                self.parent.scene_change_detection_method.currentText(),
+                self.page_handles.output.scene_change_detection_method.currentText(),
             )
         )
-        self.parent.scene_change_detection_threshold.valueChanged.connect(
+        self.page_handles.output.scene_change_detection_threshold.valueChanged.connect(
             lambda: self.settings.writeSetting(
                 "scene_change_detection_threshold",
-                str(self.parent.scene_change_detection_threshold.value()),
+                str(self.page_handles.output.scene_change_detection_threshold.value()),
             )
         )
-        self.parent.video_quality.currentIndexChanged.connect(
+        self.page_handles.encoder.video_quality.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "video_quality",
-                str(self.parent.video_quality.currentText()),
+                str(self.page_handles.encoder.video_quality.currentText()),
             )
         )
-        self.parent.output_folder_location.textChanged.connect(
+        self.page_handles.output.output_folder_location.textChanged.connect(
             lambda: self.writeOutputFolder()
         )
 
-        self.parent.resetSettingsBtn.clicked.connect(self.resetSettings)
+        self.page_handles.settings.resetSettingsBtn.clicked.connect(self.resetSettings)
 
-        self.parent.uhd_mode.stateChanged.connect(
+        self.page_handles.render_settings.uhd_mode.stateChanged.connect(
             lambda: self.settings.writeSetting(
                 "uhd_mode",
-                "True" if self.parent.uhd_mode.isChecked() else "False",
+                "True" if self.page_handles.render_settings.uhd_mode.isChecked() else "False",
             )
         )
-        self.parent.ncnn_gpu_id.textChanged.connect(
+        self.page_handles.render_settings.ncnn_gpu_id.textChanged.connect(
             lambda: self.settings.writeSetting(
-                "ncnn_gpu_id", self.parent.ncnn_gpu_id.text()
+                "ncnn_gpu_id", self.page_handles.render_settings.ncnn_gpu_id.text()
             )
         )
-        self.parent.pytorch_gpu_id.textChanged.connect(
+        self.page_handles.render_settings.pytorch_gpu_id.textChanged.connect(
             lambda: self.settings.writeSetting(
-                "pytorch_gpu_id", self.parent.pytorch_gpu_id.text()
+                "pytorch_gpu_id", self.page_handles.render_settings.pytorch_gpu_id.text()
             )
         )
-        self.parent.auto_border_cropping.stateChanged.connect(
+        self.page_handles.output.auto_border_cropping.stateChanged.connect(
             lambda: self.settings.writeSetting(
                 "auto_border_cropping",
-                "True" if self.parent.auto_border_cropping.isChecked() else "False",
+                "True" if self.page_handles.output.auto_border_cropping.isChecked() else "False",
             )
         )
-        self.parent.video_container.currentIndexChanged.connect(
+        self.page_handles.encoder.video_container.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
-                "video_container", self.parent.video_container.currentText()
+                "video_container", self.page_handles.encoder.video_container.currentText()
             )
         )
-        self.parent.video_pixel_format.currentIndexChanged.connect(
+        self.page_handles.encoder.video_pixel_format.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
-                "video_pixel_format", self.parent.video_pixel_format.currentText()
+                "video_pixel_format", self.page_handles.encoder.video_pixel_format.currentText()
             )
         )
-        self.parent.pytorch_version.currentIndexChanged.connect(
+        self.page_handles.download.pytorch_version.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
-                "pytorch_version", self.parent.pytorch_version.currentText()
+                "pytorch_version", self.page_handles.download.pytorch_version.currentText()
             )
         )
-        self.parent.pytorch_backend.currentIndexChanged.connect(
+        self.page_handles.download.pytorch_backend.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
-                "pytorch_backend", self.parent.pytorch_backend.currentText()
+                "pytorch_backend", self.page_handles.download.pytorch_backend.currentText()
             )
         )
         
-        self.parent.dynamic_tensorrt_engine.stateChanged.connect(
+        self.page_handles.render_settings.dynamic_tensorrt_engine.stateChanged.connect(
             lambda: self.settings.writeSetting(
                 "dynamic_tensorrt_engine",
-                "True" if self.parent.dynamic_tensorrt_engine.isChecked() else "False"
+                "True" if self.page_handles.render_settings.dynamic_tensorrt_engine.isChecked() else "False"
             )
         )
-        self.parent.auto_hdr_mode.stateChanged.connect(
+        self.page_handles.render_settings.auto_hdr_mode.stateChanged.connect(
             lambda: self.settings.writeSetting(
                 "auto_hdr_mode",
-                "True" if self.parent.auto_hdr_mode.isChecked() else "False"
+                "True" if self.page_handles.render_settings.auto_hdr_mode.isChecked() else "False"
             )
         )
-        self.parent.video_encoder_speed.currentIndexChanged.connect(
+        self.page_handles.encoder.video_encoder_speed.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
-                "video_encoder_speed", self.parent.video_encoder_speed.currentText()
+                "video_encoder_speed", self.page_handles.encoder.video_encoder_speed.currentText()
             )
         )
-        applyQualityPresetTooltip(getattr(self.parent, "qualityPresetComboBox", None),
-                                  getattr(self.parent, "qualityPresetInfoLabel", None))
+        applyQualityPresetTooltip(self.page_handles.general.qualityPresetComboBox)
         hide_int8_preset_if_unsupported(self.parent, self.settings)
-        if getattr(self.parent, "frameReuse", None) is not None:
-            self.parent.frameReuse.setChecked(
-                self.settings.settings.get("temporal_reuse", "True") == "True")
-            self.parent.frameReuse.setToolTip(
-                "Skip re-upscaling frames that barely changed and reuse the previous result, corrected for "
-                "whatever did change - about 1.9x faster on held animation. The gate still refuses frames it "
-                "cannot certify, so this only decides whether it is allowed to try.")
-            self.parent.frameReuse.stateChanged.connect(
-                lambda: self.settings.writeSetting(
-                    "temporal_reuse", "True" if self.parent.frameReuse.isChecked() else "False"))
-            self.parent.frameReuse.stateChanged.connect(self.onFrameReuseSwitch)
-        if getattr(self.parent, "celReuse", None) is not None:
-            self.parent.celReuse.setChecked(
-                self.settings.settings.get("temporal_reuse_statistic", "mean_abs") == "coarse")
-            self.parent.celReuse.setToolTip(
-                "Decide reuse on the drawing instead of on the film: a 3 px low-pass with the scan's sub-pixel "
-                "wobble compensated, and the reused frame is moved by that estimate. On a denoised animation this "
-                "raises the reusable share from ~12% to ~64% at the same acceptance, because a half-pixel wobble "
-                "of a 1-2 px line otherwise reads as a changed cel. It also means grain, dust dots and the scan's "
-                "own jitter are NOT preserved on the reused frames - that is the trade this switch makes.")
-            self.parent.celReuse.setEnabled(self.parent.frameReuse.isChecked())
-            self.parent.celReuse.stateChanged.connect(
-                lambda: self.settings.writeSetting(
-                    "temporal_reuse_statistic",
-                    "coarse" if self.parent.celReuse.isChecked() else "mean_abs"))
+        self.page_handles.general.frameReuse.setChecked(
+            self.settings.settings.get("temporal_reuse", "True") == "True")
+        self.page_handles.general.frameReuse.setToolTip(
+            "Skip re-upscaling frames that barely changed and reuse the previous result, corrected for "
+            "whatever did change - about 1.9x faster on held animation. The gate still refuses frames it "
+            "cannot certify, so this only decides whether it is allowed to try.")
+        self.page_handles.general.frameReuse.stateChanged.connect(
+            lambda: self.settings.writeSetting(
+                "temporal_reuse", "True" if self.page_handles.general.frameReuse.isChecked() else "False"))
+        self.page_handles.general.frameReuse.stateChanged.connect(self.onFrameReuseSwitch)
+        self.page_handles.general.celReuse.setChecked(
+            self.settings.settings.get("temporal_reuse_statistic", "mean_abs") == "coarse")
+        self.page_handles.general.celReuse.setToolTip(
+            "Decide reuse on the drawing instead of on the film: a 3 px low-pass with the scan's sub-pixel "
+            "wobble compensated, and the reused frame is moved by that estimate. On a denoised animation this "
+            "raises the reusable share from ~12% to ~64% at the same acceptance, because a half-pixel wobble "
+            "of a 1-2 px line otherwise reads as a changed cel. It also means grain, dust dots and the scan's "
+            "own jitter are NOT preserved on the reused frames - that is the trade this switch makes.")
+        self.page_handles.general.celReuse.setEnabled(self.page_handles.general.frameReuse.isChecked())
+        self.page_handles.general.celReuse.stateChanged.connect(
+            lambda: self.settings.writeSetting(
+                "temporal_reuse_statistic",
+                "coarse" if self.page_handles.general.celReuse.isChecked() else "mean_abs"))
         self.onFrameReuseSwitch()
-        self.parent.qualityPresetComboBox.currentIndexChanged.connect(
+        self.page_handles.general.qualityPresetComboBox.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "quality_preset",
                 qualityPresetLabelToValue(
-                    self.parent.qualityPresetComboBox.currentText()
+                    self.page_handles.general.qualityPresetComboBox.currentText()
                 ),
             )
         )
-        self.parent.inputFileText.textChanged.connect(
+        self.page_handles.general.inputFileText.textChanged.connect(
             self.updateFFMpegCommand
         )
-        self.parent.encoder.currentIndexChanged.connect(
+        self.page_handles.encoder.encoder.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
-        self.parent.audio_encoder.currentIndexChanged.connect(
+        self.page_handles.encoder.audio_encoder.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
-        self.parent.video_pixel_format.currentIndexChanged.connect(
+        self.page_handles.encoder.video_pixel_format.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
-        self.parent.audio_bitrate.currentIndexChanged.connect(
+        self.page_handles.encoder.audio_bitrate.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
-        self.parent.auto_hdr_mode.stateChanged.connect(
+        self.page_handles.render_settings.auto_hdr_mode.stateChanged.connect(
             self.updateFFMpegCommand
         )
-        self.parent.video_quality.currentIndexChanged.connect(
+        self.page_handles.encoder.video_quality.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
-        self.parent.video_encoder_speed.currentIndexChanged.connect(
+        self.page_handles.encoder.video_encoder_speed.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
-        self.parent.subtitle_encoder.currentIndexChanged.connect(
+        self.page_handles.encoder.subtitle_encoder.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
         # `textEdited`, not `textChanged`: the latter also fires for the programmatic `setText` above, which would mark
         # the field as user-owned the moment the app generated it.
-        self.parent.EncoderCommand.textEdited.connect(self.onEncoderCommandEdited)
+        self.page_handles.encoder.EncoderCommand.textEdited.connect(self.onEncoderCommandEdited)
 
     def onFrameReuseSwitch(self, *args):
         """The cel switch only means something while reuse is on - an option inside an option.
@@ -409,14 +406,11 @@ class SettingsTab:
         Disabled rather than hidden: a hidden checkbox that is checked would still write its setting, and the
         user would have no way to see what the gate is about to compare.
         """
-        reuse = getattr(self.parent, "frameReuse", None)
-        cel = getattr(self.parent, "celReuse", None)
-        if cel is None:
-            return
-        cel.setEnabled(reuse.isChecked() if reuse is not None else True)
+        self.page_handles.general.celReuse.setEnabled(
+            self.page_handles.general.frameReuse.isChecked())
 
     def writeOutputFolder(self):
-        outputlocation = self.parent.output_folder_location.text()
+        outputlocation = self.page_handles.output.output_folder_location.text()
         if not (os.path.exists(outputlocation) and os.path.isdir(outputlocation)):
             RegularQTPopup(
                 "No videos folder\nSetting default output folder to home directory."
@@ -442,77 +436,77 @@ class SettingsTab:
 
     def connectSettingText(self):
         if PLATFORM == "darwin":
-            index = self.parent.encoder.findText("av1")
-            self.parent.encoder.removeItem(index)
+            index = self.page_handles.encoder.encoder.findText("av1")
+            self.page_handles.encoder.encoder.removeItem(index)
 
-        self.parent.precision.setCurrentText(self.settings.settings["precision"])
-        self.parent.tensorrt_optimization_level.setCurrentText(
+        self.page_handles.render_settings.precision.setCurrentText(self.settings.settings["precision"])
+        self.page_handles.render_settings.tensorrt_optimization_level.setCurrentText(
             self.settings.settings["tensorrt_optimization_level"]
         )
-        self.parent.encoder.setCurrentText(self.settings.settings["encoder"])
-        self.parent.audio_encoder.setCurrentText(
+        self.page_handles.encoder.encoder.setCurrentText(self.settings.settings["encoder"])
+        self.page_handles.encoder.audio_encoder.setCurrentText(
             self.settings.settings["audio_encoder"]
         )
-        self.parent.audio_bitrate.setCurrentText(
+        self.page_handles.encoder.audio_bitrate.setCurrentText(
             self.settings.settings["audio_bitrate"]
         )
-        self.parent.preview_enabled.setChecked(
+        self.page_handles.app_settings.preview_enabled.setChecked(
             self.settings.settings["preview_enabled"] == "True"
         )
-        self.parent.discord_rich_presence.setChecked(
+        self.page_handles.app_settings.discord_rich_presence.setChecked(
             self.settings.settings["discord_rich_presence"] == "True"
         )
-        self.parent.scene_change_detection_enabled.setChecked(
+        self.page_handles.output.scene_change_detection_enabled.setChecked(
             self.settings.settings["scene_change_detection_enabled"] == "True"
         )
-        self.parent.scene_change_detection_method.setCurrentText(
+        self.page_handles.output.scene_change_detection_method.setCurrentText(
             self.settings.settings["scene_change_detection_method"]
         )
-        self.parent.scene_change_detection_threshold.setValue(
+        self.page_handles.output.scene_change_detection_threshold.setValue(
             float(self.settings.settings["scene_change_detection_threshold"])
         )
-        self.parent.video_quality.setCurrentText(
+        self.page_handles.encoder.video_quality.setCurrentText(
             self.settings.settings["video_quality"]
         )
-        self.parent.output_folder_location.setText(
+        self.page_handles.output.output_folder_location.setText(
             self.settings.settings["output_folder_location"]
         )
-        self.parent.select_output_folder_location_btn.clicked.connect(
+        self.page_handles.output.select_output_folder_location_btn.clicked.connect(
             self.selectOutputFolder
         )
-        self.parent.uhd_mode.setChecked(self.settings.settings["uhd_mode"] == "True")
-        self.parent.ncnn_gpu_id.setValue(int(self.settings.settings["ncnn_gpu_id"]))
-        self.parent.pytorch_gpu_id.setValue(
+        self.page_handles.render_settings.uhd_mode.setChecked(self.settings.settings["uhd_mode"] == "True")
+        self.page_handles.render_settings.ncnn_gpu_id.setValue(int(self.settings.settings["ncnn_gpu_id"]))
+        self.page_handles.render_settings.pytorch_gpu_id.setValue(
             int(self.settings.settings["pytorch_gpu_id"])
         )
-        self.parent.auto_border_cropping.setChecked(
+        self.page_handles.output.auto_border_cropping.setChecked(
             self.settings.settings["auto_border_cropping"] == "True"
         )
-        self.parent.video_container.setCurrentText(
+        self.page_handles.encoder.video_container.setCurrentText(
             self.settings.settings["video_container"]
         )
-        self.parent.video_pixel_format.setCurrentText(
+        self.page_handles.encoder.video_pixel_format.setCurrentText(
             self.settings.settings["video_pixel_format"]
         )
-        self.parent.pytorch_version.setCurrentText(
+        self.page_handles.download.pytorch_version.setCurrentText(
             self.settings.settings["pytorch_version"]
         )
-        self.parent.pytorch_backend.setCurrentText(
+        self.page_handles.download.pytorch_backend.setCurrentText(
             self.settings.settings["pytorch_backend"]
         )
-        self.parent.dynamic_tensorrt_engine.setChecked(
+        self.page_handles.render_settings.dynamic_tensorrt_engine.setChecked(
             self.settings.settings["dynamic_tensorrt_engine"] == "True"
         )
-        self.parent.auto_hdr_mode.setChecked(
+        self.page_handles.render_settings.auto_hdr_mode.setChecked(
             self.settings.settings["auto_hdr_mode"] == "True"
         )
-        self.parent.video_encoder_speed.setCurrentText(
+        self.page_handles.encoder.video_encoder_speed.setCurrentText(
             self.settings.settings["video_encoder_speed"]
         )
-        self.parent.subtitle_encoder.setCurrentText(
+        self.page_handles.encoder.subtitle_encoder.setCurrentText(
             self.settings.settings["subtitle_encoder"]
         )
-        self.parent.qualityPresetComboBox.setCurrentText(
+        self.page_handles.general.qualityPresetComboBox.setCurrentText(
             qualityPresetValueToLabel(self.settings.settings["quality_preset"])
         )
 
@@ -529,7 +523,7 @@ class SettingsTab:
                     "output_folder_location",
                     str(outputlocation),
                 )
-                self.parent.output_folder_location.setText(outputlocation)
+                self.page_handles.output.output_folder_location.setText(outputlocation)
             else:
                 RegularQTPopup("No permissions to export here!")
 

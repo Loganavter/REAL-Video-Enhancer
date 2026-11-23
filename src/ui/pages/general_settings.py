@@ -22,6 +22,7 @@ from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, 
     SurfacePanel, SurfaceScrollArea, Text)
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
+from src.ui.pages.handles import GeneralSettingsHandles
 
 #: RVE's control text is 12 PIXELS (the Designer's sizing). The info pane's stock editor was 12 px, and
 #: `setFontPointSize` would convert through the screen DPI and render 16 px - the value used to come from the
@@ -651,6 +652,34 @@ class GeneralSettingsPage:
         self.horizontalLayout_13.addWidget(self.scrollArea_4)
         self.verticalLayout_10.addWidget(self.widget_5)
         self.interpolateModelComboBox.setCurrentIndex(-1)
+        # The glue's typed edge over this tab; every field is required, so a widget that stops being built fails
+        # here (TypeError) instead of surfacing as an AttributeError or a silent `getattr(..., None)` at click time.
+        self._handles = GeneralSettingsHandles(
+            inputFileSelectButton=self.inputFileSelectButton,
+            batchSelectButton=self.batchSelectButton,
+            inputFileText=self.inputFileText,
+            outputFileText=self.outputFileText,
+            outputFileSelectButton=self.outputFileSelectButton,
+            openOutputFolderButton=self.openOutputFolderButton,
+            backendComboBox=self.backendComboBox,
+            interpolateCheckBox=self.interpolateCheckBox,
+            interpolateModelComboBox=self.interpolateModelComboBox,
+            interpolationMultiplierSpinBox=self.interpolationMultiplierSpinBox,
+            sloMoModeCheckBox=self.sloMoModeCheckBox,
+            decompressCheckBox=self.decompressCheckBox,
+            decompressModelComboBox=self.decompressModelComboBox,
+            denoiseCheckBox=self.denoiseCheckBox,
+            denoiseModelComboBox=self.denoiseModelComboBox,
+            deblurCheckBox=self.deblurCheckBox,
+            deblurModelComboBox=self.deblurModelComboBox,
+            upscaleCheckBox=self.upscaleCheckBox,
+            upscaleModelComboBox=self.upscaleModelComboBox,
+            upscaleScaleSpinBox=self.upscaleScaleSpinBox,
+            qualityPresetComboBox=self.qualityPresetComboBox,
+            frameReuse=self.frameReuse,
+            celReuse=self.celReuse,
+            addToRenderQueueButton=self.addToRenderQueueButton,
+        )
         self.retranslate()
         return self.generalSettings
 

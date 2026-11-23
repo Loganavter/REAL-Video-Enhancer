@@ -16,6 +16,7 @@ import resources_rc
 from sli_ui_toolkit.widgets import SurfacePanel, ConsoleView
 import resources_rc
 from src.ui.typography import apply, SMALL_PT
+from src.ui.pages.handles import LogsHandles
 
 
 class Tab5Page:
@@ -46,6 +47,7 @@ class Tab5Page:
         self.renderOutput.set_edge_fade_enabled(True)
         self.renderOutput.set_max_lines(4000)
         self.horizontalLayout_10.addWidget(self.renderOutput)
+        self._handles = LogsHandles(renderOutput=self.renderOutput)
         self.retranslate()
         return self.tab_5
 

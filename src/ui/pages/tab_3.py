@@ -20,6 +20,7 @@ import resources_rc
 from sli_ui_toolkit.widgets import CheckBox, ComboBox, Stepper, SurfacePanel, Text
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
+from src.ui.pages.handles import RenderSettingsHandles
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
@@ -178,6 +179,15 @@ class Tab3Page:
         self.verticalLayout_12.addItem(self._settingsFiller)
         self.verticalLayout_22.addWidget(self.renderSettingsContainer)
         self.tensorrt_optimization_level.setCurrentIndex(2)
+        self._handles = RenderSettingsHandles(
+            precision=self.precision,
+            tensorrt_optimization_level=self.tensorrt_optimization_level,
+            auto_hdr_mode=self.auto_hdr_mode,
+            dynamic_tensorrt_engine=self.dynamic_tensorrt_engine,
+            uhd_mode=self.uhd_mode,
+            ncnn_gpu_id=self.ncnn_gpu_id,
+            pytorch_gpu_id=self.pytorch_gpu_id,
+        )
         self.retranslate()
         return self.tab_3
 

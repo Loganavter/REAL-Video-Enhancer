@@ -19,6 +19,7 @@ import resources_rc
 from sli_ui_toolkit.widgets import ComboBox, CustomLineEdit, OverlayScrollArea, SurfacePanel, Text
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
+from src.ui.pages.handles import EncoderHandles
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
 #: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
@@ -304,6 +305,17 @@ class Tab6Page:
         self.scrollArea_7.setWidget(self.encoderSettings)
         self.verticalLayout_15.addWidget(self.scrollArea_7)
         self.horizontalLayout_43.addWidget(self.widget_6)
+        self._handles = EncoderHandles(
+            encoder=self.encoder,
+            EncoderCommand=self.EncoderCommand,
+            video_container=self.video_container,
+            video_pixel_format=self.video_pixel_format,
+            video_quality=self.video_quality,
+            video_encoder_speed=self.video_encoder_speed,
+            audio_encoder=self.audio_encoder,
+            audio_bitrate=self.audio_bitrate,
+            subtitle_encoder=self.subtitle_encoder,
+        )
         self.retranslate()
         return self.tab_6
 

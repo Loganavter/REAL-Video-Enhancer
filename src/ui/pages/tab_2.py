@@ -21,6 +21,7 @@ from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, 
     SurfaceScrollArea, Text)
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
+from src.ui.pages.handles import OutputSettingsHandles
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
 #: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
@@ -197,6 +198,14 @@ class Tab2Page:
         self.scrollArea_3.setWidget(self.scrollAreaWidgetContents_3)
         self.verticalLayout_19.addWidget(self.scrollArea_3)
         self.verticalLayout_17.addWidget(self.VideoSettingsContainer)
+        self._handles = OutputSettingsHandles(
+            output_folder_location=self.output_folder_location,
+            select_output_folder_location_btn=self.select_output_folder_location_btn,
+            scene_change_detection_enabled=self.scene_change_detection_enabled,
+            scene_change_detection_method=self.scene_change_detection_method,
+            scene_change_detection_threshold=self.scene_change_detection_threshold,
+            auto_border_cropping=self.auto_border_cropping,
+        )
         self.retranslate()
         return self.tab_2
 

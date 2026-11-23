@@ -20,6 +20,7 @@ from src.ui.pages.tab_6 import Tab6Page
 from src.ui.pages.render_queue_tab import RenderQueueTabPage
 from src.ui.pages.advanced_settings import AdvancedSettingsPage
 from src.ui.pages.tab_5 import Tab5Page
+from src.ui.pages.handles import ProcPageHandles
 from src.ui.typography import apply, CAPTION_PT
 from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
 
@@ -356,6 +357,20 @@ class ProcPagePage:
         self.verticalLayout_7.addWidget(self.bottomMenuSubContainer)
         self.gridLayout_3.addWidget(self.processContainer, 0, 1, 1, 1)
         self.processSettingsContainer.setCurrentIndex(0)
+        # The glue's typed edge over this page's own chrome (the tabs have their own groups). Required fields: a
+        # missing widget is a TypeError here, not a silent `None` at first render.
+        self._handles = ProcPageHandles(
+            startRenderButton=self.startRenderButton,
+            pauseRenderButton=self.pauseRenderButton,
+            killRenderButton=self.killRenderButton,
+            onRenderButtonsContiainer=self.onRenderButtonsContiainer,
+            previewLabel=self.previewLabel,
+            progressBar=self.progressBar,
+            progressDetail=self.progressDetail,
+            FPS=self.FPS,
+            ETA=self.ETA,
+            STATUS=self.STATUS,
+        )
         self.retranslate()
         return self.procPage
 

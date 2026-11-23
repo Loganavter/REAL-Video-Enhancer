@@ -43,11 +43,15 @@ from .SettingsTab import Settings
 from ..DiscordRPC import DiscordRPC
 from ..ModelHandler import getModels
 from .RenderQueue import RenderOptions
+from .pages.handles import WindowHandles
 
 
 class ProcessTab:
     def __init__(self, parent, settings: Settings):
         self.parent = parent
+        #: The typed page surface (`window.page_handles`): every control this glue touches is a required field on
+        #: one of its group dataclasses, so a page that stops building one fails at build time, not at first click.
+        self.page_handles: WindowHandles = parent.page_handles
         self.renderTextOutputList = None
         #: The curated lines (`LogLine`: text + level) behind `renderTextOutputList`; the console paints these.
         self.renderLogLines: list[LogLine] | None = None
@@ -83,20 +87,20 @@ class ProcessTab:
 
         # get default backend
         self.QConnect()
-        self.populateModels(self.parent.backendComboBox.currentText())
+        self.populateModels(self.page_handles.general.backendComboBox.currentText())
         self.setStatus("Idle")
 
     def setStatus(self, text: str) -> None:
         """The one place that decides what `STATUS:` says - never leave a stale phase on screen."""
         self.status = str(text)
         try:
-            self.parent.STATUS.setText(f"Status: {self.status}")
+            self.page_handles.proc.STATUS.setText(f"Status: {self.status}")
         except Exception:
             pass
 
     def setProgressDetail(self, text: str) -> None:
         try:
-            self.parent.progressDetail.setText(str(text))
+            self.page_handles.proc.progressDetail.setText(str(text))
         except Exception:
             pass
 
@@ -123,31 +127,31 @@ class ProcessTab:
         the current models available given a method (interpolate, upscale) and a backend (ncnn, tensorrt, pytorch)
         """
         interpolateModels, upscaleModels, deblurModels, denoiseModels, decompressModels, _ = getModels(backend)
-        self.parent.interpolateModelComboBox.clear()
-        self.parent.upscaleModelComboBox.clear()
-        self.parent.deblurModelComboBox.clear()
-        self.parent.denoiseModelComboBox.clear()
-        self.parent.decompressModelComboBox.clear()
-        self.parent.interpolateModelComboBox.addItems(
+        self.page_handles.general.interpolateModelComboBox.clear()
+        self.page_handles.general.upscaleModelComboBox.clear()
+        self.page_handles.general.deblurModelComboBox.clear()
+        self.page_handles.general.denoiseModelComboBox.clear()
+        self.page_handles.general.decompressModelComboBox.clear()
+        self.page_handles.general.interpolateModelComboBox.addItems(
             list(interpolateModels.keys())
         )
-        self.parent.interpolateModelComboBox.setCurrentIndex(len(list(interpolateModels.keys()))-1)
-        self.parent.upscaleModelComboBox.addItems(list(upscaleModels.keys()))
-        self.parent.deblurModelComboBox.addItems(list(deblurModels.keys()))
-        self.parent.denoiseModelComboBox.addItems(list(denoiseModels.keys()))
-        self.parent.decompressModelComboBox.addItems(list(decompressModels.keys()))
+        self.page_handles.general.interpolateModelComboBox.setCurrentIndex(len(list(interpolateModels.keys()))-1)
+        self.page_handles.general.upscaleModelComboBox.addItems(list(upscaleModels.keys()))
+        self.page_handles.general.deblurModelComboBox.addItems(list(deblurModels.keys()))
+        self.page_handles.general.denoiseModelComboBox.addItems(list(denoiseModels.keys()))
+        self.page_handles.general.decompressModelComboBox.addItems(list(decompressModels.keys()))
     def onTilingSwitch(self):
-        if self.parent.tilingCheckBox.isChecked():
-            self.parent.tileSizeContainer.setVisible(True)
+        if self.page_handles.advanced.tilingCheckBox.isChecked():
+            self.page_handles.advanced.tileSizeContainer.setVisible(True)
             self.tileDownAnimationHandler.dropDownAnimation(
-                self.parent.tileSizeContainer
+                self.page_handles.advanced.tileSizeContainer
             )
         else:
-            self.tileUpAnimationHandler.moveUpAnimation(self.parent.tileSizeContainer)
-            self.parent.tileSizeContainer.setVisible(False)
+            self.tileUpAnimationHandler.moveUpAnimation(self.page_handles.advanced.tileSizeContainer)
+            self.page_handles.advanced.tileSizeContainer.setVisible(False)
 
     def openOutputFolderInExplorer(self):
-        output_folder = os.path.dirname(self.parent.outputFileText.text())
+        output_folder = os.path.dirname(self.page_handles.general.outputFileText.text())
         if os.path.isdir(output_folder):
             if PLATFORM == "win32":
                 os.startfile(output_folder)
@@ -163,14 +167,14 @@ class ProcessTab:
         """
         from .queue_rows import queue_row_painter, queue_tooltip
 
-        widget = self.parent.renderQueueListWidget
+        widget = self.page_handles.queue.renderQueueListWidget
         widget.set_row_painter(queue_row_painter(self.parent.renderQueue))
         widget.set_row_tooltip_provider(queue_tooltip(self.parent.renderQueue))
 
     def refreshQueueRows(self) -> None:
         """Repaint the queue after a state change (a tick, a finish): the painter reads the model, no row rebuild."""
         try:
-            self.parent.renderQueueListWidget.update()
+            self.page_handles.queue.renderQueueListWidget.update()
         except Exception:
             pass
 
@@ -184,7 +188,7 @@ class ProcessTab:
         """
         from sli_ui_toolkit.widgets import ContextMenu, ContextMenuAction, ContextMenuSeparator
 
-        widget = self.parent.renderQueueListWidget
+        widget = self.page_handles.queue.renderQueueListWidget
 
         def entries_for(queue):
             locked = queue.is_locked()
@@ -236,54 +240,54 @@ class ProcessTab:
 
     def QConnect(self):
         # connect file select buttons
-        self.parent.addToRenderQueueButton.clicked.connect(self.parent.addToRenderQueue)
+        self.page_handles.general.addToRenderQueueButton.clicked.connect(self.parent.addToRenderQueue)
         self.installQueueMenu()
         self.installQueueRows()
-        self.parent.inputFileSelectButton.clicked.connect(self.parent.openInputFile)
-        self.parent.batchSelectButton.clicked.connect(self.parent.openBatchFiles)
-        self.parent.inputFileText.textChanged.connect(self.parent.loadVideo)
-        self.parent.outputFileSelectButton.clicked.connect(self.parent.openOutputFolder)
-        self.parent.openOutputFolderButton.clicked.connect(self.openOutputFolderInExplorer)
+        self.page_handles.general.inputFileSelectButton.clicked.connect(self.parent.openInputFile)
+        self.page_handles.general.batchSelectButton.clicked.connect(self.parent.openBatchFiles)
+        self.page_handles.general.inputFileText.textChanged.connect(self.parent.loadVideo)
+        self.page_handles.general.outputFileSelectButton.clicked.connect(self.parent.openOutputFolder)
+        self.page_handles.general.openOutputFolderButton.clicked.connect(self.openOutputFolderInExplorer)
         # connect render button
-        self.parent.startRenderButton.clicked.connect(self.parent.startRender)
+        self.page_handles.proc.startRenderButton.clicked.connect(self.parent.startRender)
         # set tile size visible to false by default
-        self.parent.tileSizeContainer.setVisible(False)
+        self.page_handles.advanced.tileSizeContainer.setVisible(False)
         # set slo mo container visable to false by default
         
-        self.parent.interpolateContainer_2.setVisible(False)
+        self.page_handles.advanced.interpolateContainer_2.setVisible(False)
         # connect up tilesize container visiable
-        self.parent.tilingCheckBox.stateChanged.connect(self.onTilingSwitch)
+        self.page_handles.advanced.tilingCheckBox.stateChanged.connect(self.onTilingSwitch)
 
-        self.parent.interpolationMultiplierSpinBox.valueChanged.connect(
+        self.page_handles.general.interpolationMultiplierSpinBox.valueChanged.connect(
             self.parent.updateVideoGUIDetails
         )
 
-        self.parent.upscaleModelComboBox.currentIndexChanged.connect(
+        self.page_handles.general.upscaleModelComboBox.currentIndexChanged.connect(
             self.parent.updateVideoGUIDetails
         )
-        self.parent.upscaleScaleSpinBox.valueChanged.connect(
+        self.page_handles.general.upscaleScaleSpinBox.valueChanged.connect(
             self.parent.updateVideoGUIDetails
         )
-        self.parent.interpolateModelComboBox.currentIndexChanged.connect(
+        self.page_handles.general.interpolateModelComboBox.currentIndexChanged.connect(
             self.parent.updateVideoGUIDetails
         )
-        self.parent.decompressModelComboBox.currentIndexChanged.connect(
+        self.page_handles.general.decompressModelComboBox.currentIndexChanged.connect(
             self.parent.updateVideoGUIDetails
         )
-        self.parent.interpolateCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)
-        self.parent.upscaleCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)
-        self.parent.deblurCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)
-        self.parent.denoiseCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)
-        self.parent.decompressCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)   
-        self.parent.sloMoModeCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)  
-        self.parent.backendComboBox.currentIndexChanged.connect(
-            lambda: self.populateModels(self.parent.backendComboBox.currentText())
+        self.page_handles.general.interpolateCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)
+        self.page_handles.general.upscaleCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)
+        self.page_handles.general.deblurCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)
+        self.page_handles.general.denoiseCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)
+        self.page_handles.general.decompressCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)   
+        self.page_handles.general.sloMoModeCheckBox.clicked.connect(self.parent.updateVideoGUIDetails)  
+        self.page_handles.general.backendComboBox.currentIndexChanged.connect(
+            lambda: self.populateModels(self.page_handles.general.backendComboBox.currentText())
         )
-        self.parent.EncoderCommand.textChanged.connect(lambda: self.parent.EncoderCommand.setFixedWidth(max(50, QFontMetrics(self.parent.EncoderCommand.font()).horizontalAdvance(self.parent.EncoderCommand.text()) + 10)))
+        self.page_handles.encoder.EncoderCommand.textChanged.connect(lambda: self.page_handles.encoder.EncoderCommand.setFixedWidth(max(50, QFontMetrics(self.page_handles.encoder.EncoderCommand.font()).horizontalAdvance(self.page_handles.encoder.EncoderCommand.text()) + 10)))
         # connect up pausing
-        hide_layout_widgets(self.parent.onRenderButtonsContiainer)
-        self.parent.pauseRenderButton.clicked.connect(self.pauseRender)
-        self.parent.killRenderButton.clicked.connect(self.killRenderProcess)
+        hide_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
+        self.page_handles.proc.pauseRenderButton.clicked.connect(self.pauseRender)
+        self.page_handles.proc.killRenderButton.clicked.connect(self.killRenderProcess)
 
     def killRenderProcess(self):
         try:  # kills  render process if necessary
@@ -295,9 +299,9 @@ class ProcessTab:
     def pauseRender(self):
         shmbuf = self.pausedSharedMemory.buf
         shmbuf[0] = 1  # 1 = True
-        hide_layout_widgets(self.parent.onRenderButtonsContiainer)
-        self.parent.startRenderButton.setVisible(True)
-        self.parent.startRenderButton.setEnabled(True)
+        hide_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
+        self.page_handles.proc.startRenderButton.setVisible(True)
+        self.page_handles.proc.startRenderButton.setEnabled(True)
         self.setStatus("Paused")
 
     def resumeRender(self):
@@ -307,9 +311,9 @@ class ProcessTab:
 
         self._render_started_mono = monotonic()
         self.setStatus("Preparing")
-        show_layout_widgets(self.parent.onRenderButtonsContiainer)
-        self.parent.onRenderButtonsContiainer.setEnabled(True)
-        self.parent.startRenderButton.setVisible(False)
+        show_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
+        self.page_handles.proc.onRenderButtonsContiainer.setEnabled(True)
+        self.page_handles.proc.startRenderButton.setVisible(False)
 
     def startGUIUpdate(self):
         
@@ -365,10 +369,10 @@ class ProcessTab:
 
         self._render_started_mono = monotonic()
         self.setStatus("Preparing")
-        show_layout_widgets(self.parent.onRenderButtonsContiainer)
-        self.parent.startRenderButton.setVisible(False)
-        self.parent.startRenderButton.clicked.disconnect()
-        self.parent.startRenderButton.clicked.connect(self.resumeRender)
+        show_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
+        self.page_handles.proc.startRenderButton.setVisible(False)
+        self.page_handles.proc.startRenderButton.clicked.disconnect()
+        self.page_handles.proc.startRenderButton.clicked.connect(self.resumeRender)
 
         if not self.checkForOverwrite(renderQueue):
             return
@@ -546,18 +550,18 @@ class ProcessTab:
             log("Some render processes failed: Error code: " + str(self.return_codes))
             RegularQTPopup("Rendering failed! Please check the logs tab!")
         # Have to swap the visibility of these here otherwise crash for some reason
-        hide_layout_widgets(self.parent.onRenderButtonsContiainer)
-        self.parent.startRenderButton.setEnabled(True)
-        self.parent.outputFileText.setEnabled(True)
-        self.parent.inputFileText.setEnabled(True)
+        hide_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
+        self.page_handles.proc.startRenderButton.setEnabled(True)
+        self.page_handles.general.outputFileText.setEnabled(True)
+        self.page_handles.general.inputFileText.setEnabled(True)
         if getattr(self.parent, "preview_label_is_surface", False):
-            self.parent.previewLabel.set_frame(None)
+            self.page_handles.proc.previewLabel.set_frame(None)
         else:
-            self.parent.previewLabel.clear()
-        self.parent.startRenderButton.clicked.disconnect()
-        self.parent.startRenderButton.clicked.connect(self.parent.startRender)
+            self.page_handles.proc.previewLabel.clear()
+        self.page_handles.proc.startRenderButton.clicked.disconnect()
+        self.page_handles.proc.startRenderButton.clicked.connect(self.parent.startRender)
         self.parent.enableProcessPage()
-        self.parent.startRenderButton.setVisible(True)
+        self.page_handles.proc.startRenderButton.setVisible(True)
         self._render_started_mono = None
         self.setProgressDetail("")
         finished_ok = all(code == 0 or code == 3221225477 for code in self.return_codes) or self.userKilled
@@ -570,8 +574,8 @@ class ProcessTab:
             self.syncRenderConsole()
         except Exception:
             pass
-        self.parent.FPS.setText("FPS: ")
-        self.parent.ETA.setText("ETA: ")
+        self.page_handles.proc.FPS.setText("FPS: ")
+        self.page_handles.proc.ETA.setText("ETA: ")
 
         self._restoreQueueAfterPreview()
         if self.currentRenderOptions.isPreview:
@@ -654,7 +658,7 @@ class ProcessTab:
                 log(f"preview decoder: cannot open {path}")
                 return
             self._preview_decoder = decoder
-            pane = self.parent.previewLabel
+            pane = self.page_handles.proc.previewLabel
             if hasattr(pane, "seekRequested"):
                 try:
                     pane.seekRequested.connect(self._on_preview_seek)
@@ -713,7 +717,7 @@ class ProcessTab:
 
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
-        pane = self.parent.previewLabel
+        pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_original"):
             pane.set_original(image)
 
@@ -735,7 +739,7 @@ class ProcessTab:
 
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
-        pane = self.parent.previewLabel
+        pane = self.page_handles.proc.previewLabel
         if getattr(self.parent, "preview_label_is_surface", False):
             pane.set_frame(image)
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
@@ -816,7 +820,7 @@ class ProcessTab:
         Append what is new, and rebuild only when the log was replaced (a new render, a reset): the prefix check makes
         that decision O(1) on the common path.
         """
-        console = self.parent.renderOutput
+        console = self.page_handles.logs.renderOutput
         entries = list(self.renderLogLines or [])
         sent = getattr(self, "_console_sent_entries", [])
         if len(entries) >= len(sent) and entries[:len(sent)] == sent:
@@ -868,7 +872,7 @@ class ProcessTab:
         """
 
         if self.renderTextOutputList is not None:
-            self.parent.progressBar.setRange(
+            self.page_handles.proc.progressBar.setRange(
                 0,
                 # only set the range to multiply the frame count if the method is interpolate
                 self.max_value
@@ -881,21 +885,21 @@ class ProcessTab:
                     self.refreshQueueRows()
             except Exception:
                 pass
-            self.parent.progressBar.setValue(self.currentFrame)
+            self.page_handles.proc.progressBar.setValue(self.currentFrame)
             self.setProgressDetail(self.progressDetailText())
             if self.fps != 0:
-                self.parent.FPS.setVisible(True)
-                self.parent.FPS.setText(f"FPS: {self.fps}")
+                self.page_handles.proc.FPS.setVisible(True)
+                self.page_handles.proc.FPS.setText(f"FPS: {self.fps}")
             else:
-                self.parent.FPS.setVisible(False)
+                self.page_handles.proc.FPS.setVisible(False)
             if self.eta != 0:
-                self.parent.ETA.setVisible(True)
-                self.parent.ETA.setText(f"ETA: {self.eta}")
+                self.page_handles.proc.ETA.setVisible(True)
+                self.page_handles.proc.ETA.setText(f"ETA: {self.eta}")
             else:
-                self.parent.ETA.setVisible(False)
-            self.parent.STATUS.setText(f"Status: {self.status}")
+                self.page_handles.proc.ETA.setVisible(False)
+            self.page_handles.proc.STATUS.setText(f"Status: {self.status}")
         if not qimage.isNull():
-            preview = self.parent.previewLabel
+            preview = self.page_handles.proc.previewLabel
             if getattr(self.parent, "preview_label_is_surface", False):
                 # The surface fits, zooms and letterboxes itself and always keeps the frame's own resolution; the
                 # backend's thumbnail is what a live render can afford (the full-resolution path is the preview file).

@@ -20,6 +20,7 @@ import resources_rc
 from sli_ui_toolkit.widgets import Button, ComboBox, OverlayScrollArea, SurfacePanel, Text
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, DISPLAY_PT
+from src.ui.pages.handles import DownloadPageHandles
 
 # Layer B3 (2026-11-21): the two widget classes this page no longer builds stock. `OverlayScrollArea` is the
 # `QScrollArea` counterpart whose surface is transparent - the page's rule is `QScrollArea{background:transparent}`,
@@ -324,6 +325,10 @@ class DownloadPagePage:
         self.verticalLayout_11.addWidget(self.scrollArea_2)
         self.gridLayout_5.addWidget(self.backendSelectContainer, 1, 0, 1, 1)
         self.retranslate()
+        self._handles = DownloadPageHandles(
+            pytorch_version=self.pytorch_version,
+            pytorch_backend=self.pytorch_backend,
+        )
         return self.downloadPage
 
     def retranslate(self) -> None:

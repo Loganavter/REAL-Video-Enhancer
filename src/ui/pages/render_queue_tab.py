@@ -18,6 +18,7 @@ import resources_rc
 # The page builds the toolkit's own controls: `Button` where the Designer had a `QPushButton`, `Text` where it had a
 # `QLabel`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import SurfacePanel, Text, TextListWidget
+from src.ui.pages.handles import RenderQueueHandles
 
 
 class RenderQueueTabPage:
@@ -87,6 +88,7 @@ class RenderQueueTabPage:
         # The bottom "Finished Output Files" list is gone (owner, 2026-11-22): a finished job stays in the queue with its
         # final state, so the page is ONE list and it takes the whole height instead of sharing it with a second pane.
         self.retranslate()
+        self._handles = RenderQueueHandles(renderQueueListWidget=self.renderQueueListWidget)
         return self.renderQueueTab
 
     def retranslate(self) -> None:
