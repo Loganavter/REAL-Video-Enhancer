@@ -162,6 +162,12 @@ class MainWindowShell:
         # Minimum/Fixed is QPushButton's own policy (as wide as it needs, exactly as tall as its hint) - the toolkit
         # button would otherwise split the rail's spare height between the two top buttons. The Designer's
         # `setCheckable(True)` is the constructor's `toggle=True`, since `Button` has no such setter.
+        #
+        # Keyboard: a `QPushButton` gave the rail Tab focus and Space/Return for free, and a bare custom `QWidget`
+        # would not have - the toolkit `Button` sets StrongFocus and its own `keyPressEvent` activates on
+        # Space/Return/Enter, so changing the class did not cost the rail its keyboard path. Measured offscreen over
+        # the four built buttons (2026-11-23): toolkit `Button` (not a `QPushButton`), focusPolicy StrongFocus, one
+        # `clicked` per Space, objectNames `homeBtn`/`processBtn`/`settingsBtn`/`downloadBtn` intact.
         self.homeBtn = Button(parent=self.verticalWidget_2, text="", variant="surface", toggle=True,
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))

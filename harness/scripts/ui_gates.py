@@ -90,8 +90,37 @@ SCOPES: dict[str, tuple[str, ...]] = {
 }
 
 #: The adapters in `src/ui/widgets/qt_shaped.py`. A widget built by one of these paints itself, so a QSS rule aimed at
-#: it is dead text; anything else a page builds is still a stock Qt widget and may legitimately be styled.
+#: it is dead text.
+#:
+#: They are no longer what the migrated tree builds, though: measured 2026-11-23, not one `QtButton`/`QtLabel`/... is
+#: constructed anywhere under `src/ui/{pages,shell,widgets}` - the pages and the shell import the toolkit directly
+#: (`self.homeBtn = Button(...)` in the shell). Kept because the wrappers still exist and a page built through one is
+#: the same subject; the rule alone on this set was blind to every control this tree actually makes.
 ADAPTERS = frozenset({"QtLabel", "QtButton", "QtCheckBox", "QtComboBox", "QtLineEdit"})
+
+#: The toolkit's own control classes, built directly. They are the same subject as an adapter - the toolkit painter owns
+#: their pixels, so a rule aimed at one is dead text - and they are what the shell's nav rail and the pages construct
+#: (`Button`, `Text`, `ComboBox`, ...). This is what makes the widened `qss-on-adapter` scope over `src/ui/shell` mean
+#: anything: a re-added `homeBtn.setStyleSheet(...)` is red again.
+#:
+#: Containers are deliberately NOT here (`SurfacePanel`, `SurfaceScrollArea`, `OverlayScrollArea`, `TopTabHost`,
+#: `RichTextView`, `TabStripHost`): a stylesheet set on a widget also styles its children, so a rule on a container can
+#: be doing real work on a stock child. A leaf control has no such use - nothing inside it is styled by the sheet.
+#:
+#: Counts are the tree's, not a wish list: every name below is constructed under `src/ui/pages|shell|widgets` today.
+TOOLKIT_CONTROLS = frozenset({
+    "Button", "CheckBox", "ComboBox", "CustomLineEdit", "DoubleSpinBox", "ImageLabel", "MinimalistScrollBar",
+    "RadioButton", "Slider", "SpinBox", "Stepper", "Switch", "Text", "ToastProgressBar",
+})
+
+#: What `check_qss` resolves a `setStyleSheet` target against: the legacy adapters plus the toolkit controls built
+#: directly. The union is the whole set of widgets in this tree whose pixels a stylesheet cannot reach.
+#:
+#: Measured on 2026-11-23 with the shell in scope: 0 findings across `src/ui/{pages,shell,widgets}` (the only
+#: `setStyleSheet` calls left are the one empty reset in `download_page.py`, which `empty-stylesheet` records, and a
+#: commented-out Designer line). `KNOWN["qss-on-adapter"]` therefore stays empty - the ratchet's baseline for the
+#: widened rule is zero, and the first re-added rule is red immediately.
+PAINTED_WIDGETS = ADAPTERS | TOOLKIT_CONTROLS
 
 #: Calls whose arguments are chrome geometry (the reference host's list minus the margin/spacing ones: RVE's pages
 #: have not been rebuilt around layout margins yet, so flagging those today would drown the real findings).
@@ -350,9 +379,12 @@ def check_qss(paths: Iterable[str | Path]) -> list[Finding]:
     """`setStyleSheet` aimed at a widget the toolkit paints: a rule that cannot take effect.
 
     The target is resolved through the constructor calls in its own class body (or module body), so the check reports
-    only a widget it has seen built by an adapter - a rule on a stock container (`QWidget`, `QFrame`, `QScrollArea`,
-    `QTabWidget`, `QTextEdit`, `QListWidget`, the spin boxes) is not a finding, because those widgets still paint
-    through the style, and a name built somewhere this module cannot see is left alone rather than guessed at.
+    only a widget it has seen built by the toolkit - a `qt_shaped` adapter (`QtButton`, ...) or one of the toolkit's own
+    controls built directly (`Button`, `Text`, `ComboBox`, ... - see `PAINTED_WIDGETS`). A rule on a stock container
+    (`QWidget`, `QFrame`, `QScrollArea`, `QTabWidget`, `QTextEdit`, `QListWidget`, the spin boxes) is not a finding,
+    because those widgets still paint through the style, and a name built somewhere this module cannot see is left
+    alone rather than guessed at. A toolkit CONTAINER is left alone for the same reason `QWidget` is: its sheet reaches
+    its children, so the rule cannot call it dead without reading the rule.
 
     An EMPTY stylesheet is not this rule's finding: it states no rule, so there is no theme question to ask about it.
     It is still dead text, and `check_empty_stylesheets` reports exactly that - one call, two rules, two questions.
@@ -365,8 +397,8 @@ def check_qss(paths: Iterable[str | Path]) -> list[Finding]:
             if _call_name(node) != "setStyleSheet" or not node.args:
                 continue
             name = _styled_name(node)
-            adapter = scope.resolve(name) if name else None
-            if adapter not in ADAPTERS:
+            painted = scope.resolve(name) if name else None
+            if painted not in PAINTED_WIDGETS:
                 continue
             rule = _literal_text(node.args[0])
             if rule is not None and not rule.strip():
@@ -374,7 +406,7 @@ def check_qss(paths: Iterable[str | Path]) -> list[Finding]:
             preview = " ".join((rule or "<computed>").split())
             if len(preview) > 48:
                 preview = preview[:45] + "..."
-            findings.append(Finding(_display(path), node.lineno, "qss-on-adapter", f"{adapter} {name}: {preview}"))
+            findings.append(Finding(_display(path), node.lineno, "qss-on-adapter", f"{painted} {name}: {preview}"))
     return sorted(findings)
 
 
