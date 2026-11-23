@@ -1,6 +1,7 @@
 PySide6-essentials==6.8.0.2
 requests
 numpy==2.1.3
+av>=14
 lief
 psutil
 py-cpuinfo

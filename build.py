@@ -190,6 +190,9 @@ class PyInstaller(BuildManager):
             + " --noconfirm"
             + " --noupx" 
             + " --noconsole" # i think this fixes weird macos dir shit
+            # The preview surface loads baked shaders from disk (`video_preview._shader`): bytecode alone would ship a
+            # widget whose first paint raises "not a valid .qsb". PyInstaller's separator is platform-specific.
+            + f" --add-data=src/ui/widgets/shaders{os.pathsep}src/ui/widgets/shaders"
             + " --distpath"
             + f" {OUTPUT_FOLDER}"
             )
