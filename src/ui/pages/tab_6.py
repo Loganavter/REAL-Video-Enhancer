@@ -9,7 +9,7 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize)
+from PySide6.QtCore import (QCoreApplication, QObject, QRect, QSize)
 from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
 import resources_rc
@@ -25,6 +25,36 @@ from src.ui.pages.handles import EncoderHandles
 #: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
 #: to come from the compatibility layer (`STOCK_SCROLLBAR_WIDTH`), which this page no longer imports.
 STOCK_SCROLLBAR_WIDTH = 8
+
+#: The encoder-command field's floor: about 30 characters, so the field stays usable in a narrow column and the page
+#: never has to honour a floor it cannot fit (`harness/tests/test_page_overflow.py`). It used to be 900 px - wider than
+#: the column itself - and the field was drawn over the preview pane (owner, 2026-11-24).
+ENCODER_COMMAND_MIN_WIDTH = 200
+
+
+class _EncoderCommandTooltip(QObject):
+    """Keep the whole encoder command in the field's tooltip: the field itself is only as wide as its column.
+
+    A `QObject` **parented to the field**, not a method on the page. The page classes are plain objects and the shell
+    that builds them is discarded after `build()`, so a page method connected to a widget signal is collected with the
+    page and the connection stops firing - measured here: the tooltip kept the description and never grew the command.
+    The same reason `src/ui/widgets/combo_width.py` wraps its event filter in a `QObject`.
+    """
+
+    def __init__(self, field, help_text: str) -> None:
+        super().__init__(field)
+        self._field = field
+        self._help = help_text
+        field.textChanged.connect(self.refresh)
+        self.refresh()
+
+    def set_help(self, help_text: str) -> None:
+        self._help = help_text
+        self.refresh()
+
+    def refresh(self) -> None:
+        command = self._field.text()
+        self._field.setToolTip(f"{self._help}\n\n{command}" if command else self._help)
 
 
 class Tab6Page:
@@ -109,8 +139,15 @@ class Tab6Page:
         self.horizontalLayout_54.setObjectName(u"horizontalLayout_54")
         self.EncoderCommand = CustomLineEdit(self.scrollAreaWidgetContents_6)
         self.EncoderCommand.setObjectName(u"EncoderCommand")
-        self.EncoderCommand.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Encoder command:</span></p><p><span style=\" font-weight:700;\">     -</span> Encoder settings passed to FFMpeg, can be manually tweaked.</p></body></html>", None))
-        self.EncoderCommand.setMinimumSize(QSize(900, 30))
+        # A command is a line that can be longer than its column, and this row holds nothing else: the field takes the
+        # row's width and scrolls its own text to the caret. A width driven by the text - or a 900 px floor, which is
+        # what this page used to state - is a control outside its page: the layout gives it the minimum, and the field
+        # paints past the column and under the preview pane (owner, 2026-11-24; the gate is
+        # `harness/tests/test_page_overflow.py`). The tooltip carries the whole command, because the field shows only
+        # the part that fits.
+        self.EncoderCommand.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.EncoderCommand.setMinimumWidth(ENCODER_COMMAND_MIN_WIDTH)
+        self._encoder_command_tooltip = _EncoderCommandTooltip(self.EncoderCommand, "")
         self.horizontalLayout_54.addWidget(self.EncoderCommand)
         self.scrollArea_6.setWidget(self.scrollAreaWidgetContents_6)
         self.horizontalLayout_51.addWidget(self.scrollArea_6)
@@ -330,6 +367,11 @@ class Tab6Page:
         return self.tab_6
 
     def retranslate(self) -> None:
+        self._encoder_command_tooltip.set_help(QCoreApplication.translate(
+            "MainWindow",
+            u"Encoder command: the encoder settings passed to FFMpeg, can be manually tweaked. "
+            u"The field shows the part that fits; the whole command is in this tooltip.",
+            None))
         self.label_74.setText(QCoreApplication.translate("MainWindow", u"Encoder Settings", None))
         self.encoderLabel.setText(QCoreApplication.translate("MainWindow", u"Video Encoder", None))
         self.encoder.setItemText(0, QCoreApplication.translate("MainWindow", u"libx264", None))
