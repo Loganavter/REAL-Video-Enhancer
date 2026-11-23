@@ -107,6 +107,12 @@ class ProcPagePage:
 
             self.previewLabel = VideoPreviewSurface(self.previewSubContainer)
             self.previewLabel.setObjectName(u"previewLabel")
+            # The pane is opaque (an RHI widget cannot alpha-blend with its siblings) and shows this colour wherever no
+            # frame is drawn: the same token the plate under it uses, so an empty pane reads as part of the page.
+            from sli_ui_toolkit.theme import ThemeManager
+
+            self.previewLabel.set_background_colour(
+                ThemeManager.get_instance().try_get_color("dialog.background") or "#24252a")
             self.preview_label_is_surface = True
         sizePolicy4 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         sizePolicy4.setHorizontalStretch(0)

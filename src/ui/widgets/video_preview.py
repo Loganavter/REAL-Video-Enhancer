@@ -82,10 +82,20 @@ class VideoPreviewSurface(QRhiWidget):
         self._panning = False
         self._pan_anchor = QPointF()
         self._showing_original = False
+        #: Opaque clear colour for the pane. QRhiWidgets composite by OVERWRITING their rect, so a clear with alpha
+        #: below 255 punches a hole (black on Wayland, white on xcb) instead of letting the page show through - the
+        #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
+        #: precedents. The pane is therefore always opaque, with the page's own colour.
+        self._clear_colour = self.palette().window().color()
         #: strip geometry in design px; the widget scales it with the device pixel ratio at paint time
         self._strip_height = 6
         self._strip_margin = 10
         self._handle_radius = 7
+        #: Opaque clear colour for the pane. QRhiWidgets composite by OVERWRITING their rect, so a clear with alpha
+        #: below 255 punches a hole (black on Wayland, white on xcb) instead of letting the page show through - the
+        #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
+        #: precedents. The pane is therefore always opaque, with the page's own colour.
+        self._clear_colour = self.palette().window().color()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt spelling
@@ -132,6 +142,14 @@ class VideoPreviewSurface(QRhiWidget):
         """
         self._progress = (float(rendered), float(total), float(playhead), float(duration))
         self._hud_dirty = True
+        self.update()
+
+    def set_background_colour(self, colour) -> None:
+        """The opaque colour the pane shows where no frame is drawn (the page's surface token)."""
+        from PySide6.QtGui import QColor as _QColor
+
+        self._clear_colour = _QColor(colour)
+        self._cleared_empty = False
         self.update()
 
     def set_strip_visible(self, visible: bool) -> None:
@@ -498,11 +516,10 @@ class VideoPreviewSurface(QRhiWidget):
         if target is None:
             return
         if self._frame is None:
-            # Nothing to show yet: clear to transparent once, so the page behind shows through instead of an
-            # uninitialised (black) backing texture. Resources are built with the first frame.
+            # Nothing to show yet: one OPAQUE clear, so the pane reads as an empty plate rather than a black hole.
             if not getattr(self, "_cleared_empty", False):
                 self._cleared_empty = True
-                command_buffer.beginPass(target, QColor(0, 0, 0, 0), QRhiDepthStencilClearValue(1.0, 0))
+                command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0))
                 command_buffer.endPass()
             return
         if getattr(self, "_deferred", False) or getattr(self, "_rhi", None) is None:
@@ -521,7 +538,7 @@ class VideoPreviewSurface(QRhiWidget):
             self._texture_dirty = False
         updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(self._mvp_floats()))
         updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(list(self._tint)))
-        command_buffer.beginPass(target, QColor(0, 0, 0, 0), QRhiDepthStencilClearValue(1.0, 0), updates)
+        command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
         command_buffer.setGraphicsPipeline(self._pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
         sample_at_one = (not self._zoom_is_fit) and abs(self._zoom - 1.0) < 1e-6
@@ -553,6 +570,13 @@ class VideoPreviewSurface(QRhiWidget):
             2.0 * cx / view.width() - 1.0, 1.0 - 2.0 * cy / view.height(), 0.0, 1.0,
         ]
 
+    def _opaque_clear(self) -> QColor:
+        """The clear colour with alpha forced to 255: an RHI widget cannot alpha-blend with its siblings, so any
+        transparency here is a hole, not a blend (framework precedent `painting-qrhiwidget-cannot-alpha-blend-siblings`)."""
+        colour = QColor(self._clear_colour)
+        colour.setAlpha(255)
+        return colour
+
     def _draw_hud(self, command_buffer, target) -> None:
         strip = self._strip_rect()
         if strip.isEmpty() or getattr(self, "_hud_pipeline", None) is None:
@@ -578,22 +602,27 @@ class VideoPreviewSurface(QRhiWidget):
         if strip.isEmpty():
             return []
         rendered, total, playhead, duration = self._progress
+        # Two colours, by the owner's rule (2026-11-23): the DARK band is what the renderer has not produced yet, the
+        # WHITE part is what it has. No accent colour on the strip - the fill's own edge is the render head, so a tick
+        # there was the same information drawn twice.
         rects: list[tuple[float, float, float, float, tuple[float, float, float, float]]] = [
-            (strip.left(), strip.top(), strip.width(), strip.height(), (1.0, 1.0, 1.0, 0.16)),
+            (strip.left(), strip.top(), strip.width(), strip.height(), (1.0, 1.0, 1.0, 0.14)),
         ]
         if total > 0:
             filled = max(0.0, min(1.0, rendered / total))
             if filled > 0:
                 rects.append((strip.left(), strip.top(), strip.width() * filled, strip.height(),
-                              (0.35, 0.66, 1.0, 0.85)))
-            # the render head: a small tick at the produced edge, distinguishable from the playhead below
-            x = strip.left() + strip.width() * filled
-            rects.append((x - 1.0, strip.top() - 3.0, 2.0, strip.height() + 6.0, (1.0, 1.0, 1.0, 0.55)))
+                              (1.0, 1.0, 1.0, 0.92)))
         if duration > 0:
             fraction = max(0.0, min(1.0, playhead / duration))
             x = strip.left() + strip.width() * fraction
-            rects.append((x - 1.0, strip.top() - 5.0, 2.0, strip.height() + 10.0, (1.0, 1.0, 1.0, 0.95)))
             handle = self._handle_radius
+            # A dark halo behind the playhead: a white marker disappears on the white "processed" part, and a dark one
+            # disappears on the dark part - the pair is visible on both.
+            rects.append((x - 2.5, strip.top() - 6.0, 5.0, strip.height() + 12.0, (0.0, 0.0, 0.0, 0.45)))
+            rects.append((x - 1.0, strip.top() - 5.0, 2.0, strip.height() + 10.0, (1.0, 1.0, 1.0, 0.95)))
+            rects.append((x - handle - 1.5, strip.top() - 6.0 - handle - 1.5, (handle + 1.5) * 2.0, (handle + 1.5) * 2.0,
+                          (0.0, 0.0, 0.0, 0.45)))
             rects.append((x - handle, strip.top() - 6.0 - handle, handle * 2.0, handle * 2.0,
                           (1.0, 1.0, 1.0, 0.95)))
         vertices: list[float] = []
