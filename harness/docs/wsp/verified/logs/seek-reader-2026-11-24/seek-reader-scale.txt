@@ -1,0 +1,3 @@
+break-even of one spawn against a forward walk (rgb24 read)
+1080p 1920x1080@24: spawn 108.3 ms | walk per seek 16.1 ms (2.69 ms/frame) | break-even 40 frames (1.68 s)
+2160p 3840x2160@24: spawn 280.2 ms | walk per seek 67.2 ms (11.21 ms/frame) | break-even 25 frames (1.04 s)
