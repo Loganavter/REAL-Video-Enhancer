@@ -1,0 +1,70 @@
+# The colour pipe: rgb48le against yuv420p10le
+
+The renderer can hand ffmpeg 16-bit RGB (6 bytes/pixel) or finished `yuv420p10le` planes it packs on the GPU
+(3 bytes/pixel). The second halves the pipe: 18 476 MB → 9 238 MB per 495-frame clip, and the writer's own line reads
+17.65 → 8.45 ms/frame (the per-frame profile keeps `pack+queue` at ~8.1 → ~5.1 ms and the encoder's input conversion
+out of the renderer's path). The question this lane answers is the other half: **is the picture the same?**
+
+Population: the 20.6 s, 1440x1080 source (`native1440_20s.mkv`, `color_space=bt709`), 2x-Futsuu-Anime, fp16, temporal
+reuse off, rendered to **lossless ffv1** in four 0.25 s segments spread across the clip (0, 6, 12, 18 s → 24 frames),
+so the encoder is out of the comparison — the same split the corpus uses for render pairs. A second population, the
+whole clip encoded as HEVC at `-cq 24`, is measured too, because that is what a viewer receives.
+
+Instrument: `harness/scripts/gate_sweep.py` — the share of pixels whose worst channel is more than 8 levels off, per
+frame, `worst_of` over the sample. Both sides are read with the SOURCE's colour matrix (`--in-matrix bt709 --in-range
+tv`): without it the untagged rgb48le file is decoded with swscale's default (bt601) and a colour-metadata difference
+reads as a 21.6 % picture difference — see PC001's predecessor below.
+
+@claim ID001 0.0 % "frames [40d95cb429f3953c] n=495" measured
+@claim ID002 0.0 count "frames [40d95cb429f3953c] n=495" measured
+@claim ID003 0.0 levels "frames [40d95cb429f3953c] n=495" measured
+@claim ID004 0.0 levels "frames [40d95cb429f3953c] n=495" measured
+
+The identity control (one file on both sides, 495 frames) reads zero on all four numbers: the instrument does not
+manufacture a difference.
+
+@claim PA001 0.0 % "frames [40d95cb429f3953c] n=495" measured
+@claim PA002 0.0 count "frames [40d95cb429f3953c] n=495" measured
+@claim PA003 0.0 levels "frames [40d95cb429f3953c] n=495" measured
+@claim PA004 0.0 levels "frames [40d95cb429f3953c] n=495" measured
+
+A/A of the reference arm: the rgb48le render, twice, 495 frames — identical. (Five runs read exactly zero; one early
+run read one pixel of 6.2 M, and the rgb24 stream md5s of the two files are identical, so that reading was the
+instrument's, not the files'.)
+
+@claim PB001 0.0 % "frames [205d223b60e13bae] n=495" measured
+@claim PB002 0.0 count "frames [205d223b60e13bae] n=495" measured
+@claim PB003 0.0 levels "frames [205d223b60e13bae] n=495" measured
+@claim PB004 0.0 levels "frames [205d223b60e13bae] n=495" measured
+
+A/A of the candidate arm: the yuv420p10le render, twice, 495 frames — identical, so a difference in the A/B is the
+pipe and not run-to-run noise.
+
+@claim PL001 3.2150205761316875e-05 % "frames [5ad018686902678f] n=24" measured
+@claim PL002 0.0 count "frames [5ad018686902678f] n=24" measured
+@claim PL003 1.986083984375 levels "frames [5ad018686902678f] n=24" measured
+@claim PL004 11.0 levels "frames [5ad018686902678f] n=24" measured
+
+The pipe itself, on the lossless spread sample: two pixels of 6.2 M over the 8-level threshold on the worst frame
+(0.00003 %), none above the 0.1 % bar, worst 64 px block mean 1.99 levels, peak 11 levels. This is the same shape the
+8-bit pipe measured when it was decided (`docs/PERFORMANCE.md`: one pixel of 8.3 M, peak 9).
+
+@claim PC001 1.1793981481481481 % "frames [40d95cb429f3953c] n=495" measured
+@claim PC002 126.0 count "frames [40d95cb429f3953c] n=495" measured
+@claim PC003 5.5166015625 levels "frames [40d95cb429f3953c] n=495" measured
+@claim PC004 84.0 levels "frames [40d95cb429f3953c] n=495" measured
+
+The same pair as the viewer gets it, encoded HEVC `-cq 24`: 1.18 % of the worst frame over the bar, 126 of 495 frames
+above it, peak 84 levels. The planes of the two files agree to 50 dB (`ffmpeg psnr` y:50.04 u:55.81 v:54.43), so this
+is the ENCODER amplifying a sub-level input difference at edges — not a picture the pipe changed. It is the reason the
+corpus measures render pairs losslessly, and it is recorded here rather than hidden: a pipe change can trip the
+delivered-file bar without changing the render.
+
+@below PA001 bar_share
+@below PB001 bar_share
+@below PL001 bar_share
+
+Verdict: the pipe is picture-identical at the level the renderer controls (PL001, two pixels of 6.2 M, 3 000x under the
+bar) and both arms are deterministic (PA001, PB001). The change is kept; the tag asymmetry it exposed — the rgb48le
+path writes a file whose container declares no colour space, the yuv420p10le path declares bt709 — is a defect of the
+OLD path and is fixed by shipping the new one.

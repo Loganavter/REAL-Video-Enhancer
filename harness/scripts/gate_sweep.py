@@ -67,8 +67,19 @@ def declare_reference(kind: str, force: bool = False) -> str:
     return "UNDECLARED reference (forced): this number cannot say what it measures"
 
 
-def _frame_iter(path: str, ffmpeg: str, w: int, h: int):
-    cmd = [ffmpeg, "-loglevel", "error", "-i", path, "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+def _frame_iter(path: str, ffmpeg: str, w: int, h: int, matrix: str = "", tone_range: str = ""):
+    cmd = [ffmpeg, "-loglevel", "error", "-i", path]
+    if matrix or tone_range:
+        # Force how the FILE's samples are read, instead of trusting its container tags: two arms of a pipe change can
+        # declare different tags (one of them none at all), and an untagged stream is decoded with swscale's DEFAULT
+        # matrix - which made a 21.6 % picture difference out of two files whose planes agree to 50 dB (2026-11-24).
+        scale = "scale="
+        if matrix:
+            scale += f"in_color_matrix={matrix}:"
+        if tone_range:
+            scale += f"in_range={tone_range}:"
+        cmd += ["-vf", scale.rstrip(":")]
+    cmd += ["-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=w * h * 3 * 2)
     size = w * h * 3
     try:
@@ -82,11 +93,12 @@ def _frame_iter(path: str, ffmpeg: str, w: int, h: int):
         proc.wait()
 
 
-def sweep(gated: str, ungated: str, ffmpeg: str, w: int, h: int, block: int) -> list[dict]:
+def sweep(gated: str, ungated: str, ffmpeg: str, w: int, h: int, block: int,
+          matrix: str = "", tone_range: str = "") -> list[dict]:
     hh, ww = (h // block) * block, (w // block) * block
     rows: list[dict] = []
-    for i, (a, b) in enumerate(zip(_frame_iter(gated, ffmpeg, w, h),
-                                  _frame_iter(ungated, ffmpeg, w, h))):
+    for i, (a, b) in enumerate(zip(_frame_iter(gated, ffmpeg, w, h, matrix, tone_range),
+                                  _frame_iter(ungated, ffmpeg, w, h, matrix, tone_range))):
         d = np.abs(a.astype(np.int16) - b.astype(np.int16)).max(axis=2)
         blk = d[:hh, :ww].reshape(hh // block, block, ww // block, block).mean(axis=(1, 3))
         rows.append({"frame": i,
@@ -123,17 +135,24 @@ def emit_records(rows: list[dict], s: dict, args, digest: str) -> list[dict]:
                   extra={"artifact_sha256": digest, "reference_kind": args.reference_kind,
                          "reference_note": reference_note})
     recs = [
+        # Each record says what it is a bar OF (`extra["of"]`), or `gates.below` refuses it: a share is judged
+        # against a share bar, a peak against a peak bar, and a count of pixels over a threshold is a `pixel_defect`.
         Record(value=s["worst_share"], unit="%", instrument=f"{instrument}, {s['block']}px blocks",
                config=args.config + f" (worst frame {s['worst_share_frame']})", statistic="worst_of",
-               **common),
+               extra={**common["extra"], "of": "share"},
+               **{k: v for k, v in common.items() if k != "extra"}),
         Record(value=float(s["frames_above_bar"]), unit="count",
                instrument=instrument, config=args.config + f" (bar {args.bar}%)",
-               statistic="single", **common),
+               statistic="single", extra={**common["extra"], "of": "pixel_defect"},
+               **{k: v for k, v in common.items() if k != "extra"}),
         Record(value=s["worst_block_mean"], unit="levels", instrument=instrument,
                config=args.config + f" (worst block mean, frame {s['worst_block_mean_frame']})",
-               statistic="max", **common),
+               statistic="max", extra={**common["extra"], "of": "excess"},
+               **{k: v for k, v in common.items() if k != "extra"}),
         Record(value=float(s["worst_peak"]), unit="levels", instrument=instrument,
-               config=args.config + " (peak channel delta on any frame)", statistic="max", **common),
+               config=args.config + " (peak channel delta on any frame)", statistic="max",
+               extra={**common["extra"], "of": "peak"},
+               **{k: v for k, v in common.items() if k != "extra"}),
     ]
     out = []
     for i, r in enumerate(recs, 1):
@@ -162,6 +181,10 @@ def main(argv=None) -> int:
     ap.add_argument("--run", default="")
     ap.add_argument("--artifact", default="")
     ap.add_argument("--id-prefix", default="RB")
+    ap.add_argument("--in-matrix", default="",
+                    help="read BOTH files with this matrix (bt709, bt2020nc, ...) instead of each file's own tags")
+    ap.add_argument("--in-range", default="",
+                    help="read BOTH files with this sample range (tv, pc) instead of each file's own tags")
     ap.add_argument("--from-json", default="",
                     help="emit from a saved per-frame table instead of re-decoding the pair")
     ap.add_argument("--reference-kind", default="undeclared",
@@ -176,7 +199,8 @@ def main(argv=None) -> int:
         saved = json.load(open(args.from_json))
         rows, s = saved["rows"], saved["summary"]
     else:
-        rows = sweep(args.gated, args.ungated, args.ffmpeg, args.width, args.height, args.block)
+        rows = sweep(args.gated, args.ungated, args.ffmpeg, args.width, args.height, args.block,
+                     getattr(args, "in_matrix", ""), getattr(args, "in_range", ""))
         s = summary(rows, args.block, args.bar)
     if not args.from_json:
         json.dump({"summary": s, "rows": rows}, open(args.out, "w"))
