@@ -4,6 +4,11 @@ Scope of this file today: the frame. The strip, the playhead and the LMB compare
 sit in the same pass (see plan-rve-video-preview-widget-2026-11-23); keeping them out until the frame is proven means the
 first thing measured is the thing that can be wrong in the most ways (texture upload, colour, aspect, zoom).
 
+The pane carries **two surfaces, one playhead** (`set_view_mode`, 2026-11-24): the render result and the source
+picture, shown as `single` (today's pane), `sbs` (result right, original left, half the width each) or `split` (one
+picture, the original left of a vertical divider). They are two draws inside the SAME RHI pass - one clear per frame -
+and the strip/HUD is painted once for the whole widget, so a seek means the same playhead in every mode.
+
 Decisions encoded here, each from a measurement or an owner call:
 
 * **fit to the pane on open.** "No downscale" in the plan is about the RENDER: the backend must not shrink frames to
@@ -23,7 +28,7 @@ import os
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QImage,
@@ -53,6 +58,10 @@ SHADER_DIR = "shaders"
 MAX_ZOOM = 8.0
 MIN_ZOOM = 1.0
 
+#: What the pane can show: the result alone, result + original side by side, or both under one divider. The names are
+#: the API (`set_view_mode`), not a UI label - the host may put them on whichever control it likes.
+VIEW_MODES = ("single", "sbs", "split")
+
 
 @dataclass(frozen=True)
 class Frame:
@@ -64,7 +73,11 @@ class Frame:
 
 
 class VideoPreviewSurface(QRhiWidget):
-    """A frame, fitted to the pane on open and zoomable from there (range: fit .. 8x source pixels)."""
+    """The result picture (or the result and the source together), fitted to the pane and zoomable from there.
+
+    The zoom/pan belongs to the RESULT: in `sbs` the original's half is placed from the same source-pixel scale (see
+    `set_view_mode`), so the two pictures always show the same apparent scale.
+    """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -85,6 +98,15 @@ class VideoPreviewSurface(QRhiWidget):
         self._panning = False
         self._pan_anchor = QPointF()
         self._showing_original = False
+        #: which surfaces the pane shows: "single" (today), "sbs" or "split" - see `set_view_mode`
+        self._view_mode = "single"
+        #: the source picture has its OWN texture, used by the compare modes; "single" keeps drawing it through
+        #: `_texture` (the flash replaces the frame, so one texture is enough there)
+        self._original_texture_dirty = False
+        #: where the split divider sits, as a share of the picture's width; the pane's rule, not a per-frame value
+        self._split_fraction = 0.5
+        #: the playhead the standing original was last asked for, so playback refreshes it once per move
+        self._original_requested_at: float | None = None
         #: Opaque clear colour for the pane. QRhiWidgets composite by OVERWRITING their rect, so a clear with alpha
         #: below 255 punches a hole (black on Wayland, white on xcb) instead of letting the page show through - the
         #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
@@ -152,13 +174,14 @@ class VideoPreviewSurface(QRhiWidget):
         return self._frame is not None
 
     def set_original(self, image: QImage | None) -> None:
-        """The source frame for the LMB compare; `None` returns to the rendered picture.
+        """The source frame for the compare: the LMB flash in `single`, a standing pane in the compare modes.
 
         The source is **stretched up to the rendered frame's size with nearest-neighbour** (`FastTransformation`): the
         cheapest interpolation there is, and the only one that adds no information. The comparison then shows two
         pictures of the same pixel size, so every difference on screen is one the upscaler produced rather than a
         smoothing artefact of the viewer, and the source pixel at (x, y) lands on the same screen point in both states
-        (owner, 2026-11-23).
+        (owner, 2026-11-23). In `sbs` that same step is what makes the half-width original the same size as the
+        result, i.e. the same apparent scale with no second zoom to keep in sync.
         """
         if image is None:
             self._original = None
@@ -172,8 +195,66 @@ class VideoPreviewSurface(QRhiWidget):
                 picture = picture.scaled(self._frame.size(), Qt.AspectRatioMode.KeepAspectRatio,
                                          Qt.TransformationMode.FastTransformation)
             self._original = picture
-        self._texture_dirty = True
+        if self._view_mode == "single":
+            # The flash replaces the frame in the one shared texture.
+            self._texture_dirty = True
+        else:
+            # The compare modes draw both pictures at once, so the source has its own texture and the result's
+            # upload is untouched by an arriving source frame.
+            self._original_texture_dirty = self._original is not None
+            if self._original is not None and getattr(self, "_texture", None) is not None:
+                self._ensure_original_texture(self._original.size())
         self.update()
+
+    def set_view_mode(self, mode: str) -> None:
+        """`single` (today) | `sbs` (result right, original left) | `split` (one picture, original left of a divider).
+
+        The invariant of the compare modes, and the reason the wheel is ignored over the original's half: **both
+        pictures are drawn at the RESULT's source-pixel scale**, so a feature is the same apparent size on both sides.
+        The original's zoom is derived from the result - it is never stored separately - and neither picture is
+        stretched into its half: each keeps its own aspect and is letterboxed on its own. The strip is painted once for
+        the whole widget and drives the same `seekRequested`, so a seek means the same playhead in every mode.
+
+        Outside "single" the source picture is a STANDING pane - there is no button to hold - so opening a compare mode
+        asks the host for the source at the playhead (`originalRequested`), and the request is repeated when the
+        playhead moves. "single" keeps the LMB flash unchanged: press = original, release = result.
+        """
+        if mode not in VIEW_MODES:
+            raise ValueError(f"unknown view mode {mode!r}: expected one of {', '.join(VIEW_MODES)}")
+        if mode == self._view_mode:
+            return
+        self._view_mode = mode
+        # Leaving "single" ends a flash: the source becomes the standing pane instead of a held picture.
+        self._showing_original = False
+        self._hud_dirty = True
+        # Both textures get re-uploaded once: `single` may have left the source in the shared one, and the compare
+        # modes keep the result there. Cheap (one upload) and it removes a whole class of "stale half" readings.
+        self._texture_dirty = self._frame is not None
+        self._original_texture_dirty = self._original is not None
+        if mode != "single":
+            self._request_standing_original()
+        self.update()
+
+    def view_mode(self) -> str:
+        """Which surfaces the pane shows: "single", "sbs" or "split"."""
+        return self._view_mode
+
+    def _request_standing_original(self) -> None:
+        """Ask the host for the source frame at the playhead (compare modes only).
+
+        The original is a standing pane outside `single`, so nothing else would ever request it: the pane asks once
+        when a compare mode opens and again whenever the playhead moves (`set_progress`). The host decodes ONE frame on
+        its own decoder and coalesces repeated requests (last one wins), which is what keeps the two pictures on one
+        playhead during playback without the pane knowing anything about decoding.
+        """
+        if self._view_mode == "single" or self._frame is None:
+            return
+        _, _, playhead, _ = self._progress
+        playhead = float(playhead)
+        if self._original is not None and playhead == self._original_requested_at:
+            return
+        self._original_requested_at = playhead
+        self.originalRequested.emit(playhead)
 
     def set_tint(self, rgba: tuple[float, float, float, float]) -> None:
         self._tint = tuple(float(part) for part in rgba)
@@ -186,10 +267,18 @@ class VideoPreviewSurface(QRhiWidget):
         `rendered/total` is the render's progress (live: frames or seconds produced so far); `playhead/duration` is
         media time. Either pair with a zero denominator hides its marker - the strip stays, the marker does not
         pretend to be at 0%.
+
+        In a compare mode this is also the clock of the standing original: a playhead that moved means the source
+        pictured on the left is one frame old, so the host is asked for the new one (the same `originalRequested`
+        the LMB flash uses). `_refresh_held_progress` re-publishes the SAME playhead on a tick, so a paused preview
+        does not spam the decoder.
         """
+        previous_playhead = self._progress[2]
         self._progress = (float(rendered), float(total), float(playhead), float(duration))
         self._hud_dirty = True
         self.update()
+        if float(playhead) != float(previous_playhead):
+            self._request_standing_original()
 
     def set_background_colour(self, colour) -> None:
         """The opaque colour the pane shows where no frame is drawn (the page's surface token)."""
@@ -215,6 +304,12 @@ class VideoPreviewSurface(QRhiWidget):
         delta = event.angleDelta().y()
         if not delta:
             return
+        # In `sbs` the original is placed from the result's scale, so a wheel over that half has nothing of its own
+        # to change: doing nothing there (instead of silently moving the far picture) is what keeps the two surfaces
+        # comparable one gesture at a time.
+        if self._view_mode == "sbs" and self._original_view_rect().contains(event.position()):
+            event.accept()
+            return
         factor = 1.15 if delta > 0 else 1 / 1.15
         self.set_zoom(self._zoom * factor, around=QRectF(event.position(), QSize(1, 1)))
         self.zoomChanged.emit(self._zoom)
@@ -238,6 +333,11 @@ class VideoPreviewSurface(QRhiWidget):
                     return
                 self._scrubbing = True
                 self.seekRequested.emit(fraction)
+                event.accept()
+                return
+            # In a compare mode the source is already on screen: there is nothing to flash, and the picture is not a
+            # control. The press is consumed so it cannot turn into a flash the user did not ask for.
+            if self._view_mode != "single":
                 event.accept()
                 return
             # LMB = "show the original": the surface asks the host for the source frame at the playhead and draws it as
@@ -363,8 +463,9 @@ class VideoPreviewSurface(QRhiWidget):
                 u = (anchor.x() - rect.left()) / max(1e-6, rect.width())
                 v = (anchor.y() - rect.top()) / max(1e-6, rect.height())
                 drawn_w, drawn_h = width * target, height * target
-                self._pan[0] = anchor.x() - u * drawn_w - (self.width() - drawn_w) / 2.0
-                self._pan[1] = anchor.y() - v * drawn_h - (self.height() - drawn_h) / 2.0
+                view = self._view_rect()
+                self._pan[0] = anchor.x() - u * drawn_w - view.left() - (view.width() - drawn_w) / 2.0
+                self._pan[1] = anchor.y() - v * drawn_h - view.top() - (view.height() - drawn_h) / 2.0
         self._zoom = target
         self._zoom_is_fit = False
         self._clamp_pan()
@@ -398,29 +499,98 @@ class VideoPreviewSurface(QRhiWidget):
         width, height = self._image_size()
         if not width or not height:
             return 1.0
-        view = self.size()
+        view = self._view_rect()
         return min(view.width() / width, view.height() / height)
 
+    def _result_scale(self) -> float:
+        """The source-pixel scale the RESULT is drawn at: the fit scale on open, the wheel's factor after that."""
+        return self._fit_scale() if self._zoom_is_fit else self._zoom
+
+    def _half_rects(self) -> tuple[QRectF, QRectF]:
+        """The two halves of `sbs`, as `(original, result)` - the source first, the render second.
+
+        That order is the before/after reading Topaz's compare has, and it is the same order `split` uses (its left
+        part is the original). ONE line: swapping these two rects is the whole layout decision.
+        """
+        half = self.width() / 2.0
+        height = float(self.height())
+        return QRectF(0.0, 0.0, half, height), QRectF(half, 0.0, half, height)
+
+    def _view_rect(self) -> QRectF:
+        """The widget rect the RESULT is laid out in: the whole pane, or the right half in `sbs`.
+
+        One rect to fit, clamp and anchor into means one zoom for the result - the wheel and the middle drag address
+        it even when the pointer is over the original's half.
+        """
+        if self._view_mode == "sbs":
+            return self._half_rects()[1]
+        return QRectF(0.0, 0.0, float(self.width()), float(self.height()))
+
+    def _original_view_rect(self) -> QRectF:
+        """The widget rect the ORIGINAL is laid out in: the left half in `sbs`; the picture's rect otherwise."""
+        if self._view_mode == "sbs":
+            return self._half_rects()[0]
+        return self._frame_rect()
+
     def _frame_rect(self) -> QRectF:
-        """The picture's rectangle in widget pixels at the current zoom/pan, centred."""
+        """The RESULT's rectangle in widget pixels at the current zoom/pan, centred in its view rect."""
         width, height = self._image_size()
         if not width or not height:
             return QRectF(0, 0, 0, 0)
-        scale = self._fit_scale() if self._zoom_is_fit else self._zoom
+        scale = self._result_scale()
         drawn_w, drawn_h = width * scale, height * scale
-        left = (self.size().width() - drawn_w) / 2.0 + self._pan[0]
-        top = (self.size().height() - drawn_h) / 2.0 + self._pan[1]
+        view = self._view_rect()
+        left = view.left() + (view.width() - drawn_w) / 2.0 + self._pan[0]
+        top = view.top() + (view.height() - drawn_h) / 2.0 + self._pan[1]
         return QRectF(left, top, drawn_w, drawn_h)
+
+    def _original_rect(self) -> QRectF:
+        """The SOURCE picture's rectangle: the result's rect when they overlay, its own half in `sbs`.
+
+        In `sbs` the placement comes from the source's own pixel size at the RESULT's source-pixel scale - never from
+        the half's size. That is the invariant `set_view_mode` states: same apparent scale on both sides, each picture
+        at its own aspect (a source with a different aspect letterboxes inside its half instead of being stretched to
+        it). The pan is the result's, so panning either half shows the same region on both.
+        """
+        picture = self._original
+        if picture is None or picture.isNull():
+            return QRectF()
+        if self._view_mode != "sbs":
+            return self._frame_rect()
+        scale = self._result_scale()
+        view = self._original_view_rect()
+        drawn_w, drawn_h = picture.width() * scale, picture.height() * scale
+        left = view.left() + (view.width() - drawn_w) / 2.0 + self._pan[0]
+        top = view.top() + (view.height() - drawn_h) / 2.0 + self._pan[1]
+        return QRectF(left, top, drawn_w, drawn_h)
+
+    def _original_clip_rect(self) -> QRectF:
+        """Where the original may paint: its half in `sbs`, the left of the divider in `split`.
+
+        Scissoring to this rect is what lets a zoomed picture reach the edge of its own surface without leaking over
+        the other one; in `sbs` it is also why an aspect-mismatched source cannot invade the result's half.
+        """
+        if self._view_mode == "sbs":
+            return self._original_view_rect()
+        if self._view_mode == "split":
+            picture = self._frame_rect()
+            if picture.isEmpty():
+                return QRectF()
+            divider = picture.left() + picture.width() * self._split_fraction
+            return QRectF(picture.left(), picture.top(), max(0.0, divider - picture.left()),
+                          picture.height())
+        return QRectF()
 
     def _clamp_pan(self) -> None:
         """Keep the picture over the pane: no gutter when zoomed past the pane, no drifting it away when it fits."""
         width, height = self._image_size()
         if not width or not height:
             return
-        scale = self._fit_scale() if self._zoom_is_fit else self._zoom
+        scale = self._result_scale()
         drawn_w, drawn_h = width * scale, height * scale
-        max_x = max(0.0, (drawn_w - self.size().width()) / 2.0)
-        max_y = max(0.0, (drawn_h - self.size().height()) / 2.0)
+        view = self._view_rect()
+        max_x = max(0.0, (drawn_w - view.width()) / 2.0)
+        max_y = max(0.0, (drawn_h - view.height()) / 2.0)
         self._pan[0] = max(-max_x, min(max_x, self._pan[0]))
         self._pan[1] = max(-max_y, min(max_y, self._pan[1]))
 
@@ -455,7 +625,9 @@ class VideoPreviewSurface(QRhiWidget):
             self._rhi = rhi
             if self._frame is not None:
                 self._texture_dirty = True
-                self.update()
+            if self._original is not None:
+                self._original_texture_dirty = True
+            self.update()
             return
         self._release()
         self._rhi = rhi
@@ -494,6 +666,11 @@ class VideoPreviewSurface(QRhiWidget):
 
         self._uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer, 64 + 16)
         self._uniforms.create()
+        # The source picture's own uniform buffer: same block, a different mvp (its half), and the same tint. Two
+        # buffers instead of one with two offsets keeps each SRB a plain whole-buffer binding.
+        self._original_uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer,
+                                                64 + 16)
+        self._original_uniforms.create()
 
         # A unit quad: two triangles, positions in [-1,1] and matching uv.
         # NDC -1 is the bottom of the pane while a QImage row 0 is its top, so the texture's v axis is flipped here
@@ -557,6 +734,12 @@ class VideoPreviewSurface(QRhiWidget):
         self._deferred = False
         self._texture_dirty = self._frame is not None
         self._pipeline = None
+        self._original_texture = None
+        if self._original is not None and not self._original.isNull():
+            # A compare mode was opened before the first frame (or the resources were rebuilt while it stood). The
+            # source's texture is created exactly like the frame's, outside a frame, and its own upload follows.
+            self._original_texture_dirty = True
+            self._ensure_original_texture(self._original.size())
 
     def _build_pipeline(self) -> None:
         """Build the graphics pipeline for the CURRENT SRB. Re-run whenever the texture (and so its SRB) is re-created:
@@ -603,10 +786,41 @@ class VideoPreviewSurface(QRhiWidget):
             pipeline.destroy()
         self._pipeline = None
 
+    def _ensure_original_texture(self, size) -> None:
+        """Create or resize the SOURCE picture's own texture (the compare modes draw both pictures in one pass).
+
+        Same rules as `_ensure_texture`, and the same trap: an SRB holds the texture's native handle, so a texture that
+        is destroyed and re-created at a new size silently invalidates every binding that names it. The pipeline is
+        built against a specific SRB object, so it is dropped too and rebuilt on the next render.
+        """
+        if getattr(self, "_texture", None) is None or getattr(self, "_rhi", None) is None:
+            # The resource set is built at the first real frame; before that there is nothing to attach a texture to.
+            return
+        texture = getattr(self, "_original_texture", None)
+        if texture is not None and texture.pixelSize() == size:
+            return
+        if texture is not None:
+            texture.destroy()
+            self._original_texture = None
+        texture = self._rhi.newTexture(QRhiTexture.Format.RGBA8, size, 1,
+                                       QRhiTexture.Flag.UsedAsTransferSource)
+        if not texture.create():
+            raise RuntimeError(f"original texture {size.width()}x{size.height()} was refused by QRhi")
+        self._original_texture = texture
+        self._build_bindings()
+        pipeline = getattr(self, "_pipeline", None)
+        if pipeline is not None:
+            pipeline.destroy()
+        self._pipeline = None
+
     def _build_bindings(self) -> None:
-        """(Re)create the two SRBs. The sampler is part of the SRB, so the 1:1 (nearest) and zoomed (linear) views are
-        two bindings that differ only by the sampler; and a texture that is destroyed and re-created at a new size
-        invalidates the native handle the SRB holds, so this runs again after such a re-create."""
+        """(Re)create the SRBs: the result's and, when it exists, the source's.
+
+        The sampler is part of the SRB, so the 1:1 (nearest) and zoomed (linear) views are two bindings that differ
+        only by the sampler; and a texture that is destroyed and re-created at a new size invalidates the native handle
+        the SRB holds, so this runs again after such a re-create. The two pictures share one binding LAYOUT (a uniform
+        buffer at 0, a sampled texture at 1) and therefore one pipeline: QRhi compares the layout, not the object.
+        """
         rhi = self._rhi
         # The UBO is read by BOTH stages (`mvp` in the vertex shader, `tint` in the fragment one), and the sampler's
         # binding index must equal the `binding = 1` the fragment shader declares: QRhi assigns texture units by SRB
@@ -615,22 +829,33 @@ class VideoPreviewSurface(QRhiWidget):
         flags = (QRhiShaderResourceBinding.StageFlag.VertexStage
                  | QRhiShaderResourceBinding.StageFlag.FragmentStage)
         frag = QRhiShaderResourceBinding.StageFlag.FragmentStage
-        for attribute, sampler in (("_bindings", self._sampler_linear),
-                                   ("_bindings_nearest", self._sampler_nearest)):
+        specs = (
+            ("_bindings", self._uniforms, self._texture, self._sampler_linear),
+            ("_bindings_nearest", self._uniforms, self._texture, self._sampler_nearest),
+            ("_original_bindings", self._original_uniforms,
+             getattr(self, "_original_texture", None), self._sampler_linear),
+            ("_original_bindings_nearest", self._original_uniforms,
+             getattr(self, "_original_texture", None), self._sampler_nearest),
+        )
+        for attribute, uniforms, texture, sampler in specs:
             current = getattr(self, attribute, None)
             if current is not None:
                 current.destroy()
+                setattr(self, attribute, None)
+            if texture is None:
+                continue
             bindings = rhi.newShaderResourceBindings()
             bindings.setBindings([
-                QRhiShaderResourceBinding.uniformBuffer(0, flags, self._uniforms),
-                QRhiShaderResourceBinding.sampledTexture(1, frag, self._texture, sampler),
+                QRhiShaderResourceBinding.uniformBuffer(0, flags, uniforms),
+                QRhiShaderResourceBinding.sampledTexture(1, frag, texture, sampler),
             ])
             bindings.create()
             setattr(self, attribute, bindings)
 
     def _release(self) -> None:
         for name in ("_pipeline", "_bindings", "_bindings_nearest", "_vertices", "_uniforms",
-                     "_sampler_nearest", "_sampler_linear", "_texture",
+                     "_sampler_nearest", "_sampler_linear", "_texture", "_original_texture",
+                     "_original_bindings", "_original_bindings_nearest", "_original_uniforms",
                      "_hud_pipeline", "_hud_bindings", "_hud_buffer", "_hud_uniforms"):
             item = getattr(self, name, None)
             if item is not None:
@@ -658,6 +883,13 @@ class VideoPreviewSurface(QRhiWidget):
             self._release()
             self._rhi = self.rhi()
             self._create_resources(command_buffer)
+        if self._view_mode == "single":
+            self._render_single(command_buffer, target)
+            return
+        self._render_two_surfaces(command_buffer, target)
+
+    def _render_single(self, command_buffer, target) -> None:
+        """Today's pane: one picture per frame, in one pass (the LMB flash replaces it in place)."""
         picture = self._original if (self._showing_original and self._original is not None) else self._frame
         if picture is None:
             return
@@ -695,14 +927,99 @@ class VideoPreviewSurface(QRhiWidget):
             command_buffer.draw(len(hud_vertices) // 6)
         command_buffer.endPass()
 
-    def _mvp_floats(self) -> list[float]:
+    def _render_two_surfaces(self, command_buffer, target) -> None:
+        """The result and the source in ONE pass: one clear, then up to two draws, each clipped to its own surface.
+
+        `sbs` lays each picture into its half, scissored so a zoomed picture cannot leak across the boundary; `split`
+        paints both over the same picture rect and clips the original to the left of the divider. Two textures, two
+        SRBs that share one pipeline layout, one `beginPass`/`endPass` - the pane's rect is overwritten exactly once,
+        which is the whole reason a QRhiWidget cannot alpha-blend with its siblings in the first place. The HUD is
+        drawn after the scissor is released, so the strip is the same single object under every mode.
+        """
+        frame = self._frame
+        if frame is None:
+            return
+        self._ensure_texture(frame.size())
+        original = self._original if (self._original is not None and not self._original.isNull()) else None
+        if original is not None:
+            self._ensure_original_texture(original.size())
+        if getattr(self, "_pipeline", None) is None:
+            self._build_pipeline()
+            if self._pipeline is None:
+                return
+        updates = self.rhi().nextResourceUpdateBatch()
+        if self._texture_dirty:
+            updates.uploadTexture(self._texture, frame)
+            self._texture_dirty = False
+        tint = list(self._tint)
+        updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(self._mvp_floats(self._frame_rect())))
+        updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(tint))
+        draw_original = original is not None and getattr(self, "_original_texture", None) is not None
+        if draw_original:
+            if self._original_texture_dirty:
+                updates.uploadTexture(self._original_texture, original)
+                self._original_texture_dirty = False
+            updates.updateDynamicBuffer(self._original_uniforms, 0, 64,
+                                        _floats(self._mvp_floats(self._original_rect())))
+            updates.updateDynamicBuffer(self._original_uniforms, 64, 16, _floats(tint))
+        hud_vertices = self._hud_vertices()
+        if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
+            updates.updateDynamicBuffer(self._hud_uniforms, 0, 16,
+                                        _floats([float(self.width()), float(self.height()),
+                                                 float(self.devicePixelRatioF() or 1.0), 0.0]))
+            updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
+        command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
+        command_buffer.setGraphicsPipeline(self._pipeline)
+        command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
+        sample_at_one = (not self._zoom_is_fit) and abs(self._zoom - 1.0) < 1e-6
+        result_bindings = self._bindings_nearest if sample_at_one else self._bindings
+        result_clip = self._view_rect()
+        if result_bindings is not None and not result_clip.isEmpty() and self._frame_rect().intersects(result_clip):
+            command_buffer.setShaderResources(result_bindings)
+            command_buffer.setVertexInput(0, [(self._vertices, 0)])
+            self._scissor(command_buffer, result_clip)
+            command_buffer.draw(6)
+        if draw_original:
+            original_bindings = (self._original_bindings_nearest if sample_at_one
+                                 else self._original_bindings)
+            original_clip = self._original_clip_rect()
+            if original_bindings is not None and not original_clip.isEmpty():
+                command_buffer.setShaderResources(original_bindings)
+                command_buffer.setVertexInput(0, [(self._vertices, 0)])
+                self._scissor(command_buffer, original_clip)
+                command_buffer.draw(6)
+        # The HUD spans the whole widget; a scissor left over from one half would clip the far end of the strip.
+        command_buffer.setScissor(QRect(0, 0, target.pixelSize().width(), target.pixelSize().height()))
+        if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
+            command_buffer.setGraphicsPipeline(self._hud_pipeline)
+            command_buffer.setShaderResources(self._hud_bindings)
+            command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
+            command_buffer.draw(len(hud_vertices) // 6)
+        command_buffer.endPass()
+
+    def _scissor(self, command_buffer, rect: QRectF) -> None:
+        """Confine the next draw to a widget-space rect (QRhi scissors are in framebuffer pixels)."""
+        target = self.renderTarget()
+        if target is None:
+            return
+        pixels = target.pixelSize()
+        dpr = float(self.devicePixelRatioF() or 1.0)
+        left = max(0.0, rect.left() * dpr)
+        top = max(0.0, rect.top() * dpr)
+        right = min(float(pixels.width()), rect.right() * dpr)
+        bottom = min(float(pixels.height()), rect.bottom() * dpr)
+        command_buffer.setScissor(QRect(int(left), int(top),
+                                        max(0, int(right - left)), max(0, int(bottom - top))))
+
+    def _mvp_floats(self, rect: QRectF | None = None) -> list[float]:
         """Unit quad -> the picture's rect on the pane, column-major for the uniform buffer.
 
         Written out instead of composed from ``QMatrix4x4``: PySide6 hands that object back row-major, and a transposed
         transform in a shader is a silently mirrored picture - the kind of bug that reads as "the widget drew something"
-        and is caught only by looking at the pixels.
+        and is caught only by looking at the pixels. The rect comes from the caller in the compare modes (one picture
+        per SRB); the default is the result's own placement.
         """
-        rect = self._frame_rect()
+        rect = self._frame_rect() if rect is None else rect
         view = self.size()
         if rect.isEmpty() or not view.width() or not view.height():
             return [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
@@ -757,6 +1074,21 @@ class VideoPreviewSurface(QRhiWidget):
             x = strip.left() + strip.width() * self._hover_fraction
             colour = (1.0, 0.45, 0.45, 0.55) if self._hover_blocked else (1.0, 1.0, 1.0, 0.55)
             rects.append((x - 0.5, strip.top() - 3.0, 1.0, strip.height() + 6.0, colour))
+        # The two-surface modes draw ONE boundary, not a second HUD: a faint line between the halves in `sbs`, and
+        # the divider itself in `split`. Both stop above the strip so the playhead stays readable across the width.
+        strip_top = strip.top()
+        if self._view_mode == "sbs":
+            middle = self.width() / 2.0
+            if strip_top > 0:
+                rects.append((middle - 0.5, 0.0, 1.0, strip_top, (1.0, 1.0, 1.0, 0.18)))
+        elif (self._view_mode == "split" and self._original is not None
+              and not self._original.isNull()):
+            picture = self._frame_rect()
+            top = max(0.0, picture.top())
+            bottom = min(strip_top, picture.bottom())
+            if bottom > top:
+                x = picture.left() + picture.width() * self._split_fraction
+                rects.append((x - 1.0, top, 2.0, bottom - top, (1.0, 1.0, 1.0, 0.85)))
         vertices: list[float] = []
         for x, y, w, h, colour in rects:
             corners = [(x, y), (x + w, y), (x, y + h), (x + w, y), (x + w, y + h), (x, y + h)]
