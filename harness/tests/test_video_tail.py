@@ -25,6 +25,8 @@ import types
 
 import pytest
 
+pytest.importorskip("PySide6")
+
 from src.ui.video.tail import TailReader
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
