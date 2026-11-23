@@ -43,6 +43,24 @@ from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, Minimalis
 SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
 
+def _retain_box_when_hidden(*widgets: QWidget) -> None:
+    """Keep each widget's box in its layout while the widget is hidden.
+
+    `QWidget.setVisible(False)` is a paint decision in Qt's model, but a layout treats a hidden widget as one with no
+    size: its share is handed to the siblings and every widget after it moves. Where the glue toggles a group of
+    controls in place (the render row: start at idle, pause + kill while a job runs), that hand-out is a visible
+    re-flow at the moment the state changes. `QSizePolicy.setRetainSizeWhenHidden(True)` is the switch that keeps the
+    box, so the row is laid out once and only its contents change.
+
+    `sizePolicy()` returns a copy, so the policy has to be written back - editing the returned object alone does
+    nothing (silently, which is why this is a named helper rather than four lines repeated at each call site).
+    """
+    for widget in widgets:
+        policy = widget.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        widget.setSizePolicy(policy)
+
+
 # --- the tab strip's geometry policy (host side) ------------------------------------------------
 #
 # Owner, 2026-11-21: "the Log label is clipped and scroller arrows appear". Both halves of that are the strip's
@@ -537,6 +555,15 @@ class ProcPagePage:
         self.killRenderButton.setIconSize(QSize(40, 45))
         self.onRenderButtonsContiainer.addWidget(self.killRenderButton)
         self.horizontalLayout_32.addLayout(self.onRenderButtonsContiainer)
+        # The row has three buttons and the glue swaps which of them are shown (idle: start; a job: pause + kill;
+        # paused: start again). Hiding a widget without `setRetainSizeWhenHidden` takes its width out of the layout, so
+        # every swap re-flowed the row: the progress bar gave up ~two button widths and everything after the buttons
+        # moved at the exact moment the user pressed start (owner, 2026-11-24; the gate is
+        # `harness/tests/test_render_row_geometry.py`). A retained box makes visibility a paint decision, not a layout
+        # one - the row keeps its geometry in every state.
+        _retain_box_when_hidden(
+            self.startRenderButton, self.pauseRenderButton, self.killRenderButton
+        )
         # `height=25` is the Designer's bar row; the toolkit toast bar's own default is 6 px. Its track paints from
         # the toolkit's `toast.progress.background` token (the adapter's call-site token was `progress.track.background`).
         self.progressBar = ToastProgressBar(self.widget_13, height=25, track_token="progress.track.background")
