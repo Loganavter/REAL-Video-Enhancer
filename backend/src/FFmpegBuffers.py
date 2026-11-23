@@ -334,7 +334,14 @@ class FFmpegWrite(Buffer):
         ffmpeg planar samples labelled P010 and came out at 12.7 dB against the reference.
         A format disagreement here cannot fail loudly: both are 16-bit words at 3 bytes/pixel.
         """
-        if self.high_bitdepth and not self.hdr_mode:
+        forced = os.environ.get("RVE_PIPE")
+        if forced:
+            # Diagnostic only: the A/B of the pipe formats has to run on one build, or the comparison measures the code
+            # as much as the pipe (`RVE_PIPE=rgb48le` is the old 6-bytes-per-pixel path).
+            return forced
+        if self.high_bitdepth:
+            # HDR included: the packer converts with the source's matrix, so the pipe no longer carries rgb48le
+            # (6 bytes/px) for ffmpeg to convert on the CPU.
             return self.pipe_input_pixel_format or "yuv420p10le"
         if not self.high_bitdepth and self.pipe_input_pixel_format == "yuv420p":
             # 8-bit planar pipe (RVE_YUV8): what the renderer packed, 1.5 bytes/pixel
@@ -351,9 +358,12 @@ class FFmpegWrite(Buffer):
         real explanation of what looked like "10-bit output costs 2x NVENC": NVENC itself is
         9.4 against 6.4 ms/frame). On the input side the same tags produce the same container
         tags and no conversion at all.
+
+        One matrix for every pipe: the SOURCE's, or bt709 when the source declares nothing. The old code returned
+        nothing at all under `hdr_mode`, which left an RGB pipe to swscale's default matrix - measured bt601 against a
+        bt709 source: -6.4 levels of green on saturated content, and only there (2026-11-23, 1440x1080, 24 frames).
         """
-        if self.hdr_mode:
-            return []
+        pipe = self._pipe_input_pixel_format()
         args: list[str] = []
         if self.color_space:
             args += ["-colorspace", self.color_space]
@@ -363,13 +373,9 @@ class FFmpegWrite(Buffer):
             args += ["-color_primaries", self.color_primaries]
         if self.color_transfer:
             args += ["-color_trc", self.color_transfer]
-        # The 8-bit YUV pipe carries samples the PACKER made (BT.709, limited), so its tags must
-        # describe that even when the source declares nothing. The rgb24 branch gets bt709 stamped
-        # for free by `scale=out_color_matrix=bt709`; measured without this, the YUV pipe's output
-        # came out `color_space=unknown` - the same "undeclared matrix" class that cost 5 dB in C3.
-        if not self.hdr_mode and self._pipe_input_pixel_format() == "yuv420p":
-            if not (self.color_space or self.color_primaries):
-                args += ["-colorspace", "bt709"]
+        if pipe in ("yuv420p10le", "p010le", "yuv420p", "rgb48le", "rgb24"):
+            if not self.color_space:
+                args += ["-colorspace", "bt2020nc" if self.hdr_mode else "bt709"]
             if not self.color_range:
                 args += ["-color_range", "tv"]
         return args

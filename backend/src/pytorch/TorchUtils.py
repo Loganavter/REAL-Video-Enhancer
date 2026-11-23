@@ -13,6 +13,7 @@ from ..utils.Util import (
 )
 HAS_PYTORCH_CUDA = CudaChecker().HAS_PYTORCH_CUDA
 import numpy as np
+import os
 
 def dummy_function(*args, **kwargs):
     """
@@ -27,6 +28,14 @@ def dummy_context_manager(*args, **kwargs):
     This is used as a placeholder for device-specific context managers that may not be available.
     """
     return DummyContextManager()
+
+#: Luma coefficients for the YUV packers (`tensor_to_yuv420p10`, `tensor_to_yuv420p`).
+#: Non-constant luminance, the form every SDR/HDR video pipeline actually uses.
+_LUMA_MATRICES = {
+    "bt709": (0.2126, 0.7152, 0.0722),
+    "bt2020": (0.2627, 0.6780, 0.0593),
+}
+
 
 class DummyContextManager:
     def __call__ (self, *args, **kwargs):
@@ -311,8 +320,12 @@ class TorchUtils:
     
     @torch.inference_mode()
     def tensor_to_yuv420p10(self, frame: torch.Tensor, pixel_format: str = "yuv420p10le",
-                            dest: torch.Tensor | None = None):
-        """(1,3,H,W) float 0..1 -> packed yuv420p10le bytes (BT.709, limited range).
+                            dest: torch.Tensor | None = None, matrix: str = "bt709"):
+        """(1,3,H,W) float 0..1 -> packed yuv420p10le bytes (limited range, `matrix` luma).
+
+        `matrix` picks the luma coefficients: `bt709` for SDR 10-bit, `bt2020` for HDR (the encoder is told
+        bt2020nc/smpte2084, so the packer must convert with the same matrix or the chroma shifts - the class of
+        mistake this file has paid for twice, a P010/planar mismatch at 12.7 dB and a bt601 default at |dU| ~6.6).
 
         Doing this on the GPU keeps the pipe at 3 bytes/pixel instead of 6 (rgb48le) while
         preserving 10-bit precision: measured 26.6 ms vs 40.8 ms for the old uint8 rgb24
@@ -322,19 +335,32 @@ class TorchUtils:
         With `dest` the packed frame is written into that 1-D uint16 host buffer instead of
         being `.tobytes()`-ed into a new one - same bytes, one less full-frame copy.
         """
-        x = frame if frame.dtype == torch.float16 else frame.half()
+        want = torch.float32 if os.environ.get("RVE_YUV10_FP32") else torch.float16
+        x = frame if frame.dtype == want else frame.to(want)
         r, g, b = x[0, 0], x[0, 1], x[0, 2]
-        # BT.709 luma, fp16 to halve the memory traffic at 4K
-        y = (0.2126 * r).add_(g, alpha=0.7152).add_(b, alpha=0.0722)
-        cb = b.sub(y).mul_(0.5 / (1.0 - 0.0722))
-        cr = r.sub(y).mul_(0.5 / (1.0 - 0.2126))
-        # 4:2:0 - average 2x2 blocks; odd sizes are padded by replication, because ffmpeg
-        # expects ceil(h/2) x ceil(w/2) chroma planes
+        kr, kg, kb = _LUMA_MATRICES.get(str(matrix).lower(), _LUMA_MATRICES["bt709"])
+        y = (kr * r).add_(g, alpha=kg).add_(b, alpha=kb)
+        cb = b.sub(y).mul_(0.5 / (1.0 - kb))
+        cr = r.sub(y).mul_(0.5 / (1.0 - kr))
+        # 4:2:0 chroma. `avg` averages each 2x2 block (centre siting); `left` keeps the top-left sample of the block,
+        # which is the siting ffmpeg's own RGB->YUV conversion uses (MPEG-2 "left"), so a comparison against a
+        # `scale=`-based render measures the conversion, not the siting. Odd sizes are padded by replication.
         if y.shape[0] % 2 or y.shape[1] % 2:
             cb = torch.nn.functional.pad(cb[None, None], (0, y.shape[1] % 2, 0, y.shape[0] % 2), mode="replicate")[0, 0]
             cr = torch.nn.functional.pad(cr[None, None], (0, y.shape[1] % 2, 0, y.shape[0] % 2), mode="replicate")[0, 0]
-        cb = torch.nn.functional.avg_pool2d(cb[None, None], 2)[0, 0]
-        cr = torch.nn.functional.avg_pool2d(cr[None, None], 2)[0, 0]
+        chroma = str(os.environ.get("RVE_YUV10_CHROMA", "avg")).lower()
+        if chroma == "left":
+            # top-left sample of each 2x2 block
+            cb = cb[::2, ::2]
+            cr = cr[::2, ::2]
+        elif chroma == "mpeg2":
+            # MPEG-2 siting: the chroma sample sits at the LEFT column, between the two luma rows - the location
+            # ffmpeg's own containers declare, and therefore what a decoder assumes when it upsamples.
+            cb = (cb[0::2, 0::2] + cb[1::2, 0::2]) * 0.5
+            cr = (cr[0::2, 0::2] + cr[1::2, 0::2]) * 0.5
+        else:
+            cb = torch.nn.functional.avg_pool2d(cb[None, None], 2)[0, 0]
+            cr = torch.nn.functional.avg_pool2d(cr[None, None], 2)[0, 0]
         h, w = y.shape
         yq = (y.mul_(876.0).add_(64.0).round_().clamp_(64, 940)).to(torch.uint16).reshape(-1)
         uq = (cb.mul_(896.0).add_(512.0).round_().clamp_(64, 960)).to(torch.uint16).reshape(-1)

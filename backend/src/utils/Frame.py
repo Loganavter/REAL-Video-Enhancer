@@ -228,6 +228,8 @@ class Frame:
         self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
         # set by the upscaler: emit yuv420p10le instead of RGB bytes (10-bit SDR path)
         self.yuv10_output = False
+        #: Luma coefficients the 10-bit packer must use (`bt709` for SDR, `bt2020` for HDR).
+        self.yuv10_matrix = "bt709"
         # 8-bit planar yuv420p pipe (RVE_YUV8): half the D2H of rgb24, no ffmpeg scale filter
         self.yuv8_output = False
         # set by the reader: the incoming bytes are packed yuv420p10le, not RGB
@@ -372,7 +374,8 @@ class Frame:
                 elif getattr(self, "yuv10_output", False):
                     # 10-bit SDR: pack YUV420p10 on the GPU so the pipe stays 3 bytes/px
                     self._bytes = _torch_utils.tensor_to_yuv420p10(
-                        self._tensor, getattr(self, "yuv10_format", "yuv420p10le"))
+                        self._tensor, getattr(self, "yuv10_format", "yuv420p10le"),
+                        matrix=getattr(self, "yuv10_matrix", "bt709"))
                 elif getattr(self, "yuv8_output", False):
                     # 8-bit: pack planar yuv420p on the GPU - 1.5 bytes/px instead of rgb24's 3
                     self._bytes = _torch_utils.tensor_to_yuv420p(self._tensor)
@@ -580,6 +583,7 @@ class Frame:
         if self._bytes is not None:
             new_frame.set_frame_bytes(self._bytes)
         new_frame.yuv10_output = self.yuv10_output
+        new_frame.yuv10_matrix = getattr(self, "yuv10_matrix", "bt709")
         new_frame.yuv8_output = getattr(self, "yuv8_output", False)
         return new_frame
     

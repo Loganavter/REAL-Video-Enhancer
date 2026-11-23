@@ -175,6 +175,11 @@ class UpscalePytorch:
         
         self.hdr_mode = hdr_mode         
         self.high_bitdepth = hdr_mode if high_bitdepth is None else high_bitdepth
+        #: Luma matrix the 10-bit pipe packer must use; set by the renderer from the SOURCE's colour space (this
+        #: app's "HDR mode" is also the 10-bit deep-colour switch, so the flag cannot decide the matrix: a 10-bit
+        #: bt709 clip packed with bt2020 coefficients measured mean |d| 3.72 against the rgb48 reference where bt709
+        #: measured 1.92).
+        self.yuv10_matrix = None
         # 8-bit planar YUV pipe, ON by default since 2026-11-18 (RVE_YUV8=0 reverts to rgb24).
         # Half the host traffic of rgb24 and no ffmpeg scale filter; the A/B that cleared it is in
         # harness/docs/PERFORMANCE.md (two titles: mean |delta| 0.12-0.17 levels, worst frame 1 px over the
@@ -478,10 +483,23 @@ class UpscalePytorch:
         retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale,
                          device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                          high_bitdepth=self.high_bitdepth)
-        retFrame.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+        # 10-bit output ships the pipe as yuv420p10le, HDR included: the packer converts with the source's matrix
+        # (`bt2020` under HDR) instead of handing ffmpeg rgb48le, which is 6 bytes/pixel for a frame the encoder stores
+        # at 3 (measured 2026-11-23: 37.3 vs 18.7 MB/frame, writer 15.5 vs 6.9 ms/frame).
+        retFrame.yuv10_output = bool(self.high_bitdepth) and self._pack_yuv()
+        retFrame.yuv10_matrix = self._pipe_matrix()
         retFrame.yuv8_output = self.yuv8_output
         retFrame.set_frame_tensor(result)
         return retFrame
+
+    @staticmethod
+    def _pack_yuv() -> bool:
+        """Whether the pipe carries packed yuv420p10le (`RVE_PIPE=rgb48le` restores the old RGB pipe for an A/B)."""
+        return str(os.environ.get("RVE_PIPE", "")).lower() != "rgb48le"
+
+    def _pipe_matrix(self) -> str:
+        """The luma coefficients for the 10-bit packer: the source's own, else bt709 (SDR) / bt2020 (HDR)."""
+        return str(self.yuv10_matrix or ("bt2020" if self.hdr_mode else "bt709")).lower()
 
     @torch.inference_mode()
     def flush(self):
@@ -493,7 +511,8 @@ class UpscalePytorch:
             f = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale,
                       device=self.device, gpu_id=getattr(self, "gpu_id", 0), hdr_mode=self.hdr_mode,
                       dtype=self.dtype, high_bitdepth=self.high_bitdepth)
-            f.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+            f.yuv10_output = bool(self.high_bitdepth) and self._pack_yuv()
+            f.yuv10_matrix = self._pipe_matrix()
             f.yuv8_output = self.yuv8_output
             f.set_frame_tensor(result)
             frames.append(f)
@@ -600,8 +619,9 @@ class UpscalePytorch:
             _t_frame_ctor = time.perf_counter()
             retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale, device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                              high_bitdepth=self.high_bitdepth)
-            # 10-bit SDR: hand ffmpeg ready-made yuv420p10le instead of RGB
-            retFrame.yuv10_output = bool(self.high_bitdepth and not self.hdr_mode)
+            # 10-bit output hands ffmpeg ready-made yuv420p10le instead of RGB (HDR included, with the HDR matrix)
+            retFrame.yuv10_output = bool(self.high_bitdepth) and self._pack_yuv()
+            retFrame.yuv10_matrix = self._pipe_matrix()
             retFrame.yuv8_output = self.yuv8_output
             retFrame.yuv10_format = self.pipe_pixel_format
             

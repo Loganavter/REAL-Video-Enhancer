@@ -87,11 +87,34 @@ def test_an_rgb_pipe_still_gets_the_matrix_filter():
     assert args[0] == "-vf" and "out_color_matrix=bt709" in args[1]
 
 
-def test_the_tags_exist_only_when_they_were_given():
+def test_a_pipe_declares_the_matrix_its_own_samples_were_made_with():
+    """The tags describe the PIPE's samples, so they are owed even when the source declared nothing.
+
+    They used to be emitted only when the source declared something, and never at all under `hdr_mode`. Two consequences
+    were measured on 2026-11-24: an untagged 10-bit file is decoded with swscale's default (bt601) instead of bt709 -
+    a 21.6 % picture difference manufactured by colour metadata alone - and the rgb48le arm's output carried no
+    colour space at all. The rule now: the source's matrix when it declares one, else bt709 (SDR) / bt2020nc (HDR).
+    """
     writer = _writer(pipe="yuv420p10le")
     writer.color_space = None
     writer.color_range = None
-    assert writer._color_tags() == []
+    writer.hdr_mode = False
+    assert writer._color_tags() == ["-colorspace", "bt709", "-color_range", "tv"]
+
+    writer.hdr_mode = True
+    assert writer._color_tags() == ["-colorspace", "bt2020nc", "-color_range", "tv"]
+
+    # a declared source wins over the depth-based guess, in every pipe
+    for pipe in ("yuv420p10le", "rgb48le"):
+        writer = _writer(pipe=pipe)
+        writer.hdr_mode = True
+        writer.color_space = "bt709"
+        writer.color_primaries = "bt709"
+        writer.color_transfer = "bt709"
+        writer.color_range = "tv"
+        tags = writer._color_tags()
+        assert tags[:2] == ["-colorspace", "bt709"], tags
+        assert tags.count("-colorspace") == 1, tags
 
 
 def test_the_pipe_format_follows_the_packed_format_and_the_depth():

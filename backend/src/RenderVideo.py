@@ -290,6 +290,10 @@ class Render:
         )
         self.fps = videoInfo.get_fps()
         color_space = videoInfo.get_color_space()
+        # The pipe packer's luma matrix follows the SOURCE's colour space, not the bit depth: "HDR mode" here is also
+        # the 10-bit switch, and a 10-bit bt709 clip packed with bt2020 coefficients measured mean |d| 3.72 against the
+        # rgb48 reference where bt709 measured 1.92 (2026-11-23, 1440x1080, 24 frames).
+        self.yuv10Matrix = "bt2020" if str(color_space or "").lower().startswith("bt2020") else "bt709"
         color_primaries = videoInfo.get_color_primaries()
         color_transfer = videoInfo.get_color_transfer()
         try:
@@ -1335,6 +1339,8 @@ class Render:
 
             self.upscaleOption = self.upscalePytorchObject(self.upscaleModel)
             self.modelScale = self.upscaleOption.getScale()
+            if hasattr(self.upscaleOption, "yuv10_matrix"):
+                self.upscaleOption.yuv10_matrix = getattr(self, "yuv10Matrix", "bt709")
             # The render thread can build the body before this method finishes (observed: "int8: start
             # ... int8Fit=<unset>" logged before the probe's assignment), so a FORCED verdict has to
             # reach the option here, at creation, not after the probe.
