@@ -1,4 +1,4 @@
-"""Three static gates over the UI tree, ported from the reference host (Improve-ImgSLI / BlinkTable).
+"""The static gates over the UI tree, ported from the reference host (Improve-ImgSLI / BlinkTable).
 
 Why this file exists: the migration from the Designer's generated class to code-assembled pages changes *which class*
 answers to a widget name (a stock `QLabel` becomes `QtLabel`, a `QPushButton` becomes `QtButton`), and two of RVE's
@@ -15,11 +15,30 @@ habits silently stop working when that happens:
 * a theme colour read while the module is being imported is a colour that can never follow a theme change. That is the
   QColor half of `test_no_manual_theming.py`, and rule 3 here.
 
-The three checks are plain AST functions returning `Finding`s ("rule, where, what"), so they run on the portable
+Every check is a plain AST function returning `Finding`s ("rule, where, what"), so they run on the portable
 interpreter without PySide6, and each has its own source scope (declared in `SCOPES`).
 
-**The ratchet.** Now is the worst moment for all three gates: the pages are the Designer's own statements, so they
-carry 88 pinned pixels and two QSS rules on widgets that are already toolkit controls. A gate that is red on day one
+Four more gates were added on 2026-11-23, each from a shape this tree actually carries (the counts are in `KNOWN`):
+
+* `empty-stylesheet` - the Designer's `setStyleSheet("")` reset kept after the widget moved onto the toolkit. It
+  states no rule and reads like theming that does something, so it is dead text a reader debugs twice. The QSS rule
+  above deliberately ignores it (there is no rule to retire); this one reports exactly that, and the two rules are
+  two questions about one call, not duplicates of each other;
+* `silent-swallow` - `except ...: pass` with no comment and no log. The exception leaves no trace, so the next bug
+  report about a widget that did not appear has nothing to grep. A comment that says why the swallow is deliberate
+  is the escape hatch, and a body that does anything (log, re-raise, fallback assignment) is not this shape;
+* `backend-imports-ui` - `backend/` must never import `src.ui`. That edge is what makes a headless render process
+  need a display, and it cannot even resolve: `backend/src` is the `src` package on the backend's own path, so
+  `from src.ui...` in backend is an ImportError at best and a display dependency at worst. Green today;
+* `page-process-http` - a page or shell module importing `subprocess`, an HTTP client, or calling `os.system`/
+  `os.popen` moves IO into the layer that is supposed to paint. Green today; `src/ui/dialogs/toolkit_dialogs.py`
+  is where the download and the backend subprocess live on purpose and is out of this rule's scope.
+
+`no-qt-tr` and `no-qtooltip` were considered for the same wave and left out: both report nothing in this tree and
+nothing here makes them regrow, so they would be a permanently green line rather than a ratchet.
+
+**The ratchet.** Now is the worst moment for these gates: the pages are the Designer's own statements, so they
+carry 81 pinned pixels, 7 swallowed exceptions and one empty stylesheet reset today. A gate that is red on day one
 is a gate nobody reads, so `KNOWN` records today's findings per rule and the gate fails only when a **new** one
 appears - and equally when a recorded one is gone, so the list cannot rot. The docstring of the ratchet is the rule:
 *`KNOWN` only shrinks.* A page that migrates and loses its pinning must drop its entries in the same change; a page
@@ -42,6 +61,7 @@ from __future__ import annotations
 
 import ast
 import sys
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -52,11 +72,21 @@ if str(_ROOT) not in sys.path:          # `python3 harness/scripts/ui_gates.py` 
 
 #: rule name -> the source roots it scans, relative to the repo root. Rule 1 covers the shell too: its nav buttons are
 #: toolkit controls now, so a QSS rule there would be dead text exactly like a page's.
+#:
+#: `empty-stylesheet` and `silent-swallow` cover the migrated UI tree (pages, shell, widgets and the toolkit dialogs).
+#: The legacy top-level tab modules (`ProcessTab.py`, `HomeTab.py`, `QTcustom.py`, ...) are the migration's SUBJECT,
+#: not its product: their catches and their reset calls go away wholesale when the page that owns them lands, so
+#: recording them here would make the ratchet chase a rewrite instead of a regression. `backend-imports-ui` is the
+#: one rule whose scope is the backend - it is a layering law, and the layer it protects is the UI.
 SCOPES: dict[str, tuple[str, ...]] = {
     "qss-on-adapter": ("src/ui/pages", "src/ui/shell", "src/ui/widgets"),
     "raw-chrome-px": ("src/ui/pages", "src/ui/shell", "src/ui/widgets"),
     "theme-read-at-build": ("src/ui/pages", "src/ui/shell", "src/ui/widgets"),
     "stock-widget": ("src/ui/pages",),
+    "empty-stylesheet": ("src/ui/pages", "src/ui/shell", "src/ui/widgets", "src/ui/dialogs"),
+    "silent-swallow": ("src/ui/pages", "src/ui/shell", "src/ui/widgets", "src/ui/dialogs"),
+    "backend-imports-ui": ("backend",),
+    "page-process-http": ("src/ui/pages", "src/ui/shell"),
 }
 
 #: The adapters in `src/ui/widgets/qt_shaped.py`. A widget built by one of these paints itself, so a QSS rule aimed at
@@ -87,6 +117,11 @@ THEME_CALLS = frozenset({"get_color", "try_get_color"})
 #: by `(path, site)` would stop noticing a third `QSize(30, 30)` in `download_page.py`, while a count going 10 -> 11
 #: is growth. No key carries a line number, so inserting a line above a recorded literal re-keys nothing.
 KNOWN: dict[str, dict[tuple[str, str], int]] = {
+    "backend-imports-ui": {},
+    "empty-stylesheet": {
+        ('src/ui/pages/download_page.py', 'backendSelectContainer.setStyleSheet("")'): 1,
+    },
+    "page-process-http": {},
     "qss-on-adapter": {},
     "raw-chrome-px": {
         ('src/ui/pages/advanced_settings.py', 'setGeometry(460, 516)'): 1,
@@ -128,6 +163,13 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
         ('src/ui/shell/window.py', 'setMaximumSize(55)'): 4,
         ('src/ui/shell/window.py', 'setMinimumSize(1050, 700)'): 1,
         ('src/ui/shell/window.py', 'setMinimumSize(31)'): 1,
+    },
+    "silent-swallow": {
+        ('src/ui/dialogs/toolkit_dialogs.py', 'except (RuntimeError, TypeError): pass'): 1,
+        ('src/ui/dialogs/toolkit_dialogs.py', 'except Exception: pass'): 3,
+        ('src/ui/dialogs/toolkit_dialogs.py', 'except RuntimeError: pass'): 1,
+        ('src/ui/shell/window.py', 'except Exception: pass'): 1,
+        ('src/ui/widgets/video_preview.py', 'except Exception: pass'): 1,
     },
     "stock-widget": {},
     "theme-read-at-build": {},
@@ -189,8 +231,18 @@ def scope_paths(rule: str) -> list[Path]:
     return list(_python_files(SCOPES[rule]))
 
 
+def _parse_text(source: str, path: Path) -> ast.Module:
+    """Parse one module's text. An escape-sequence `SyntaxWarning` in a file the gate only reads is that file's
+    business: the backend half of `backend-imports-ui` walks vendored architectures that raise four of them per run,
+    and the gate's own output should not carry them.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        return ast.parse(source, filename=str(path))
+
+
 def _parse(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return _parse_text(path.read_text(encoding="utf-8"), path)
 
 
 def _call_name(node: ast.Call) -> str:
@@ -302,8 +354,8 @@ def check_qss(paths: Iterable[str | Path]) -> list[Finding]:
     `QTabWidget`, `QTextEdit`, `QListWidget`, the spin boxes) is not a finding, because those widgets still paint
     through the style, and a name built somewhere this module cannot see is left alone rather than guessed at.
 
-    An EMPTY stylesheet is not a finding: `setStyleSheet("")` states no rule, so there is nothing to retire, and
-    reporting the Designer's resets would bury the rules that actually have to move.
+    An EMPTY stylesheet is not this rule's finding: it states no rule, so there is no theme question to ask about it.
+    It is still dead text, and `check_empty_stylesheets` reports exactly that - one call, two rules, two questions.
     """
     findings: list[Finding] = []
     for path in _python_files(paths):
@@ -336,7 +388,7 @@ def check_raw_px(paths: Iterable[str | Path]) -> list[Finding]:
     - a name, a layout geometry, `fontMetrics().height()` - is not a finding: that is the direction the migration is
     moving in, and the literal is what this gate is for.
 
-    The gate is a ratchet: `KNOWN` holds today's literals (88 of them at this commit, in 10 modules, 42 `(path, site)`
+    The gate is a ratchet: `KNOWN` holds today's literals (81 of them at this commit, in 9 modules, 39 `(path, site)`
     keys) and that list only shrinks - each page that migrates deletes its entries, and nothing is ever added to it.
     """
     findings: list[Finding] = []
@@ -465,11 +517,181 @@ def check_stock_widgets(paths: Iterable[str | Path]) -> list[Finding]:
     return findings
 
 
+# --- rule 5: an empty stylesheet is dead text -------------------------------------------------------------
+
+def check_empty_stylesheets(paths: Iterable[str | Path]) -> list[Finding]:
+    """`setStyleSheet("")` - a call that states no rule, so it can never change a pixel.
+
+    The Designer wrote the reset on every widget it wanted unstyled, and the split pages kept it. On a toolkit control
+    the call is doubly dead (the painter owns the pixels), but it is dead on a stock widget too: what it looks like is
+    theming that does something, which is why a reader follows it, finds nothing, and goes looking again.
+
+    Only an empty string literal counts. A computed argument (`setStyleSheet(self._rule)`) may well be a rule, and a
+    non-empty literal is `qss-on-adapter`'s question when the target is an adapter and legitimate theming otherwise.
+    """
+    findings: list[Finding] = []
+    for path in _python_files(paths):
+        for node in ast.walk(_parse(path)):
+            if not isinstance(node, ast.Call) or _call_name(node) != "setStyleSheet" or not node.args:
+                continue
+            text = _literal_text(node.args[0])
+            if text is None or text.strip():
+                continue
+            name = _styled_name(node)
+            detail = f'{name}.setStyleSheet("")' if name else 'setStyleSheet("")'
+            findings.append(Finding(_display(path), node.lineno, "empty-stylesheet", detail))
+    return sorted(findings)
+
+
+# --- rule 6: a swallow that leaves no trace ----------------------------------------------------------------
+
+def _handler_text(node: ast.ExceptHandler) -> str:
+    """`except ValueError: pass` - the rule's own text for the clause, and the ratchet's `site`."""
+    return "except: pass" if node.type is None else f"except {ast.unparse(node.type)}: pass"
+
+
+def _handler_has_note(lines: list[str], node: ast.ExceptHandler) -> bool:
+    """A `#` on the `except` line or between it and the `pass`: the author saying the swallow is deliberate."""
+    return any("#" in line for line in lines[node.lineno - 1:node.body[0].lineno])
+
+
+def check_silent_swallows(paths: Iterable[str | Path]) -> list[Finding]:
+    """`except ...: pass` with no comment and no log: a failure the next bug report cannot see.
+
+    The shape is exactly one `pass` in the handler - anything else (a log call, a re-raise, a fallback assignment)
+    leaves a trace and is not silent. A comment in the clause is the deliberate-swallow escape hatch: teardown code
+    that ignores a destroyed object is a decision, and the comment is where the decision is recorded.
+
+    Comments are read from the source text rather than the AST (they are not in it), so this is the one check that
+    needs the parsed tree and the raw lines together.
+    """
+    findings: list[Finding] = []
+    for path in _python_files(paths):
+        source = path.read_text(encoding="utf-8")
+        lines = source.splitlines()
+        for node in ast.walk(_parse_text(source, path)):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            if not (len(node.body) == 1 and isinstance(node.body[0], ast.Pass)):
+                continue
+            if _handler_has_note(lines, node):
+                continue
+            findings.append(Finding(_display(path), node.lineno, "silent-swallow", _handler_text(node)))
+    return sorted(findings)
+
+
+# --- rule 7: the backend never imports the UI --------------------------------------------------------------
+
+def _import_candidates(node: ast.AST) -> list[str]:
+    """The module names an import statement binds. `from pkg import name` also names `pkg.name`.
+
+    So `from src import ui` answers `src.ui`, the same edge as `from src.ui import pages`: both make the importer
+    depend on the UI package. Relative imports are skipped - `backend/src` is the `src` package on the backend's own
+    path, so a relative import there can never reach the app's UI.
+    """
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom) and not node.level and node.module:
+        return [node.module, *(f"{node.module}.{alias.name}" for alias in node.names)]
+    return []
+
+
+def _matches(candidate: str, roots: Iterable[str]) -> bool:
+    """`candidate` is one of `roots` or sits under it (`src.ui` matches `src.ui.pages.tab_2`)."""
+    return any(candidate == root or candidate.startswith(f"{root}.") for root in roots)
+
+
+def check_backend_imports_ui(paths: Iterable[str | Path]) -> list[Finding]:
+    """A backend module that imports `src.ui`: the layering that turns a render process into a GUI process.
+
+    It cannot even resolve in this repository - `backend/` carries its own `src` package, so `src` names the backend's
+    tree on that path and `src.ui` is not in it - which makes the finding either an ImportError or, worse, a working
+    import someone made work by adding the app root to `sys.path`.
+
+    Import statements only: a dynamic `importlib.import_module("src.ui...")` is out of scope, because no backend code
+    in this tree reaches the UI that way and guessing at string arguments would report a documentation example.
+    """
+    findings: list[Finding] = []
+    for path in _python_files(paths):
+        for node in ast.walk(_parse(path)):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            for candidate in _import_candidates(node):
+                if _matches(candidate, ("src.ui",)):
+                    findings.append(Finding(_display(path), node.lineno, "backend-imports-ui",
+                                             f"imports {candidate}"))
+                    break
+    return sorted(findings)
+
+
+# --- rule 8: a page or shell module does not spawn processes or do HTTP -------------------------------------
+
+#: Modules that start a process. `subprocess` is the sanctioned tool everywhere else; a page importing it means the
+#: page owns a child process, which is the backend's or a devtool's job.
+PROCESS_MODULES = frozenset({"subprocess"})
+
+#: Modules that put a request on the wire. `urllib.request` is listed separately from `urllib`: `urllib.parse` is
+#: string handling and a page may legitimately split a filename with it.
+HTTP_MODULES = frozenset({"requests", "httpx", "aiohttp", "urllib.request"})
+
+#: `os.system`/`os.popen` start a process without importing `subprocess`, so the import half of this rule cannot see
+#: them. `os.spawn*`/`os.exec*` are left out on purpose: they replace the process, which a GUI cannot survive, so
+#: their first appearance is a crash, not a finding.
+OS_SPAWN_CALLS = frozenset({"system", "popen"})
+
+#: The `from os import system` spelling of the same two calls: the statement names `os.system`, which the call check
+#: cannot see because the call itself is bare.
+OS_SPAWN_IMPORTS = frozenset({"os.system", "os.popen"})
+
+
+def _is_os_spawn(node: ast.Call) -> bool:
+    func = node.func
+    return (isinstance(func, ast.Attribute) and func.attr in OS_SPAWN_CALLS
+            and isinstance(func.value, ast.Name) and func.value.id == "os")
+
+
+def check_page_process_http(paths: Iterable[str | Path]) -> list[Finding]:
+    """A page or shell module importing `subprocess`, an HTTP client, or calling `os.system`/`os.popen`.
+
+    The page layer's contract is "build widgets, format text, emit signals". A page that fetches an update or shells
+    out to ffmpeg runs blocking work on the GUI thread and makes the module untestable without the network or the
+    binary - and every such call already has a home: the backend, `src/ui/Updater.py`, or a dialog. This is green
+    today and is meant to stay that way, which is the one direction a ratchet is allowed to go.
+
+    `src/ui/dialogs` is out of scope on purpose: `toolkit_dialogs.DownloadProgressPopup` is the app's download, and
+    `SettingUpBackendPopup` runs the backend installer. Recording those two as known debt would say a page may do
+    HTTP as long as it is in a dialog; the rule protects the page and shell layer, not every UI module.
+    """
+    findings: list[Finding] = []
+    for path in _python_files(paths):
+        for node in ast.walk(_parse(path)):
+            if isinstance(node, ast.Call) and _is_os_spawn(node):
+                findings.append(Finding(_display(path), node.lineno, "page-process-http",
+                                         f"os.{node.func.attr}(...)"))
+                continue
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            for candidate in _import_candidates(node):
+                if candidate in OS_SPAWN_IMPORTS or _matches(candidate, PROCESS_MODULES):
+                    findings.append(Finding(_display(path), node.lineno, "page-process-http",
+                                             f"imports {candidate} (process)"))
+                    break
+                if _matches(candidate, HTTP_MODULES):
+                    findings.append(Finding(_display(path), node.lineno, "page-process-http",
+                                             f"imports {candidate} (http)"))
+                    break
+    return sorted(findings)
+
+
 CHECKS = {
     "qss-on-adapter": check_qss,
     "raw-chrome-px": check_raw_px,
     "theme-read-at-build": check_theme_reads,
     "stock-widget": check_stock_widgets,
+    "empty-stylesheet": check_empty_stylesheets,
+    "silent-swallow": check_silent_swallows,
+    "backend-imports-ui": check_backend_imports_ui,
+    "page-process-http": check_page_process_http,
 }
 
 
