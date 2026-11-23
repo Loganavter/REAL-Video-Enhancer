@@ -280,6 +280,160 @@ def resize_image_bytes(image_bytes: bytes, width: int, height: int, target_width
     return resized_image.tobytes()
 
 
+#: Packed planar 4:2:0 formats the override resize can re-scale, with their sample width in bytes.
+#:
+#: Verified in `backend/src/pytorch/TorchUtils.py` (not assumed):
+#:   * `tensor_to_yuv420p`   -> `cat(Y, U, V)`, all `uint8`;
+#:   * `tensor_to_yuv420p10` -> `cat(Y, U, V)` in `uint16` for `yuv420p10le`, and
+#:                              `cat(Y << 6, interleave(U << 6, V << 6))` for `p010le`.
+#: In both packers Y is `h x w` and each chroma plane is `ceil(h/2) x ceil(w/2)`: an odd edge is
+#: replicate-padded before `avg_pool2d(2)`. `Frame._pooled_numel` sizes its pinned slot with the
+#: same `(h+1)//2` x `(w+1)//2`, and ffmpeg's own rawvideo planner uses the same ceiling.
+_YUV_SAMPLE_BYTES = {"yuv420p": 1, "yuv420p10le": 2, "p010le": 2}
+
+#: The A/B switch: `RVE_OVERRIDE_YUV=0` restores the pre-2026-11-23 refusal on the YUV pipes.
+YUV_OVERRIDE_ENV = "RVE_OVERRIDE_YUV"
+
+
+def yuv420_plane_geometry(payload_size: int, width: int, height: int,
+                          pixel_format: str = "yuv420p",
+                          path: str = "resize_image_bytes"):
+    """Validate a packed planar 4:2:0 payload against a declared geometry.
+
+    Returns `(y_samples, chroma_width, chroma_height, interleaved)` where `y_samples` is the sample
+    count of the luma plane and `interleaved` says whether U/V are stored as (U,V) pairs
+    (`p010le`) instead of two separate planes (`yuv420p`, `yuv420p10le`).
+
+    Anything this cannot prove - an unknown format, a payload that is not exactly
+    `Y + 2 x ceil(w/2) x ceil(h/2)` samples - raises a `ValueError` naming the declared geometry,
+    the payload's own size and `path`. A scrambled picture is not an acceptable fallback.
+    """
+    if pixel_format not in _YUV_SAMPLE_BYTES:
+        raise ValueError(
+            f"{path}: {pixel_format!r} is not a packed planar 4:2:0 format this resize can prove "
+            f"(known: {', '.join(sorted(_YUV_SAMPLE_BYTES))}); refusing to guess a plane layout"
+        )
+    sample_bytes = _YUV_SAMPLE_BYTES[pixel_format]
+    size = int(payload_size)
+    width, height = int(width), int(height)
+    if width <= 0 or height <= 0:
+        raise ValueError(
+            f"{path}: the declared geometry {width}x{height} is empty, so a {size}-byte packed "
+            f"{pixel_format} payload cannot be checked against it"
+        )
+    if size <= 0:
+        raise ValueError(
+            f"{path}: the payload is {size} bytes for a declared {width}x{height} {pixel_format} frame"
+        )
+    if size % sample_bytes:
+        raise ValueError(
+            f"{path}: the payload is {size} bytes, not a whole number of {sample_bytes}-byte "
+            f"{pixel_format} samples for a declared {width}x{height} frame"
+        )
+    samples = size // sample_bytes
+    chroma_width, chroma_height = (width + 1) // 2, (height + 1) // 2
+    y_samples = width * height
+    expected = y_samples + 2 * chroma_width * chroma_height
+    if samples != expected:
+        raise ValueError(
+            f"{path}: the payload does not match the declared geometry {width}x{height} as packed "
+            f"{pixel_format}: {expected} samples expected (Y {y_samples} + 2 x "
+            f"{chroma_width}x{chroma_height} chroma), the payload is {samples} samples "
+            f"({size} bytes){_implied_yuv_geometry(samples, width, height)}"
+        )
+    return y_samples, chroma_width, chroma_height, pixel_format == "p010le"
+
+
+def _implied_yuv_geometry(samples: int, width: int, height: int) -> str:
+    """`" (its size is 320x240 as packed 4:2:0)"`, or "" when no whole 4:2:0 image fits."""
+    # an even 4:2:0 geometry packs 1.5 samples per pixel, so a whole image has 3 | samples
+    if samples % 3 or samples <= 0:
+        return " (its size is not a whole 4:2:0 image)"
+    pixels = samples * 2 // 3
+    factor = pixels / float(width * height)
+    side = math.sqrt(factor)
+    implied_w = int(round(width * side))
+    implied_h = int(round(height * side))
+    if (implied_w > 0 and implied_h > 0
+            and implied_w * implied_h + 2 * ((implied_w + 1) // 2) * ((implied_h + 1) // 2) == samples):
+        return (f" (its size is {implied_w}x{implied_h} as packed 4:2:0"
+                f" - the frame's own geometry, not the declared one)")
+    return " (its size is not a whole 4:2:0 image)"
+
+
+def _resize_interpolation(width: int, height: int, target_width: int, target_height: int):
+    """`cv2.INTER_AREA` when shrinking, `cv2.INTER_LANCZOS4` when growing (as the RGB path does)."""
+    if target_width < width or target_height < height:
+        return cv2.INTER_AREA
+    return cv2.INTER_LANCZOS4
+
+
+def resize_yuv420_bytes(payload, width: int, height: int, target_width: int, target_height: int,
+                        pixel_format: str = "yuv420p",
+                        path: str = "resize_image_bytes") -> bytes:
+    """Plane-wise resize of a packed planar 4:2:0 payload (the 8/10-bit SDR pipes).
+
+    Y is resized to `target_width x target_height`, each chroma plane to
+    `ceil(target_width/2) x ceil(target_height/2)`, and the result is returned in the SAME plane
+    order and packing the payload came in (`cat(Y, U, V)`, or `cat(Y, UV)` for `p010le`) - the
+    writer's `-pix_fmt` and `-s` describe that layout, so a reorder here is a wrong picture, not an
+    error.
+
+    `p010le` keeps its 10-bit sample in the MSBs of the `uint16` word (`x << 6`), so the resample
+    runs on the true 10-bit values and the shift is restored afterwards; a constant plane therefore
+    round-trips exactly instead of drifting by interpolation rounding on a 64x-scaled word.
+
+    A payload already at the target size is handed back untouched (the same no-op contract as
+    `resize_image_bytes`); `resize_frame_bytes` normalises that to `bytes` for the render loop.
+    """
+    payload_size = getattr(payload, "nbytes", None)
+    payload_size = len(payload) if payload_size is None else int(payload_size)
+    y_samples, chroma_width, chroma_height, interleaved = yuv420_plane_geometry(
+        payload_size, width, height, pixel_format=pixel_format, path=path)
+    width, height = int(width), int(height)
+    target_width, target_height = int(target_width), int(target_height)
+    if target_width <= 0 or target_height <= 0:
+        raise ValueError(
+            f"{path}: the override target {target_width}x{target_height} is empty"
+        )
+    if target_width == width and target_height == height:
+        # nothing to resample: hand the payload back untouched, exactly as the RGB path does
+        return payload
+    target_chroma_width, target_chroma_height = (target_width + 1) // 2, (target_height + 1) // 2
+    dtype = np.uint8 if _YUV_SAMPLE_BYTES[pixel_format] == 1 else np.uint16
+    samples = np.frombuffer(payload, dtype=dtype)
+    interpolation = _resize_interpolation(width, height, target_width, target_height)
+    # P010 stores the sample in the top 10 bits of the 16-bit word
+    shift = 6 if interleaved else 0
+
+    def resize_plane(plane, target_w: int, target_h: int):
+        if plane.shape[1] == target_w and plane.shape[0] == target_h:
+            return plane
+        work = plane >> shift if shift else plane
+        try:
+            resized = cv2.resize(work, (target_w, target_h), interpolation=interpolation)
+        except Exception:
+            resized = cv2.resize(work, (target_w, target_h))
+        return resized << shift if shift else resized
+
+    luma = resize_plane(samples[:y_samples].reshape(height, width), target_width, target_height)
+    chroma = samples[y_samples:y_samples + 2 * chroma_height * chroma_width]
+    if interleaved:
+        pairs = chroma.reshape(chroma_height, chroma_width, 2)
+        u = resize_plane(pairs[:, :, 0], target_chroma_width, target_chroma_height)
+        v = resize_plane(pairs[:, :, 1], target_chroma_width, target_chroma_height)
+        out_chroma = np.stack((u, v), axis=-1).reshape(-1)
+    else:
+        plane_samples = chroma_height * chroma_width
+        u = resize_plane(chroma[:plane_samples].reshape(chroma_height, chroma_width),
+                         target_chroma_width, target_chroma_height)
+        v = resize_plane(chroma[plane_samples:].reshape(chroma_height, chroma_width),
+                         target_chroma_width, target_chroma_height)
+        out_chroma = np.concatenate((u.reshape(-1), v.reshape(-1)))
+    packed = np.concatenate((luma.reshape(-1), out_chroma)).astype(dtype, copy=False)
+    return packed.tobytes()
+
+
 def resize_frame_bytes(frame, target_width: int, target_height: int,
                        path: str = "RenderVideo.render:override_upscale_scale") -> bytes:
     """Re-scale the frame the upscaler returned, using THAT frame's geometry as the source size.
@@ -292,23 +446,52 @@ def resize_frame_bytes(frame, target_width: int, target_height: int,
     fallback for frames that carry bytes only. Either way the payload is measured, so a mismatch is
     a named `ValueError` instead of a reshape error.
 
-    Packed planar YUV payloads (the 8/10-bit SDR pipes) are refused by name: they are not RGB24/RGB48
-    and resizing them as if they were would emit a scrambled picture.
+    Packed planar YUV payloads (the 8/10-bit SDR pipes) go through `resize_yuv420_bytes`: plane-wise,
+    in the layout the writer's `-pix_fmt` names. A layout this cannot prove (an unknown chroma
+    format, a payload that is not a whole image) is refused by name rather than resampled as if it
+    were RGB. `RVE_OVERRIDE_YUV=0` restores the pre-2026-11-23 refusal on those pipes for an A/B.
     """
     if isinstance(frame, (bytes, bytearray, memoryview)):
         raise TypeError(
             f"{path}: a raw {type(frame).__name__} payload has no geometry; pass a Frame or call "
             f"resize_image_bytes() with the source width/height"
         )
-    if getattr(frame, "yuv8_output", False) or getattr(frame, "yuv10_output", False):
-        raise ValueError(
-            f"{path}: this frame is emitted as packed planar YUV (yuv8_output/yuv10_output), not "
-            f"RGB24/RGB48; the override resize cannot re-scale it - disable override_upscale_scale "
-            f"or render at the model's own scale"
-        )
+    yuv8 = bool(getattr(frame, "yuv8_output", False))
+    yuv10 = bool(getattr(frame, "yuv10_output", False))
     payload = frame.get_frame_bytes()
     width, height = frame_source_geometry(frame)
+    if yuv8 or yuv10:
+        if os.environ.get(YUV_OVERRIDE_ENV, "1") == "0":
+            raise ValueError(
+                f"{path}: this frame is emitted as packed planar YUV (yuv8_output/yuv10_output), not "
+                f"RGB24/RGB48; the override resize cannot re-scale it - disable override_upscale_scale "
+                f"or render at the model's own scale ({YUV_OVERRIDE_ENV}=0)"
+            )
+        if yuv8 and yuv10:
+            raise ValueError(
+                f"{path}: the frame is marked as both yuv8_output and yuv10_output; refusing to "
+                f"guess which packed planar layout the payload is in"
+            )
+        pixel_format = "yuv420p" if yuv8 else str(
+            getattr(frame, "yuv10_format", "yuv420p10le") or "yuv420p10le")
+        resized = resize_yuv420_bytes(payload, width, height, target_width, target_height,
+                                      pixel_format=pixel_format, path=path)
+        return _as_payload_bytes(resized)
     return resize_image_bytes(payload, width, height, target_width, target_height, path=path)
+
+
+def _as_payload_bytes(payload) -> bytes:
+    """The resized payload as `bytes`, whatever container the no-op path handed back.
+
+    The render loop branches on `type(frame) is bytes` right after this call (it then pipes the
+    payload and skips the preview). A numpy array or a memoryview returned by a no-op resize would
+    reach it as a "frame" that has no `get_frame_bytes()`, so the contract here is `bytes`.
+    """
+    if isinstance(payload, bytes):
+        return payload
+    if hasattr(payload, "tobytes"):     # the packers hand back a fresh numpy array per frame
+        return payload.tobytes()
+    return bytes(payload)               # a memoryview on a pinned pool slot
 
 
 def frame_source_geometry(frame) -> tuple[int, int]:

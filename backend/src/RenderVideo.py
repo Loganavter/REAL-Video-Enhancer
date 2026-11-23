@@ -1227,6 +1227,11 @@ class Render:
                     # the old call fed that payload to a 640x480 reshape - an opaque reshape error,
                     # then a dead render thread (2026-11-22). A frame whose payload disagrees with
                     # its own geometry now raises a named ValueError instead.
+                    #
+                    # The SDR pipes emit packed planar YUV (`yuv8_output` / `yuv10_output`), so the
+                    # resize is plane-wise there (`resize_yuv420_bytes`): Y to the override size and
+                    # each chroma plane to its half, in the packing the writer's `-pix_fmt` names.
+                    # `RVE_OVERRIDE_YUV=0` restores the old refusal for an A/B on the merge.
                     frame = resize_frame_bytes(
                         frame,
                         target_width=self.width * self.override_upscale_scale,
