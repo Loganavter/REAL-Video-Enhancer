@@ -46,6 +46,42 @@ from .RenderQueue import RenderOptions
 from .pages.handles import WindowHandles
 
 
+#: The read side of the backend's one crop record (`backend/src/RenderVideo.py: format_borders_line`).
+#: The pattern lives inside the parser so the shipped function is exactly what the harness executes: no
+#: module-level regex to re-create in a test, and no second copy of the format to drift.
+def parse_borders_line(line: object) -> tuple[int, int, int, int] | None:
+    """``(w, h, x, y)`` from a render's ``BORDERS w=.. h=.. x=.. y=..`` line, or ``None``.
+
+    ``None`` for anything that is not exactly that record (a truncated line, an extra field, a non-numeric
+    value, an empty or missing line): the caller then keeps the preview's uncropped decode - today's
+    behaviour - instead of applying half a box. ``BACKEND: `` is tolerated because the backend's ``log()``
+    prefixes its records; the bare print this record uses does not. ``fullmatch`` is the point: a line that
+    carries anything else is not this record, and guessing around noise crops the wrong rectangle.
+    """
+    match = re.fullmatch(r"(?:BACKEND:\s+)?BORDERS w=(\d+) h=(\d+) x=(\d+) y=(\d+)", str(line).strip())
+    if match is None:
+        return None
+    return tuple(int(group) for group in match.groups())
+
+
+def crop_region(box, source_width: int, source_height: int) -> tuple[int, int, int, int] | None:
+    """``(x, y, w, h)`` for a QImage crop of a ``source_width``x``source_height`` frame, or ``None``.
+
+    ``box`` is the backend's order (``w, h, x, y``); the answer is QImage's (``x, y, w, h``). A box whose
+    rectangle runs off the source (a stale ``.crop.json`` from another resolution, a scaled preview) is
+    refused as a whole: a partially sampled source would show a picture shifted against the render, which
+    reads as a render bug rather than as a stale box.
+    """
+    if box is None or len(tuple(box)) != 4:
+        return None
+    width, height, x, y = (int(value) for value in box)
+    if width <= 0 or height <= 0 or x < 0 or y < 0:
+        return None
+    if x + width > int(source_width) or y + height > int(source_height):
+        return None
+    return x, y, width, height
+
+
 class ProcessTab:
     def __init__(self, parent, settings: Settings):
         self.parent = parent
@@ -67,6 +103,11 @@ class ProcessTab:
         self.userKilled = False
         self.currentRenderOptions = None
         self.status = "Idle"
+        #: The crop the CURRENT job's backend reported (`BORDERS w/h/x/y`), or ``None`` until a render says.
+        #: The LMB compare decodes the source with this box, so it shows the same framing the renderer used.
+        self._source_crop = None
+        #: True once "the box is unknown" was logged for this job - one line per render, not per LMB press.
+        self._source_crop_unknown_logged = False
         #: monotonic stamp of the current render, for the "elapsed" half of the progress line
         self._render_started_mono = None
         self.animationHandler = AnimationHandler()
@@ -421,6 +462,10 @@ class ProcessTab:
             
             self.isPreview = renderOptions.isPreview
             self.currentRenderOptions = renderOptions
+            # A job's crop belongs to THAT job: the next render's box arrives in its own log, and until it
+            # does the compare must not reuse the previous job's rectangle.
+            self._source_crop = None
+            self._source_crop_unknown_logged = False
             renderQueue.mark_rendering(renderOptions)
             self.refreshQueueRows()
 
@@ -464,6 +509,13 @@ class ProcessTab:
             for line in iter(self.renderProcess.stdout.readline, ""):
                 try:
                     line = str(line.strip())
+                    if "BORDERS" in line:
+                        # The crop the backend actually handed its reader, kept with this job so the LMB
+                        # compare decodes the same rectangle. Parsed here, before the log filter, because the
+                        # filter's job is what a person reads - this record is the job's own state.
+                        box = parse_borders_line(line)
+                        if box is not None:
+                            self._source_crop = box
                     if "RENDER FAILED" in line:
                         # The backend's thread wrapper wrote its one summary line: this job is over,
                         # whatever else arrives belongs to a traceback the pane should show.
@@ -693,7 +745,9 @@ class ProcessTab:
         """Decode ONE source frame at the playhead for the LMB compare (the input file, never the renderer).
 
         The image is what the platform's decoder produces from the input, which is the honest comparison: the renderer's
-        own source buffer would need a second channel and would make the render pay for a preview-only action.
+        own source buffer would need a second channel and would make the render pay for a preview-only action. It is
+        then cropped to the box the render reported (`BORDERS`, parsed out of this job's output) - see
+        `_on_original_frame`.
         """
         decoder = getattr(self, "_source_decoder", None)
         try:
@@ -713,13 +767,40 @@ class ProcessTab:
             log(f"original frame failed: {exc}")
 
     def _on_original_frame(self, frame) -> None:
+        """The source frame from the decoder, cropped to the box THE RENDER used, then handed to the pane.
+
+        The crop is applied here rather than in the decoder because the decoder exposes no crop and the surface
+        (`src/ui/widgets/video_preview.py`) is another lane's file: `QImage.copy` of the same rectangle is the same
+        pixels, and the surface then scales it to the rendered frame's size - which is what makes the two pictures
+        comparable. Without the crop the compare shows the whole source (black bars included) and the eye reads the
+        letterbox as a scale difference.
+        """
         from PySide6.QtGui import QImage
 
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
+        box = getattr(self, "_source_crop", None)
+        region = crop_region(box, image.width(), image.height())
+        if region is None:
+            # Today's picture (the whole source) is the fallback, and the log says once why: a silent
+            # uncropped frame is indistinguishable from "crop detection found nothing".
+            if box is None:
+                self._log_source_crop_unknown("this render's output carried no readable BORDERS line")
+            else:
+                self._log_source_crop_unknown(
+                    f"the render reported {box} but the source frame is {image.width()}x{image.height()}")
+        else:
+            image = image.copy(*region)
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_original"):
             pane.set_original(image)
+
+    def _log_source_crop_unknown(self, reason: str) -> None:
+        """One line per job when the compare cannot crop: the preview then shows the uncropped source."""
+        if getattr(self, "_source_crop_unknown_logged", False):
+            return
+        self._source_crop_unknown_logged = True
+        log(f"source crop: unknown ({reason}); the LMB compare shows the uncropped source")
 
     def _stop_source_decoder(self) -> None:
         decoder = getattr(self, "_source_decoder", None)

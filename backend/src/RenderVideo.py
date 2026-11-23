@@ -57,6 +57,33 @@ def resolve_int8_fit(int8_fit: str | None, quality_preset: str) -> str:
     return int8_fit
 
 
+#: The crop record a render carries once, before its first frame, so the front end can decode the LMB
+#: "original" with the SAME crop the renderer used instead of guessing from the source's size.
+def format_borders_line(width, height, x, y):
+    """``BORDERS w=<w> h=<h> x=<x> y=<y>`` - the crop the reader was actually handed, as one record.
+
+    The values are the ones passed to :class:`FFmpegRead` (the detected crop, or the full frame), never the
+    source's own size: a reader that crops and a compare that does not show two different pictures. The line
+    carries nothing else, so the parser on the other side can require the whole line
+    (``src/ui/ProcessTab.py: parse_borders_line``) and treat anything else as unknown instead of half-reading it.
+    """
+    return f"BORDERS w={int(width)} h={int(height)} x={int(x)} y={int(y)}"
+
+
+def report_borders(width, height, x, y):
+    """Write the one ``BORDERS`` record of this render (see :func:`format_borders_line`).
+
+    Called once, unconditionally, by ``Render.__init__``: a render with detection off reports the full frame,
+    and a render whose frame size was never known (an invalid input) logs why there is no record instead of
+    inventing a box - the front end reads a missing record as "unknown" and keeps today's uncropped compare.
+    """
+    box = (width, height, x, y)
+    if None in box:
+        log("borders: no crop to report (the input frame size was not available)")
+        return
+    print(format_borders_line(*box), file=sys.stderr, flush=True)
+
+
 class Render:
     """
     Subclass of FFmpegRender
@@ -331,6 +358,13 @@ class Render:
             log(
                 f"Detected borders: Width,Height:{self.width}x{self.height}, X,Y: {self.borderX}x{self.borderY}"
             )
+
+        # The one machine-readable record of the crop this render used, for the LMB compare: the front end
+        # parses it out of this process's output and decodes the SOURCE with the same box, so the two pictures
+        # differ by the upscaler's own work rather than by a cropped-versus-uncropped framing. Emitted on EVERY
+        # render (also with border detection off, where the box is the full frame), before the reader is built
+        # and long before the first frame is written.
+        report_borders(self.width, self.height, self.borderX, self.borderY)
 
         log("Using backend: " + self.backend)
         # upscale has to be called first to get the scale of the upscale model
