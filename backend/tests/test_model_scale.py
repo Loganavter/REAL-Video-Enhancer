@@ -67,10 +67,24 @@ def _fake_modules():
     class _Module:  # stands in for torch.nn.Module as a base class
         pass
 
+    class _FakeModule(types.ModuleType):
+        """A module whose every attribute exists — annotations are evaluated at class creation.
+
+        `UpscaleModelWrapper` has no `from __future__ import annotations`, so `conv: torch.nn.Conv2d` in a
+        method signature is looked up while the class body runs. A bare ModuleType therefore failed the
+        wrapper import with `module 'torch.nn' has no attribute 'Conv2d'` — including on the interpreter
+        that HAS torch, where the stub must still win for this file's purpose.
+        """
+
+        def __getattr__(self, name):
+            if name.startswith("__"):
+                raise AttributeError(name)
+            return _Anything()
+
     torch = _FakeTorch("torch")
-    nn = types.ModuleType("torch.nn")
+    nn = _FakeModule("torch.nn")
     nn.Module = _Module
-    functional = types.ModuleType("torch.nn.functional")
+    functional = _FakeModule("torch.nn.functional")
 
     def _inference_mode(*args, **kwargs):
         return lambda function: function
