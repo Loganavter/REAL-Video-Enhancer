@@ -38,6 +38,7 @@ from PySide6.QtGui import (
     QRhiGraphicsPipeline,
     QRhiSampler,
     QRhiShaderResourceBinding,
+    QRhiScissor,
     QRhiShaderResourceBindings,
     QRhiShaderStage,
     QRhiTexture,
@@ -760,6 +761,11 @@ class VideoPreviewSurface(QRhiWidget):
         self._pipeline.setVertexInputLayout(layout)
         self._pipeline.setShaderResourceBindings(self._bindings)
         self._pipeline.setRenderPassDescriptor(self.renderTarget().renderPassDescriptor())
+        # Without this flag QRhi IGNORES `setScissor` on the pipeline: the scissor state is only read by a pipeline
+        # compiled with it. Both compare modes depend on that clipping (the split divider, and a zoomed `sbs` half that
+        # must not leak into the other one), and the absence was invisible while nothing sampled the pixels: the split
+        # mode painted the ORIGINAL over the whole picture rect (the pixel gate, 2026-11-24).
+        self._pipeline.setFlags(QRhiGraphicsPipeline.Flag.UsesScissor)
         self._pipeline.setDepthTest(False)
         self._pipeline.setDepthWrite(False)
         blend = QRhiGraphicsPipeline.TargetBlend()
@@ -917,6 +923,11 @@ class VideoPreviewSurface(QRhiWidget):
         command_buffer.setGraphicsPipeline(self._pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
         sample_at_one = (not self._zoom_is_fit) and abs(self._zoom - 1.0) < 1e-6
+        # The pipeline declares `UsesScissor` (the compare modes need it), so the scissor state is LIVE here: a frame
+        # must state its own scissor before drawing, or it inherits the last one set on the command buffer - an empty
+        # one clipped the whole picture away in `single` after a compare mode had run (pixel gate, 2026-11-24).
+        command_buffer.setScissor(
+            QRhiScissor(0, 0, target.pixelSize().width(), target.pixelSize().height()))
         command_buffer.setShaderResources(self._bindings_nearest if sample_at_one else self._bindings)
         command_buffer.setVertexInput(0, [(self._vertices, 0)])
         command_buffer.draw(6)
@@ -989,7 +1000,11 @@ class VideoPreviewSurface(QRhiWidget):
                 self._scissor(command_buffer, original_clip)
                 command_buffer.draw(6)
         # The HUD spans the whole widget; a scissor left over from one half would clip the far end of the strip.
-        command_buffer.setScissor(QRect(0, 0, target.pixelSize().width(), target.pixelSize().height()))
+        # `QRhiCommandBuffer.setScissor` takes a `QRhiScissor`, not a `QRect`: PySide6 6.11 rejected the implicit rect
+        # with `TypeError: setScissor(QRect)` while 6.8 still accepted it, so `sbs`/`split` drew nothing there and said
+        # so only inside a paint (the two-surface pixel gate, 2026-11-24, was the first thing to see it).
+        command_buffer.setScissor(
+            QRhiScissor(0, 0, target.pixelSize().width(), target.pixelSize().height()))
         if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
             command_buffer.setGraphicsPipeline(self._hud_pipeline)
             command_buffer.setShaderResources(self._hud_bindings)
@@ -1008,8 +1023,8 @@ class VideoPreviewSurface(QRhiWidget):
         top = max(0.0, rect.top() * dpr)
         right = min(float(pixels.width()), rect.right() * dpr)
         bottom = min(float(pixels.height()), rect.bottom() * dpr)
-        command_buffer.setScissor(QRect(int(left), int(top),
-                                        max(0, int(right - left)), max(0, int(bottom - top))))
+        command_buffer.setScissor(QRhiScissor(int(left), int(top),
+                                             max(0, int(right - left)), max(0, int(bottom - top))))
 
     def _mvp_floats(self, rect: QRectF | None = None) -> list[float]:
         """Unit quad -> the picture's rect on the pane, column-major for the uniform buffer.
