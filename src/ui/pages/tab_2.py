@@ -121,6 +121,7 @@ class Tab2Page:
         self.horizontalLayout_17.addItem(self.horizontalSpacer_3)
         self.scene_change_detection_enabled = _row_checkbox(self.sceneChangeDetectionSettingContainer)
         self.scene_change_detection_enabled.setObjectName(u"scene_change_detection_enabled")
+        self.scene_change_detection_enabled.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Scene Change Detection Enabled:</span></p><p>- Enabled: Attempts to detect when scenes change in a video. </p><p>   When running an interpolation, it will avoide interpolating over these scene changes.</p></body></html>", None))
         self.horizontalLayout_17.addWidget(self.scene_change_detection_enabled)
         self.verticalLayout_25.addWidget(self.sceneChangeDetectionSettingContainer)
         self.widget_12 = QWidget(self.scrollAreaWidgetContents_3)
@@ -143,6 +144,7 @@ class Tab2Page:
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.setObjectName(u"scene_change_detection_method")
+        self.scene_change_detection_method.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Scene Change Detection Method</span></p><p>- mean: fastest, least accurate</p><p>- mean (segmented): fast, prone to overdetection</p><p>- pyscenedetect: slow, accuate <span style=\" font-weight:700;\">(Recommended)</span></p></body></html>", None))
         self.horizontalLayout_27.addWidget(self.scene_change_detection_method)
         self.verticalLayout_25.addWidget(self.widget_12)
         self.widget_7 = QWidget(self.scrollAreaWidgetContents_3)
@@ -165,6 +167,7 @@ class Tab2Page:
                                       step_button_width=20, field_height=29,
             alignment=SPIN_ALIGNMENT)
         self.scene_change_detection_threshold.setObjectName(u"scene_change_detection_threshold")
+        self.scene_change_detection_threshold.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Scene Change Detection Threshold</span></p><p> - Lower number: <span style=\" font-weight:700;\">higher</span> chance of detecting scene changes, with risk of <span style=\" font-weight:700;\">overdetection</span>.</p><p> - Higher number: <span style=\" font-weight:700;\">lower </span>chance of detecting scene changes, with risk of <span style=\" font-weight:700;\">underdetection.</span></p><p>   - <span style=\" font-weight:700;\">Recommended: </span>2-3 for real life, 4 for animation.</p></body></html>", None))
         self.scene_change_detection_threshold.setMinimumSize(QSize(75, 30))
         self.scene_change_detection_threshold.setDecimals(1)
         # Qt's `setMinimum`/`setMaximum` are the one range spelling the toolkit field does not answer (`DoubleSpinBox`
@@ -186,6 +189,7 @@ class Tab2Page:
         self.horizontalLayout_25.addItem(self.horizontalSpacer_10)
         self.auto_border_cropping = _row_checkbox(self.widget_9)
         self.auto_border_cropping.setObjectName(u"auto_border_cropping")
+        self.auto_border_cropping.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Audo Border Cropping:</span></p><p>- Will automatically remove black bars if they are present throughout a video, can increase performance.</p></body></html>", None))
         self.horizontalLayout_25.addWidget(self.auto_border_cropping)
         self.verticalLayout_25.addWidget(self.widget_9)
         # A settings column is a list of ROWS: the layout's leftover height is not theirs to share. Every container here

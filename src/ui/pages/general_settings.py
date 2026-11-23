@@ -345,6 +345,7 @@ class GeneralSettingsPage:
         self.horizontalLayout_31.addItem(self.horizontalSpacer_16)
         self.sloMoModeCheckBox = _row_checkbox(self.sloMoModeContainer)
         self.sloMoModeCheckBox.setObjectName(u"sloMoModeCheckBox")
+        self.sloMoModeCheckBox.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Increase video length instead of framerate when interpolating.</p><p>Audio and Subtitles will not be transfered to output video.</p></body></html>", None))
         self.horizontalLayout_31.addWidget(self.sloMoModeCheckBox)
         self.verticalLayout_38.addWidget(self.sloMoModeContainer)
         self.verticalLayout_32.addWidget(self.interpolationContainer)
@@ -523,6 +524,7 @@ class GeneralSettingsPage:
         self.upscaleScaleSpinBox = DoubleSpinBox(self.widget_42, single_step=0.1, decimals=1, show_step_buttons=True,
             alignment=SPIN_ALIGNMENT)
         self.upscaleScaleSpinBox.setObjectName(u"upscaleScaleSpinBox")
+        self.upscaleScaleSpinBox.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Upscale Scale:</span></p><p><span style=\" font-weight:700;\">   - </span>Custom output scale no matter the model. Will run AI on video frame once, and scale the image to match the multiplier. Useful for 4x models.</p></body></html>", None))
         sizePolicy5.setHeightForWidth(self.upscaleScaleSpinBox.sizePolicy().hasHeightForWidth())
         self.upscaleScaleSpinBox.setSizePolicy(sizePolicy5)
         self.upscaleScaleSpinBox.setMinimumSize(QSize(75, 30))

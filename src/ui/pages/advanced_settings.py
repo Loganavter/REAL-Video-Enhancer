@@ -124,6 +124,7 @@ class AdvancedSettingsPage:
         self.horizontalLayout_42.addItem(self.horizontalSpacer)
         self.benchmarkModeCheckBox = _row_checkbox(self.benchmarkModeContainer)
         self.benchmarkModeCheckBox.setObjectName(u"benchmarkModeCheckBox")
+        self.benchmarkModeCheckBox.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Perform processing without outputing new video. This tests the raw performance of the inference.</p></body></html>", None))
         # The Designer's `setStyleSheet(u"")` states no rule; a toolkit check box paints itself, so it is dropped
         # rather than kept as dead text.
         self.horizontalLayout_42.addWidget(self.benchmarkModeCheckBox)
@@ -156,6 +157,7 @@ class AdvancedSettingsPage:
         self.horizontalLayout_16.addItem(self.horizontalSpacer_8)
         self.tilingCheckBox = _row_checkbox(self.tilingContainer)
         self.tilingCheckBox.setObjectName(u"tilingCheckBox")
+        self.tilingCheckBox.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Split up processing upscaled frames into chunks.</p><p>Lowers VRAM usage, but also slows down render. </p><p>Only use when render failes due to VRAM limits.</p></body></html>", None))
         self.horizontalLayout_16.addWidget(self.tilingCheckBox)
         self.verticalLayout_16.addWidget(self.tilingContainer)
         self.tileSizeContainer = QWidget(self.upscaleContainer)
@@ -214,6 +216,7 @@ class AdvancedSettingsPage:
         self.horizontalLayout_53.addItem(self.horizontalSpacer_26)
         self.dynamicScaledOpticalFlowCheckBox = _row_checkbox(self.sloMoModeContainer_5)
         self.dynamicScaledOpticalFlowCheckBox.setObjectName(u"dynamicScaledOpticalFlowCheckBox")
+        self.dynamicScaledOpticalFlowCheckBox.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Scales optical flow based on the difference between frames.</p><p>Helps with anime interpolation.</p></body></html>", None))
         self.horizontalLayout_53.addWidget(self.dynamicScaledOpticalFlowCheckBox)
         self.interpolateContainer.addWidget(self.sloMoModeContainer_5)
         self.sloMoModeContainer_4 = QWidget(self.interpolateContainer_2)
@@ -228,6 +231,7 @@ class AdvancedSettingsPage:
         self.horizontalLayout_52.addItem(self.horizontalSpacer_25)
         self.ensembleCheckBox = _row_checkbox(self.sloMoModeContainer_4)
         self.ensembleCheckBox.setObjectName(u"ensembleCheckBox")
+        self.ensembleCheckBox.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Ensembles flow, can produce better results.</p><p>Only compadible with older RIFE models and GMFSS</p></body></html>", None))
         self.horizontalLayout_52.addWidget(self.ensembleCheckBox)
         self.interpolateContainer.addWidget(self.sloMoModeContainer_4)
         self.verticalLayout_33.addWidget(self.interpolateContainer_2, 0, Qt.AlignmentFlag.AlignTop)
