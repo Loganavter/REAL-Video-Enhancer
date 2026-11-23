@@ -1,0 +1,62 @@
+{
+  "provenance": {
+    "measured_at": "2026-11-20T22:26:45+03:00",
+    "commit": "917a4b59656d5177c662a5bd2690283ae24f3e51",
+    "dirty": true,
+    "model_sha": "5ed232c71599b019",
+    "device": "NVIDIA GeForce RTX 4060 Ti",
+    "capability": "8.9",
+    "driver": "615.71.09",
+    "torch": "2.9.0+cu130",
+    "triton": "3.5.0",
+    "tensorrt": "10.12.0.36"
+  },
+  "run": {
+    "input": "/tmp/opencode/rve-struct/cut120.mkv",
+    "output": null,
+    "backend": "tensorrt",
+    "model": "/home/jorj/\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0438/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth",
+    "precision": "auto",
+    "frames": 80
+  },
+  "settings": {
+    "temporal_reuse": true,
+    "temporal_reuse_correction": true,
+    "temporal_reuse_threshold": 5.0,
+    "temporal_reuse_max_chain": 4,
+    "temporal_reuse_statistic": "coarse",
+    "int8_fit": "fp16"
+  },
+  "phases_ms_per_frame": {
+    "gate": 3.928,
+    "to_tensor": 1.311,
+    "up_wall": 18.667,
+    "infer": 18.541,
+    "model": 0.736,
+    "handover": 0.005,
+    "conv": 0.0,
+    "preview": 0.002,
+    "pack": 6.343,
+    "read": 0.646,
+    "frame": 33.839,
+    "unaccounted": 4.252
+  },
+  "gate": {
+    "processed": 80,
+    "reused": 51,
+    "reuse_pct": 63.75,
+    "depth_histogram": {
+      "1": 29,
+      "2": 8,
+      "3": 7,
+      "4": 7
+    },
+    "vetoes": 0,
+    "scene_cuts": 0
+  },
+  "autotuner": {
+    "chosen_threshold": 4.0,
+    "chosen_chain": 4,
+    "stats": "auto gate: threshold 4.0/255, chain 4, veto None, noise floor 2.23, would reuse 56% of the 16 calibration frames; certified d1 worst share 0.00 at 12 (limit 0.1), d2 worst share 0.00 at 12 (limit 0.1), d3 worst share 0.00 at 12 (limit 0.1), d4 worst share 0.00 at 12 (limit 0.1)"
+  }
+}

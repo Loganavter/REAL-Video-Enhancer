@@ -1,0 +1,116 @@
+BACKEND: Getting Input Video Properties
+==============
+RVE Backend Version: 2.4.1-dev16
+==============
+CLI Arguments: 
+['rve-backend.py', '-i', '/home/jorj/2Tb/remastering/Untitled78.mov', '-o', '/tmp/opencode/rve-struct/seg120_123.mkv', '--ffmpeg_path', '/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-b', 'tensorrt', '--precision', 'auto', '--upscale_model', '/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth', '--override_upscale_scale', '2', '--quality_preset', 'best', '--temporal_reuse_statistic', 'coarse', '--hdr_mode', '--start_time', '120', '--end_time', '123', '--report', '/tmp/opencode/rve-struct/seg120_123.json', '--overwrite']
+==============
+BACKEND: No Working Directory specified, using current directory: /home/jorj/Загрузки/projects/REAL-Video-Enhancer/backend
+BACKEND: Getting Input Video Properties
+BACKEND: Using backend: tensorrt
+BACKEND: Setting up Upscale
+BACKEND: Handling device: auto, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: auto
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: head convolution body.0: 3 input channels -> 8 (zeros, padded inside the head so the model's own residual keeps its 3 channels), so the engine can fuse it with its PReLU
+Loading TensorRT engine from /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth_fp16_NVIDIA GeForce RTX 4060 Ti_trt-10.12.0.36_torch_tensorrt-2.9.0+cu130_opt-5_tiling-full_headpad5_1440x1080.engine_2.4.1-dev16.engine.
+[vost#0:0/rawvideo @ 0x55787d8da180] Error submitting a packet to the muxer: Broken pipe
+    Last message repeated 1 times
+[out#0/rawvideo @ 0x55787d8e0040] Error muxing a packet
+[out#0/rawvideo @ 0x55787d8e0040] Task finished with error code: -32 (Broken pipe)
+[out#0/rawvideo @ 0x55787d8e0040] Terminating thread with return code -32 (Broken pipe)
+[out#0/rawvideo @ 0x55787d8e0040] Error writing trailer: Broken pipe
+[out#0/rawvideo @ 0x55787d8e0040] Error closing file: Broken pipe
+BACKEND: int8 probe: calibration only, 16 frames (certification withdrawn 2026-11-19: its pair set moved with the configuration, so its percentages are not comparable across runs)
+BACKEND: int8 calibration frames handed to the body: 24 (forced verdict: fp16)
+BACKEND: int8 fit FORCED to fp16; the probe calibrated only
+BACKEND: DEBUG after assign: option=140397587991728 int8Fit=fp16
+BACKEND: Using Upscaling Model: /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth
+BACKEND: head convolution body.0: 3 input channels -> 8 (zeros, padded inside the head so the model's own residual keeps its 3 channels), so the engine can fuse it with its PReLU
+BACKEND: TensorRT engine already loaded in this process: 2x-Futsuu-Anime(1).pth_fp16_NVIDIA GeForce RTX 4060 Ti_trt-10.12.0.36_torch_tensorrt-2.9.0+cu130_opt-5_tiling-full_headpad5_1440x1080.engine_2.4.1-dev16.engine
+BACKEND: DEBUG after hotReload: option=140397587991728 int8Fit=fp16
+BACKEND: Override upscale scale is set to the same value as the model scale, this will not change the output resolution.
+BACKEND: Upscale Times: 2
+BACKEND: Interpolate Factor: 1.0
+BACKEND: Total Output Frames: 71
+BACKEND: Model Scale: 2
+BACKEND: HDR Mode: True
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-ss', '120.000000', '-t', '3.000000', '-i', '/home/jorj/2Tb/remastering/Untitled78.mov', '-vf', 'crop=1440:1080:0:0,scale=w=iw*sar:h=ih', '-f', 'image2pipe', '-pix_fmt', 'rgb48le', '-vcodec', 'rawvideo', '-s', '1440x1080', '-']
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-ss', '120.000000', '-t', '3.000000', '-i', '/home/jorj/2Tb/remastering/Untitled78.mov', '-vf', 'crop=1440:1080:0:0,scale=w=iw*sar:h=ih', '-f', 'image2pipe', '-pix_fmt', 'rgb48le', '-vcodec', 'rawvideo', '-s', '1440x1080', '-']
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-ss', '120.000000', '-t', '3.000000', '-i', '/home/jorj/2Tb/remastering/Untitled78.mov', '-vf', 'crop=1440:1080:0:0,scale=w=iw*sar:h=ih', '-f', 'image2pipe', '-pix_fmt', 'rgb48le', '-vcodec', 'rawvideo', '-s', '1440x1080', '-']
+BACKEND: 
+FFMPEG WRITE COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-loglevel', 'error', '-framerate', '23.976023976023978', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-vcodec', 'rawvideo', '-s', '2880x2160', '-i', '-', '-r', '23.976023976023978', '-fflags', '+genpts', '-i', '/home/jorj/2Tb/remastering/Untitled78.mov', '-map', '0:v', '-map', '1:a?', '-map', '1:s?', '-avoid_negative_ts', 'make_zero', '-max_interleave_delta', '0', '-muxpreload', '0', '-muxdelay', '0', '-c:v', 'libx264', '-crf', '18', '-c:a', 'copy', '-c:s', 'copy', '-pix_fmt', 'yuv420p10le', '/tmp/opencode/rve-struct/seg120_123.mkv', '-y']
+
+BACKEND: Reference-frame reuse: the correction is ON (frequency split, recursive base, alpha 1.35 on flat static blocks)
+BACKEND: Reference-frame reuse enabled (threshold 5.0/255, statistic coarse, max chain 4, pixel veto 0.0)
+BACKEND: auto gate: the noise-floor guard is off for the coarse statistic (its premise is the grain the low-pass removes); the acceptance certifier still bounds the picture, at the same scale as the decision
+BACKEND: auto gate tuning: the threshold will be chosen from the first rendered frames (LR delta vs the real HR delta they cause)
+
+
+Duration: 385.3015833333333 seconds
+Total Frames: 9238
+Resolution: 1440x1080
+FPS: 23.976023976023978
+Color Space: bt709
+Color Transfer: None
+Color Primaries: None
+Pixel Format: yuv420p10le
+Video Codec: hevc
+Video Bitrate: 11733 kbps
+Is HDR: False
+Bit Depth: 10
+FPS: 162 Current Frame: 1 ETA: 0:00:00
+BACKEND: Rendering
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling device: auto, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: auto
+int8: start (tilesize=0, tile_upscaler=False, int8Fit=fp16)
+int8: verdict is not int8, fp16 engine runs
+host timeline: upload 0.44  upload_sync 0.03  model-call 41.79  frame-ctor 0.08  final-sync 31.52  | total 73.85 ms | last_inference_ms 73.38 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig True stride (18662400, 6220800, 2880, 1)
+BACKEND: startup: first frame enqueued 5.03 s after process start (interpreter, engine, ffmpeg/NVENC init)
+BACKEND: reuse: 0.0% of 1 frames (0 reused), depth up to 0, 0 scene cuts, threshold 5/255
+host timeline: upload 0.09  upload_sync 0.05  model-call 1.07  frame-ctor 0.02  final-sync 37.56  | total 38.78 ms | last_inference_ms 38.64 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig True stride (18662400, 6220800, 2880, 1)
+host timeline: upload 0.09  upload_sync 0.05  model-call 0.45  frame-ctor 0.01  final-sync 37.08  | total 37.67 ms | last_inference_ms 37.54 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig True stride (18662400, 6220800, 2880, 1)
+Initialized Frame PyTorch utils
+                                      FPS: 6 Current Frame: 3 ETA: 0:00:11
+BACKEND: auto gate: the acceptance certifier keeps 4 LR frames (64 MB budget), so it can price reuses up to 4 frames deep; deeper chains are not certified on this resolution
+host timeline: upload 0.08  upload_sync 0.05  model-call 0.44  frame-ctor 0.01  final-sync 35.24  | total 35.82 ms | last_inference_ms 35.68 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig True stride (18662400, 6220800, 2880, 1)
+fp16 engine GPU: 41.40 ms/frame (last 8); alloc_retries 0
+                                    FPS: 10 Current Frame: 10 ETA: 0:00:06
+host timeline: upload 0.14  upload_sync 0.05  model-call 0.46  frame-ctor 0.01  final-sync 36.89  | total 37.55 ms | last_inference_ms 37.36 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig True stride (18662400, 6220800, 2880, 1)
+fp16 engine GPU: 37.14 ms/frame (last 8); alloc_retries 0
+                                      FPS: 11 Current Frame: 17 ETA: 0:00:04
+BACKEND: auto gate: threshold 4.0/255, chain 1, veto None, noise floor 2.28, would reuse 31% of the 16 calibration frames; certified d1 worst share 0.00 at 12 (limit 0.1); calibration: 16 informative of 20 frames
+BACKEND: auto gate: at the PIXEL scale the stale frame reads 8.373% of pixels above 8 levels (worst 21.832% over 78 samples); the EMISSION itself reads 4.609% median, 10.208% worst - dust dots and the scan's registration, which the coarse certification is built to ignore
+host timeline: upload 0.12  upload_sync 0.04  model-call 0.65  frame-ctor 0.02  final-sync 36.39  | total 37.22 ms | last_inference_ms 37.05 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig True stride (18662400, 6220800, 2880, 1)
+fp16 engine GPU: 37.08 ms/frame (last 8); alloc_retries 0
+                                      FPS: 14 Current Frame: 29 ETA: 0:00:02
+host timeline: upload 0.12  upload_sync 0.05  model-call 1.15  frame-ctor 0.03  final-sync 35.99  | total 37.34 ms | last_inference_ms 37.17 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig True stride (18662400, 6220800, 2880, 1)
+fp16 engine GPU: 37.34 ms/frame (last 8); alloc_retries 0
+                                      FPS: 18 Current Frame: 44 ETA: 0:00:01
+host timeline: upload 0.06  upload_sync 0.05  model-call 0.38  frame-ctor 0.01  final-sync 36.63  | total 37.12 ms | last_inference_ms 37.02 | out dtype torch.float16 shape (1, 3, 2160, 2880) contig True stride (18662400, 6220800, 2880, 1)
+fp16 engine GPU: 36.87 ms/frame (last 8); alloc_retries 0
+                                      FPS: 19 Current Frame: 58 ETA: 0:00:00
+BACKEND: render loop: 3.25 s for 73 frames (44.49 ms/frame), total 8.28 s since process start
+BACKEND: reference reuse: 37/73 frames reused (50.7%), 0 scene cuts, 0 pixel vetoes, threshold=4.0/255 over scaledpx blocks (coarse on a 3 px low-pass with the translation compensated), max chain=1, pixel veto=off; depth histogram {1: 36, 2: 1}
+BACKEND: auto gate: threshold 4.0/255, chain 1, veto None, noise floor 2.28, would reuse 31% of the 16 calibration frames; certified d1 worst share 0.00 at 12 (limit 0.1); calibration: 16 informative of 20 frames
+BACKEND: profile over 73 frames: gate 5.67 ms (input to tensor 2.25), model wall 24.68 ms (self-reported 24.42, engine 1.05, frame handover 0.01), input convert 0.00 ms, preview 0.00 ms (0 built), pack+queue 9.49 ms, read wait 1.02 ms, named 40.86 of frame total 46.40 ms, unaccounted 5.54 ms
+BACKEND: run report: /tmp/opencode/rve-struct/seg120_123.json
+BACKEND: 
+Time to complete render: 6.48
+BACKEND: writer: 73 frames, write 18.11 ms/frame (max 40.6), wait for frames 29.79 ms/frame, 2725 MB total, busy 1.32 s of 6.48 s, queue max 1

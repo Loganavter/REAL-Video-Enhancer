@@ -1,0 +1,23 @@
+# Session s-rve-structural-gate: the run reports, without the media
+
+The per-run reports and console logs of the reuse structural-gate measurements
+(the records are `../../records/reuse-structural-gate.jsonl`, the headline run is
+`../reuse-structural-gate-on.log`). The numbers this session produced are in the
+records; these files are the raw shape they were read from - per-run gate
+counters (`*.json`), the per-frame damage table (`damage.json`), the record
+stream (`render-records.jsonl`) and the backend console (`*.log`).
+
+The media workspace was scratch under `/tmp/opencode/rve-struct/` (5.3 GB: the
+lossless cut and fourteen ffv1 renders) and was deleted on 2026-11-23. It holds
+nothing the records do not:
+
+- the input is a lossless `-c copy` cut of "078 Pink Plasma denoised
+  (Untitled78.mov)", 120-123.4 s, 80 frames - `ffmpeg -ss 120 -to 123.4 -c copy`;
+- every output regenerates from that cut with the CLI its own `*.log` header
+  records verbatim (tensorrt, 2x-Futsuu-Anime fp16, 1440x1080 -> 2880x2160,
+  ffv1 yuv444p, plus the flag set that run used);
+- the population a record cites is fixed by `items_sha` over the item list, so
+  the exact frame set survives without the frames.
+
+Rebuild the workspace by re-running those commands into a fresh scratch
+directory; do not re-cite the deleted paths as if they were still there.
