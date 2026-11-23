@@ -146,6 +146,11 @@ class Render:
         merge_subtitles: bool = True,
         # misc
         pause_shared_memory_id=None,
+        # The pane's composited-frame block and its seek request (both GUI-owned segments, see
+        # utils/DisplayChannel.py for the byte layout). None = no viewer, nothing is paid.
+        display_state_id: str | None = None,
+        display_size: tuple[int, int] | None = None,
+        seek_state_id: str | None = None,
         sceneDetectMethod: str = "pyscenedetect",
         sceneDetectSensitivity: float = 3.0,
         trt_optimization_level: int = 5,
@@ -474,7 +479,48 @@ class Render:
         )
 
         self.reportPath = report_path
+        # The pane's block: sized by the GUI, written only while the pane asks. Building it is cheap -
+        # no GPU work happens until the first frame is actually published (utils/DisplayStager.py).
+        self.displayEvery = max(1, int(os.environ.get("RVE_DISPLAY_EVERY", "1") or 1))
+        self.displayChannel = None
+        self.displayStager = None
+        self._displayCounter = 0
+        if display_state_id:
+            try:
+                from .utils.DisplayChannel import DisplayChannel
+                from .utils.DisplayStager import DisplayStager
+
+                box = tuple(display_size) if display_size else (640, 360)
+                self.displayChannel = DisplayChannel(display_state_id, box=box)
+                if self.displayChannel.attached:
+                    self.displayStager = DisplayStager(box[0], box[1])
+                    log(f"display: publishing to '{display_state_id}' at most every "
+                        f"{self.displayEvery} rendered frame(s), box {box[0]}x{box[1]}")
+                else:
+                    log(f"display: block '{display_state_id}' is not usable; the pane stays empty")
+            except Exception as _display_exc:   # a pane must never cost the export
+                log(f"display: channel setup failed ({_display_exc}); the render runs without it")
+                self.displayChannel = None
+                self.displayStager = None
+        # Newest-wins seek request. One slot: a newer request overwrites an older one, and an iteration
+        # that finds nothing pays a 12-byte read before it blocks on the reader.
+        self.seekState = None
+        self.lastSeekSeconds = None
+        if seek_state_id:
+            try:
+                from .utils.DisplayChannel import SeekState
+
+                self.seekState = SeekState(seek_state_id)
+                if self.seekState.attached:
+                    log(f"seek: watching '{seek_state_id}' (newest request wins, "
+                        f"generation {self.seekState.last_generation})")
+                else:
+                    log(f"seek: block '{seek_state_id}' is not usable; the pane cannot seek")
+            except Exception as _seek_exc:
+                log(f"seek: request block setup failed ({_seek_exc}); the render runs without it")
+                self.seekState = None
         self.temporalReuse = None
+
         # created together with the gate, below; None means a reused frame is emitted verbatim
         self.temporalCorrection = None
         self.temporalReuseCorrection = bool(temporal_reuse_correction)
@@ -1042,6 +1088,146 @@ class Render:
         except Exception as exc:  # a report must never take a render down
             log(f"run report FAILED ({exc}); the render is unaffected")
 
+    def _publish_display(self, frame, force: bool = False) -> bool:
+        """Offer this composited frame to the pane; returns whether a publish actually happened.
+
+        Bounded on purpose: at most one staged frame is in flight, and a normal render publishes at most
+        every `RVE_DISPLAY_EVERY`-th rendered frame (default 1). `force` is the seek path - a requested
+        frame is what the pane asked for, so it goes out even between the N-th frames.
+        """
+        channel, stager = self.displayChannel, self.displayStager
+        if channel is None or stager is None or not channel.attached:
+            return False
+        if not channel.wanted():
+            # Nobody is watching: this is the whole cost of the channel when it is off.
+            return False
+        if not force:
+            self._displayCounter += 1
+            if self._displayCounter % self.displayEvery:
+                return False
+        if force:
+            # A requested frame is shown NOW, not one frame late: the pane is waiting on exactly this
+            # picture, and there may be no further publish for seconds. Drain the in-flight frame (it is
+            # superseded), stage the seek frame and wait for its copy - one D2H, on the seek path only.
+            stager.take(force=True)
+            if not stager.submit(frame, getattr(frame, "width", None), getattr(frame, "height", None)):
+                return False
+            previous = stager.take(force=True)
+            if previous is None:
+                return False
+            payload, fmt, width, height = previous
+            return channel.publish(payload, width, height, fmt=fmt)
+        published = False
+        previous = stager.take()
+        if previous is not None:
+            payload, fmt, width, height = previous
+            published = channel.publish(payload, width, height, fmt=fmt)
+        if not stager.busy():
+            stager.submit(frame, getattr(frame, "width", None), getattr(frame, "height", None))
+        return published
+
+    def _take_seek_request(self):
+        """The newest requested time when the generation moved since the last one acted on, else None."""
+        state = self.seekState
+        if state is None:
+            return None
+        try:
+            return state.pending()
+        except Exception as exc:
+            log(f"seek: request read failed ({exc}); ignoring seeks for this render")
+            self.seekState = None
+            return None
+
+    def _open_reader_at(self, seconds: float):
+        """A one-shot source reader starting at `seconds` (the same options as the export's reader).
+
+        A seek cannot reuse the export's reader: its ffmpeg is already streaming the sequential range
+        down a pipe, and restarting it would either drop frames the writer is still waiting for or put
+        the output out of order. A second decoder on the same file is cheap (one frame, then closed) and
+        leaves the export's stream untouched.
+        """
+        from .FFmpegBuffers import FFmpegRead
+
+        reader = self.readBuffer
+        return FFmpegRead(
+            inputFile=self.inputFile,
+            width=reader.width,
+            height=reader.height,
+            start_time=float(seconds),
+            end_time=None,
+            borderX=reader.borderX,
+            borderY=reader.borderY,
+            hdr_mode=reader.hdr_mode,
+            high_bitdepth=reader.high_bitdepth,
+            backend=reader.backend,
+            device=reader.device,
+            gpu_id=reader.gpu_id,
+            dtype=reader.dtype,
+            color_space=reader.color_space,
+            color_primaries=reader.color_primaries,
+            color_transfer=reader.color_transfer,
+            color_range=reader.color_range,
+            input_pixel_format=reader.input_pixel_format,
+            ffmpeg_path=reader.ffmpeg_path,
+        )
+
+    def _seek_preview(self, seconds: float) -> None:
+        """Decode one frame at `seconds`, run it through the model path and show it - nothing else.
+
+        Not written to the writer, not counted in `frames_rendered`, no gate/tuner state touched: the
+        export's stream must stay sequential and valid, so this is a side branch that reads the source
+        again and publishes only to the pane.
+        """
+        up = getattr(self, "upscaleOption", None)
+        channel = self.displayChannel
+        if channel is None or not channel.attached:
+            # Nothing to show it on: do not spend an ffmpeg spawn on a pane that is not wired.
+            return
+        pipelined = (getattr(up, "num_streams", 1) or 1) > 1 and getattr(up, "tile_upscaler", None) is None \
+            and getattr(up, "backend", self.backend) == "tensorrt"
+        if pipelined:
+            # `_call_pipelined` keeps N-1 frames inside the engine and emits them a call later; pushing a
+            # seek frame through it would shift that queue and swap one exported frame for the seek's.
+            if not getattr(self, "_seekPipelinedWarned", False):
+                self._seekPipelinedWarned = True
+                log("seek: preview disabled - this upscaler emits frames N-1 late (tensorrt, "
+                    "trt_streams > 1), and a seek frame through it would corrupt the export")
+            return
+        reader = None
+        try:
+            reader = self._open_reader_at(seconds)
+            chunk = reader.read_frame()
+        except Exception as exc:
+            log(f"seek: could not decode a frame at {seconds:.3f}s ({exc})")
+            return
+        finally:
+            if reader is not None:
+                try:
+                    reader.close()
+                except Exception:
+                    pass
+        if chunk is None:
+            return
+        try:
+            from .utils.Frame import Frame
+
+            source = self.readBuffer
+            frame = Frame(source.backend, source.width, source.height, source.device, source.gpu_id,
+                          source.hdr_mode, source.dtype, high_bitdepth=source.high_bitdepth)
+            frame.yuv10_input = bool(source.high_bitdepth and not source.hdr_mode)
+            frame.set_frame_bytes(chunk)
+            for extraRestoration in self.extraRestorationModels:
+                frame = extraRestoration(frame)
+            if self.upscaleModel:
+                frame = self.upscaleOption(frame)
+            if frame is None:
+                return
+            self._publish_display(frame, force=True)
+            self.lastSeekSeconds = float(seconds)
+            log(f"seek: displayed the frame at {seconds:.3f}s (not written to the export)")
+        except Exception as exc:
+            log(f"seek: frame at {seconds:.3f}s could not be displayed ({exc})")
+
     def render(self):
         frames_rendered = 0
         """
@@ -1055,6 +1241,12 @@ class Render:
 
         while True:
             if not self.informationHandler.get_is_paused():
+                # A seek is acted on between frames, before the next read blocks: the request is a single
+                # slot, so a newer one simply replaces this one - the loop never waits for the pane.
+                requested = self._take_seek_request()
+                if requested is not None:
+                    self._seek_preview(requested)
+                    continue
                 _t_read = _perf_counter()
                 frame = self.readBuffer.get()
                 _read_ms = (_perf_counter() - _t_read) * 1000.0
@@ -1168,6 +1360,10 @@ class Render:
                 
                 
                 
+                # The composited frame, offered to the pane BEFORE the override resize: that call returns
+                # raw pipe bytes, and the display channel speaks RGB888 only.
+                self._publish_display(frame)
+
                 if self.override_upscale_scale:
                     # Source geometry comes from the frame the upscaler returned, never from
                     # `width * modelScale`: on `4xNomos8k_span_otf_weak_no_update_params.pth` the
@@ -1262,6 +1458,14 @@ class Render:
                 log(tu.stats())
         self._write_run_report()
         self.writeBuffer.writeQueue.put(None)
+        # Detach the GUI-owned blocks: closing never unlinks a segment we did not create. A block the
+        # backend created as a fallback (the window had not attached yet) is removed by close().
+        for _block in (self.displayChannel, self.seekState):
+            if _block is not None:
+                try:
+                    _block.close()
+                except Exception:
+                    pass
         """
         tracer.stop()
         tracer.save()
