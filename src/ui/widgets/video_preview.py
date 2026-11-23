@@ -6,8 +6,10 @@ first thing measured is the thing that can be wrong in the most ways (texture up
 
 Decisions encoded here, each from a measurement or an owner call:
 
-* **fit to the pane on open, never a downscaled SOURCE.** The texture is always the frame's own resolution; drawing it
-  smaller is the GPU's job. `1:1` is a zoom step (`reset_view(actual_size=True)`), the range is [fit, 8x].
+* **fit to the pane on open.** "No downscale" in the plan is about the RENDER: the backend must not shrink frames to
+  save work. The VIEW downscales freely to fit - that is what fit means - and `1:1` is only a zoom step the user can
+  reach (`reset_view(actual_size=True)`), the range being [fit, 8x source pixels]. The texture always carries the
+  frame's own pixels either way.
 * **the transform lives on the CPU** (mvp), because the letterbox and the pan clamp are widget rules, not shading.
 * **one upload per new frame**, and only when the frame actually changed (`set_frame` marks the texture dirty).
 * **readback is the pixel instrument**: under llvmpipe a composited RHI widget comes out black in the window, while
@@ -45,8 +47,9 @@ from PySide6.QtWidgets import QRhiWidget
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 
 SHADER_DIR = "shaders"
-#: 8 source pixels per screen pixel at most; the floor is the FIT scale (computed per frame), not 1:1 - see
-#: `_min_zoom`. Zoom is a source-pixel scale, so "1:1" is a meaningful step inside the range.
+#: 8 source pixels per screen pixel at most. The floor is the FIT scale (computed per frame), not 1:1: the pane shows
+#: the whole frame by default and the wheel can go back to that, while 1:1 is just a step inside the range. Zoom is a
+#: source-pixel scale, so the same factor means the same detail whatever the pane size.
 MAX_ZOOM = 8.0
 MIN_ZOOM = 1.0
 
@@ -61,7 +64,7 @@ class Frame:
 
 
 class VideoPreviewSurface(QRhiWidget):
-    """A frame, drawable at 1:1 or zoomed, with a letterboxed fit on open."""
+    """A frame, fitted to the pane on open and zoomable from there (range: fit .. 8x source pixels)."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -91,6 +94,9 @@ class VideoPreviewSurface(QRhiWidget):
         self._strip_height = 6
         self._strip_margin = 10
         self._handle_radius = 7
+        #: hovered position on the strip (fraction 0..1), and whether it is past the produced edge
+        self._hover_fraction: float | None = None
+        self._hover_blocked = False
         #: Opaque clear colour for the pane. QRhiWidgets composite by OVERWRITING their rect, so a clear with alpha
         #: below 255 punches a hole (black on Wayland, white on xcb) instead of letting the page show through - the
         #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
@@ -172,7 +178,8 @@ class VideoPreviewSurface(QRhiWidget):
         self._hud_dirty = True
         self.update()
 
-    seekRequested = Signal(float)     # fraction 0..1 of the strip
+    seekRequested = Signal(float)     # fraction 0..1 of the strip (only inside the produced range)
+    seekBlocked = Signal(float)       # a seek was asked for past the produced edge; nothing moved
     zoomChanged = Signal(float)       # the new zoom factor
     originalRequested = Signal(float)  # playhead seconds: the host decodes the SOURCE frame at this time
 
@@ -196,8 +203,15 @@ class VideoPreviewSurface(QRhiWidget):
             return
         if event.button() == Qt.MouseButton.LeftButton:
             if self._strip_visible and self._strip_rect().contains(position):
+                fraction = self._fraction_at(position.x())
+                if not self._seekable(fraction):
+                    # Past the produced edge there is nothing to seek to. Refusing is the honest answer: emitting a
+                    # seek the renderer cannot satisfy would move the playhead over a picture that does not exist.
+                    self.seekBlocked.emit(fraction)
+                    event.accept()
+                    return
                 self._scrubbing = True
-                self.seekRequested.emit(self._fraction_at(position.x()))
+                self.seekRequested.emit(fraction)
                 event.accept()
                 return
             # LMB = "show the original": the surface asks the host for the source frame at the playhead and draws it as
@@ -214,7 +228,10 @@ class VideoPreviewSurface(QRhiWidget):
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         position = event.position()
         if self._scrubbing:
-            self.seekRequested.emit(self._fraction_at(position.x()))
+            fraction = self._fraction_at(position.x())
+            # A drag is clamped at the produced edge instead of jumping into the dark part: the playhead never leaves
+            # frames that exist.
+            self.seekRequested.emit(min(fraction, self._produced_fraction()))
             event.accept()
             return
         if self._panning:
@@ -223,7 +240,25 @@ class VideoPreviewSurface(QRhiWidget):
             self.pan_by(delta.x(), delta.y())
             event.accept()
             return
+        self._update_hover(position)
         super().mouseMoveEvent(event)
+
+    def _update_hover(self, position) -> None:
+        """Hover feedback on the strip: a marker where the pointer is, and a forbidden cursor past the produced edge."""
+        strip = self._strip_rect()
+        if strip.isEmpty() or not strip.contains(position):
+            if self._hover_fraction is not None:
+                self._hover_fraction = None
+                self.unsetCursor()
+                self.update()
+            return
+        fraction = self._fraction_at(position.x())
+        blocked = not self._seekable(fraction)
+        if fraction != self._hover_fraction or blocked != self._hover_blocked:
+            self._hover_fraction = fraction
+            self._hover_blocked = blocked
+            self.setCursor(Qt.CursorShape.ForbiddenCursor if blocked else Qt.CursorShape.PointingHandCursor)
+            self.update()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         if event.button() == Qt.MouseButton.MiddleButton and self._panning:
@@ -255,6 +290,20 @@ class VideoPreviewSurface(QRhiWidget):
         width = max(1.0, self.width() - 2 * margin)
         top = self.height() - margin - height
         return QRectF(margin, top, width, height)
+
+    def _produced_fraction(self) -> float:
+        """The share of the strip the renderer has produced, i.e. the seekable edge while a render is running.
+
+        `total == 0` means "this is a finished file": the whole strip is seekable. While `rendered < total` the area to
+        the right of the produced edge has no frames - seeking there can only lie to the user.
+        """
+        rendered, total, _, _ = self._progress
+        if total <= 0:
+            return 1.0
+        return max(0.0, min(1.0, rendered / total))
+
+    def _seekable(self, fraction: float) -> bool:
+        return fraction <= self._produced_fraction() + 1e-6
 
     def _fraction_at(self, x: float) -> float:
         rect = self._strip_rect()
@@ -291,7 +340,7 @@ class VideoPreviewSurface(QRhiWidget):
         self.update()
 
     def reset_view(self, *, actual_size: bool = False) -> None:
-        """Back to the opening view: the whole frame in the pane (or 1:1, the "no downscale" step)."""
+        """Back to the opening view: the whole frame fitted into the pane (or 1:1 when the user asks for it)."""
         self._zoom = 1.0
         self._zoom_is_fit = not actual_size
         self._pan = [0.0, 0.0]
@@ -651,6 +700,10 @@ class VideoPreviewSurface(QRhiWidget):
                           (0.0, 0.0, 0.0, 0.45)))
             rects.append((x - handle, strip.top() - 6.0 - handle, handle * 2.0, handle * 2.0,
                           (1.0, 1.0, 1.0, 0.95)))
+        if self._hover_fraction is not None and not self._scrubbing:
+            x = strip.left() + strip.width() * self._hover_fraction
+            colour = (1.0, 0.45, 0.45, 0.55) if self._hover_blocked else (1.0, 1.0, 1.0, 0.55)
+            rects.append((x - 0.5, strip.top() - 3.0, 1.0, strip.height() + 6.0, colour))
         vertices: list[float] = []
         for x, y, w, h, colour in rects:
             corners = [(x, y), (x + w, y), (x, y + h), (x + w, y), (x + w, y + h), (x, y + h)]
