@@ -131,6 +131,9 @@ class Render:
         dynamic_scaled_optical_flow: bool = False,
         ensemble: bool = False,
         output_to_mpv: bool = False,
+        # A preview render writes a container a reader can follow while the file grows (fragmented mp4);
+        # an export keeps `+faststart`. Passed straight to the writer, never derived here.
+        preview_render: bool = False,
         trt_timing_iters: int = 8,
         trt_streams: int = 1,
         trt_tiling_level: str = "full",
@@ -423,6 +426,7 @@ class Render:
             pipe_input_pixel_format=getattr(self, "pipePixelFormat", "yuv420p10le"),
             ffmpeg_path=ffmpeg_path,
             ffmpeg_log_file=os.path.join(cwd, "ffmpeg_log.txt"),
+            preview=preview_render,
         )
 
         self.informationHandler = InformationWriteOut(

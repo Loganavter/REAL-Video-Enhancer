@@ -221,6 +221,7 @@ class HandleApplication:
             dynamic_scaled_optical_flow=self.args.dynamic_scaled_optical_flow,
             ensemble=self.args.ensemble,
             output_to_mpv=self.args.output_to_mpv,
+            preview_render=self.args.preview_render,
             trt_timing_iters=self.args.trt_timing_iters,
             trt_streams=self.args.trt_streams,
             trt_tiling_level=self.args.trt_tiling_level,
@@ -705,6 +706,14 @@ class HandleApplication:
         parser.add_argument(
             "--output_to_mpv",
             help="Outputs to mpv instead of an output file (requires mpv to be installed)",
+            action="store_true",
+            default=False,
+        )
+        parser.add_argument(
+            "--preview_render",
+            help="This job is the preview render: an mp4-family output is written fragmented "
+                 "(+frag_keyframe+empty_moov) so the file can be read while it is still being written. "
+                 "Real exports keep +faststart; the GUI passes this only for the preview job.",
             action="store_true",
             default=False,
         )

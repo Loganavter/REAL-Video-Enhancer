@@ -5,8 +5,13 @@ import os
 import subprocess
 import queue
 import time
-import cv2
-import numpy as np
+# Guarded like `utils/Util.py` does it: these two are used only by the reader's yuv420p path, and the argument
+# builder must stay importable where they are absent (the harness unit tests, a verification cell).
+try:
+    import cv2
+    import numpy as np
+except ImportError:
+    pass
 
 from .utils.Util import (
     log,
@@ -176,6 +181,27 @@ class FFmpegRead(Buffer):
         self.readProcess.terminate()
 
 
+#: Containers whose index (`moov`) is written last: with `+faststart` ffmpeg relocates it at close.
+_MP4_FAMILY = ("mp4", "mov", "m4v")
+
+
+def resolve_movflags(output_file: str | None, extension: str | None, preview: bool) -> list[str]:
+    """The `-movflags` value for this output, or `[]` when the container takes none.
+
+    An export keeps `+faststart`: a finished file with its index at the front, seekable immediately.
+    A *preview* render instead writes fragmented mp4 (`+frag_keyframe+empty_moov` - one fragment per
+    keyframe, an empty index up front), because `+faststart` moves the index to the end **at close**:
+    until ffmpeg exits the growing file has no index, so a reader following it cannot demux it at all.
+    That reader is the preview surface's tail reader (plan-rve-video-preview-widget-2026-11-23).
+    Matroska/TS (and everything else) are readable as they grow and stay untouched.
+    """
+    if not output_file:
+        return []
+    if str(extension or "").lower() not in _MP4_FAMILY:
+        return []
+    return ["+frag_keyframe+empty_moov"] if preview else ["+faststart"]
+
+
 def resolve_output_pixel_format(requested: str | None, high_bitdepth: bool,
                                 interpolating: bool = False) -> str:
     """Output pixel format when the caller did not choose one.
@@ -227,6 +253,7 @@ class FFmpegWrite(Buffer):
         color_range: str = None,
         ffmpeg_path: str = "./bin/ffmpeg",
         ffmpeg_log_file: str = "ffmpeg_log.txt",
+        preview: bool = False,
     ):
         self.inputFile = inputFile
         self.outputFile = outputFile
@@ -273,6 +300,9 @@ class FFmpegWrite(Buffer):
         self.color_range = color_range
         self.ffmpeg_path = ffmpeg_path
         self.ffmpeg_log_file = ffmpeg_log_file
+        # A preview render must be readable while it is still being written (fragmented mp4); an export must
+        # not be (it keeps `+faststart`). Explicit, never inferred from the output path or its name.
+        self.preview = preview
         self.outputFPS = (
             (self.fps * self.interpolateFactor)
             if not self.slowmo_mode
@@ -552,12 +582,12 @@ class FFmpegWrite(Buffer):
 
                 ]
 
-                # MP4/MOV: improve seekability by moving the moov atom to the front.
-                if self.outputFile and self.outputFileExtension.lower() in ("mp4", "mov", "m4v"):
-                    command += [
-                        "-movflags",
-                        "+faststart",
-                    ]
+                # MP4/MOV: an export moves the moov atom to the front; a preview render fragments instead so the
+                # written part is a readable stream while the file is still growing (see resolve_movflags).
+                movflags = resolve_movflags(
+                    self.outputFile, getattr(self, "outputFileExtension", None), self.preview)
+                if movflags:
+                    command += ["-movflags", *movflags]
             if str(self.outputFile) == "null":
                 # Fixed-cost measurement path: rawvideo encoding is a memcpy and the null muxer
                 # discards the packets, so the wall measures read + gate + inference only. Without
