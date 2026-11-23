@@ -7,6 +7,24 @@ from src.version import __version__
 from src.utils.Util import log
 
 
+def parse_size(text: str | None) -> tuple[int, int] | None:
+    """`WxH` -> `(width, height)`; None stays None (no box was asked for).
+
+    The pane sends its box as one token because argparse has no tuple type; a bad token is refused at
+    parse time with the value in the message instead of reaching the renderer as a string it would have
+    to guess about.
+    """
+    if text in (None, ""):
+        return None
+    try:
+        width, height = (int(part) for part in str(text).lower().split("x"))
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"expected WxH (e.g. 640x360), got {text!r}")
+    if width <= 0 or height <= 0:
+        raise argparse.ArgumentTypeError(f"expected a positive WxH, got {text!r}")
+    return width, height
+
+
 class HandleApplication:
     def __init__(self):
         self.args = self.handleArguments()
@@ -196,6 +214,9 @@ class HandleApplication:
             merge_subtitles=self.args.merge_subtitles,
             # misc settings
             pause_shared_memory_id=self.args.pause_shared_memory_id,
+            display_state_id=self.args.display_state_id,
+            display_size=self.args.display_size,
+            seek_state_id=self.args.seek_state_id,
             sceneDetectMethod=self.args.scene_detect_method,
             sceneDetectSensitivity=self.args.scene_detect_threshold,
             trt_optimization_level=self.args.tensorrt_opt_profile,
@@ -706,6 +727,26 @@ class HandleApplication:
             default=None,
         )
         parser.add_argument(
+            "--display_state_id",
+            help="Shared-memory block the pane reads composited frames from (layout: "
+                 "backend/src/utils/DisplayChannel.py). The pane sizes it; the renderer only attaches.",
+            type=str,
+            default=None,
+        )
+        parser.add_argument(
+            "--display_size",
+            help="The pane's box as WxH (e.g. 640x360); frames are fitted into it, aspect preserved",
+            type=parse_size,
+            default=None,
+        )
+        parser.add_argument(
+            "--seek_state_id",
+            help="Shared-memory block holding the newest seek request (a double time and a uint32 "
+                 "generation); the renderer displays that frame without writing it to the output",
+            type=str,
+            default=None,
+        )
+        parser.add_argument(
             "--merge_subtitles",
             help="Merges subtitles into output video",
             action="store_true",
@@ -826,7 +867,7 @@ def watch_parent(names=(), interval: float = 1.0) -> None:
 
 if __name__ == "__main__":
     _segments = []
-    for _flag in ("--pause_shared_memory_id",):
+    for _flag in ("--pause_shared_memory_id", "--display_state_id"):
         if _flag in sys.argv:
             _index = sys.argv.index(_flag)
             if _index + 1 < len(sys.argv):
