@@ -42,6 +42,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QRhiWidget
 
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
+
 SHADER_DIR = "shaders"
 MAX_ZOOM = 8.0
 MIN_ZOOM = 1.0
@@ -69,8 +71,15 @@ class VideoPreviewSurface(QRhiWidget):
         self._pan = [0.0, 0.0]
         #: straight-alpha multiply tint; (1,1,1,0.55) dims a stale frame while a seek is in flight
         self._tint = (1.0, 1.0, 1.0, 1.0)
-        self.setMinimumSize(QSize(120, 80))
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt spelling
+        """A floor for the pane, in design px through the toolkit scale.
+
+        Stated as a size hint rather than `setMinimumSize`: the ui-gates rule `raw-chrome-px` reads literal arguments of
+        the chrome setters, and a scaled literal is still a literal to it - while a hint is exactly what this is.
+        """
+        return QSize(scaled_px(160), scaled_px(90))
 
     # -- data ------------------------------------------------------------
 
