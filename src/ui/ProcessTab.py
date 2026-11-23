@@ -789,13 +789,15 @@ class ProcessTab:
                 command,
                 **kwargs,
             )
-            if self._preview_enabled() and self._followable(renderOptions):
-                # ANY render writes a file, and a matroska one is readable while it grows - so the pane follows the
-                # export too, not only the preview job. Without this the pane went black on a plain render the moment
-                # the shared-memory thumbnail was deleted (owner, 2026-11-24: "видео куда-то пропало"). An mp4 keeps
-                # its index at the end (`+faststart` moves it there at close), so a growing mp4 is not followable and
-                # the pane stays empty there instead of showing a corrupt picture.
+            if self._tail_should_run(renderOptions):
+                # A PREVIEW follows its own file: the tail decodes what the renderer has written so far, which is the
+                # pane's only painter there. An export with a usable display block does NOT start it - see
+                # `_tail_should_run` (measured 2026-11-24: two painters, one surface).
                 self._start_live_tail(renderOptions.outputPath)
+            else:
+                # One picture, one painter: this job's pane is fed by the display block (or by nothing), and a tail
+                # left over from the previous job in the same pass would paint on top of it.
+                self._stop_live_tail()
             textOutput = []
             self._log_filter = RenderLogFilter()
             self.renderLogLines = []
@@ -905,10 +907,11 @@ class ProcessTab:
         self.page_handles.general.outputFileText.setEnabled(True)
         self.page_handles.general.inputFileText.setEnabled(True)
         # The job is over: no backend publishes any more, so the block and the seek request are released here (the
-        # GUI thread) rather than left for a tick that may never come. The pane's own clear below follows.
+        # GUI thread) rather than left for a tick that may never come - and whoever followed the job's file stops
+        # with it (see `_end_job_painters`). The pane's own clear below follows.
         self._second_surface_pts = None
         self._display_seek_pending = False
-        self._close_display_state()
+        self._end_job_painters()
         if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             self.page_handles.proc.previewLabel.set_frame(None)
         else:
@@ -934,9 +937,19 @@ class ProcessTab:
 
         self._restoreQueueAfterPreview()
         if self.currentRenderOptions.isPreview:
-            self._stop_live_tail()
             self._start_preview_playback(self.currentRenderOptions.outputPath)
 
+    def _end_job_painters(self) -> None:
+        """Stop whoever followed the finished job's file, then release the block the renderer published into.
+
+        A tail outliving its job keeps decoding a file nobody writes any more, and its frames land on the pane after
+        the picture was finished - measured live (2026-11-24): the export's last display frame stood at 18.9 s while
+        the tail, still running, painted its own lagging cluster at 8.97 s over it. The tail goes FIRST: the block is
+        what a still-live tail's frames would have been painted over, and `_on_preview_frame` refuses frames once no
+        owner is current, so a frame already queued by the stopped tail is not painted either.
+        """
+        self._stop_live_tail()
+        self._close_display_state()
 
     def _start_live_tail(self, path: str) -> None:
         """Ask for the live tail; the pane's own GUI tick creates it.
@@ -961,11 +974,14 @@ class ProcessTab:
         The pane's `rendered` is a snapshot taken when a frame was painted, so a paused preview froze the band at
         whatever the renderer had produced at the moment of the pause - and a seek could not reach what had been
         produced since. The playhead must not move: only the two produced counters are refreshed.
+
+        An EXPORT's pane has no tail (its painter is the display feed, see `_tail_should_run`), so "a tail is running"
+        is not the condition: the condition is that a painter owns the pane and left a progress snapshot to refresh.
         """
         if not getattr(self, "_preview_paused", False):
             return
-        tail = getattr(self, "_live_tail", None)
-        if tail is None:
+        if (getattr(self, "_live_tail", None) is None
+                and not self._display_owns_pane()):
             return
         pane = self.page_handles.proc.previewLabel
         progress = getattr(pane, "_progress", None)
@@ -988,6 +1004,25 @@ class ProcessTab:
             return True
         extension = os.path.splitext(str(getattr(renderOptions, "outputPath", "") or ""))[1].lower()
         return extension not in (".mp4", ".mov", ".m4v")
+
+    def _tail_should_run(self, renderOptions) -> bool:
+        """Whether THIS job's pane follows the job's own output file with a tail - decided before it starts.
+
+        One picture, one painter, decided structurally rather than by who publishes last (measured 2026-11-24, a
+        495-frame 1440x1080 mkv export: the display feed and a tail both painted the pane, so its playhead jumped
+        between the composited frame at 18.9 s and the tail's cluster at 8.97 s):
+
+        * a PREVIEW follows its own file - the tail is the picture there and the strip's seek lives on it;
+        * an EXPORT whose pane the display block feeds does not start a tail at all - the feed is that pane's painter;
+        * an EXPORT whose block could not be allocated keeps the tail as its fallback: that is what stopped the pane
+          going black on a plain render when the thumbnail channel was deleted (owner, 2026-11-24: "видео куда-то
+          пропало"), and it cannot race the feed because there is no feed.
+        """
+        if not self._preview_enabled() or not self._followable(renderOptions):
+            return False
+        if getattr(renderOptions, "isPreview", False):
+            return True
+        return not self._display_owns_pane()
 
     def _preview_enabled(self) -> bool:
         """The user's "Preview Enabled" switch (`Settings -> GUI Options`).
@@ -1320,10 +1355,17 @@ class ProcessTab:
         picture, one painter - the display feed wins and the tail's frame is dropped here. That is the rule the deleted
         640x360 channel broke: two writers raced for the same surface, so the pane flickered between a thumbnail and a
         decoded frame and neither could be trusted. A preview keeps its tail as the only painter (`wanted` stays 0).
+
+        `frame_ready` is delivered queued, so a tail stopped at the job's end can still deliver a frame it emitted
+        before the stop. Such a frame has no current owner (the tail is gone, and playback of a finished file installs
+        its own decoder) and is dropped: a zombie painter is the same rule violation as an early one.
         """
         from PySide6.QtGui import QImage
 
         if self._display_owns_pane():
+            return
+        if (getattr(self, "_live_tail", None) is None
+                and getattr(self, "_preview_decoder", None) is None):
             return
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
