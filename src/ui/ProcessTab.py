@@ -712,7 +712,16 @@ class ProcessTab:
         if getattr(self.parent, "preview_label_is_surface", False):
             pane.set_frame(image)
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
-            pane.set_progress(rendered=frame.pts, total=duration, playhead=frame.pts, duration=duration)
+            running = self.renderProcess is not None and self.renderProcess.poll() is None
+            if running:
+                # Live: the white part is what the RENDERER has produced (`currentFrame/max_value`), the playhead is
+                # where the tail stands. The file's duration is not known yet, so no duration marker.
+                pane.set_progress(rendered=self.currentFrame, total=self.max_value,
+                                  playhead=frame.pts, duration=0.0)
+            else:
+                # Finished file: everything exists, so the strip is fully produced; the playhead is the only marker.
+                pane.set_progress(rendered=duration, total=duration,
+                                  playhead=frame.pts, duration=duration)
         else:
             pixmap = QtGui.QPixmap.fromImage(image)
             pane.setPixmap(self.getRoundedPixmap(pixmap, corner_radius=10))

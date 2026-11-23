@@ -91,9 +91,9 @@ class VideoPreviewSurface(QRhiWidget):
         #: precedents. The pane is therefore always opaque, with the page's own colour.
         self._clear_colour = self.palette().window().color()
         #: strip geometry in design px; the widget scales it with the device pixel ratio at paint time
-        self._strip_height = 6
-        self._strip_margin = 10
-        self._handle_radius = 7
+        self._strip_height = scaled_px(6)
+        self._strip_margin = scaled_px(10)
+        self._handle_radius = scaled_px(7)
         #: hovered position on the strip (fraction 0..1), and whether it is past the produced edge
         self._hover_fraction: float | None = None
         self._hover_blocked = False
@@ -292,7 +292,6 @@ class VideoPreviewSurface(QRhiWidget):
     def _strip_rect(self) -> QRectF:
         if not self._strip_visible or not self.has_frame():
             return QRectF()
-        dpr = self.devicePixelRatioF() or 1.0
         margin = self._strip_margin
         height = self._strip_height
         width = max(1.0, self.width() - 2 * margin)
@@ -336,12 +335,18 @@ class VideoPreviewSurface(QRhiWidget):
         small pane `fit` is below 1 and the range is [fit, 8].
         """
         target = max(self._min_zoom(), min(MAX_ZOOM, float(zoom)))
-        if around is not None and self._zoom > 0:
-            centre = self._frame_rect().center()
-            offset = around.center() - centre
-            ratio = target / self._zoom
-            self._pan[0] = (self._pan[0] + offset.x() * (ratio - 1.0)) / 1.0
-            self._pan[1] = (self._pan[1] + offset.y() * (ratio - 1.0)) / 1.0
+        if around is not None:
+            # Keep the frame point under the cursor where it is: solve for the pan that puts it back after the scale
+            # change. The first version scaled the offset by a factor, which drifted the picture at the edges.
+            width, height = self._image_size()
+            if width and height:
+                rect = self._frame_rect()
+                anchor = around.center()
+                u = (anchor.x() - rect.left()) / max(1e-6, rect.width())
+                v = (anchor.y() - rect.top()) / max(1e-6, rect.height())
+                drawn_w, drawn_h = width * target, height * target
+                self._pan[0] = anchor.x() - u * drawn_w - (self.width() - drawn_w) / 2.0
+                self._pan[1] = anchor.y() - v * drawn_h - (self.height() - drawn_h) / 2.0
         self._zoom = target
         self._zoom_is_fit = False
         self._clamp_pan()
@@ -621,6 +626,14 @@ class VideoPreviewSurface(QRhiWidget):
             self._texture_dirty = False
         updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(self._mvp_floats()))
         updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(list(self._tint)))
+        # The HUD's buffers are filled into the SAME batch, before the pass: `QRhiCommandBuffer::resourceUpdate` must be
+        # called outside a render pass, so building the strip inside one (the first version did) is not allowed.
+        hud_vertices = self._hud_vertices()
+        if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
+            updates.updateDynamicBuffer(self._hud_uniforms, 0, 16,
+                                        _floats([float(self.width()), float(self.height()),
+                                                 float(self.devicePixelRatioF() or 1.0), 0.0]))
+            updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
         command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
         command_buffer.setGraphicsPipeline(self._pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
@@ -628,7 +641,11 @@ class VideoPreviewSurface(QRhiWidget):
         command_buffer.setShaderResources(self._bindings_nearest if sample_at_one else self._bindings)
         command_buffer.setVertexInput(0, [(self._vertices, 0)])
         command_buffer.draw(6)
-        self._draw_hud(command_buffer, target)
+        if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
+            command_buffer.setGraphicsPipeline(self._hud_pipeline)
+            command_buffer.setShaderResources(self._hud_bindings)
+            command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
+            command_buffer.draw(len(hud_vertices) // 6)
         command_buffer.endPass()
 
     def _mvp_floats(self) -> list[float]:
@@ -659,25 +676,6 @@ class VideoPreviewSurface(QRhiWidget):
         colour = QColor(self._clear_colour)
         colour.setAlpha(255)
         return colour
-
-    def _draw_hud(self, command_buffer, target) -> None:
-        strip = self._strip_rect()
-        if strip.isEmpty() or getattr(self, "_hud_pipeline", None) is None:
-            return
-        vertices = self._hud_vertices()
-        if not vertices:
-            return
-        updates = self.rhi().nextResourceUpdateBatch()
-        updates.updateDynamicBuffer(self._hud_uniforms, 0, 16,
-                                    _floats([float(self.width()), float(self.height()),
-                                             float(self.devicePixelRatioF() or 1.0), 0.0]))
-        updates.updateDynamicBuffer(self._hud_buffer, 0, len(vertices) * 4, _floats(vertices))
-        command_buffer.resourceUpdate(updates)
-        command_buffer.setGraphicsPipeline(self._hud_pipeline)
-        command_buffer.setShaderResources(self._hud_bindings)
-        command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
-        command_buffer.draw(len(vertices) // 6)
-        self._hud_dirty = False
 
     def _hud_vertices(self) -> list[float]:
         """Rectangles for the strip, in widget pixels: track, rendered range, playhead, render head, handle."""
