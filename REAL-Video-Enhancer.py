@@ -41,10 +41,12 @@ createDirectory(os.path.join(CWD, "bin"))
 
 
 from src.DownloadModels import DownloadModel
-from src.DownloadDeps import Dependency, Python, DownloadDependencies
+from src.DownloadDeps import Python, DownloadDependencies
 from src.ui.ProcessTab import ProcessTab
 from src.ui.DownloadTab import DownloadTab
 from src.ui.SettingsTab import SettingsTab, Settings
+from src.ui.use_cases import startup as startup_io
+from src.ui.use_cases import models as model_io
 from src.ui.HomeTab import HomeTab
 from src.Backendhandler import BackendHandler
 from src.ModelHandler import totalModels
@@ -134,7 +136,7 @@ class MainWindow(QMainWindow):
 
         log(str(os.environ))
         # setup application
-        FileHandler.createDirectory(TEMP_DOWNLOAD_PATH)
+        startup_io.prepare_temp_directory(TEMP_DOWNLOAD_PATH, FileHandler.createDirectory)
 
         # Assemble the interface: the shell builds the chrome and the five nav pages, and exposes every widget as an
         # attribute of this window - the surface the glue below already binds (`self.label_20`, `self.stackedWidget`).
@@ -205,9 +207,7 @@ class MainWindow(QMainWindow):
 
         start_time = time.time()
         if not IS_INSTALLED:
-            for dep in Dependency.__subclasses__():
-                d = dep()
-                d.download()
+            startup_io.download_missing_dependencies()
         end_time = time.time()
         log("Dependency download time: " + str(end_time - start_time))
         
@@ -215,11 +215,7 @@ class MainWindow(QMainWindow):
         #popupthread.start() 
 
         start_time = time.time()
-        for dep in Dependency.__subclasses__():
-            d = dep()
-            if d.get_if_update_available():
-        #        popupthread.terminate()
-                d.update_if_updates_available()
+        startup_io.update_available_dependencies()
         end_time = time.time()
         log("Dependency update time: " + str(end_time - start_time))
         #try:
@@ -228,9 +224,7 @@ class MainWindow(QMainWindow):
         #    pass
 
         start_time = time.time()
-        self.backends, self.fullOutput = (
-            backendHandler.getAvailableBackends()
-        )
+        self.backends, self.fullOutput = startup_io.available_backends(backendHandler)
         end_time = time.time()
         
 
@@ -248,9 +242,7 @@ class MainWindow(QMainWindow):
             if automaticInstall:
                 self.downloadTab = DownloadTab(parent=self, backends=self.backends, skip_info_popup=True)
                 self.downloadTab.installRecommended()
-                self.backends, self.fullOutput = (
-                    backendHandler.getAvailableBackends()
-                )
+                self.backends, self.fullOutput = startup_io.available_backends(backendHandler)
                 self.anyBackendsInstalled = len(self.backends) > 0
             else:
                 self.processBtn.setEnabled(False) # disable process button if no backends are available
@@ -310,19 +302,10 @@ class MainWindow(QMainWindow):
         log(printOut)
 
         # process the output
-        total_ncnn_gpus = -1
-        total_pytorch_gpus = -1
-        halfPrecisionSupport = False
-        for line in self.fullOutput.lower().split("\n"):
-            if "half precision support:" in line:
-                halfPrecisionSupport = "true" in line
-            if "ncnn gpu " in line:  # this is to grab every line with "GPU "
-                total_ncnn_gpus += 1
-            if "pytorch gpu " in line:
-                total_pytorch_gpus += 1
-
-        total_pytorch_gpus = max(0, total_pytorch_gpus)  # minimum gpu id is 0
-        total_ncnn_gpus = max(0, total_ncnn_gpus)
+        report = startup_io.parse_backend_report(self.fullOutput)
+        halfPrecisionSupport = report.half_precision
+        total_ncnn_gpus = report.ncnn_gpus
+        total_pytorch_gpus = report.pytorch_gpus
 
         if self.anyBackendsInstalled:
             self.processTab = ProcessTab(
@@ -597,25 +580,21 @@ class MainWindow(QMainWindow):
             interpolateDownloadFile = interpolateModels[interpolate][1]
             interpolateModelFile = interpolateModels[interpolate][0]
 
-            dm = DownloadModel(
-                modelFile=interpolateModelFile,
-                downloadModelFile=interpolateDownloadFile,
-            )
             if "sudo" in scene_detect_method:
                 scene_detect_model_file = sceneChangeModels[scene_detect_method][0]
                 scene_detect_download_file = sceneChangeModels[scene_detect_method][1]
-                dm_scene = DownloadModel(
-                    modelFile=scene_detect_model_file,
-                    downloadModelFile=scene_detect_download_file,
-                )
-                if not dm_scene.downloadModel():
+                if not model_io.ensure_models(
+                    [(scene_detect_model_file, scene_detect_download_file)], DownloadModel
+                ):
                     NotificationOverlay(
                         "Unable to download scene detection model, please check your network and try again.",
                         self,
                         timeout=1500,
                     )
                     return 1
-            if not dm.downloadModel():
+            if not model_io.ensure_models(
+                [(interpolateModelFile, interpolateDownloadFile)], DownloadModel
+            ):
                 NotificationOverlay(
                     "Unable to download model, please check your network and try again.",
                     self,
@@ -631,11 +610,9 @@ class MainWindow(QMainWindow):
             upscaleTimes = int(self.upscaleScaleSpinBox.value())
             upscaleModelArch = upscaleModels[upscale][3]
             if upscaleModelArch != "custom":
-                dm = DownloadModel(
-                    modelFile=upscaleModelFile,
-                    downloadModelFile=upscaleDownloadFile,
-                )
-                if not dm.downloadModel():
+                if not model_io.ensure_models(
+                    [(upscaleModelFile, upscaleDownloadFile)], DownloadModel
+                ):
                     NotificationOverlay(
                         "Unable to add to render queue.\nModel can't be downloaded.\nPlease check your network and try again.",
                         self,
@@ -645,11 +622,9 @@ class MainWindow(QMainWindow):
         if deblur:
             deblurModelFile = deblurModels[deblur][0]
             deblurDownloadFile = deblurModels[deblur][1]
-            dm = DownloadModel(
-                modelFile=deblurModelFile,
-                downloadModelFile=deblurDownloadFile,
-            )
-            if not dm.downloadModel():
+            if not model_io.ensure_models(
+                [(deblurModelFile, deblurDownloadFile)], DownloadModel
+            ):
                 NotificationOverlay(
                     "Unable to add to render queue.\nModel can't be downloaded.\nPlease check your network and try again.",
                     self,
@@ -660,11 +635,9 @@ class MainWindow(QMainWindow):
         if denoise:
             denoiseModelFile = denoiseModels[denoise][0]
             denoiseDownloadFile = denoiseModels[denoise][1]
-            dm = DownloadModel(
-                modelFile=denoiseModelFile,
-                downloadModelFile=denoiseDownloadFile,
-            )
-            if not dm.downloadModel():
+            if not model_io.ensure_models(
+                [(denoiseModelFile, denoiseDownloadFile)], DownloadModel
+            ):
                 NotificationOverlay(
                     "Unable to add to render queue.\nModel can't be downloaded.\nPlease check your network and try again.",
                     self,
@@ -674,11 +647,9 @@ class MainWindow(QMainWindow):
         if decompress:
             decompressModelFile = decompressModels[decompress][0]
             decompressDownloadFile = decompressModels[decompress][1]
-            dm = DownloadModel(
-                modelFile=decompressModelFile,
-                downloadModelFile=decompressDownloadFile,
-            )
-            if not dm.downloadModel():
+            if not model_io.ensure_models(
+                [(decompressModelFile, decompressDownloadFile)], DownloadModel
+            ):
                 NotificationOverlay(
                     "Unable to add to render queue.\nModel can't be downloaded.\nPlease check your network and try again.",
                     self,

@@ -40,6 +40,7 @@ from ..Util import (
 )
 from ..DownloadModels import DownloadModel
 from .SettingsTab import Settings
+from .render_command import build_command as build_render_command
 from ..DiscordRPC import DiscordRPC
 from ..ModelHandler import getModels
 from .RenderQueue import RenderOptions
@@ -1002,192 +1003,14 @@ class ProcessTab:
                 preview.setPixmap(roundedPixmap)
 
     def build_command(self, renderOptions: RenderOptions):
-        if (
-            renderOptions.backend == "pytorch (cuda)"
-            or renderOptions.backend == "pytorch (rocm)"
-            or renderOptions.backend == "pytorch (xpu)"
-            or renderOptions.backend == "pytorch (mps)"
-        ):
-            renderOptions.backend = (
-                "pytorch"  # pytorch is the same for both cuda and rocm
-            )
+        """The backend command for one job.
 
-        command = [
-            f"{PYTHON_EXECUTABLE_PATH}",
-            "-W",
-            "ignore",
-            os.path.join(BACKEND_PATH, "rve-backend.py"),
-            "-i",
-            renderOptions.inputFile,
-            "-o",
-            renderOptions.outputPath,
-            "-b",
-            f"{renderOptions.backend}",
-            "--precision",
-            f"{self.settings.settings['precision']}",
-            # the run report is written next to the output, always: it is what makes "it got slower" a
-            # number with a commit and a card (python3 -m harness.ingest <report>)
-            "--report",
-            f"{os.path.splitext(renderOptions.outputPath)[0]}.report.json",
-            "--custom_encoder",
-            f" {renderOptions.encoderCommand} ",
-            "--tensorrt_opt_profile",
-            f"{self.settings.settings['tensorrt_optimization_level']}",
-            "--pause_shared_memory_id",
-            f"{PAUSED_STATE_SHARED_MEMORY_ID}",
-            "--ncnn_gpu_id",
-            f"{self.settings.settings['ncnn_gpu_id']}",
-            "--pytorch_gpu_id",
-            f"{self.settings.settings['pytorch_gpu_id']}",
-            "--cwd",
-            f"{CWD}",
-            "--ffmpeg_path",
-            f"{FFMPEG_PATH}",
-
-        ]
-
-        if renderOptions.upscaleModelFile:
-            modelPath = os.path.join(MODELS_PATH, renderOptions.upscaleModelFile)
-            if renderOptions.upscaleModelArch == "custom":
-                modelPath = os.path.join(
-                    CUSTOM_MODELS_PATH, renderOptions.upscaleModelFile
-                )
-            command += [
-                "--upscale_model",
-                modelPath,
-            ]
-            command += ["--override_upscale_scale", f"{renderOptions.overrideUpscaleScale}"]
-            
-        if renderOptions.tilingEnabled:
-            command += [
-                "--tilesize",
-                f"{renderOptions.tilesize}",
-            ]
-            
-
-        if renderOptions.interpolateModelFile:
-            command += [
-                "--interpolate_model",
-                os.path.join(
-                    MODELS_PATH,
-                    renderOptions.interpolateModelFile,
-                ),
-                "--interpolate_factor",
-                f"{renderOptions.interpolateTimes}",
-            ]
-            if renderOptions.sloMoMode:
-                command += [
-                    "--slomo_mode",
-                ]
-            if renderOptions.dyanmicScaleOpticalFlow:
-                command += [
-                    "--dynamic_scaled_optical_flow",
-                ]
-            if renderOptions.ensemble:
-                command += [
-                    "--ensemble",
-                ]
-        
-        if renderOptions.deblurModelFile:
-            command += [
-                "--extra_restoration_models",
-                os.path.join(
-                    MODELS_PATH,
-                    renderOptions.deblurModelFile,
-                ),
-            ]
-        if renderOptions.denoiseModelFile:
-            command += [
-                "--extra_restoration_models",
-                os.path.join(
-                    MODELS_PATH,
-                    renderOptions.denoiseModelFile,
-                ),
-            ]
-        if renderOptions.decompressModelFile:
-            command += [
-                "--extra_restoration_models",
-                os.path.join(
-                    MODELS_PATH,
-                    renderOptions.decompressModelFile,
-                ),
-            ]
-
-        if renderOptions.isPreview:
-            # The preview file is read WHILE it is written (the pane tail-follows it): the backend writes a fragmented
-            # container with a short GOP for exactly this job, and keeps `+faststart` for real exports.
-            command += ["--preview_render"]
-
-        if self.settings.settings["auto_border_cropping"] == "True":
-            command += [
-                "--border_detect",
-            ]
-
-        if self.settings.settings["dynamic_tensorrt_engine"] == "True":
-            command += [
-                "--tensorrt_dynamic_shapes",
-            ]
-
-        # always explicit, even though "best" is the backend default, and tolerant of an
-        # older settings.txt that predates the key.
-        quality_preset = self.settings.settings.get("quality_preset", "best")
-        if quality_preset not in self.settings.allowedSettings["quality_preset"]:
-            quality_preset = "best"
-        command += [
-            "--quality_preset",
-            f"{quality_preset}",
-        ]
-
-        # the backend defaults to reuse ON; the switch is therefore an opt-out, and it is passed explicitly so
-        # an old settings.txt cannot silently mean something else than what the checkbox shows
-        if self.settings.settings.get("temporal_reuse", "True") == "False":
-            command += ["--no_temporal_reuse"]
-        # "by cel": compare the drawing, not the film (3 px low-pass + the scan's translation compensated, and
-        # the reused frame is moved by that estimate). Passed only when chosen - the backend's default is the
-        # shipped statistic, so an old settings.txt that predates the key cannot mean something else.
-        elif self.settings.settings.get("temporal_reuse_statistic", "mean_abs") == "coarse":
-            command += ["--temporal_reuse_statistic", "coarse"]
-
-        if self.settings.settings["preview_enabled"] == "True":
-            command += [
-                "--preview_shared_memory_id",
-                f"{IMAGE_SHARED_MEMORY_ID}",
-                "--preview_size",
-                f"{PREVIEW_WIDTH}x{PREVIEW_HEIGHT}",
-            ]
-
-        if self.settings.settings["scene_change_detection_enabled"] == "False":
-            command += ["--scene_detect_method", "none"]
-        else:
-            command += [
-                "--scene_detect_method",
-                self.settings.settings["scene_change_detection_method"],
-                "--scene_detect_threshold",
-                self.settings.settings["scene_change_detection_threshold"],
-            ]
-            if renderOptions.sceneChangeModelFile:
-                command += [
-                    "--scene_detect_model",
-                    os.path.join(
-                        MODELS_PATH,
-                        renderOptions.sceneChangeModelFile,
-                    ),
-                ]
-
-        if renderOptions.benchmarkMode:
-            command += ["--benchmark"]
-
-        if self.settings.settings["uhd_mode"] == "True":
-            if renderOptions.videoWidth > 1920 or renderOptions.videoHeight > 1080:
-                command += ["--UHD_mode"]
-                log("UHD mode enabled")
-
-        if self.isOverwrite:
-            command += ["--overwrite"]
-
-        if renderOptions.hdrMode:
-            command += ["--hdr_mode"]
-
-
-
-        return command
+        The assembly lives in `src/ui/render_command.py` (P3 of the seam plan): it is a function of the options and the
+        settings, so the command can be asked for without a window. This method only supplies this tab's two pieces of
+        state - the settings store and the overwrite answer - and nothing about the string changed.
+        """
+        return build_render_command(
+            renderOptions,
+            self.settings,
+            is_overwrite=self.isOverwrite,
+        )
