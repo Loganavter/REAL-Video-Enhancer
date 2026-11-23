@@ -289,33 +289,56 @@ class MainWindowShell:
                     self.fit()
                 return False
 
-            def fit(self) -> None:
+            def fit(self, only=None) -> None:
+                """Give every page the box it gets and lay it out for that box, synchronously.
+
+                ``only`` limits the settle pass to one page (the one a switch just showed): its geometry was set by the
+                stacked layout, but the LayoutRequest pass that would lay its children out for that geometry is still
+                queued - one frame with children sized for the box the page had *before* the switch. Measured on the
+                settings page before this hook: its top tab host sat at 1000x766 for one turn and became 1008x777 only
+                on the next event-loop pass. The settle is ``deep`` because the scroll area's content widget was already
+                the final size, so nothing resized it and its own layout never re-ran (2026-11-23).
+                """
                 if _FIT_DISABLED:
                     return
                 stack = window.stackedWidget
-                size = stack.size()
-                if size.isEmpty():
+                # The page's box is the stack MINUS its page inset (`setContentsMargins(PAGE_INSET_H, PAGE_INSET_V, ...)`),
+                # not the stack's outer rect: the outer size is 2*PAGE_INSET_H wider and 2*PAGE_INSET_V taller than the
+                # box `QStackedLayout` actually gives a page. Laying every page out for the outer size (and leaving it
+                # where it was) meant the first painted frame of a page carried content laid out for a box 20 px wider
+                # and 10 px taller than the page it sits in, and Qt's own layout pass then corrected it - the owner's
+                # "content of every new page jumps up 5-10 px to the right place as soon as I touch it" (2026-11-23).
+                # `contentsRect()` is exactly the rect the stacked layout will apply, so the settle pass below lays the
+                # page out for its final box and the first frame is already right.
+                box = stack.contentsRect()
+                if box.isEmpty():
                     return
                 for index in range(stack.count()):
                     page = stack.widget(index)
                     if page is None:
                         continue
-                    if page.size() != size:
-                        page.resize(size)
-                    if _SETTLE_DISABLED:
+                    if page.geometry() != box:
+                        page.setGeometry(box)
+                    if _SETTLE_DISABLED or page is not (only if only is not None else stack.currentWidget()):
                         continue
                     try:
                         from sli_ui_toolkit.ui.layout_settle import settle_layout
                     except Exception:
                         continue
                     try:
-                        settle_layout(page)
+                        settle_layout(page, deep=True)
                     except Exception:
                         pass
 
         _page_fit = _PageStackFit(window)
         _page_fit.fit()
         window.stackedWidget.installEventFilter(_page_fit)
+        # A page switch is not a Resize/Show of the stack, so the filter above never sees it: the newly current page
+        # would keep its children laid out for the box it had while hidden until the queued layout request ran. Settle
+        # the page that was just shown, in the same turn the switch happens.
+        window.stackedWidget.currentChanged.connect(
+            lambda index: _page_fit.fit(only=window.stackedWidget.widget(index))
+        )
 
         window._page_stack_fit = _page_fit
         # One place for the control type size: a page's 12 pt container font would otherwise cascade 16 px into every
