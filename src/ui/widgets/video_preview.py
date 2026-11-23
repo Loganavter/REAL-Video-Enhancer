@@ -108,6 +108,24 @@ class VideoPreviewSurface(QRhiWidget):
         # changed in the hover test).
         self.setMouseTracking(True)
 
+    def setAutoFillBackground(self, enabled: bool) -> None:  # noqa: N802 - Qt spelling
+        """A no-op, on purpose.
+
+        `qrhi-gotchas.md` §"QRhiWidget autofill": autofill's palette clear fights RHI texture compositing, so a widget
+        that carries it shows a stale frame - BlinkTable's canvas answers the same call with `pass`. The pane's own
+        colour is the opaque clear inside the RHI pass, never the palette.
+        """
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        """Re-post a paint after being shown: a widget that was hidden may come back with an undrawn target."""
+        super().showEvent(event)
+        self.update()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        """Ask for a repaint after a resize - `initialize()` has just been called with a new target size."""
+        super().resizeEvent(event)
+        self.update()
+
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt spelling
         """A floor for the pane, in design px through the toolkit scale.
 
@@ -409,8 +427,27 @@ class VideoPreviewSurface(QRhiWidget):
     # -- RHI ---------------------------------------------------------------
 
     def initialize(self, command_buffer) -> None:  # noqa: N802 - Qt spelling
-        self._release()
+        """Build the resource set - but not on a mere resize.
+
+        Qt calls `initialize()`/`releaseResources()` on EVERY resize (the widget's backing target is reallocated at the
+        new pixel size), not only on a real context change - the framework's `qrhi-gotchas.md` §"Canvas resize tears down
+        the whole tile array on every resize" measured it at ~1 s per resize in BlinkTable. Releasing here unconditionally
+        is worse than slow for a still picture: the frame texture is destroyed with it, the next `render()` builds a fresh
+        texture and only uploads when `_texture_dirty` is set - which a resize does not set - so the pane draws an
+        undrawn texture until the NEXT frame. A finished or paused render never sends one: the pane stays see-through
+        after any window resize or sibling repaint. That is the "the preview turns transparent at any sneeze" defect.
+        """
         rhi = self.rhi()
+        same_context = rhi is getattr(self, "_rhi", None) and getattr(self, "_pipeline", None) is not None
+        if same_context:
+            # Same RHI, just a new target size: keep every resource and re-upload the frame we already hold, so the
+            # pane shows the picture again on the very next paint instead of an empty texture.
+            self._rhi = rhi
+            if self._frame is not None:
+                self._texture_dirty = True
+                self.update()
+            return
+        self._release()
         self._rhi = rhi
         if self._frame is None:
             # Nothing to draw yet. Building a 1x1 texture and then resizing it forces an SRB and pipeline rebuild in
@@ -601,11 +638,11 @@ class VideoPreviewSurface(QRhiWidget):
         if target is None:
             return
         if self._frame is None:
-            # Nothing to show yet: one OPAQUE clear, so the pane reads as an empty plate rather than a black hole.
-            if not getattr(self, "_cleared_empty", False):
-                self._cleared_empty = True
-                command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0))
-                command_buffer.endPass()
+            # Nothing to show yet: an OPAQUE clear on EVERY render, so the pane reads as an empty plate rather than a
+            # hole. It used to clear once (`_cleared_empty`) - a latch that is false on the next paint, which leaves the
+            # region undrawn after any repaint and shows the window behind it (the "transparent at any sneeze" half).
+            command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0))
+            command_buffer.endPass()
             return
         if getattr(self, "_deferred", False) or getattr(self, "_rhi", None) is None:
             self._release()
