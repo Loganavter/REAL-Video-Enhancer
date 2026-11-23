@@ -1,11 +1,11 @@
 #version 440
 
-// HUD geometry (strip, playhead, handle, badge): flat coloured rectangles in pixel space. The CPU side converts pixels to
-// clip space with the widget size as one uniform, so a resize never rebuilds a vertex buffer.
-layout(location = 0) in vec4 rect_px;     // x, y, w, h in device pixels
+// HUD geometry: one vertex buffer of coloured triangles in widget pixels. No instancing and no per-item uniform - the
+// strip is a handful of rectangles, and one buffer upload per change is cheaper than a draw call per rectangle.
+layout(location = 0) in vec2 pos;      // device pixels, origin top-left
+layout(location = 1) in vec4 colour;   // straight alpha
 
-layout(location = 0) out vec2 v_local;    // 0..1 inside the rect
-layout(location = 1) flat out vec4 v_rect;
+layout(location = 0) out vec4 v_colour;
 
 layout(std140, binding = 0) uniform buf {
     vec4 viewport;   // width, height, devicePixelRatio, 0
@@ -13,10 +13,7 @@ layout(std140, binding = 0) uniform buf {
 
 void main()
 {
-    vec2 corner = vec2(float(gl_VertexIndex & 1), float((gl_VertexIndex >> 1) & 1));
-    vec2 px = rect_px.xy + corner * rect_px.zw;
-    vec2 clip = px / ubuf.viewport.xy * 2.0 - 1.0;
+    vec2 clip = pos / ubuf.viewport.xy * 2.0 - 1.0;
     gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
-    v_local = corner;
-    v_rect = rect_px;
+    v_colour = colour;
 }

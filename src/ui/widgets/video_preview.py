@@ -21,7 +21,7 @@ import os
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QImage,
@@ -71,6 +71,19 @@ class VideoPreviewSurface(QRhiWidget):
         self._pan = [0.0, 0.0]
         #: straight-alpha multiply tint; (1,1,1,0.55) dims a stale frame while a seek is in flight
         self._tint = (1.0, 1.0, 1.0, 1.0)
+        #: (rendered, total, playhead, duration) - the two time bases the plan keeps apart. `total`/`duration` of 0
+        #: hide their marker; the strip stays visible as long as a frame is shown.
+        self._progress = (0.0, 0.0, 0.0, 0.0)
+        self._strip_visible = True
+        self._hud_dirty = True
+        self._scrubbing = False
+        self._panning = False
+        self._pan_anchor = QPointF()
+        self._showing_original = False
+        #: strip geometry in design px; the widget scales it with the device pixel ratio at paint time
+        self._strip_height = 6
+        self._strip_margin = 10
+        self._handle_radius = 7
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt spelling
@@ -105,6 +118,108 @@ class VideoPreviewSurface(QRhiWidget):
     def set_tint(self, rgba: tuple[float, float, float, float]) -> None:
         self._tint = tuple(float(part) for part in rgba)
         self.update()
+
+    def set_progress(self, rendered: float, total: float, playhead: float = 0.0,
+                     duration: float = 0.0) -> None:
+        """Two markers, two bases: how much the renderer has produced, and where playback stands.
+
+        `rendered/total` is the render's progress (live: frames or seconds produced so far); `playhead/duration` is
+        media time. Either pair with a zero denominator hides its marker - the strip stays, the marker does not
+        pretend to be at 0%.
+        """
+        self._progress = (float(rendered), float(total), float(playhead), float(duration))
+        self._hud_dirty = True
+        self.update()
+
+    def set_strip_visible(self, visible: bool) -> None:
+        self._strip_visible = bool(visible)
+        self._hud_dirty = True
+        self.update()
+
+    seekRequested = Signal(float)   # fraction 0..1 of the strip
+    zoomChanged = Signal(float)     # the new zoom factor
+
+    # -- interaction -----------------------------------------------------
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        delta = event.angleDelta().y()
+        if not delta:
+            return
+        factor = 1.15 if delta > 0 else 1 / 1.15
+        self.set_zoom(self._zoom * factor, around=QRectF(event.position(), QSize(1, 1)))
+        self.zoomChanged.emit(self._zoom)
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        position = event.position()
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = True
+            self._pan_anchor = position
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._strip_visible and self._strip_rect().contains(position):
+                self._scrubbing = True
+                self.seekRequested.emit(self._fraction_at(position.x()))
+                event.accept()
+                return
+            if self._original is not None:
+                self._showing_original = True
+                self.update()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        position = event.position()
+        if self._scrubbing:
+            self.seekRequested.emit(self._fraction_at(position.x()))
+            event.accept()
+            return
+        if self._panning:
+            delta = position - self._pan_anchor
+            self._pan_anchor = position
+            self.pan_by(delta.x(), delta.y())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
+            self._panning = False
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._scrubbing = False
+            if self._showing_original:
+                self._showing_original = False
+                self.update()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        self.reset_view()
+        self.zoomChanged.emit(self._zoom)
+        event.accept()
+
+    # -- strip geometry ---------------------------------------------------
+
+    def _strip_rect(self) -> QRectF:
+        if not self._strip_visible or not self.has_frame():
+            return QRectF()
+        dpr = self.devicePixelRatioF() or 1.0
+        margin = self._strip_margin
+        height = self._strip_height
+        width = max(1.0, self.width() - 2 * margin)
+        top = self.height() - margin - height
+        return QRectF(margin, top, width, height)
+
+    def _fraction_at(self, x: float) -> float:
+        rect = self._strip_rect()
+        if rect.width() <= 0:
+            return 0.0
+        return max(0.0, min(1.0, (x - rect.left()) / rect.width()))
 
     # -- view ------------------------------------------------------------
 
@@ -237,6 +352,46 @@ class VideoPreviewSurface(QRhiWidget):
         command_buffer.resourceUpdate(updates)
 
         self._build_bindings()
+
+        # HUD: its own 16-byte viewport uniform and a dynamic vertex buffer (rects are rebuilt only when they change).
+        self._hud_uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer, 16)
+        self._hud_uniforms.create()
+        self._hud_capacity = 64 * 6 * 6 * 4          # 64 rectangles x 6 vertices x 6 floats
+        self._hud_buffer = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.VertexBuffer,
+                                         self._hud_capacity)
+        self._hud_buffer.create()
+        self._hud_bindings = rhi.newShaderResourceBindings()
+        self._hud_bindings.setBindings([
+            QRhiShaderResourceBinding.uniformBuffer(0, QRhiShaderResourceBinding.StageFlag.VertexStage,
+                                                    self._hud_uniforms),
+        ])
+        self._hud_bindings.create()
+        hud_layout = QRhiVertexInputLayout()
+        hud_layout.setBindings([QRhiVertexInputBinding(6 * 4)])
+        hud_layout.setAttributes([
+            QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute.Format.Float2, 0),
+            QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute.Format.Float4, 2 * 4),
+        ])
+        self._hud_pipeline = rhi.newGraphicsPipeline()
+        self._hud_pipeline.setShaderStages([
+            QRhiShaderStage(QRhiShaderStage.Type.Vertex, _shader("hud.vert.qsb")),
+            QRhiShaderStage(QRhiShaderStage.Type.Fragment, _shader("hud.frag.qsb")),
+        ])
+        self._hud_pipeline.setVertexInputLayout(hud_layout)
+        self._hud_pipeline.setShaderResourceBindings(self._hud_bindings)
+        self._hud_pipeline.setRenderPassDescriptor(self.renderTarget().renderPassDescriptor())
+        self._hud_pipeline.setDepthTest(False)
+        self._hud_pipeline.setDepthWrite(False)
+        hud_blend = QRhiGraphicsPipeline.TargetBlend()
+        hud_blend.enable = True
+        hud_blend.srcColor = QRhiGraphicsPipeline.BlendFactor.SrcAlpha
+        hud_blend.dstColor = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
+        hud_blend.srcAlpha = QRhiGraphicsPipeline.BlendFactor.One
+        hud_blend.dstAlpha = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
+        self._hud_pipeline.setTargetBlends([hud_blend])
+        self._hud_pipeline.create()
+        self._hud_dirty = True
+
         self._deferred = False
         self._texture_dirty = self._frame is not None
         self._pipeline = None
@@ -313,7 +468,8 @@ class VideoPreviewSurface(QRhiWidget):
 
     def _release(self) -> None:
         for name in ("_pipeline", "_bindings", "_bindings_nearest", "_vertices", "_uniforms",
-                     "_sampler_nearest", "_sampler_linear", "_texture"):
+                     "_sampler_nearest", "_sampler_linear", "_texture",
+                     "_hud_pipeline", "_hud_bindings", "_hud_buffer", "_hud_uniforms"):
             item = getattr(self, name, None)
             if item is not None:
                 try:
@@ -354,6 +510,7 @@ class VideoPreviewSurface(QRhiWidget):
         command_buffer.setShaderResources(self._bindings_nearest if sample_at_one else self._bindings)
         command_buffer.setVertexInput(0, [(self._vertices, 0)])
         command_buffer.draw(6)
+        self._draw_hud(command_buffer, target)
         command_buffer.endPass()
 
     def _mvp_floats(self) -> list[float]:
@@ -377,6 +534,56 @@ class VideoPreviewSurface(QRhiWidget):
             0.0, 0.0, 1.0, 0.0,
             2.0 * cx / view.width() - 1.0, 1.0 - 2.0 * cy / view.height(), 0.0, 1.0,
         ]
+
+    def _draw_hud(self, command_buffer, target) -> None:
+        strip = self._strip_rect()
+        if strip.isEmpty() or getattr(self, "_hud_pipeline", None) is None:
+            return
+        vertices = self._hud_vertices()
+        if not vertices:
+            return
+        updates = self.rhi().nextResourceUpdateBatch()
+        updates.updateDynamicBuffer(self._hud_uniforms, 0, 16,
+                                    _floats([float(self.width()), float(self.height()),
+                                             float(self.devicePixelRatioF() or 1.0), 0.0]))
+        updates.updateDynamicBuffer(self._hud_buffer, 0, len(vertices) * 4, _floats(vertices))
+        command_buffer.resourceUpdate(updates)
+        command_buffer.setGraphicsPipeline(self._hud_pipeline)
+        command_buffer.setShaderResources(self._hud_bindings)
+        command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
+        command_buffer.draw(len(vertices) // 6)
+        self._hud_dirty = False
+
+    def _hud_vertices(self) -> list[float]:
+        """Rectangles for the strip, in widget pixels: track, rendered range, playhead, render head, handle."""
+        strip = self._strip_rect()
+        if strip.isEmpty():
+            return []
+        rendered, total, playhead, duration = self._progress
+        rects: list[tuple[float, float, float, float, tuple[float, float, float, float]]] = [
+            (strip.left(), strip.top(), strip.width(), strip.height(), (1.0, 1.0, 1.0, 0.16)),
+        ]
+        if total > 0:
+            filled = max(0.0, min(1.0, rendered / total))
+            if filled > 0:
+                rects.append((strip.left(), strip.top(), strip.width() * filled, strip.height(),
+                              (0.35, 0.66, 1.0, 0.85)))
+            # the render head: a small tick at the produced edge, distinguishable from the playhead below
+            x = strip.left() + strip.width() * filled
+            rects.append((x - 1.0, strip.top() - 3.0, 2.0, strip.height() + 6.0, (1.0, 1.0, 1.0, 0.55)))
+        if duration > 0:
+            fraction = max(0.0, min(1.0, playhead / duration))
+            x = strip.left() + strip.width() * fraction
+            rects.append((x - 1.0, strip.top() - 5.0, 2.0, strip.height() + 10.0, (1.0, 1.0, 1.0, 0.95)))
+            handle = self._handle_radius
+            rects.append((x - handle, strip.top() - 6.0 - handle, handle * 2.0, handle * 2.0,
+                          (1.0, 1.0, 1.0, 0.95)))
+        vertices: list[float] = []
+        for x, y, w, h, colour in rects:
+            corners = [(x, y), (x + w, y), (x, y + h), (x + w, y), (x + w, y + h), (x, y + h)]
+            for cx, cy in corners:
+                vertices.extend([cx, cy, *colour])
+        return vertices
 
     def grabFrame(self) -> QImage:  # noqa: N802 - Qt spelling is `grabFramebuffer`, this is the plan's name
         return self.grabFramebuffer()
