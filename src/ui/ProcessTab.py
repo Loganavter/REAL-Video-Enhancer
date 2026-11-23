@@ -190,9 +190,36 @@ class ProcessTab:
         )
         self.page_handles.general.interpolateModelComboBox.setCurrentIndex(len(list(interpolateModels.keys()))-1)
         self.page_handles.general.upscaleModelComboBox.addItems(list(upscaleModels.keys()))
+        # The first entry is not a default, it is an accident of the file listing: with a 4x model on top, a 2x request
+        # ran the 4x forward pass and downscaled its 5760x4320 output - 668.7 ms/frame against 75.2 ms/frame for the
+        # installed 2x model on the same clip (owner, 2026-11-23: "4x SPAN model использовал бы futsuu"). A model whose
+        # own scale is the requested one costs a fraction and produces the same picture at that scale.
+        self.prefer_scale_matched_model()
         self.page_handles.general.deblurModelComboBox.addItems(list(deblurModels.keys()))
         self.page_handles.general.denoiseModelComboBox.addItems(list(denoiseModels.keys()))
         self.page_handles.general.decompressModelComboBox.addItems(list(decompressModels.keys()))
+    def prefer_scale_matched_model(self) -> None:
+        """Select the first upscale model whose own scale IS the requested one (a default, not a policy).
+
+        Only the default: once the user picks a model, nothing here runs again until the backend changes - switching
+        backends rebuilds the list and the old choice is gone anyway.
+        """
+        import re
+
+        combo = self.page_handles.general.upscaleModelComboBox
+        try:
+            wanted = int(round(float(self.page_handles.general.upscaleScaleSpinBox.value())))
+        except Exception:
+            return
+        if combo.count() == 0 or wanted < 2:
+            return
+            return
+        for index in range(combo.count()):
+            match = re.match(r"\s*(\d+)x", combo.itemText(index))
+            if match and int(match.group(1)) == wanted:
+                combo.setCurrentIndex(index)
+                return
+
     def onTilingSwitch(self):
         if self.page_handles.advanced.tilingCheckBox.isChecked():
             self.page_handles.advanced.tileSizeContainer.setVisible(True)

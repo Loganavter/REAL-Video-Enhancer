@@ -703,7 +703,11 @@ class MainWindow(QMainWindow):
             interpolateModelFile=interpolateModelFile,
             sceneChangeModelFile=scene_detect_model_file,
             hdrMode=hdrmode,
-            overrideUpscaleScale=upscaleTimes,
+            # `--override_upscale_scale` is the "run the model once, then resize to this multiplier" switch. When the
+            # request IS the model's own scale there is nothing to override, and passing it anyway made the backend
+            # resize every frame to the size it already had (a full 2880x2160 10-bit copy in and out). The backend
+            # already falls back to the model's scale when this is None.
+            overrideUpscaleScale=(upscaleTimes if upscaleTimes != modelScale else None),
             encoderCommand=self.page_handles.encoder.EncoderCommand.text(),
         )
 

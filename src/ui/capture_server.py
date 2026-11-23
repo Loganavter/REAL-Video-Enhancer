@@ -549,7 +549,7 @@ def install(window) -> None:
                     report["strip"] = [round(rect.x()), round(rect.y()), round(rect.width()), round(rect.height())]
                 except Exception:
                     pass
-        for attr in ("count", "currentRow", "selectedRows", "selectedCount"):
+        for attr in ("count", "currentRow", "selectedRows", "selectedCount", "value", "text"):
             getter = getattr(target, attr, None)
             if callable(getter):
                 try:
@@ -758,9 +758,13 @@ def install(window) -> None:
     def select_a_model() -> None:
         """The app refuses to queue without one: "Please select at least one model!" (REAL-Video-Enhancer.py:537).
 
-        The gate enables upscale (the model list is populated from the models directory) and picks the first model,
-        because a queue that cannot be filled would make the rest of the gate measure nothing.
+        The gate enables upscale and picks a model whose OWN scale is the one the GUI asks for (`upscaleScaleSpinBox`),
+        not simply the first entry. The first entry here is a 4x SPAN, and a 2x request then ran it and downscaled its
+        5760x4320 output: measured 668.7 ms/frame against 75.2 ms/frame for the installed 2x model on the same
+        1440x1080 clip (8.9x, owner: "4x SPAN model использовал бы futsuu"). A model's scale is in its name (`2x...`).
         """
+        import re as _re
+
         general = window.page_handles.general
         boxes = (general.interpolateCheckBox, general.upscaleCheckBox, general.deblurCheckBox,
                  general.denoiseCheckBox, general.decompressCheckBox)
@@ -768,8 +772,23 @@ def install(window) -> None:
             return
         general.upscaleCheckBox.setChecked(True)
         combo = general.upscaleModelComboBox
-        if combo.currentIndex() < 0 and combo.count() > 0:
-            combo.setCurrentIndex(0)
+        if combo.count() == 0:
+            return
+        if combo.currentIndex() >= 0:
+            return
+        wanted = None
+        try:
+            wanted = int(round(float(general.upscaleScaleSpinBox.value())))
+        except Exception:
+            pass
+        best = 0
+        if wanted and wanted >= 2:
+            for index in range(combo.count()):
+                match = _re.match(r"\s*(\d+)x", combo.itemText(index))
+                if match and int(match.group(1)) == wanted:
+                    best = index
+                    break
+        combo.setCurrentIndex(best)
 
     def render(video: str) -> None:
         """Queue and START a render through the same controls the user presses.
@@ -889,6 +908,10 @@ def install(window) -> None:
         """
         from src.constants import TEMP_DOWNLOAD_PATH
 
+        model_hint = None
+        if "#model=" in video:
+            video, _, model_hint = video.partition("#model=")
+            model_hint = model_hint.strip() or None
         result = {"stamp": _stamp(), "kind": "preview", "video": video, "started": False, "finished": False,
                   "seconds": 0.0, "output": None, "pane": None, "output_bytes": None, "error": None}
         # Bind the answer to THIS request now: `_finish` publishes under the id it is given, and the verb answers
@@ -985,6 +1008,20 @@ def install(window) -> None:
         def press_preview() -> None:
             select_a_backend()
             select_a_model()
+            if model_hint:
+                # `preview:<clip>#model=futsuu`: the model a measurement runs with is part of the measurement. The
+                # same clip and resolution gave 75.2 ms/frame on a 2x Anime model and 621.6 ms/frame on a 2x
+                # animation model (measured 2026-11-23) - an unnamed model makes every number unrepeatable.
+                combo = window.page_handles.general.upscaleModelComboBox
+                for index in range(combo.count()):
+                    if model_hint.lower() in combo.itemText(index).lower():
+                        combo.setCurrentIndex(index)
+                        result["model"] = combo.itemText(index)
+                        break
+                else:
+                    result["model_hint_missed"] = model_hint
+            elif getattr(window.page_handles.general, "upscaleModelComboBox", None) is not None:
+                result["model"] = window.page_handles.general.upscaleModelComboBox.currentText()
             # The button lives on the processing page and so does the pane: pressing it from another page would start a
             # render nobody can see (and make the strip unclickable for a live seek proof).
             try:

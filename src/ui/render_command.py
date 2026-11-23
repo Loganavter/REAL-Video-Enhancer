@@ -140,7 +140,9 @@ def build_command(render_options, settings, is_overwrite: bool = False, paths: R
             "--upscale_model",
             modelPath,
         ]
-        command += ["--override_upscale_scale", f"{render_options.overrideUpscaleScale}"]
+        if render_options.overrideUpscaleScale:
+            # None means "the model's own scale is the request": no resize stage, and no flag for the backend to parse.
+            command += ["--override_upscale_scale", f"{render_options.overrideUpscaleScale}"]
 
     if render_options.tilingEnabled:
         command += [
