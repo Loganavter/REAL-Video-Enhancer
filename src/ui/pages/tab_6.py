@@ -17,8 +17,10 @@ import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `ComboBox` where it had a
 # `QComboBox`, `CustomLineEdit` where it had a `QLineEdit`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import ComboBox, CustomLineEdit, OverlayScrollArea, SurfacePanel, Text
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
+from src.ui.pages.scale_follower import ScaleFollower
 from src.ui.pages.handles import EncoderHandles
 from src.ui import i18n
 
@@ -27,9 +29,16 @@ from src.ui import i18n
 #: to come from the compatibility layer (`STOCK_SCROLLBAR_WIDTH`), which this page no longer imports.
 STOCK_SCROLLBAR_WIDTH = 8
 
+#: The encoder-options log row in DESIGN px: the header band the group title and the command row live in, and the row
+#: itself (the field's line height plus its frame). Both are host geometry, so they take the UI factor; the field's
+#: own hint is a toolkit metric and already scales with its font.
+ENCODER_HEADER_MAX_HEIGHT_PX = 100
+ENCODER_ROW_HEIGHT_PX = 50
+
 #: The encoder-command field's floor: about 30 characters, so the field stays usable in a narrow column and the page
 #: never has to honour a floor it cannot fit (`harness/tests/test_page_overflow.py`). It used to be 900 px - wider than
-#: the column itself - and the field was drawn over the preview pane (owner, 2026-11-24).
+#: the column itself - and the field was drawn over the preview pane (owner, 2026-11-24). A design value: the floor
+#: grows with the row it guards, so a raised factor does not leave it narrower than the text it must show.
 ENCODER_COMMAND_MIN_WIDTH = 200
 
 
@@ -112,7 +121,7 @@ class Tab6Page:
         sizePolicy9.setVerticalStretch(0)
         sizePolicy9.setHeightForWidth(self.widget_33.sizePolicy().hasHeightForWidth())
         self.widget_33.setSizePolicy(sizePolicy9)
-        self.widget_33.setMaximumSize(QSize(16777215, 100))
+        self.widget_33.setMaximumSize(QSize(16777215, scaled_px(ENCODER_HEADER_MAX_HEIGHT_PX)))
         self.verticalLayout_9 = QVBoxLayout(self.widget_33)
         self.verticalLayout_9.setObjectName(u"verticalLayout_9")
         self.verticalLayout_9.setContentsMargins(0, 0, 0, 0)
@@ -129,8 +138,8 @@ class Tab6Page:
         self.scrollArea_6.setObjectName(u"scrollArea_6")
         sizePolicy7.setHeightForWidth(self.scrollArea_6.sizePolicy().hasHeightForWidth())
         self.scrollArea_6.setSizePolicy(sizePolicy7)
-        self.scrollArea_6.setMinimumSize(QSize(0, 50))
-        self.scrollArea_6.setMaximumSize(QSize(16777215, 50))
+        self.scrollArea_6.setMinimumSize(QSize(0, scaled_px(ENCODER_ROW_HEIGHT_PX)))
+        self.scrollArea_6.setMaximumSize(QSize(16777215, scaled_px(ENCODER_ROW_HEIGHT_PX)))
         # The overlay area owns both affordances; a native bar would sit on top of its own and steal viewport space.
         self.scrollArea_6.setWidgetResizable(True)
         self.scrollAreaWidgetContents_6 = QWidget()
@@ -147,7 +156,7 @@ class Tab6Page:
         # `harness/tests/test_page_overflow.py`). The tooltip carries the whole command, because the field shows only
         # the part that fits.
         self.EncoderCommand.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.EncoderCommand.setMinimumWidth(ENCODER_COMMAND_MIN_WIDTH)
+        self.EncoderCommand.setMinimumWidth(scaled_px(ENCODER_COMMAND_MIN_WIDTH))
         self._encoder_command_tooltip = _EncoderCommandTooltip(self.EncoderCommand, "")
         self.horizontalLayout_54.addWidget(self.EncoderCommand)
         self.scrollArea_6.setWidget(self.scrollAreaWidgetContents_6)
@@ -368,7 +377,24 @@ class Tab6Page:
         # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
         i18n.bind_page(self, self.tab_6)
         self.retranslate()
+        # The log row is host geometry: re-stated at the factor in force now and on every later change, so the header
+        # band and the command row grow with the text inside them instead of clipping it.
+        self._log_row_scale = ScaleFollower(self.tab_6, self._apply_log_row_geometry)
         return self.tab_6
+
+    def _apply_log_row_geometry(self) -> None:
+        """State the encoder log row's boxes at the factor in force now (design px through `scaled_px`).
+
+        The header band is the group title plus the command row; the row's height is the field's line height plus its
+        frame; the field's floor is stated with it so a raised factor does not leave the floor narrower than the
+        text it must show. All three are host geometry, so all three take the factor once.
+        """
+        header = scaled_px(ENCODER_HEADER_MAX_HEIGHT_PX)
+        row = scaled_px(ENCODER_ROW_HEIGHT_PX)
+        self.widget_33.setMaximumSize(QSize(16777215, header))
+        self.scrollArea_6.setMinimumSize(QSize(0, row))
+        self.scrollArea_6.setMaximumSize(QSize(16777215, row))
+        self.EncoderCommand.setMinimumWidth(scaled_px(ENCODER_COMMAND_MIN_WIDTH))
 
     def retranslate(self, language: str | None = None) -> None:
         self._encoder_command_tooltip.set_help(QCoreApplication.translate(

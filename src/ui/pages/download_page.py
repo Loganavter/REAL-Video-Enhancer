@@ -18,10 +18,23 @@ import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `Button` for a `QPushButton`
 # and `ComboBox` for a `QComboBox`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import Button, ComboBox, OverlayScrollArea, SurfacePanel, Text
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, DISPLAY_PT
+from src.ui.pages.scale_follower import ScaleFollower
 from src.ui.pages.handles import DownloadPageHandles
 from src.ui import i18n
+
+#: The icon buttons' design box and glyph, in DESIGN px (owner, 2026-11-24): the box grows with the UI factor, the
+#: glyph is resolved by the toolkit at paint time (`Button.setIconSize` stores a design value and the style bridge
+#: multiplies it exactly once) - so this page must NOT pre-scale the icon, only the box around it.
+ICON_BUTTON_MAX_WIDTH_PX = 50
+ICON_BUTTON_MAX_HEIGHT_PX = 45
+ICON_BUTTON_ICON_PX = 30
+
+#: The content inset every button on this page states. It is design px the toolkit scales at use time, so it is
+#: named once here and passed to `Button(content_padding=...)` unscaled.
+ICON_BUTTON_CONTENT_PADDING = (10, 5, 10, 5)
 
 # Layer B3 (2026-11-21): the two widget classes this page no longer builds stock. `OverlayScrollArea` is the
 # `QScrollArea` counterpart whose surface is transparent - the page's rule is `QScrollArea{background:transparent}`,
@@ -37,6 +50,10 @@ class DownloadPagePage:
 
     def build(self):
         """Build the widget tree and return the page root."""
+        # One design box, resolved once at construction: `scaled_px` runs HERE and again on `scale_changed`, never at
+        # import (an import-time number would freeze the factor the process happened to start with).
+        icon_box = QSize(scaled_px(ICON_BUTTON_MAX_WIDTH_PX), scaled_px(ICON_BUTTON_MAX_HEIGHT_PX))
+        icon_size = QSize(ICON_BUTTON_ICON_PX, ICON_BUTTON_ICON_PX)
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -73,7 +90,7 @@ class DownloadPagePage:
         self.gridLayout_10.setObjectName(u"gridLayout_10")
         self.selectNCNNCustomModel = Button(parent=self.widget_10, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.selectNCNNCustomModel.setObjectName(u"selectNCNNCustomModel")
         self.selectNCNNCustomModel.setEnabled(True)
         # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
@@ -84,7 +101,7 @@ class DownloadPagePage:
         self.gridLayout_10.addWidget(self.selectNCNNCustomModel, 1, 0, 1, 1)
         self.selectPytorchCustomModel = Button(parent=self.widget_10, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.selectPytorchCustomModel.setObjectName(u"selectPytorchCustomModel")
         self.selectPytorchCustomModel.setEnabled(True)
         self.selectPytorchCustomModel.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
@@ -108,15 +125,15 @@ class DownloadPagePage:
         self.horizontalLayout_49.setObjectName(u"horizontalLayout_49")
         self.uninstallAppBtn = Button(parent=self.widget_31, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.uninstallAppBtn.setObjectName(u"uninstallAppBtn")
         sizePolicy5.setHeightForWidth(self.uninstallAppBtn.sizePolicy().hasHeightForWidth())
         self.uninstallAppBtn.setSizePolicy(sizePolicy5)
-        self.uninstallAppBtn.setMaximumSize(QSize(50, 45))
+        self.uninstallAppBtn.setMaximumSize(icon_box)
         icon6 = QIcon()
         icon6.addFile(u":/icons/icons/trash-2.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.uninstallAppBtn.setIcon(icon6)
-        self.uninstallAppBtn.setIconSize(QSize(30, 30))
+        self.uninstallAppBtn.setIconSize(icon_size)
         self.horizontalLayout_49.addWidget(self.uninstallAppBtn)
         self.label_67 = Text(parent=self.widget_31)
         self.label_67.setObjectName(u"label_67")
@@ -185,15 +202,15 @@ class DownloadPagePage:
         self.horizontalLayout_37.setContentsMargins(0, 0, 0, 0)
         self.downloadRecommendedBtn = Button(parent=self.pytorchBackendInstallerContainer_5, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.downloadRecommendedBtn.setObjectName(u"downloadRecommendedBtn")
         sizePolicy5.setHeightForWidth(self.downloadRecommendedBtn.sizePolicy().hasHeightForWidth())
         self.downloadRecommendedBtn.setSizePolicy(sizePolicy5)
-        self.downloadRecommendedBtn.setMaximumSize(QSize(50, 45))
+        self.downloadRecommendedBtn.setMaximumSize(icon_box)
         icon7 = QIcon()
         icon7.addFile(u":/icons/icons/download.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.downloadRecommendedBtn.setIcon(icon7)
-        self.downloadRecommendedBtn.setIconSize(QSize(30, 30))
+        self.downloadRecommendedBtn.setIconSize(icon_size)
         self.horizontalLayout_37.addWidget(self.downloadRecommendedBtn)
         self.label_25 = Text(parent=self.pytorchBackendInstallerContainer_5)
         self.label_25.setObjectName(u"label_25")
@@ -208,23 +225,23 @@ class DownloadPagePage:
         self.horizontalLayout_9.setContentsMargins(0, 0, 0, 0)
         self.downloadNCNNBtn = Button(parent=self.pytorchBackendInstallerContainer_4, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.downloadNCNNBtn.setObjectName(u"downloadNCNNBtn")
         sizePolicy5.setHeightForWidth(self.downloadNCNNBtn.sizePolicy().hasHeightForWidth())
         self.downloadNCNNBtn.setSizePolicy(sizePolicy5)
-        self.downloadNCNNBtn.setMaximumSize(QSize(50, 45))
+        self.downloadNCNNBtn.setMaximumSize(icon_box)
         self.downloadNCNNBtn.setIcon(icon7)
-        self.downloadNCNNBtn.setIconSize(QSize(30, 30))
+        self.downloadNCNNBtn.setIconSize(icon_size)
         self.horizontalLayout_9.addWidget(self.downloadNCNNBtn)
         self.uninstallNCNNBtn = Button(parent=self.pytorchBackendInstallerContainer_4, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.uninstallNCNNBtn.setObjectName(u"uninstallNCNNBtn")
         sizePolicy5.setHeightForWidth(self.uninstallNCNNBtn.sizePolicy().hasHeightForWidth())
         self.uninstallNCNNBtn.setSizePolicy(sizePolicy5)
-        self.uninstallNCNNBtn.setMaximumSize(QSize(50, 45))
+        self.uninstallNCNNBtn.setMaximumSize(icon_box)
         self.uninstallNCNNBtn.setIcon(icon6)
-        self.uninstallNCNNBtn.setIconSize(QSize(30, 30))
+        self.uninstallNCNNBtn.setIconSize(icon_size)
         self.horizontalLayout_9.addWidget(self.uninstallNCNNBtn)
         self.label_10 = Text(parent=self.pytorchBackendInstallerContainer_4)
         self.label_10.setObjectName(u"label_10")
@@ -237,23 +254,23 @@ class DownloadPagePage:
         self.horizontalLayout_6.setContentsMargins(0, 0, 0, 0)
         self.downloadTorchBtn = Button(parent=self.pytorchBackendInstallerContainer, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.downloadTorchBtn.setObjectName(u"downloadTorchBtn")
         sizePolicy5.setHeightForWidth(self.downloadTorchBtn.sizePolicy().hasHeightForWidth())
         self.downloadTorchBtn.setSizePolicy(sizePolicy5)
-        self.downloadTorchBtn.setMaximumSize(QSize(50, 45))
+        self.downloadTorchBtn.setMaximumSize(icon_box)
         self.downloadTorchBtn.setIcon(icon7)
-        self.downloadTorchBtn.setIconSize(QSize(30, 30))
+        self.downloadTorchBtn.setIconSize(icon_size)
         self.horizontalLayout_6.addWidget(self.downloadTorchBtn)
         self.uninstallTorchBtn = Button(parent=self.pytorchBackendInstallerContainer, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.uninstallTorchBtn.setObjectName(u"uninstallTorchBtn")
         sizePolicy5.setHeightForWidth(self.uninstallTorchBtn.sizePolicy().hasHeightForWidth())
         self.uninstallTorchBtn.setSizePolicy(sizePolicy5)
-        self.uninstallTorchBtn.setMaximumSize(QSize(50, 45))
+        self.uninstallTorchBtn.setMaximumSize(icon_box)
         self.uninstallTorchBtn.setIcon(icon6)
-        self.uninstallTorchBtn.setIconSize(QSize(30, 30))
+        self.uninstallTorchBtn.setIconSize(icon_size)
         self.horizontalLayout_6.addWidget(self.uninstallTorchBtn)
         self.label_6 = Text(parent=self.pytorchBackendInstallerContainer)
         self.label_6.setObjectName(u"label_6")
@@ -268,23 +285,23 @@ class DownloadPagePage:
         self.horizontalLayout_24.setContentsMargins(0, 0, 0, 0)
         self.downloadTensorRTBtn = Button(parent=self.pytorchBackendInstallerContainer_2, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.downloadTensorRTBtn.setObjectName(u"downloadTensorRTBtn")
         sizePolicy5.setHeightForWidth(self.downloadTensorRTBtn.sizePolicy().hasHeightForWidth())
         self.downloadTensorRTBtn.setSizePolicy(sizePolicy5)
-        self.downloadTensorRTBtn.setMaximumSize(QSize(50, 45))
+        self.downloadTensorRTBtn.setMaximumSize(icon_box)
         self.downloadTensorRTBtn.setIcon(icon7)
-        self.downloadTensorRTBtn.setIconSize(QSize(30, 30))
+        self.downloadTensorRTBtn.setIconSize(icon_size)
         self.horizontalLayout_24.addWidget(self.downloadTensorRTBtn)
         self.uninstallTensorRTBtn = Button(parent=self.pytorchBackendInstallerContainer_2, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.uninstallTensorRTBtn.setObjectName(u"uninstallTensorRTBtn")
         sizePolicy5.setHeightForWidth(self.uninstallTensorRTBtn.sizePolicy().hasHeightForWidth())
         self.uninstallTensorRTBtn.setSizePolicy(sizePolicy5)
-        self.uninstallTensorRTBtn.setMaximumSize(QSize(50, 45))
+        self.uninstallTensorRTBtn.setMaximumSize(icon_box)
         self.uninstallTensorRTBtn.setIcon(icon6)
-        self.uninstallTensorRTBtn.setIconSize(QSize(30, 30))
+        self.uninstallTensorRTBtn.setIconSize(icon_size)
         self.horizontalLayout_24.addWidget(self.uninstallTensorRTBtn)
         self.label_8 = Text(parent=self.pytorchBackendInstallerContainer_2)
         self.label_8.setObjectName(u"label_8")
@@ -297,23 +314,23 @@ class DownloadPagePage:
         self.horizontalLayout_8.setContentsMargins(0, 0, 0, 0)
         self.downloadDirectMLBtn = Button(parent=self.directMLBackendInstallerContainer, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.downloadDirectMLBtn.setObjectName(u"downloadDirectMLBtn")
         sizePolicy5.setHeightForWidth(self.downloadDirectMLBtn.sizePolicy().hasHeightForWidth())
         self.downloadDirectMLBtn.setSizePolicy(sizePolicy5)
-        self.downloadDirectMLBtn.setMaximumSize(QSize(50, 45))
+        self.downloadDirectMLBtn.setMaximumSize(icon_box)
         self.downloadDirectMLBtn.setIcon(icon7)
-        self.downloadDirectMLBtn.setIconSize(QSize(30, 30))
+        self.downloadDirectMLBtn.setIconSize(icon_size)
         self.horizontalLayout_8.addWidget(self.downloadDirectMLBtn)
         self.uninstallDirectMLBtn = Button(parent=self.directMLBackendInstallerContainer, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=ICON_BUTTON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.uninstallDirectMLBtn.setObjectName(u"uninstallDirectMLBtn")
         sizePolicy5.setHeightForWidth(self.uninstallDirectMLBtn.sizePolicy().hasHeightForWidth())
         self.uninstallDirectMLBtn.setSizePolicy(sizePolicy5)
-        self.uninstallDirectMLBtn.setMaximumSize(QSize(50, 45))
+        self.uninstallDirectMLBtn.setMaximumSize(icon_box)
         self.uninstallDirectMLBtn.setIcon(icon6)
-        self.uninstallDirectMLBtn.setIconSize(QSize(30, 30))
+        self.uninstallDirectMLBtn.setIconSize(icon_size)
         self.horizontalLayout_8.addWidget(self.uninstallDirectMLBtn)
         self.label_28 = Text(parent=self.directMLBackendInstallerContainer)
         self.label_28.setObjectName(u"label_28")
@@ -352,7 +369,35 @@ class DownloadPagePage:
             selectPytorchCustomModel=self.selectPytorchCustomModel,
             selectNCNNCustomModel=self.selectNCNNCustomModel,
         )
+        # The ten icon buttons are one box: the follower re-states it at the factor in force now (it already ran once
+        # in its constructor) and again on every later change, so the box grows with the icon the toolkit paints.
+        self._icon_buttons = (
+            self.uninstallAppBtn,
+            self.downloadRecommendedBtn,
+            self.downloadNCNNBtn,
+            self.uninstallNCNNBtn,
+            self.downloadTorchBtn,
+            self.uninstallTorchBtn,
+            self.downloadTensorRTBtn,
+            self.uninstallTensorRTBtn,
+            self.downloadDirectMLBtn,
+            self.uninstallDirectMLBtn,
+        )
+        self._icon_button_scale = ScaleFollower(self.downloadPage, self._apply_icon_button_geometry)
         return self.downloadPage
+
+    def _apply_icon_button_geometry(self) -> None:
+        """State the icon buttons' box at the factor in force now.
+
+        The BOX is host geometry, so it takes the factor here. The ICON is a toolkit design value: `Button.setIconSize`
+        stores it and the style bridge multiplies it once at paint time, so multiplying it here would apply the factor
+        twice (measured: 30 design px paints 45 at 1.5 and 60 at 2.0).
+        """
+        box = QSize(scaled_px(ICON_BUTTON_MAX_WIDTH_PX), scaled_px(ICON_BUTTON_MAX_HEIGHT_PX))
+        icon = QSize(ICON_BUTTON_ICON_PX, ICON_BUTTON_ICON_PX)
+        for button in self._icon_buttons:
+            button.setMaximumSize(box)
+            button.setIconSize(icon)
 
     def retranslate(self, language: str | None = None) -> None:
         self.encoderLabel_4.setText(QCoreApplication.translate("MainWindow", u"Import Custom Upscale Model", None))
