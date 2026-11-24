@@ -66,11 +66,12 @@ class VideoDecoder(QObject):
         self._codec_threads = max(1, int(codec_threads))
         #: The largest picture this decoder will hand over, or ``None`` for the file's own resolution.
         #:
-        #: Playback cost is decode + conversion + upload per frame, and all three grow with the pixel count: a 4K
-        #: source costs 8.3 MB per RGB24 frame against 0.52 MB at 960x540. The queue pane shows one held picture in
-        #: a box that is a few hundred pixels wide, so the extra pixels are paid for by the decoder and thrown away by
-        #: the surface. `_fit` asks PyAV for the smaller picture instead (swscale, in the decode already happening);
-        #: the file's timestamps and the seek path are untouched.
+        #: Playback cost is decode + conversion + upload per frame, and all three grow with the pixel count. Packed
+        #: RGB24 is ``width * height * 3`` bytes: 24.9 MB for a 3840x2160 frame, 6.2 MB at 1080p, 1.56 MB at 960x540.
+        #: The queue pane shows one held picture in a box that is a few hundred pixels wide, so the extra pixels are
+        #: paid for by the decoder, copied and uploaded only to be thrown away by the surface. `_fit` asks PyAV for the
+        #: smaller picture instead (swscale, in the decode already happening) - a 4K item on a 960x540 pane packs 16x
+        #: less per frame. The file's timestamps and the seek path are untouched.
         self._max_size = None if max_size is None else (max(2, int(max_size[0])), max(2, int(max_size[1])))
 
         self._container = None
