@@ -21,6 +21,7 @@ pane does not have.
 from __future__ import annotations
 
 import functools
+import math
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor
@@ -132,6 +133,8 @@ def format_time(seconds: float | None) -> str:
     except (TypeError, ValueError):
         return TIME_PLACEHOLDER
     if value != value or value < 0:  # NaN or negative: not a time this pane can stand on
+        return TIME_PLACEHOLDER
+    if not math.isfinite(value):  # an infinite clock is a bug upstream, not a time to print
         return TIME_PLACEHOLDER
     total_ms = int(round(value * 1000.0))
     minutes, rest = divmod(total_ms, 60_000)

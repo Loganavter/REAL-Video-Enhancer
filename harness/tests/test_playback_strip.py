@@ -172,6 +172,9 @@ def test_the_formatter_prints_minutes_seconds_and_milliseconds():
     assert strip.format_time(0.0) == "00:00.000"
     assert strip.format_time(61.5) == "01:01.500"
     assert strip.format_time(None) == strip.TIME_PLACEHOLDER
+    assert strip.format_time(float("nan")) == strip.TIME_PLACEHOLDER
+    assert strip.format_time(float("inf")) == strip.TIME_PLACEHOLDER
+    assert strip.format_time(-1.0) == strip.TIME_PLACEHOLDER
 
 
 def test_em_dashes_before_a_frame_exists(pane):
