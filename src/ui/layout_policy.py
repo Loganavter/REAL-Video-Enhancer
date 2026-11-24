@@ -41,6 +41,12 @@ COLUMN_FLOOR_PAD_PX = 32
 #: The floor a narrow column never goes under, regardless of the measurement: the 1.0 content needs no more than 500.
 COLUMN_FLOOR_MIN_PX = 500
 
+#: The column content's DESIGN width: 325 design px -> 650 at 2.0, where the General tab's scroll content measures
+#: 618 px and the column's insets add 32. This is the width-independent form of the measured floor. The measurement
+#: alone is not safe as a policy input: it moves with the width it is measuring (at a 647 px column the same content
+#: reflows to a 603 px hint), which would let the 2.0 cell decide `side` on one resize and `stack` on the next.
+COLUMN_FLOOR_DESIGN_PX = 325
+
 #: `mode` values the page and the tests share, as plain strings (this module has no Qt, not even an enum dependency).
 SIDE = "side"
 STACK = "stack"
@@ -61,8 +67,22 @@ def column_content_floor(general_content_px: int | float) -> int:
     ``general_content_px`` is the General tab's scroll content's minimum width (618 px at 2.0 on the real page). The
     pad is the column's insets around it; the 500 px floor is the 1.0 content's own need, which the measurement can
     under-report before the page has been laid out once.
+
+    Use this for a MEASURED floor (a test, a probe). The page's policy uses :func:`column_floor_for_factor`, because a
+    live measurement moves with the width being tested.
     """
     return max(COLUMN_FLOOR_MIN_PX, int(general_content_px) + COLUMN_FLOOR_PAD_PX)
+
+
+def column_floor_for_factor(factor: float) -> int:
+    """The column's content floor for a factor: the 325 design px content resolved the same way as the column.
+
+    650 at 2.0 (the measured 618 + 32), 569 at 1.75 (the research's ~575, measured at that factor's font metrics),
+    500 at 1.0-1.5 (the measured content is narrower than the design floor). Width-independent on purpose: the
+    content hint reflows with the column, so feeding the live hint back into the decision lets one resize flip the
+    answer (measured: 618 px at a 1000 px column, 603 px at the 647 px column the same content would get).
+    """
+    return max(COLUMN_FLOOR_MIN_PX, scaled_design_px(COLUMN_FLOOR_DESIGN_PX, factor))
 
 
 def layout_decision(factor: float, viewport_px: int, pane_floor_px: int, column_floor_px: int) -> tuple[str, int]:
@@ -98,6 +118,7 @@ def layout_decision(factor: float, viewport_px: int, pane_floor_px: int, column_
 __all__ = [
     "BODY_INSET_PX",
     "COLUMN_DESIGN_PX",
+    "COLUMN_FLOOR_DESIGN_PX",
     "COLUMN_FLOOR_MIN_PX",
     "COLUMN_FLOOR_PAD_PX",
     "PANE_FLOOR_PX",
@@ -105,6 +126,7 @@ __all__ = [
     "SIDE",
     "STACK",
     "column_content_floor",
+    "column_floor_for_factor",
     "layout_decision",
     "scaled_design_px",
 ]

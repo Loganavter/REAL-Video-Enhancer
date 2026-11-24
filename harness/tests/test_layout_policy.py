@@ -27,6 +27,7 @@ from src.ui.layout_policy import (
     SIDE,
     STACK,
     column_content_floor,
+    column_floor_for_factor,
     layout_decision,
     scaled_design_px,
 )
@@ -147,3 +148,13 @@ def test_the_column_content_floor_is_the_general_tabs_measured_width_plus_its_in
     assert column_content_floor(545) == 577
     # Before the first layout the measurement can read 0; the design floor is the answer, never 32.
     assert column_content_floor(0) == 500
+
+
+def test_the_page_uses_a_width_independent_floor_per_factor():
+    """The page's floor is the 325 design px content scaled, not the live hint (which reflows with the column).
+
+    650 at 2.0 is the measured 618 + 32; 569 at 1.75 is the smooth form of the research's ~575 (both decide the same
+    cells). The values never move when the column does - that is what keeps a resize from flipping the mode.
+    """
+    assert [column_floor_for_factor(factor) for factor in (1.0, 1.25, 1.5, 1.75, 2.0)] == [
+        500, 500, 500, 569, 650]

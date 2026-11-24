@@ -141,6 +141,9 @@ class ProcessTab:
         #: The typed page surface (`window.page_handles`): every control this glue touches is a required field on
         #: one of its group dataclasses, so a page that stops building one fails at build time, not at first click.
         self.page_handles: WindowHandles = parent.page_handles
+        #: The page layout mode last logged, so a resize that keeps the mode does not write a line per event.
+        self._page_layout_mode: str | None = None
+        self._install_page_layout_glue()
         self.renderTextOutputList = None
         #: The curated lines (`LogLine`: text + level) behind `renderTextOutputList`; the console paints these.
         self.renderLogLines: list[LogLine] | None = None
@@ -221,6 +224,27 @@ class ProcessTab:
         self.QConnect()
         self.populateModels(self.page_handles.general.backendComboBox.currentText())
         self.setStatus("Idle")
+        # The glue just hid the pause/kill pair and populated the model combos; the row's hint and the General tab's
+        # content are final now, so the page takes one more policy pass (the footer height is read from that row).
+        self.page_handles.proc.layoutState.reapplyRequested.emit()
+
+    def _install_page_layout_glue(self) -> None:
+        """The typed edge into the page's layout policy (owner, 2026-11-24).
+
+        The page owns the geometry (mode, column, band height, sticky footer); this glue does the two things the page
+        cannot see: it logs the mode when it changes (one line per change, not per resize) and asks for a final pass
+        after the glue's own construction, because hiding the pause/kill pair is what settles the render row's hint.
+        """
+        proc = self.page_handles.proc
+        proc.layoutState.changed.connect(self._on_page_layout_changed)
+
+    def _on_page_layout_changed(self, mode: str, column: int, collapsed: bool) -> None:
+        """One log line per mode change: the layout a bug report has to name, without a line per resize."""
+        if mode == self._page_layout_mode:
+            return
+        self._page_layout_mode = mode
+        band = "collapsed" if collapsed else "expanded"
+        log(f"layout: process page {mode} at {column} px (preview band {band})")
 
     def setStatus(self, text: str) -> None:
         """The one place that decides what `STATUS:` says - never leave a stale phase on screen."""

@@ -1,8 +1,10 @@
 """The nav rail and the page insets follow the UI scale; the WINDOW does not - measured against BlinkTable.
 
 This is the last wave of the UI-scale migration: typography already follows the factor (the toolkit's squared-size
-`paint_font` bug is fixed upstream), the process column grows strictly 500 -> 750 -> 1000 and its page body scrolls
-(wave 2). What was still frozen was the window itself: 1163x700, the 1050x700 minimum, the nav rail's 55 px cap, the
+`paint_font` bug is fixed upstream), the process column's DESIRED width grows strictly 500 -> 750 -> 1000 and its page
+body scrolls (wave 2); the layout policy now decides whether that desired column fits beside the preview or the page
+stacks (wave 3 of the same owner decision), so the column does not simply overrun the window at a raised factor. What
+was still frozen was the window itself: 1163x700, the 1050x700 minimum, the nav rail's 55 px cap, the
 35 px icon boxes and the 10/5 page insets were literals, so at 2.0 the window stayed the 1.0 box and the roam rail's
 buttons were CLIPPED (the toolkit's own hint is 72 px at 2.0 - the 36 px icon floor times the factor - against a 55 px
 raw maximum).
@@ -43,6 +45,7 @@ if "resources_rc" not in sys.modules:
     sys.modules["resources_rc"] = types.ModuleType("resources_rc")
 
 from src.ui.shell import window as shell_window  # noqa: E402
+from src.ui.layout_policy import BODY_INSET_PX, STACK  # noqa: E402
 
 #: Where the advanced settings page lives in the source, for the one static pin (a deleted statement has no runtime).
 ADVANCED_SETTINGS = Path(__file__).resolve().parents[2] / "src" / "ui" / "pages" / "advanced_settings.py"
@@ -261,12 +264,15 @@ def test_a_live_factor_change_moves_the_rail_and_leaves_the_window_alone(qapp, f
 # --- the minimum-size policy ------------------------------------------------------------------------------------
 
 
-def test_the_minimum_is_design_space_and_the_page_carries_the_overflow(qapp, factor_state):
-    """The minimum stays 1050x700 at 2.0; the 1000 px column plus the preview does not fit, so the PAGE scrolls.
+def test_the_minimum_is_design_space_and_the_page_stacks_at_two_point_zero(qapp, factor_state):
+    """The minimum stays 1050x700 at 2.0, and the page does NOT scroll horizontally: it stacks.
 
-    The policy is BlinkTable's: a minimum is a usability floor, never a content floor. At 2.0 the honest content minimum
-    would be 2100x1400 - larger than any laptop - so the window keeps a floor a user can fit and the overflow lives in
-    the page's own scroll surface.
+    The policy is BlinkTable's: a minimum is a usability floor, never a content floor. At 2.0 the honest content
+    minimum would be 2100x1400 - larger than any laptop - so the window keeps a floor a user can fit and the overflow
+    lives in the page's own scroll surface. The layout policy is the other half: a 1000 px column plus a 338 px
+    preview needs 1362 px of content in a 1009 px viewport, and the capped column (647) is 3 px under the General
+    tab's 650 px content floor, so the page STACKS instead of asking for a 353 px horizontal scroll. This pin used to
+    assert the opposite (`horizontalScrollBar().maximum() > 0`); it is rewritten with the owner's 2026-11-24 decision.
     """
     from sli_ui_toolkit.ui.managers.ui_scale import UiScale
 
@@ -277,10 +283,17 @@ def test_the_minimum_is_design_space_and_the_page_carries_the_overflow(qapp, fac
         assert (window.minimumSize().width(), window.minimumSize().height()) == MINIMUM_SIZE[2.0]
 
         page = builder.procPage_page
-        assert page.processContainer.width() == 1000
-        assert page.pageScroll.horizontalScrollBar().maximum() > 0, (
-            "a 1000 px column plus the preview does not fit the 1163 px window at 2.0, so the page must scroll "
-            "horizontally: the alternative was a window wider than the screen")
+        viewport = page.pageScroll.viewport().width()
+        assert page.layout_mode == STACK, (
+            "at 2.0 in the design window the column and the preview cannot both fit - the page stacks")
+        assert page.pageScroll.horizontalScrollBar().maximum() == 0, (
+            "a 1000 px column plus the preview does not fit the 1163 px window at 2.0; the answer is a stacked "
+            "page, not a 353 px horizontal scroll")
+        assert page.processContainer.width() == viewport - BODY_INSET_PX, (
+            "a stacked column takes the body's whole content width")
+        assert page.processInfoContainer.isVisible()
+        assert page.processInfoContainer.width() == page.processContainer.width(), (
+            "the stacked preview band is as wide as the column under it")
     finally:
         window.close()
 
