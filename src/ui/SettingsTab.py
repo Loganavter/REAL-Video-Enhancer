@@ -168,7 +168,10 @@ class SettingsTab:
         Updates the FFMpegCommand object with the current settings.
         """
         for key, value in self.ffmpeg_settings_dict.items():
-            self.settings.writeSetting(key, value.currentText())
+            # A control may carry the VALUE in item data and a translated label as its text (quality and encoder speed
+            # do): reading `currentText()` there would write "Очень высокое" into a field the builder matches on.
+            data = value.currentData() if hasattr(value, "currentData") else None
+            self.settings.writeSetting(key, data if data is not None else value.currentText())
         
         self.out_pixel_fmt = self.settings.settings['video_pixel_format']
         pxfmtDict = {
@@ -278,7 +281,7 @@ class SettingsTab:
         self.page_handles.encoder.video_quality.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "video_quality",
-                str(self.page_handles.encoder.video_quality.currentText()),
+                str(self.page_handles.encoder.video_quality.currentData()),
             )
         )
         self.page_handles.output.output_folder_location.textChanged.connect(
@@ -344,7 +347,7 @@ class SettingsTab:
         )
         self.page_handles.encoder.video_encoder_speed.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
-                "video_encoder_speed", self.page_handles.encoder.video_encoder_speed.currentText()
+                "video_encoder_speed", self.page_handles.encoder.video_encoder_speed.currentData()
             )
         )
         applyQualityPresetTooltip(self.page_handles.general.qualityPresetComboBox)
@@ -376,9 +379,8 @@ class SettingsTab:
         self.page_handles.general.qualityPresetComboBox.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "quality_preset",
-                qualityPresetLabelToValue(
-                    self.page_handles.general.qualityPresetComboBox.currentText()
-                ),
+                self.page_handles.general.qualityPresetComboBox.currentData()
+                or qualityPresetLabelToValue(self.page_handles.general.qualityPresetComboBox.currentText()),
             )
         )
         self.page_handles.general.inputFileText.textChanged.connect(
@@ -467,8 +469,8 @@ class SettingsTab:
         self.page_handles.output.scene_change_detection_threshold.setValue(
             float(self.settings.settings["scene_change_detection_threshold"])
         )
-        self.page_handles.encoder.video_quality.setCurrentText(
-            self.settings.settings["video_quality"]
+        self.page_handles.encoder.video_quality.setCurrentIndex(
+            max(0, self.page_handles.encoder.video_quality.findData(self.settings.settings["video_quality"]))
         )
         self.page_handles.output.output_folder_location.setText(
             self.settings.settings["output_folder_location"]
@@ -502,11 +504,12 @@ class SettingsTab:
         self.page_handles.render_settings.auto_hdr_mode.setChecked(
             self.settings.settings["auto_hdr_mode"] == "True"
         )
-        self.page_handles.encoder.video_encoder_speed.setCurrentText(
-            self.settings.settings["video_encoder_speed"]
+        self.page_handles.encoder.video_encoder_speed.setCurrentIndex(
+            max(0, self.page_handles.encoder.video_encoder_speed.findData(self.settings.settings["video_encoder_speed"]))
         )
-        self.page_handles.general.qualityPresetComboBox.setCurrentText(
-            qualityPresetValueToLabel(self.settings.settings["quality_preset"])
+        self.page_handles.general.qualityPresetComboBox.setCurrentIndex(
+            max(0, self.page_handles.general.qualityPresetComboBox.findData(
+                self.settings.settings["quality_preset"]))
         )
 
     def selectOutputFolder(self):

@@ -862,6 +862,9 @@ class GeneralSettingsPage:
         self.qualityPresetLabel.setText(QCoreApplication.translate("MainWindow", u"Quality Preset", None))
         self.qualityPresetComboBox.setItemText(0, QCoreApplication.translate("MainWindow", u"Best quality", None))
         self.qualityPresetComboBox.setItemText(1, QCoreApplication.translate("MainWindow", u"Fast", None))
+        # VALUE for the backend (`--quality_preset`); the text is a catalogue label.
+        self.qualityPresetComboBox.setItemData(0, "best")
+        self.qualityPresetComboBox.setItemData(1, "fast")
         self.frameReuse.setText(QCoreApplication.translate("MainWindow", u"Reuse unchanged frames", None))
         self.celReuse.setText(QCoreApplication.translate("MainWindow", u"By cel (ignore grain, dust and scan wobble)", None))
         self.addToRenderQueueButton.setText(QCoreApplication.translate("MainWindow", u" Add to Render Queue", None))

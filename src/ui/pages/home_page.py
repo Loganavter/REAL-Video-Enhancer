@@ -172,7 +172,8 @@ class HomePagePage:
         self.label_16.setText(QCoreApplication.translate("MainWindow", u"GitHub Page", None))
         self.githubBtn.setText("")
         # `setText("")` is gone with the stock label: an ImageLabel has no text channel ("no text" is its default)
-        self.label.setText(QCoreApplication.translate("MainWindow", u"REAL Video Enhancer", None))
+        # The product name, not a label to translate.
+        self.label.setText("REAL Video Enhancer")
         self.changeLogText.setHtml(QCoreApplication.translate("MainWindow", u"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
 "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
 "p, li { white-space: pre-wrap; }\n"

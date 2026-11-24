@@ -543,4 +543,6 @@ class MainWindowShell:
         i18n.install(window)
 
     def retranslate(self, language: str | None = None) -> None:
-        self._window.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
+        # The product name, not the Qt context: the field used to read "MainWindow" in the title bar of BOTH languages
+        # (the source string doubled as the context). A product name is not translated, so no catalogue key is added.
+        self._window.setWindowTitle("REAL Video Enhancer")
