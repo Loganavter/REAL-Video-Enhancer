@@ -70,6 +70,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ETA: ": "Осталось: ",
         "FPS:": "К/с:",
         "STATUS:": "СТАТУС:",
+        # --- The per-tick readouts (`src/ui/ProcessTab.py::updateProcessTab` / `::setStatus`) ----------------
+        # These are different keys from the chrome above, on purpose: the tick writes `FPS: <n>`, `ETA: <t>`,
+        # `Status: <phase>`, so its prefix literals carry a trailing space and `Status: ` is not `STATUS:`. Renaming
+        # either side would put a value-less chrome label or a raw key on screen; a missing key here falls back to
+        # the English prefix (the honest, supported state). `ETA: ` above is already this tick's key - the chrome
+        # reuses it - so only the two new spellings are added.
+        "FPS: ": "К/с: ",
+        "Status: ": "Статус: ",
         # The five inner tab labels of the process page (`processSettingsContainer`).
         "General": "Общие",
         "Encoder Options": "Параметры кодирования",
