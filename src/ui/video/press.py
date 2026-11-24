@@ -81,7 +81,7 @@ class PressTicket:
         self.generation = None if generation is None else int(generation)
         self.reason = why
         self._decided = True
-        telemetry.event("seek decide", press=self.id, route=self.route,
+        telemetry.event("seek decide", ts=telemetry.wall(), press=self.id, route=self.route,
                         target_s=_seconds(self.target_s), target_frame=self.target_frame,
                         produced=_share(self.produced), edge_s=_seconds(self.edge_s),
                         answerable=int(bool(answerable)), ahead=None if ahead is None else int(bool(ahead)),
@@ -96,7 +96,8 @@ class PressTicket:
         self._outcome = "closed"
         telemetry.note_seek(float(turnaround_ms), target=self.target_frame, landed=landed,
                             target_s=self.target_s, landed_time=landed_time,
-                            target_gen=self.generation, landed_gen=landed_gen, press=self.id)
+                            target_gen=self.generation, landed_gen=landed_gen, press=self.id,
+                            ts=telemetry.wall())
         return True
 
     def refused(self, reason: str) -> bool:
@@ -121,7 +122,7 @@ class PressTicket:
         if not self.open or self._stream_noted:
             return False
         self._stream_noted = True
-        telemetry.event("seek stream", press=self.id, seq=seq, t=_seconds(media_time),
+        telemetry.event("seek stream", ts=telemetry.wall(), press=self.id, seq=seq, t=_seconds(media_time),
                         gen=landed_gen, not_the_answer=1)
         return True
 
@@ -129,6 +130,6 @@ class PressTicket:
         if not self.open:
             return False
         self._outcome = outcome
-        telemetry.event(f"seek {outcome}", press=self.id, route=self.route,
+        telemetry.event(f"seek {outcome}", ts=telemetry.wall(), press=self.id, route=self.route,
                         target_s=_seconds(self.target_s), **fields)
         return True

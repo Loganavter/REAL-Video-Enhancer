@@ -2116,7 +2116,14 @@ class ProcessTab:
         # the owner saw: the newest upscaled frame painted over his request and the marker dragged to the produced edge,
         # pause notwithstanding (2026-11-24). A press on a PAUSED pane parks on the requested picture; while playing it
         # stays a live follow, and the answer is one publication in the stream.
-        self._request_display_seek(fraction, hold=bool(getattr(self, "_preview_paused", False)))
+        if not self._request_display_seek(fraction, hold=bool(getattr(self, "_preview_paused", False))):
+            # Nobody will answer: the render has finished (or never started), and an export has no file decoder behind
+            # the pane. Refusing keeps the pane honest - it also clears the pending flag, because a parked pane that
+            # waits forever for a picture is the "video became unavailable after the render" the owner reported
+            # (2026-11-25). Reported instead of silent: the press was logged as decided and then vanished.
+            ticket.refused("no-render-and-no-file-decoder")
+            self._display_seek_pending = False
+            self._update_display_wanted()
 
     def _request_display_seek(self, fraction: float, *, hold: bool) -> bool:
         """Ask the running render for ONE frame at `fraction` of the clip; True when the request went out.

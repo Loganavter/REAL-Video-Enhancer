@@ -1328,8 +1328,17 @@ class Render:
                     "trt_streams > 1), and a seek frame through it would corrupt the export")
             return
         _t_pick = _perf_counter()
+        # Wall clock at the moment the loop ACTED on the request. `monotonic` cannot cross into the pane's process;
+        # `time.time()` can (one host), and the pane stamps its press with the same clock - the difference is the
+        # queue/renderer-loop latency that no other number in either log covers.
+        _wall_pick = _time.time()
+        _t_reader = _perf_counter()
         try:
-            chunk = self._seek_reader(seconds).frame_at(seconds)
+            # Split on purpose: `_seek_reader` may BUILD a decoder (a spawn) and that is a different cost from
+            # decoding a frame with one that already exists. Folded together, a cold seek looked like a slow decode.
+            reader = self._seek_reader(seconds)
+            _t_decoding = _perf_counter()
+            chunk = reader.frame_at(seconds)
         except Exception as exc:
             log(f"seek: could not decode a frame at {seconds:.3f}s ({exc})")
             return
@@ -1344,6 +1353,9 @@ class Render:
                           source.hdr_mode, source.dtype, high_bitdepth=source.high_bitdepth)
             frame.yuv10_input = bool(source.high_bitdepth and not source.hdr_mode)
             frame.set_frame_bytes(chunk)
+            _t_bytes = _perf_counter()
+            # The MODEL is the cost people mean by "the seek is slow", and it used to be buried inside `prepare=`
+            # together with the byte copy and the resize.
             for extraRestoration in self.extraRestorationModels:
                 frame = extraRestoration(frame)
             if self.upscaleModel:
@@ -1370,10 +1382,13 @@ class Render:
             # the fourth stage and only the app side can see it.
             log(f"seek: displayed the frame at {seconds:.3f}s (generation {generation}, not written to the export); "
                 f"stages "
-                f"decode={(_t_decoded - _t_pick) * 1000.0:.1f}ms "
-                f"prepare={(_t_prepared - _t_decoded) * 1000.0:.1f}ms "
+                f"reader={(_t_decoding - _t_reader) * 1000.0:.1f}ms "
+                f"decode={(_t_decoded - _t_decoding) * 1000.0:.1f}ms "
+                f"bytes={(_t_bytes - _t_decoded) * 1000.0:.1f}ms "
+                f"model={(_t_prepared - _t_bytes) * 1000.0:.1f}ms "
                 f"publish={(_t_published - _t_prepared) * 1000.0:.1f}ms "
-                f"backend_total={(_t_published - _t_pick) * 1000.0:.1f}ms")
+                f"backend_total={(_t_published - _t_pick) * 1000.0:.1f}ms "
+                f"pickup_wall={_wall_pick:.3f}")
         except Exception as exc:
             log(f"seek: frame at {seconds:.3f}s could not be displayed ({exc})")
 

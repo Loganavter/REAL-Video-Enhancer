@@ -125,6 +125,16 @@ def _fmt(value: float | None) -> str:
     return "-" if value is None else f"{value:.2f}"
 
 
+def wall() -> str:
+    """Wall clock, seconds with milliseconds, for joining this file with the backend's.
+
+    `monotonic` cannot cross a process boundary; both processes are on one host, so `time.time()` can. That join is
+    what turns `turnaround_ms` (a sum) into its parts: press -> backend picked the request -> decoded -> published ->
+    painted. Nothing here assumes the two clocks tick together beyond being the same system clock.
+    """
+    return f"{time.time():.3f}"
+
+
 def event(kind: str, **fields) -> None:
     """One line per action: always written (``level="info"``), so a session leaves a trace of what was pressed."""
     parts = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
@@ -224,7 +234,8 @@ MIN_SEEK_MS = 1.0
 def note_seek(turnaround_ms: float, *, target: int | None = None,
               landed: tuple[str, int] | None = None, target_s: float | None = None,
               landed_time: float | None = None, target_gen: int | None = None,
-              landed_gen: int | None = None, press: int | None = None) -> None:
+              landed_gen: int | None = None, press: int | None = None,
+              ts: str | None = None) -> None:
     """Press -> first new picture, in milliseconds, naming the frame that was asked for and the one the PANE shows.
 
     `target` is the frame the press pointed at (`fraction x the strip's total`). `landed` is the pane's own identity for
@@ -235,6 +246,8 @@ def note_seek(turnaround_ms: float, *, target: int | None = None,
     """
     turnaround_ms = float(turnaround_ms)
     fields: dict[str, object] = {"target_frame": target, "press": press}
+    if ts is not None:
+        fields["ts"] = ts
     if target_s is not None:
         fields["target_s"] = f"{float(target_s):.3f}"
     if landed is not None:
