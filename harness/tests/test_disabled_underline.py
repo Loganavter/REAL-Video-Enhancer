@@ -147,15 +147,21 @@ def test_a_host_can_state_the_disabled_colour(captured, qapp):
 
 
 def test_the_derived_grey_sits_between_the_plate_and_the_text(captured, qapp):
-    """The bridge fallback is derived from two tokens, so every channel lands strictly between them."""
+    """The fallback (for a palette that predates `input.underline.disabled`) mixes the INPUT family's own two ends.
+
+    Since the toolkit's input-family migration the mix is `input.text.disabled` into `input.background`, not
+    `dialog.text` over `surface.background` (toolkit CHANGELOG, "The input family paints its own state tokens"), so the
+    bounds this test names are the family's - a test that still named the dialog sources would pass by coincidence and
+    stop protecting the contract.
+    """
     module, seen = captured
     field = _field(module, qapp, enabled=False)
     try:
         grey = field._disabled_underline_colour()
         from PySide6.QtGui import QColor
 
-        plate = QColor(field.theme_manager.get_color("surface.background"))
-        text = QColor(field.theme_manager.get_color("dialog.text"))
+        plate = QColor(field.theme_manager.get_color("input.background"))
+        text = QColor(field.theme_manager.get_color("input.text.disabled"))
         for channel in ("red", "green", "blue"):
             low, high = sorted((getattr(plate, channel)(), getattr(text, channel)()))
             value = getattr(grey, channel)()
