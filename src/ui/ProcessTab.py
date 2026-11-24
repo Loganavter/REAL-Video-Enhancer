@@ -267,7 +267,14 @@ class ProcessTab:
             pass
 
     def progressDetailText(self) -> str:
-        """`42% · 12m3s elapsed · 16m40s left · frame 1234/5678` - empty while idle."""
+        """`42% · 12m3s elapsed · 16m40s left · frame 1234/5678` - empty while idle.
+
+        The three words are catalogue keys (`i18n.tr`, keyed by the English source string) because the tick rebuilds
+        this line every 100 ms: a literal here put `elapsed`/`left`/`frame` back on screen one tick after a switch to
+        `ru` (measured 2026-11-24). The fragments keep their own spaces exactly as the literals did (`" elapsed"`,
+        `" left"`, `"frame "` - the space is part of the key), so the English line and every number in it stay byte for
+        byte what 1.0 wrote.
+        """
         if self._render_started_mono is None and not self.max_value:
             return ""
         total = max(1, int(self.max_value or 0))
@@ -277,10 +284,10 @@ class ProcessTab:
             from time import monotonic
 
             elapsed = max(0.0, monotonic() - self._render_started_mono)
-            parts.append(f"{short_duration(elapsed)} elapsed")
+            parts.append(short_duration(elapsed) + i18n.tr(" elapsed"))
         if self.eta:
-            parts.append(f"{self.eta} left")
-        parts.append(f"frame {done}/{total}")
+            parts.append(str(self.eta) + i18n.tr(" left"))
+        parts.append(i18n.tr("frame ") + f"{done}/{total}")
         return " · ".join(parts)
 
     def populateModels(self, backend) -> dict:
