@@ -27,7 +27,7 @@ from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 from sli_ui_toolkit.widgets import Button, ImageLabel, RichTextView, SurfacePanel, Text
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 
-from src.ui.pages.scale_follower import ScaleFollower
+from src.ui.scale_follower import ScaleFollower
 from src.ui.pages.handles import HomePageHandles
 from src.ui import i18n
 

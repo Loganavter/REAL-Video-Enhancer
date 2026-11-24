@@ -22,7 +22,7 @@ from sli_ui_toolkit.widgets import CheckBox, ComboBox, Stepper, SurfacePanel, Te
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import RenderSettingsHandles
-from src.ui.pages.ui_scale_follow import UiScaleFollower
+from src.ui.scale_follower import ScaleFollower
 from src.ui import i18n
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
@@ -199,7 +199,7 @@ class Tab3Page:
         i18n.bind_page(self, self.tab_3)
         self.retranslate()
         # Construction is the first run of the page's one size statement; the follower re-runs it on a factor change.
-        self._scale = UiScaleFollower(self.tab_3, self._apply_scale)
+        self._scale = ScaleFollower(self.tab_3, self._apply_scale)
         return self.tab_3
 
     def _apply_scale(self) -> None:

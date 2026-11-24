@@ -24,7 +24,7 @@ from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, 
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import GeneralSettingsHandles
-from src.ui.pages.ui_scale_follow import UiScaleFollower
+from src.ui.scale_follower import ScaleFollower
 from src.ui import i18n
 
 #: RVE's control text is 12 PIXELS (the Designer's sizing). The info pane's stock editor was 12 px, and
@@ -735,7 +735,7 @@ class GeneralSettingsPage:
         self.retranslate()
         # Every design number in this page is stated once in `_apply_scale`: the first run is construction, and the
         # follower re-runs it on a live factor change. After `retranslate` so the labels are final.
-        self._scale = UiScaleFollower(self.generalSettings, self._apply_scale)
+        self._scale = ScaleFollower(self.generalSettings, self._apply_scale)
         return self.generalSettings
 
     def _apply_scale(self) -> None:

@@ -180,6 +180,12 @@ def test_the_body_scrolls_to_its_content_at_a_raised_factor(qapp, process_state,
     """Taller than the viewport, and a real wheel over it moves the viewport to the far end."""
     shell, window = _shell(qapp, factor)
     try:
+        # The window's own default size follows the factor (wave 5) and its follower re-applies that default after the
+        # first show, so a viewport chosen inside `_shell` is gone by now. This test is about the SCROLL MECHANISM in a
+        # window of a laptop size, not about the default: choose the viewport after the window has settled, and do not
+        # change the factor again (the follower would size the window back, by design).
+        window.resize(*DEFAULT_SIZE)
+        _settle(qapp, 3)
         page = shell.procPage_page
         area = page.pageScroll
         content = area.widget()

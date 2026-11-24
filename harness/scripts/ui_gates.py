@@ -153,7 +153,6 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
     "page-process-http": {},
     "qss-on-adapter": {},
     "raw-chrome-px": {
-        ('src/ui/pages/advanced_settings.py', 'setGeometry(460, 516)'): 1,
         ('src/ui/pages/download_page.py', 'setGeometry(928, 302)'): 1,
         ('src/ui/pages/general_settings.py', 'QSize(230)'): 1,
         ('src/ui/pages/general_settings.py', 'setGeometry(470, 1040)'): 1,
@@ -166,11 +165,6 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
         ('src/ui/pages/tab_2.py', 'setGeometry(968, 528)'): 1,
         ('src/ui/pages/tab_6.py', 'setGeometry(453, 581)'): 1,
         ('src/ui/pages/tab_6.py', 'setGeometry(918, 48)'): 1,
-        ('src/ui/shell/window.py', 'QSize(35, 35)'): 4,
-        ('src/ui/shell/window.py', 'resize(1163, 700)'): 1,
-        ('src/ui/shell/window.py', 'setMaximumSize(55)'): 4,
-        ('src/ui/shell/window.py', 'setMinimumSize(1050, 700)'): 1,
-        ('src/ui/shell/window.py', 'setMinimumSize(31)'): 1,
     },
     "silent-swallow": {
         ('src/ui/dialogs/toolkit_dialogs.py', 'except (RuntimeError, TypeError): pass'): 1,

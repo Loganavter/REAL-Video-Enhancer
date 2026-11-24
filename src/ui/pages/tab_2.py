@@ -23,7 +23,7 @@ from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, 
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import OutputSettingsHandles
-from src.ui.pages.ui_scale_follow import UiScaleFollower
+from src.ui.scale_follower import ScaleFollower
 from src.ui import i18n
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
@@ -225,7 +225,7 @@ class Tab2Page:
         self.retranslate()
         # One place states this page's design numbers: construction is its first run, the follower re-runs it on a
         # live factor change.
-        self._scale = UiScaleFollower(self.tab_2, self._apply_scale)
+        self._scale = ScaleFollower(self.tab_2, self._apply_scale)
         return self.tab_2
 
     def _apply_scale(self) -> None:

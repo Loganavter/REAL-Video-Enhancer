@@ -21,7 +21,7 @@ from sli_ui_toolkit.widgets import Button, ComboBox, OverlayScrollArea, SurfaceP
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, DISPLAY_PT
-from src.ui.pages.scale_follower import ScaleFollower
+from src.ui.scale_follower import ScaleFollower
 from src.ui.pages.handles import DownloadPageHandles
 from src.ui import i18n
 

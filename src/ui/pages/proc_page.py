@@ -26,6 +26,7 @@ from src.ui.pages.tab_5 import Tab5Page
 from src.ui.pages.handles import ProcPageHandles
 from src.ui import i18n
 from src.ui.typography import apply, CAPTION_PT
+from src.ui.scale_follower import ScaleFollower
 from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
 
 # Layer B (2026-11-21): the three widget classes this page no longer builds stock. `TopTabHost` is the tab host, built
@@ -49,23 +50,6 @@ SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 #: resolves it through `scaled_px()` where the widget is built (and again on `scale_changed`), never at import: an
 #: import-time number would freeze the factor the process happened to start with.
 PROCESS_COLUMN_PX = 500
-
-
-class _UiScaleFollower(QObject):
-    """Calls ``apply`` once now and again on every `UiScale.scale_changed`.
-
-    Parented to the page so Qt drops the connection with the widget: a plain callable connected to the process-wide
-    manager would outlive the window and fire into deleted C++ objects after a close.
-    """
-
-    def __init__(self, parent: QObject, apply) -> None:
-        super().__init__(parent)
-        self._apply = apply
-        UiScale.get_instance().scale_changed.connect(self._refresh)
-        self._refresh()
-
-    def _refresh(self, *_args) -> None:
-        self._apply()
 
 
 def _retain_box_when_hidden(*widgets: QWidget) -> None:
@@ -638,8 +622,8 @@ class ProcPagePage:
         self.verticalLayout_page.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout_page.addWidget(self.pageScroll)
         # The column's width is resolved at construction and re-resolved on every factor change, so `scale:<factor>`
-        # on a live window moves it without a restart (see `_UiScaleFollower`).
-        self._column_scale = _UiScaleFollower(
+        # on a live window moves it without a restart (see `ScaleFollower`).
+        self._column_scale = ScaleFollower(
             self.procPage,
             lambda: self._apply_column_width(self.processContainer, self.bottomMenuSubContainer, self.widget_13),
         )
