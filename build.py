@@ -193,6 +193,10 @@ class PyInstaller(BuildManager):
             # The preview surface loads baked shaders from disk (`video_preview._shader`): bytecode alone would ship a
             # widget whose first paint raises "not a valid .qsb". PyInstaller's separator is platform-specific.
             + f" --add-data=src/ui/widgets/shaders{os.pathsep}src/ui/widgets/shaders"
+            # The bundled display face (`src/ui/bundled_fonts.FONT_DIR`) is read from disk next to the module, so a
+            # packaged exe without this line opens with the host fallback and nobody sees Fira Mono (found by the
+            # bundle cell, 2026-11-24). Same platform-specific separator as the shaders above.
+            + f" --add-data=src/ui/fonts{os.pathsep}src/ui/fonts"
             + " --distpath"
             + f" {OUTPUT_FOLDER}"
             )
