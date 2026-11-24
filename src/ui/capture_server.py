@@ -207,6 +207,21 @@ def drain_requests(root: str, dispatch, *, state: dict | None = None, now: float
     return served
 
 
+def validate_input_path(path: str) -> tuple[str | None, str | None]:
+    """``(error, resolved)`` for an `input:` request - pure, so a test needs no window.
+
+    An empty path and a path that does not exist are the two ways a probe gets this wrong (a typo, a relative path run
+    from another directory); both are answered, never silently ignored.
+    """
+    text = (path or "").strip()
+    if not text:
+        return "empty path", None
+    resolved = os.path.abspath(os.path.expanduser(text))
+    if not os.path.isfile(resolved):
+        return f"no such file: {resolved}", None
+    return None, resolved
+
+
 def install(window) -> None:
     """Arm the server on ``window``. Never returns anything; the app keeps running."""
     from PySide6.QtCore import QTimer
@@ -437,6 +452,40 @@ def install(window) -> None:
         report["applicationFontPt"] = round(float(font.pointSizeF()), 2)
         _finish(report)
         print(f"capture-server: scale {requested} -> {report['factor']}", flush=True)
+
+    def load_input(path: str) -> None:
+        """Set the process page's input file the way the file dialog does, without the dialog: `input:<path>`.
+
+        The dialog's last step is `MainWindow.loadVideo(inputFile)`; the input field, the probe, the queue add and the
+        Render Preview button's enablement all hang off that call. Without this verb a live probe cannot reach any of
+        it: measured 2026-11-24, `render:` and `preview:` answer NOTHING at all - no payload, no error, no log line -
+        while no input file is set, which reads exactly like a dead channel.
+
+        The answer reports what the APP ended up with, not what was asked: `loadVideo` refuses a file it cannot probe
+        and leaves the field empty, so the verb says so instead of pretending success.
+        """
+        report = {"stamp": _stamp(), "kind": "input", "requested": path, "error": None, "loaded": None}
+        error, resolved = validate_input_path(path)
+        if error:
+            report["error"] = error
+            _finish(report)
+            print(f"capture-server: input {path!r} -> {error}", flush=True)
+            return
+        loader = getattr(window, "loadVideo", None)
+        if loader is None:
+            report["error"] = "the window has no loadVideo"
+            _finish(report)
+            return
+        loader(resolved)
+        for _ in range(8):
+            QApplication.processEvents()
+        field = getattr(getattr(window.page_handles, "general", None), "inputFileText", None)
+        shown = field.text().strip() if field is not None and hasattr(field, "text") else None
+        report["loaded"] = shown or None
+        if not shown:
+            report["error"] = "the app did not take the file (its probe rejected it); the input field is empty"
+        _finish(report)
+        print(f"capture-server: input {resolved} -> loaded={report['loaded']!r} error={report['error']!r}", flush=True)
 
     def click(spec: str) -> None:
         """Send a real left click: `click:<objectName>@x,y`.
@@ -1005,6 +1054,9 @@ def install(window) -> None:
             return
         if wanted.startswith("scale:"):
             scale(wanted[len("scale:"):])
+            return
+        if wanted.startswith("input:"):
+            load_input(wanted[len("input:"):].strip())
             return
         if wanted.startswith("click:"):
             click(wanted[len("click:"):])
