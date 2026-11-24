@@ -570,6 +570,9 @@ class Render:
         #: The resident preview decoder (`utils/SeekReader.py`), built by the first seek request and kept
         #: for the rest of the render; closed with the other resources at the end of `render()`.
         self._seekReader = None
+        #: The frame-grid probe runs from HERE, not from the first press: it is a second ffmpeg decoding 13 frames
+        #: (~133 ms at 1440x1080, measured), and starting it during engine load takes that cost off the first seek.
+        self._gridProbe = None
         if seek_state_id:
             try:
                 from .utils.DisplayChannel import SeekState
@@ -584,6 +587,13 @@ class Render:
                 log(f"seek: request block setup failed ({_seek_exc}); the render runs without it")
                 self.seekState = None
         self.temporalReuse = None
+        if seek_state_id and self.seekState is not None and self.seekState.attached:
+            try:
+                from .utils.SeekReader import GridProbe
+
+                self._gridProbe = GridProbe(self.inputFile, self.readBuffer.ffmpeg_path)
+            except Exception as _probe_exc:
+                log(f"seek: grid probe could not start ({_probe_exc}); the first press will probe inline")
 
         # created together with the gate, below; None means a reused frame is emitted verbatim
         self.temporalCorrection = None
@@ -1302,6 +1312,7 @@ class Render:
                 color_range=reader.color_range,
                 input_pixel_format=reader.input_pixel_format,
                 ffmpeg_path=reader.ffmpeg_path,
+                grid_probe=getattr(self, "_gridProbe", None),
             )
         return self._seekReader
 

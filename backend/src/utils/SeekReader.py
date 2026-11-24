@@ -93,6 +93,39 @@ def probe_frame_grid(inputFile, ffmpeg_path: str = "ffmpeg", frames: int = _PROB
     return pts[0], pitch
 
 
+class GridProbe:
+    """The frame-grid probe started OFF the seek path, so the first press does not pay for it.
+
+    The probe is a second ffmpeg process decoding 13 frames (~133 ms at 1440x1080, ~273 ms at 2160p, measured 2026-11-25).
+    It used to run inline in whichever request arrived first, which is why the FIRST seek of every render cost 300-900 ms
+    more than the rest. Starting it where the render already spends seconds (engine load) removes that from the press.
+    """
+
+    def __init__(self, inputFile, ffmpeg_path: str = "ffmpeg", near: float = 0.0) -> None:
+        import threading
+
+        self._done = threading.Event()
+        self._value = None
+        self._inputFile = inputFile
+        self._ffmpeg_path = ffmpeg_path
+        self._near = float(near or 0.0)
+        self._thread = threading.Thread(target=self._run, name="seek-grid-probe", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            self._value = probe_frame_grid(self._inputFile, self._ffmpeg_path, near=self._near)
+        except Exception:
+            self._value = None
+        finally:
+            self._done.set()
+
+    def value(self, timeout: float = _PROBE_TIMEOUT):
+        """The grid, waiting at most `timeout`; None means "no constant grid" or "not ready in time" (both fall back)."""
+        self._done.wait(timeout)
+        return self._value if self._done.is_set() else None
+
+
 class SeekReader:
     """One resident `FFmpegRead` that serves every preview seek of a render.
 
@@ -120,7 +153,7 @@ class SeekReader:
     """
 
     def __init__(self, inputFile, *, width, height, start_time=0.0,
-                 forward_limit_seconds: float = 1.0, **reader_kwargs):
+                 forward_limit_seconds: float = 1.0, grid_probe=None, **reader_kwargs):
         self.inputFile = inputFile
         self.width = int(width)
         self.height = int(height)
@@ -134,6 +167,8 @@ class SeekReader:
         #: `(first_pts, pitch)`, probed once, or None for a source that has no constant grid.
         self._grid = None
         self._grid_probed = False
+        #: A probe already running since render start (`GridProbe`), or None to probe here (a bare reader in a test).
+        self._grid_probe = grid_probe
         self._reader = None
         #: Grid index of the frame the next `read_frame()` returns. Indices are internal: only their
         #: differences are used, so an arbitrary origin is fine.
@@ -279,7 +314,10 @@ class SeekReader:
             return self._grid
         self._grid_probed = True
         try:
-            self._grid = probe_frame_grid(self.inputFile, self._ffmpeg_path, near=self.start_time)
+            if self._grid_probe is not None:
+                self._grid = self._grid_probe.value(_PROBE_TIMEOUT)
+            else:
+                self._grid = probe_frame_grid(self.inputFile, self._ffmpeg_path, near=self.start_time)
         except Exception as exc:
             log(f"seek: frame-rate probe failed ({exc}); seeks will re-open the source")
             self._grid = None
