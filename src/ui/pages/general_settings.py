@@ -73,7 +73,8 @@ ACTION_ICON_PX = 32
 INFO_BODY_PT = 11
 INFO_TEXT_PT = 10
 
-#: The pane's nine rows, in the Designer's order.
+#: The pane's nine rows, in the Designer's order. These are catalogue KEYS, not the text on screen: the document is
+#: painted from `i18n.translate(key)` at the language in force, so a switch rewrites the names and nothing else.
 INFO_LABELS = ("FPS:", "Resolution:", "Frame Count:", "Encoder:", "Container:", "Color Space:",
                "Pixel Format:", "Is HDR:", "Bit Depth:")
 
@@ -115,19 +116,24 @@ def _design_pt(design_pt: float, factor: float) -> str:
     return f"{design_pt * factor:g}pt"
 
 
-def _info_html(factor: float) -> str:
-    """The General tab's information body at ``factor``.
+def _info_html(factor: float, language: str | None = None) -> str:
+    """The General tab's information body at ``factor``, its nine row names in ``language``.
 
     Every size is stated as DESIGN x factor. The alternative - removing the inline sizes and letting the document font
     rule - would use `RichTextView`'s 12 px body at 1.0, while the visible text today is the spans' 10 pt (13.3 px):
     that is a 1.0 change, and 1.0 is this wave's identity gate. Building the markup keeps the Designer's pixel at 1.0
     and makes the body grow with the factor instead of standing still on an absolute 10 pt.
+
+    The names go through the catalogue (`src/ui/i18n.py`, keyed by the English source string) rather than being baked
+    in: this document is the pane's whole content, so its own text is the only thing a language switch can rewrite.
+    ``language=None`` is the language in force, which is what the first paint uses.
     """
     span_pt = _design_pt(INFO_TEXT_PT, factor)
     body_pt = _design_pt(INFO_BODY_PT, factor)
     rows = "\n".join(
         '<p style=" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; '
-        f'text-indent:0px;"><span style=" font-family:\'Sans Serif\'; font-size:{span_pt};">{label}</span></p>'
+        f'text-indent:0px;"><span style=" font-family:\'Sans Serif\'; font-size:{span_pt};">'
+        f'{i18n.translate(label, language)}</span></p>'
         for label in INFO_LABELS
     )
     return (
@@ -140,6 +146,29 @@ def _info_html(factor: float) -> str:
         f'</style></head><body style=" font-family:\'Adwaita Sans\'; font-size:{body_pt}; font-weight:400; '
         f'font-style:normal;">\n{rows}</body></html>'
     )
+
+
+def _info_name_variants(label: str) -> tuple[str, ...]:
+    """Every spelling a row name can carry on screen: the English key plus each language's translation.
+
+    A second switch has to recognise the spelling the first one painted, so the rewrite reads the catalogue rather
+    than assuming the pane is still in English.
+    """
+    variants = [label]
+    for table in i18n.TRANSLATIONS.values():
+        translated = table.get(label)
+        if translated and translated not in variants:
+            variants.append(translated)
+    return tuple(variants)
+
+
+def _relabel_info_line(line: str, language: str | None) -> str:
+    """``line`` with its leading row name in ``language``; everything after the name is returned unchanged."""
+    for label in INFO_LABELS:
+        for variant in _info_name_variants(label):
+            if line.startswith(variant):
+                return i18n.translate(label, language) + line[len(variant):]
+    return line
 
 
 class GeneralSettingsPage:
@@ -738,6 +767,30 @@ class GeneralSettingsPage:
         self._scale = ScaleFollower(self.generalSettings, self._apply_scale)
         return self.generalSettings
 
+    def _render_info_pane(self, language: str | None = None) -> None:
+        """Paint the pane's nine-row placeholder at the factor and language in force."""
+        self.inputVideoInfoTextEdit.setHtml(_info_html(UiScale.get_instance().factor(), language))
+        # What the placeholder reads as, so a switch can tell it apart from a loaded video's rows (below).
+        self._info_placeholder_text = self.inputVideoInfoTextEdit.text()
+
+    def _retranslate_info_pane(self, language: str | None = None) -> None:
+        """Repaint the pane's nine row names in ``language``, keeping a loaded video's values.
+
+        The pane has two writers: this page paints the nine-row placeholder, and `MainWindow.updateVideoGUIText`
+        replaces it with the loaded file's values - the same nine names, each followed by its values. A switch is
+        therefore one of two rewrites. The placeholder is rebuilt from the catalogue (one document, same spans, same
+        factor). A loaded body is relabelled line by line, because re-rendering the placeholder over it would erase
+        the video's numbers - the regression this method exists to avoid.
+        """
+        pane = self.inputVideoInfoTextEdit
+        current = pane.text()
+        if not current or current == getattr(self, "_info_placeholder_text", None):
+            self._render_info_pane(language)
+            return
+        relabelled = "\n".join(_relabel_info_line(line, language) for line in current.split("\n"))
+        if relabelled != current:
+            pane.setText(relabelled)
+
     def _apply_scale(self) -> None:
         """Resolve this page's design numbers at the factor in force now.
 
@@ -779,7 +832,7 @@ class GeneralSettingsPage:
         self.verticalLayout_39.setContentsMargins(inset, inset, inset, inset)
         self.horizontalLayout_50.setSpacing(section_gap)
 
-        self.inputVideoInfoTextEdit.setHtml(_info_html(UiScale.get_instance().factor()))
+        self._render_info_pane(i18n.current_language())
 
     def retranslate(self, language: str | None = None) -> None:
         self.inputFileSelectButton.setText(QCoreApplication.translate("MainWindow", u"Select Input File", None))
@@ -812,3 +865,6 @@ class GeneralSettingsPage:
         self.frameReuse.setText(QCoreApplication.translate("MainWindow", u"Reuse unchanged frames", None))
         self.celReuse.setText(QCoreApplication.translate("MainWindow", u"By cel (ignore grain, dust and scan wobble)", None))
         self.addToRenderQueueButton.setText(QCoreApplication.translate("MainWindow", u" Add to Render Queue", None))
+        # Last, and through the pane's own two-writer rule: a language switch must repaint the nine names without
+        # erasing the values `updateVideoGUIText` puts after them.
+        self._retranslate_info_pane(language)
