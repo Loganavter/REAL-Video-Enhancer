@@ -687,12 +687,20 @@ class GeneralSettingsPage:
         self.widget_26.setObjectName(u"widget_26")
         sizePolicy5.setHeightForWidth(self.widget_26.sizePolicy().hasHeightForWidth())
         self.widget_26.setSizePolicy(sizePolicy5)
-        self.widget_26.setMaximumSize(QSize(42344, 200))
+        # No vertical ceiling: the Designer's 200 px cap sat ABOVE the panel's 190 px floor, so the panel could never
+        # grow into its own content - at 2.0 the video-info body needs 228 px and the last field line ended up under
+        # the scroll area's edge fade (owner, 2026-11-24: "the fade is aggressive, the text fits"). The height is the
+        # content's now (`RichTextView(fit_content=True)`), and the panel's own 190 px floor still keeps an empty one
+        # from collapsing.
         self.horizontalLayout_22 = QHBoxLayout(self.widget_26)
         self.horizontalLayout_22.setObjectName(u"horizontalLayout_22")
         # A read-only rich-text panel: the toolkit's `RichTextView` takes the host's `setText`/`setFontPointSize` calls
         # and scrolls its own content (the plate is `surface.list`, the colour the deleted page rule carried).
-        self.inputVideoInfoTextEdit = RichTextView(self.widget_26, padding=(10, 5, 10, 5))
+        # `fit_content`: this pane's body is a record of fields, so it asks for the height that shows all of them
+        # instead of sitting on the 190 px floor below. Measured 2026-11-24: at 2.0 the body needed 208 px, the floor
+        # kept 190, and the last field line was hidden under the scroll area's edge fade (owner: "the fade is
+        # aggressive, the text fits"). The floor still keeps an EMPTY panel from collapsing.
+        self.inputVideoInfoTextEdit = RichTextView(self.widget_26, padding=(10, 5, 10, 5), fit_content=True)
         # The stock editor's text is 12 PIXELS (the Designer's sizing); `setFontPointSize` would convert through the
         # screen DPI and render 16 px, which grew every line of this panel.
         self.inputVideoInfoTextEdit.setTextPixelSize(RVE_CONTROL_FONT_PX)
