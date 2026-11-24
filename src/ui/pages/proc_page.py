@@ -12,12 +12,15 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
-from PySide6.QtCore import (QCoreApplication, QEvent, QObject, QSize, Qt)
+from PySide6.QtCore import (QCoreApplication, QEvent, QObject, QPoint, QSize, Qt,
+    Signal)
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
+from src.ui.layout_policy import (BODY_INSET_PX, COLUMN_DESIGN_PX, PANE_FLOOR_PX,
+    SIDE, STACK, column_floor_for_factor, layout_decision)
 from src.ui.pages.general_settings import GeneralSettingsPage
 from src.ui.pages.tab_6 import Tab6Page
 from src.ui.pages.render_queue_tab import RenderQueueTabPage
@@ -45,11 +48,53 @@ from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, Minimalis
 #: defaults to centre, which would move every value to the middle of its box.
 SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
-#: The process column's width in DESIGN px (owner, 2026-11-24): the column grows strictly with the UI factor -
-#: 500 -> 750 at 1.5 -> 1000 at 2.0 - and the preview pane takes what is left. It is a design value, so every site
-#: resolves it through `scaled_px()` where the widget is built (and again on `scale_changed`), never at import: an
-#: import-time number would freeze the factor the process happened to start with.
-PROCESS_COLUMN_PX = 500
+#: The process column's width in DESIGN px (owner, 2026-11-24): the desired width grows with the UI factor - 500 ->
+#: 750 at 1.5 -> 1000 at 2.0 - and `layout_policy` decides whether it fits beside the preview or the page stacks. It is
+#: a design value, so every resolve goes through `scaled_px()`/`layout_decision()` at apply time, never at import.
+PROCESS_COLUMN_PX = COLUMN_DESIGN_PX
+
+#: The floating collapse toggle's inset from the page viewport's top-right corner, in DESIGN px.
+OVERLAY_INSET_PX = 8
+
+#: The preview band's aspect ratio (owner, 2026-11-24): in stacked mode the preview's height is 16:9 of its width,
+#: never a share of the window. 16/9 is width/height, so the height is width * 9 / 16.
+PREVIEW_BAND_ASPECT_W = 16
+PREVIEW_BAND_ASPECT_H = 9
+
+
+class PageLayoutState(QObject):
+    """The page's layout mode, as a signal its glue can listen to.
+
+    `ProcPagePage` is a builder, not a `QObject`, so the one thing the glue needs from it - "the mode and the column
+    changed, re-apply your half" - lives on this object, parented to the page root (Qt drops the connection with the
+    widget). `toggleRequested` is the typed spelling of the band's toggle press: the page owns the state change, and
+    `ProcessTab` only wires the button to this signal.
+    """
+
+    #: `(mode, column_px, preview_collapsed)` on every policy apply, including a resize that keeps the same mode.
+    changed = Signal(str, int, bool)
+    #: A request for one more policy pass. The page does not need it for its own widgets; the glue emits it after its
+    #: construction changed the render row's hint (the idle state hides pause/kill), which is what sizes the footer.
+    reapplyRequested = Signal()
+    toggleRequested = Signal()
+
+
+class _PageLayoutFilter(QObject):
+    """Re-run the policy when the page viewport changes size, and keep the overlays on its bottom edge.
+
+    The factor is not the only input: a user drag-resizes the window without touching the scale, and at a raised
+    factor that changes which side of the 2.0 stack boundary the page is on. A `ScaleFollower` alone would leave the
+    page in the mode it happened to build with.
+    """
+
+    def __init__(self, page: "ProcPagePage") -> None:
+        super().__init__(page.procPage)
+        self._page = page
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self._page._apply_layout_policy()
+        return False
 
 
 def _retain_box_when_hidden(*widgets: QWidget) -> None:
@@ -294,6 +339,9 @@ class ProcPagePage:
         self.verticalLayout_5.setContentsMargins(9, 9, 9, 9)
         self.previewSubContainer = SurfacePanel(self.processInfoContainer, background_token="dialog.background")
         self.previewSubContainer.setObjectName(u"previewSubContainer")
+        #: The typed name for the thing wave 3 treats as the stacked band (the preview's own container, not the whole
+        #: info pane): its height is what 16:9 applies to.
+        self.previewBand = self.previewSubContainer
         self.verticalLayout_8 = QVBoxLayout(self.previewSubContainer)
         self.verticalLayout_8.setSpacing(0)
         self.verticalLayout_8.setObjectName(u"verticalLayout_8")
@@ -519,6 +567,9 @@ class ProcPagePage:
         self.widget_13 = SurfacePanel(self.bottomMenuSubContainer, background_token="surface.page")
         self.widget_13.setObjectName(u"widget_13")
         self.widget_13.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
+        #: The typed name for the render row (Start/ETA/FPS/STATUS' row): in stacked mode it moves into the sticky
+        #: footer, in side mode it stays in the column's flow.
+        self.renderRow = self.widget_13
         self.horizontalLayout_32 = QHBoxLayout(self.widget_13)
         self.horizontalLayout_32.setSpacing(6)
         self.horizontalLayout_32.setObjectName(u"horizontalLayout_32")
@@ -534,10 +585,11 @@ class ProcPagePage:
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(59, 55))
         self.startRenderButton.setObjectName(u"startRenderButton")
         self.startRenderButton.setEnabled(True)
-        self.startRenderButton.setMaximumSize(QSize(59, 55))
-        # The Designer pinned this button at 59x55. The toolkit's hint is 60x50 (the icon is 40x45 and its box is square:
-        # 45 + 5 padding), so the ceiling alone left it 5 px short and 1 px wide. A minimum states the Designer's number,
-        # and with the ceiling above it the button is exactly 59x55 in any row.
+        self.startRenderButton.setMaximumSize(QSize(scaled_px(59), scaled_px(55)))
+        # The Designer pinned this button at 59x55 DESIGN px. The toolkit scales that box itself in the constructor
+        # (`size=(59, 55)` -> `setFixedSize(scaled_px(...))`), so the ceiling must be stated at the same factor: a raw
+        # 59x55 maximum against a 88x82 minimum left the layout centring a 55 px box in an 82 px cell and the button
+        # hung 13 px (27 px at 2.0) below its row. Both bounds now resolve through `scaled_px`, like the toolkit's own.
 
         # QPushButton's own policy: as wide as it needs, exactly as tall as its hint - the toolkit button would
         # otherwise fill the cell and grow past the Designer's 55 px ceiling in a taller row.
@@ -560,7 +612,7 @@ class ProcPagePage:
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.pauseRenderButton.setObjectName(u"pauseRenderButton")
         self.pauseRenderButton.setEnabled(True)
-        self.pauseRenderButton.setMaximumSize(QSize(59, 55))
+        self.pauseRenderButton.setMaximumSize(QSize(scaled_px(59), scaled_px(55)))
         self.pauseRenderButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         icon4 = QIcon()
         icon4.addFile(u":/icons/icons/pause-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
@@ -577,7 +629,7 @@ class ProcPagePage:
         sizePolicy11.setVerticalStretch(0)
         sizePolicy11.setHeightForWidth(self.killRenderButton.sizePolicy().hasHeightForWidth())
         self.killRenderButton.setSizePolicy(sizePolicy11)
-        self.killRenderButton.setMaximumSize(QSize(59, 55))
+        self.killRenderButton.setMaximumSize(QSize(scaled_px(59), scaled_px(55)))
         icon5 = QIcon()
         icon5.addFile(u":/icons/icons/x-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.killRenderButton.setIcon(icon5)
@@ -621,12 +673,46 @@ class ProcPagePage:
         self.verticalLayout_page.setObjectName(u"verticalLayout_page")
         self.verticalLayout_page.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout_page.addWidget(self.pageScroll)
-        # The column's width is resolved at construction and re-resolved on every factor change, so `scale:<factor>`
-        # on a live window moves it without a restart (see `ScaleFollower`).
-        self._column_scale = ScaleFollower(
-            self.procPage,
-            lambda: self._apply_column_width(self.processContainer, self.bottomMenuSubContainer, self.widget_13),
-        )
+        # The sticky footer and the band's collapse toggle are children of the PAGE, not of the scrolling body: they
+        # must stay on the viewport's edges while the body scrolls. Both are hidden in side mode, so the 1.0 page keeps
+        # its flow geometry exactly. `widget_13` moves between the column's flow and this footer (`_apply_render_row`).
+        self.renderRowFooter = SurfacePanel(self.procPage, background_token="dialog.background", radius=0)
+        self.renderRowFooter.setObjectName(u"renderRowFooter")
+        self.renderRowFooterLayout = QHBoxLayout(self.renderRowFooter)
+        self.renderRowFooterLayout.setObjectName(u"renderRowFooterLayout")
+        self.renderRowFooterLayout.setContentsMargins(0, 0, 0, 0)
+        self.renderRowFooterLayout.setSpacing(0)
+        self.renderRowFooter.hide()
+        # The collapse chevron floats at the viewport's top-right in stacked mode. It lives outside the pane on purpose:
+        # collapsing hides the band, and a toggle inside the hidden band could never expand it again. The glyph is the
+        # action the press performs, like the preview's own transport button.
+        self.previewBandToggle = Button(
+            parent=self.procPage, text=u"\u25be", variant="surface",
+            content_align=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            content_padding=(8, 2, 8, 2), corner_radius=8, size=(0, 0))
+        self.previewBandToggle.setObjectName(u"previewBandToggle")
+        self.previewBandToggle.setToolTip(QCoreApplication.translate(
+            "MainWindow", u"Collapse the preview band", None))
+        self.previewBandToggle.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.previewBandToggle.hide()
+        # The policy's state: the mode, the column it asked for, and whether the band is collapsed. `ProcPageHandles`
+        # exposes the state object so `ProcessTab` can wire the toggle without reaching into the builder.
+        self._layout_mode = SIDE
+        self._policy_column = scaled_px(PROCESS_COLUMN_PX)
+        self._preview_collapsed = False
+        self._applying_layout = False
+        self._base_grid_bottom = self.gridLayout_3.contentsMargins().bottom()
+        self.layoutState = PageLayoutState(self.procPage)
+        self.previewBandToggle.clicked.connect(self.layoutState.toggleRequested.emit)
+        self.layoutState.toggleRequested.connect(self.toggle_preview_band)
+        self.layoutState.reapplyRequested.connect(self._apply_layout_policy)
+        # The column's width/mode is resolved at construction and re-resolved on every factor change AND on every page
+        # resize (a window drag changes the viewport without a factor change), so `scale:<factor>` and a resize both
+        # move it without a restart.
+        self._column_scale = ScaleFollower(self.procPage, self._apply_layout_policy)
+        self._layout_filter = _PageLayoutFilter(self)
+        self.procPage.installEventFilter(self._layout_filter)
+        self.pageScroll.viewport().installEventFilter(self._layout_filter)
         self.processSettingsContainer.setCurrentIndex(0)
         # The strip's host half (see `TabStripHost`): measures the labels, exposes an overflow the user can reach,
         # and paints the selected plate from the host's token. It must come after the labels are set, or it would
@@ -654,6 +740,11 @@ class ProcPagePage:
             startTimeSpinBox=self.startTimeSpinBox,
             endTimeSpinBox=self.endTimeSpinBox,
             timeInVideoScrollBar=self.timeInVideoScrollBar,
+            previewBand=self.previewBand,
+            previewBandToggle=self.previewBandToggle,
+            renderRow=self.renderRow,
+            renderRowFooter=self.renderRowFooter,
+            layoutState=self.layoutState,
         )
         # The page pass needs a QObject to walk; the relay is that object and forwards
         # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
@@ -661,16 +752,157 @@ class ProcPagePage:
         self.retranslate()
         return self.procPage
 
-    @staticmethod
-    def _apply_column_width(*columns: QWidget) -> None:
-        """Give the process column and its inner containers the design width at the factor in force now.
+    # -- the layout policy: cascade, then stack ---------------------------------------------------------------
 
-        `scaled_px` runs HERE - at build and on every `UiScale.scale_changed` - never at import, so the number follows
-        the factor the window is actually using. All three sites take the same number: one column, stated once.
+    @property
+    def layout_mode(self) -> str:
+        """The mode the policy last applied: `"side"` or `"stack"` (`SIDE`/`STACK` in `layout_policy`)."""
+        return self._layout_mode
+
+    @property
+    def policy_column(self) -> int:
+        """The column width the policy last asked for (the actual width of the three column widgets)."""
+        return self._policy_column
+
+    @property
+    def preview_collapsed(self) -> bool:
+        """Whether the stacked preview band is currently collapsed."""
+        return self._preview_collapsed
+
+    def _column_floor_px(self) -> int:
+        """The column's content floor, from the factor - never from the live content hint.
+
+        The General tab's hint moves with the width it is measuring (618 px at a 1000 px column, 603 px at the 647 px
+        column the same content would get), so feeding it back would let a single resize flip the 2.0 decision. The
+        factor form is the measured 650 at 2.0/575 at 1.75 resolved through the same scale as the column.
         """
-        width = scaled_px(PROCESS_COLUMN_PX)
-        for column in columns:
-            column.setFixedWidth(width)
+        return column_floor_for_factor(UiScale.get_instance().factor())
+
+    def _apply_layout_policy(self) -> None:
+        """Decide `(mode, column)` from the live viewport and apply it to both panes and the page chrome.
+
+        Called at build, on every `UiScale.scale_changed`, and on every viewport resize (the factor is not the only
+        input: a window drag changes the viewport too). The guard keeps the layout writes from re-entering through
+        the resize events they cause.
+        """
+        if self._applying_layout:
+            return
+        self._applying_layout = True
+        try:
+            viewport = self.pageScroll.viewport().width()
+            mode, column = layout_decision(
+                UiScale.get_instance().factor(),
+                viewport,
+                max(PANE_FLOOR_PX, self.processInfoContainer.minimumSizeHint().width()),
+                self._column_floor_px(),
+            )
+            # A collapsed band is the same cascade with the preview out of the sum: the column takes the body's whole
+            # content width. In side mode this is the candidate the owner asked for (the column widens); in stack mode
+            # it was already full width, and collapsing reclaims the vertical space.
+            if self._preview_collapsed:
+                mode = STACK
+                column = max(0, viewport - BODY_INSET_PX)
+            self._place_panes(mode, column)
+            self._apply_preview_band(mode, column)
+            self._apply_render_row(mode)
+            self._layout_mode = mode
+            self._policy_column = column
+            self.previewBandToggle.setVisible(mode == STACK)
+            self.layoutState.changed.emit(mode, column, self._preview_collapsed)
+            self._position_overlays()
+        finally:
+            self._applying_layout = False
+
+    def _place_panes(self, mode: str, column: int) -> None:
+        """Put the preview and the column in the grid for `mode`, and state the column width at all three sites."""
+        grid = self.gridLayout_3
+        # Remove both first, so a mode switch cannot leave a row or a column item behind: `addWidget` alone moves a
+        # widget but the vacated cell's row can keep a minimum height from the old placement.
+        grid.removeWidget(self.processInfoContainer)
+        grid.removeWidget(self.processContainer)
+        if mode == STACK:
+            # The preview is a band above the column; both span the grid's two content columns, so neither is squeezed.
+            grid.addWidget(self.processInfoContainer, 0, 1, 1, 2)
+            grid.addWidget(self.processContainer, 1, 1, 1, 2)
+        else:
+            grid.addWidget(self.processInfoContainer, 0, 2, 1, 1)
+            grid.addWidget(self.processContainer, 0, 1, 1, 1)
+        # One column, stated once: the outer container and the two inner strips that were fixed separately before.
+        for container in (self.processContainer, self.bottomMenuSubContainer, self.widget_13):
+            container.setFixedWidth(column)
+        self.processInfoContainer.setVisible(not self._preview_collapsed)
+
+    def _apply_preview_band(self, mode: str, column: int) -> None:
+        """In stacked mode the preview's height is 16:9 of its width; in side mode it is the pane's own hint."""
+        if mode == STACK and not self._preview_collapsed:
+            margins = self.verticalLayout_5.contentsMargins()
+            band_width = max(0, column - margins.left() - margins.right())
+            height = int(round(band_width * PREVIEW_BAND_ASPECT_H / PREVIEW_BAND_ASPECT_W))
+            self.previewBand.setMinimumHeight(height)
+            self.previewBand.setMaximumHeight(height)
+        else:
+            # Release the fixed box: `setFixedHeight` cannot be undone by `setFixedHeight(0)` (that is a zero box), and
+            # the side page's 1.0 geometry must be exactly the flow geometry it had before this wave.
+            self.previewBand.setMinimumHeight(0)
+            self.previewBand.setMaximumHeight(16777215)
+
+    def _apply_render_row(self, mode: str) -> None:
+        """Move the render row into the sticky footer in stacked mode and back into the column's flow in side mode."""
+        footer = self.renderRowFooter
+        if mode == STACK:
+            self.verticalLayout_21.removeWidget(self.widget_13)
+            if self.widget_13.parentWidget() is not footer:
+                self.renderRowFooterLayout.addWidget(self.widget_13)
+            row_height = max(self.widget_13.sizeHint().height(), self.widget_13.minimumSizeHint().height())
+            footer.setFixedHeight(row_height)
+            footer.show()
+            footer.raise_()
+            margins = self.gridLayout_3.contentsMargins()
+            self.gridLayout_3.setContentsMargins(
+                margins.left(), margins.top(), margins.right(), self._base_grid_bottom + row_height)
+        else:
+            self.renderRowFooterLayout.removeWidget(self.widget_13)
+            if self.widget_13.parentWidget() is not self.bottomMenuSubContainer:
+                # Index 1 is the row's shipped place: after the tab host (`widget_2`), before `progressDetail`.
+                self.verticalLayout_21.insertWidget(1, self.widget_13)
+            footer.hide()
+            margins = self.gridLayout_3.contentsMargins()
+            self.gridLayout_3.setContentsMargins(
+                margins.left(), margins.top(), margins.right(), self._base_grid_bottom)
+
+    def _position_overlays(self) -> None:
+        """Pin the sticky footer to the page viewport's bottom and the collapse toggle to its top-right."""
+        viewport = self.pageScroll.viewport()
+        origin = viewport.mapTo(self.procPage, QPoint(0, 0))
+        if self.renderRowFooter.isVisible():
+            height = self.renderRowFooter.height()
+            self.renderRowFooter.setGeometry(
+                origin.x(), origin.y() + viewport.height() - height, viewport.width(), height)
+            self.renderRowFooter.raise_()
+        if self.previewBandToggle.isVisible():
+            toggle = self.previewBandToggle
+            toggle.adjustSize()
+            toggle.setGeometry(
+                origin.x() + viewport.width() - toggle.width() - OVERLAY_INSET_PX, origin.y() + OVERLAY_INSET_PX,
+                toggle.width(), toggle.height())
+            toggle.raise_()
+
+    def toggle_preview_band(self) -> None:
+        """The collapse toggle's one action: flip the band and re-run the policy."""
+        self.set_preview_collapsed(not self._preview_collapsed)
+
+    def set_preview_collapsed(self, collapsed: bool) -> None:
+        """Collapse or expand the preview band; a no-op when the state already matches."""
+        collapsed = bool(collapsed)
+        if collapsed == self._preview_collapsed:
+            return
+        self._preview_collapsed = collapsed
+        # The glyph is the ACTION the press performs, like the preview's own pause/play button.
+        self.previewBandToggle.setText(u"\u25b8" if collapsed else u"\u25be")
+        self.previewBandToggle.setToolTip(QCoreApplication.translate(
+            "MainWindow",
+            u"Expand the preview band" if collapsed else u"Collapse the preview band", None))
+        self._apply_layout_policy()
 
     def retranslate(self, language: str | None = None) -> None:
         self.label_9.setText(QCoreApplication.translate("MainWindow", u"Start Time (seconds)", None))

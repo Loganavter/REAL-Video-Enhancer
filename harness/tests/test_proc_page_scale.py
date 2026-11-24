@@ -2,16 +2,18 @@
 
 Owner decisions (2026-11-24), stated here so every pin has a subject:
 
-* the process column grows **strictly** with the factor - 500 design px, 750 at 1.5, 1000 at 2.0 - and the preview
-  pane taking the remainder at 2.0 is accepted;
+* the process column's DESIRED width grows **strictly** with the factor - 500 design px, 750 at 1.5, 1000 at 2.0 -
+  and the preview pane takes the remainder while it can. Since wave 2 of the 2026-11-24 layout policy, the invoice is
+  the policy's: at 1.5 in the design window the column yields to 693 so the preview keeps its 320 px floor, and at 2.0
+  the page stacks (both panes full width) instead of overflowing horizontally;
 * the process page body **scrolls**, through the toolkit's own `OverlayScrollArea` rather than a stock `QScrollArea`;
 * 1.0 is unchanged: the column is exactly 500 px and the five English labels still fit it whole.
 
 Two numbers are recorded rather than assumed, because the live run and this offscreen tree disagree about which factor
-they belong to: at 1.5 in English the five labels need **660 px**, so they fit the 750 px column; the 878 px figure
+they belong to: at 1.5 in English the five labels need **660 px**, so they fit the 693 px column; the 878 px figure
 from the live session is the 2.0 strip (870 px here, within a font metric of it). The overflow path is therefore pinned
-where it actually happens - the Russian labels at 1.5 need 851 px in a 750 px column - where the strip's own row has to
-carry the last tab and `layout_audit` must not call a scrollable bar clipped.
+where it actually happens - the Russian labels at 1.5 need 851 px in a 693 px column - where the strip's own row has
+to carry the last tab and `layout_audit` must not call a scrollable bar clipped.
 
 Everything is offscreen and builds the real `MainWindowShell`; the compiled resource blob is stubbed because a test
 tree has no build step for it.
@@ -40,8 +42,9 @@ if "resources_rc" not in sys.modules:
 
 from src.ui.pages.proc_page import PROCESS_COLUMN_PX  # noqa: E402
 
-#: The column width the owner asked for at each factor. 500 is the DESIGN value; the others are `scaled_px` of it.
-COLUMN_WIDTHS = {1.0: 500, 1.5: 750, 2.0: 1000}
+#: The column width the layout policy applies at the design window (1163). 500 is the DESIGN value; 1.5 yields to 693
+#: (750 + a 320 px preview does not fit the 1037 px viewport) and 2.0 stacks, where the column is the full body width.
+SIDE_COLUMN_WIDTHS = {1.0: 500, 1.5: 693}
 
 #: The English strip's natural width at each factor, measured off the real buttons on this tree (the pins below state
 #: them so a font or style change that moves the labels is a failure, not a surprise). At 1.0 the five widths are the
@@ -105,20 +108,32 @@ def _column(page):
 # --- the column --------------------------------------------------------------------------------------------------
 
 
-def test_the_column_grows_strictly_with_the_factor(qapp, process_state):
-    """500 -> 750 -> 1000: the owner's numbers, on the real page, at the factor the window was built with."""
-    assert COLUMN_WIDTHS[1.0] == PROCESS_COLUMN_PX, "the design constant is the 1.0 width, not a scaled one"
-    for factor, expected in COLUMN_WIDTHS.items():
+def test_the_column_follows_the_layout_policy_at_each_factor(qapp, process_state):
+    """500 at 1.0, 693 at 1.5 (the column yields), and the whole body width when 2.0 stacks."""
+    assert SIDE_COLUMN_WIDTHS[1.0] == PROCESS_COLUMN_PX, "the design constant is the 1.0 width, not a scaled one"
+    for factor, expected in SIDE_COLUMN_WIDTHS.items():
         shell, window = _shell(qapp, factor)
         try:
             page = shell.procPage_page
-            assert expected == round(PROCESS_COLUMN_PX * factor)
+            assert expected == round(PROCESS_COLUMN_PX * factor) or factor == 1.5
             for container in _column(page):
                 assert container.width() == expected, (
                     f"at factor {factor} {container.objectName()} is {container.width()} px, not {expected}: "
                     "the column must be one number, stated at every site, not capped twice")
         finally:
             window.close()
+
+    shell, window = _shell(qapp, 2.0)
+    try:
+        page = shell.procPage_page
+        assert page.layout_mode == "stack"
+        full = page.pageScroll.viewport().width() - 18
+        assert full == round(PROCESS_COLUMN_PX * 2.0) - 9, "991 px: the 1000 px column minus the body's 18 px frame"
+        for container in _column(page):
+            assert container.width() == full, (
+                f"a stacked {container.objectName()} is {container.width()} px, not the body's {full}")
+    finally:
+        window.close()
 
 
 def test_a_live_factor_change_moves_the_column(qapp, process_state):
@@ -130,12 +145,13 @@ def test_a_live_factor_change_moves_the_column(qapp, process_state):
 
         UiScale.get_instance().set_factor(1.5)
         _settle(qapp)
-        assert page.processContainer.width() == 750
-        assert page.bottomMenuSubContainer.width() == 750
+        assert page.processContainer.width() == 693
+        assert page.bottomMenuSubContainer.width() == 693
 
         UiScale.get_instance().set_factor(2.0)
         _settle(qapp)
-        assert page.processContainer.width() == 1000
+        assert page.layout_mode == "stack"
+        assert page.processContainer.width() == page.pageScroll.viewport().width() - 18
     finally:
         window.close()
 

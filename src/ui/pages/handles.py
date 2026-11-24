@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only; this module must import without PySide6
+    from PySide6.QtCore import QObject
     from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QWidget
     from sli_ui_toolkit.widgets import (
         Button,
@@ -161,6 +162,15 @@ class ProcPageHandles:
     startTimeSpinBox: "DoubleSpinBox"
     endTimeSpinBox: "DoubleSpinBox"
     timeInVideoScrollBar: "MinimalistScrollBar"
+    # Wave 3 (owner, 2026-11-24): the stacked preview band, the toggle at its top-right that collapses it, the
+    # render row and the sticky footer it moves into in stacked mode. `layoutState` is the page's `PageLayoutState`
+    # (`mode`, `column`, `collapsed` on `changed`; emit `toggleRequested` to collapse/expand; emit
+    # `reapplyRequested` for one more policy pass) - the typed edge the glue and the band tests read.
+    previewBand: "QWidget"
+    previewBandToggle: "Button"
+    renderRow: "QWidget"
+    renderRowFooter: "QWidget"
+    layoutState: "QObject"
 
 
 @dataclass(frozen=True)
