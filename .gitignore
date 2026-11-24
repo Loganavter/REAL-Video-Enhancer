@@ -20,6 +20,7 @@ harness/docs/wsp/ledger.db
 
 # runtime artifacts the app writes next to itself
 /log.txt
+/log.prev.txt
 /settings.txt
 /temp/
 
