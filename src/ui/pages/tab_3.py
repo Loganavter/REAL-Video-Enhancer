@@ -21,6 +21,7 @@ from sli_ui_toolkit.widgets import CheckBox, ComboBox, Stepper, SurfacePanel, Te
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import RenderSettingsHandles
+from src.ui import i18n
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
@@ -195,10 +196,13 @@ class Tab3Page:
             ncnn_gpu_id=self.ncnn_gpu_id,
             pytorch_gpu_id=self.pytorch_gpu_id,
         )
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.tab_3)
         self.retranslate()
         return self.tab_3
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.label_3.setText(QCoreApplication.translate("MainWindow", u"Precision", None))
         self.precision.setItemText(0, QCoreApplication.translate("MainWindow", u"auto", None))
         self.precision.setItemText(1, QCoreApplication.translate("MainWindow", u"float16", None))

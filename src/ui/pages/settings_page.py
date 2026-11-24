@@ -21,6 +21,7 @@ from sli_ui_toolkit.widgets import Button, SurfacePanel, SurfaceScrollArea, TopT
 from src.ui.pages.proc_page import TabButtonFactory, TabStripHost, overflow_style
 from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_style
 from src.ui.pages.handles import SettingsPageHandles
+from src.ui import i18n
 from src.ui.pages.tab_2 import Tab2Page
 from src.ui.pages.tab_3 import Tab3Page
 from src.ui.pages.tab_4 import Tab4Page
@@ -97,10 +98,13 @@ class SettingsPagePage:
         self.tabWidget.setCurrentIndex(0)
         self._tab_strip = TabStripHost(self.tabWidget, strip_style, strip_buttons)
         self._handles = SettingsPageHandles(resetSettingsBtn=self.resetSettingsBtn)
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.settingsPage)
         self.retranslate()
         return self.settingsPage
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_2), QCoreApplication.translate("MainWindow", u"Output Settings", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_3), QCoreApplication.translate("MainWindow", u"Render Settings", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_4), QCoreApplication.translate("MainWindow", u"RVE Settings", None))

@@ -17,6 +17,7 @@ from sli_ui_toolkit.widgets import SurfacePanel, ConsoleView
 import resources_rc
 from src.ui.typography import apply, SMALL_PT
 from src.ui.pages.handles import LogsHandles
+from src.ui import i18n
 
 
 class Tab5Page:
@@ -48,10 +49,13 @@ class Tab5Page:
         self.renderOutput.set_max_lines(4000)
         self.horizontalLayout_10.addWidget(self.renderOutput)
         self._handles = LogsHandles(renderOutput=self.renderOutput)
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.tab_5)
         self.retranslate()
         return self.tab_5
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.renderOutput.setHtml(QCoreApplication.translate("MainWindow", u"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
 "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
 "p, li { white-space: pre-wrap; }\n"

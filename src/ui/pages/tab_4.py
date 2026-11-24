@@ -16,9 +16,10 @@ import resources_rc
 import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CheckBox` where it had a
 # `QCheckBox`, `Button` where it had a `QPushButton`. Nothing here needs a Qt-shaped compatibility adapter.
-from sli_ui_toolkit.widgets import Button, CheckBox, SurfacePanel, Text
+from sli_ui_toolkit.widgets import Button, CheckBox, ComboBox, SurfacePanel, Text
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import AppSettingsHandles
+from src.ui import i18n
 
 
 def _row_checkbox(parent) -> CheckBox:
@@ -93,6 +94,29 @@ class Tab4Page:
         self.discord_rich_presence.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Show REAL Video Enhancer in discord.</p></body></html>", None))
         self.horizontalLayout_12.addWidget(self.discord_rich_presence)
         self.verticalLayout_20.addWidget(self.discordRPCSettingsContainer)
+        # The interface language. A layout, not a wrapper QWidget: the row is a line of content, and the page already
+        # has the column that stacks it (`test_toolkit_native.py` counts bare wrappers on purpose).
+        self.languageLayout = QHBoxLayout()
+        self.languageLayout.setSpacing(10)
+        self.languageLayout.setContentsMargins(0, 0, 0, 0)
+        # The combo carries the language code as item data and the endonym as its text, so a user hunting for Russian
+        # reads "Русский" whatever language the app is in. Applying it is `SettingsTab.applyLanguageSetting` (the
+        # page builds the control, the glue owns the setting): the switch is a toolkit fan-out, not a restart.
+        self.languageLabel = Text()
+        self.languageLabel.setObjectName(u"languageLabel")
+        apply(self.languageLabel, BODY_PT)
+        self.languageLayout.addWidget(self.languageLabel)
+        self.languageLayout.addStretch(1)
+        self.language = ComboBox()
+        self.language.setObjectName(u"language")
+        # QComboBox's own policy: as wide as its longest item, exactly as tall as its hint (the toolkit combo would
+        # otherwise take the row's spare width).
+        self.language.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        for _code in i18n.LANGUAGES:
+            self.language.addItem(i18n.language_name(_code), _code)
+        self.language.setCurrentIndex(max(0, self.language.findData(i18n.current_language())))
+        self.languageLayout.addWidget(self.language)
+        self.verticalLayout_20.addLayout(self.languageLayout)
         self.widget_29 = QWidget(self.GUIOptionsContainer)
         self.widget_29.setObjectName(u"widget_29")
         self.verticalLayout_35 = QVBoxLayout(self.widget_29)
@@ -118,14 +142,19 @@ class Tab4Page:
         self._handles = AppSettingsHandles(
             preview_enabled=self.preview_enabled,
             discord_rich_presence=self.discord_rich_presence,
+            language=self.language,
             openRVEFolderBtn=self.openRVEFolderBtn,
         )
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.tab_4)
         self.retranslate()
         return self.tab_4
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.label_19.setText(QCoreApplication.translate("MainWindow", u"Preview Enabled", None))
         self.preview_enabled.setText("")
         self.label_23.setText(QCoreApplication.translate("MainWindow", u"Discord Rich Presence", None))
         self.discord_rich_presence.setText("")
+        self.languageLabel.setText(QCoreApplication.translate("MainWindow", u"Language", None))
         self.openRVEFolderBtn.setText(QCoreApplication.translate("MainWindow", u"Open RVE Folder", None))

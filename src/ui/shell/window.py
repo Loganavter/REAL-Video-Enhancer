@@ -33,6 +33,7 @@ import resources_rc
 from sli_ui_toolkit.widgets import Button, SurfacePanel
 
 from src.ui import toolkit_theme
+from src.ui import i18n
 from src.ui.pages.home_page import HomePagePage
 from src.ui.pages.more_page import MorePagePage
 from src.ui.pages.proc_page import ProcPagePage
@@ -396,5 +397,14 @@ class MainWindowShell:
 
             apply_edge_fades(window)
 
-    def retranslate(self, window) -> None:
-        window.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
+        # The language pass, once for the whole window: every page bound a relay under its own root in `build()`
+        # (`i18n.bind_page`), and this one install is what makes the toolkit's `language_changed` reach them - current
+        # pages and any widget added later (the toolkit installs a `ChildAdded` watcher). The shell's own title is the
+        # last relay, so a switch repaints it too instead of leaving the one string that was dead code (the method had
+        # no caller before this).
+        self._window = window
+        i18n.bind_page(self, window)
+        i18n.install(window)
+
+    def retranslate(self, language: str | None = None) -> None:
+        self._window.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))

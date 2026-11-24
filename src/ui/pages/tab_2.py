@@ -22,6 +22,7 @@ from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, 
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import OutputSettingsHandles
+from src.ui import i18n
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
 #: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
@@ -210,10 +211,13 @@ class Tab2Page:
             scene_change_detection_threshold=self.scene_change_detection_threshold,
             auto_border_cropping=self.auto_border_cropping,
         )
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.tab_2)
         self.retranslate()
         return self.tab_2
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.encoderLabel_3.setText(QCoreApplication.translate("MainWindow", u"Output folder directory", None))
         self.select_output_folder_location_btn.setText(QCoreApplication.translate("MainWindow", u"Select Output Folder", None))
         self.label_20.setText(QCoreApplication.translate("MainWindow", u"Scene Change Detection Enabled", None))

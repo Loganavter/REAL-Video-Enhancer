@@ -1166,6 +1166,20 @@ def main(file_to_open=None):
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    # The interface language goes in BEFORE any window exists: the pages call `QCoreApplication.translate(...)` while
+    # they build, so installing the translator here means the first paint is already in the chosen language, not
+    # English repainted into it after the window is up. `src/ui/i18n.py` owns the table and the toolkit binding; the
+    # value comes from `settings.txt` (`language`), and an unknown one reads as English.
+    try:
+        from src.ui import i18n
+
+        _language = i18n.configure_i18n(Settings().settings.get("language"))
+        log(f"interface language: {_language}")
+    except Exception as _i18n_exc:
+        # A language is a preference, not a precondition: the app runs in English rather than not at all.
+        import traceback
+
+        log("interface language failed:\n" + traceback.format_exc())
     # Before the theme: `toolkit_theme.install` imports the toolkit, and without the path it would "fail" into RVE's
     # own palette and log an error nobody reads - the app would then run with toolkit widgets on a stock palette.
     try:

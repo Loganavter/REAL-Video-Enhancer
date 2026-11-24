@@ -20,6 +20,25 @@ from __future__ import annotations
 
 import os
 
+#: The interface languages the app ships: English and ONE translated language. The tuple lives here because this
+#: module is the settings owner and must stay importable without PySide6; `src.ui.i18n` re-exports it as its language
+#: list, and the validator below is the single answer to "is this a language we can render".
+SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "ru")
+
+#: What an absent, empty or unknown value means. English is the source language of every string in the tree, so it is
+#: also the fallback that costs nothing.
+DEFAULT_LANGUAGE: str = "en"
+
+
+def validate_language(value: str | None) -> str:
+    """`value` when it is a supported language, `DEFAULT_LANGUAGE` otherwise.
+
+    Unknown values are not an error to raise on: a `settings.txt` written by another build (or hand-edited) must open
+    in a language the app can render, not fail to start.
+    """
+    language = (value or "").strip()
+    return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+
 
 class Settings:
     def __init__(self, settings_file: str | None = None, default_output_folder: str | None = None):
@@ -84,6 +103,10 @@ class Settings:
             # scan wobble (harness/docs/wsp/verified/reuse-structural-gate.txt). Not the default: it certifies
             # its own acceptance at that same coarse scale, which is a picture judgement the owner makes.
             "temporal_reuse_statistic": "mean_abs",
+            # The interface language (`src.ui.i18n`). English is the source language of every UI string; `ru` is the
+            # one translated language the app ships. Appended, not prepended: an existing `settings.txt` keeps its
+            # first 30 lines and gains this one at the end on the next write, so nothing a user hand-edited moves.
+            "language": DEFAULT_LANGUAGE,
         }
         self.allowedSettings = {
             "encoder_command": "ANY",
@@ -134,6 +157,7 @@ class Settings:
             "quality_preset": ("best", "fast"),
             "temporal_reuse": ("True", "False"),
             "temporal_reuse_statistic": ("mean_abs", "coarse"),
+            "language": SUPPORTED_LANGUAGES,
         }
         self.settings = self.defaultSettings.copy()
         if not os.path.isfile(self.settingsFile):
@@ -159,6 +183,11 @@ class Settings:
                     key, _, value = line.strip().partition(",")
                     if not key:
                         continue
+                    # An unknown language is not a value the UI can render; it reads as English instead of being kept
+                    # (the writer drops values outside `allowedSettings`, so a kept `de` would vanish on the next save
+                    # anyway - this way the current session agrees with the next one).
+                    if key == "language":
+                        value = validate_language(value)
                     self.settings[key] = value
             except (
                 ValueError

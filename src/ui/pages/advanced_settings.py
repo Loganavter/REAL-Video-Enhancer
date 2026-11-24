@@ -20,6 +20,7 @@ from sli_ui_toolkit.widgets import CheckBox, ComboBox, SurfacePanel, SurfaceScro
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 from src.ui.pages.handles import AdvancedSettingsHandles
+from src.ui import i18n
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
 #: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
@@ -258,10 +259,13 @@ class AdvancedSettingsPage:
             ensembleCheckBox=self.ensembleCheckBox,
             upscaleContainer=self.upscaleContainer,
         )
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.advancedSettings)
         self.retranslate()
         return self.advancedSettings
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.label_41.setText(QCoreApplication.translate("MainWindow", u"General Settings", None))
         self.label_18.setToolTip("")
         self.label_18.setStatusTip("")

@@ -19,6 +19,7 @@ import resources_rc
 # `QLabel`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import SurfacePanel, TextListWidget
 from src.ui.pages.handles import RenderQueueHandles
+from src.ui import i18n
 
 
 class RenderQueueTabPage:
@@ -87,9 +88,12 @@ class RenderQueueTabPage:
         self.verticalLayout_27.addWidget(self.widget_22, 1)
         # The bottom "Finished Output Files" list is gone (owner, 2026-11-22): a finished job stays in the queue with its
         # final state, so the page is ONE list and it takes the whole height instead of sharing it with a second pane.
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.renderQueueTab)
         self.retranslate()
         self._handles = RenderQueueHandles(renderQueueListWidget=self.renderQueueListWidget)
         return self.renderQueueTab
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         pass

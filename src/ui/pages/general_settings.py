@@ -23,6 +23,7 @@ from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, 
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import GeneralSettingsHandles
+from src.ui import i18n
 
 #: RVE's control text is 12 PIXELS (the Designer's sizing). The info pane's stock editor was 12 px, and
 #: `setFontPointSize` would convert through the screen DPI and render 16 px - the value used to come from the
@@ -699,10 +700,13 @@ class GeneralSettingsPage:
             generalUpscaleContainer=self.generalUpscaleContainer,
             qualityPresetContainer=self.qualityPresetContainer,
         )
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.generalSettings)
         self.retranslate()
         return self.generalSettings
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.inputFileSelectButton.setText(QCoreApplication.translate("MainWindow", u"Select Input File", None))
         self.batchSelectButton.setText(QCoreApplication.translate("MainWindow", u"Batch Select", None))
         self.outputFileSelectButton.setText(QCoreApplication.translate("MainWindow", u"Select Output Folder", None))
