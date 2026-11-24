@@ -30,6 +30,16 @@ from .utils.Util import log, resize_frame_bytes, guard_render_thread, process_up
 from .utils.LogPolicy import JobPhases, ProgressLimiter, LEVEL_DEBUG
 from .utils.BorderDetect import BorderDetect, cache_location
 from .utils.VideoInfo import OpenCVInfo
+from .utils.DisplayChannel import (
+    ETA_UNSET,
+    PHASE_BUILDING_ENGINE,
+    PHASE_DONE,
+    PHASE_FINALISING,
+    PHASE_PREPARING,
+    PHASE_RENDERING,
+    StatusChannel,
+    engine_code,
+)
 import numpy as np
 
 
@@ -156,6 +166,8 @@ class Render:
         display_state_id: str | None = None,
         display_size: tuple[int, int] | None = None,
         seek_state_id: str | None = None,
+        #: The render-status record (see utils/DisplayChannel.py), a GUI-owned pid-scoped segment.
+        status_state_id: str | None = None,
         sceneDetectMethod: str = "pyscenedetect",
         sceneDetectSensitivity: float = 3.0,
         trt_optimization_level: int = 5,
@@ -306,6 +318,23 @@ class Render:
         self.fps = videoInfo.get_fps()
         log(f"phase: video probe {(_perf_counter() - _t_probe) * 1000.0:.0f} ms "
             f"({self.width}x{self.height}, {self.totalInputFrames} frames, {self.fps:.3f} fps)")
+
+        # The render-status block (its own pid-scoped segment, see utils/DisplayChannel.py): the numbers the
+        # pane used to scrape out of this process's stdout. Created BEFORE the engines are built so the
+        # building-engine phase is on the slot, and written beside every log line, never instead of one.
+        # None = no viewer; the render pays one `set()` per frame and nothing else.
+        self.statusChannel = None
+        if status_state_id:
+            try:
+                self.statusChannel = StatusChannel(status_state_id, engine=engine_code(self.backend))
+                if self.statusChannel.attached:
+                    log(f"status: publishing to '{status_state_id}' (backend {self.backend})")
+                    self._write_status(0, phase=PHASE_PREPARING)
+                else:
+                    log(f"status: block '{status_state_id}' is not usable; the pane reads no status")
+            except Exception as _status_exc:   # a pane must never cost the export
+                log(f"status: channel setup failed ({_status_exc}); the render runs without it")
+                self.statusChannel = None
         color_space = videoInfo.get_color_space()
         # The pipe packer's luma matrix follows the SOURCE's colour space, not the bit depth: "HDR mode" here is also
         # the 10-bit switch, and a 10-bit bt709 clip packed with bt2020 coefficients measured mean |d| 3.72 against the
@@ -381,6 +410,9 @@ class Render:
         report_borders(self.width, self.height, self.borderX, self.borderY)
 
         log("Using backend: " + self.backend)
+        # The engine build below is the long silent stretch the pane used to learn from the stdout words
+        # "This may take a while": the slot says it in the phase byte (the log line is untouched).
+        self._write_status(0, phase=PHASE_BUILDING_ENGINE)
         # upscale has to be called first to get the scale of the upscale model
         if upscaleModel:
             _t_model = _perf_counter()
@@ -421,7 +453,10 @@ class Render:
 
         for extraRestoration in self.extraRestorationModels:
             extraRestoration.hotReload()
-        
+
+        # Every engine this job needs is built; the reader/encoder and the first frame are still ahead.
+        self._write_status(0, phase=PHASE_PREPARING)
+
         if self.modelScale and self.override_upscale_scale:
             if int(self.modelScale) == int(self.override_upscale_scale):
                 log("Override upscale scale is set to the same value as the model scale, this will not change the output resolution.")
@@ -1136,6 +1171,42 @@ class Render:
             return None
         return max(0.0, float(frames_rendered) / (fps * factor))
 
+    def _write_status(self, frames_rendered, phase: int | None = None) -> None:
+        """Write the render-status record the pane reads (`utils/DisplayChannel.StatusChannel`).
+
+        Called once per rendered frame and on every phase change. The ETA/FPS here are the SAME arithmetic
+        the log line uses (`InformationWriteOut.remaining_seconds` / the same elapsed division), so the pane
+        and the log cannot disagree about how much is left. A detached channel is a no-op, and a failure in
+        the slot must never take a render down - the log line is already written by its own path.
+        """
+        channel = getattr(self, "statusChannel", None)
+        if channel is None:
+            return
+        info = getattr(self, "informationHandler", None)
+        frames_total = getattr(info, "totalOutputFrames", None)
+        if frames_total is None:
+            frames_total = getattr(self, "totalOutputFrames", 0)
+        eta = ETA_UNSET
+        fps = 0.0
+        if info is not None:
+            eta = info.remaining_seconds(frames_rendered)
+            if frames_rendered > 0:
+                elapsed = time() - info.startTime
+                if elapsed > 0:
+                    fps = float(round(frames_rendered / elapsed))
+        changes = {
+            "frames_rendered": int(frames_rendered),
+            "frames_total": int(frames_total or 0),
+            "eta_seconds": float(eta),
+            "fps": fps,
+        }
+        if phase is not None:
+            changes["phase"] = int(phase)
+        try:
+            channel.set(**changes)
+        except Exception:
+            pass
+
     def _publish_display(self, frame, force: bool = False, time_s: float | None = None) -> bool:
         """Offer this composited frame to the pane; returns whether a publish actually happened.
 
@@ -1297,6 +1368,8 @@ class Render:
 
     def render(self):
         frames_rendered = 0
+        # The engines are built and the reader/writer are up: this thread only moves frames now.
+        self._write_status(0, phase=PHASE_RENDERING)
         """
         from viztracer import VizTracer
         tracer = VizTracer()
@@ -1326,6 +1399,9 @@ class Render:
                             self.writeBuffer.writeQueue.put(f.get_frame_bytes())
                             frames_rendered += int(self.ceilInterpolateFactor)
                     self.informationHandler.stopWriting()
+                    # The reader is drained; the writer may still be flushing. Say so instead of leaving
+                    # "Rendering" on the pane until the process exits.
+                    self._write_status(frames_rendered, phase=PHASE_FINALISING)
                     break
 
                 for extraRestoration in self.extraRestorationModels:
@@ -1467,6 +1543,9 @@ class Render:
                     self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
                 self._profile["pack"] += (_perf_counter() - _t_pack) * 1000.0
                 frames_rendered += int(self.ceilInterpolateFactor)
+                # Once per rendered frame: the counters, ETA and FPS the pane shows, beside the log line
+                # the information thread keeps printing (the slot never replaces it).
+                self._write_status(frames_rendered)
                 if not hasattr(self, "_t_first_frame"):
                     self._t_first_frame = _time.time()
                     if self._phases.first("first-frame"):
@@ -1501,6 +1580,7 @@ class Render:
                         pass
             else:
                 sleep(1)
+        self._write_status(frames_rendered, phase=PHASE_DONE)
         first = getattr(self, "_t_first_frame", None)
         if first is not None and self._phases.first("render-loop"):
             log(f"render loop: {_time.time() - first:.2f} s for {frames_rendered} frames "
@@ -1534,7 +1614,7 @@ class Render:
         self.writeBuffer.writeQueue.put(None)
         # Detach the GUI-owned blocks: closing never unlinks a segment we did not create. A block the
         # backend created as a fallback (the window had not attached yet) is removed by close().
-        for _block in (self.displayChannel, self.seekState):
+        for _block in (self.displayChannel, self.seekState, getattr(self, "statusChannel", None)):
             if _block is not None:
                 try:
                     _block.close()

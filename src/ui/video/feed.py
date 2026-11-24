@@ -208,6 +208,23 @@ class PreviewFeed(QObject):
         """How many accepted pictures were replaced before anyone took them (latest-wins, no queue)."""
         return self._dropped
 
+    # -- the render status --------------------------------------------------------------------------
+
+    def status(self) -> dict | None:
+        """The render's own status record (`DisplayReader.status`), or None when there is none.
+
+        The status is the reader's byte contract, not the feed's picture state: the feed only forwards it so
+        the pane has one object to ask. A stub reader without the call, a detached reader, or a torn record
+        all answer None - which the pane treats as "nothing new", never as zeroes.
+        """
+        getter = getattr(self._reader, "status", None)
+        if not callable(getter):
+            return None
+        try:
+            return getter()
+        except Exception:
+            return None
+
     # -- the newest-wins seek -----------------------------------------------------------------------
 
     def request_seek(self, seconds: float) -> int:

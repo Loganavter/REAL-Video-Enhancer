@@ -30,11 +30,27 @@ after the copy and retrying a torn read.
 The seek request block (16 bytes, `SeekState`) rides on the same machinery: ``<dI`` =
 ``requested_seconds`` (double) + ``generation`` (uint32), newest wins, one slot, 4 trailing reserved
 bytes so the block is 16.
+
+The render status (``STATUS``, `StatusChannel`) lives in a **second, pid-scoped segment**
+(``/status_state<pid>``) instead of a block appended to this header. Why: the header above is a pixel
+contract whose offsets are pinned byte for byte by `harness/tests/test_display_channel.py` and whose
+payload slots start at ``HEADER_SIZE`` - growing it moves every payload, and one wrong offset draws a
+torn picture instead of raising. A status record is a handful of counters written once per frame; it
+does not deserve that blast radius. One extra attach per process buys an untouched frame contract and
+a block that can be read (and torn-read-checked) on its own.
+
+The status record is a seqlock: ``generation`` is bumped to an ODD value before the fields are written
+and to the next EVEN value after they are in place, and the even value is written LAST. A reader takes
+``generation`` before and after the fields and only accepts an even generation that did not move; a
+writer that starts or finishes between those two reads makes the value move (or turns it odd), so a
+mixed record is refused rather than reported.
 """
 
 from __future__ import annotations
 
+import os
 import struct
+import threading
 
 #: The header. `<` = little-endian, standard sizes, no padding - 23 bytes. The `I` is the reserved word
 #: (4 bytes) and the trailing `d` is the frame's media time, so a reader that assumed a 15-byte header
@@ -64,6 +80,84 @@ RGB_BYTES_PER_PIXEL = 3
 SEEK_STRUCT = struct.Struct("<dI")
 SEEK_BLOCK_SIZE = 16
 UINT32_MAX = 0xFFFFFFFF
+
+#: The render-status record (24 bytes, its own pid-scoped segment - see the module docstring): the seqlock
+#: `generation`, the render loop's two frame counters, the ETA the backend prints, the FPS it prints, and the
+#: phase/engine codes a reader turns into the words the pane shows. `<` keeps standard sizes and no padding;
+#: the two trailing bytes are reserved so a later field does not move this record's size.
+STATUS = struct.Struct("<IIIffBB2x")
+STATUS_SIZE = STATUS.size
+#: The record's fields WITHOUT `generation`: what a writer packs between its odd and even marker.
+STATUS_FIELDS = struct.Struct("<IIffBB2x")
+STATUS_FIELDS_OFFSET = 4
+
+STATUS_OFFSET_GENERATION = 0
+STATUS_OFFSET_FRAMES_RENDERED = 4
+STATUS_OFFSET_FRAMES_TOTAL = 8
+STATUS_OFFSET_ETA = 12
+STATUS_OFFSET_FPS = 16
+STATUS_OFFSET_PHASE = 20
+STATUS_OFFSET_ENGINE = 21
+STATUS_OFFSET_RESERVED = 22
+
+#: `eta_seconds` meaning "the renderer cannot estimate it (yet)". A remaining time is never negative.
+ETA_UNSET = -1.0
+
+#: What the render is doing, as a byte. The pane maps a code to the word it shows (`PHASE_NAMES`).
+PHASE_IDLE = 0
+PHASE_PREPARING = 1
+PHASE_BUILDING_ENGINE = 2
+PHASE_RENDERING = 3
+PHASE_FINALISING = 4
+PHASE_DONE = 5
+PHASE_FAILED = 6
+PHASE_PAUSED = 7
+
+PHASE_NAMES = {
+    PHASE_IDLE: "Idle",
+    PHASE_PREPARING: "Preparing",
+    PHASE_BUILDING_ENGINE: "Building engine…",
+    PHASE_RENDERING: "Rendering",
+    PHASE_FINALISING: "Finalising",
+    PHASE_DONE: "Idle",
+    PHASE_FAILED: "Failed",
+    PHASE_PAUSED: "Paused",
+}
+
+#: Which upscaler produced the picture, as a byte. The name is the backend's own `--backend` token.
+ENGINE_UNKNOWN = 0
+ENGINE_PYTORCH = 1
+ENGINE_TENSORRT = 2
+ENGINE_NCNN = 3
+ENGINE_ONNX = 4
+ENGINE_DIRECTML = 5
+
+ENGINE_NAMES = {
+    ENGINE_UNKNOWN: "unknown",
+    ENGINE_PYTORCH: "pytorch",
+    ENGINE_TENSORRT: "tensorrt",
+    ENGINE_NCNN: "ncnn",
+    ENGINE_ONNX: "onnx",
+    ENGINE_DIRECTML: "directml",
+}
+
+_ENGINE_CODES = {
+    "pytorch": ENGINE_PYTORCH,
+    "tensorrt": ENGINE_TENSORRT,
+    "ncnn": ENGINE_NCNN,
+    "onnx": ENGINE_ONNX,
+    "directml": ENGINE_DIRECTML,
+}
+
+
+def engine_code(backend: object) -> int:
+    """The `engine` byte for a backend name (`--backend`/`self.backend`); unknown names stay `ENGINE_UNKNOWN`."""
+    return _ENGINE_CODES.get(str(backend or "").strip().lower(), ENGINE_UNKNOWN)
+
+
+def status_state_id(pid: int | None = None) -> str:
+    """The status block's name: one per GUI process, the same pid-scoped convention as the paused flag."""
+    return "/status_state" + str(os.getpid() if pid is None else int(pid))
 
 
 def _open_block(name: str, size: int):
@@ -226,6 +320,91 @@ class SeekState:
         return float(seconds)
 
     def close(self) -> None:
+        segment, created = self._shm, self.created
+        self._shm = None
+        self.attached = False
+        if segment is None:
+            return
+        try:
+            segment.close()
+        except Exception:
+            pass
+        if created:
+            try:
+                segment.unlink()
+            except Exception:
+                pass
+
+
+class StatusChannel:
+    """The writer's end of the render-status block (its own pid-scoped segment, `STATUS`).
+
+    Frame data is the display channel's job; this block carries the numbers the pane used to scrape out
+    of the backend's stdout: how far the render is, how much is left, how fast it is going and which
+    phase it is in. It is written once per rendered frame and on every phase change, never instead of
+    the log line - the log stays the record a person reads.
+
+    `set()` is a partial update: the fields passed replace the stored ones and the rest are rewritten
+    unchanged, so a frame tick never has to know the ETA and an ETA tick never has to know the frame
+    count. The two writer threads (the render loop and the information printer) share one lock; the
+    seqlock marker makes the record safe to read from the other process without one.
+    """
+
+    def __init__(self, name: str | None, engine: int = ENGINE_UNKNOWN):
+        self.name = name
+        self.created = False
+        self._shm = None
+        self._lock = threading.Lock()
+        self._state = {
+            "generation": 0,
+            "frames_rendered": 0,
+            "frames_total": 0,
+            "eta_seconds": ETA_UNSET,
+            "fps": 0.0,
+            "phase": PHASE_IDLE,
+            "engine": int(engine) & 0xFF,
+        }
+        if name:
+            try:
+                self._shm, self.created = _open_block(name, STATUS_SIZE)
+            except Exception:
+                # A status block that cannot be attached must never take a render down.
+                self._shm = None
+        self.attached = self._shm is not None and len(self._shm.buf) >= STATUS_SIZE
+        if self.attached:
+            # Continue the sequence of a block a previous writer left: the reader rejects a generation that
+            # moves, so starting over at 0 under a block already at 40 would look like a torn write forever.
+            self._state["generation"] = int(struct.unpack_from("<I", self._shm.buf, 0)[0]) & ~1
+
+    def set(self, **changes) -> int:
+        """Merge `changes` into the record, write it, and return the new (even) generation; 0 when detached."""
+        if not self.attached or self._shm is None:
+            return 0
+        with self._lock:
+            state = dict(self._state)
+            state.update(changes)
+            generation = (int(state["generation"]) + 2) & UINT32_MAX
+            buf = self._shm.buf
+            # Odd: a write is in progress. A reader that lands anywhere inside the record sees this and refuses.
+            struct.pack_into("<I", buf, 0, (generation - 1) & UINT32_MAX)
+            STATUS_FIELDS.pack_into(
+                buf,
+                STATUS_FIELDS_OFFSET,
+                int(state["frames_rendered"]) & UINT32_MAX,
+                int(state["frames_total"]) & UINT32_MAX,
+                float(state["eta_seconds"]),
+                float(state["fps"]),
+                int(state["phase"]) & 0xFF,
+                int(state["engine"]) & 0xFF,
+            )
+            # Even, written LAST: everything before this byte is already in place when a reader accepts it.
+            struct.pack_into("<I", buf, 0, generation)
+            state["generation"] = generation
+            self._state = state
+            return generation
+
+    def close(self) -> None:
+        """Release the block. Unlink only when this process created it (the GUI owns its own names)."""
         segment, created = self._shm, self.created
         self._shm = None
         self.attached = False

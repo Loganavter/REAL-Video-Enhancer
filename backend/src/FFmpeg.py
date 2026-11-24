@@ -92,6 +92,20 @@ class InformationWriteOut:
     def get_is_paused(self):
         return self.isPaused
 
+    def remaining_seconds(self, framesRendered):
+        """Seconds left, or -1 when there is no estimate yet (no frame rendered).
+
+        The one place the estimate is computed: `calculateETA` formats this number for the log line and
+        `RenderVideo._write_status` puts the same number on the render-status block, so the pane's ETA and
+        the printed ETA cannot drift apart.
+        """
+        if framesRendered <= 0:
+            return -1.0
+        elapsed_time = time.time() - self.startTime
+        time_per_iteration = elapsed_time / framesRendered
+        remaining_iterations = self.totalOutputFrames - framesRendered
+        return max(0.0, remaining_iterations * time_per_iteration)
+
     def calculateETA(self, framesRendered):
         """
         Calculates ETA
@@ -102,12 +116,8 @@ class InformationWriteOut:
 
         """
 
-        # Estimate the remaining time
-        elapsed_time = time.time() - self.startTime
-        time_per_iteration = elapsed_time / framesRendered
-        remaining_iterations = self.totalOutputFrames - framesRendered
-        remaining_time = remaining_iterations * time_per_iteration
-        remaining_time = int(remaining_time)
+        # Estimate the remaining time (the same number the status block carries)
+        remaining_time = int(max(0.0, self.remaining_seconds(framesRendered)))
         # convert to hours, minutes, and seconds
         hours, minutes, seconds = convertTime(remaining_time)
         return f"{hours}:{minutes}:{seconds}"

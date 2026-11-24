@@ -44,6 +44,9 @@ class RenderPaths:
     display_state_id: str | None = None
     display_size: str | None = None
     seek_state_id: str | None = None
+    #: The render-status block (`/status_state<pid>`): the numbers the pane used to scrape out of stdout.
+    #: Optional like the three above, so a caller that models a job with no pane gets the command it always had.
+    status_state_id: str | None = None
 
 
 def app_paths() -> RenderPaths:
@@ -137,6 +140,14 @@ def build_command(render_options, settings, is_overwrite: bool = False, paths: R
                 f"{paths.seek_state_id}",
             ]
             if paths.display_state_id and paths.display_size and paths.seek_state_id
+            else []
+        ),
+        # The status block is a separate segment, so it travels as its own flag: a job that models no pane
+        # (the pre-move golden) must still produce the command it always had.
+        *(
+            ["--status_state_id", f"{paths.status_state_id}"]
+            if paths.display_state_id and paths.display_size and paths.seek_state_id
+            and paths.status_state_id
             else []
         ),
         "--ncnn_gpu_id",

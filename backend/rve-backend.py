@@ -217,6 +217,7 @@ class HandleApplication:
             display_state_id=self.args.display_state_id,
             display_size=self.args.display_size,
             seek_state_id=self.args.seek_state_id,
+            status_state_id=self.args.status_state_id,
             sceneDetectMethod=self.args.scene_detect_method,
             sceneDetectSensitivity=self.args.scene_detect_threshold,
             trt_optimization_level=self.args.tensorrt_opt_profile,
@@ -743,6 +744,13 @@ class HandleApplication:
             "--seek_state_id",
             help="Shared-memory block holding the newest seek request (a double time and a uint32 "
                  "generation); the renderer displays that frame without writing it to the output",
+            type=str,
+            default=None,
+        )
+        parser.add_argument(
+            "--status_state_id",
+            help="Shared-memory block holding the render status (frames, ETA, FPS, phase; layout in "
+                 "backend/src/utils/DisplayChannel.py). The pane sizes it; the renderer only attaches.",
             type=str,
             default=None,
         )

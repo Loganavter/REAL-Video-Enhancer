@@ -25,8 +25,17 @@ from .QTcustom import (
 from .video.channel import (
     DEFAULT_DISPLAY_BOX,
     DISPLAY_STATE_SHARED_MEMORY_ID,
+    PHASE_BUILDING_ENGINE,
+    PHASE_FAILED,
+    PHASE_FINALISING,
+    PHASE_NAMES,
+    PHASE_PAUSED,
+    PHASE_PREPARING,
+    PHASE_RENDERING,
     SEEK_STATE_SHARED_MEMORY_ID,
+    STATUS_STATE_SHARED_MEMORY_ID,
     DisplayReader,
+    format_eta,
 )
 from .video.feed import PreviewFeed
 from ..constants import (
@@ -206,6 +215,10 @@ class ProcessTab:
         #: The box the block was allocated at (the pane's device pixels, or `DEFAULT_DISPLAY_BOX`); the command's
         #: `--display_size` has to be the same box, so it is kept for the whole render pass.
         self._display_box = DEFAULT_DISPLAY_BOX
+        #: The last render-status generation applied to the readouts: the record is rewritten every frame, so
+        #: an unchanged one must not repaint the pane - and must not overwrite a status the pane itself set
+        #: after it (Paused, Failed) with a stale "Rendering".
+        self._status_generation = None
         #: The playhead the standing compare (`sbs`/`split`) was last asked for: the 100 ms clock must not re-seek the
         #: source decoder for a picture that is already on screen.
         self._second_surface_pts = None
@@ -735,6 +748,8 @@ class ProcessTab:
         self._close_display_state()
         box = self._pane_display_box()
         self._display_box = box
+        # A new pass starts at generation 0 of a fresh record, whatever the last render left in the readouts.
+        self._status_generation = None
         try:
             reader = DisplayReader(
                 DISPLAY_STATE_SHARED_MEMORY_ID,
@@ -778,7 +793,7 @@ class ProcessTab:
         # clears the ceiling when the allocation failed or the job is a preview (whose tail owns the edge).
         self._apply_seek_ceiling()
         log(f"display: block {DISPLAY_STATE_SHARED_MEMORY_ID} at {box[0]}x{box[1]}, "
-            f"seek {SEEK_STATE_SHARED_MEMORY_ID}")
+            f"seek {SEEK_STATE_SHARED_MEMORY_ID}, status {STATUS_STATE_SHARED_MEMORY_ID}")
 
     def _close_display_state(self) -> None:
         """Release the frame and seek blocks; safe twice, and safe when nothing was prepared."""
@@ -910,6 +925,55 @@ class ProcessTab:
         if display is None or not self._block_attached(display):
             return
         display.set_wanted(self._display_should_want())
+
+    #: The phases whose word the pane takes from the render-status block. Idle/Done are the pane's own
+    #: transitions (the job's completion path sets them); taking them from the slot would announce "Idle"
+    #: while the process is still flushing.
+    _SLOT_STATUS_PHASES = (PHASE_PREPARING, PHASE_BUILDING_ENGINE, PHASE_RENDERING,
+                           PHASE_FINALISING, PHASE_PAUSED, PHASE_FAILED)
+
+    def _sync_render_status(self) -> None:
+        """Take FPS/ETA/frame count/status from the render-status slot, not from the backend's prose.
+
+        The block is written once per rendered frame and on every phase change, so it is fresher than the
+        twice-a-second log line it replaces. An unchanged `generation` is a no-op - that is what keeps the
+        pane's own Paused/Failed/Idle from being overwritten by a record that has not moved since. A torn
+        record answers `None` and the previous readouts stay on screen.
+        """
+        display = self._display_chain()
+        if display is None:
+            return
+        getter = getattr(display, "status", None)
+        if not callable(getter):
+            return
+        try:
+            status = getter()
+        except Exception:
+            return
+        if not status:
+            return
+        generation = status.get("generation")
+        if generation is None or generation == getattr(self, "_status_generation", None):
+            return
+        self._status_generation = generation
+        frames = status.get("frames_rendered")
+        if isinstance(frames, int) and frames >= 0:
+            self.currentFrame = frames
+        fps = status.get("fps")
+        try:
+            fps = float(fps or 0.0)
+        except (TypeError, ValueError):
+            fps = 0.0
+        if fps > 0:
+            self.fps = int(round(fps))
+        eta = status.get("eta_seconds")
+        if eta is not None and float(eta) >= 0:
+            self.eta = format_eta(eta)
+        phase = status.get("phase")
+        if phase in self._SLOT_STATUS_PHASES:
+            name = PHASE_NAMES.get(phase)
+            if name is not None:
+                self.setStatus(name)
 
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
@@ -1153,23 +1217,11 @@ class ProcessTab:
                         self.setStatus("Failed")
                     if "it/s" in line:
                         textOutput = textOutput[:-1]
-                    if "FPS" in line:
-                        textOutput = textOutput[
-                            :-1
-                        ]  # slice the list to only get the last updated data
-                        self.currentFrame = int(
-                            re.search(r"Current Frame: (\d+)", line).group(1)
-                        )
-                        self.fps = re.search(r"FPS: (\d+)", line).group(1)
-                        # bounded to h:mm:ss: the stream can carry a log record on the same line
-                        self.eta = re.search(r"ETA: (\d+(?::\d+){2})", line).group(1)
-                        self.setStatus("Rendering")
-
-
-                    if "this may take a while" in line.lower():
-                        self.setStatus("Building engine…")
-
-
+                    # FPS, ETA, the frame count and the status words are NOT parsed out of this stream any
+                    # more: the backend writes them to its status block (`video/channel.py: STATUS`) and
+                    # `_sync_render_status` reads them on the 100 ms tick. The render log below still gets
+                    # every event, and the status lines are still printed for the log file a person reads.
+                    #
                     # The pane gets the EVENTS, not the telemetry: per-frame timings, the live progress line it already
                     # shows as FPS/ETA, and the setup chatter repeats are dropped here (src/ui/render_log.py explains
                     # each class and the numbers behind them).
@@ -2332,6 +2384,9 @@ class ProcessTab:
 
 
         if self.renderTextOutputList is not None:
+            # The numbers the labels below show come from the render-status slot (the backend writes them
+            # beside its log lines); nothing here parses the backend's stdout for them any more.
+            self._sync_render_status()
             self.page_handles.proc.progressBar.setRange(
                 0,
                 # only set the range to multiply the frame count if the method is interpolate
@@ -2395,4 +2450,5 @@ class ProcessTab:
             display_state_id=DISPLAY_STATE_SHARED_MEMORY_ID,
             display_size=f"{width}x{height}",
             seek_state_id=SEEK_STATE_SHARED_MEMORY_ID,
+            status_state_id=STATUS_STATE_SHARED_MEMORY_ID,
         )
