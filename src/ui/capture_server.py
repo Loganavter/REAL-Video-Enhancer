@@ -458,6 +458,66 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: click {target}@({x},{y}) -> hit={report['hit']} selected={report['selectedRows']}", flush=True)
 
+    def hold(spec: str) -> None:
+        """Press the left button and LEAVE IT DOWN: `hold:<objectName>@x,y` (pair it with `release:`).
+
+        The LMB compare is a hold, not a click: the pane shows the source while the button is down and clears it on
+        release (`VideoPreviewSurface.mousePressEvent`/`mouseReleaseEvent`), so a `click:` is unobservable - the flash is
+        gone before a grab and the report would read "nothing happened". Measured 2026-11-24: the owner's compare report
+        ("a couple of frames of desync, or the current upscale frame") had no instrument at all until this verb existed.
+        """
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QWidget
+
+        target, _, coords = spec.partition("@")
+        widget = window.findChild(QWidget, target.strip())
+        report = {"stamp": _stamp(), "kind": "hold", "target": target.strip(), "error": None}
+        if widget is None or "," not in coords:
+            report["error"] = "widget not found" if widget is None else "expected x,y"
+            _finish(report)
+            return
+        try:
+            x, y = (int(value) for value in coords.split(",", 1))
+        except ValueError:
+            report["error"] = "point is not x,y"
+            _finish(report)
+            return
+        point = widget.mapTo(window, QPoint(x, y))
+        QTest.mousePress(window.windowHandle(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        state["held_point"] = point
+        for _ in range(4):
+            QApplication.processEvents()
+        report["point"] = [point.x(), point.y()]
+        _finish(report)
+        print(f"capture-server: hold {target.strip()}@({x},{y})", flush=True)
+
+    def release(spec: str = "") -> None:
+        """Release the button `hold:` left down. `release:` alone releases at the held point."""
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QWidget
+
+        report = {"stamp": _stamp(), "kind": "release", "error": None}
+        point = state.pop("held_point", None)
+        if point is None:
+            report["error"] = "no button is held"
+            _finish(report)
+            return
+        target, _, coords = spec.partition("@")
+        widget = window.findChild(QWidget, target.strip()) if target.strip() else None
+        if widget is not None and "," in coords:
+            try:
+                x, y = (int(value) for value in coords.split(",", 1))
+                point = widget.mapTo(window, QPoint(x, y))
+            except ValueError:
+                pass
+        QTest.mouseRelease(window.windowHandle(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        for _ in range(4):
+            QApplication.processEvents()
+        _finish(report)
+        print(f"capture-server: release at ({point.x()},{point.y()})", flush=True)
+
     def drag(spec: str) -> None:
         """A real drag through the window: `drag:<objectName>@x1,y1>dydx...` - `x1,y1:x2,y2`.
 
@@ -867,6 +927,12 @@ def install(window) -> None:
             return
         if wanted.startswith("drag:"):
             drag(wanted[len("drag:"):])
+            return
+        if wanted.startswith("hold:"):
+            hold(wanted[len("hold:"):])
+            return
+        if wanted.startswith("release:"):
+            release(wanted[len("release:"):])
             return
         if wanted.startswith("queue:"):
             queue(wanted[len("queue:"):])
