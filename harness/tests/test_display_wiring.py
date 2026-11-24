@@ -341,7 +341,8 @@ class _Pane:
         return bool(self.visible)
 
     def set_frame(self, image, *, gui_ms: float | None = None, index: int | None = None,
-                  seq: int | None = None, media_time: float | None = None) -> None:
+                  seq: int | None = None, media_time: float | None = None,
+                  generation: int | None = None) -> None:
         self.frames.append(image)
 
     def set_progress(self, **values) -> None:
@@ -380,6 +381,9 @@ class _Reader:
     def request_seek(self, seconds: float) -> int:
         self.seeks.append(float(seconds))
         self.generation += 1
+        return self.generation
+
+    def seek_generation(self) -> int:
         return self.generation
 
 
@@ -452,6 +456,65 @@ def test_a_strip_press_during_an_export_asks_for_the_next_generation():
         assert reader.seek_request() == pytest.approx((5.0, 6))
     finally:
         reader.release()
+
+
+def test_a_press_that_replaces_an_unanswered_one_says_so(monkeypatch):
+    """Newest wins means an unanswered press is REPLACED, and the log has to show that instead of dropping it.
+
+    The owner's own session (2026-11-24) pressed three times while the renderer was busy: the log showed three
+    `seek press` lines and ONE close, so a reader could not tell a deliberately superseded request from an answer that
+    never came. Two presses through the real routing are enough to pin it.
+    """
+    events = []
+    monkeypatch.setattr("src.ui.video.telemetry.event", lambda kind, **kw: events.append((kind, kw)))
+    reader = _Reader()
+    tab = _tab(preview=False, paused=True, alive=True, reader=reader)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)  # 10 s clip
+
+    tab._on_preview_seek(0.25)
+    first = tab._press
+    assert first is not None and first.open, "the first press is a record with a decision"
+    assert first.route == "display"
+
+    tab._on_preview_seek(0.5)
+    second = tab._press
+
+    superseded = [fields for kind, fields in events if kind == "seek superseded"]
+    assert superseded, f"a replaced request left no trace: {events}"
+    assert (superseded[-1]["press"], superseded[-1]["by"]) == (first.id, second.id)
+    assert superseded[-1]["target_s"] == "2.500"
+
+    # The first press of a run is not a replacement: nothing was open before it.
+    assert not [fields for kind, fields in events if kind == "seek superseded" and fields["press"] == second.id]
+
+
+def test_four_presses_leave_four_records_and_no_silence(monkeypatch):
+    """The owner's scenario: four strip presses in a session, and not one line about the result.
+
+    Every press now opens a record that states its route and whether that route can answer it, and a replaced press
+    says it was replaced. This is the pin for "the log can finally be read instead of reconstructed".
+    """
+    events = []
+    monkeypatch.setattr("src.ui.video.telemetry.event", lambda kind, **kw: events.append((kind, kw)))
+    reader = _Reader()
+    tab = _tab(preview=False, paused=True, alive=True, reader=reader)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)  # 10 s clip
+
+    tickets = []
+    for fraction in (0.5, 0.9, 0.5, 0.5):
+        tab._on_preview_seek(fraction)
+        tickets.append(tab._press)
+
+    decides = [fields for kind, fields in events if kind == "seek decide"]
+    superseded = [fields for kind, fields in events if kind == "seek superseded"]
+    assert len(decides) == 4, f"one decision per press: {decides}"
+    assert len(superseded) == 3, "each press replaced the previous one, and said so"
+    assert all(fields["route"] == "display" for fields in decides)
+    assert all(fields["answerable"] == 1 for fields in decides), \
+        "the display route decodes any timestamp on demand, so it is answerable even ahead of the export"
+    assert all(fields["ahead"] == 1 for fields in decides), "nothing was produced yet, so every target is a future frame"
+    assert [ticket.open for ticket in tickets] == [False, False, False, True], \
+        "three ended as superseded, the last one is still waiting for its picture"
 
 
 def test_a_seek_while_paused_buys_exactly_that_one_frame():
@@ -578,6 +641,27 @@ def test_a_preview_paints_from_its_tail():
     tab._on_preview_frame(frame)
     assert len(pane.frames) == 1
     assert pane.progress and pane.progress[-1]["playhead"] == pytest.approx(1.0)
+
+
+def test_a_held_pane_that_produced_nothing_does_not_repaint_its_strip():
+    """`set_progress` repaints unconditionally; with both counters standing still it must not be called at all.
+
+    Measured in the owner's own session (2026-11-24): a paused pane whose render had produced nothing new reported
+    `frames=0 paints=10 int_ms=100` for as long as it sat there - ten repaints a second for a picture and a band that
+    had not moved.
+    """
+    pane = _Pane()
+    pane._progress = (60, 100, 5.0, 10.0)
+    tab = _tab(pane=pane, preview=False, paused=True, reader=_Reader())
+    tab.max_value = 100
+    tab.currentFrame = 60
+
+    tab._refresh_held_progress()
+    assert pane.progress == [], "the produced counters did not move, so there is nothing to publish"
+
+    tab.currentFrame = 61
+    tab._refresh_held_progress()
+    assert pane.progress[-1] == {"rendered": 61, "total": 100, "playhead": 5.0, "duration": 10.0}
 
 
 def test_a_paused_export_keeps_its_produced_band_honest_without_a_tail():
@@ -830,7 +914,7 @@ def _seek_tab(media_time, seek_answer=_NO_FIELD, seek_generation=None, target_s=
     calls = []
 
     class _Pane:
-        def set_frame(self, image, *, gui_ms=None, index=None, seq=None, media_time=None):
+        def set_frame(self, image, *, gui_ms=None, index=None, seq=None, media_time=None, generation=None):
             calls.append(("frame", seq, media_time))
             self._shown = ("seq", seq) if seq is not None else None
             self._shown_time = media_time

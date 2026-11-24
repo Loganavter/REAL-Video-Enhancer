@@ -14,6 +14,7 @@ from .RenderQueue import RenderQueue
 from ..render_jobs import short_duration
 from .render_log import LogLine, RenderLogFilter
 from .video import telemetry
+from .video.press import PressTicket
 from . import shared_flag
 from . import i18n
 
@@ -1007,7 +1008,21 @@ class ProcessTab:
             # A seek is pending and this is not its answer: paint NOTHING. A held pane waits for one picture, and
             # showing the in-flight streaming frame first is the flash this gate exists to stop - measured live
             # (2026-11-24): a press at 1.888 s painted the streaming frame at 4.046 s, then the answer at 1.888 s.
-            # The request byte stays 1, so the answer still arrives.
+            # The request byte stays 1, so the answer still arrives - and the log names the picture it refused, once
+            # per press, because "the pane painted something else than my press" has to be readable afterwards.
+            ticket = getattr(self, "_press", None)
+            if ticket is not None and ticket.open:
+                feed_named = getattr(self, "_feed", None)
+                if feed_named is not None and callable(getattr(feed_named, "shown", None)):
+                    named = feed_named.shown()
+                    ticket.note_stream(seq=named[1] if named else None,
+                                       media_time=feed_named.shown_time(),
+                                       landed_gen=self._picture_seek_answer())
+                else:
+                    reader_named = getattr(self, "_display", None)
+                    ticket.note_stream(seq=getattr(reader_named, "seq", None),
+                                       media_time=getattr(reader_named, "media_time", None),
+                                       landed_gen=self._picture_seek_answer())
             return
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_frame"):
@@ -1028,21 +1043,31 @@ class ProcessTab:
                 reader = getattr(self, "_display", None)
                 seq = getattr(reader, "seq", None)
                 media_time = getattr(reader, "media_time", None)
-            pane.set_frame(image, seq=seq, media_time=media_time)
+            answer_of = getattr(self, "_picture_seek_answer", None)
+            pane.set_frame(image, seq=seq, media_time=media_time,
+                           generation=answer_of() if callable(answer_of) else None)
             if pressed_at is not None and pending and media_time is not None:
                 # Close the seek here, and only here: the gate above already refused every picture that does not
                 # answer the request, so this publication IS the answer. The log names both generations as well as the
                 # two times, because a press -> answer turnaround is only a cost when the picture is the right one.
                 shown = getattr(pane, "shown", None)
                 shown_time = getattr(pane, "shown_time", None)
-                telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
-                                    target=getattr(self, "_seek_target_frame", None),
-                                    landed=shown() if callable(shown) else None,
-                                    target_s=getattr(self, "_seek_target_s", None),
-                                    landed_time=shown_time() if callable(shown_time) else None,
-                                    target_gen=getattr(self, "_seek_generation", None),
-                                    landed_gen=self._picture_seek_answer())
+                fields = dict(target=getattr(self, "_seek_target_frame", None),
+                              landed=shown() if callable(shown) else None,
+                              target_s=getattr(self, "_seek_target_s", None),
+                              landed_time=shown_time() if callable(shown_time) else None,
+                              target_gen=getattr(self, "_seek_generation", None),
+                              landed_gen=self._picture_seek_answer())
+                turnaround_ms = (time.perf_counter() - pressed_at) * 1000.0
+                ticket = getattr(self, "_press", None)
+                if ticket is not None and ticket.open:
+                    # The press record settles: the log line is a projection of it, not a sentence written here.
+                    ticket.settled(landed=fields["landed"], landed_time=fields["landed_time"],
+                                   turnaround_ms=turnaround_ms, landed_gen=fields["landed_gen"])
+                else:
+                    telemetry.note_seek(turnaround_ms, **fields)
                 self._seek_pressed_at = None
+                self._seek_generation = None
             if hasattr(pane, "set_progress"):
                 pane.set_progress(
                     rendered=self.currentFrame,
@@ -1113,7 +1138,25 @@ class ProcessTab:
         return 0.0
 
     def _result_playhead(self) -> float:
-        """Where the RESULT's playhead is: the tail's or file decoder's PTS, else the render's produced share."""
+        """Where the RESULT's playhead is: the tail's or file decoder's PTS, else the render's produced share.
+
+        While a press has no answer yet the marker stands on the REQUESTED time. It used to be recomputed from
+        `currentFrame / max_value` on every painted frame, so a press was followed by the marker jumping to the produced
+        edge - "увела туда же головку произведения несмотря на паузу" (owner, 2026-11-24).
+        """
+        ticket = getattr(self, "_press", None)
+        if ticket is not None and ticket.open and ticket.target_s is not None:
+            return float(ticket.target_s)
+        # The picture on screen names its own time: a display-channel frame carries the export's media time, so the
+        # marker follows what is SHOWN instead of being recomputed from `currentFrame / max_value`. The old arithmetic
+        # sent the marker to the produced edge right after a seek had landed (measured live 2026-11-24: press at
+        # 12.370 s, marker at 7.88 s - the produced share at that instant).
+        pane = getattr(getattr(self, "page_handles", None), "proc", None)
+        shown_time = getattr(getattr(pane, "previewLabel", None), "shown_time", None)
+        if callable(shown_time):
+            named = shown_time()
+            if named is not None:
+                return float(named)
         playhead = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
         if (getattr(self, "_live_tail", None) is not None
                 or getattr(self, "_preview_decoder", None) is not None) and playhead > 0.0:
@@ -1410,9 +1453,15 @@ class ProcessTab:
         progress = getattr(pane, "_progress", None)
         if not progress or len(progress) < 4:
             return
+        produced = (float(getattr(self, "currentFrame", 0) or 0), float(getattr(self, "max_value", 0) or 0))
+        if (float(progress[0]), float(progress[1])) == produced:
+            # Nothing has been produced since the last publish, and `set_progress` repaints unconditionally (it is the
+            # strip's only notification). A held pane with nothing new therefore repainted ten times a second for
+            # nothing - measured in the owner's own session (2026-11-24): `frames=0 paints=10 int_ms=100` while the
+            # picture and both counters stood still.
+            return
         playhead, duration = float(progress[2]), float(progress[3])
-        pane.set_progress(rendered=self.currentFrame, total=self.max_value,
-                          playhead=playhead, duration=duration)
+        pane.set_progress(rendered=produced[0], total=produced[1], playhead=playhead, duration=duration)
 
     @staticmethod
     def _followable(renderOptions) -> bool:
@@ -1853,7 +1902,7 @@ class ProcessTab:
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_frame"):
             pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
-                           index=getattr(frame, "index", None))
+                           index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
         elif hasattr(pane, "setPixmap"):
             pane.setPixmap(self.getRoundedPixmap(QtGui.QPixmap.fromImage(image), corner_radius=10))
         pts = float(getattr(frame, "pts", 0.0) or 0.0)
@@ -1996,14 +2045,27 @@ class ProcessTab:
         telemetry.event("seek press", fraction=f"{fraction:.4f}", produced=f"{produced:.4f}",
                         target_s=None if target_s is None else f"{target_s:.3f}",
                         target_frame=target_frame)
+        # One record per press, created BEFORE a route is chosen: the intent, the route it took, whether that route
+        # can answer it, and (from whichever painter answers) the picture. Without this a press could end in silence -
+        # the owner's three sessions pressed four times each and left no line about the result at all (2026-11-24).
+        edge_s = produced * duration_s if duration_s > 0.0 else None
+        ticket = PressTicket(target_s=target_s, target_frame=target_frame, produced=produced, edge_s=edge_s)
+        previous = getattr(self, "_press", None)
+        if previous is not None and previous.open:
+            previous.superseded(ticket.id)
+        self._press = ticket
         if self._queue_owns_pane():
             decoder = getattr(self, "_queue_pane_decoder", None)
             duration = float(getattr(decoder, "duration", 0.0) or 0.0)
             if decoder is not None and duration > 0.0:
+                ticket.decide(route="queue", answerable=True)
                 try:
                     decoder.seek(fraction * duration)
                 except Exception as exc:
+                    ticket.refused(f"queue-decode-failed: {exc}")
                     log(f"queue pane: seek failed ({exc})")
+            else:
+                ticket.refused("queue-has-no-duration")
             return
         live = getattr(self, "_live_tail", None)
         produced = self._live_produced_fraction()
@@ -2020,21 +2082,26 @@ class ProcessTab:
             # press is one request and a hold on the picture it yields.
             if self._request_display_seek(fraction, hold=True):
                 return
+            ticket.refused("no-process-or-unknown-length")
             log("seek: refused - the running render cannot answer that press (no process, or the clip length is unknown)")
             return
         if live is not None:
             edge = float(getattr(live, "produced_seconds", 0.0) or 0.0)
             if edge <= 0.0:
+                ticket.decide(route="tail", answerable=False, why="nothing-written-yet")
+                ticket.refused("nothing-written-yet")
                 log("seek: refused - nothing is written yet")
                 return                      # nothing is written yet, so there is nothing to seek to
             target = fraction * self._live_timeline(edge)
             self._seek_watch = target
             live.seek(target)
+            ticket.decide(route="tail", answerable=True)
             log(f"seek: tail asked for {target:.3f}s (published edge {edge:.3f}s)")
             return
         decoder = getattr(self, "_preview_decoder", None)
         duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
         if decoder is not None and duration > 0:
+            ticket.decide(route="decoder", answerable=True)
             decoder.seek(fraction * duration)
             return
         # EXPORT, third route: no tail and no file decoder, but a renderer is alive and publishing into the pane's
@@ -2043,8 +2110,13 @@ class ProcessTab:
         # only ever goes out while something renders; with no process the block is left alone (nothing would answer).
         # A PREVIEW with no usable block keeps today's refusal: its tail is all there is.
         if bool(getattr(self, "isPreview", False)):
+            ticket.refused("preview-without-a-block")
             return
-        self._request_display_seek(fraction, hold=False)
+        # An export press used to pass `hold=False` - "its feed keeps painting the moving band" - which is exactly what
+        # the owner saw: the newest upscaled frame painted over his request and the marker dragged to the produced edge,
+        # pause notwithstanding (2026-11-24). A press on a PAUSED pane parks on the requested picture; while playing it
+        # stays a live follow, and the answer is one publication in the stream.
+        self._request_display_seek(fraction, hold=bool(getattr(self, "_preview_paused", False)))
 
     def _request_display_seek(self, fraction: float, *, hold: bool) -> bool:
         """Ask the running render for ONE frame at `fraction` of the clip; True when the request went out.
@@ -2074,8 +2146,19 @@ class ProcessTab:
             # Park the transport on the frame it asked for. A playing tail would otherwise paint its own (produced)
             # frame over it a moment later; play resumes the follow from the produced edge, as before.
             self._on_preview_pause_toggled(True)
+        unanswered = getattr(self, "_seek_pressed_at", None) is not None
+        previous_generation = getattr(self, "_seek_generation", None)
         generation = chain.request_seek(target)
         self._seek_generation = generation or None
+        spot = getattr(self, "_press", None)
+        if spot is not None and spot.open:
+            # "Can this be answered" is known now, in milliseconds: a produced frame exists or it does not. No stopwatch
+            # - `answerable=0` with `why=target-past-produced-edge` is the explanation for a press that used to leave no
+            # line at all (owner, 2026-11-24: four presses, produced=0.0000, nothing drawn, nothing logged).
+            produced_s = float(self._live_produced_fraction() or 0.0) * clip
+            ahead = target > produced_s + 1e-6
+            spot.decide(route="display", answerable=True, ahead=ahead,
+                        why="decoded-on-demand" if ahead else None, generation=generation)
         if hold or bool(getattr(self, "_preview_paused", True)):
             # A held pane has `wanted` 0, so the renderer would stage the requested frame and never publish it. Ask
             # for exactly that one frame: `_on_display_frame` paints it and clears this again.
@@ -2257,7 +2340,7 @@ class ProcessTab:
         pane = self.page_handles.proc.previewLabel
         if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
-                           index=getattr(frame, "index", None))
+                           index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
             watched = getattr(self, "_seek_watch", None)
             if watched is not None:
@@ -2268,10 +2351,18 @@ class ProcessTab:
                 pressed_at = getattr(self, "_seek_pressed_at", None)
                 if pressed_at is not None:
                     shown = getattr(pane, "shown", None)
-                    telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
-                                        target=getattr(self, "_seek_target_frame", None),
-                                        landed=shown() if callable(shown) else None)
+                    turnaround_ms = (time.perf_counter() - pressed_at) * 1000.0
+                    spot = getattr(self, "_press", None)
+                    if spot is not None and spot.open:
+                        spot.settled(landed=shown() if callable(shown) else None,
+                                     landed_time=float(getattr(frame, "pts", 0.0) or 0.0),
+                                     turnaround_ms=turnaround_ms, landed_gen=None)
+                    else:
+                        telemetry.note_seek(turnaround_ms, target=getattr(self, "_seek_target_frame", None),
+                                            landed=shown() if callable(shown) else None)
                     self._seek_pressed_at = None
+                    # The request is answered, by this path or not at all: a later press must not call it superseded.
+                    self._seek_generation = None
                 log(f"seek: press wanted {watched:.3f}s, the picture landed at {self._preview_playhead:.3f}s "
                     f"(delta {self._preview_playhead - watched:+.3f}s)")
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)

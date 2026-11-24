@@ -153,18 +153,29 @@ _last_snapshot: dict[str, object] = {}
 
 
 def note_frame(*, gui_ms: float | None = None, pts: float | None = None, index: int | None = None,
-               seq: int | None = None) -> None:
-    """A picture was handed to the pane: `index` is a decoder's frame number, `seq` the display channel's sequence."""
+               seq: int | None = None, media_time: float | None = None,
+               generation: int | None = None) -> None:
+    """A picture was handed to the pane: `index` is a decoder's frame number, `seq` the display channel's sequence.
+
+    `media_time` and `generation` are the picture's OWN names, straight from the header that carried it (or from the
+    tail frame's PTS). They are printed for every picture, with or without a seek: "which frame was drawn" must be
+    answerable from the log alone (owner, 2026-11-24 - the line used to say only `frame seq=98`).
+    """
     global _frames, _shown
     _frames += 1
     if index is not None:
         _shown = ("frame", int(index))
     elif seq is not None:
         _shown = ("seq", int(seq))
+    time_text = None
+    if media_time is not None:
+        time_text = f"{float(media_time):.3f}"
+    elif pts is not None:
+        time_text = f"{float(pts):.3f}"
     if gui_ms is not None:
         _gui.append(float(gui_ms))
     if level() >= 2:
-        event("frame", index=index, seq=seq, pts=None if pts is None else f"{pts:.3f}", gui_ms=_fmt(gui_ms))
+        event("frame", index=index, seq=seq, t=time_text, gen=generation, gui_ms=_fmt(gui_ms))
 
 
 def note_upload(*, upload_ms: float | None = None, size_bytes: int | None = None) -> None:
@@ -213,7 +224,7 @@ MIN_SEEK_MS = 1.0
 def note_seek(turnaround_ms: float, *, target: int | None = None,
               landed: tuple[str, int] | None = None, target_s: float | None = None,
               landed_time: float | None = None, target_gen: int | None = None,
-              landed_gen: int | None = None) -> None:
+              landed_gen: int | None = None, press: int | None = None) -> None:
     """Press -> first new picture, in milliseconds, naming the frame that was asked for and the one the PANE shows.
 
     `target` is the frame the press pointed at (`fraction x the strip's total`). `landed` is the pane's own identity for
@@ -223,7 +234,7 @@ def note_seek(turnaround_ms: float, *, target: int | None = None,
     frame, which the counter could not prove).
     """
     turnaround_ms = float(turnaround_ms)
-    fields: dict[str, object] = {"target_frame": target}
+    fields: dict[str, object] = {"target_frame": target, "press": press}
     if target_s is not None:
         fields["target_s"] = f"{float(target_s):.3f}"
     if landed is not None:

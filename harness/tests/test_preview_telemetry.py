@@ -176,7 +176,7 @@ def test_per_frame_lines_only_at_level_two(monkeypatch, fresh):
     assert not any("preview: frame " in line for line, _ in lines)
     _level(monkeypatch, "2")
     telemetry.note_frame(gui_ms=0.6, pts=1.25)
-    assert any("preview: frame pts=1.250 gui_ms=0.60" in line for line, _ in lines)
+    assert any("preview: frame t=1.250 gui_ms=0.60" in line for line, _ in lines), [line for line, _ in lines]
 
 
 def test_the_file_is_beside_the_app_unless_told_otherwise(monkeypatch, tmp_path):

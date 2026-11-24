@@ -344,7 +344,7 @@ class _PaneStub:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def set_frame(self, image, *, gui_ms=None, index=None, seq=None, media_time=None) -> None:
+    def set_frame(self, image, *, gui_ms=None, index=None, seq=None, media_time=None, generation=None) -> None:
         self.calls.append((image, seq, media_time))
 
     def set_progress(self, **values) -> None:

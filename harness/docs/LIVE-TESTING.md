@@ -70,9 +70,29 @@ run is still the final word for the shipped platform.
 preview: session file=/…/preview-log.txt pane_w=504 pane_h=721 dpr=1.0 mode=single
 preview: stats frames=24 paints=27 up=24 up_ms=0.01/0.02/1.34 pass_ms=0.40/0.52/0.98 gui_ms=0.62/0.71/0.98 int_ms=41.2/44.0/90.1 drop=0 shown=f209 seek_ms=38.4/… window_s=1.0
 preview: seek press fraction=0.4210 produced=0.3800 target_s=3.542 target_frame=208
-preview: seek turnaround_ms=38.9 target_frame=208 landed_time=3.560 delta_s=+0.018 landed_seq=208
+preview: seek decide press=7 route=display target_s=3.542 target_frame=208 produced=0.3800 edge_s=7.845 answerable=1 generation=3
+preview: seek turnaround_ms=38.9 target_frame=208 press=7 landed_time=3.560 delta_s=+0.018 landed_seq=208 target_gen=3 landed_gen=3
+preview: frame seq=208 t=3.560 gen=3 gui_ms=-
 preview: hold on playhead=12.500
 ```
+
+**A press is one record with a lifecycle** (`src/ui/video/press.py`), and that is the unit to read. Before it, the log
+could say where a seek was asked to go and - on the happy path - where it landed, while four of the owner's own
+sessions pressed four times each and produced no line about the result at all. Now:
+
+| line | meaning |
+|---|---|
+| `seek press` | the raw press (fraction on the strip, produced share at that instant) |
+| `seek decide press=N route=…` | where it went (`display`, `tail`, `decoder`, `queue`) and whether that route can answer it. `answerable=0` always carries `why=` - `target-past-produced-edge` means the renderer has not written that frame yet, so the press is a request for the future, not a bug |
+| `seek stream press=N seq=… t=… not_the_answer=1` | a streaming picture arrived while the press was open and was **not** painted as its answer (once per press) |
+| `seek turnaround_ms=… press=N …` | the picture that settled it, with its own media time and both generations (`closed`) |
+| `seek refused press=N reason=…` | the route cannot answer (no process, nothing written yet, a decoder error) |
+| `seek superseded press=N by=M` | a newer press replaced it before an answer - normal for a drag, and now visible instead of silent |
+| `seek abandoned press=N reason=…` | it was open and nothing arrived (a backend that died, a route that went away) |
+
+Exactly one `decide` and exactly one outcome per press, so a press with no outcome line is a defect by definition.
+`frame … t= gen=` names the picture that was painted - with or without a seek - because "which frame did we draw" has
+to be answerable from the log alone.
 
 Collection:
 

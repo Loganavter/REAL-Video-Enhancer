@@ -236,7 +236,17 @@ def log(message: str, level: str = "info"):
         print(f"An error occurred while logging: {e}", file=sys.stderr)
 
 
-with open(os.path.join(CWD, "log.txt"), "w") as f:
+#: Keep the PREVIOUS run instead of erasing it. `log.txt` used to be truncated here, so the backend's `seek:` lines
+#: and the pane's own decisions of the run that just misbehaved were gone by the time anyone could read them - measured
+#: 2026-11-24: the owner's `log.txt` held 147 bytes (two lines) while `preview-log.txt` had three hours of history,
+#: because only the latter appends. One rotation is enough to answer "what did the last run do".
+_LOG_PATH = os.path.join(CWD, "log.txt")
+try:
+    if os.path.exists(_LOG_PATH) and os.path.getsize(_LOG_PATH) > 0:
+        os.replace(_LOG_PATH, os.path.join(CWD, "log.prev.txt"))
+except OSError:
+    pass                                    # a read-only tree keeps the old behaviour rather than failing to start
+with open(_LOG_PATH, "w") as f:
     pass
 
 
