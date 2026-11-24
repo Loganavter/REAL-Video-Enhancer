@@ -458,9 +458,15 @@ def test_a_seek_while_paused_buys_exactly_that_one_frame():
     assert reader.wants[-1] is False, "after that one frame the hold costs the renderer nothing again"
 
 
-def test_a_previews_strip_press_never_writes_the_renderer_seek_block():
+def test_a_preview_without_a_usable_block_never_writes_the_renderer_seek_block():
+    """No block, no answer: the tail is all there is, and a press it cannot serve writes nothing.
+
+    A preview WITH a usable block is the frame-on-demand case (`test_preview_frame_on_demand.py`): the block renders
+    the requested frame, so that press does write a request.
+    """
     reader = _Reader()
     tab = _tab(preview=True, paused=False, alive=True, reader=reader)
+    reader.attached = False
     tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)
     tab._on_preview_seek(0.5)
     assert reader.seeks == []
