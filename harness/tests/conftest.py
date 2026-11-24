@@ -83,6 +83,29 @@ def _qt_widgets():
     return QtWidgets
 
 
+def pytest_configure(config):
+    """Name the interpreter pair whose Qt build corrupts the GC - before a run dies with no explanation.
+
+    Measured 2026-11-24 with a forced `gc.collect()` after every test: CPython 3.12 + PySide6 6.8.0.2 (the REAL-2
+    bundled interpreter) segfaults inside CPython's own collector (`move_unreachable` -> `visit_reachable` ->
+    `_PyObject_IS_GC` on a tuple holding a stack address) at 3 of 3 runs, while CPython 3.14 + PySide6 6.12 (the system
+    interpreter) runs the same suite clean at 2 of 2. Nothing in this tree is implicated - but a suite that dies at GC
+    is unreadable, and the failure looks like a flake. Run the Qt suite under the system interpreter and the backend
+    suite under the bundled one (it carries torch); this warning exists so nobody has to rediscover that.
+    """
+    import sys
+
+    try:
+        import PySide6
+    except ImportError:
+        return
+    if sys.version_info[:2] == (3, 12) and PySide6.__version__ == "6.8.0.2":
+        print(
+            "\nWARNING conftest: Qt 6.8.0.2 on CPython 3.12 segfaults inside CPython's GC (measured 3/3 runs). "
+            "Run this suite under the system python3 (Qt 6.12) and keep the bundled interpreter for backend/tests.\n",
+            file=sys.stderr, flush=True)
+
+
 @pytest.fixture(scope="session")
 def qapp():
     """One ``QApplication`` for the session, built on demand.
