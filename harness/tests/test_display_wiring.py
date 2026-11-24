@@ -662,7 +662,9 @@ def test_a_plain_exports_completion_stops_its_tail_before_releasing_the_block(mo
     reader = _ReleasingReader(events)
     tail = _Tail(events)
     tab = _completion_tab(preview=False, reader=reader, tail=tail)
-    monkeypatch.setattr(sys.modules[ProcessTab.__module__], "hide_layout_widgets", lambda widget: None)
+    # The completion path re-states the row through the glue's single writer; the stub tab has no widgets to
+    # enable, so the writer is what gets neutralised (it used to be the `hide_layout_widgets` call it replaced).
+    monkeypatch.setattr(ProcessTab, "_set_render_controls", lambda self, state: None)
 
     tab.guiChangesOnRenderCompletion()
 
@@ -678,7 +680,9 @@ def test_a_previews_completion_stops_the_tail_before_playback_starts(monkeypatch
     tail = _Tail(events)
     tab = _completion_tab(preview=True, reader=reader, tail=tail)
     tab._start_preview_playback = lambda path: events.append("playback")
-    monkeypatch.setattr(sys.modules[ProcessTab.__module__], "hide_layout_widgets", lambda widget: None)
+    # The completion path re-states the row through the glue's single writer; the stub tab has no widgets to
+    # enable, so the writer is what gets neutralised (it used to be the `hide_layout_widgets` call it replaced).
+    monkeypatch.setattr(ProcessTab, "_set_render_controls", lambda self, state: None)
 
     tab.guiChangesOnRenderCompletion()
 

@@ -23,8 +23,6 @@ from .QTcustom import (
     DisplayReader,
     RegularQTPopup,
     UpdateGUIThread,
-    show_layout_widgets,
-    hide_layout_widgets,
 )
 from ..constants import (
     BACKEND_PATH,
@@ -506,7 +504,7 @@ class ProcessTab:
         # ~480 px column, so it was painted outside the page and over the preview pane (owner, 2026-11-24; the gate is
         # `harness/tests/test_page_overflow.py`).
         # connect up pausing
-        hide_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
+        self._set_render_controls("idle")
         self.page_handles.proc.pauseRenderButton.clicked.connect(self.pauseRender)
         self.page_handles.proc.killRenderButton.clicked.connect(self.killRenderProcess)
         # The preview's own transport: it stands PAUSED until this is pressed (owner, 2026-11-23), and the toggle's
@@ -518,6 +516,25 @@ class ProcessTab:
         self.page_handles.proc.previewPauseButton.toggled.connect(self._on_preview_pause_toggled)
         self._sync_preview_transport()
 
+    #: Which render button each state leaves USABLE. Visibility never changes (owner, 2026-11-24: "show the cancel
+    #: button always, just inactive while nothing runs") - hiding a button made the row either re-flow at the press or
+    #: reserve its box as an empty gap, and a disabled button avoids both while still reading as unavailable.
+    RENDER_CONTROLS = {
+        "idle": {"start": True, "pause": False, "kill": False},
+        "running": {"start": False, "pause": True, "kill": True},
+        "paused": {"start": True, "pause": False, "kill": True},
+    }
+
+    def _set_render_controls(self, state: str) -> None:
+        """Enable the buttons `state` allows and disable the rest; every button stays in the row."""
+        proc = self.page_handles.proc
+        controls = {"start": proc.startRenderButton, "pause": proc.pauseRenderButton, "kill": proc.killRenderButton}
+        wanted = self.RENDER_CONTROLS[state]
+        proc.onRenderButtonsContiainer.setEnabled(True)
+        for name, widget in controls.items():
+            widget.setVisible(True)
+            widget.setEnabled(bool(wanted[name]))
+
     def killRenderProcess(self):
         try:  # kills  render process if necessary
             self.userKilled = True
@@ -528,9 +545,7 @@ class ProcessTab:
     def pauseRender(self):
         shmbuf = self.pausedSharedMemory.buf
         shmbuf[0] = 1  # 1 = True
-        hide_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
-        self.page_handles.proc.startRenderButton.setVisible(True)
-        self.page_handles.proc.startRenderButton.setEnabled(True)
+        self._set_render_controls("paused")
         self.setStatus("Paused")
 
     def resumeRender(self):
@@ -540,9 +555,7 @@ class ProcessTab:
 
         self._render_started_mono = monotonic()
         self.setStatus("Preparing")
-        show_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
-        self.page_handles.proc.onRenderButtonsContiainer.setEnabled(True)
-        self.page_handles.proc.startRenderButton.setVisible(False)
+        self._set_render_controls("running")
 
     def startGUIUpdate(self):
         
@@ -602,8 +615,7 @@ class ProcessTab:
 
         self._render_started_mono = monotonic()
         self.setStatus("Preparing")
-        show_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
-        self.page_handles.proc.startRenderButton.setVisible(False)
+        self._set_render_controls("running")
         self.page_handles.proc.startRenderButton.clicked.disconnect()
         self.page_handles.proc.startRenderButton.clicked.connect(self.resumeRender)
 
@@ -1094,9 +1106,8 @@ class ProcessTab:
         else:
             log("Some render processes failed: Error code: " + str(self.return_codes))
             RegularQTPopup("Rendering failed! Please check the logs tab!")
-        # Have to swap the visibility of these here otherwise crash for some reason
-        hide_layout_widgets(self.page_handles.proc.onRenderButtonsContiainer)
-        self.page_handles.proc.startRenderButton.setEnabled(True)
+        # The row goes back to its idle state: start usable, the cancel pair visible but disabled.
+        self._set_render_controls("idle")
         self.page_handles.general.outputFileText.setEnabled(True)
         self.page_handles.general.inputFileText.setEnabled(True)
         # The job is over: no backend publishes any more, so the block and the seek request are released here (the
@@ -1114,7 +1125,6 @@ class ProcessTab:
         self.page_handles.proc.startRenderButton.clicked.disconnect()
         self.page_handles.proc.startRenderButton.clicked.connect(self.parent.startRender)
         self.parent.enableProcessPage()
-        self.page_handles.proc.startRenderButton.setVisible(True)
         self._render_started_mono = None
         self.setProgressDetail("")
         finished_ok = all(code == 0 or code == 3221225477 for code in self.return_codes) or self.userKilled

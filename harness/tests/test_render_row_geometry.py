@@ -1,27 +1,20 @@
-"""The render-buttons row may not re-flow when a job starts.
+"""The render-buttons row: every button is always in the row, and only its enabled state changes.
 
-The defect this gate exists for (owner, 2026-11-24): "the buttons row re-flows when a job starts". At idle the row is
-`[start] [pause] [kill] [progress bar]`, with pause and kill hidden through `hide_layout_widgets`, so their width leaves
-the layout entirely. `ProcessTab.run` then shows the container again - and the row lays itself out a second time: the
-progress bar gives up ~two button widths and everything after the buttons moves at the exact moment the user presses
-start. Nothing in the suite could see it: every state was laid out correctly, and the defect is the *step between* two
-correct states.
+This file changed sides twice on the owner's calls, and the three states are the history worth keeping:
 
-Qt's answer is `QSizePolicy.setRetainSizeWhenHidden(True)`: a hidden widget keeps its box, so hiding is a paint decision
-rather than a layout one. The row keeps the same geometry in both states and the bar never jumps.
+1. **Morning, 2026-11-24** - "the buttons row re-flows when a job starts": pause/kill were hidden at idle and shown
+   when a render began, so the progress bar gave up their width at the press. The cure was
+   `setRetainSizeWhenHidden(True)`.
+2. **Evening, 2026-11-24** - the cost of that cure: "why is there a left indent - the bar got shorter and the button
+   stepped after it". Retention keeps the row stable by reserving the hidden pair's 84 px, which reads as an empty
+   gap. The owner chose the longer idle bar over the stable row.
+3. **Same evening, final** - "better show the cancel button always, just inactive while nothing runs". That is the
+   contract below: no button is ever hidden, so the row has ONE geometry in every state, and nothing is reserved
+   because nothing is missing. `ProcessTab._set_render_controls` is the single place a state is applied, and the
+   mechanism half of this file keeps the retention demonstration as the reason the third option was chosen.
 
-The file has two halves, on purpose:
-
-* the **mechanism** half is toolkit-free: two button-sized widgets in a nested `QHBoxLayout` next to an expanding
-  stretch widget, exactly the shape of `onRenderButtonsContiainer`. It first *reproduces* the defect (hide without
-  retention, the stretch widget grows by two button widths), then requires the cure (hide with retention, geometry
-  unchanged). A gate that cannot fail is a comment, and this one demonstrates it can.
-* the **app** half builds the real shell the way `harness/tests/test_page_overflow.py` does and asserts the same on
-  `startRenderButton`, `pauseRenderButton`, `killRenderButton` and `progressBar` between idle and job start. It skips
-  cleanly where `sli_ui_toolkit` is not importable (a worker cell); the supervisor runs it on the shared tree.
-
-Run against the tree before the cure and the app half names the shrinking progress bar and the moved pause button. That
-is the record of the owner's report kept as a test.
+States (from `ProcessTab.RENDER_CONTROLS`): idle -> start usable, pause/kill visible but disabled; running -> start
+disabled, pause/kill usable; paused -> start (resume) and kill usable, pause disabled.
 """
 
 from __future__ import annotations
@@ -202,8 +195,30 @@ def _row_rects(proc, row: QWidget) -> dict[str, QRect]:
     return {name: QRect(widget.mapTo(row, QPoint(0, 0)), widget.size()) for name, widget in widgets.items()}
 
 
-def test_the_render_row_keeps_its_boxes_from_idle_to_job_start(qapp: QApplication):
-    """The gate: pressing start may not move the row's controls. Only which of them is visible may change."""
+#: The three states the glue applies, as `ProcessTab.RENDER_CONTROLS` states them (`src/ui/ProcessTab.py`).
+STATES = {
+    "idle": {"start": True, "pause": False, "kill": False},
+    "running": {"start": False, "pause": True, "kill": True},
+    "paused": {"start": True, "pause": False, "kill": True},
+}
+
+
+def _apply_state(proc, state: str) -> None:
+    """The same two lines `ProcessTab._set_render_controls` performs: show, then enable or disable.
+
+    The test mirrors the glue because importing `src/ui/ProcessTab.py` needs the app's full dependency set (`cpuinfo`,
+    the backend) that this offscreen suite deliberately does not have; `test_the_glue_owns_the_row_state` below pins
+    that the glue is the one place these calls live.
+    """
+    wanted = STATES[state]
+    for name, widget in (("start", proc.startRenderButton), ("pause", proc.pauseRenderButton),
+                         ("kill", proc.killRenderButton)):
+        widget.setVisible(True)
+        widget.setEnabled(bool(wanted[name]))
+
+
+def test_every_render_button_stays_in_the_row_and_only_its_state_changes(qapp: QApplication):
+    """The final contract: the row's boxes may not move, and no button may disappear."""
     pytest.importorskip("sli_ui_toolkit")
 
     app, window = _boot()
@@ -213,41 +228,49 @@ def test_the_render_row_keeps_its_boxes_from_idle_to_job_start(qapp: QApplicatio
         row = proc.progressBar.parentWidget()
         assert row is not None, "the progress bar has no parent - the row this gate measures is gone"
 
-        # Idle, exactly as `ProcessTab.__init__` leaves it: `hide_layout_widgets(onRenderButtonsContiainer)` (a
-        # `setVisible(False)` per widget) with the start button shown. The glue is not built by `MainWindowShell`, so
-        # the test states the idle side of the transition the same way the glue does.
-        proc.pauseRenderButton.setVisible(False)
-        proc.killRenderButton.setVisible(False)
-        proc.startRenderButton.setVisible(True)
-        _settle(app)
+        rects = {}
+        for state in STATES:
+            _apply_state(proc, state)
+            _settle(app)
+            for name in ("startRenderButton", "pauseRenderButton", "killRenderButton"):
+                assert getattr(proc, name).isVisible(), f"{name} is hidden in the {state} state"
+            rects[state] = _row_rects(proc, row)
+            assert proc.startRenderButton.isEnabled() == STATES[state]["start"]
+            assert proc.pauseRenderButton.isEnabled() == STATES[state]["pause"]
+            assert proc.killRenderButton.isEnabled() == STATES[state]["kill"]
 
-        assert not proc.pauseRenderButton.isVisible() and not proc.killRenderButton.isVisible(), (
-            "idle must hide the pause/kill pair - otherwise this gate is measuring a row that never changes")
-        assert proc.startRenderButton.isVisible(), "idle must show the start button"
-        idle = _row_rects(proc, row)
+        idle = rects["idle"]
+        for state, measured in rects.items():
+            moved = [f"{name}: {idle[name]} -> {measured[name]}" for name in idle if idle[name] != measured[name]]
+            assert not moved, (
+                f"the render row moved between idle and {state} - a disabled button keeps its box, a hidden one does "
+                "not:\n" + "\n".join(f"  {line}" for line in moved))
 
-        # Exactly what `ProcessTab.run` performs when a job starts: `show_layout_widgets(onRenderButtonsContiainer)`
-        # (a `setVisible(True)` per widget) and the start button hidden.
-        proc.pauseRenderButton.setVisible(True)
-        proc.killRenderButton.setVisible(True)
-        proc.startRenderButton.setVisible(False)
-        _settle(app)
-
-        assert proc.pauseRenderButton.isVisible() and proc.killRenderButton.isVisible(), (
-            "a running job must show the pause/kill pair")
-        assert not proc.startRenderButton.isVisible(), "a running job must hide the start button"
-        running = _row_rects(proc, row)
-
-        moved = [f"{name}: {idle[name]} -> {running[name]}" for name in idle if idle[name] != running[name]]
-        assert not moved, (
-            "the render row re-flowed when the job started - a hidden button must keep its box "
-            "(`QSizePolicy.setRetainSizeWhenHidden(True)`), or the progress bar jumps under the user's pointer:\n"
-            + "\n".join(f"  {line}" for line in moved))
-
+        # No reservation is needed any more: nothing is hidden, so no policy may claim a box for a hidden widget.
         for name in ("startRenderButton", "pauseRenderButton", "killRenderButton"):
-            widget = getattr(proc, name)
-            assert widget.sizePolicy().retainSizeWhenHidden(), (
-                f"{name} does not retain its size when hidden: {widget.sizePolicy().horizontalPolicy()} without "
-                "retention is the defect this gate was written for")
+            assert not getattr(proc, name).sizePolicy().retainSizeWhenHidden(), (
+                f"{name} retains its size when hidden - with nothing hidden that can only hide a real regression")
     finally:
         window.close()
+
+
+def test_the_glue_owns_the_row_state():
+    """One place applies it: `ProcessTab` enables/disables, and nothing in the file hides a render button."""
+    import ast
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[2] / "src" / "ui" / "ProcessTab.py"
+    text = source.read_text(encoding="utf-8")
+    assert "_set_render_controls(" in text, "the glue lost its single state writer"
+    assert "RENDER_CONTROLS" in text, "the states are no longer stated as data"
+    for name in ("startRenderButton", "pauseRenderButton", "killRenderButton"):
+        for call in (f"{name}.setVisible(False)", f"{name}.hide()"):
+            assert call not in text, f"{call} is back - the cancel pair must stay in the row, only disabled"
+
+    tree = ast.parse(text)
+    states = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "RENDER_CONTROLS" for target in node.targets):
+            states = ast.literal_eval(node.value)
+    assert states == STATES, f"the glue's states drifted from the contract: {states}"
