@@ -17,11 +17,13 @@ import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CustomLineEdit` for a
 # `QLineEdit`, `Button` for a `QPushButton`, `CheckBox` for a `QCheckBox`, `ComboBox` for a `QComboBox` and
 # `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, SurfacePanel,
     SurfaceScrollArea, Text)
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import OutputSettingsHandles
+from src.ui.pages.ui_scale_follow import UiScaleFollower
 from src.ui import i18n
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
@@ -32,6 +34,19 @@ STOCK_SCROLLBAR_WIDTH = 8
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
 SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+#: The output path field's MINIMUM height in DESIGN px: the Designer's ``(0, 25)``. A design value, so it is resolved
+#: through `scaled_px()` at construction and on every factor change - the toolkit field re-pins its own height on a
+#: scale change, and the page's floor has to follow it.
+ROW_MIN_HEIGHT_PX = 25
+
+#: The scene-change threshold's design row: the Designer's ``75x30`` value field.
+FIELD_WIDTH_PX = 75
+ROW_HEIGHT_PX = 30
+
+#: The rows' design gap (10) and the tight gap before the last row (6).
+ROW_GAP_PX = 10
+TIGHT_GAP_PX = 6
 
 
 def _row_checkbox(parent) -> CheckBox:
@@ -88,7 +103,6 @@ class Tab2Page:
         self.outputFileLocationContianer = QWidget(self.scrollAreaWidgetContents_3)
         self.outputFileLocationContianer.setObjectName(u"outputFileLocationContianer")
         self.horizontalLayout_19 = QHBoxLayout(self.outputFileLocationContianer)
-        self.horizontalLayout_19.setSpacing(10)
         self.horizontalLayout_19.setObjectName(u"horizontalLayout_19")
         self.horizontalLayout_19.setContentsMargins(0, 0, 0, 0)
         self.encoderLabel_3 = Text(parent=self.outputFileLocationContianer)
@@ -99,7 +113,6 @@ class Tab2Page:
         self.horizontalLayout_19.addItem(self.horizontalSpacer_11)
         self.output_folder_location = CustomLineEdit(self.outputFileLocationContianer)
         self.output_folder_location.setObjectName(u"output_folder_location")
-        self.output_folder_location.setMinimumSize(QSize(0, 25))
         self.horizontalLayout_19.addWidget(self.output_folder_location)
         self.select_output_folder_location_btn = Button(parent=self.outputFileLocationContianer, text="",
             variant="surface", content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -111,7 +124,6 @@ class Tab2Page:
         self.sceneChangeDetectionSettingContainer = QWidget(self.scrollAreaWidgetContents_3)
         self.sceneChangeDetectionSettingContainer.setObjectName(u"sceneChangeDetectionSettingContainer")
         self.horizontalLayout_17 = QHBoxLayout(self.sceneChangeDetectionSettingContainer)
-        self.horizontalLayout_17.setSpacing(10)
         self.horizontalLayout_17.setObjectName(u"horizontalLayout_17")
         self.horizontalLayout_17.setContentsMargins(0, 0, 0, 0)
         self.label_20 = Text(parent=self.sceneChangeDetectionSettingContainer)
@@ -128,7 +140,6 @@ class Tab2Page:
         self.widget_12 = QWidget(self.scrollAreaWidgetContents_3)
         self.widget_12.setObjectName(u"widget_12")
         self.horizontalLayout_27 = QHBoxLayout(self.widget_12)
-        self.horizontalLayout_27.setSpacing(10)
         self.horizontalLayout_27.setObjectName(u"horizontalLayout_27")
         self.horizontalLayout_27.setContentsMargins(0, 0, 0, 0)
         self.label_37 = Text(parent=self.widget_12)
@@ -151,7 +162,6 @@ class Tab2Page:
         self.widget_7 = QWidget(self.scrollAreaWidgetContents_3)
         self.widget_7.setObjectName(u"widget_7")
         self.horizontalLayout_14 = QHBoxLayout(self.widget_7)
-        self.horizontalLayout_14.setSpacing(10)
         self.horizontalLayout_14.setObjectName(u"horizontalLayout_14")
         self.horizontalLayout_14.setContentsMargins(0, 0, 0, 0)
         self.label_30 = Text(parent=self.widget_7)
@@ -169,7 +179,6 @@ class Tab2Page:
             alignment=SPIN_ALIGNMENT)
         self.scene_change_detection_threshold.setObjectName(u"scene_change_detection_threshold")
         self.scene_change_detection_threshold.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Scene Change Detection Threshold</span></p><p> - Lower number: <span style=\" font-weight:700;\">higher</span> chance of detecting scene changes, with risk of <span style=\" font-weight:700;\">overdetection</span>.</p><p> - Higher number: <span style=\" font-weight:700;\">lower </span>chance of detecting scene changes, with risk of <span style=\" font-weight:700;\">underdetection.</span></p><p>   - <span style=\" font-weight:700;\">Recommended: </span>2-3 for real life, 4 for animation.</p></body></html>", None))
-        self.scene_change_detection_threshold.setMinimumSize(QSize(75, 30))
         self.scene_change_detection_threshold.setDecimals(1)
         # Qt's `setMinimum`/`setMaximum` are the one range spelling the toolkit field does not answer (`DoubleSpinBox`
         # carries `setRange` only), so the Designer's two statements are the one call they compose to.
@@ -179,7 +188,6 @@ class Tab2Page:
         self.widget_9 = QWidget(self.scrollAreaWidgetContents_3)
         self.widget_9.setObjectName(u"widget_9")
         self.horizontalLayout_25 = QHBoxLayout(self.widget_9)
-        self.horizontalLayout_25.setSpacing(6)
         self.horizontalLayout_25.setObjectName(u"horizontalLayout_25")
         self.horizontalLayout_25.setContentsMargins(0, 0, 0, 0)
         self.label_48 = Text(parent=self.widget_9)
@@ -215,7 +223,22 @@ class Tab2Page:
         # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
         i18n.bind_page(self, self.tab_2)
         self.retranslate()
+        # One place states this page's design numbers: construction is its first run, the follower re-runs it on a
+        # live factor change.
+        self._scale = UiScaleFollower(self.tab_2, self._apply_scale)
         return self.tab_2
+
+    def _apply_scale(self) -> None:
+        """Resolve this page's design numbers at the factor in force now (never at import)."""
+        self.output_folder_location.setMinimumSize(QSize(0, scaled_px(ROW_MIN_HEIGHT_PX)))
+        self.scene_change_detection_threshold.setMinimumSize(
+            QSize(scaled_px(FIELD_WIDTH_PX), scaled_px(ROW_HEIGHT_PX)))
+
+        gap = scaled_px(ROW_GAP_PX)
+        for layout in (self.horizontalLayout_19, self.horizontalLayout_17,
+                       self.horizontalLayout_27, self.horizontalLayout_14):
+            layout.setSpacing(gap)
+        self.horizontalLayout_25.setSpacing(scaled_px(TIGHT_GAP_PX))
 
     def retranslate(self, language: str | None = None) -> None:
         self.encoderLabel_3.setText(QCoreApplication.translate("MainWindow", u"Output folder directory", None))

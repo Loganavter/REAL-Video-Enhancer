@@ -18,11 +18,13 @@ import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CustomLineEdit` for a
 # `QLineEdit`, `Button` for a `QPushButton`, `CheckBox` for a `QCheckBox`, `ComboBox` for a `QComboBox` and
 # `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
 from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, RichTextView,
     SurfacePanel, SurfaceScrollArea, Text)
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import GeneralSettingsHandles
+from src.ui.pages.ui_scale_follow import UiScaleFollower
 from src.ui import i18n
 
 #: RVE's control text is 12 PIXELS (the Designer's sizing). The info pane's stock editor was 12 px, and
@@ -36,7 +38,45 @@ STOCK_SCROLLBAR_WIDTH = 8
 
 #: The Designer's `QFrame` separator is a 3 px sunken line. The toolkit's `Divider` is a button-region spec, not a
 #: widget, so the line is a token-painted panel of that height (`SEPARATOR_HEIGHT` in the layer this page dropped).
+#: DESIGN px: a painted line still grows with the factor, or it turns into a hairline against a 45 px row.
 SEPARATOR_HEIGHT = 3
+
+#: The settings row's height in DESIGN px (owner, 2026-11-24): the rows, the path fields, the combo boxes and the value
+#: spin boxes all state this one row. At 1.0 it is the Designer's 30; 45 at 1.5 and 60 at 2.0 come from `scaled_px()`
+#: at apply time, never from an import-time snapshot. The old constant was an absolute pin, which is what clipped a
+#: 12 pt label's line at 1.5 (wave 2 left the page body scrollable but the rows still 30 px).
+ROW_HEIGHT_PX = 30
+
+#: A value spin box's width in DESIGN px; its height is `ROW_HEIGHT_PX` (the Designer's 75x30).
+FIELD_WIDTH_PX = 75
+
+#: The page body's gap and inset in DESIGN px: the Designer's 11 between rows and around the body.
+PAGE_GAP_PX = 11
+
+#: A settings section's inner inset in DESIGN px (the Designer's 9 around the interpolation/upscale groups).
+SECTION_INSET_PX = 9
+
+#: The upscale section's tighter design gap (the Designer's 6 between its two rows).
+SECTION_GAP_PX = 6
+
+#: The path fields' design width ceilings (the Designer's 1000/10000). A ceiling, not the row height, but it is part
+#: of the same size statement and scales with it.
+INPUT_PATH_MAX_WIDTH_PX = 1000
+OUTPUT_PATH_MAX_WIDTH_PX = 10000
+
+#: The render-queue action icon's design px.
+ACTION_ICON_PX = 32
+
+#: The General tab's information pane, in DESIGN points: the Designer's 11 pt body and 10 pt spans. Qt's rich-text
+#: engine treats an inline `font-size` as ABSOLUTE, so the page must state these at DESIGN x factor itself - leaving
+#: `10pt` in the markup kept the body at 10 pt at every factor (measured: 172 px of ink at 1.0, 1.5 and 2.0).
+INFO_BODY_PT = 11
+INFO_TEXT_PT = 10
+
+#: The pane's nine rows, in the Designer's order.
+INFO_LABELS = ("FPS:", "Resolution:", "Frame Count:", "Encoder:", "Container:", "Color Space:",
+               "Pixel Format:", "Is HDR:", "Bit Depth:")
+
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
@@ -64,6 +104,42 @@ def _row_checkbox(parent) -> CheckBox:
     box.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
     box.toggled.connect(lambda checked: box.stateChanged.emit(2 if checked else 0))
     return box
+
+
+def _design_pt(design_pt: float, factor: float) -> str:
+    """A design point size at the factor in force, as the CSS string Qt's rich-text engine wants.
+
+    ``:g`` keeps 1.0's ``10pt``/``11pt`` byte-identical to the Designer's markup, and writes ``15pt``/``16.5pt`` at 1.5
+    without a trailing ``.0``.
+    """
+    return f"{design_pt * factor:g}pt"
+
+
+def _info_html(factor: float) -> str:
+    """The General tab's information body at ``factor``.
+
+    Every size is stated as DESIGN x factor. The alternative - removing the inline sizes and letting the document font
+    rule - would use `RichTextView`'s 12 px body at 1.0, while the visible text today is the spans' 10 pt (13.3 px):
+    that is a 1.0 change, and 1.0 is this wave's identity gate. Building the markup keeps the Designer's pixel at 1.0
+    and makes the body grow with the factor instead of standing still on an absolute 10 pt.
+    """
+    span_pt = _design_pt(INFO_TEXT_PT, factor)
+    body_pt = _design_pt(INFO_BODY_PT, factor)
+    rows = "\n".join(
+        '<p style=" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; '
+        f'text-indent:0px;"><span style=" font-family:\'Sans Serif\'; font-size:{span_pt};">{label}</span></p>'
+        for label in INFO_LABELS
+    )
+    return (
+        '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">\n'
+        '<html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">\n'
+        'p, li { white-space: pre-wrap; }\n'
+        'hr { height: 1px; border-width: 0; }\n'
+        'li.unchecked::marker { content: "\\2610"; }\n'
+        'li.checked::marker { content: "\\2612"; }\n'
+        f'</style></head><body style=" font-family:\'Adwaita Sans\'; font-size:{body_pt}; font-weight:400; '
+        f'font-style:normal;">\n{rows}</body></html>'
+    )
 
 
 class GeneralSettingsPage:
@@ -136,9 +212,7 @@ class GeneralSettingsPage:
         self.scrollAreaWidgetContents_4.setObjectName(u"scrollAreaWidgetContents_4")
         self.scrollAreaWidgetContents_4.setGeometry(QRect(0, 0, 470, 1040))
         self.verticalLayout_32 = QVBoxLayout(self.scrollAreaWidgetContents_4)
-        self.verticalLayout_32.setSpacing(11)
         self.verticalLayout_32.setObjectName(u"verticalLayout_32")
-        self.verticalLayout_32.setContentsMargins(11, 11, 11, 11)
         self.inputFileContainer = QWidget(self.scrollAreaWidgetContents_4)
         self.inputFileContainer.setObjectName(u"inputFileContainer")
         self.horizontalLayout_4 = QHBoxLayout(self.inputFileContainer)
@@ -148,14 +222,13 @@ class GeneralSettingsPage:
         # The label is passed HERE, not only in `retranslate`: the toolkit's empty-label transition
         # (`_apply_text_geometry`) raises the minimum height to 32 and unbounds the maximum, which would drop the
         # Designer's 30 px row (the adapter restored those pins after every `setText`). A button born with its text
-        # takes no such pass, so the `setMinimumSize`/`setMaximumSize` statements below are what the layout sees.
+        # takes no such pass, and the row height is applied by `_apply_scale` at the end of `build` (and again on
+        # every `UiScale.scale_changed`), so this is the size the layout sees.
         self.inputFileSelectButton = Button(parent=self.inputFileContainer,
             text=QCoreApplication.translate("MainWindow", u"Select Input File", None), variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.inputFileSelectButton.setObjectName(u"inputFileSelectButton")
-        self.inputFileSelectButton.setMinimumSize(QSize(0, 30))
-        self.inputFileSelectButton.setMaximumSize(QSize(16777215, 30))
         apply(self.inputFileSelectButton, BODY_PT)
         # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
         # fill the cell, which turns a row button into a slab when the page is taller than its contents. `size=(0, 0)`
@@ -168,8 +241,6 @@ class GeneralSettingsPage:
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.batchSelectButton.setObjectName(u"batchSelectButton")
-        self.batchSelectButton.setMinimumSize(QSize(0, 30))
-        self.batchSelectButton.setMaximumSize(QSize(16777215, 30))
         apply(self.batchSelectButton, BODY_PT)
         self.batchSelectButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_4.addWidget(self.batchSelectButton)
@@ -181,8 +252,6 @@ class GeneralSettingsPage:
         sizePolicy7.setVerticalStretch(0)
         sizePolicy7.setHeightForWidth(self.inputFileText.sizePolicy().hasHeightForWidth())
         self.inputFileText.setSizePolicy(sizePolicy7)
-        self.inputFileText.setMinimumSize(QSize(0, 30))
-        self.inputFileText.setMaximumSize(QSize(1000, 30))
         self.inputFileText.setReadOnly(False)
         self.verticalLayout_32.addWidget(self.inputFileText)
         self.outputFileContainer = QWidget(self.scrollAreaWidgetContents_4)
@@ -196,8 +265,6 @@ class GeneralSettingsPage:
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.outputFileSelectButton.setObjectName(u"outputFileSelectButton")
         self.outputFileSelectButton.setEnabled(False)
-        self.outputFileSelectButton.setMinimumSize(QSize(0, 30))
-        self.outputFileSelectButton.setMaximumSize(QSize(16777215, 30))
         apply(self.outputFileSelectButton, BODY_PT)
         self.outputFileSelectButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_5.addWidget(self.outputFileSelectButton)
@@ -207,8 +274,6 @@ class GeneralSettingsPage:
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.openOutputFolderButton.setObjectName(u"openOutputFolderButton")
         self.openOutputFolderButton.setEnabled(False)
-        self.openOutputFolderButton.setMinimumSize(QSize(0, 30))
-        self.openOutputFolderButton.setMaximumSize(QSize(16777215, 30))
         apply(self.openOutputFolderButton, BODY_PT)
         self.openOutputFolderButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.horizontalLayout_5.addWidget(self.openOutputFolderButton)
@@ -221,15 +286,12 @@ class GeneralSettingsPage:
         sizePolicy8.setVerticalStretch(0)
         sizePolicy8.setHeightForWidth(self.outputFileText.sizePolicy().hasHeightForWidth())
         self.outputFileText.setSizePolicy(sizePolicy8)
-        self.outputFileText.setMinimumSize(QSize(0, 30))
-        self.outputFileText.setMaximumSize(QSize(10000, 30))
         self.verticalLayout_32.addWidget(self.outputFileText)
         # A separator is one painted pixel of the Designer's 3 px sunken `QFrame`. The toolkit's `Divider` is a
         # button-region spec, not a widget, so the line is a token-painted panel of `SEPARATOR_HEIGHT` (the deleted
         # rule painted the frame white, which is `dialog.border`).
         self.line = SurfacePanel(self.scrollAreaWidgetContents_4, background_token="dialog.border")
         self.line.setObjectName(u"line")
-        self.line.setFixedHeight(SEPARATOR_HEIGHT)
         self.line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.verticalLayout_32.addWidget(self.line)
         self.widget_3 = QWidget(self.scrollAreaWidgetContents_4)
@@ -248,7 +310,6 @@ class GeneralSettingsPage:
         sizePolicy8.setHeightForWidth(self.backendComboBox.sizePolicy().hasHeightForWidth())
         self.backendComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.backendComboBox.setMinimumSize(QSize(0, 0))
-        self.backendComboBox.setMaximumHeight(30)   # width follows the content, not the Designer's column
         self.horizontalLayout_11.addWidget(self.backendComboBox)
         self.verticalLayout_32.addWidget(self.widget_3)
         self.widget_35 = QWidget(self.scrollAreaWidgetContents_4)
@@ -279,7 +340,6 @@ class GeneralSettingsPage:
         self.interpolationContainer.setEnabled(True)
         self.verticalLayout_38 = QVBoxLayout(self.interpolationContainer)
         self.verticalLayout_38.setObjectName(u"verticalLayout_38")
-        self.verticalLayout_38.setContentsMargins(9, 9, 9, 9)
         self.widget_28 = QWidget(self.interpolationContainer)
         self.widget_28.setObjectName(u"widget_28")
         self.horizontalLayout_45 = QHBoxLayout(self.widget_28)
@@ -296,7 +356,6 @@ class GeneralSettingsPage:
         sizePolicy8.setHeightForWidth(self.interpolateModelComboBox.sizePolicy().hasHeightForWidth())
         self.interpolateModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.interpolateModelComboBox.setMinimumSize(QSize(0, 0))
-        self.interpolateModelComboBox.setMaximumHeight(30)   # width follows the content, not the Designer's column
         self.interpolateModelComboBox.setSizeIncrement(QSize(230, 0))
         self.horizontalLayout_45.addWidget(self.interpolateModelComboBox)
         self.verticalLayout_38.addWidget(self.widget_28)
@@ -322,8 +381,6 @@ class GeneralSettingsPage:
         self.interpolationMultiplierSpinBox.setObjectName(u"interpolationMultiplierSpinBox")
         sizePolicy5.setHeightForWidth(self.interpolationMultiplierSpinBox.sizePolicy().hasHeightForWidth())
         self.interpolationMultiplierSpinBox.setSizePolicy(sizePolicy5)
-        self.interpolationMultiplierSpinBox.setMinimumSize(QSize(75, 30))
-        self.interpolationMultiplierSpinBox.setMaximumSize(QSize(75, 30))
         # No `setButtonSymbols`: the toolkit's gutter is not symbol-mode driven (it draws ▲/▼ whenever it is on), and
         # `UpDownArrows` is the only mode the Designer ever asks for, so there is nothing left to state.
         self.interpolationMultiplierSpinBox.setDecimals(0)
@@ -380,7 +437,6 @@ class GeneralSettingsPage:
         sizePolicy8.setHeightForWidth(self.decompressModelComboBox.sizePolicy().hasHeightForWidth())
         self.decompressModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.decompressModelComboBox.setMinimumSize(QSize(0, 0))
-        self.decompressModelComboBox.setMaximumHeight(30)   # width follows the content, not the Designer's column
         self.horizontalLayout_66.addWidget(self.decompressModelComboBox)
         self.verticalLayout_32.addWidget(self.decompressContainer)
         self.denoiseCheckBoxContainer = QWidget(self.scrollAreaWidgetContents_4)
@@ -418,7 +474,6 @@ class GeneralSettingsPage:
         sizePolicy8.setHeightForWidth(self.denoiseModelComboBox.sizePolicy().hasHeightForWidth())
         self.denoiseModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.denoiseModelComboBox.setMinimumSize(QSize(0, 0))
-        self.denoiseModelComboBox.setMaximumHeight(30)   # width follows the content, not the Designer's column
         self.horizontalLayout_63.addWidget(self.denoiseModelComboBox)
         self.horizontalLayout_64.addWidget(self.widget_44)
         self.verticalLayout_32.addWidget(self.denoiseContainer)
@@ -447,7 +502,6 @@ class GeneralSettingsPage:
         self.widget_43.setObjectName(u"widget_43")
         self.horizontalLayout_60 = QHBoxLayout(self.widget_43)
         self.horizontalLayout_60.setObjectName(u"horizontalLayout_60")
-        self.horizontalLayout_60.setContentsMargins(9, 9, 9, 9)
         self.label_79 = Text(parent=self.widget_43)
         self.label_79.setObjectName(u"label_79")
         apply(self.label_79, BODY_PT)
@@ -459,7 +513,6 @@ class GeneralSettingsPage:
         sizePolicy8.setHeightForWidth(self.deblurModelComboBox.sizePolicy().hasHeightForWidth())
         self.deblurModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.deblurModelComboBox.setMinimumSize(QSize(0, 0))
-        self.deblurModelComboBox.setMaximumHeight(30)   # width follows the content, not the Designer's column
         self.horizontalLayout_60.addWidget(self.deblurModelComboBox)
         self.verticalLayout_41.addWidget(self.widget_43)
         self.verticalLayout_32.addWidget(self.deblurContainer)
@@ -487,9 +540,7 @@ class GeneralSettingsPage:
         self.generalUpscaleContainer = QWidget(self.scrollAreaWidgetContents_4)
         self.generalUpscaleContainer.setObjectName(u"generalUpscaleContainer")
         self.verticalLayout_39 = QVBoxLayout(self.generalUpscaleContainer)
-        self.verticalLayout_39.setSpacing(6)
         self.verticalLayout_39.setObjectName(u"verticalLayout_39")
-        self.verticalLayout_39.setContentsMargins(9, 9, 9, 9)
         self.widget = QWidget(self.generalUpscaleContainer)
         self.widget.setObjectName(u"widget")
         self.horizontalLayout = QHBoxLayout(self.widget)
@@ -506,13 +557,11 @@ class GeneralSettingsPage:
         sizePolicy8.setHeightForWidth(self.upscaleModelComboBox.sizePolicy().hasHeightForWidth())
         self.upscaleModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.upscaleModelComboBox.setMinimumSize(QSize(0, 0))
-        self.upscaleModelComboBox.setMaximumHeight(30)   # width follows the content, not the Designer's column
         self.horizontalLayout.addWidget(self.upscaleModelComboBox)
         self.verticalLayout_39.addWidget(self.widget)
         self.widget_42 = QWidget(self.generalUpscaleContainer)
         self.widget_42.setObjectName(u"widget_42")
         self.horizontalLayout_50 = QHBoxLayout(self.widget_42)
-        self.horizontalLayout_50.setSpacing(6)
         self.horizontalLayout_50.setObjectName(u"horizontalLayout_50")
         self.horizontalLayout_50.setContentsMargins(0, 0, 0, 0)
         self.label_72 = Text(parent=self.widget_42)
@@ -528,8 +577,6 @@ class GeneralSettingsPage:
         self.upscaleScaleSpinBox.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Upscale Scale:</span></p><p><span style=\" font-weight:700;\">   - </span>Custom output scale no matter the model. Will run AI on video frame once, and scale the image to match the multiplier. Useful for 4x models.</p></body></html>", None))
         sizePolicy5.setHeightForWidth(self.upscaleScaleSpinBox.sizePolicy().hasHeightForWidth())
         self.upscaleScaleSpinBox.setSizePolicy(sizePolicy5)
-        self.upscaleScaleSpinBox.setMinimumSize(QSize(75, 30))
-        self.upscaleScaleSpinBox.setMaximumSize(QSize(75, 30))
         # No `setButtonSymbols`: the gutter is not symbol-mode driven (see the interpolation multiplier above).
         self.upscaleScaleSpinBox.setDecimals(0)
         # Qt's two range statements are the one call the toolkit field answers (`setRange`).
@@ -585,15 +632,15 @@ class GeneralSettingsPage:
         self.addToRenderQueueButton.setObjectName(u"addToRenderQueueButton")
         sizePolicy5.setHeightForWidth(self.addToRenderQueueButton.sizePolicy().hasHeightForWidth())
         self.addToRenderQueueButton.setSizePolicy(sizePolicy5)
-        self.addToRenderQueueButton.setMaximumSize(QSize(200, 35))
         # The Designer pinned 200x35; the toolkit's hint at RVE's 12 px control font is 187x33 (text + 10/10 padding +
-        # 5/5), so the row handed it 2-5 px less. The Designer's numbers are the row's height here, not a preference.
+        # 5/5), so the row handed it 2-5 px less. The design size is the constructor's `size=(200, 35)` now: the toolkit
+        # re-resolves it on `scale_changed` (a page `setMaximumSize(200, 35)` would have capped the scaled button at the
+        # 1.0 number and clipped it at 1.5).
 
         # No stylesheet: a toolkit button paints itself; the deleted rule only repeated its own alignment.
         icon2 = QIcon()
         icon2.addFile(u":/icons/icons/plus-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.addToRenderQueueButton.setIcon(icon2)
-        self.addToRenderQueueButton.setIconSize(QSize(32, 32))
         self.horizontalLayout_40.addWidget(self.addToRenderQueueButton)
         self.verticalLayout_32.addWidget(self.widget_25)
         self.widget_26 = QWidget(self.scrollAreaWidgetContents_4)
@@ -627,24 +674,6 @@ class GeneralSettingsPage:
         self.inputVideoInfoTextEdit.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         self.inputVideoInfoTextEdit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.inputVideoInfoTextEdit.setReadOnly(True)
-        self.inputVideoInfoTextEdit.setHtml(u"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:'Adwaita Sans'; font-size:11pt; font-weight:400; font-style:normal;\">\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">FPS:</span></p>\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Resolution:</span></p>\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent"
-                        ":0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Frame Count:</span></p>\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Encoder:</span></p>\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Container:</span></p>\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Color Space:</span></p>\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Pixel Format:</span></p>\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; t"
-                        "ext-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Is HDR:</span></p>\n"
-"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:'Sans Serif'; font-size:10pt;\">Bit Depth:</span></p></body></html>")
         self.horizontalLayout_22.addWidget(self.inputVideoInfoTextEdit)
         self.verticalLayout_32.addWidget(self.widget_26)
         # The list is a column of fixed rows; the layout's leftover height is NOT theirs to share. Without a spacer the
@@ -704,7 +733,53 @@ class GeneralSettingsPage:
         # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
         i18n.bind_page(self, self.generalSettings)
         self.retranslate()
+        # Every design number in this page is stated once in `_apply_scale`: the first run is construction, and the
+        # follower re-runs it on a live factor change. After `retranslate` so the labels are final.
+        self._scale = UiScaleFollower(self.generalSettings, self._apply_scale)
         return self.generalSettings
+
+    def _apply_scale(self) -> None:
+        """Resolve this page's design numbers at the factor in force now.
+
+        The rows, the value fields, the separator and the design gaps are the Designer's numbers in DESIGN px; each is
+        resolved through `scaled_px()` HERE (at construction and on every `UiScale.scale_changed`), never at import,
+        where it would freeze the factor the page happened to be built with. 1.0 resolves to the same numbers the page
+        stated before this wave, so the look does not move when the feature is off.
+        """
+        row = scaled_px(ROW_HEIGHT_PX)
+        field_width = scaled_px(FIELD_WIDTH_PX)
+        gap = scaled_px(PAGE_GAP_PX)
+        inset = scaled_px(SECTION_INSET_PX)
+        section_gap = scaled_px(SECTION_GAP_PX)
+
+        for button in (self.inputFileSelectButton, self.batchSelectButton,
+                       self.outputFileSelectButton, self.openOutputFolderButton):
+            button.setMinimumSize(QSize(0, row))
+            button.setMaximumSize(QSize(16777215, row))
+        for edit, max_width in ((self.inputFileText, INPUT_PATH_MAX_WIDTH_PX),
+                                (self.outputFileText, OUTPUT_PATH_MAX_WIDTH_PX)):
+            edit.setMinimumSize(QSize(0, row))
+            edit.setMaximumSize(QSize(scaled_px(max_width), row))
+        for combo in (self.backendComboBox, self.interpolateModelComboBox, self.decompressModelComboBox,
+                      self.denoiseModelComboBox, self.deblurModelComboBox, self.upscaleModelComboBox):
+            combo.setMaximumHeight(row)   # width follows the content, not the Designer's column
+        for spin in (self.interpolationMultiplierSpinBox, self.upscaleScaleSpinBox):
+            spin.setMinimumSize(QSize(field_width, row))
+            spin.setMaximumSize(QSize(field_width, row))
+
+        self.line.setFixedHeight(scaled_px(SEPARATOR_HEIGHT))
+        icon = scaled_px(ACTION_ICON_PX)
+        self.addToRenderQueueButton.setIconSize(QSize(icon, icon))
+
+        self.verticalLayout_32.setSpacing(gap)
+        self.verticalLayout_32.setContentsMargins(gap, gap, gap, gap)
+        self.verticalLayout_38.setContentsMargins(inset, inset, inset, inset)
+        self.horizontalLayout_60.setContentsMargins(inset, inset, inset, inset)
+        self.verticalLayout_39.setSpacing(section_gap)
+        self.verticalLayout_39.setContentsMargins(inset, inset, inset, inset)
+        self.horizontalLayout_50.setSpacing(section_gap)
+
+        self.inputVideoInfoTextEdit.setHtml(_info_html(UiScale.get_instance().factor()))
 
     def retranslate(self, language: str | None = None) -> None:
         self.inputFileSelectButton.setText(QCoreApplication.translate("MainWindow", u"Select Input File", None))
