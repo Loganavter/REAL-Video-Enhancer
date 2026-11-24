@@ -1,0 +1,138 @@
+BACKEND: Getting Input Video Properties
+=======================================================================
+RVE Backend Version: 2.4.1-dev16
+=======================================================================
+CLI Arguments: 
+['/home/jorj/Загрузки/projects/REAL-Video-Enhancer/backend/rve-backend.py', '--ffmpeg_path', '/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '--backend', 'tensorrt', '--upscale_model', '/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth', '--input', 'scan2/w960.mkv', '--output', 'nv_off.mp4', '--video_encoder_preset', 'x265_nvenc', '--crf', '18', '--overwrite']
+=======================================================================
+BACKEND: No Working Directory specified, using current directory: /home/jorj/rve-scratch
+BACKEND: Getting Input Video Properties
+BACKEND: 8-bit pipe: packing yuv420p on the GPU - 1.5 bytes/px instead of rgb24's 3, and no ffmpeg scale filter (RVE_YUV8=0 reverts)
+BACKEND: Using backend: tensorrt
+BACKEND: Setting up Upscale
+BACKEND: Handling device: auto, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: auto
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: head convolution body.0: 3 input channels -> 8 (zeros, padded inside the head so the model's own residual keeps its 3 channels), so the engine can fuse it with its PReLU
+Loading TensorRT engine from /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth_fp16_NVIDIA GeForce RTX 4060 Ti_trt-10.12.0.36_torch_tensorrt-2.9.0+cu130_opt-5_tiling-full_headpad5_1920x1080.engine_2.4.1-dev16.engine.
+[vost#0:0/rawvideo @ 0x5603ae0f2200] Error submitting a packet to the muxer: Broken pipe
+    Last message repeated 1 times
+[out#0/rawvideo @ 0x5603ae0ae580] Error muxing a packet
+[out#0/rawvideo @ 0x5603ae0ae580] Task finished with error code: -32 (Broken pipe)
+[out#0/rawvideo @ 0x5603ae0ae580] Terminating thread with return code -32 (Broken pipe)
+[out#0/rawvideo @ 0x5603ae0ae580] Error writing trailer: Broken pipe
+[out#0/rawvideo @ 0x5603ae0ae580] Error closing file: Broken pipe
+BACKEND: int8 probe: calibration only, 16 frames (certification withdrawn 2026-11-19: its pair set moved with the configuration, so its percentages are not comparable across runs)
+BACKEND: int8 calibration frames handed to the body: 24 (forced verdict: fp16)
+BACKEND: int8 fit FORCED to fp16; the probe calibrated only
+BACKEND: DEBUG after assign: option=140144538715104 int8Fit=fp16
+BACKEND: Using Upscaling Model: /home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/custom_models/2x-Futsuu-Anime(1).pth
+BACKEND: head convolution body.0: 3 input channels -> 8 (zeros, padded inside the head so the model's own residual keeps its 3 channels), so the engine can fuse it with its PReLU
+BACKEND: TensorRT engine already loaded in this process: 2x-Futsuu-Anime(1).pth_fp16_NVIDIA GeForce RTX 4060 Ti_trt-10.12.0.36_torch_tensorrt-2.9.0+cu130_opt-5_tiling-full_headpad5_1920x1080.engine_2.4.1-dev16.engine
+BACKEND: DEBUG after hotReload: option=140144538715104 int8Fit=fp16
+BACKEND: Upscale Times: 2
+BACKEND: Interpolate Factor: 1.0
+BACKEND: Total Output Frames: 202
+BACKEND: Model Scale: 2
+BACKEND: HDR Mode: False
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', 'scan2/w960.mkv', '-vf', 'crop=1920:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1920x1080', '-']
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', 'scan2/w960.mkv', '-vf', 'crop=1920:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1920x1080', '-']
+BACKEND: FFMPEG READ COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-i', 'scan2/w960.mkv', '-vf', 'crop=1920:1080:0:0,scale=w=iw*sar:h=ih:in_range=tv:out_range=tv', '-f', 'image2pipe', '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-s', '1920x1080', '-']
+BACKEND: 
+FFMPEG WRITE COMMAND: ['/home/jorj/Загрузки/REAL-2/REAL-Video-Enhancer-RVE-2.4.2/bin/ffmpeg', '-loglevel', 'error', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-framerate', '23.976023976023978', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-colorspace', 'bt709', '-color_range', 'tv', '-vcodec', 'rawvideo', '-s', '3840x2160', '-i', '-', '-r', '23.976023976023978', '-fflags', '+genpts', '-i', 'scan2/w960.mkv', '-map', '0:v', '-map', '1:a?', '-map', '1:s?', '-avoid_negative_ts', 'make_zero', '-max_interleave_delta', '0', '-muxpreload', '0', '-muxdelay', '0', '-c:v', 'hevc_nvenc', '-preset', 'p1', '-cq:v', '18', '-c:a', 'copy', '-c:s', 'copy', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'nv_off.mp4', '-y']
+
+BACKEND: Rendering
+Duration: 8.425083333333333 seconds
+Total Frames: 202
+Resolution: 1920x1080
+FPS: 23.976023976023978
+Color Space: None
+Color Transfer: None
+Color Primaries: None
+Pixel Format: yuv420p
+Video Codec: h264
+Video Bitrate: 35329 kbps
+Is HDR: False
+Bit Depth: 8
+BACKEND: Initializing stream for device cuda (GPU ID: 0)
+BACKEND: Handling device: cuda, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling device: auto, GPU ID: 0
+Using Device: NVIDIA GeForce RTX 4060 Ti
+BACKEND: Handling precision: auto
+int8: start (tilesize=0, tile_upscaler=False, int8Fit=fp16)
+int8: verdict is not int8, fp16 engine runs
+host timeline: upload 3.28  upload_sync 0.01  model-call 45.11  frame-ctor 0.02  final-sync 43.73  | total 92.14 ms | last_inference_ms 88.85 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+BACKEND: startup: first frame enqueued 5.33 s after process start (interpreter, engine, ffmpeg/NVENC init)
+host timeline: upload 4.00  upload_sync 0.01  model-call 1.40  frame-ctor 0.02  final-sync 45.75  | total 51.17 ms | last_inference_ms 47.16 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+host timeline: upload 2.59  upload_sync 0.01  model-call 0.78  frame-ctor 0.01  final-sync 45.00  | total 48.39 ms | last_inference_ms 45.79 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+
+
+Initialized Frame PyTorch utils
+FPS: 10 Current Frame: 5 ETA: 0:00:19host timeline: upload 2.49  upload_sync 0.01  model-call 0.53  frame-ctor 0.02  final-sync 44.62  | total 47.67 ms | last_inference_ms 45.17 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 51.78 ms/frame (last 8); alloc_retries 0
+host timeline: upload 2.28  upload_sync 0.01  model-call 0.45  frame-ctor 0.01  final-sync 44.78  | total 47.53 ms | last_inference_ms 45.24 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.68 ms/frame (last 8); alloc_retries 0
+                                     FPS: 15 Current Frame: 15 ETA: 0:00:12host timeline: upload 2.30  upload_sync 0.01  model-call 0.42  frame-ctor 0.01  final-sync 44.34  | total 47.08 ms | last_inference_ms 44.78 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.72 ms/frame (last 8); alloc_retries 0
+                                      FPS: 17 Current Frame: 25 ETA: 0:00:10host timeline: upload 1.86  upload_sync 0.01  model-call 0.56  frame-ctor 0.01  final-sync 45.36  | total 47.79 ms | last_inference_ms 45.93 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.67 ms/frame (last 8); alloc_retries 0
+                                      FPS: 17 Current Frame: 35 ETA: 0:00:09host timeline: upload 2.57  upload_sync 0.01  model-call 0.35  frame-ctor 0.01  final-sync 45.50  | total 48.44 ms | last_inference_ms 45.85 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.76 ms/frame (last 8); alloc_retries 0
+                                      FPS: 18 Current Frame: 44 ETA: 0:00:08host timeline: upload 1.91  upload_sync 0.73  model-call 0.48  frame-ctor 0.01  final-sync 45.59  | total 48.72 ms | last_inference_ms 46.08 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.65 ms/frame (last 8); alloc_retries 0
+                                      FPS: 18 Current Frame: 54 ETA: 0:00:08host timeline: upload 2.47  upload_sync 0.01  model-call 0.43  frame-ctor 0.01  final-sync 45.20  | total 48.11 ms | last_inference_ms 45.63 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.82 ms/frame (last 8); alloc_retries 0
+host timeline: upload 1.85  upload_sync 0.01  model-call 0.76  frame-ctor 0.02  final-sync 45.60  | total 48.24 ms | last_inference_ms 46.37 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.71 ms/frame (last 8); alloc_retries 0
+                                      FPS: 18 Current Frame: 64 ETA: 0:00:07host timeline: upload 2.44  upload_sync 0.01  model-call 0.36  frame-ctor 0.01  final-sync 47.11  | total 49.92 ms | last_inference_ms 47.47 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 46.13 ms/frame (last 8); alloc_retries 0
+                                      FPS: 18 Current Frame: 73 ETA: 0:00:07host timeline: upload 2.59  upload_sync 0.01  model-call 0.36  frame-ctor 0.01  final-sync 45.02  | total 47.99 ms | last_inference_ms 45.39 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.63 ms/frame (last 8); alloc_retries 0
+                                      FPS: 18 Current Frame: 83 ETA: 0:00:06host timeline: upload 2.58  upload_sync 0.01  model-call 0.42  frame-ctor 0.01  final-sync 45.55  | total 48.56 ms | last_inference_ms 45.97 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.95 ms/frame (last 8); alloc_retries 0
+                                      FPS: 18 Current Frame: 92 ETA: 0:00:05host timeline: upload 2.44  upload_sync 0.01  model-call 0.35  frame-ctor 0.01  final-sync 45.07  | total 47.87 ms | last_inference_ms 45.43 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 46.11 ms/frame (last 8); alloc_retries 0
+                                      FPS: 19 Current Frame: 102 ETA: 0:00:05host timeline: upload 2.42  upload_sync 0.01  model-call 0.35  frame-ctor 0.01  final-sync 45.57  | total 48.35 ms | last_inference_ms 45.92 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.64 ms/frame (last 8); alloc_retries 0
+host timeline: upload 2.68  upload_sync 0.01  model-call 0.39  frame-ctor 0.01  final-sync 45.05  | total 48.15 ms | last_inference_ms 45.46 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.84 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 112 ETA: 0:00:04host timeline: upload 2.64  upload_sync 0.01  model-call 0.37  frame-ctor 0.01  final-sync 45.76  | total 48.78 ms | last_inference_ms 46.13 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 46.03 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 121 ETA: 0:00:04host timeline: upload 2.56  upload_sync 0.01  model-call 0.45  frame-ctor 0.01  final-sync 44.65  | total 47.68 ms | last_inference_ms 45.11 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.98 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 131 ETA: 0:00:03host timeline: upload 2.65  upload_sync 0.01  model-call 0.38  frame-ctor 0.01  final-sync 45.72  | total 48.76 ms | last_inference_ms 46.10 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.86 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 141 ETA: 0:00:03host timeline: upload 2.44  upload_sync 0.03  model-call 0.36  frame-ctor 0.01  final-sync 45.38  | total 48.23 ms | last_inference_ms 45.76 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.85 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 150 ETA: 0:00:02host timeline: upload 2.32  upload_sync 0.01  model-call 0.41  frame-ctor 0.01  final-sync 45.48  | total 48.21 ms | last_inference_ms 45.89 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.97 ms/frame (last 8); alloc_retries 0
+host timeline: upload 2.25  upload_sync 0.01  model-call 0.48  frame-ctor 0.01  final-sync 45.46  | total 48.21 ms | last_inference_ms 45.95 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.83 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 160 ETA: 0:00:02host timeline: upload 2.08  upload_sync 0.01  model-call 0.37  frame-ctor 0.01  final-sync 47.12  | total 49.59 ms | last_inference_ms 47.50 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 46.09 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 170 ETA: 0:00:01host timeline: upload 1.79  upload_sync 0.01  model-call 0.36  frame-ctor 0.01  final-sync 45.75  | total 47.92 ms | last_inference_ms 46.12 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.66 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 180 ETA: 0:00:01host timeline: upload 1.78  upload_sync 0.01  model-call 0.38  frame-ctor 0.01  final-sync 45.20  | total 47.38 ms | last_inference_ms 45.59 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 46.06 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 189 ETA: 0:00:00host timeline: upload 1.77  upload_sync 0.01  model-call 0.29  frame-ctor 0.01  final-sync 45.95  | total 48.03 ms | last_inference_ms 46.25 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.89 ms/frame (last 8); alloc_retries 0
+host timeline: upload 1.76  upload_sync 0.01  model-call 0.31  frame-ctor 0.01  final-sync 44.81  | total 46.89 ms | last_inference_ms 45.12 | out dtype torch.float16 shape (1, 3, 2160, 3840) contig True stride (24883200, 8294400, 3840, 1)
+fp16 engine GPU: 45.98 ms/frame (last 8); alloc_retries 0
+                                       FPS: 19 Current Frame: 199 ETA: 0:00:00BACKEND: render loop: 10.34 s for 201 frames (51.45 ms/frame), total 15.67 s since process start
+BACKEND: profile over 201 frames: gate 0.00 ms (input to tensor 0.00), model wall 48.58 ms (self-reported 46.21, engine 0.71, frame handover 0.01), input convert 0.00 ms, preview 0.00 ms, pack+queue 3.33 ms, read wait 0.45 ms, named 52.37 of frame total 51.93 ms, unaccounted -0.45 ms
+BACKEND: 
+Time to complete render: 10.64
+BACKEND: writer: 201 frames, write 5.71 ms/frame (max 164.8), wait for frames 46.68 ms/frame, 2501 MB total, busy 1.15 s of 10.64 s, queue max 3

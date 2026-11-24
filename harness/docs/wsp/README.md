@@ -34,6 +34,22 @@ New work touches three files, and the index is built from them:
 | the conclusion, and its lifetime | `harness/docs/wsp/verdicts.yaml` | `id, lane, status, scope, date, statement, evidence, superseded_by` |
 | the prose of a lane | `harness/docs/wsp/history/YYYY-MM-DD-<lane>.md` | free form, linked from the verdict |
 
+### Where an artifact lives (the rule this layer learned the hard way)
+
+A record cites its artifact by a **repo-relative path under `harness/docs/wsp/verified/artifacts/`**, and the digest in
+`artifact_sha256` must verify against those bytes. Never an absolute path outside the repository: a record that points at
+`~/some-scratch/` stops being evidence the moment that directory is cleaned, and the owner is right that nobody can be
+asked to hand over 20 GB of renders to check a number.
+
+- **the numbers are the record**, and they are checked; the artifact is the material that lets someone re-read them;
+- an artifact that cannot travel with the repository is **not an artifact**: either it is small enough to commit
+  (kibibytes, as the 30 records whose JSON/logs live in `verified/artifacts/` do), or the record names the **run** that
+  reproduces it instead, or it carries no artifact and says so (`artifact_note`) - see the 2026-11-24 cleanup of the
+  21 GB `~/rve-scratch` tree, which left 45 records pointing at committed files and 9 stating that their renders/logs
+  were not retained;
+- large media (renders, clips, videos) is never cited: cite the frame population and the instrument, and name the
+  command that regenerates the file if it matters.
+
 Then:
 
 ```
