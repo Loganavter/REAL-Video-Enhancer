@@ -174,8 +174,61 @@ class FileHandler:
 
         return videos_folder
 
-def log(message: str):
-    
+class _FallbackLogPolicy:
+    """The gate the app uses when the backend's policy module is not next to it.
+
+    Kept tiny on purpose: only the level decision matters on the app side, and a missing
+    backend directory must never make logging raise.
+    """
+
+    DEBUG_ENV = "RVE_LOG_DEBUG"
+    LEVEL_DEBUG = "debug"
+    LEVEL_INFO = "info"
+
+    @staticmethod
+    def debug_enabled() -> bool:
+        return os.environ.get("RVE_LOG_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @classmethod
+    def level_enabled(cls, level: str) -> bool:
+        return str(level or cls.LEVEL_INFO).strip().lower() != cls.LEVEL_DEBUG or cls.debug_enabled()
+
+
+_LOG_POLICY = None
+
+
+def log_policy():
+    """The shared policy module, loaded from the backend this app launches.
+
+    The app and the backend run as separate processes from one tree, so the policy is one
+    file (``backend/src/utils/LogPolicy.py``) loaded by path rather than a second copy that
+    can drift. A tree without that file falls back to the same ``RVE_LOG_DEBUG`` rule.
+    """
+    global _LOG_POLICY
+    if _LOG_POLICY is not None:
+        return _LOG_POLICY
+    import importlib.util
+
+    path = os.path.join(CWD, "backend", "src", "utils", "LogPolicy.py")
+    try:
+        spec = importlib.util.spec_from_file_location("rve_log_policy", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _LOG_POLICY = module
+    except Exception:
+        _LOG_POLICY = _FallbackLogPolicy
+    return _LOG_POLICY
+
+
+def log(message: str, level: str = "info"):
+    """Write one app line to ``log.txt``, gated by the shared log policy.
+
+    ``info`` (the default) is kept; ``level="debug"`` is per-frame / per-call detail and is
+    written only when ``RVE_LOG_DEBUG=1``. The file is the app's own record, so the gate is
+    the only change - a debug line that is enabled is written exactly as before.
+    """
+    if not log_policy().level_enabled(level):
+        return
     try:
         with open(os.path.join(CWD, "log.txt"), "a") as f:
             f.write(message + "\n")

@@ -178,8 +178,7 @@ class TorchTensorRTHandler:
                 build_plan(onnx_path, engine_path + ".plan", fp16=(dtype == torch.float16),
                            tiling=tiling_optimization_level,
                            optimization_level=self.optimization_level)
-                print(f"TensorRT engine built in {time.time() - start_time:.2f} seconds "
-                      f"(raw builder).", file=sys.stderr)
+                log(f"TensorRT engine built in {time.time() - start_time:.2f} seconds (raw builder).")
                 TorchUtils.clear_cache()
                 return RawTRTEngine(engine_path + ".plan")
             except Exception as error:
@@ -191,10 +190,7 @@ class TorchTensorRTHandler:
             log("raw TensorRT path exports one static shape; this engine asked for dynamic "
                 "(tensorrt_dynamic_shapes), so torch_tensorrt builds it")
         """Builds a TensorRT engine from the provided model."""
-        print(
-            f"Building TensorRT engine {os.path.basename(trt_engine_name)}. This may take a while...",
-            file=sys.stderr,
-        )
+        log(f"Building TensorRT engine {os.path.basename(trt_engine_name)}. This may take a while...")
         
         with suppress_stdout_stderr():
             exported_program = nnmodule_to_dynamo(model, example_inputs, dynamic_shapes=dynamic_shapes)
@@ -247,10 +243,7 @@ class TorchTensorRTHandler:
         engines = getattr(model_trt, "_trt_engines", None)
         if engines is not None:
             log(f"TensorRT partitioning: {len(engines)} sub-engine(s)")
-        print(
-            f"TensorRT engine built in {time.time() - start_time:.2f} seconds.",
-            file=sys.stderr,
-        )
+        log(f"TensorRT engine built in {time.time() - start_time:.2f} seconds.")
         TorchUtils.clear_cache()
         return model_trt
 
@@ -289,10 +282,17 @@ class TorchTensorRTHandler:
             return _cached
         if self.raw_trt_enabled() and os.path.exists(trt_engine_path + ".plan"):
             from .RawTRTEngine import RawTRTEngine
-            print(f"Loading raw TensorRT plan from {trt_engine_path}.plan.", file=sys.stderr)
-            return RawTRTEngine(trt_engine_path + ".plan")
-        print(f"Loading TensorRT engine from {trt_engine_path}.", file=sys.stderr)
+            _t_load = time.time()
+            log(f"Loading raw TensorRT plan from {trt_engine_path}.plan.")
+            engine = RawTRTEngine(trt_engine_path + ".plan")
+            log(f"TensorRT engine loaded in {time.time() - _t_load:.2f} seconds "
+                f"({os.path.basename(trt_engine_path)}.plan, raw).")
+            return engine
+        _t_load = time.time()
+        log(f"Loading TensorRT engine from {trt_engine_path}.")
         loaded = torch.jit.load(trt_engine_path).eval()
+        log(f"TensorRT engine loaded in {time.time() - _t_load:.2f} seconds "
+            f"({os.path.basename(trt_engine_path)}).")
         TorchTensorRTHandler._engine_cache[trt_engine_path] = loaded
         engines = getattr(loaded, "_trt_engines", None)
         if engines is not None:

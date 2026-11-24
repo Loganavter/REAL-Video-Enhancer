@@ -22,7 +22,8 @@ from .FFmpegBuffers import FFmpegRead, FFmpegWrite, MPVOutput
 from .FFmpeg import InformationWriteOut
 from .utils.Encoders import EncoderSettings
 from .utils.SceneDetect import SceneDetect
-from .utils.Util import log, resize_frame_bytes, guard_render_thread
+from .utils.Util import log, resize_frame_bytes, guard_render_thread, process_uptime
+from .utils.LogPolicy import JobPhases, ProgressLimiter, LEVEL_DEBUG
 from .utils.BorderDetect import BorderDetect, cache_location
 from .utils.VideoInfo import OpenCVInfo
 import numpy as np
@@ -202,6 +203,11 @@ class Render:
         report_path: str | None = None,
         quality_preset: str = "best",
     ):
+        # Phase bookkeeping for this JOB: once-per-job lines and the progress window are per
+        # instance, so a second render never inherits the first one's marks or its last tick.
+        self._phases = JobPhases()
+        self._progress = ProgressLimiter()
+        _t_init = _perf_counter()
         self.inputFile = inputFile
         self.backend = backend
         self.upscaleModel = upscaleModel
@@ -273,8 +279,8 @@ class Render:
         else:
             cwd = os.getcwd()
             log("No Working Directory specified, using current directory: " + cwd)
+        _t_probe = _perf_counter()
         videoInfo = OpenCVInfo(input_file=inputFile, start_time=start_time, end_time=end_time, ffmpeg_path=ffmpeg_path)
-        
         if not videoInfo.is_valid_video:
             log("Input video is not valid!")
         
@@ -294,6 +300,8 @@ class Render:
             self.totalInputFrames * self.ceilInterpolateFactor
         )
         self.fps = videoInfo.get_fps()
+        log(f"phase: video probe {(_perf_counter() - _t_probe) * 1000.0:.0f} ms "
+            f"({self.width}x{self.height}, {self.totalInputFrames} frames, {self.fps:.3f} fps)")
         color_space = videoInfo.get_color_space()
         # The pipe packer's luma matrix follows the SOURCE's colour space, not the bit depth: "HDR mode" here is also
         # the 10-bit switch, and a 10-bit bt709 clip packed with bt2020 coefficients measured mean |d| 3.72 against the
@@ -371,8 +379,11 @@ class Render:
         log("Using backend: " + self.backend)
         # upscale has to be called first to get the scale of the upscale model
         if upscaleModel:
+            _t_model = _perf_counter()
             self.setupUpscale()
             self.upscaleOption.hotUnload()  # unload model to free up memory for trt enging building
+            log(f"phase: model load upscale '{os.path.basename(str(self.upscaleModel))}' "
+                f"{(_perf_counter() - _t_model) * 1000.0:.0f} ms")
             log("Using Upscaling Model: " + self.upscaleModel)
         else:
             self.upscaleTimes = 1  # if no upscaling, it will default to 1
@@ -382,20 +393,27 @@ class Render:
         
         if extraRestorationModels:
             for model in extraRestorationModels:
+                _t_model = _perf_counter()
                 extraRestoration = self.setupExtraRestoration(model)
                 if extraRestoration:
                     log("Using Extra Restoration Model: " + model)
                     self.extraRestorationModels.append(extraRestoration)
                     extraRestoration.hotUnload()  # unload model to free up memory for trt enging building
+                    log(f"phase: model load restoration '{os.path.basename(str(model))}' "
+                        f"{(_perf_counter() - _t_model) * 1000.0:.0f} ms")
         
 
         if interpolateModel:
+            _t_model = _perf_counter()
             self.setupInterpolate()
+            log(f"phase: model load interpolation '{os.path.basename(str(self.interpolateModel))}' "
+                f"{(_perf_counter() - _t_model) * 1000.0:.0f} ms")
             log("Using Interpolation Model: " + self.interpolateModel)
 
         if upscaleModel: # load model after interpolation model is loaded, this saves on vram if the user builds 2 separate engines
             self.upscaleOption.hotReload()
-            log(f"DEBUG after hotReload: option={id(self.upscaleOption)} int8Fit={getattr(self.upscaleOption,'int8Fit','<unset>')}")
+            log(f"debug: after hotReload option={id(self.upscaleOption)} int8Fit={getattr(self.upscaleOption,'int8Fit','<unset>')}",
+                level=LEVEL_DEBUG)
 
         for extraRestoration in self.extraRestorationModels:
             extraRestoration.hotReload()
@@ -411,6 +429,7 @@ class Render:
         log("Model Scale: " + str(self.modelScale))
         log("HDR Mode: " + str(hdr_mode))
 
+        _t_reader = _perf_counter()
         self.readBuffer = FFmpegRead(  # input width
             inputFile=inputFile,
             width=self.width,
@@ -432,10 +451,12 @@ class Render:
             input_pixel_format=input_pix_fmt,
             ffmpeg_path=ffmpeg_path,
         )
+        log(f"phase: reader open {(_perf_counter() - _t_reader) * 1000.0:.0f} ms")
 
         from .FFmpegBuffers import resolve_output_pixel_format
         pixelFormat = resolve_output_pixel_format(
             pixelFormat, self.high_bitdepth, bool(self.interpolateModel))
+        _t_writer = _perf_counter()
         self.writeBuffer = FFmpegWrite(
             inputFile=inputFile,
             outputFile=outputFile,
@@ -470,6 +491,7 @@ class Render:
             ffmpeg_log_file=os.path.join(cwd, "ffmpeg_log.txt"),
             preview=preview_render,
         )
+        log(f"phase: writer/encoder init {(_perf_counter() - _t_writer) * 1000.0:.0f} ms")
 
         self.informationHandler = InformationWriteOut(
             paused_shared_memory_id=pause_shared_memory_id,
@@ -650,6 +672,9 @@ class Render:
         self.ffmpegReadThread.start()
         self.ffmpegWriteThread.start()
         self.renderThread.start()
+        log(f"phase: backend init {(_perf_counter() - _t_init) * 1000.0:.0f} ms "
+            f"(backend {self.backend}, device {self.device}, precision {self.precision}); "
+            f"{process_uptime():.2f} s since process start")
 
         if output_to_mpv:
             MPVOut = MPVOutput(self.writeBuffer, width=self.width*self.upscaleTimes, height=self.height*self.upscaleTimes,fps=self.fps*self.interpolateFactor, outputFrameChunkSize=self.outputFrameChunkSize)
@@ -1399,12 +1424,16 @@ class Render:
                 frames_rendered += int(self.ceilInterpolateFactor)
                 if not hasattr(self, "_t_first_frame"):
                     self._t_first_frame = _time.time()
-                    log(f"startup: first frame enqueued {self._t_first_frame - _T0:.2f} s "
-                        f"after process start (interpreter, engine, ffmpeg/NVENC init)")
+                    if self._phases.first("first-frame"):
+                        log(f"startup: first frame enqueued {self._t_first_frame - _T0:.2f} s "
+                            f"after process start (interpreter, engine, ffmpeg/NVENC init)")
                 if (self.temporalReuse is not None and hasattr(self, "_profile")
                         and self._profile["frames"] % 250 == 0):
-                    # visible during the render, not only in the summary: a cancelled encode used to say nothing
-                    log("reuse: " + self.temporalReuse.progress())
+                    # visible during the render, not only in the summary: a cancelled encode used to say nothing.
+                    # Bounded to one line per second of wall clock - the old every-250-frames cadence printed
+                    # ~4 lines/s on a fast clip and nothing for a minute on a slow one.
+                    if self._progress.allow():
+                        log("reuse: " + self.temporalReuse.progress())
                 if hasattr(self, "_profile"):
                     self._profile["frames"] += 1
                     self._profile["frame"] += (_perf_counter() - _t_frame) * 1000.0
@@ -1428,7 +1457,7 @@ class Render:
             else:
                 sleep(1)
         first = getattr(self, "_t_first_frame", None)
-        if first is not None:
+        if first is not None and self._phases.first("render-loop"):
             log(f"render loop: {_time.time() - first:.2f} s for {frames_rendered} frames "
                 f"({1000.0 * (_time.time() - first) / max(1, frames_rendered):.2f} ms/frame), "
                 f"total {_time.time() - _T0:.2f} s since process start")
@@ -1450,7 +1479,7 @@ class Render:
                 f"pack+queue {prof.get('pack', 0.0)/n:.2f} ms, "
                 f"read wait {prof.get('read', 0.0)/n:.2f} ms, "
                 f"named {(named/n):.2f} of frame total {prof['frame']/n:.2f} ms, "
-                f"unaccounted {(prof['frame'] - named)/n:.2f} ms")
+                f"unaccounted {(prof['frame'] - named)/n:.2f} ms", level=LEVEL_DEBUG)
         if self.upscaleModel and getattr(self, "tileReuse", False):
             up = getattr(self, "upscaleOption", None)
             tu = getattr(up, "tile_upscaler", None)
@@ -1620,7 +1649,8 @@ class Render:
                         "(determinism arm)")
                 except Exception as _error:  # noqa: BLE001 - a diagnostic must not cost a render
                     log("diag: engine warm-up failed (%s)", _error)
-            log(f"DEBUG after assign: option={id(self.upscaleOption)} int8Fit={getattr(self.upscaleOption,'int8Fit','<unset>')}")
+            log(f"debug: after assign option={id(self.upscaleOption)} int8Fit={getattr(self.upscaleOption,'int8Fit','<unset>')}",
+                level=LEVEL_DEBUG)
             
 
         if self.backend == "ncnn":
