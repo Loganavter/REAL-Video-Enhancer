@@ -25,6 +25,7 @@ from .QTcustom import (
 )
 from .video.channel import (
     DEFAULT_DISPLAY_BOX,
+    DISPLAY_BOX_SHARED_MEMORY_ID,
     DISPLAY_STATE_SHARED_MEMORY_ID,
     PHASE_BUILDING_ENGINE,
     PHASE_FAILED,
@@ -744,6 +745,30 @@ class ProcessTab:
         # RGB888 rows are happy at any width, but even dimensions keep the two slots and the strip geometry stable.
         return width - (width & 1), height - (height & 1)
 
+    def _display_allocation_box(self) -> tuple[int, int]:
+        """The box the block is ALLOCATED for: a maximum the pane may grow into without a reallocation.
+
+        The pane announces its real size separately (`DisplayBoxWriter`); this is only how much memory is reserved. The
+        screen's device pixels are the honest ceiling - the window can be maximised - capped so a preview cannot reserve
+        a 4K pair of slots for a 400 px pane, and floored at the pane's own current box.
+        """
+        pane_box = self._pane_display_box()
+        width, height = pane_box
+        try:
+            from PySide6.QtGui import QGuiApplication
+
+            screen = QGuiApplication.primaryScreen()
+            if screen is not None:
+                geometry = screen.availableGeometry()
+                ratio = float(screen.devicePixelRatio() or 1.0)
+                width = max(width, int(geometry.width() * ratio))
+                height = max(height, int(geometry.height() * ratio))
+        except Exception:
+            pass
+        width = min(width, 2560)
+        height = min(height, 1440)
+        return max(2, width) & ~1, max(2, height) & ~1
+
     def _prepare_display_state(self) -> None:
         """Allocate the pane's frame block (and the seek block) before the backend starts - GUI thread only.
 
@@ -751,7 +776,9 @@ class ProcessTab:
         window (or after it closed) pays nothing. One block per render pass; `_close_display_state` releases it.
         """
         self._close_display_state()
-        box = self._pane_display_box()
+        # The block is allocated for a MAXIMUM and the pane announces its real box through the record; a resize inside
+        # the maximum then needs no reallocation (see `_display_allocation_box`).
+        box = self._display_allocation_box()
         self._display_box = box
         # A new pass starts at generation 0 of a fresh record, whatever the last render left in the readouts.
         self._status_generation = None
@@ -766,6 +793,22 @@ class ProcessTab:
             self._display = None
             self._feed = None
             return
+        # The pane's own box, announced through its own record: the writer fits into it and answers with what the
+        # allocated block really holds. Created with the state so the FIRST frame is already the right size.
+        try:
+            from .video.channel import DisplayBoxWriter
+
+            self._display_box_writer = DisplayBoxWriter(DISPLAY_BOX_SHARED_MEMORY_ID)
+            if self._display_box_writer.attached:
+                pane_box = self._pane_display_box()
+                self._display_box_writer.announce(*pane_box)
+                self._announced_box = pane_box
+            else:
+                self._announced_box = None
+        except Exception as exc:
+            log(f"display: the announced-box record is not usable ({exc}); the block keeps its allocation size")
+            self._display_box_writer = None
+            self._announced_box = None
         if not reader.attached:
             log("display: the pane's block is not usable; the export runs without it")
             reader.release()
@@ -801,7 +844,15 @@ class ProcessTab:
             f"seek {SEEK_STATE_SHARED_MEMORY_ID}, status {STATUS_STATE_SHARED_MEMORY_ID}")
 
     def _close_display_state(self) -> None:
-        """Release the frame and seek blocks; safe twice, and safe when nothing was prepared."""
+        """Release the frame, seek and announced-box blocks; safe twice, and safe when nothing was prepared."""
+        announcer = getattr(self, "_display_box_writer", None)
+        self._display_box_writer = None
+        self._announced_box = None
+        if announcer is not None:
+            try:
+                announcer.release()
+            except Exception:
+                pass
         feed = getattr(self, "_feed", None)
         reader = getattr(self, "_display", None)
         self._feed = None
@@ -969,8 +1020,25 @@ class ProcessTab:
             if name is not None:
                 self.setStatus(name)
 
+    def _announce_pane_box(self) -> None:
+        """Publish a new pane box when it changed; one call per tick, no signal plumbing.
+
+        The pane is a widget and knows nothing about shared memory; the tab reads its box on the clock it already runs.
+        A miss of one tick is 100 ms of the old size, which is the same latency the picture itself has.
+        """
+        writer = getattr(self, "_display_box_writer", None)
+        if writer is None or not getattr(writer, "attached", False):
+            return
+        box = self._pane_display_box()
+        if box == getattr(self, "_announced_box", None):
+            return
+        generation = writer.announce(*box)
+        self._announced_box = box
+        log(f"display: pane box {box[0]}x{box[1]} announced (generation {generation})")
+
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
+        self._announce_pane_box()
         display = self._display_chain()
         if display is None or not display.attached:
             return
@@ -2599,5 +2667,6 @@ class ProcessTab:
             display_state_id=DISPLAY_STATE_SHARED_MEMORY_ID,
             display_size=f"{width}x{height}",
             seek_state_id=SEEK_STATE_SHARED_MEMORY_ID,
+            display_box_id=DISPLAY_BOX_SHARED_MEMORY_ID,
             status_state_id=STATUS_STATE_SHARED_MEMORY_ID,
         )

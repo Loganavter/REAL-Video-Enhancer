@@ -58,6 +58,18 @@ class DisplayStager:
         """True while a frame is still crossing the link (one in flight, so nothing is lost)."""
         return self._pending
 
+    def set_box(self, width: int, height: int) -> None:
+        """Change the box frames are fitted into, without touching anything in flight.
+
+        The next `submit` fits into the new box; a frame already staged keeps the geometry it was staged with, and its
+        header (written by `publish`) names that geometry - so a resize is a sequence of whole frames, never a mix. The
+        pane announces its box and the renderer applies it at a frame boundary, which is the shape the professional
+        sources use for exactly this (mpv refuses to reconfigure while a frame is displaying; VLC only reshapes the
+        viewport; OBS resizes the draw target, not the canvas).
+        """
+        self.width = max(2, int(width))
+        self.height = max(2, int(height))
+
     def _handle(self):
         torch = frame_module._torch
         if torch is None:

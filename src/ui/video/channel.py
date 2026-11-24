@@ -142,6 +142,90 @@ def status_state_id(pid: int | None = None) -> str:
     return "/status_state" + str(os.getpid() if pid is None else int(pid))
 
 
+def display_box_id(pid: int | None = None) -> str:
+    """The announced-box block's name: same convention, one record per GUI process."""
+    return "/display_box" + str(os.getpid() if pid is None else int(pid))
+
+
+#: The pane's announced box. A REQUEST/READY record, not a flag: "the pane asked for 800x600" and "the writer is
+#: producing 800x600" are different facts, and conflating them is exactly how a resize leaves a stale picture (the
+#: professional readers of this problem - mpv's `resize()` vs `reconfig()`, libplacebo's `pl_swapchain_resize`
+#: returning the size it ACTUALLY set, xpra's clamped `DISPLAY_RESIZED` - all keep the request and the fact apart).
+#: 16 bytes, little-endian, its own pid-scoped segment:
+#:
+#:   gen          u32  bumped by the pane on every announcement; the writer acts on a change
+#:   req_w/req_h  u16  the box the pane asks for, device pixels
+#:   real_w/real_h u16 what the writer actually fits into (a slot can be smaller than a request)
+#:   state        u8   IDLE / REQUESTED / READY / FAILED
+#:   flags        u8   reserved
+#:   pad          2
+DISPLAY_BOX = struct.Struct("<IHHHHBBxx")
+DISPLAY_BOX_SIZE = DISPLAY_BOX.size
+BOX_IDLE = 0
+BOX_REQUESTED = 1
+BOX_READY = 2
+BOX_FAILED = 3
+
+
+
+class DisplayBoxWriter:
+    """The GUI's side of the announced box: write a REQUEST, read back the writer's ANSWER.
+
+    The block is allocated once by the pane for a generous maximum, so a resize inside that maximum needs no
+    reallocation at all - the writer just fits into the smaller announced box. That is the same ownership split OBS and
+    VLC use (the display owns the buffer, the producer only draws into it), and it is why the announcement is a record
+    and not a byte: a byte cannot say "requested but not ready", which is the state a stale picture hides in.
+    """
+
+    def __init__(self, name: str | None = None) -> None:
+        from .. import shared_flag
+
+        self.name = str(name or DISPLAY_BOX_SHARED_MEMORY_ID)
+        self._shm = None
+        try:
+            try:
+                segment = shared_flag.attach(self.name)
+            except FileNotFoundError:
+                segment = None
+            if segment is None or len(segment.buf) < DISPLAY_BOX_SIZE:
+                if segment is not None:
+                    shared_flag.release(segment)      # a stale block from this pid, ours to replace
+                segment = shared_flag.create(self.name, DISPLAY_BOX_SIZE)
+            self._shm = segment
+        except Exception:
+            self._shm = None
+        self.attached = self._shm is not None and len(self._shm.buf) >= DISPLAY_BOX_SIZE
+        if self.attached:
+            DISPLAY_BOX.pack_into(self._shm.buf, 0, 0, 0, 0, 0, 0, BOX_IDLE, 0)
+
+    def announce(self, width: int, height: int) -> int:
+        """Publish a request for `width`x`height` device pixels; returns its generation (0 when detached)."""
+        if not self.attached:
+            return 0
+        current = int(DISPLAY_BOX.unpack_from(self._shm.buf, 0)[0])
+        generation = (current + 1) & 0xFFFFFFFF
+        width = max(2, int(width)) & ~1
+        height = max(2, int(height)) & ~1
+        # The generation goes in WITH the request: a reader brackets its read with two generation probes, so a record
+        # written while it reads is refused rather than half-applied.
+        DISPLAY_BOX.pack_into(self._shm.buf, 0, generation, width, height, 0, 0, BOX_REQUESTED, 0)
+        return generation
+
+    def answer(self) -> tuple[int, int, int, int, int, int]:
+        """`(gen, req_w, req_h, real_w, real_h, state)` as the writer left it (all zero when detached)."""
+        if not self.attached:
+            return 0, 0, 0, 0, 0, BOX_IDLE
+        return DISPLAY_BOX.unpack_from(self._shm.buf, 0)
+
+    def release(self) -> None:
+        from .. import shared_flag
+
+        segment, self._shm = self._shm, None
+        self.attached = False
+        if segment is not None:
+            shared_flag.release(segment)
+
+
 def format_eta(seconds: float | None) -> str:
     """An ETA in seconds as the string the backend prints (`h:mm:ss`, minutes and seconds zero-padded).
 
@@ -155,6 +239,7 @@ def format_eta(seconds: float | None) -> str:
 
 
 DISPLAY_STATE_SHARED_MEMORY_ID = display_state_id()
+DISPLAY_BOX_SHARED_MEMORY_ID = display_box_id()
 SEEK_STATE_SHARED_MEMORY_ID = seek_state_id()
 STATUS_STATE_SHARED_MEMORY_ID = status_state_id()
 

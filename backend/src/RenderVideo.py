@@ -166,6 +166,7 @@ class Render:
         display_state_id: str | None = None,
         display_size: tuple[int, int] | None = None,
         seek_state_id: str | None = None,
+        display_box_id: str | None = None,
         #: The render-status record (see utils/DisplayChannel.py), a GUI-owned pid-scoped segment.
         status_state_id: str | None = None,
         sceneDetectMethod: str = "pyscenedetect",
@@ -545,6 +546,7 @@ class Render:
         self.displayEvery = max(1, int(os.environ.get("RVE_DISPLAY_EVERY", "1") or 1))
         self.displayChannel = None
         self.displayStager = None
+        self.displayBox = None
         self._displayCounter = 0
         if display_state_id:
             try:
@@ -555,6 +557,12 @@ class Render:
                 self.displayChannel = DisplayChannel(display_state_id, box=box)
                 if self.displayChannel.attached:
                     self.displayStager = DisplayStager(box[0], box[1])
+                    # The pane asks for a box here; the writer answers with what the slot really holds. A resize inside
+                    # the allocated maximum needs no reallocation at all.
+                    if display_box_id:
+                        from .utils.DisplayChannel import DisplayBoxState
+
+                        self.displayBox = DisplayBoxState(display_box_id)
                     log(f"display: publishing to '{display_state_id}' at most every "
                         f"{self.displayEvery} rendered frame(s), box {box[0]}x{box[1]}")
                 else:
@@ -1265,6 +1273,32 @@ class Render:
             stager.submit(frame, getattr(frame, "width", None), getattr(frame, "height", None), time_s=time_s)
         return published
 
+    def _apply_announced_box(self) -> None:
+        """Fit the next frames into the box the pane last announced. A frame boundary, never mid-frame.
+
+        The payload lives inside a preallocated slot and every publication names its own `width`/`height` in the frame
+        header, so changing the box here is safe without the drain a real swapchain reallocation needs: a reader either
+        gets the old box or the new one. The ANSWER matters as much as the request - if the pane asked for more than the
+        slot holds, the log names both numbers instead of drifting silently.
+        """
+        box = getattr(self, "displayBox", None)
+        stager = getattr(self, "displayStager", None)
+        channel = getattr(self, "displayChannel", None)
+        if box is None or stager is None or channel is None:
+            return
+        announced = box.pending()
+        if announced is None:
+            return
+        generation, want_w, want_h = announced
+        real_w, real_h = channel.fit_announced_box(want_w, want_h)
+        stager.set_box(real_w, real_h)
+        box.answer(generation, want_w, want_h, real_w, real_h)
+        if (real_w, real_h) == (want_w, want_h):
+            log(f"display: pane announced {want_w}x{want_h}; fitting it (generation {generation})")
+        else:
+            log(f"display: pane announced {want_w}x{want_h} but the block holds {real_w}x{real_h}; fitting that "
+                f"(generation {generation}, slot {channel.slot_size} bytes)")
+
     def _take_seek_request(self):
         """The newest requested time when the generation moved since the last one acted on, else None."""
         state = self.seekState
@@ -1427,6 +1461,7 @@ class Render:
             if not self.informationHandler.get_is_paused():
                 # A seek is acted on between frames, before the next read blocks: the request is a single
                 # slot, so a newer one simply replaces this one - the loop never waits for the pane.
+                self._apply_announced_box()
                 requested = self._take_seek_request()
                 if requested is not None:
                     self._seek_preview(requested, getattr(self.seekState, "last_generation", None))

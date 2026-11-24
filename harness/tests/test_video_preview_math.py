@@ -147,11 +147,11 @@ def test_magnified_views_sample_nearest_and_fitted_ones_do_not(surface):
     assert surface.samples_nearest() is True, "exactly 1:1 is a source pixel per screen pixel"
 
 
-def test_a_left_drag_pans_and_cancels_the_compare_flash(surface):
-    """Panning moved to the LEFT button (owner, 2026-11-24), and the press still starts the compare.
+def test_a_left_drag_pans_and_KEEPS_the_compare_on(surface):
+    """Panning is on the LEFT button, and the compare stays on while it runs (owner, 2026-11-25).
 
-    The flash is what a HOLD shows, so the press cannot be deferred to the release; instead the first move past the
-    threshold ends the flash and the drag pans from that point.
+    A drag moves the view over the same picture, so what the eye wants there is the ORIGINAL, not the upscale; the
+    release ends the compare like any hold.
     """
     surface.set_zoom(surface.zoom() * 2.0)
     start = QPointF(200.0, 200.0)
@@ -164,7 +164,7 @@ def test_a_left_drag_pans_and_cancels_the_compare_flash(surface):
 
     _send(surface, QEvent.Type.MouseMove, QPointF(240.0, 220.0), held=Qt.MouseButton.LeftButton)
     assert surface._panning is True, "a left drag pans"
-    assert surface._showing_original is False, "the drag won the gesture: the flash is gone"
+    assert surface._showing_original is True, "and the compare stays on: the drag inspects the original"
     _release_with_clip(surface, QPointF(240.0, 220.0))
 
     assert surface._panning is False
@@ -275,3 +275,22 @@ def test_hover_marks_the_unprocessed_part_with_a_forbidden_cursor(surface):
     assert surface.cursor().shape() == Qt.CursorShape.ForbiddenCursor, (
         "the pointer must say that nothing has been produced there")
     assert surface._hover_fraction is not None
+
+
+def test_the_compare_puts_the_original_on_the_results_own_pixel_grid(surface):
+    """Within rounding noise the source is scaled to the frame EXACTLY, so both pictures share one grid.
+
+    The channel's payload box rounds each side to an even number independently: a 4:3 source in a 421x512 pane becomes a
+    420x314 payload (0.32 % wide of 4:3), and `KeepAspectRatio` into it produced 418x314 that the draw then stretched
+    back to 420 - a further 0.48 % (owner, 2026-11-25: "кадр чуть шире"). The measured case is pinned here.
+    """
+    surface.set_frame(QImage(420, 314, QImage.Format.Format_RGB32))    # the payload the pane receives
+    surface.set_original(QImage(1440, 1080, QImage.Format.Format_RGB32))   # a 4:3 source
+    assert surface._original.size().toTuple() == (420, 314), "same grid as the result, no extra stretch"
+
+
+def test_a_really_different_aspect_is_letterboxed_and_named(surface):
+    """A REAL difference (a border crop) must not be stretched: the proportions stay and the log says why."""
+    surface.set_frame(QImage(420, 300, QImage.Format.Format_RGB32))
+    surface.set_original(QImage(1440, 1080, QImage.Format.Format_RGB32))
+    assert surface._original.size().toTuple() == (400, 300), "4:3 inside a 7:5 frame keeps its proportions"

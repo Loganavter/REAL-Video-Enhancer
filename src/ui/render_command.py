@@ -44,6 +44,8 @@ class RenderPaths:
     display_state_id: str | None = None
     display_size: str | None = None
     seek_state_id: str | None = None
+    #: The announced-box record: the pane asks for a resolution here and the renderer answers with what it fits.
+    display_box_id: str | None = None
     #: The render-status block (`/status_state<pid>`): the numbers the pane used to scrape out of stdout.
     #: Optional like the three above, so a caller that models a job with no pane gets the command it always had.
     status_state_id: str | None = None
@@ -138,6 +140,7 @@ def build_command(render_options, settings, is_overwrite: bool = False, paths: R
                 f"{paths.display_size}",
                 "--seek_state_id",
                 f"{paths.seek_state_id}",
+                *(["--display_box_id", f"{paths.display_box_id}"] if paths.display_box_id else []),
             ]
             if paths.display_state_id and paths.display_size and paths.seek_state_id
             else []

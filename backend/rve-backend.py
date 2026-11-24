@@ -216,6 +216,7 @@ class HandleApplication:
             pause_shared_memory_id=self.args.pause_shared_memory_id,
             display_state_id=self.args.display_state_id,
             display_size=self.args.display_size,
+            display_box_id=self.args.display_box_id,
             seek_state_id=self.args.seek_state_id,
             status_state_id=self.args.status_state_id,
             sceneDetectMethod=self.args.scene_detect_method,
@@ -738,6 +739,14 @@ class HandleApplication:
             "--display_size",
             help="The pane's box as WxH (e.g. 640x360); frames are fitted into it, aspect preserved",
             type=parse_size,
+            default=None,
+        )
+        parser.add_argument(
+            "--display_box_id",
+            help="Shared-memory record where the pane ANNOUNCES the box it wants frames fitted into, and the renderer "
+                 "answers with what the block really holds (layout: backend/src/utils/DisplayChannel.py). A resize "
+                 "inside the allocated maximum needs no reallocation.",
+            type=str,
             default=None,
         )
         parser.add_argument(

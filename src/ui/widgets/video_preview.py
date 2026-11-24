@@ -299,12 +299,31 @@ class VideoPreviewSurface(QRhiWidget):
         else:
             picture = image.convertToFormat(QImage.Format.Format_RGBA8888)
             if self._frame is not None and picture.size() != self._frame.size():
-                # KEEP the source's proportions. The source and the render normally share an aspect, but a render can
-                # change dimensions (border-detect crops, an odd scale) and a stretched compare would then show a
-                # straight line where the picture has a curve - a difference the viewer invented. Nearest is still the
-                # filter: cheapest, and it adds no information.
-                picture = picture.scaled(self._frame.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.FastTransformation)
+                target = self._frame.size()
+                # TWO cases, and the difference is measurable. The channel's payload box rounds each side to an even
+                # number independently (`fit_box`), so a 4:3 source in a 421x512 pane becomes a 420x314 payload whose
+                # aspect is 0.32 % wide; scaling the source into it with `KeepAspectRatio` gave 418x314 and the draw
+                # then stretched that back to 420 - a further 0.48 %. The original therefore sat on a DIFFERENT pixel
+                # grid than the result, which reads as "the frame is a bit wider" (owner, 2026-11-25). Within rounding
+                # noise the source is scaled to the frame EXACTLY: same grid, honest compare, no invented geometry.
+                source_aspect = picture.width() / float(picture.height())
+                frame_aspect = target.width() / float(target.height())
+                relative = abs(source_aspect - frame_aspect) / frame_aspect
+                if relative <= 0.01:
+                    picture = picture.scaled(target, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                             Qt.TransformationMode.FastTransformation)
+                else:
+                    # A REAL difference (border crop, an odd scale): stretching would show a straight line where the
+                    # picture has a curve. Keep the proportions and say so once - a silent deformation is worse than
+                    # either.
+                    picture = picture.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
+                                             Qt.TransformationMode.FastTransformation)
+                    if getattr(self, "_compare_aspect_noted", None) != (picture.size(), target):
+                        self._compare_aspect_noted = (picture.size(), target)
+                        telemetry.event("compare aspect", source=f"{image.width()}x{image.height()}",
+                                        fitted=f"{picture.width()}x{picture.height()}",
+                                        frame=f"{target.width()}x{target.height()}",
+                                        diff_pct=f"{relative * 100.0:.2f}")
             self._original = picture
         if self._view_mode == "single":
             # The flash replaces the frame in the one shared texture.
@@ -518,12 +537,10 @@ class VideoPreviewSurface(QRhiWidget):
         if self._left_press is not None and (event.buttons() & Qt.MouseButton.LeftButton):
             moved = position - self._left_press
             if abs(moved.x()) > PAN_THRESHOLD_PX or abs(moved.y()) > PAN_THRESHOLD_PX:
-                if self._showing_original:
-                    # The drag won: the compare flash was a press, and the press is now a pan. Ending it first keeps
-                    # the two gestures from fighting over the picture.
-                    self._showing_original = False
-                    telemetry.event("hold off")
-                    self.set_original(None)
+                # The compare stays ON while the drag runs: panning moves the view over the same picture, so the
+                # original is exactly what the eye wants to inspect there (owner, 2026-11-25: "чтобы во время
+                # панорамирования показывался оригинал, а не апскейл"). The release ends it, like any hold; the
+                # geometry is shared, so the result appears where the drag left the picture.
                 self._left_press = None
                 self._panning = True
                 self._pan_anchor = position

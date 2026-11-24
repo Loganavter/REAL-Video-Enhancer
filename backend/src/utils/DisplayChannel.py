@@ -49,6 +49,7 @@ mixed record is refused rather than reported.
 from __future__ import annotations
 
 import os
+import math
 import struct
 import threading
 
@@ -85,6 +86,13 @@ RGB_BYTES_PER_PIXEL = 3
 
 #: The seek request: `requested_seconds` then `generation`. 12 bytes of struct inside a 16-byte block.
 SEEK_STRUCT = struct.Struct("<dI")
+
+#: The pane's announced box: `gen u32, req_w u16, req_h u16, real_w u16, real_h u16, state u8, flags u8, pad 2`.
+#: The pane WRITES a request (what resolution it wants the writer to fit into) and this side ANSWERS with what it
+#: really fits - a slot can be smaller than the request. Request and fact are separate states on purpose: a single
+#: "make it bigger" flag cannot say "requested but not ready", and that is the state a stale picture hides in.
+BOX_STRUCT = struct.Struct("<IHHHHBBxx")
+BOX_IDLE, BOX_REQUESTED, BOX_READY, BOX_FAILED = 0, 1, 2, 3
 SEEK_BLOCK_SIZE = 16
 UINT32_MAX = 0xFFFFFFFF
 
@@ -221,6 +229,24 @@ class DisplayChannel:
             return 0
         return HEADER.unpack_from(self._shm.buf, 0)[0]
 
+    def fit_announced_box(self, width: int, height: int) -> tuple[int, int]:
+        """The largest box with the REQUESTED aspect that this block's slot can hold.
+
+        A pane can ask for more than the block was allocated for (it grew past the maximum the GUI chose). The honest
+        answer is the size actually fitted - libplacebo's `pl_swapchain_resize` returns "what width/height the swapchain
+        was actually set to", xpra clamps with `min(client, root)` and replies with the server's size. Silently writing a
+        smaller payload while the pane believes otherwise is the failure mode all of them avoid.
+        """
+        want_w = max(2, int(width))
+        want_h = max(2, int(height))
+        area = (self.slot_size // 3) if self.slot_size else 0
+        if area <= 0 or want_w * want_h <= area:
+            return want_w - (want_w & 1), want_h - (want_h & 1)
+        scale = math.sqrt(area / float(want_w * want_h))
+        real_w = max(2, int(want_w * scale)) & ~1
+        real_h = max(2, int(want_h * scale)) & ~1
+        return real_w, real_h
+
     def published_time(self) -> float | None:
         """The media time of the newest published picture, or None when the writer did not name it."""
         if not self.attached:
@@ -288,6 +314,68 @@ class DisplayChannel:
         """Release the block. Unlink only when this process created it (the GUI owns its own names)."""
         segment, created = self._shm, self.created
         self._shm = None
+        self.attached = False
+        if segment is None:
+            return
+        try:
+            segment.close()
+        except Exception:
+            pass
+        if created:
+            try:
+                segment.unlink()
+            except Exception:
+                pass
+
+
+class DisplayBoxState:
+    """The writer's side of the announced box: act on a generation change, answer with what it really fits.
+
+    Read once per loop iteration - one 16-byte unpack at the frame boundary, where the professional sources put a
+    geometry change (mpv refuses to reconfigure while a frame is displaying; libplacebo retires the old target only
+    after its fences signal). Here nothing is retired, because the payload always fits a PREALLOCATED slot and each
+    publication carries its own `width`/`height` in the frame header: a frame is either the old box or the new one,
+    never torn.
+    """
+
+    def __init__(self, name: str | None):
+        self.name = name
+        self.created = False
+        self._shm = None
+        if name:
+            try:
+                self._shm, self.created = _open_block(name, BOX_STRUCT.size)
+            except Exception:
+                self._shm = None
+        self.attached = self._shm is not None and len(self._shm.buf) >= BOX_STRUCT.size
+        #: The generation acted on. None means "the first record is still a request" (the pane announces before the
+        #: renderer starts, so the first iteration must apply it).
+        self.last_generation = None
+
+    def pending(self):
+        """`(generation, want_w, want_h)` when the pane announced something this process has not acted on."""
+        if not self.attached:
+            return None
+        generation, want_w, want_h, _real_w, _real_h, _state, _flags = BOX_STRUCT.unpack_from(self._shm.buf, 0)
+        # The writer's own torn-read guard: a record written while this unpack ran is refused, not half-applied.
+        if int(BOX_STRUCT.unpack_from(self._shm.buf, 0)[0]) != int(generation):
+            return None
+        generation = int(generation)
+        if generation == 0 or generation == self.last_generation:
+            return None
+        self.last_generation = generation
+        return generation, int(want_w), int(want_h)
+
+    def answer(self, generation: int, want_w: int, want_h: int, real_w: int, real_h: int) -> None:
+        """Publish what was really fitted; `state` says whether the request was honoured exactly."""
+        if not self.attached:
+            return
+        honoured = (int(real_w), int(real_h)) == (int(want_w), int(want_h))
+        BOX_STRUCT.pack_into(self._shm.buf, 0, int(generation), int(want_w), int(want_h),
+                             int(real_w), int(real_h), BOX_READY if honoured else BOX_FAILED, 0)
+
+    def close(self) -> None:
+        segment, created, self._shm = self._shm, self.created, None
         self.attached = False
         if segment is None:
             return

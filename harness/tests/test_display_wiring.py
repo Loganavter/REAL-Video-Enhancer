@@ -1022,3 +1022,49 @@ def test_the_stamped_picture_closes_the_seek_with_its_own_time(monkeypatch):
     assert fields["target_s"] == 1.139
     assert fields["landed"] == ("seq", 196)
     assert tab._seek_pressed_at is None
+
+
+def test_the_pane_announces_a_resize_once_and_only_when_it_changed():
+    """The tab reads the pane's box on its own 100 ms clock and publishes a NEW GENERATION per change.
+
+    That is the whole GUI half of the resize fix: the block is allocated for a maximum, the pane announces the box it
+    wants, and the renderer answers with what it fits. A per-tick announcement without the change check would make the
+    renderer re-fit every 100 ms for nothing.
+    """
+    from src.utils.DisplayChannel import DisplayBoxState
+    from src.ui.video.channel import DisplayBoxWriter
+
+    class _SizedPane:
+        def __init__(self):
+            self.w, self.h = 421, 512
+
+        def width(self):
+            return self.w
+
+        def height(self):
+            return self.h
+
+        def devicePixelRatioF(self):
+            return 1.0
+
+    pane = _SizedPane()
+    name = f"/display_box_tab_{os.getpid()}"
+    writer = DisplayBoxWriter(name)
+    assert writer.attached
+    reader = DisplayBoxState(name)
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True, reader=_Reader())
+    tab._display_box_writer = writer
+    tab._announced_box = None
+
+    tab._announce_pane_box()
+    assert reader.pending() == (1, 420, 512), "the first tick publishes the pane's own box (even-rounded)"
+
+    tab._announce_pane_box()
+    assert reader.pending() is None, "an unchanged box is not a new request"
+
+    pane.w, pane.h = 800, 600
+    tab._announce_pane_box()
+    assert reader.pending() == (2, 800, 600), "a resize is a new generation"
+
+    writer.release()
+    reader.close()
