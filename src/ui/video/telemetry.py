@@ -211,7 +211,8 @@ MIN_SEEK_MS = 1.0
 
 
 def note_seek(turnaround_ms: float, *, target: int | None = None,
-              landed: tuple[str, int] | None = None) -> None:
+              landed: tuple[str, int] | None = None, target_s: float | None = None,
+              landed_time: float | None = None) -> None:
     """Press -> first new picture, in milliseconds, naming the frame that was asked for and the one the PANE shows.
 
     `target` is the frame the press pointed at (`fraction x the strip's total`). `landed` is the pane's own identity for
@@ -222,9 +223,17 @@ def note_seek(turnaround_ms: float, *, target: int | None = None,
     """
     turnaround_ms = float(turnaround_ms)
     fields: dict[str, object] = {"target_frame": target}
+    if target_s is not None:
+        fields["target_s"] = f"{float(target_s):.3f}"
     if landed is not None:
         kind, number = landed
         fields["landed_frame" if kind == "frame" else "landed_seq"] = int(number)
+    if landed_time is not None:
+        # The media time of the picture on screen, and how far it is from where the press pointed. THIS is the number
+        # that answers "did the seek go where it was told" - a sequence number cannot (owner, 2026-11-24).
+        fields["landed_time"] = f"{float(landed_time):.3f}"
+        if target_s is not None:
+            fields["delta_s"] = f"{float(landed_time) - float(target_s):+.3f}"
     if turnaround_ms < MIN_SEEK_MS:
         event("seek instant", turnaround_ms=f"{turnaround_ms:.2f}", **fields)
         return
@@ -273,8 +282,10 @@ def _reset(*, session: bool = False) -> None:
     """
     global _frames, _paints, _uploads, _bytes, _drops, _last_snapshot, _started, _last_stats, _shown
     _frames = _paints = _uploads = _bytes = _drops = 0
-    _shown = None
     if session:
+        # `shown` is a property of the PANE (what it is painting right now), not a per-window counter: clearing it on
+        # every flush made an idle second report `shown=-` while the picture was still on screen (measured 2026-11-24).
+        _shown = None
         _started = False
         _last_stats = 0.0
     _gui.clear()

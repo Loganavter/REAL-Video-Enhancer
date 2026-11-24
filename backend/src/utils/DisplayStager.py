@@ -48,6 +48,7 @@ class DisplayStager:
         self._pinned = None       # page-locked host buffer the device copies into
         self._event = None
         self._pending = False
+        self._pending_time: float | None = None
         self._pending_fmt = 1
         self._pending_w = 0
         self._pending_h = 0
@@ -67,7 +68,7 @@ class DisplayStager:
         return torch
 
     def submit(self, frame, width: int | None = None, height: int | None = None,
-               fmt: int = 1) -> bool:
+               fmt: int = 1, time_s: float | None = None) -> bool:
         """Stage `frame` (a `utils.Frame.Frame`) into the box and start the copy back.
 
         `width`/`height` are the geometry the caller believes the frame has; the tensor's own shape is
@@ -125,11 +126,15 @@ class DisplayStager:
         self._pending_w = target_w
         self._pending_h = target_h
         self._pending_len = n
+        #: The media time of THIS picture, or None when the caller could not name it. It travels with the staged
+        #: payload because a normal render publishes one frame late: the time of the picture being PUBLISHED is the
+        #: staged one, not whatever the newest frame carries.
+        self._pending_time = time_s
         self._pending = True
         return True
 
-    def take(self, force: bool = False) -> tuple[bytes, int, int, int] | None:
-        """`(payload, fmt, width, height)` of the previous frame, or None when it is late/absent.
+    def take(self, force: bool = False) -> tuple[bytes, int, int, int, float | None] | None:
+        """`(payload, fmt, width, height, time_s)` of the previous frame, or None when it is late/absent.
 
         `force` waits for the in-flight copy instead of answering None. Only the seek path uses it: a
         requested frame has to be on screen now, while a normal render can happily be one frame late.
@@ -142,4 +147,4 @@ class DisplayStager:
             self._event.synchronize()
         self._pending = False
         payload = self._pinned[:self._pending_len].numpy().tobytes()
-        return payload, self._pending_fmt, self._pending_w, self._pending_h
+        return payload, self._pending_fmt, self._pending_w, self._pending_h, self._pending_time

@@ -160,13 +160,19 @@ def show_layout_widgets(layout):
 
 #: The pane's block, as the reader sees it. The writer's copy is `backend/src/utils/DisplayChannel.py`; both sides
 #: derive every offset from the struct, never from a literal, because a field at the wrong offset does not raise -
-#: it draws a torn or colour-shifted picture. 15 bytes: `seq`, `width`, `height`, `fmt`, `wanted`, `flags`, reserved.
-DISPLAY_HEADER = struct.Struct("<IHHBBBI")
+#: it draws a torn or colour-shifted picture. 23 bytes: the seven fields above plus the picture's media time.
+#: `<IHHBBBI d`: seq, width, height, fmt, wanted, flags, reserved, then the picture's media time (double, -1 when the
+#: writer cannot name it). The time is what makes "is this the frame the seek asked for" answerable - a sequence number
+#: alone can only say "a new publication arrived".
+DISPLAY_HEADER = struct.Struct("<IHHBBBI d")
 DISPLAY_HEADER_SIZE = DISPLAY_HEADER.size
 DISPLAY_OFFSET_SEQ = 0
 DISPLAY_OFFSET_WIDTH = 4
 DISPLAY_OFFSET_HEIGHT = 6
 DISPLAY_OFFSET_FMT = 8
+DISPLAY_OFFSET_TIME = 15
+#: The `time` value the writer packs when it cannot name the picture.
+DISPLAY_TIME_UNSET = -1.0
 DISPLAY_OFFSET_WANTED = 9
 DISPLAY_FMT_RGB888 = 1
 DISPLAY_RGB_BYTES_PER_PIXEL = 3
@@ -213,6 +219,15 @@ class DisplayReader(QObject):
 
     #: One composited frame, already a Qt image owned by the GUI (the shared buffer is copied, not aliased).
     display_frame = Signal(QImage)
+
+    @property
+    def media_time(self) -> float | None:
+        """The media time of the picture this reader last handed over, seconds; None when the writer did not name it.
+
+        A sequence number proves a NEW picture, not WHICH one: a seek log needs this number to say whether the pane is
+        showing the frame that was asked for (owner, 2026-11-24).
+        """
+        return getattr(self, "_media_time", None)
 
     @property
     def seq(self) -> int:
@@ -271,7 +286,9 @@ class DisplayReader(QObject):
             if created:
                 # A freshly owned block starts at `seq` 0: an attached one (the pane reopening, a hand-written test
                 # block) keeps whatever its writer already put there.
-                DISPLAY_HEADER.pack_into(segment.buf, 0, 0, 0, 0, 0, 0, 0, 0)
+                # A zeroed block must say "no picture, no time": `0.0` would claim second zero, so the time
+                # field starts at the unset sentinel and the pane's reader reports None.
+                DISPLAY_HEADER.pack_into(segment.buf, 0, 0, 0, 0, 0, 0, 0, 0, DISPLAY_TIME_UNSET)
             self._write_wanted(0)
         try:
             self._seek_shm = shared_flag.create(self.seek_name, SEEK_BLOCK_SIZE)
@@ -341,8 +358,10 @@ class DisplayReader(QObject):
         if not self.attached or not self._want:
             return None
         buf = self._shm.buf
-        seq, width, height, fmt, _wanted, _flags, _reserved = DISPLAY_HEADER.unpack_from(buf, 0)
+        seq, width, height, fmt, _wanted, _flags, _reserved, stamp = DISPLAY_HEADER.unpack_from(buf, 0)
         seq = int(seq)
+        # The picture about to be handed over carries its own time; -1 means the writer could not name it.
+        self._media_time = float(stamp) if stamp >= 0 else None
         if seq == self._last_seq:
             return None
         width, height = int(width), int(height)

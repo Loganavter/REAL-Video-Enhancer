@@ -88,6 +88,16 @@ def test_a_seek_names_both_frames_and_the_line_names_the_shown_one(monkeypatch, 
     assert "shown=f209" in lines[-1][0], lines[-1][0]
 
 
+def test_a_seek_reports_the_media_time_of_the_picture_and_its_distance(monkeypatch, fresh):
+    """The number that answers "did it go where it was told": the published picture's media time vs the request."""
+    lines, now = fresh
+    _level(monkeypatch, "1")
+    telemetry.note_seek(15.1, target=85, landed=("seq", 208), target_s=3.5420, landed_time=3.5600)
+    line = [text for text, _ in lines if text.startswith("preview: seek ")][-1]
+    assert "target_s=3.542" in line and "landed_time=3.560" in line, line
+    assert "delta_s=+0.018" in line, line
+
+
 def test_the_display_channel_sequence_is_its_own_kind_of_identity(monkeypatch, fresh):
     """A composited frame has no frame number: it has the publisher's sequence, and the line must not blur the two."""
     lines, now = fresh
@@ -136,6 +146,18 @@ def test_the_pass_cost_is_its_own_number(fresh):
     line = lines[-1][0]
     assert "up_ms=0.01/0.01/0.01" in line, line
     assert "pass_ms=0.50/0.60/0.60" in line, line
+
+
+def test_an_idle_window_still_says_what_the_pane_is_showing(monkeypatch, fresh):
+    """`shown` is the pane's state, not a per-window counter: a flush must not make a picture on screen look like none."""
+    lines, now = fresh
+    _level(monkeypatch, "1")
+    telemetry.note_frame(seq=41)
+    telemetry.maybe_stats(force=True)
+    assert "shown=seq41" in lines[-1][0], lines[-1][0]
+    now["t"] += 5.0
+    telemetry.maybe_stats(force=True)          # a window with no frames at all
+    assert "shown=seq41" in lines[-1][0], lines[-1][0]
 
 
 def test_the_summary_is_median_p95_max(fresh):

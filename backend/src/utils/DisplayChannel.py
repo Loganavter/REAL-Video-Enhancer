@@ -16,7 +16,9 @@ Layout (little-endian, the invariant both sides copy verbatim; the reader's copy
     9       1     wanted   uint8    0 = the viewer is not asking; the writer publishes nothing
     10      1     flags    uint8    reserved for the writer, 0 today
     11      4     reserved uint32   0
-    15      ...   two payload slots, each ``box_w * box_h * 3`` bytes
+    15      8     time     double   media time of the picture in the newest slot, seconds;
+                                    ``TIME_UNSET`` (-1) when the writer cannot name it
+    23      ...   two payload slots, each ``box_w * box_h * 3`` bytes
 
 (``struct.Struct("<IHHBBBI")``: four-byte seq, two shorts, three bytes, then the reserved word - 15
 bytes. ``wanted`` is the byte at 9, which is the one offset both sides must agree on by name.)
@@ -34,10 +36,12 @@ from __future__ import annotations
 
 import struct
 
-#: The header. `<` = little-endian, standard sizes, no padding - 15 bytes. The trailing `I` is the
-#: reserved word (4 bytes), so a reader that assumed a 12-byte header would read the slots 3 bytes early;
-#: both sides must derive `HEADER_SIZE` from this struct, never hard-code it.
-HEADER = struct.Struct("<IHHBBBI")
+#: The header. `<` = little-endian, standard sizes, no padding - 23 bytes. The `I` is the reserved word
+#: (4 bytes) and the trailing `d` is the frame's media time, so a reader that assumed a 15-byte header
+#: would read the slots 8 bytes early; both sides must derive `HEADER_SIZE` from this struct, never
+#: hard-code it. The time exists because a sequence number alone cannot answer "is this the frame the
+#: seek asked for" (owner, 2026-11-24: the pane's log could name the publication but not its content).
+HEADER = struct.Struct("<IHHBBBI d")
 HEADER_SIZE = HEADER.size
 
 OFFSET_SEQ = 0
@@ -47,6 +51,10 @@ OFFSET_FMT = 8
 OFFSET_WANTED = 9
 OFFSET_FLAGS = 10
 OFFSET_RESERVED = 11
+OFFSET_TIME = 15
+
+#: `time` value meaning "the writer cannot name this picture". Media times are >= 0, so -1 is free.
+TIME_UNSET = -1.0
 
 #: `fmt` value of the payload: three interleaved 8-bit channels - the one format a pane can blit.
 FMT_RGB888 = 1
@@ -112,8 +120,20 @@ class DisplayChannel:
             return 0
         return HEADER.unpack_from(self._shm.buf, 0)[0]
 
-    def publish(self, payload, width: int, height: int, fmt: int = FMT_RGB888) -> bool:
+    def published_time(self) -> float | None:
+        """The media time of the newest published picture, or None when the writer did not name it."""
+        if not self.attached:
+            return None
+        stamp = HEADER.unpack_from(self._shm.buf, 0)[7]
+        return None if stamp < 0 else float(stamp)
+
+    def publish(self, payload, width: int, height: int, fmt: int = FMT_RGB888,
+                time_s: float | None = None) -> bool:
         """Copy one composited frame into the free slot. False when nobody asked or it does not fit.
+
+        `time_s` is the media time of THIS picture: the seek path knows it exactly (it decoded that frame),
+        a streaming frame often does not, and the header says which case it is instead of leaving the
+        reader to guess.
 
         The payload is `width * height * 3` bytes of interleaved RGB888 (so it may be smaller than the
         slot: a box fit keeps the picture's aspect, and the header says what the payload really is).
@@ -144,8 +164,9 @@ class DisplayChannel:
         # Read `wanted` again rather than reusing the check above: the pane may have gone away while the
         # payload was copied, and its byte must survive this header write untouched either way.
         wanted = buf[OFFSET_WANTED]
+        stamp = TIME_UNSET if time_s is None else float(time_s)
         HEADER.pack_into(buf, 0, (seq + 1) & UINT32_MAX, width, height, FMT_RGB888,
-                         wanted, 0, 0)
+                         wanted, 0, 0, stamp)
         return True
 
     def close(self) -> None:

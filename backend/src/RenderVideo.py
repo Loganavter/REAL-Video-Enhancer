@@ -1116,7 +1116,7 @@ class Render:
         except Exception as exc:  # a report must never take a render down
             log(f"run report FAILED ({exc}); the render is unaffected")
 
-    def _publish_display(self, frame, force: bool = False) -> bool:
+    def _publish_display(self, frame, force: bool = False, time_s: float | None = None) -> bool:
         """Offer this composited frame to the pane; returns whether a publish actually happened.
 
         Bounded on purpose: at most one staged frame is in flight, and a normal render publishes at most
@@ -1138,20 +1138,21 @@ class Render:
             # picture, and there may be no further publish for seconds. Drain the in-flight frame (it is
             # superseded), stage the seek frame and wait for its copy - one D2H, on the seek path only.
             stager.take(force=True)
-            if not stager.submit(frame, getattr(frame, "width", None), getattr(frame, "height", None)):
+            if not stager.submit(frame, getattr(frame, "width", None), getattr(frame, "height", None),
+                                 time_s=time_s):
                 return False
             previous = stager.take(force=True)
             if previous is None:
                 return False
-            payload, fmt, width, height = previous
-            return channel.publish(payload, width, height, fmt=fmt)
+            payload, fmt, width, height, stamp = previous
+            return channel.publish(payload, width, height, fmt=fmt, time_s=stamp)
         published = False
         previous = stager.take()
         if previous is not None:
-            payload, fmt, width, height = previous
-            published = channel.publish(payload, width, height, fmt=fmt)
+            payload, fmt, width, height, stamp = previous
+            published = channel.publish(payload, width, height, fmt=fmt, time_s=stamp)
         if not stager.busy():
-            stager.submit(frame, getattr(frame, "width", None), getattr(frame, "height", None))
+            stager.submit(frame, getattr(frame, "width", None), getattr(frame, "height", None), time_s=time_s)
         return published
 
     def _take_seek_request(self):
@@ -1247,7 +1248,9 @@ class Render:
                 frame = self.upscaleOption(frame)
             if frame is None:
                 return
-            self._publish_display(frame, force=True)
+            # The seek path KNOWS the media time of this picture - it decoded that exact frame - so this is the one
+            # publish whose content can be checked against the request.
+            self._publish_display(frame, force=True, time_s=float(seconds))
             self.lastSeekSeconds = float(seconds)
             log(f"seek: displayed the frame at {seconds:.3f}s (not written to the export)")
         except Exception as exc:

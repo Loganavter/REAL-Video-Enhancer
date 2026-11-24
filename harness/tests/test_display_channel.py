@@ -59,18 +59,19 @@ def _frame(seed: int, width: int = 2, height: int = 2) -> bytes:
 
 
 def test_the_header_is_the_literal_struct_and_wanted_sits_at_offset_nine():
-    assert DC.HEADER.format == "<IHHBBBI"
-    # the literal struct: 4 + 2 + 2 + 1 + 1 + 1 + 4 - the trailing `I` is the reserved word
-    assert DC.HEADER.size == DC.HEADER_SIZE == 15
+    assert DC.HEADER.format == "<IHHBBBI d"
+    # the literal struct: 4 + 2 + 2 + 1 + 1 + 1 + 4 + 8 - the `I` is the reserved word, the `d` the picture's time
+    assert DC.HEADER.size == DC.HEADER_SIZE == 23
     assert (DC.OFFSET_SEQ, DC.OFFSET_WIDTH, DC.OFFSET_HEIGHT, DC.OFFSET_FMT,
             DC.OFFSET_WANTED, DC.OFFSET_FLAGS, DC.OFFSET_RESERVED) == (0, 4, 6, 8, 9, 10, 11)
-    packed = DC.HEADER.pack(7, 640, 360, DC.FMT_RGB888, 3, 0, 0)
-    assert len(packed) == 15
-    # the pane's poll is a single byte at 9; every field before it must stay where it is
+    assert DC.OFFSET_TIME == 15
+    packed = DC.HEADER.pack(7, 640, 360, DC.FMT_RGB888, 3, 0, 0, 3.5)
+    assert len(packed) == 23
+    # the pane's poll is a single byte at 9; every field BEFORE it must stay where it is
     assert packed[DC.OFFSET_WANTED] == 3
-    assert DC.HEADER.unpack(packed) == (7, 640, 360, 1, 3, 0, 0)
-    # the slots start where the struct ends, never at a hard-coded 12
-    assert DC.HEADER_SIZE == DC.OFFSET_RESERVED + 4
+    assert DC.HEADER.unpack(packed) == (7, 640, 360, 1, 3, 0, 0, 3.5)
+    # the slots start where the struct ends, never at a hard-coded offset
+    assert DC.HEADER_SIZE == DC.OFFSET_TIME + 8
 
 
 # --- the writer's side -----------------------------------------------------------------------------
@@ -129,6 +130,22 @@ def test_a_payload_whose_length_disagrees_with_its_geometry_is_refused():
         channel.close()
 
 
+def test_a_publish_can_name_the_picture_it_sends():
+    """The seek path knows the media time of the frame it decoded; that is what makes the landing checkable.
+
+    A sequence number proves a NEW publication, not WHICH picture (owner, 2026-11-24).
+    """
+    channel = _channel(box=(2, 2))
+    try:
+        _ask(channel)
+        assert channel.publish(_frame(0, 2, 2), 2, 2, time_s=3.5) is True
+        assert channel.published_time() == 3.5
+        assert channel.publish(_frame(1, 2, 2), 2, 2) is True
+        assert channel.published_time() is None, "a picture the writer cannot name must not report a time"
+    finally:
+        channel.close()
+
+
 # --- the reader's side, through a real segment -----------------------------------------------------
 
 
@@ -143,10 +160,11 @@ def test_a_full_publish_read_round_trip_through_shared_memory():
         assert channel.publish(payload, 3, 2) is True
 
         reader = shm_attach(name)
-        seq, width, height, fmt, wanted, flags, reserved = DC.HEADER.unpack_from(reader.buf, 0)
+        seq, width, height, fmt, wanted, flags, reserved, stamp = DC.HEADER.unpack_from(reader.buf, 0)
         assert (width, height, fmt) == (3, 2, DC.FMT_RGB888)
         assert wanted == 1, "the writer must leave the pane's own byte alone"
         assert (flags, reserved) == (0, 0)
+        assert stamp == DC.TIME_UNSET, "a publish without a time must say so, not claim second zero"
         slot = (seq - 1) & 1
         start = DC.HEADER_SIZE + slot * ((len(reader.buf) - DC.HEADER_SIZE) // 2)
         assert bytes(reader.buf[start:start + 18]) == payload

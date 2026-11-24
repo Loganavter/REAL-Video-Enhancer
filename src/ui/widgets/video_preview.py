@@ -193,7 +193,8 @@ class VideoPreviewSurface(QRhiWidget):
     # -- data ------------------------------------------------------------
 
     def set_frame(self, image: QImage | None, *, gui_ms: float | None = None,
-                  index: int | None = None, seq: int | None = None) -> None:
+                  index: int | None = None, seq: int | None = None,
+                  media_time: float | None = None) -> None:
         """Show this picture. A `None` clears the pane (no frame yet)."""
         self._frame = None if image is None else image.convertToFormat(QImage.Format.Format_RGBA8888)
         self._texture_dirty = self._frame is not None
@@ -212,10 +213,15 @@ class VideoPreviewSurface(QRhiWidget):
             self._shown = ("frame", int(index))
         elif seq is not None:
             self._shown = ("seq", int(seq))
+        self._shown_time = None if media_time is None else float(media_time)
         telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq)
 
     def has_frame(self) -> bool:
         return self._frame is not None
+
+    def shown_time(self) -> float | None:
+        """The media time of the picture on screen, when the publisher named it."""
+        return getattr(self, "_shown_time", None)
 
     def shown(self) -> tuple[str, int] | None:
         """What the pane is painting: ``("frame", n)`` or ``("seq", n)``, or None before the first picture."""

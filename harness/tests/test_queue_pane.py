@@ -98,7 +98,7 @@ class _Pane:
         self.ceilings: list = []
 
     def set_frame(self, image, *, gui_ms: float | None = None, index: int | None = None,
-                  seq: int | None = None) -> None:
+                  seq: int | None = None, media_time: float | None = None) -> None:
         self.frames.append(image)
 
     def set_progress(self, **values) -> None:

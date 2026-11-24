@@ -893,12 +893,16 @@ class ProcessTab:
             # The display channel's own sequence is the identity of a composited picture: the renderer's frame counter
             # is a different fact (it is what the log used to print, and it named frames the pane was not showing).
             seq = getattr(getattr(self, "_display", None), "seq", None)
-            pane.set_frame(image, seq=seq)
+            pane.set_frame(image, seq=seq,
+                           media_time=getattr(getattr(self, "_display", None), "media_time", None))
             if pressed_at is not None and getattr(self, "_display_seek_pending", False):
                 shown = getattr(pane, "shown", None)
+                shown_time = getattr(pane, "shown_time", None)
                 telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
                                     target=getattr(self, "_seek_target_frame", None),
-                                    landed=shown() if callable(shown) else None)
+                                    landed=shown() if callable(shown) else None,
+                                    target_s=getattr(self, "_seek_target_s", None),
+                                    landed_time=shown_time() if callable(shown_time) else None)
                 self._seek_pressed_at = None
             if hasattr(pane, "set_progress"):
                 pane.set_progress(
@@ -1816,7 +1820,13 @@ class ProcessTab:
         total = float(getattr(self, "max_value", 0) or 0)
         if total > 0:
             produced = max(0.0, min(1.0, float(getattr(self, "currentFrame", 0) or 0) / total))
+        target_s = None
+        duration_s = float(self._clip_duration() or 0.0)
+        if duration_s > 0.0:
+            target_s = fraction * duration_s
+        self._seek_target_s = target_s
         telemetry.event("seek press", fraction=f"{fraction:.4f}", produced=f"{produced:.4f}",
+                        target_s=None if target_s is None else f"{target_s:.3f}",
                         target_frame=target_frame)
         if self._queue_owns_pane():
             decoder = getattr(self, "_queue_pane_decoder", None)

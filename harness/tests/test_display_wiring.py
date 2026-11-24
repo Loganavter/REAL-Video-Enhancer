@@ -66,6 +66,7 @@ from src.ui.ProcessTab import ProcessTab  # noqa: E402
 from src.ui.QTcustom import (  # noqa: E402
     DEFAULT_DISPLAY_BOX,
     DISPLAY_FMT_RGB888,
+    DISPLAY_TIME_UNSET,
     DISPLAY_HEADER,
     DISPLAY_HEADER_SIZE,
     DISPLAY_OFFSET_SEQ,
@@ -208,7 +209,8 @@ def _write_frame(block, *, seq: int, width: int, height: int, pixels: bytes) -> 
     start = DISPLAY_HEADER_SIZE + slot * slot_size
     assert len(pixels) == slot_size
     block.buf[start:start + slot_size] = pixels
-    DISPLAY_HEADER.pack_into(block.buf, 0, seq, width, height, DISPLAY_FMT_RGB888, 0, 0, 0)
+    # the 8th field is the picture's media time; the stand-ins here publish without one, so the sentinel
+    DISPLAY_HEADER.pack_into(block.buf, 0, seq, width, height, DISPLAY_FMT_RGB888, 0, 0, 0, DISPLAY_TIME_UNSET)
 
 
 def test_the_reader_turns_a_hand_written_block_into_a_qimage_of_the_announced_size():
@@ -326,7 +328,7 @@ class _Pane:
         return bool(self.visible)
 
     def set_frame(self, image, *, gui_ms: float | None = None, index: int | None = None,
-                  seq: int | None = None) -> None:
+                  seq: int | None = None, media_time: float | None = None) -> None:
         self.frames.append(image)
 
     def set_progress(self, **values) -> None:
@@ -721,7 +723,7 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
 
 def test_the_default_box_is_the_probe_constant():
     assert DEFAULT_DISPLAY_BOX == (960, 540)
-    assert DISPLAY_HEADER_SIZE == 15
+    assert DISPLAY_HEADER_SIZE == 23      # + the 8-byte media time
     assert DISPLAY_OFFSET_SEQ == 0
     assert DISPLAY_OFFSET_WANTED == 9
 
