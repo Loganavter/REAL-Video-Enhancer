@@ -411,9 +411,9 @@ class DownloadPagePage:
         # ("ImageLabel ignores setText(''): a pixmap label has no text"); "no text" is already the default.
         self.label_65.setText(QCoreApplication.translate("MainWindow", u"PyTorch Version", None))
         self.label_53.setText(QCoreApplication.translate("MainWindow", u"PyTorch Backend", None))
-        self.pytorch_backend.setItemText(0, QCoreApplication.translate("MainWindow", u"CUDA", None))
-        self.pytorch_backend.setItemText(1, QCoreApplication.translate("MainWindow", u"ROCm", None))
-        self.pytorch_backend.setItemText(2, QCoreApplication.translate("MainWindow", u"xpu", None))
+        self.pytorch_backend.setItemText(0, u"CUDA")
+        self.pytorch_backend.setItemText(1, u"ROCm")
+        self.pytorch_backend.setItemText(2, u"xpu")
         # same as label_64: an ImageLabel has no text channel, so the Designer's empty `setText` has no work
         self.downloadRecommendedBtn.setText("")
         self.label_25.setText(QCoreApplication.translate("MainWindow", u"Install Recommended Dependencies", None))

@@ -213,9 +213,9 @@ class Tab3Page:
 
     def retranslate(self, language: str | None = None) -> None:
         self.label_3.setText(QCoreApplication.translate("MainWindow", u"Precision", None))
-        self.precision.setItemText(0, QCoreApplication.translate("MainWindow", u"auto", None))
-        self.precision.setItemText(1, QCoreApplication.translate("MainWindow", u"float16", None))
-        self.precision.setItemText(2, QCoreApplication.translate("MainWindow", u"float32", None))
+        self.precision.setItemText(0, u"auto")
+        self.precision.setItemText(1, u"float16")
+        self.precision.setItemText(2, u"float32")
         self.label_15.setText(QCoreApplication.translate("MainWindow", u"TensorRT Optimization Level", None))
         self.tensorrt_optimization_level.setItemText(0, QCoreApplication.translate("MainWindow", u"1", None))
         self.tensorrt_optimization_level.setItemText(1, QCoreApplication.translate("MainWindow", u"2", None))
