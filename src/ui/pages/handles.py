@@ -232,9 +232,6 @@ class EncoderHandles:
     video_pixel_format: "ComboBox"
     video_quality: "ComboBox"
     video_encoder_speed: "ComboBox"
-    audio_encoder: "ComboBox"
-    audio_bitrate: "ComboBox"
-    subtitle_encoder: "ComboBox"
     # The tab's own body: the window disables its children as a group while a render runs.
     encoderSettings: "QWidget"
 

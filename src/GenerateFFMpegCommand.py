@@ -5,9 +5,6 @@ class FFMpegCommand:
                  video_encoder_speed: str,
                  video_quality: str,
                  video_pixel_format: str,
-                 audio_encoder: str,
-                 audio_bitrate: str,
-                 subtitle_encoder: str,
                  hdr_mode: bool,
                  color_space: str,
                  color_primaries: str,
@@ -16,13 +13,10 @@ class FFMpegCommand:
         self._video_encoder_speed = video_encoder_speed
         self._video_quality = video_quality
         self._video_pixel_format = video_pixel_format
-        self._audio_encoder = audio_encoder
-        self._audio_bitrate = audio_bitrate
         self._hdr_mode = hdr_mode
         self._color_space = color_space
         self._color_primaries = color_primaries
         self._color_transfer = color_transfer
-        self._subtitle_encoder = subtitle_encoder
     
     def _get_video_quality(self, 
                            quality: str,
@@ -208,32 +202,12 @@ class FFMpegCommand:
         
         command += ["-pix_fmt",self._video_pixel_format]
 
-        match self._audio_encoder:
-            case "copy_audio":
-                command +=["-c:a","copy"]
-            case "aac":
-                command +=["-c:a","aac"]
-            case "libmp3lame":
-                command +=["-c:a","libmp3lame"]
-            case "opus":
-                command +=["-c:a","libopus"]
-            case _:
-                command +=["-c:a","copy"]
-        
-        if self._audio_encoder != "copy_audio":
-            command += ["-b:a",self._audio_bitrate]
-
-        match self._subtitle_encoder:
-            case "copy_subtitle":
-                command +=["-c:s","copy"]
-            case "srt":
-                command +=["-c:s","srt"]
-            case "ass":
-                command +=["-c:s","ass"]
-            case "webvtt":
-                command +=["-c:s","webvtt"]
-            case _:
-                command +=["-c:s","copy"]
+        # Audio and subtitles are COPIED, always (owner, 2026-11-24: "аудио и сабы то нахуя настраивать? выкинуть
+        # контролы - просто copy делать"). The video is what this app re-encodes; a copied track can neither lose
+        # quality nor drift. One consequence to know: a codec the target container cannot carry (FLAC/Opus into mp4)
+        # makes the muxer refuse at the end of the render - the default container is mkv, which carries everything.
+        command += ["-c:a", "copy"]
+        command += ["-c:s", "copy"]
 
         return command
 

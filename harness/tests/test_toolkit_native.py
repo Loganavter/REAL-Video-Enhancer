@@ -50,7 +50,7 @@ KNOWN_GENERATED_NAMES: dict[str, int] = {
     "tab_3.py": 15,
     "tab_4.py": 9,
     "tab_5.py": 2,
-    "tab_6.py": 41,
+    "tab_6.py": 32,
 }
 
 #: ``QWidget``/``QFrame`` containers whose only call is ``setObjectName`` (a layout inside, nothing else): the wrapper
@@ -66,7 +66,7 @@ KNOWN_BARE_WRAPPERS: dict[str, int] = {
     "tab_2.py": 6,
     "tab_3.py": 1,
     "tab_4.py": 4,
-    "tab_6.py": 11,
+    "tab_6.py": 8,
 }
 
 #: Designer spacers. The toolkit shape is ``layout.addStretch()``; a ``QSpacerItem`` is a widget-less item the page has
@@ -80,7 +80,7 @@ KNOWN_SPACERS: dict[str, int] = {
     "tab_2.py": 6,
     "tab_3.py": 4,
     "tab_4.py": 3,
-    "tab_6.py": 9,
+    "tab_6.py": 6,
 }
 
 #: Window attributes that collide with a `QMainWindow` member (a later call to the Qt method/property would hit the

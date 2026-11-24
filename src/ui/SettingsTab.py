@@ -103,13 +103,13 @@ class SettingsTab:
         self.color_transfer = None
         self.in_pix_fmt = ""
         self.hdr_mode = False
+        # Audio and subtitles are ALWAYS copied (owner, 2026-11-24: "аудио и сабы то нахуя настраивать? выкинуть
+        # контролы - просто copy делать"), so they are no longer controls this glue mirrors. The settings keys stay in
+        # `settings_store` for file compatibility; nothing reads them for the command any more.
         self.ffmpeg_settings_dict = {
             "encoder": self.page_handles.encoder.encoder,
-            "audio_encoder": self.page_handles.encoder.audio_encoder,
-            "audio_bitrate": self.page_handles.encoder.audio_bitrate,
             "video_pixel_format": self.page_handles.encoder.video_pixel_format,
             "video_quality": self.page_handles.encoder.video_quality,
-
         }
         self.settings = Settings()
         log("Settings: " + str(self.settings.settings))
@@ -218,9 +218,6 @@ class SettingsTab:
             self.settings.settings['video_encoder_speed'],
             self.settings.settings['video_quality'],
             self.out_pixel_fmt,
-            self.settings.settings['audio_encoder'],
-            self.settings.settings['audio_bitrate'],
-            self.settings.settings['subtitle_encoder'],  
             self.hdr_mode,
             self.color_space if self.in_pix_fmt != "yuv420p" else None,
             self.color_primaries,
@@ -233,11 +230,6 @@ class SettingsTab:
 
     def connectWriteSettings(self):
         
-        self.page_handles.encoder.subtitle_encoder.currentIndexChanged.connect(
-            lambda: self.settings.writeSetting(
-                "subtitle_encoder", self.page_handles.encoder.subtitle_encoder.currentText()
-            )
-        )
 
         self.page_handles.render_settings.precision.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
@@ -395,13 +387,7 @@ class SettingsTab:
         self.page_handles.encoder.encoder.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
-        self.page_handles.encoder.audio_encoder.currentIndexChanged.connect(
-            self.updateFFMpegCommand
-        )
         self.page_handles.encoder.video_pixel_format.currentIndexChanged.connect(
-            self.updateFFMpegCommand
-        )
-        self.page_handles.encoder.audio_bitrate.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
         self.page_handles.render_settings.auto_hdr_mode.stateChanged.connect(
@@ -411,9 +397,6 @@ class SettingsTab:
             self.updateFFMpegCommand
         )
         self.page_handles.encoder.video_encoder_speed.currentIndexChanged.connect(
-            self.updateFFMpegCommand
-        )
-        self.page_handles.encoder.subtitle_encoder.currentIndexChanged.connect(
             self.updateFFMpegCommand
         )
         # `textEdited`, not `textChanged`: the latter also fires for the programmatic `setText` above, which would mark
@@ -464,12 +447,6 @@ class SettingsTab:
             self.settings.settings["tensorrt_optimization_level"]
         )
         self.page_handles.encoder.encoder.setCurrentText(self.settings.settings["encoder"])
-        self.page_handles.encoder.audio_encoder.setCurrentText(
-            self.settings.settings["audio_encoder"]
-        )
-        self.page_handles.encoder.audio_bitrate.setCurrentText(
-            self.settings.settings["audio_bitrate"]
-        )
         self.page_handles.app_settings.preview_enabled.setChecked(
             self.settings.settings["preview_enabled"] == "True"
         )
@@ -527,9 +504,6 @@ class SettingsTab:
         )
         self.page_handles.encoder.video_encoder_speed.setCurrentText(
             self.settings.settings["video_encoder_speed"]
-        )
-        self.page_handles.encoder.subtitle_encoder.setCurrentText(
-            self.settings.settings["subtitle_encoder"]
         )
         self.page_handles.general.qualityPresetComboBox.setCurrentText(
             qualityPresetValueToLabel(self.settings.settings["quality_preset"])
