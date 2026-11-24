@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from src.ui.widgets.video_preview import (  # noqa: E402
     VideoPreviewSurface,
-    nearest_zoom_step,
+    samples_nearest_for,
     wheel_zoom_factor,
 )
 
@@ -119,20 +119,18 @@ def test_the_mip_chain_has_a_switch_so_an_ab_runs_on_one_build(monkeypatch):
     assert mip_minify_enabled() is False, "whitespace must not resurrect the fix"
 
 
-def test_magnification_snaps_to_whole_steps_because_nearest_needs_them():
-    """`Nearest` duplicates a source pixel by a WHOLE number; at 1.87x the blocks are uneven - the ragged look.
+def test_the_zoom_is_continuous_and_nearest_covers_every_magnification():
+    """BlinkTable's rule: `Nearest` always, and a continuous scale - its own constant says why.
 
-    The owner asked for nearest ("по ближайшим") AND no raggedness ("качество не рванина"), which is only possible on
-    a ladder of whole factors. Minification stays continuous: there the sampler averages instead.
+    The ladder that made nearest "honest" at whole factors also made one wheel notch do nothing and the next one
+    double the picture; that is the jerky zoom the owner reported ("рванное" = choppy, not jagged). Continuous plus
+    nearest reproduces the reference viewer: the blocks widen smoothly as the wheel turns and the pixels are the real
+    ones. Minification keeps the linear sampler - nearest there drops pixels.
     """
-    assert nearest_zoom_step(1.0) == 1.0
-    assert nearest_zoom_step(1.4) == 1.0, "just under the geometric midpoint stays at 1x"
-    assert nearest_zoom_step(1.5) == 2.0
-    assert nearest_zoom_step(1.87) == 2.0
-    assert nearest_zoom_step(3.4) == 3.0
-    assert nearest_zoom_step(5.9) == 6.0
-    assert nearest_zoom_step(0.29) == 0.29, "minification is not on the ladder"
-    assert nearest_zoom_step(0.5) == 0.5
+    assert samples_nearest_for(1.0) is True
+    assert samples_nearest_for(1.87) is True, "magnified at any factor: the real pixels"
+    assert samples_nearest_for(4.0) is True
+    assert samples_nearest_for(0.5) is False, "minification averages instead"
 
 
 def test_magnified_views_sample_nearest_and_fitted_ones_do_not(surface):
@@ -142,7 +140,8 @@ def test_magnified_views_sample_nearest_and_fitted_ones_do_not(surface):
     surface.set_zoom(2.0)
     assert surface.zoom() == 2.0 and surface.samples_nearest() is True
     surface.set_zoom(1.87)
-    assert surface.zoom() == 2.0, "a fractional magnification is snapped to the ladder"
+    assert surface.zoom() == pytest.approx(1.87), "the scale is continuous - no ladder"
+    assert surface.samples_nearest() is True, "BlinkTable's rule: nearest on every magnification"
     surface.reset_view(actual_size=True)
     assert surface.samples_nearest() is True, "exactly 1:1 is a source pixel per screen pixel"
 

@@ -932,6 +932,11 @@ class ProcessTab:
             # The queue tab's item is the pane's one owner there: the feed stages nothing and its frames are dropped.
             return False
         if not bool(getattr(self, "isPreview", False)):
+            # An export's feed owns the pane UNLESS a tail is painting it: during playback the tail is the timeline
+            # (position, rate, seek), and the feed publishing at the same time would be the two-painter race the tail
+            # rule was written to stop. A held export has no tail, so the feed's one-frame loan is untouched.
+            if getattr(self, "_live_tail", None) is not None and not bool(getattr(self, "_preview_paused", True)):
+                return False
             return True
         return bool(getattr(self, "_display_seek_pending", False))
 
@@ -1618,7 +1623,8 @@ class ProcessTab:
         from .video.tail import LiveTailThread
 
         try:
-            tail = LiveTailThread(path, paused=self._preview_paused)
+            box = self._pane_display_box()
+            tail = LiveTailThread(path, paused=self._preview_paused, target_size=box)
             tail.frame_ready.connect(self._on_preview_frame)
             tail.error.connect(lambda message: log(f"preview tail: {message}"))
             # A press the file could not answer must be legible in log.txt: "it did nothing" and "it snapped to the
@@ -1629,6 +1635,24 @@ class ProcessTab:
             self._wire_preview_strip()
             self._live_tail = tail
             self._live_tail_wanted = False
+            # Playback continues where the picture stands - but only where FRAMES EXIST. A seek past the produced edge is
+            # answered on demand by the renderer's display channel (it decodes one frame), which does NOT write that
+            # frame to the output; the file therefore holds nothing after the edge, and a tail asked to start there
+            # cannot read it and would play from the file's beginning (measured live 2026-11-25: seek to 9.384 s on a
+            # render that had written 4.9 s, playback started at 1.1 s). So the start is clamped to the produced edge and
+            # the log says both numbers: an honest "from here, because that is all there is".
+            start = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+            clip = self._clip_duration()
+            produced = self._live_produced_fraction()
+            edge = produced * clip if clip > 0.0 and produced > 0.0 else 0.0
+            if edge > 0.0 and start > edge:
+                log(f"preview: playback starts at the render's edge {edge:.3f}s - {start:.3f}s is not written yet")
+                start = edge
+            if start > 0.0:
+                try:
+                    tail.seek(start, attempt_past_edge=True)
+                except Exception:
+                    pass
             tail.start()
             self._sync_preview_transport()
         except Exception as exc:  # a preview that cannot follow must not take the render down
@@ -1637,6 +1661,7 @@ class ProcessTab:
 
     def _stop_live_tail(self) -> None:
         self._live_tail_wanted = False
+        self._playback_tail = False
         tail = getattr(self, "_live_tail", None)
         if tail is not None:
             try:
@@ -1693,7 +1718,25 @@ class ProcessTab:
         # ONE producer at a time: while the queue tab owns the pane, pressing play starts the QUEUE item, not the
         # render's tail/decoder behind it - a decoder playing under a picture nobody shows is pure cost.
         queue_owns = self._queue_owns_pane()
+        if holding and getattr(self, "_playback_tail", False):
+            # The tail this PLAY created exists only while the transport plays; pausing drops it and the feed's cheap
+            # path (the renderer's own composited frame) takes the pane back. A PREVIEW's tail and a tail somebody else
+            # owns (the queue tab's hand-back) are NOT ours to stop - they are the picture there.
+            self._stop_live_tail()
         tail = getattr(self, "_live_tail", None)
+        if not holding and tail is None and not queue_owns and not bool(getattr(self, "isPreview", False)):
+            # PLAY, export, no tail: the pane was following the renderer's newest frames, which is not playback. The
+            # output file is the timeline; start the tail here (the GUI tick builds it) at the pane's own position, and
+            # the feed stands down while it paints. Pausing drops it again, so the feed's cheap path is what a held
+            # pane uses (owner, 2026-11-25: "воспроизведение всё ещё просто переключает нас на слежение за последними
+            # апкад кадрами").
+            options = getattr(self, "currentRenderOptions", None)
+            path = str(getattr(options, "outputPath", "") or "")
+            if path:
+                self._start_live_tail(path)
+                self._ensure_live_tail()
+                self._playback_tail = getattr(self, "_live_tail", None) is not None
+                tail = getattr(self, "_live_tail", None)
         if tail is not None:
             if not holding and not queue_owns:
                 # Its own try: a resume that cannot work out the head must still unpause the tail (the first version

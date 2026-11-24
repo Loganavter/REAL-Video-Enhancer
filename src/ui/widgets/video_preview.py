@@ -87,26 +87,17 @@ def mip_minify_enabled() -> bool:
     return str(os.environ.get("RVE_MIP_MINIFY", "1")).strip() != "0"
 
 
-#: The magnification ladder for NEAREST sampling. `Nearest` duplicates a source pixel by a WHOLE number of screen
-#: pixels; at a fractional factor the blocks are 3 px wide in one place and 4 px in the next, which is the ragged
-#: "рванина" the owner refused (2026-11-24: "мне нужны по ближайшим, но при этом качество не рванина"). So the applied
-#: zoom is always one of these, and the wheel moves a target between them. libplacebo calls the same mode
-#: `oversample` ("aspect-ratio preserving nearest neighbour sampling").
-ZOOM_STEPS = (1.0, 2.0, 3.0, 4.0, 6.0, 8.0)
+#: NEAREST on every magnification, like the reference viewer. BlinkTable's own constant says why in one line:
+#: `DEFAULT_INTERPOLATION_METHOD = "NEAREST"` - "it is the only filter whose result is the real pixels (blocks you can
+#: count), and every other choice is a taste for smoothing". Its zoom is CONTINUOUS, so the blocks widen smoothly as
+#: the wheel turns; a ladder is what makes that look jerky (owner, 2026-11-25: "почему у нас зум очень неплавный? У
+#: нас заданы большие шаги" + "напомни как blinktable всегда делает nearest"). Minification (fit and below) keeps the
+#: LINEAR sampler: nearest there would drop pixels and shimmer.
 
 
-def nearest_zoom_step(zoom: float) -> float:
-    """The allowed magnification step closest to `zoom`, compared in log space so the feel is even.
-
-    Below 1.0 the value is returned untouched: that is MINIFICATION (fit and tighter), where `Nearest` would alias
-    rather than preserve pixels, so the caller keeps the linear sampler there until the mip chain lands.
-    """
-    value = float(zoom)
-    if value < 1.0:
-        return value
-    import math
-
-    return min(ZOOM_STEPS, key=lambda step: abs(math.log(value / step)))
+def samples_nearest_for(scale: float) -> bool:
+    """Whether this drawn scale is magnified (or exactly 1:1) - where `Nearest` shows the real pixels."""
+    return float(scale) >= 1.0 - 1e-9
 
 
 def wheel_zoom_factor(angle_delta: float | None) -> float | None:
@@ -692,7 +683,7 @@ class VideoPreviewSurface(QRhiWidget):
         `_zoom`, so it is the effective scale that decides - a fit of a frame SMALLER than the pane does magnify.
         """
         scale = self._fit_scale() if self._zoom_is_fit else float(self._zoom)
-        return scale >= 1.0 - 1e-9
+        return samples_nearest_for(scale)
 
     def zoom(self) -> float:
         """The scale the picture is DRAWN at: `_fit_scale()` while the view is fitted, else the stored factor.
@@ -717,9 +708,8 @@ class VideoPreviewSurface(QRhiWidget):
         """
         target = max(self._min_zoom(), min(MAX_ZOOM, float(zoom)))
         self._zoom_target = target
-        # Magnification is a ladder of whole factors: `Nearest` at 1.87x draws uneven pixel blocks. Minification
-        # (fit and tighter) stays continuous, because there the sampler averages.
-        target = nearest_zoom_step(target)
+        # CONTINUOUS on purpose: the step size is the wheel's, not the ladder's. `samples_nearest` decides the filter
+        # instead - crisp at whole factors, linear between them (a little soft, never ragged, never a 100 % jump).
         if around is not None:
             # Keep the frame point under the cursor where it is: solve for the pan that puts it back after the scale
             # change. The first version scaled the offset by a factor, which drifted the picture at the edges.

@@ -81,11 +81,15 @@ class TailReader(QObject):
 
     def __init__(self, parent: QObject | None = None, *, pixel_format: str = "rgb24",
                  max_frames_per_poll: int = 4, codec_threads: int = 2,
-                 container_factory=None, open_grace_polls: int = 40) -> None:
+                 container_factory=None, open_grace_polls: int = 40,
+                 target_size: tuple[int, int] | None = None) -> None:
         super().__init__(parent)
         if pixel_format not in FORMATS:
             raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
         self._pixel_format = pixel_format
+        #: `(w, h)` the decoded picture is converted to; None keeps the file's own size. The pane cannot show more
+        #: than its box, and converting a 2880x2160 frame to RGB costs 24.9 MB of traffic per frame.
+        self._target_size = None if target_size is None else (max(1, int(target_size[0])), max(1, int(target_size[1])))
         self._max_frames_per_poll = max(1, int(max_frames_per_poll))
         self._codec_threads = max(1, int(codec_threads))
         self._container_factory = container_factory or _default_container_factory
@@ -324,7 +328,7 @@ class TailReader(QObject):
             self._last_pts = pts
             if self._edge_pts is None or pts > self._edge_pts:
                 self._edge_pts = pts
-            self.frame_ready.emit(pack_frame(decoded, index, self._pixel_format, pts=pts))
+            self.frame_ready.emit(pack_frame(decoded, index, self._pixel_format, pts=pts, size=self._target_size))
             emitted += 1
         else:
             # The cap stopped the read, not the file: there is more written data behind the playhead.
@@ -465,12 +469,14 @@ class LiveTailThread(QThread):
     MAX_PRESENT_WAIT_S = 0.5
 
     def __init__(self, path: str, parent: QObject | None = None, *, interval_ms: int = 120,
-                 paused: bool = True, clock=None, sleep=None, **reader_kwargs) -> None:
+                 paused: bool = True, clock=None, sleep=None, target_size=None, **reader_kwargs) -> None:
         super().__init__(parent)
         #: Injected by tests; the thread itself uses the real clocks. Pacing by media time is the whole difference
         #: between "the preview plays at the renderer's production rate" and "at the file's own fps".
         self._clock = clock or time.monotonic
         self._sleep = sleep or time.sleep
+        #: The pane's box: the reader converts each decoded frame to it instead of to the file's own (4K-class) size.
+        self._target_size = None if target_size is None else (max(1, int(target_size[0])), max(1, int(target_size[1])))
         #: `(pts, wall)` the media clock is anchored to, or None before the first presented frame / after a seek.
         self._present_anchor: tuple[float, float] | None = None
         self._path = str(path)
@@ -561,7 +567,7 @@ class LiveTailThread(QThread):
     # -- the loop ------------------------------------------------------------------------------------
 
     def run(self) -> None:
-        reader = TailReader(pixel_format="rgb24", **self._reader_kwargs)
+        reader = TailReader(pixel_format="rgb24", target_size=self._target_size, **self._reader_kwargs)
         reader.frame_ready.connect(self._present)
         reader.error.connect(self.error)
         reader.seek_unavailable.connect(self.seek_unavailable)

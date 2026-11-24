@@ -62,7 +62,7 @@ def frame_pts(frame) -> float:
 
 
 def pack_frame(frame, index: int, pixel_format: str = "rgb24",
-               pts: float | None = None) -> FrameRef:
+               pts: float | None = None, size: tuple[int, int] | None = None) -> FrameRef:
     """A :class:`FrameRef` from one decoded PyAV-style frame, with no copy beyond the pack itself.
 
     ``rgb24`` asks PyAV for a packed RGB picture; ``yuv420p`` asks for the three planes and keeps
@@ -75,6 +75,14 @@ def pack_frame(frame, index: int, pixel_format: str = "rgb24",
     """
     if pixel_format not in FORMATS:
         raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
+    if size is not None:
+        # Convert AND scale in one step, at the size the pane can actually show. Measured cost of not doing it: an
+        # RGB24 picture of a 2880x2160 upscale is 24.9 MB per frame, and the pane draws about 504x378 of it - the
+        # packing and the QImage in the pane moved 43x more bytes than the screen can use (owner, 2026-11-25: the
+        # playback path should be the cheap one). Never upscales: a frame already smaller than `size` is left alone.
+        target_w, target_h = max(1, int(size[0])), max(1, int(size[1]))
+        if target_w < int(frame.width) or target_h < int(frame.height):
+            frame = frame.reformat(width=target_w, height=target_h)
     width, height = int(frame.width), int(frame.height)
     pts = frame_pts(frame) if pts is None else float(pts)
     if pixel_format == "rgb24":
