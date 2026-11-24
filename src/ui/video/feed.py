@@ -126,7 +126,9 @@ class PreviewFeed(QObject):
                 except Exception:
                     pass
 
+    @property
     def attached(self) -> bool:
+        """Whether the block is usable - the same shape `DisplayReader.attached` has, so a caller needs no adapter."""
         return bool(self._attached)
 
     def set_wanted(self, wanted: bool) -> None:

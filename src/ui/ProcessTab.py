@@ -903,26 +903,15 @@ class ProcessTab:
     def _display_chain(self):
         """The object that carries the picture and the seek request: the feed when there is one, else the reader.
 
-        The reader stays the block's owner (`self._display`): the reach and painter predicates ask IT whether the
-        block is usable, and nothing about them changed. The feed is the chain over it. A tab wired by hand (a
-        test with a stub reader) has the reader only, and both answer the same calls.
+        Both answer the same calls (`attached`, `set_wanted`, `poll`, `status`), which is why one expression is enough:
+        the feed composes the reader, and a tab wired by hand (a test stub) has the reader alone.
         """
-        feed = getattr(self, "_feed", None)
-        return feed if feed is not None else getattr(self, "_display", None)
-
-    @staticmethod
-    def _block_attached(display) -> bool:
-        """`attached` is a property on the reader and a method on the feed; one question, both shapes."""
-        value = getattr(display, "attached", False)
-        try:
-            return bool(value() if callable(value) else value)
-        except Exception:
-            return False
+        return getattr(self, "_feed", None) or getattr(self, "_display", None)
 
     def _update_display_wanted(self) -> None:
         """Re-assert the request byte after anything that changes the answer (pause, job start, page hide)."""
         display = self._display_chain()
-        if display is None or not self._block_attached(display):
+        if display is None or not display.attached:
             return
         display.set_wanted(self._display_should_want())
 
@@ -978,7 +967,7 @@ class ProcessTab:
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
         display = self._display_chain()
-        if display is None or not self._block_attached(display):
+        if display is None or not display.attached:
             return
         wanted = self._display_should_want()
         display.set_wanted(wanted)

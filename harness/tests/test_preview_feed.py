@@ -247,7 +247,7 @@ def test_before_the_first_picture_the_feed_names_nothing():
 
 def test_a_feed_that_never_attached_polls_nothing_and_names_nothing():
     feed = PreviewFeed(_segment_name("none"), box=(2, 2))
-    assert feed.attached() is False
+    assert feed.attached is False
     assert feed.poll() is False
     assert feed.image() is None
     assert feed.shown() is None
@@ -262,7 +262,7 @@ def test_a_reader_that_cannot_attach_is_refused_rather_than_used():
     feed = PreviewFeed(_segment_name("refused"), box=(2, 2), reader=reader)
 
     assert feed.attach() is False
-    assert feed.attached() is False
+    assert feed.attached is False
     reader.publish(_picture(), seq=3, media_time=None)
     assert feed.poll() is False, "a block that is not usable is not polled"
     assert feed.image() is None
@@ -301,7 +301,7 @@ def test_detaching_releases_the_reader_and_forgets_the_picture():
 
     feed.detach()
     assert reader.released is True
-    assert feed.attached() is False
+    assert feed.attached is False
     assert feed.image() is None
     assert feed.poll() is False
     feed.detach()                       # safe twice
