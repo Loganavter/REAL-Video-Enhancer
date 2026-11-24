@@ -78,6 +78,15 @@ WHEEL_UNITS_PER_NOTCH = 120.0
 WHEEL_ZOOM_PER_NOTCH = 1.2
 #: How far the pointer must travel before an LMB press becomes a pan instead of the compare flash.
 PAN_THRESHOLD_PX = 3.0
+#: Mipminification on/off. The chain is the whole fix for the fit view (a 1440x1080 frame in a 421x512 pane is a
+#: 3.42x minification through ONE bilinear tap, which aliases); the switch exists so an A/B runs on ONE build and the
+#: owner can compare the two arms himself. `RVE_MIP_MINIFY=0` keeps the old single-level texture.
+def mip_minify_enabled() -> bool:
+    import os
+
+    return str(os.environ.get("RVE_MIP_MINIFY", "1")).strip() != "0"
+
+
 #: The magnification ladder for NEAREST sampling. `Nearest` duplicates a source pixel by a WHOLE number of screen
 #: pixels; at a fractional factor the blocks are 3 px wide in one place and 4 px in the next, which is the ragged
 #: "рванина" the owner refused (2026-11-24: "мне нужны по ближайшим, но при этом качество не рванина"). So the applied
@@ -888,8 +897,12 @@ class VideoPreviewSurface(QRhiWidget):
         """
         rhi = self._rhi
         initial_size = self._frame.size() if self._frame is not None else QSize(1, 1)
-        self._texture = rhi.newTexture(QRhiTexture.Format.RGBA8, initial_size, 1,
-                                       QRhiTexture.Flag.UsedAsTransferSource)
+        # `MipMapped` makes Qt allocate the chain (`mipLevelsForSize` = 11 for 1440x1080) and requires the levels to be
+        # generated after each upload; `UsedWithGenerateMips` is what the backend needs to accept `generateMips`.
+        flags = QRhiTexture.Flag.UsedAsTransferSource
+        if mip_minify_enabled():
+            flags |= QRhiTexture.Flag.MipMapped | QRhiTexture.Flag.UsedWithGenerateMips
+        self._texture = rhi.newTexture(QRhiTexture.Format.RGBA8, initial_size, 1, flags)
         if not self._texture.create():
             raise RuntimeError(f"frame texture {initial_size.width()}x{initial_size.height()} was refused by QRhi")
         # The THIRD filter is the mipmap mode, and it must be `None_` for a single-level texture: with a mipmap filter
@@ -900,8 +913,12 @@ class VideoPreviewSurface(QRhiWidget):
                                                QRhiSampler.Filter.None_, QRhiSampler.AddressMode.ClampToEdge,
                                                QRhiSampler.AddressMode.ClampToEdge)
         self._sampler_nearest.create()
+        # The THIRD argument is the mipmap mode. `Linear` there is trilinear: the fit view samples the two levels the
+        # derivative-chosen LOD falls between, which is what turns the aliasing tap into an average. Left `None_` when
+        # the chain is off, because a mipmap mode over a single-level texture sampled opaque black on llvmpipe once.
+        mip_mode = QRhiSampler.Filter.Linear if mip_minify_enabled() else QRhiSampler.Filter.None_
         self._sampler_linear = rhi.newSampler(QRhiSampler.Filter.Linear, QRhiSampler.Filter.Linear,
-                                              QRhiSampler.Filter.None_, QRhiSampler.AddressMode.ClampToEdge,
+                                              mip_mode, QRhiSampler.AddressMode.ClampToEdge,
                                               QRhiSampler.AddressMode.ClampToEdge)
         self._sampler_linear.create()
 
@@ -1154,6 +1171,11 @@ class VideoPreviewSurface(QRhiWidget):
         if self._texture_dirty:
             upload_started = time.perf_counter()
             updates.uploadTexture(self._texture, picture)
+            if mip_minify_enabled():
+                # Same batch as the upload, BEFORE the pass: the chain is built from level 0 on the queue, and
+                # `resourceUpdate` is only legal outside a render pass. Cost is one-time per uploaded frame (the chain
+                # of an 1440x1080 RGBA8 is ~2.1 MB - noise against the 6.2 MB level 0 that already crossed the bus).
+                updates.generateMips(self._texture)
             telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
                                   size_bytes=picture.width() * picture.height() * 4)
             self._texture_dirty = False
@@ -1213,6 +1235,8 @@ class VideoPreviewSurface(QRhiWidget):
         if self._texture_dirty:
             upload_started = time.perf_counter()
             updates.uploadTexture(self._texture, frame)
+            if mip_minify_enabled():
+                updates.generateMips(self._texture)
             telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
                                   size_bytes=frame.width() * frame.height() * 4)
             self._texture_dirty = False

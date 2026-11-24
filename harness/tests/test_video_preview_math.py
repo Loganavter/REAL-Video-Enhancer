@@ -100,6 +100,25 @@ def test_a_wheel_notch_scales_by_its_magnitude_not_by_the_event():
     assert wheel_zoom_factor(None) is None
 
 
+def test_the_mip_chain_has_a_switch_so_an_ab_runs_on_one_build(monkeypatch):
+    """`RVE_MIP_MINIFY` exists for the A/B, not for production: the default is on.
+
+    The chain cannot be proven by a test - a texture only exists under a real QRhi, and the null backend refuses to
+    instantiate (`QRhiWidget: QRhi is not supported on this platform`). What IS pinned here is the policy the two live
+    arms depend on, so a stale env cannot silently turn the fix off.
+    """
+    from src.ui.widgets.video_preview import mip_minify_enabled
+
+    monkeypatch.delenv("RVE_MIP_MINIFY", raising=False)
+    assert mip_minify_enabled() is True, "the fix is on by default"
+    monkeypatch.setenv("RVE_MIP_MINIFY", "1")
+    assert mip_minify_enabled() is True
+    monkeypatch.setenv("RVE_MIP_MINIFY", "0")
+    assert mip_minify_enabled() is False, "the baseline arm"
+    monkeypatch.setenv("RVE_MIP_MINIFY", " 0 ")
+    assert mip_minify_enabled() is False, "whitespace must not resurrect the fix"
+
+
 def test_magnification_snaps_to_whole_steps_because_nearest_needs_them():
     """`Nearest` duplicates a source pixel by a WHOLE number; at 1.87x the blocks are uneven - the ragged look.
 

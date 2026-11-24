@@ -1014,13 +1014,38 @@ def install(window) -> None:
             print(f"capture-server: rhi -> {report}", flush=True)
             return
         if wanted.startswith("grab:"):
-            target = wanted[len("grab:"):].strip() or os.path.join(root, f"grab-{_stamp()}.png")
+            # `grab:<path>` grabs the WINDOW; `grab:<path>@<objectName>` grabs ONE WIDGET. The second form exists
+            # because a picture's quality cannot be measured through a window crop: the pane's position in the window
+            # is not exposed by any verb (`state:` reports progress and the strip, not geometry), so a pixel gate on the
+            # preview would otherwise have to guess where the pane is (measured 2026-11-25).
+            spec = wanted[len("grab:"):].strip()
+            target, _, widget_name = spec.partition("@")
+            target = target.strip() or os.path.join(root, f"grab-{_stamp()}.png")
             os.makedirs(os.path.dirname(target) or root, exist_ok=True)
-            pixmap = window.grab()
-            saved = pixmap.save(target)
+            subject = window
+            if widget_name:
+                found = window.findChild(QWidget, widget_name.strip())
+                if found is None:
+                    _finish({"stamp": _stamp(), "kind": "grab", "path": target, "saved": False,
+                             "error": f"no widget named {widget_name.strip()!r}"})
+                    return
+                subject = found
+            # A QRhiWidget cannot be grabbed with `QWidget.grab()`: the call blocks waiting for a frame that only the
+            # widget's own render loop produces (measured 2026-11-25: the request timed out after 30 s). Its picture
+            # is `grabFrame()`, which is also what the RHI pixel gate uses.
+            grab_frame = getattr(subject, "grabFrame", None)
+            if callable(grab_frame) and widget_name:
+                image = grab_frame()
+                saved = image is not None and image.save(target)
+                size = [image.width(), image.height()] if image is not None else [0, 0]
+            else:
+                pixmap = subject.grab()
+                saved = pixmap.save(target)
+                size = [pixmap.width(), pixmap.height()]
             _finish({"stamp": _stamp(), "kind": "grab", "path": target, "saved": bool(saved),
-                     "size": [pixmap.width(), pixmap.height()]})
-            print(f"capture-server: grab -> {target} ({pixmap.width()}x{pixmap.height()})", flush=True)
+                     "widget": widget_name.strip() or None, "size": size})
+            print(f"capture-server: grab {widget_name.strip() or 'window'} -> {target} "
+                  f"({pixmap.width()}x{pixmap.height()})", flush=True)
             return
         if wanted.startswith("probe_at:"):
             from PySide6.QtCore import QPoint

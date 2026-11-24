@@ -1,0 +1,2 @@
+arm=0 output= progress=[0.0, 495.0, 0.0, 0.0]
+arm=1 output= progress=[0.0, 495.0, 0.0, 0.0]

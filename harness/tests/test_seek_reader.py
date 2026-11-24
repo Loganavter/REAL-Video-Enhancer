@@ -356,3 +356,44 @@ def test_the_break_even_shrinks_as_the_frame_grows():
     with open(os.path.join(SCRATCH, "seek-reader-scale.txt"), "w", encoding="utf-8") as handle:
         handle.write(evidence + "\n")
     print("\n" + evidence)
+
+
+def test_a_probe_started_early_is_what_the_first_press_uses(monkeypatch):
+    """The grid probe is a whole extra ffmpeg decoding 13 frames; it must not run inside the first press.
+
+    Measured 2026-11-25: the probe costs ~133 ms at 1440x1080 and ~273 ms at 2160p, and it used to run inline in
+    whichever request arrived first - the first seek of every render cost hundreds of milliseconds more than the rest.
+    `GridProbe` starts it where the render already spends seconds (engine load) and `_ensure_grid` takes the answer.
+    """
+    from src.utils import SeekReader as SR
+
+    calls: list[tuple] = []
+
+    def fake_probe(input_file, ffmpeg_path="ffmpeg", frames=SR._PROBE_FRAMES, near=0.0):
+        calls.append((input_file, near))
+        return (0.5, 0.041666)
+
+    monkeypatch.setattr(SR, "probe_frame_grid", fake_probe)
+    probe = SR.GridProbe("clip.mkv", "ffmpeg", near=0.0)
+    assert probe.value(timeout=5.0) == (0.5, 0.041666)
+    assert len(calls) == 1, "one probe, once"
+
+    # A reader handed that handle must NOT probe again, and must see the same grid.
+    inline: list[int] = []
+    monkeypatch.setattr(SR, "probe_frame_grid", lambda *a, **k: inline.append(1))
+    reader = SR.SeekReader("clip.mkv", width=4, height=4, grid_probe=probe)
+    assert reader._ensure_grid() == (0.5, 0.041666)
+    assert inline == [], "the inline probe must not run when a probe already answered"
+
+
+def test_a_probe_that_never_answers_falls_back_to_one_spawn_per_seek(monkeypatch):
+    """A dead probe is not a hang: `value()` times out to None and the reader keeps today's behaviour."""
+    from src.utils import SeekReader as SR
+
+    class Dead:
+        def value(self, timeout=None):
+            return None
+
+    monkeypatch.setattr(SR, "probe_frame_grid", lambda *a, **k: (_ for _ in ()).throw(AssertionError("inline ran")))
+    reader = SR.SeekReader("clip.mkv", width=4, height=4, grid_probe=Dead())
+    assert reader._ensure_grid() is None, "no grid: the seek re-opens the source, which is the documented fallback"
