@@ -40,6 +40,8 @@ file.
 
 from __future__ import annotations
 
+import time
+
 import os
 
 from PySide6.QtCore import QObject, QThread, Signal
@@ -458,9 +460,19 @@ class LiveTailThread(QThread):
     #: A press the file could not satisfy: the picture stays, the message goes to the owner's log.
     seek_unavailable = Signal(str)
 
+    #: The longest a single frame may be held back: a gap in the file (or a seek to a distant point) must not park the
+    #: thread on a stale estimate - the picture catches up instead of freezing.
+    MAX_PRESENT_WAIT_S = 0.5
+
     def __init__(self, path: str, parent: QObject | None = None, *, interval_ms: int = 120,
-                 paused: bool = True, **reader_kwargs) -> None:
+                 paused: bool = True, clock=None, sleep=None, **reader_kwargs) -> None:
         super().__init__(parent)
+        #: Injected by tests; the thread itself uses the real clocks. Pacing by media time is the whole difference
+        #: between "the preview plays at the renderer's production rate" and "at the file's own fps".
+        self._clock = clock or time.monotonic
+        self._sleep = sleep or time.sleep
+        #: `(pts, wall)` the media clock is anchored to, or None before the first presented frame / after a seek.
+        self._present_anchor: tuple[float, float] | None = None
         self._path = str(path)
         self._interval_ms = max(20, int(interval_ms))
         self._reader_kwargs = reader_kwargs
@@ -472,6 +484,7 @@ class LiveTailThread(QThread):
         #: A preview stands still until its transport is pressed (the owner's default), so `paused` starts True: the
         #: loop still reads until the FIRST frame exists (an empty pane would be "paused on nothing"), then holds it.
         self._paused = bool(paused)
+        self._present_anchor = None
 
     # -- what the owner reads while the loop runs ----------------------------------------------------
 
@@ -498,6 +511,8 @@ class LiveTailThread(QThread):
         those (measured live 2026-11-24: a resume aimed at 2.544 s landed on 0.334 s because the edge still said 0.1).
         """
         self._pending_seek = (max(0.0, float(seconds)), bool(attempt_past_edge))
+        # A new position re-anchors the media clock: the next frame is due NOW, not where the old position was.
+        self._present_anchor = None
 
     @property
     def paused(self) -> bool:
@@ -511,16 +526,43 @@ class LiveTailThread(QThread):
         press while paused must show its target - and that poll is the only read a paused loop performs.
         """
         self._paused = bool(paused)
+        # A pause ends the run the clock was measuring; the resume starts a fresh one (see `_present`).
+        self._present_anchor = None
 
     def stop_and_wait(self, timeout_ms: int = 3000) -> None:
         self._stop_requested = True
         self.wait(timeout_ms)
 
+    # -- pacing --------------------------------------------------------------------------------------
+
+    def _present(self, frame) -> None:
+        """Hand the frame on at its MEDIA time, not as fast as the file grew.
+
+        The reader polls every `interval_ms` and hands over whatever it found; with no pacing the picture advances at the
+        renderer's production rate, so a 23.976 fps source plays at whatever fps the upscaler happens to run at (owner,
+        2026-11-25: "кнопка play ... не с оригинальным фпс"). Here the media clock is anchored to the first presented
+        frame and advances with wall time; a frame is held back until its pts is reached, and a frame that is already
+        late is shown at once so the picture catches up instead of falling further behind.
+
+        A bounding wait keeps a gap or a distant seek from parking the thread on a stale estimate.
+        """
+        pts = float(getattr(frame, "pts", 0.0) or 0.0)
+        now = float(self._clock())
+        anchor = self._present_anchor
+        if anchor is None or pts < anchor[0]:
+            anchor = (pts, now)
+            self._present_anchor = anchor
+        due = anchor[0] + (now - anchor[1])
+        ahead = pts - due
+        if ahead > 0.0:
+            self._sleep(min(ahead, self.MAX_PRESENT_WAIT_S))
+        self.frame_ready.emit(frame)
+
     # -- the loop ------------------------------------------------------------------------------------
 
     def run(self) -> None:
         reader = TailReader(pixel_format="rgb24", **self._reader_kwargs)
-        reader.frame_ready.connect(self.frame_ready)
+        reader.frame_ready.connect(self._present)
         reader.error.connect(self.error)
         reader.seek_unavailable.connect(self.seek_unavailable)
         self._reader = reader

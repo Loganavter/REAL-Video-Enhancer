@@ -567,3 +567,55 @@ def test_a_reader_built_without_a_factory_has_the_real_demuxer(qapp):
     assert reader._container_factory.__name__ == "_default_container_factory"
     thread = LiveTailThread("/never/created.mkv", interval_ms=20)
     assert thread is not None, "the thread must be constructible with the default reader arguments"
+
+
+def test_the_tail_presents_at_the_media_rate_not_at_the_production_rate(qapp):
+    """A frame is handed on when its PTS is due, so a 23.976 source plays at 23.976 fps (owner, 2026-11-25).
+
+    Without pacing the reader's `poll` hands over whatever the file grew to and the picture advances at the renderer's
+    production rate - which is what "play is not at the original fps" means. The clock is injected here: the assertion is
+    the SLEEP between two frames, i.e. the pacing itself, not a wall-clock measurement.
+    """
+    from types import SimpleNamespace
+
+    state = {"now": 100.0, "slept": []}
+
+    def clock():
+        return state["now"]
+
+    def sleep(seconds):
+        state["slept"].append(round(float(seconds), 4))
+        state["now"] += float(seconds)
+
+    thread = LiveTailThread("clip.mkv", clock=clock, sleep=sleep)
+    shown = []
+    thread.frame_ready.connect(lambda frame: shown.append(round(frame.pts, 4)))
+
+    interval = 1.0 / 23.976
+    thread._present(SimpleNamespace(pts=0.0))
+    thread._present(SimpleNamespace(pts=interval))
+    thread._present(SimpleNamespace(pts=2 * interval))
+
+    assert shown == [0.0, 0.0417, 0.0834]
+    assert state["slept"] == [0.0417, 0.0417], f"one interval of pacing per frame, got {state['slept']}"
+
+    # A frame that is already late is shown at once: the picture catches up instead of falling further behind.
+    state["now"] += 1.0
+    before = list(state["slept"])
+    thread._present(SimpleNamespace(pts=3 * interval))
+    assert state["slept"] == before, "a late frame must not be delayed further"
+
+
+def test_a_seek_re_anchors_the_media_clock(qapp):
+    """After a jump the next frame is due NOW; without the reset the old anchor would hold it for seconds."""
+    from types import SimpleNamespace
+
+    state = {"now": 0.0, "slept": []}
+    thread = LiveTailThread("clip.mkv", clock=lambda: state["now"],
+                            sleep=lambda seconds: (state["slept"].append(seconds), state.__setitem__("now", state["now"] + seconds)))
+    thread._present(SimpleNamespace(pts=10.0))
+    state["now"] = 30.0
+    thread.seek(100.0)
+    before = len(state["slept"])
+    thread._present(SimpleNamespace(pts=100.0))
+    assert len(state["slept"]) == before, "the first frame after a seek is presented at once"

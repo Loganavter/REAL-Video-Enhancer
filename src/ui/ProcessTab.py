@@ -1545,22 +1545,31 @@ class ProcessTab:
             self._live_tail = None
         self._sync_preview_transport()
 
-    def _resume_tail_at_the_head(self, tail) -> None:
-        """On play, put the tail where the RENDERER is, not where the tail stopped.
+    def _resume_tail_at_the_pane(self, tail) -> None:
+        """On play, continue from where the PANE stands - the seeker position - not from the renderer's head.
 
-        A held pane stops polling: its published edge is frozen at the last frame it read, and the file has grown since.
-        Resuming from that edge replays the backlog and starts the picture seconds behind the head (measured live
-        2026-11-24: play after a held seek restarted at 0.459 s while the renderer stood at 11 % of the clip). The head is
-        the produced share of the clip; the tail's own edge is only the fallback when the clip length is unknown.
+        Owner, 2026-11-25: "кнопка play начинает играть видео не с позиции сикера". The previous rule jumped to the
+        produced head on purpose, to avoid replaying the backlog a held pane had accumulated; that cured a stall but
+        made play ignore the seeker, which is the behaviour a viewer actually relies on. Both are satisfied here: the
+        pane's position is the target, clamped into the produced band, so play continues where the picture stands and a
+        backlog is still played at the media rate rather than skipped.
+
+        The pane's clock is `_preview_playhead` (set by every tail frame and by a held seek). A pane that never painted
+        one has no position and the head is the only honest answer.
         """
         clip = self._clip_duration()
         produced = self._live_produced_fraction()
-        target = (produced * clip if clip > 0.0 and produced > 0.0
-                  else float(getattr(tail, "produced_seconds", 0.0) or 0.0))
+        head = (produced * clip if clip > 0.0 and produced > 0.0
+                else float(getattr(tail, "produced_seconds", 0.0) or 0.0))
+        pane = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        if clip > 0.0:
+            pane = min(max(0.0, pane), clip)
+        target = pane if pane > 0.0 else head
         if target <= 0.0:
             return
-        tail.seek(target, attempt_past_edge=True)
-        log(f"preview transport: resuming at the render's head {target:.3f}s (produced {produced:.1%} of {clip:.3f}s)")
+        tail.seek(target, attempt_past_edge=pane > 0.0)
+        log(f"preview transport: resuming at the pane's position {target:.3f}s "
+            f"(pane {pane:.3f}s, render head {head:.3f}s = {produced:.1%} of {clip:.3f}s)")
 
     def _on_preview_pause_toggled(self, paused: bool) -> None:
         telemetry.event("transport", paused=int(bool(paused)))
@@ -1589,7 +1598,7 @@ class ProcessTab:
                 # Its own try: a resume that cannot work out the head must still unpause the tail (the first version
                 # put both in one block, and an AttributeError in the head arithmetic skipped `set_paused` entirely).
                 try:
-                    self._resume_tail_at_the_head(tail)
+                    self._resume_tail_at_the_pane(tail)
                 except Exception as exc:
                     log(f"preview transport: resume at the head failed ({exc})")
             try:
