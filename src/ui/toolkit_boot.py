@@ -62,5 +62,18 @@ def source() -> str | None:
 
 
 def ensure() -> str | None:
-    """Idempotent alias: call it before the first page import."""
-    return source()
+    """Idempotent alias: call it before the first page import, then register the bundled fonts.
+
+    The font registration lives here because this is the one function every entry point already runs before the theme
+    is installed and before any page exists: ``main()`` calls it ahead of ``toolkit_theme.install``, and the live
+    harness builds ``MainWindow()`` without ``main()``. Both paths therefore load the bundled face before a widget can
+    resolve ``Fira Mono`` to the host's fallback.
+
+    A font problem must not stop the toolkit import, so :func:`bundled_fonts.ensure` reports and returns instead of
+    raising; its failure leaves the app on the system face, which is the state it had before the bundle.
+    """
+    source_dir = source()
+    from . import bundled_fonts
+
+    bundled_fonts.ensure()
+    return source_dir
