@@ -233,9 +233,14 @@ def test_ui_diff_refuses_the_recorded_page_growth() -> None:
     """The 2026-11-21 numbers through today's per-page table: four pages still over, the Process rows inside 6.0."""
     data = json.loads((FIXTURES / "ui_diff" / "page_budget_growth_2026_11_21.json").read_text(encoding="utf-8"))
     grown = ui_diff.over_budget(data["rows"], ui_diff.PAGE_BASELINE, 0.05)
-    assert len(grown) == data["refused"]
+    # The fixture records four rows over the table of 2026-11-21. One of them is the Home page at 0.168 %, and its
+    # entry was raised to 0.5 % on 2026-11-24 for a DELIBERATE look change (the bundled Fira Mono heading; the bound is
+    # measured, see `PAGE_BASELINE`). So that row is inside its budget now and the refusals drop to three - the other
+    # pages are untouched, which is the point of a per-page table.
+    assert len(grown) == data["refused"] - 1
     assert ("nav3-tab0.png", 3.137, 0.05) in grown
-    assert ("nav0.png", 0.168, 0.05) in grown
+    assert not [row for row in grown if row[0] == "nav0.png"], (
+        "the Home page's 0.168 % sits inside its recorded 0.5 % - the raised entry must be the only reason")
     assert not [row for row in grown if row[0] in ("nav2-tab0.png", "nav2.png")], \
         "the Process page measured 0.393 and its entry is 6.0 - the per-page number is the whole point"
     table, refused = ui_diff.record_baseline(data["rows"], ui_diff.PAGE_BASELINE, 0.05)

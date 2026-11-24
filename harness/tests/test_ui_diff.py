@@ -91,7 +91,12 @@ def test_the_process_page_carries_its_measured_noise_and_the_rest_the_floor() ->
     """
     assert ui_diff.page_budget("nav2-tab0.png", ui_diff.PAGE_BASELINE, 0.05) == 6.0
     assert ui_diff.page_budget("nav2.png", ui_diff.PAGE_BASELINE, 0.05) == 6.0
-    for page in ("nav0.png", "nav1.png", "nav3.png", "nav4.png"):
+    # nav0 is the ONE page whose 1.0 look changed on purpose: the bundled Fira Mono (2026-11-24) repainted the Home
+    # heading, and the entry carries the measured bound (heading ink 0.238 % of the page, union <= 0.476 %) instead of
+    # the floor. A regression on that page still has to clear 0.5 %, so the entry stays a gate.
+    assert ui_diff.page_budget("nav0.png", ui_diff.PAGE_BASELINE, 0.05) == 0.5, (
+        "the Home page's deliberate typeface change is recorded with its measurement, not the floor")
+    for page in ("nav1.png", "nav3.png", "nav4.png"):
         assert ui_diff.page_budget(page, ui_diff.PAGE_BASELINE, 0.05) == ui_diff.BASELINE_FLOOR
     assert set(ui_diff.PAGE_BASELINE) == {
         "nav0.png", "nav1.png", "nav2.png", "nav2-tab0.png", "nav2-tab1.png", "nav2-tab2.png",
