@@ -4,8 +4,20 @@ import subprocess
 import contextlib
 import logging
 import math
+import time
 import traceback
 from .Colors import Colors
+from .LogPolicy import LEVEL_INFO, level_enabled
+
+#: Backend process start. `Util` is the first backend module the entry point imports, so this is
+#: the closest mark to "the process exists" a phase line can honestly use; `RenderVideo` reports
+#: the whole `process start -> backend ready` interval against it.
+PROCESS_START = time.time()
+
+
+def process_uptime() -> float:
+    """Seconds since this backend process started (see ``PROCESS_START``)."""
+    return time.time() - PROCESS_START
 # non standard python libraries
 try:
     import numpy as np
@@ -119,10 +131,17 @@ def _install_rve_handler():
 _install_rve_handler()
 
 
-def log(message: str, show_backend = True):
+def log(message: str, show_backend = True, level: str = LEVEL_INFO):
+    """One backend log line, gated by the policy in ``LogPolicy``.
+
+    ``info`` (the default) is always printed; ``level="debug"`` is the per-frame / per-call
+    detail and is suppressed unless ``RVE_LOG_DEBUG=1``. Everything still goes to stderr with
+    the ``BACKEND: `` prefix the pane reads (``show_backend=False`` is only for already-prefixed
+    error text). Nothing is dropped from the file the render report keeps - the gate is here,
+    before the line exists.
     """
-    Log is now depricated, just using print now.
-    """
+    if not level_enabled(level):
+        return
     end_inplace_line()
     if show_backend:
         print("BACKEND: " + message, file=sys.stderr)

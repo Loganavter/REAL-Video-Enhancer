@@ -32,6 +32,7 @@ from .int8_kernels import (body_prologue_kernel, dequantise_nhwc, dequantise_nhw
                           head_int8_kernel, quantise_nchw_to_nhwc, quantise_nchw_to_nhwc_prelu,
                           hop_padded_kernel, quantise_nhwc, quantise_nhwc_prelu, tail_int8_kernel,
                           tail_int8_shuffle_kernel, tail_int8_yuv_kernel)
+from ...utils.LogPolicy import debug_enabled
 
 __all__ = ["Int8Body"]
 
@@ -651,7 +652,7 @@ class Int8Body:
         # complete by now, so reading it costs nothing and charges no foreign work to us.
         import logging as _lg
         _prev = getattr(self, "_ev_pair", None)
-        if _prev is not None:
+        if _prev is not None and debug_enabled():
             _s, _e, _n = _prev
             self._last_body_ms = _s.elapsed_time(_e)
             self._gpu_ms = getattr(self, "_gpu_ms", []) + [self._last_body_ms]
@@ -669,7 +670,7 @@ class Int8Body:
                 pass
         _mk = (lambda: torch.cuda.Event(True)) if not _quiet else (lambda: _NoEvent())
         _prevp = getattr(self, "_phase_ev", None)
-        if _prevp is not None:
+        if _prevp is not None and debug_enabled():
             _names = ("head", "quantise", "hops", "tail")
             _vals = [_a.elapsed_time(_b) for _a, _b in _prevp]
             self._phase_log = getattr(self, "_phase_log", 0) + 1
@@ -681,7 +682,7 @@ class Int8Body:
                     getattr(self, "_last_body_ms", -1.0),
                     getattr(self, "_last_body_ms", 0.0) - sum(_vals))
         _prevt = getattr(self, "_tail_ev", None)
-        if _prevt is not None:
+        if _prevt is not None and debug_enabled():
             _tv = [_a.elapsed_time(_b) for _a, _b in _prevt]
             self._tail_log = getattr(self, "_tail_log", 0) + 1
             if self._tail_log % 8 == 0:
