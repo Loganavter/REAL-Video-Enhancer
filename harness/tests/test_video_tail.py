@@ -545,10 +545,11 @@ def test_a_seek_while_paused_shows_its_target_and_holds_it(qapp, scratch_dir):
 
         thread.seek(0.2)
         assert _wait_for(qapp, lambda: len(frames) > 4), "the seek is applied while paused"
-        assert [round(frame.pts, 3) for frame in frames[4:]] == [0.2, 0.3]
+        assert [round(frame.pts, 3) for frame in frames[4:]] == [0.2], \
+            "a held seek publishes its TARGET only - no backlog behind it (see test_preview_seek_held.py)"
         time.sleep(0.4)
         qapp.processEvents()
-        assert len(frames) == 6, "and the picture stands on the target afterwards, not at the edge"
+        assert len(frames) == 5, "and the picture stands on the target afterwards, not at the edge"
     finally:
         thread.stop_and_wait()
 
