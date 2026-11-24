@@ -91,7 +91,9 @@ class Tab4Page:
         self.horizontalLayout_12.addItem(self.horizontalSpacer_5)
         self.discord_rich_presence = _row_checkbox(self.discordRPCSettingsContainer)
         self.discord_rich_presence.setObjectName(u"discord_rich_presence")
-        self.discord_rich_presence.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Show REAL Video Enhancer in discord.</p></body></html>", None))
+        self.discord_rich_presence.setToolTip(i18n.tooltip(
+            'Show REAL Video Enhancer in discord.'
+        ))
         self.horizontalLayout_12.addWidget(self.discord_rich_presence)
         self.verticalLayout_20.addWidget(self.discordRPCSettingsContainer)
         # The interface language. A layout, not a wrapper QWidget: the row is a line of content, and the page already

@@ -327,3 +327,30 @@ def test_the_window_owner_configures_the_language_without_main(qapp, monkeypatch
             "the first paint must already be translated: the hook runs before the pages are built")
     finally:
         window.close()
+
+
+def test_a_language_switch_does_not_wipe_a_runtime_pane(i18n_state, qapp):
+    """The changelog pane holds RUNTIME text, not a label - and `retranslate()` used to erase it.
+
+    `HomeTab.retranslate` called `changeLogText.setHtml(QCoreApplication.translate(... <an empty Qt document> ...))`:
+    a catalogue key that could never be translated, and on every switch it replaced the user's notes with a blank page.
+    `tab_5.retranslate` did the same to the render log. Measured 2026-11-24 while translating the UI; the empty document
+    is gone and a switch now leaves both panes alone.
+    """
+    i18n_state.configure_i18n("en")
+    shell, window = _build_shell(qapp)
+    try:
+        panel = shell.homePage_page.changeLogText
+        panel.setMarkdown("release notes that must survive a switch")
+        i18n_state.emit_language_changed("ru")
+        assert "survive a switch" in panel.toPlainText(), (
+            "a language switch replaced the changelog with an empty document instead of leaving it alone")
+        log = shell.procPage_page.tab_5_page.renderOutput
+        log.append("frame 1 rendered")
+        i18n_state.emit_language_changed("en")
+        visible = log.text() if hasattr(log, "text") else log.toPlainText()
+        assert "frame 1 rendered" in visible, (
+            "a language switch replaced the render log with an empty document")
+    finally:
+        i18n_state.emit_language_changed("en")
+        window.close()

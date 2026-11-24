@@ -36,6 +36,9 @@ class Tab5Page:
         # widget could finally leave stock (src/ui/ProcessTab.py:481-485).
         self.renderOutput = ConsoleView(self.tab_5)
         self.renderOutput.setObjectName(u"renderOutput")
+        # An empty document at build time (never in `retranslate`, which used to wipe the user's log on a switch).
+        self.renderOutput.setHtml("")
+
         sizePolicy10 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         sizePolicy10.setHorizontalStretch(0)
         sizePolicy10.setVerticalStretch(0)
@@ -56,11 +59,7 @@ class Tab5Page:
         return self.tab_5
 
     def retranslate(self, language: str | None = None) -> None:
-        self.renderOutput.setHtml(QCoreApplication.translate("MainWindow", u"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:'Adwaita Sans'; font-weight:400; font-style:normal;\">\n"
-"<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:'Noto Sans';\"><br /></p></body></html>", None))
+        # The pane holds RUNTIME text (the render log), not a label: it has nothing to translate, and the empty
+        # document this method used to set through the catalogue wiped the user's log on every language switch.
+        pass
+

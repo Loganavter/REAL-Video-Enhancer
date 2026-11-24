@@ -902,8 +902,10 @@ def install(window) -> None:
                     report["strip"] = [round(rect.x()), round(rect.y()), round(rect.width()), round(rect.height())]
                 except Exception:
                     pass
+        # `toolTip` is here because a tooltip is text the channel could not read: proving a translated tooltip needs
+        # the string, and hovering under Xvfb does not reliably pop one (measured 2026-11-24).
         for attr in ("count", "currentRow", "selectedRows", "selectedCount", "value", "text",
-                     "currentIndex", "currentText"):
+                     "currentIndex", "currentText", "toolTip"):
             getter = getattr(target, attr, None)
             if callable(getter):
                 try:

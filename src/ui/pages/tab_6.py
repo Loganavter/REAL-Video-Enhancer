@@ -192,7 +192,19 @@ class Tab6Page:
         self.encoder.addItem("")
         self.encoder.addItem("")
         self.encoder.setObjectName(u"encoder")
-        self.encoder.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Encoder:</span></p><p>- Compression algorithm for video, most common is libx264</p><p>- Any encoder without a device label is a CPU encoder.</p><p>- <span style=\" font-weight:700; text-decoration: underline;\">Lossy Encoders:</span></p><p>- libx264 (<span style=\" font-weight:700;\">mkv, mp4, mov, avi</span>)</p><p>- libx265 (<span style=\" font-weight:700;\">mkv, mp4, mov</span>)</p><p>- vp9 (<span style=\" font-weight:700;\">mkv, webm</span>)</p><p>- av1 (<span style=\" font-weight:700;\">mkv, mp4, webm</span>)</p><p>- <span style=\" font-weight:700; text-decoration: underline;\">Lossless Encoders:</span></p><p>- prores (<span style=\" font-weight:700;\">mkv, mov</span>)</p><p>- ffv1 (<span style=\" font-weight:700;\">mkv, avi</span>)</p></body></html>", None))
+        self.encoder.setToolTip(i18n.tooltip(
+            'Encoder:',
+            '- Compression algorithm for video, most common is libx264',
+            '- Any encoder without a device label is a CPU encoder.',
+            '- Lossy Encoders:',
+            '- libx264 (mkv, mp4, mov, avi)',
+            '- libx265 (mkv, mp4, mov)',
+            '- vp9 (mkv, webm)',
+            '- av1 (mkv, mp4, webm)',
+            '- Lossless Encoders:',
+            '- prores (mkv, mov)',
+            '- ffv1 (mkv, avi)'
+        ))
         self.encoder.setMinimumSize(QSize(0, 0))
         self.horizontalLayout_15.addWidget(self.encoder)
         self.verticalLayout_26.addWidget(self.widget_17)
@@ -215,7 +227,10 @@ class Tab6Page:
         self.video_encoder_speed.addItem("")
         self.video_encoder_speed.addItem("")
         self.video_encoder_speed.setObjectName(u"video_encoder_speed")
-        self.video_encoder_speed.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Encoder Speed:</span></p><p> - Speed at which the encoder processes the video, <span style=\" font-weight:700; text-decoration: underline;\">Slower</span> processing time means <span style=\" font-weight:700; text-decoration: underline;\">Better results for the file size</span><span style=\" text-decoration: underline;\">.</span></p></body></html>", None))
+        self.video_encoder_speed.setToolTip(i18n.tooltip(
+            'Encoder Speed:',
+            '- Speed at which the encoder processes the video, Slower processing time means Better results for the file size.'
+        ))
         self.video_encoder_speed.setMinimumSize(QSize(0, 0))
         self.horizontalLayout_36.addWidget(self.video_encoder_speed)
         self.verticalLayout_26.addWidget(self.widget_16)
@@ -261,7 +276,13 @@ class Tab6Page:
         self.video_container.addItem("")
         self.video_container.addItem("")
         self.video_container.setObjectName(u"video_container")
-        self.video_container.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Video Container</span></p><p>- Changes the video container in the default output file generated container.</p><p>- <span style=\" font-weight:700;\">mkv </span>is <span style=\" font-weight:700;\">recomended</span> due to its extensive support for different formats.</p><p><span style=\" font-weight:700;\">WARNING: Changing this </span><span style=\" font-weight:700; text-decoration: underline;\">MAY</span><span style=\" font-weight:700;\"> break encoder compadibility. </span></p><p><span style=\" font-weight:700;\">Please look at the audio and video encoder tooltips for compadibility.</span></p></body></html>", None))
+        self.video_container.setToolTip(i18n.tooltip(
+            'Video Container',
+            '- Changes the video container in the default output file generated container.',
+            '- mkv is recomended due to its extensive support for different formats.',
+            'WARNING: Changing this MAY break encoder compadibility.',
+            'Please look at the audio and video encoder tooltips for compadibility.'
+        ))
         self.horizontalLayout_44.addWidget(self.video_container)
         self.verticalLayout_26.addWidget(self.widget_27)
         self.widget_21 = QWidget(self.widget_15)
@@ -284,8 +305,14 @@ class Tab6Page:
         self.video_pixel_format.addItem("")
         self.video_pixel_format.addItem("")
         self.video_pixel_format.setObjectName(u"video_pixel_format")
-        self.video_pixel_format.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Pixel Format</span></p><p>- D<span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; color:#cccccc;\">efines how color information is stored for each pixel in a video frame.</span></p><p><span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; color:#cccccc;\">- yuv420p: Most common, removes the most information. </span>(<span style=\" font-weight:700;\">mkv, mp4, mov, avi, webm</span>)</p><p><span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; color:#cccccc;\">- yuv422p: In between 420p and 444p. </span>(<span style=\" font-weight:700;\">mkv, mov, mp4</span>)</p><p><span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; color:#cccccc;\">- yuv444p: Keeps the most information. </span>(<span style=\" font-weight:700;\">mkv, mov, mp4</span>)<br/></p><p>- <span style=\" font-family:'Droid Sans Mono','monospace','monospace'; font-size:9pt; colo"
-                        "r:#cccccc;\">yuv 420/422/444 p10le: 10 bit version of each. (MKV and MP4 containers only) </span>(<span style=\" font-weight:700;\">mkv, mov, mp4</span>)</p></body></html>", None))
+        self.video_pixel_format.setToolTip(i18n.tooltip(
+            'Pixel Format',
+            '- Defines how color information is stored for each pixel in a video frame.',
+            '- yuv420p: Most common, removes the most information. (mkv, mp4, mov, avi, webm)',
+            '- yuv422p: In between 420p and 444p. (mkv, mov, mp4)',
+            '- yuv444p: Keeps the most information. (mkv, mov, mp4)',
+            '- yuv 420/422/444 p10le: 10 bit version of each. (MKV and MP4 containers only) (mkv, mov, mp4)'
+        ))
         self.video_pixel_format.setMinimumSize(QSize(0, 0))
         self.horizontalLayout_35.addWidget(self.video_pixel_format)
         self.verticalLayout_26.addWidget(self.widget_21)

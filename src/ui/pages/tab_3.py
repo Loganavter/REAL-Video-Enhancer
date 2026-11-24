@@ -84,7 +84,12 @@ class Tab3Page:
         self.precision.addItem("")
         self.precision.addItem("")
         self.precision.setObjectName(u"precision")
-        self.precision.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Precision:</p><p> - Auto: Defaults to float16 if the GPU is supported (RTX 20 series and up)</p><p> - Float16: Faster inference and less VRAM usage.</p><p> - Float32: Slower inference and more VRAM usage, supported on more GPUS.</p></body></html>", None))
+        self.precision.setToolTip(i18n.tooltip(
+            'Precision:',
+            '- Auto: Defaults to float16 if the GPU is supported (RTX 20 series and up)',
+            '- Float16: Faster inference and less VRAM usage.',
+            '- Float32: Slower inference and more VRAM usage, supported on more GPUS.'
+        ))
         self.precisionSettingsContainer.addWidget(self.precision)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer)
         self.tensorRTOptLevelSettingsContainer = QHBoxLayout()
@@ -102,7 +107,11 @@ class Tab3Page:
         self.tensorrt_optimization_level.addItem("")
         self.tensorrt_optimization_level.addItem("")
         self.tensorrt_optimization_level.setObjectName(u"tensorrt_optimization_level")
-        self.tensorrt_optimization_level.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>TensorRT Optimization Level:</p><p>- Lower means less optimization, but faster engine generation time.</p><p>- Higher means more optimization, but slower engine generation time.</p></body></html>", None))
+        self.tensorrt_optimization_level.setToolTip(i18n.tooltip(
+            'TensorRT Optimization Level:',
+            '- Lower means less optimization, but faster engine generation time.',
+            '- Higher means more optimization, but slower engine generation time.'
+        ))
         self.tensorRTOptLevelSettingsContainer.addWidget(self.tensorrt_optimization_level)
         self.verticalLayout_12.addLayout(self.tensorRTOptLevelSettingsContainer)
         self.horizontalLayout_67 = QHBoxLayout()
@@ -115,7 +124,12 @@ class Tab3Page:
         self.horizontalLayout_67.addItem(self.horizontalSpacer_34)
         self.auto_hdr_mode = _row_checkbox(self.renderSettingsContainer)
         self.auto_hdr_mode.setObjectName(u"auto_hdr_mode")
-        self.auto_hdr_mode.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Auto HDR Mode</p><p>- Auto enables HDR mode if RVE detects that the video that is being rendered is HDR. <span style=\" font-weight:700;\">This will cause slower rendering if the video is HDR.</span></p><p><span style=\" font-weight:700;\"> - </span><span style=\" font-weight:700;\">HDR is only color tested on x264 and x265 encoders.</span></p><p><span style=\" ont-weight:700\"> - The preview colors may be distorted as the preview itself is not HDR.</span></p></body></html>", None))
+        self.auto_hdr_mode.setToolTip(i18n.tooltip(
+            'Auto HDR Mode',
+            '- Auto enables HDR mode if RVE detects that the video that is being rendered is HDR. This will cause slower rendering if the video is HDR.',
+            '- HDR is only color tested on x264 and x265 encoders.',
+            '- The preview colors may be distorted as the preview itself is not HDR.'
+        ))
         sizePolicy12 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         sizePolicy12.setHorizontalStretch(0)
         sizePolicy12.setVerticalStretch(0)
@@ -133,7 +147,10 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer_3.addItem(self.horizontalSpacer_31)
         self.dynamic_tensorrt_engine = _row_checkbox(self.renderSettingsContainer)
         self.dynamic_tensorrt_engine.setObjectName(u"dynamic_tensorrt_engine")
-        self.dynamic_tensorrt_engine.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>TensorRT Dynamic Engine:</p><p>- Enables TensorRT to build for many different resolutions in one engine.</p></body></html>", None))
+        self.dynamic_tensorrt_engine.setToolTip(i18n.tooltip(
+            'TensorRT Dynamic Engine:',
+            '- Enables TensorRT to build for many different resolutions in one engine.'
+        ))
         sizePolicy12.setHeightForWidth(self.dynamic_tensorrt_engine.sizePolicy().hasHeightForWidth())
         self.dynamic_tensorrt_engine.setSizePolicy(sizePolicy12)
         self.tensorRTOptLevelSettingsContainer_3.addWidget(self.dynamic_tensorrt_engine)
@@ -148,7 +165,9 @@ class Tab3Page:
         self.precisionSettingsContainer_2.addItem(self.horizontalSpacer_15)
         self.uhd_mode = _row_checkbox(self.renderSettingsContainer)
         self.uhd_mode.setObjectName(u"uhd_mode")
-        self.uhd_mode.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>Saves VRAM and speeds up inference at resolutions above 1080p by calculating flow at a lower resolution. (GMFSS/GIMM)</p></body></html>", None))
+        self.uhd_mode.setToolTip(i18n.tooltip(
+            'Saves VRAM and speeds up inference at resolutions above 1080p by calculating flow at a lower resolution. (GMFSS/GIMM)'
+        ))
         self.precisionSettingsContainer_2.addWidget(self.uhd_mode)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_2)
         self.precisionSettingsContainer_4 = QHBoxLayout()
@@ -162,7 +181,10 @@ class Tab3Page:
         # step gutter (22 px) where the adapter pinned 29 px and 20 px - toolkit metrics, reported in DONE.md.
         self.ncnn_gpu_id = Stepper(self.renderSettingsContainer, alignment=SPIN_ALIGNMENT)
         self.ncnn_gpu_id.setObjectName(u"ncnn_gpu_id")
-        self.ncnn_gpu_id.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>NCNN GPU ID -</p><p>Sets what GPU is used for NCNN</p></body></html>", None))
+        self.ncnn_gpu_id.setToolTip(i18n.tooltip(
+            'NCNN GPU ID -',
+            'Sets what GPU is used for NCNN'
+        ))
         self.ncnn_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_4.addWidget(self.ncnn_gpu_id)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_4)
@@ -174,7 +196,10 @@ class Tab3Page:
         self.precisionSettingsContainer_3.addWidget(self.label_43)
         self.pytorch_gpu_id = Stepper(self.renderSettingsContainer, alignment=SPIN_ALIGNMENT)
         self.pytorch_gpu_id.setObjectName(u"pytorch_gpu_id")
-        self.pytorch_gpu_id.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p>PyTorch GPU ID -</p><p>Sets what GPU is used for PyTorch</p></body></html>", None))
+        self.pytorch_gpu_id.setToolTip(i18n.tooltip(
+            'PyTorch GPU ID -',
+            'Sets what GPU is used for PyTorch'
+        ))
         self.pytorch_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_3.addWidget(self.pytorch_gpu_id)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_3)

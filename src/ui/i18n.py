@@ -33,6 +33,7 @@ the chosen language rather than repainting into it.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QObject, QTranslator
@@ -102,6 +103,79 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Discord Rich Presence": "Активность в Discord",
         "Open RVE Folder": "Открыть папку RVE",
         "Language": "Язык",
+        "- 2.6: Supports older CUDA enabled GPUs": "- 2.6: поддерживает старые GPU с CUDA",
+        "- 2.8: Supports all RTX cards, faster and recomended.": "- 2.8: все карты RTX, быстрее и рекомендовано.",
+        "- 2.9: Experimental.": "- 2.9: экспериментальная.",
+        "- Any encoder without a device label is a CPU encoder.": "- Любой кодировщик без метки устройства — процессорный.",
+        "- Auto enables HDR mode if RVE detects that the video that is being rendered is HDR. This will cause slower rendering if the video is HDR.": "- Авто включает HDR, если RVE определит, что рендерится HDR-видео. **На HDR-видео рендер будет медленнее.**",
+        "- Auto: Defaults to float16 if the GPU is supported (RTX 20 series and up)": "- Авто: float16, если GPU поддерживает (RTX 20 и новее)",
+        "- CUDA: NVIDIA GPUs 10 series and up": "- CUDA: NVIDIA GPU 10 серии и новее",
+        "- Changes the video container in the default output file generated container.": "- Меняет контейнер выходного файла.",
+        "- Compression algorithm for video, most common is libx264": "- Алгоритм сжатия видео; самый распространённый — libx264",
+        "- Custom output scale no matter the model. Will run AI on video frame once, and scale the image to match the multiplier. Useful for 4x models.": "- Свой масштаб вывода независимо от модели. Нейросеть прогоняется по кадру один раз, изображение масштабируется до множителя. Полезно для 4x-моделей.",
+        "- Defines how color information is stored for each pixel in a video frame.": "- Определяет, как хранится информация о цвете каждого пикселя кадра.",
+        "- Enabled: Attempts to detect when scenes change in a video.": "- Включено: приложение пытается находить смены сцен в видео.",
+        "- Enables TensorRT to build for many different resolutions in one engine.": "- Позволяет TensorRT собрать один движок под разные разрешения.",
+        "- Float16: Faster inference and less VRAM usage.": "- Float16: быстрее и меньше видеопамяти.",
+        "- Float32: Slower inference and more VRAM usage, supported on more GPUS.": "- Float32: медленнее и больше видеопамяти, поддерживается на большем числе GPU.",
+        "- HDR is only color tested on x264 and x265 encoders.": "- Цвет HDR проверен только на кодировщиках x264 и x265.",
+        "- Higher means more optimization, but slower engine generation time.": "- Больше — сильнее оптимизация, но дольше сборка движка.",
+        "- Higher number: lower chance of detecting scene changes, with risk of underdetection.": "- Больше — ниже шанс найти смену сцены, риск **пропусков**.",
+        "- Lossless Encoders:": "- Кодировщики без потерь:",
+        "- Lossy Encoders:": "- Кодировщики с потерями:",
+        "- Lower means less optimization, but faster engine generation time.": "- Меньше — слабее оптимизация, но быстрее сборка движка.",
+        "- Lower number: higher chance of detecting scene changes, with risk of overdetection.": "- Меньше — выше шанс найти смену сцены, риск **ложных срабатываний**.",
+        "- MPS: Apple Mac M series SOCs only.": "- MPS: только Apple Silicon (M).",
+        "- ROCm: AMD (Linux Only) 7000 series(maybe) and up": "- ROCm: AMD (только Linux), 7000 серия (возможно) и новее",
+        "- Recommended: 2-3 for real life, 4 for animation.": "- Рекомендуется: 2–3 для живого видео, 4 для анимации.",
+        "- Renders a small portion of the video to show the results (most useful for upscaling)": "- Рендерит небольшой фрагмент видео, чтобы показать результат (полезнее всего для увеличения)",
+        "- Speed at which the encoder processes the video, Slower processing time means Better results for the file size.": "- Скорость работы кодировщика. **Медленнее** обработка — **лучше результат при том же размере файла**.",
+        "- The preview colors may be distorted as the preview itself is not HDR.": "- Цвета превью могут искажаться: само превью не HDR.",
+        "- This is the version downloaded": "- Это скачанная версия",
+        "- Will automatically remove black bars if they are present throughout a video, can increase performance.": "- Автоматически убирает чёрные полосы, если они есть по всему видео; может ускорить обработку.",
+        "- av1 (mkv, mp4, webm)": "- av1 (mkv, mp4, webm)",
+        "- ffv1 (mkv, avi)": "- ffv1 (mkv, avi)",
+        "- libx264 (mkv, mp4, mov, avi)": "- libx264 (mkv, mp4, mov, avi)",
+        "- libx265 (mkv, mp4, mov)": "- libx265 (mkv, mp4, mov)",
+        "- mean (segmented): fast, prone to overdetection": "- mean (по сегментам): быстро, склонно к ложным срабатываниям",
+        "- mean: fastest, least accurate": "- mean: быстрее всех, наименее точный",
+        "- mkv is recomended due to its extensive support for different formats.": "- **mkv** рекомендуется: он поддерживает больше всего форматов.",
+        "- prores (mkv, mov)": "- prores (mkv, mov)",
+        "- pyscenedetect: slow, accuate (Recommended)": "- pyscenedetect: медленно, точно **(рекомендуется)**",
+        "- vp9 (mkv, webm)": "- vp9 (mkv, webm)",
+        "- xpu: Intel: idk fam, dunno if this even works lowkey": "- xpu: Intel — если честно, не знаю, работает ли это вообще",
+        "- yuv 420/422/444 p10le: 10 bit version of each. (MKV and MP4 containers only) (mkv, mov, mp4)": "- yuv 420/422/444 p10le: 10-битная версия каждого (только MKV и MP4)",
+        "- yuv420p: Most common, removes the most information. (mkv, mp4, mov, avi, webm)": "- yuv420p: самый распространённый, теряет больше всего информации (mkv, mp4, mov, avi, webm)",
+        "- yuv422p: In between 420p and 444p. (mkv, mov, mp4)": "- yuv422p: между 420p и 444p (mkv, mov, mp4)",
+        "- yuv444p: Keeps the most information. (mkv, mov, mp4)": "- yuv444p: сохраняет больше всего информации (mkv, mov, mp4)",
+        "Audio and Subtitles will not be transfered to output video.": "Аудио и субтитры не попадут в выходное видео.",
+        "Audo Border Cropping:": "Автоматическая обрезка полей:",
+        "Encoder Speed:": "Скорость кодека:",
+        "Ensembles flow, can produce better results.": "Ансамбль потоков может дать лучший результат.",
+        "Helps with anime interpolation.": "Помогает при интерполяции аниме.",
+        "Increase video length instead of framerate when interpolating.": "Увеличивать длительность видео, а не частоту кадров при интерполяции.",
+        "Lowers VRAM usage, but also slows down render.": "Меньше видеопамяти, но рендер медленнее.",
+        "NCNN GPU ID -": "GPU NCNN —",
+        "Only compadible with older RIFE models and GMFSS": "Совместимо только со старыми моделями RIFE и GMFSS",
+        "Only use when render failes due to VRAM limits.": "Использовать, только если рендер падает из-за нехватки видеопамяти.",
+        "Perform processing without outputing new video. This tests the raw performance of the inference.": "Выполнять обработку без записи видео — проверка чистой производительности инференса.",
+        "Pixel Format": "Формат пикселей",
+        "Please look at the audio and video encoder tooltips for compadibility.": "Совместимость смотрите в подсказках к аудио- и видеокодеку.",
+        "Precision:": "Точность:",
+        "PyTorch GPU ID -": "GPU PyTorch —",
+        "Render Preview:": "Предпросмотр рендера:",
+        "Saves VRAM and speeds up inference at resolutions above 1080p by calculating flow at a lower resolution. (GMFSS/GIMM)": "Экономит видеопамять и ускоряет инференс выше 1080p: поток считается в меньшем разрешении (GMFSS/GIMM).",
+        "Scales optical flow based on the difference between frames.": "Масштабирует оптический поток по разнице между кадрами.",
+        "Scene Change Detection Enabled:": "Определение смены сцен:",
+        "Sets what GPU is used for NCNN": "Задаёт GPU для NCNN",
+        "Sets what GPU is used for PyTorch": "Задаёт GPU для PyTorch",
+        "Show REAL Video Enhancer in discord.": "Показывать REAL Video Enhancer в Discord.",
+        "Split up processing upscaled frames into chunks.": "Разбивать обработку увеличенных кадров на части.",
+        "TensorRT Dynamic Engine:": "Динамический движок TensorRT:",
+        "TensorRT Optimization Level:": "Уровень оптимизации TensorRT:",
+        "Upscale Scale:": "Масштаб увеличения:",
+        "WARNING: Changing this MAY break encoder compadibility.": "**ВНИМАНИЕ: смена контейнера МОЖЕТ сломать совместимость с кодировщиком.**",
+        "When running an interpolation, it will avoide interpolating over these scene changes.": "При интерполяции кадры через такие смены сцен не интерполируются.",
         " Add to Render Queue": " Добавить в очередь",
         "\"Support Me!\"": "«Поддержите меня!»",
         "Encoder command: the encoder settings passed to FFMpeg, can be manually tweaked. The field shows the part that fits; the whole command is in this tooltip.": "Команда кодека: настройки, передаваемые FFMpeg, можно править вручную. Поле показывает влезающую часть; полная команда — в этой подсказке.",
@@ -314,6 +388,37 @@ def ensure_configured(application=None) -> str:
     if _configured:
         return _current_language
     return configure_from_settings(application=application)
+
+
+#: The markup a tooltip is built with. The toolkit paints these labels itself, so the shape is RVE's, not Qt's: a bold
+#: title line and one paragraph per bullet. It lives HERE so a tooltip is code + translated parts, never a translated
+#: HTML document (a document-as-key breaks on any whitespace edit and silently falls back to English).
+_TOOLTIP_TITLE = '<p><span style=" font-weight:700;">{}</span></p>'
+_TOOLTIP_LINE = "<p>{}</p>"
+
+
+def _rich(text: str) -> str:
+    """A tooltip line with `**bold**` and `__underline__` markers rendered as spans.
+
+    The markers exist so a translator writes plain text with two punctuation marks instead of HTML; the markup stays in
+    this module, where a wrong tag is a code bug and not a silent fallback.
+    """
+    escaped = (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    escaped = re.sub(r"\*\*(.+?)\*\*", r'<span style=" font-weight:700;">\1</span>', escaped)
+    escaped = re.sub(r"__(.+?)__", r'<span style=" text-decoration: underline;">\1</span>', escaped)
+    return escaped
+
+
+def tooltip(title: str, *lines: str) -> str:
+    """A tooltip document assembled from catalogue parts: the title and each line are translated separately.
+
+    Replaces the old shape, where the WHOLE `<html>…</html>` string was the catalogue key: 27 such keys could not be
+    translated without putting markup in a translator's hands, and any markup edit made the key miss. Call sites pass
+    English source strings (the catalogue's keys); the markup is fixed here and a switch rebuilds the document.
+    """
+    parts = [_TOOLTIP_TITLE.format(_rich(tr(title)))]
+    parts.extend(_TOOLTIP_LINE.format(_rich(tr(line))) for line in lines if line)
+    return "<html><head/><body>" + "".join(parts) + "</body></html>"
 
 
 def emit_language_changed(language: str | None) -> str:

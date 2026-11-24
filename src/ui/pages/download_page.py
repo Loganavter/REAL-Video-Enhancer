@@ -186,14 +186,26 @@ class DownloadPagePage:
         self.pytorch_backend.addItem("")
         self.pytorch_backend.setObjectName(u"pytorch_backend")
         self.pytorch_backend.setToolTipDuration(0)
-        self.pytorch_backend.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">PyTorch Backend</span></p><p>- CUDA: NVIDIA GPUs 10 series and up</p><p>- ROCm: AMD (Linux Only) 7000 series(maybe) and up</p><p>- xpu: Intel: idk fam, dunno if this even works lowkey</p><p>- MPS: Apple Mac M series SOCs only.</p></body></html>", None))
+        self.pytorch_backend.setToolTip(i18n.tooltip(
+            'PyTorch Backend',
+            '- CUDA: NVIDIA GPUs 10 series and up',
+            '- ROCm: AMD (Linux Only) 7000 series(maybe) and up',
+            '- xpu: Intel: idk fam, dunno if this even works lowkey',
+            '- MPS: Apple Mac M series SOCs only.'
+        ))
         self.gridLayout_9.addWidget(self.pytorch_backend, 3, 2, 1, 1)
         self.pytorch_version = ComboBox(self.scrollAreaWidgetContents_2)
         self.pytorch_version.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         cap_combo_to_row(self.pytorch_version)
         self.pytorch_version.setObjectName(u"pytorch_version")
         self.pytorch_version.setToolTipDuration(0)
-        self.pytorch_version.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">PyTorch Version</span></p><p>- This is the version downloaded</p><p>- 2.6: Supports older CUDA enabled GPUs</p><p>- 2.8: Supports all RTX cards, faster and recomended.</p><p>- 2.9: Experimental.</p></body></html>", None))
+        self.pytorch_version.setToolTip(i18n.tooltip(
+            'PyTorch Version',
+            '- This is the version downloaded',
+            '- 2.6: Supports older CUDA enabled GPUs',
+            '- 2.8: Supports all RTX cards, faster and recomended.',
+            '- 2.9: Experimental.'
+        ))
         self.gridLayout_9.addWidget(self.pytorch_version, 1, 2, 1, 1)
         self.pytorchBackendInstallerContainer_5 = QWidget(self.scrollAreaWidgetContents_2)
         self.pytorchBackendInstallerContainer_5.setObjectName(u"pytorchBackendInstallerContainer_5")

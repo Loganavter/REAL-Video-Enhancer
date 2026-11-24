@@ -457,7 +457,10 @@ class ProcPagePage:
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.renderPreviewBtn.setObjectName(u"renderPreviewBtn")
-        self.renderPreviewBtn.setToolTip(QCoreApplication.translate("MainWindow", u"<html><head/><body><p><span style=\" font-weight:700;\">Render Preview:</span></p><p>     - Renders a small portion of the video to show the results (most useful for upscaling)</p></body></html>", None))
+        self.renderPreviewBtn.setToolTip(i18n.tooltip(
+            'Render Preview:',
+            '- Renders a small portion of the video to show the results (most useful for upscaling)'
+        ))
         apply(self.renderPreviewBtn, None)
         # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
         # fill the cell, which turns a row button into a slab when the column is taller than its contents.

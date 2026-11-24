@@ -127,6 +127,10 @@ class HomePagePage:
         self.horizontalLayout_30.setObjectName(u"horizontalLayout_30")
         self.changeLogText = RichTextView(self.homePage, link_token="link")
         self.changeLogText.setObjectName(u"changeLogText")
+        # The document's own font must exist before the notes arrive (the pane scales with it), and it is set ONCE: the
+        # same call used to live in `retranslate()`, where every language switch replaced the user's notes with a blank
+        # page - and the blank document travelled through the catalogue as an untranslatable key (measured 2026-11-24).
+        self.changeLogText.setHtml("")
         self.changeLogText.setReadOnly(True)
         self.horizontalLayout_30.addWidget(self.changeLogText)
         self.systemInfoText = RichTextView(self.homePage, link_token="link")
@@ -174,11 +178,4 @@ class HomePagePage:
         # `setText("")` is gone with the stock label: an ImageLabel has no text channel ("no text" is its default)
         # The product name, not a label to translate.
         self.label.setText("REAL Video Enhancer")
-        self.changeLogText.setHtml(QCoreApplication.translate("MainWindow", u"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:'Adwaita Sans'; font-weight:400; font-style:normal;\">\n"
-"<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:'Cantarell';\"><br /></p></body></html>", None))
+

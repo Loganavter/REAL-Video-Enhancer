@@ -35,6 +35,9 @@ SOURCE_ROOTS = ("src", "harness", "REAL-Video-Enhancer.py")
 
 #: Calls whose argument is a catalogue key. `translate(context, source, ...)` is Qt's; `tr(source)` is the app's.
 _TRANSLATE_ATTRS = ("translate", "tr")
+#: Calls whose EVERY string argument is a catalogue key: `i18n.tooltip(title, *lines)` builds a document from parts, so
+#: each part is a key and the markup is code.
+_ALL_ARGS_ARE_KEYS = ("tooltip",)
 
 
 def is_label(key: str) -> bool:
@@ -73,17 +76,25 @@ def collect_code_keys(root: Path = _ROOT, roots=SOURCE_ROOTS) -> dict[str, set[s
                 continue
             func = node.func
             name = getattr(func, "attr", None) or getattr(func, "id", None)
-            if name not in _TRANSLATE_ATTRS:
+            if name not in _TRANSLATE_ATTRS + _ALL_ARGS_ARE_KEYS:
                 continue
             # Qt's `QCoreApplication.translate(context, source, ...)` and the app's own
             # `i18n.translate(source, language=None)` are DIFFERENT signatures: reading the wrong argument made the
             # gate report "ru"/"en" as missing keys because a TEST calls `i18n.translate(key, "ru")`.
             receiver = getattr(func, "value", None)
             receiver_name = getattr(receiver, "id", None) or getattr(receiver, "attr", None)
-            if getattr(func, "attr", None) == "translate" and receiver_name in ("QCoreApplication", "QApplication"):
+            if name in _ALL_ARGS_ARE_KEYS:
+                pass  # handled below, every argument is a key
+            elif getattr(func, "attr", None) == "translate" and receiver_name in ("QCoreApplication", "QApplication"):
                 key = _string_literal(node.args[1]) if len(node.args) > 1 else None
             else:
                 key = _string_literal(node.args[0]) if node.args else None
+            if name in _ALL_ARGS_ARE_KEYS:
+                for argument in node.args:
+                    part = _string_literal(argument)
+                    if part and is_label(part):
+                        found.setdefault(part, set()).add(str(path.relative_to(root)))
+                continue
             if key is None or not is_label(key):
                 continue
             found.setdefault(key, set()).add(str(path.relative_to(root)))
