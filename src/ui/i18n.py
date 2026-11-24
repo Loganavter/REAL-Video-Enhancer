@@ -86,6 +86,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Discord Rich Presence": "Активность в Discord",
         "Open RVE Folder": "Открыть папку RVE",
         "Language": "Язык",
+        # --- The General tab's video-info pane (`src/ui/pages/general_settings.py::_info_html`) --------------
+        # The pane's nine row names. The values written after them (`MainWindow.updateVideoGUIText`) are not
+        # translated: they are file facts. `FPS:` is above, already the process page's key.
+        "Resolution:": "Разрешение:",
+        "Frame Count:": "Количество кадров:",
+        "Encoder:": "Кодировщик:",
+        "Container:": "Контейнер:",
+        "Color Space:": "Цветовое пространство:",
+        "Pixel Format:": "Формат пикселей:",
+        # Not bare `HDR:` on purpose: `updateVideoGUIText` writes its own `HDR: <value>` row, and a translation
+        # that collides with it would make the rewrite ambiguous on the way back to English.
+        "Is HDR:": "Поддержка HDR:",
+        "Bit Depth:": "Глубина цвета:",
     },
 }
 
