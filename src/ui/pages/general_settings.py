@@ -612,8 +612,12 @@ class GeneralSettingsPage:
         self.inputVideoInfoTextEdit.setEnabled(False)
         sizePolicy3.setHeightForWidth(self.inputVideoInfoTextEdit.sizePolicy().hasHeightForWidth())
         self.inputVideoInfoTextEdit.setSizePolicy(sizePolicy3)
+        # The Designer had a 190 px MINIMUM under a 180 px MAXIMUM here: Qt clamps to the maximum, the content needed
+        # 2 px more than it had, and the toolkit drew its 'there is more below' fade over text that already fitted
+        # (owner, 2026-11-24: 'the text fits but the fade is there'). The contradictory ceiling is gone - the default
+        # maximum applies and the floor keeps the Designer's 190 so an empty panel does not collapse. The fade itself
+        # now also requires a ramp's worth of remaining scroll, so a 2 px rounding can never advertise more text.
         self.inputVideoInfoTextEdit.setMinimumSize(QSize(0, 190))
-        self.inputVideoInfoTextEdit.setMaximumSize(QSize(100000, 180))
         self.inputVideoInfoTextEdit.setAccessibleDescription(u"")
         # No stylesheet: the pane paints its own text and plate; the deleted rule only forced white on a disabled
         # editor, which is the colour this pane's token already gives it.
