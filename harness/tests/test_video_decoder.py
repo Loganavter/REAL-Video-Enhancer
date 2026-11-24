@@ -97,3 +97,23 @@ def test_transport_calls_before_open_are_reported_not_raised(qapp):
 def test_an_unknown_pixel_format_is_refused_at_construction(qapp):
     with pytest.raises(ValueError):
         VideoDecoder(pixel_format="nv12")
+
+
+def test_a_name_a_few_milliseconds_off_its_frame_still_picks_that_frame():
+    """The pane names a picture with the backend's FITTED grid time; a plain ceil can then jump one frame ahead.
+
+    Measured 2026-11-25: the seek at 8.105 returned the frame whose own PTS is 8.133 and named it 8.136 (the fit is
+    exact to ~0.1 ms per frame but drifts a few ms over eight seconds). The compare asked 8.136 and a plain ceil picked
+    the NEXT frame at 8.175 - 0.9 of a frame. Half a frame of tolerance is the inverse of "a name is a frame's time".
+    """
+    from src.ui.video.decode import frame_at_or_after
+
+    interval = 1.0 / 23.976
+    name = 8.136
+    assert frame_at_or_after(8.133, name, tolerance=0.5 * interval) is True, "the frame the picture came from"
+    assert frame_at_or_after(8.133, name) is False, "a plain ceil is what jumped to the next frame"
+    # The walk stops at the FIRST qualifying frame, so a later one qualifying too is harmless - the point is that the
+    # picture's own frame is reached BEFORE the next one.
+    frames = [8.091, 8.133, 8.175]
+    first = next(pts for pts in frames if frame_at_or_after(pts, name, tolerance=0.5 * interval))
+    assert first == 8.133, f"the walk would publish {first}, not the frame the picture came from"

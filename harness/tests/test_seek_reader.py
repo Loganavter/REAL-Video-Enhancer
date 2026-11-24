@@ -397,3 +397,36 @@ def test_a_probe_that_never_answers_falls_back_to_one_spawn_per_seek(monkeypatch
     monkeypatch.setattr(SR, "probe_frame_grid", lambda *a, **k: (_ for _ in ()).throw(AssertionError("inline ran")))
     reader = SR.SeekReader("clip.mkv", width=4, height=4, grid_probe=Dead())
     assert reader._ensure_grid() is None, "no grid: the seek re-opens the source, which is the documented fallback"
+
+
+def test_the_grid_is_fitted_not_a_median_and_the_frame_names_itself():
+    """The container quantises PTS to milliseconds; a median of adjacent deltas inherits that error, a fit does not.
+
+    Measured 2026-11-25 on the owner's clip: 13 probed frames of a 23.976 source read back as a 42.000 ms pitch against
+    a true 41.708. Over a 20 s clip that is ~4 frames of drift, and it is why the pane could not name the frame it
+    decoded - the request was published as the picture's time instead (`delta_s` structurally zero).
+    """
+    from src.utils.SeekReader import SeekReader, fit_grid
+
+    truth = 0.041708                    # 23.976 fps
+    quantised = [round(offset * truth * 1000.0) / 1000.0 for offset in range(13)]
+    median_delta = round(truth * 1000.0) / 1000.0          # what the old rule produced
+    first, pitch = fit_grid(quantised)
+
+    assert abs(pitch - truth) < 0.0002, f"fit pitch {pitch:.6f} vs true {truth}"
+    assert abs(pitch - truth) < abs(median_delta - truth), "the fit must beat the median it replaced"
+    for offset in range(13):
+        assert abs(quantised[offset] - (first + offset * pitch)) <= 0.0005
+
+    # A reader with that grid names the frame it just read: `_read` advances the index, so the returned frame is the
+    # one behind it.
+    class Chunk:
+        def read_frame(self):
+            return b"frame"
+
+    reader = SeekReader("clip.mkv", width=4, height=4)
+    reader._grid = (first, pitch)
+    reader._reader = Chunk()
+    reader._next_index = 10
+    reader._read()
+    assert reader.last_pts == pytest.approx(first + 10 * pitch, abs=1e-6)

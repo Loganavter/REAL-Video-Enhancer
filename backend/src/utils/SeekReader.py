@@ -46,6 +46,30 @@ _GRID_TOLERANCE = 0.25
 _PROBE_TIMEOUT = 30.0
 
 
+def fit_grid(pts) -> tuple[float, float] | None:
+    """`(first_pts, pitch)` from a least-squares line through the probed frame times.
+
+    The MEDIAN OF ADJACENT DELTAS is quantised by the container's millisecond PTS: 13 frames of a 23.976 source read
+    back as a 42.000 ms pitch against a true 41.708 (measured 2026-11-25). Every index -> time conversion inherited that
+    0.7 % error, which over a 20 s clip is ~4 frames - and it is why the pane could not name the frame it decoded. A fit
+    over the same 13 points is ~0.1 ms, which is what makes `last_pts` honest.
+    """
+    values = [float(value) for value in pts]
+    count = len(values)
+    if count < 2:
+        return None
+    mean_x = (count - 1) / 2.0
+    mean_y = sum(values) / count
+    denominator = sum((index - mean_x) ** 2 for index in range(count))
+    if denominator <= 0:
+        return None
+    slope = sum((index - mean_x) * (value - mean_y) for index, value in enumerate(values)) / denominator
+    intercept = mean_y - slope * mean_x
+    if not (slope > 0 and math.isfinite(slope) and math.isfinite(intercept)):
+        return None
+    return intercept, slope
+
+
 def probe_frame_grid(inputFile, ffmpeg_path: str = "ffmpeg", frames: int = _PROBE_FRAMES,
                      near: float = 0.0):
     """`(first_pts, pitch)` of a constant-rate source, or None when it cannot be trusted.
@@ -80,17 +104,14 @@ def probe_frame_grid(inputFile, ffmpeg_path: str = "ffmpeg", frames: int = _PROB
     pts = [float(value) for value in _PTS_TIME.findall(stderr or "")]
     if len(pts) < 2:
         return None
-    deltas = [b - a for a, b in zip(pts, pts[1:]) if b > a]
-    if not deltas:
+    fitted = fit_grid(pts)
+    if fitted is None:
         return None
-    deltas.sort()
-    pitch = deltas[len(deltas) // 2]
-    if not (pitch > 0 and math.isfinite(pitch)):
-        return None
+    first, pitch = fitted
     for offset, value in enumerate(pts):
-        if abs((value - pts[0]) - offset * pitch) > _GRID_TOLERANCE * pitch:
+        if abs(value - (first + offset * pitch)) > _GRID_TOLERANCE * pitch:
             return None
-    return pts[0], pitch
+    return first, pitch
 
 
 class GridProbe:
@@ -177,6 +198,10 @@ class SeekReader:
         #: so a request at or past it can be answered without another spawn.
         self._eof_index = None
         self._closed = False
+        #: Grid time of the frame the last successful `_read` returned, when a grid exists. `RenderVideo` publishes
+        #: THIS as the picture's media time instead of the request: a request at 3.620 s decodes the frame at 3.629 s,
+        #: and naming the picture 3.620 made the seek log's `delta_s` structurally zero (measured 2026-11-25).
+        self.last_pts = None
         # Evidence of what this object actually did; logged at close.
         self.seeks = 0
         self.spawns = 0
@@ -265,6 +290,12 @@ class SeekReader:
             return None
         self._next_index += 1
         self.frames_read += 1
+        grid = self._grid
+        if grid is not None:
+            first, pitch = grid
+            self.last_pts = first + (self._next_index - 1) * pitch
+        else:
+            self.last_pts = None
         return chunk
 
     def _skip(self) -> bool:

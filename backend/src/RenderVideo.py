@@ -1382,7 +1382,12 @@ class Render:
             # frame it draws, so "named" stopped meaning "asked for" (measured 2026-11-24: a press at 1.888 s was
             # closed by the streaming frame at 4.046 s, +2.158 s off).
             _t_prepared = _perf_counter()
-            published = self._publish_display(frame, force=True, time_s=float(seconds),
+            # The picture's OWN time, not the request: `-ss 3.620` returns the frame at 3.629, and naming it 3.620 made
+            # the pane's `landed_time`/`delta_s` structurally zero - the instrument could not have shown a desync even
+            # if there was one (measured 2026-11-25). The resident reader knows the grid time of the frame it returned.
+            frame_pts = getattr(reader, "last_pts", None)
+            published = self._publish_display(frame, force=True,
+                                              time_s=float(seconds) if frame_pts is None else float(frame_pts),
                                               seek_generation=generation)
             _t_published = _perf_counter()
             if published:
@@ -1391,7 +1396,9 @@ class Render:
             # The stages, so a turnaround can be read instead of guessed: decode is whatever the resident reader paid,
             # prepare is restoration/upscale, publish is the channel (staging copy + header). The pane's own poll is
             # the fourth stage and only the app side can see it.
-            log(f"seek: displayed the frame at {seconds:.3f}s (generation {generation}, not written to the export); "
+            log(f"seek: displayed the frame at {seconds:.3f}s"
+                f"{'' if frame_pts is None else f' (frame pts {frame_pts:.3f}s)'}"
+                f" (generation {generation}, not written to the export); "
                 f"stages "
                 f"reader={(_t_decoding - _t_reader) * 1000.0:.1f}ms "
                 f"decode={(_t_decoded - _t_decoding) * 1000.0:.1f}ms "

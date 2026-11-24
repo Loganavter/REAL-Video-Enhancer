@@ -59,16 +59,22 @@ def frame_belongs_to(frame_pts: float, target: float) -> bool:
         return False
 
 
-def frame_at_or_after(frame_pts: float, target: float) -> bool:
+def frame_at_or_after(frame_pts: float, target: float, *, tolerance: float = 0.0) -> bool:
     """Whether the frame at `frame_pts` is the FIRST one at or after the target - the frame `-ss target` returns.
 
     This is the rule the render's own seek path uses (`SeekReader._index_at` is a `ceil`), so a ONE-OFF request (the
     LMB compare) must use it too: a `floor` here and a `ceil` there put the source one frame behind the result on every
     press whose target sits between two frames. Measured 2026-11-25: ask 8.105s, frames at 8.091/8.133, the result was
     the 8.133 frame and the compare showed 8.091.
+
+    `tolerance` is for the caller whose target is a NAME rather than an exact boundary: the pane names a picture with
+    the backend's grid time, and that grid is fitted from millisecond-quantised probe samples, so the name sits a few
+    milliseconds off the frame it belongs to (measured: name 8.136s, the frame's own PTS 8.133s, and a plain `ceil`
+    then picked the NEXT frame at 8.175). The caller passes half a frame interval - the exact inverse of "a name is a
+    frame's time" - and the frame the picture came from is chosen again.
     """
     try:
-        return float(frame_pts) >= float(target) - PTS_QUANTISATION_S
+        return float(frame_pts) >= float(target) - PTS_QUANTISATION_S - float(tolerance)
     except (TypeError, ValueError):
         return False
 
@@ -399,7 +405,7 @@ class VideoDecoder(QObject):
                     break
                 published = frame
                 continue
-            if frame_at_or_after(frame.pts, target):
+            if frame_at_or_after(frame.pts, target, tolerance=0.5 * self._interval):
                 published = frame
                 break
             fallback = frame
