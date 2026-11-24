@@ -890,12 +890,16 @@ class ProcessTab:
             # function and the panel would otherwise count the same picture twice (measured 2026-11-24: `frames=2`
             # for one frame on screen).
             pressed_at = getattr(self, "_seek_pressed_at", None)
+            # The display channel's own sequence is the identity of a composited picture: the renderer's frame counter
+            # is a different fact (it is what the log used to print, and it named frames the pane was not showing).
+            seq = getattr(getattr(self, "_display", None), "seq", None)
+            pane.set_frame(image, seq=seq)
             if pressed_at is not None and getattr(self, "_display_seek_pending", False):
+                shown = getattr(pane, "shown", None)
                 telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
                                     target=getattr(self, "_seek_target_frame", None),
-                                    landed=int(getattr(self, "currentFrame", 0) or 0))
+                                    landed=shown() if callable(shown) else None)
                 self._seek_pressed_at = None
-            pane.set_frame(image, index=int(getattr(self, "currentFrame", 0) or 0))
             if hasattr(pane, "set_progress"):
                 pane.set_progress(
                     rendered=self.currentFrame,
@@ -1806,7 +1810,14 @@ class ProcessTab:
             total_frames = float(getattr(self, "videoFrameCount", 0) or 0)
         target_frame = int(round(fraction * total_frames)) if total_frames > 0 else None
         self._seek_target_frame = target_frame
-        telemetry.event("seek press", fraction=f"{fraction:.4f}", target_frame=target_frame)
+        # The produced share goes with the press: a press past what the renderer has written is a different event from
+        # a press inside it, and only the log can tell them apart afterwards.
+        produced = 0.0
+        total = float(getattr(self, "max_value", 0) or 0)
+        if total > 0:
+            produced = max(0.0, min(1.0, float(getattr(self, "currentFrame", 0) or 0) / total))
+        telemetry.event("seek press", fraction=f"{fraction:.4f}", produced=f"{produced:.4f}",
+                        target_frame=target_frame)
         if self._queue_owns_pane():
             decoder = getattr(self, "_queue_pane_decoder", None)
             duration = float(getattr(decoder, "duration", 0.0) or 0.0)
@@ -2074,9 +2085,10 @@ class ProcessTab:
                 self._seek_watch = None
                 pressed_at = getattr(self, "_seek_pressed_at", None)
                 if pressed_at is not None:
+                    shown = getattr(pane, "shown", None)
                     telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
                                         target=getattr(self, "_seek_target_frame", None),
-                                        landed=getattr(frame, "index", None))
+                                        landed=shown() if callable(shown) else None)
                     self._seek_pressed_at = None
                 log(f"seek: press wanted {watched:.3f}s, the picture landed at {self._preview_playhead:.3f}s "
                     f"(delta {self._preview_playhead - watched:+.3f}s)")

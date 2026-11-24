@@ -214,6 +214,18 @@ class DisplayReader(QObject):
     #: One composited frame, already a Qt image owned by the GUI (the shared buffer is copied, not aliased).
     display_frame = Signal(QImage)
 
+    @property
+    def seq(self) -> int:
+        """The sequence number of the last picture this reader accepted (the publisher's own counter).
+
+        The publisher writes `seq` BEFORE the payload is complete, so the picture a reader holds is the slot one behind
+        it - the test for "did the pane get a NEW picture" is this counter moving, not the clock. Exposed because the
+        pane's own identity for a composited frame is this number: the renderer's frame counter is a different fact and
+        they do not always agree (owner, 2026-11-24: a seek log named the frame the render was on, not the one on
+        screen).
+        """
+        return int(getattr(self, "_last_seq", 0) or 0)
+
     def __init__(self, name: str, box=DEFAULT_DISPLAY_BOX, seek_name: str | None = None, parent=None) -> None:
         super().__init__(parent)
         self.name = str(name)

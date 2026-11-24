@@ -144,23 +144,27 @@ _drops = 0
 _last_paint: float | None = None
 _last_stats = 0.0
 _started = False
-#: The last frame index the pane accepted, when the producer could name it (`FrameRef.index`, the render's counter).
-_last_index: int | None = None
+#: What the pane is painting: `("frame", n)` from a decoder's own number, `("seq", n)` from the display channel's
+#: sequence. A pair on purpose - the two numbers mean different things and must not be printed as if they were one.
+_shown: tuple[str, int] | None = None
 _seek_ms: list[float] = []
 #: the last written snapshot, for a control verb or a test to read without waiting for the next second
 _last_snapshot: dict[str, object] = {}
 
 
-def note_frame(*, gui_ms: float | None = None, pts: float | None = None, index: int | None = None) -> None:
-    """A frame arrived and was handed to the pane. `index` is the producer's own frame number when it has one."""
-    global _frames, _last_index
+def note_frame(*, gui_ms: float | None = None, pts: float | None = None, index: int | None = None,
+               seq: int | None = None) -> None:
+    """A picture was handed to the pane: `index` is a decoder's frame number, `seq` the display channel's sequence."""
+    global _frames, _shown
     _frames += 1
     if index is not None:
-        _last_index = int(index)
+        _shown = ("frame", int(index))
+    elif seq is not None:
+        _shown = ("seq", int(seq))
     if gui_ms is not None:
         _gui.append(float(gui_ms))
     if level() >= 2:
-        event("frame", index=index, pts=None if pts is None else f"{pts:.3f}", gui_ms=_fmt(gui_ms))
+        event("frame", index=index, seq=seq, pts=None if pts is None else f"{pts:.3f}", gui_ms=_fmt(gui_ms))
 
 
 def note_upload(*, upload_ms: float | None = None, size_bytes: int | None = None) -> None:
@@ -206,18 +210,26 @@ def note_drops(count: int) -> None:
 MIN_SEEK_MS = 1.0
 
 
-def note_seek(turnaround_ms: float, *, target: int | None = None, landed: int | None = None) -> None:
-    """Press -> first new picture, in milliseconds, with both frame numbers when the caller knows them.
+def note_seek(turnaround_ms: float, *, target: int | None = None,
+              landed: tuple[str, int] | None = None) -> None:
+    """Press -> first new picture, in milliseconds, naming the frame that was asked for and the one the PANE shows.
 
-    A turnaround alone says how long; the pair says whether the picture is the one that was asked for. `target` is the
-    frame the press pointed at, `landed` the frame that actually arrived first.
+    `target` is the frame the press pointed at (`fraction x the strip's total`). `landed` is the pane's own identity for
+    the picture it paints - `("frame", n)` where the producer numbers frames, `("seq", n)` where the only real identity
+    is the display channel's sequence. It is deliberately NOT the renderer's frame counter: that is a different fact
+    and it produced a wrong reading once (owner, 2026-11-24: the log claimed the picture was already the requested
+    frame, which the counter could not prove).
     """
     turnaround_ms = float(turnaround_ms)
+    fields: dict[str, object] = {"target_frame": target}
+    if landed is not None:
+        kind, number = landed
+        fields["landed_frame" if kind == "frame" else "landed_seq"] = int(number)
     if turnaround_ms < MIN_SEEK_MS:
-        event("seek instant", turnaround_ms=f"{turnaround_ms:.2f}", target_frame=target, landed_frame=landed)
+        event("seek instant", turnaround_ms=f"{turnaround_ms:.2f}", **fields)
         return
     _seek_ms.append(turnaround_ms)
-    event("seek", turnaround_ms=f"{turnaround_ms:.1f}", target_frame=target, landed_frame=landed)
+    event("seek", turnaround_ms=f"{turnaround_ms:.1f}", **fields)
 
 
 def _summary(samples: list[float]) -> str:
@@ -226,6 +238,13 @@ def _summary(samples: list[float]) -> str:
     ordered = sorted(samples)
     p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
     return f"{statistics.median(ordered):.2f}/{p95:.2f}/{ordered[-1]:.2f}"
+
+
+def _shown_text() -> str:
+    if _shown is None:
+        return "-"
+    kind, number = _shown
+    return f"f{number}" if kind == "frame" else f"seq{number}"
 
 
 def snapshot() -> dict[str, object]:
@@ -241,7 +260,7 @@ def snapshot() -> dict[str, object]:
         "interval_ms": list(_intervals),
         "pass_ms": list(_pass),
         "seek_ms": list(_seek_ms),
-        "shown": _last_index,
+        "shown": _shown,
     }
 
 
@@ -252,9 +271,9 @@ def _reset(*, session: bool = False) -> None:
     session (a test, a restarted recorder) forgets both - otherwise the next flush after a reset would treat itself as
     the session's first and skip a window.
     """
-    global _frames, _paints, _uploads, _bytes, _drops, _last_snapshot, _started, _last_stats, _last_index
+    global _frames, _paints, _uploads, _bytes, _drops, _last_snapshot, _started, _last_stats, _shown
     _frames = _paints = _uploads = _bytes = _drops = 0
-    _last_index = None
+    _shown = None
     if session:
         _started = False
         _last_stats = 0.0
@@ -292,7 +311,7 @@ def maybe_stats(now: float | None = None, *, force: bool = False) -> bool:
     line = (
         f"preview: stats frames={_frames} paints={_paints} up={_uploads} "
         f"up_ms={_summary(_upload)} pass_ms={_summary(_pass)} gui_ms={_summary(_gui)} "
-        f"int_ms={_summary(_intervals)} drop={_drops} shown={_last_index if _last_index is not None else '-'} "
+        f"int_ms={_summary(_intervals)} drop={_drops} shown={_shown_text()} "
         f"seek_ms={_summary(_seek_ms)} "
         f"mb={_bytes / 1e6:.1f} window_s={minutes:.1f}"
     )

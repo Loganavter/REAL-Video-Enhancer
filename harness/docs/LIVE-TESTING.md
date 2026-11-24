@@ -68,8 +68,8 @@ run is still the final word for the shipped platform.
 ```
 # preview telemetry session 2026-11-24T20:45:41 level=1 pid=3103220
 preview: session file=/…/preview-log.txt pane_w=504 pane_h=721 dpr=1.0 mode=single
-preview: stats frames=24 paints=27 up=24 up_ms=0.01/0.02/1.34 pass_ms=0.40/0.52/0.98 gui_ms=0.62/0.71/0.98 int_ms=41.2/44.0/90.1 drop=0 shown=209 seek_ms=38.4/… window_s=1.0
-preview: seek press fraction=0.4210 target_frame=208
+preview: stats frames=24 paints=27 up=24 up_ms=0.01/0.02/1.34 pass_ms=0.40/0.52/0.98 gui_ms=0.62/0.71/0.98 int_ms=41.2/44.0/90.1 drop=0 shown=f209 seek_ms=38.4/… window_s=1.0
+preview: seek press fraction=0.4210 produced=0.3800 target_frame=208
 preview: seek turnaround_ms=38.9 target_frame=208 landed_frame=209
 preview: hold on playhead=12.500
 ```
@@ -101,12 +101,14 @@ What the fields mean, so a line can be read without the source:
 * `drop` - frames the queue discarded (oldest for the live stream, late for the playback grid).
 * `seek_ms` - press -> first new picture. A turnaround under `MIN_SEEK_MS` (1 ms) is logged as `seek instant`, because it
   means a picture was already in flight, not that the seek was free.
-* `target_frame` / `landed_frame` - the frame the press pointed at and the frame that actually arrived first (the target
-  is `fraction x total`; the total is the render's frame count, or `duration x fps` on a file). A `landed != target` is
-  the honest measure of "the seek went where it was told"; `seek instant` carries the pair too, so a stale press is
-  visible instead of hidden.
-* `shown` - the producer's frame number for the last picture the pane accepted (`FrameRef.index` on the decoder paths,
-  the renderer's own counter on the live feed). A dash means the producer did not name the frame.
+* `produced` - the share of the timeline the renderer had already written when the press landed. A press past it is a
+  request for a frame that does not exist yet, which is a different event from a press inside the produced band.
+* `target_frame` / `landed_frame` / `landed_seq` - the frame the press pointed at (`fraction x total`, where the total is
+  the render's frame count, `duration x fps`, or the clip's own count), and the picture the PANE was painting when the
+  seek closed. `landed_frame` is a decoder's frame number; `landed_seq` is the display channel's sequence, which is the
+  only real identity a composited frame has. **Neither is the renderer's frame counter** - that counter named a frame the
+  pane was not showing once, and a `landed == target` from it proved nothing.
+* `shown` - `f<n>` (a decoder's frame) or `seq<n>` (the display channel's sequence). A dash means no picture yet.
 
 ## The same surface as an MCP server (`harness/mcp-server/app`)
 

@@ -193,7 +193,7 @@ class VideoPreviewSurface(QRhiWidget):
     # -- data ------------------------------------------------------------
 
     def set_frame(self, image: QImage | None, *, gui_ms: float | None = None,
-                  index: int | None = None) -> None:
+                  index: int | None = None, seq: int | None = None) -> None:
         """Show this picture. A `None` clears the pane (no frame yet)."""
         self._frame = None if image is None else image.convertToFormat(QImage.Format.Format_RGBA8888)
         self._texture_dirty = self._frame is not None
@@ -205,10 +205,21 @@ class VideoPreviewSurface(QRhiWidget):
             self._ensure_texture(self._frame.size())
         self._refresh_readout()
         self.update()
-        telemetry.note_frame(gui_ms=gui_ms, index=index)
+        # The pane is the only place that knows what it PAINTS: a decoder's frame number when the producer has one,
+        # otherwise the display channel's sequence. Recorded here, read back through `shown()` - a seek's landing must
+        # be the picture on screen, not a counter that happens to sit next to it.
+        if index is not None:
+            self._shown = ("frame", int(index))
+        elif seq is not None:
+            self._shown = ("seq", int(seq))
+        telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq)
 
     def has_frame(self) -> bool:
         return self._frame is not None
+
+    def shown(self) -> tuple[str, int] | None:
+        """What the pane is painting: ``("frame", n)`` or ``("seq", n)``, or None before the first picture."""
+        return getattr(self, "_shown", None)
 
     def set_original(self, image: QImage | None) -> None:
         if image is not None:

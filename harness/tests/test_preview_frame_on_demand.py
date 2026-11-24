@@ -145,8 +145,8 @@ class _FakePane:
     def isVisible(self) -> bool:  # noqa: N802 - Qt spelling
         return self.visible
 
-    def set_frame(self, image, *, gui_ms: float | None = None,
-                  index: int | None = None) -> None:
+    def set_frame(self, image, *, gui_ms: float | None = None, index: int | None = None,
+                  seq: int | None = None) -> None:
         self.frames.append(image)
 
     def set_progress(self, **values) -> None:

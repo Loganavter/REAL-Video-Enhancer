@@ -68,7 +68,7 @@ def test_the_first_window_starts_with_the_first_record(monkeypatch, fresh):
 def test_an_instant_turnaround_is_not_counted_as_a_seek(monkeypatch, fresh):
     lines, now = fresh
     _level(monkeypatch, "1")
-    telemetry.note_seek(0.1, target=100, landed=101)
+    telemetry.note_seek(0.1, target=100, landed=("frame", 101))
     assert any("preview: seek instant" in line and "target_frame=100" in line and "landed_frame=101" in line
                for line, _ in lines)
     assert telemetry.snapshot()["seek_ms"] == []
@@ -77,15 +77,27 @@ def test_an_instant_turnaround_is_not_counted_as_a_seek(monkeypatch, fresh):
 
 
 def test_a_seek_names_both_frames_and_the_line_names_the_shown_one(monkeypatch, fresh):
-    """A turnaround says how long; the frame pair says whether the picture is the one that was asked for."""
+    """A turnaround says how long; the pair says which picture the PANE holds - not which frame the render counted."""
     lines, now = fresh
     _level(monkeypatch, "1")
-    telemetry.note_seek(48.88, target=208, landed=209)
+    telemetry.note_seek(48.88, target=208, landed=("frame", 209))
     seek_line = [line for line, _ in lines if line.startswith("preview: seek ")][-1]
     assert "target_frame=208" in seek_line and "landed_frame=209" in seek_line, seek_line
     telemetry.note_frame(index=209)
     telemetry.maybe_stats(force=True)
-    assert "shown=209" in lines[-1][0], lines[-1][0]
+    assert "shown=f209" in lines[-1][0], lines[-1][0]
+
+
+def test_the_display_channel_sequence_is_its_own_kind_of_identity(monkeypatch, fresh):
+    """A composited frame has no frame number: it has the publisher's sequence, and the line must not blur the two."""
+    lines, now = fresh
+    _level(monkeypatch, "1")
+    telemetry.note_frame(seq=41)
+    telemetry.note_seek(12.5, target=90, landed=("seq", 41))
+    seek_line = [line for line, _ in lines if line.startswith("preview: seek ")][-1]
+    assert "landed_seq=41" in seek_line and "landed_frame" not in seek_line, seek_line
+    telemetry.maybe_stats(force=True)
+    assert "shown=seq41" in lines[-1][0], lines[-1][0]
 
 
 def test_one_aggregate_line_per_second_with_the_numbers(monkeypatch, fresh):
