@@ -25,9 +25,20 @@ from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `Button` where it had a
 # `QPushButton`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import Button, ImageLabel, RichTextView, SurfacePanel, Text
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 
+from src.ui.pages.scale_follower import ScaleFollower
 from src.ui.pages.handles import HomePageHandles
 from src.ui import i18n
+
+#: The two icon buttons' design box: the width the text beside them leaves, and the glyph the toolkit paints. Same
+#: split as the download page - the box is host geometry and takes the factor here; the glyph is a design value the
+#: toolkit scales once at paint time.
+HOME_ICON_MAX_WIDTH_PX = 55
+HOME_ICON_PX = 35
+
+#: The buttons' content inset: design px the toolkit scales at use time, named once instead of repeated per button.
+HOME_ICON_CONTENT_PADDING = (10, 5, 10, 5)
 
 
 class HomePagePage:
@@ -37,6 +48,9 @@ class HomePagePage:
 
     def build(self):
         """Build the widget tree and return the page root."""
+        # The two icon buttons' box: width only (the height side is `QWIDGETSIZE_MAX` because the row decides it).
+        home_icon_box = QSize(scaled_px(HOME_ICON_MAX_WIDTH_PX), 16777215)
+        home_icon_size = QSize(HOME_ICON_PX, HOME_ICON_PX)
         self.homePage = SurfacePanel(background_token="surface.page")
         self.homePage.setObjectName(u"homePage")
         # Layer C: the page body paints itself; its buttons are toolkit plates. The two read-only panes are the
@@ -57,17 +71,17 @@ class HomePagePage:
         self.horizontalLayout_29.addWidget(self.label_13)
         self.kofiBtn = Button(parent=self.widget_11, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=HOME_ICON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.kofiBtn.setObjectName(u"kofiBtn")
         # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
         # fill the cell, which turns an icon button into a slab when the row is taller than its contents. `size=(0, 0)`
         # above drops the standalone 36x36 control size; this states the row's share.
         self.kofiBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.kofiBtn.setMaximumSize(QSize(55, 16777215))
+        self.kofiBtn.setMaximumSize(home_icon_box)
         icon = QIcon()
         icon.addFile(u":/icons/icons/coffee.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.kofiBtn.setIcon(icon)
-        self.kofiBtn.setIconSize(QSize(35, 35))
+        self.kofiBtn.setIconSize(home_icon_size)
         # `setCheckable(False)` states the button's own default, and `Button` has no such setter (toggle mode is the
         # constructor's `toggle=`), so the Designer's line is a no-op here.
         self.horizontalLayout_29.addWidget(self.kofiBtn)
@@ -76,14 +90,14 @@ class HomePagePage:
         self.horizontalLayout_29.addWidget(self.label_16)
         self.githubBtn = Button(parent=self.widget_11, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
+            content_padding=HOME_ICON_CONTENT_PADDING, corner_radius=10, size=(0, 0))
         self.githubBtn.setObjectName(u"githubBtn")
         self.githubBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.githubBtn.setMaximumSize(QSize(55, 16777215))
+        self.githubBtn.setMaximumSize(home_icon_box)
         icon1 = QIcon()
         icon1.addFile(u":/icons/icons/github.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.githubBtn.setIcon(icon1)
-        self.githubBtn.setIconSize(QSize(35, 35))
+        self.githubBtn.setIconSize(home_icon_size)
         self.horizontalLayout_29.addWidget(self.githubBtn)
         self.horizontalLayout_28.addWidget(self.widget_11)
         self.gridLayout_2.addLayout(self.horizontalLayout_28, 4, 0, 1, 1)
@@ -133,7 +147,22 @@ class HomePagePage:
         # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
         i18n.bind_page(self, self.homePage)
         self.retranslate()
+        # The two icon boxes are one design width: re-stated at the factor in force now and on every later change, so
+        # a live `scale:<factor>` moves them with the glyph the toolkit paints.
+        self._icon_button_scale = ScaleFollower(self.homePage, self._apply_icon_button_geometry)
         return self.homePage
+
+    def _apply_icon_button_geometry(self) -> None:
+        """State the two icon buttons' max width at the factor in force now.
+
+        Width only: the row owns the height, and `QWIDGETSIZE_MAX` is Qt's "unbounded". The icon itself stays a design
+        value - the toolkit multiplies it once when it paints (see `HOME_ICON_PX`).
+        """
+        box = QSize(scaled_px(HOME_ICON_MAX_WIDTH_PX), 16777215)
+        icon = QSize(HOME_ICON_PX, HOME_ICON_PX)
+        for button in (self.kofiBtn, self.githubBtn):
+            button.setMaximumSize(box)
+            button.setIconSize(icon)
 
     def retranslate(self, language: str | None = None) -> None:
         self.label_13.setText(QCoreApplication.translate("MainWindow", u"Support Me!", None))
@@ -150,5 +179,5 @@ class HomePagePage:
 "hr { height: 1px; border-width: 0; }\n"
 "li.unchecked::marker { content: \"\\2610\"; }\n"
 "li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:'Adwaita Sans'; font-size:11pt; font-weight:400; font-style:normal;\">\n"
+"</style></head><body style=\" font-family:'Adwaita Sans'; font-weight:400; font-style:normal;\">\n"
 "<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:'Cantarell';\"><br /></p></body></html>", None))
