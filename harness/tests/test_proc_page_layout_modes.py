@@ -152,6 +152,11 @@ def test_every_measured_cell_has_no_page_scroll_and_both_panes_usable(qapp, proc
                 f"the {name} is {pane.width()} px at factor {factor}, window {window}; the floor is {PANE_FLOOR_PX}")
         assert page.generalSettings_page.scrollArea_4.horizontalScrollBar().maximum() == 0, (
             "the General tab scrolls inside itself: the column went under its content floor")
+        from src.ui.devtools.layout_audit import audit
+
+        start_clips = [line for line in audit(win) if "startRenderButton" in line]
+        assert not start_clips, (
+            "the Start button still hangs below its row at this factor:\n" + "\n".join(start_clips))
     finally:
         win.close()
 
