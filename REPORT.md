@@ -92,27 +92,27 @@ frame/body call; **250f** = every 250 rendered frames.
 
 | line | what it prints | frequency | level now |
 |---|---|---|---|
-| 230/322/327/345 | calibration cache / layout notes | job | info |
-| 473/477/485 | calibration/grid notes | job | info |
-| 627/636 | non-contiguous input, `RVE_DEBUG_INPUT` dump | once, env-gated | info |
+| 231/323/328/346 | calibration cache / layout notes | job | info |
+| 474/478/486 | calibration/grid notes | job | info |
+| 628/637 | non-contiguous input, `RVE_DEBUG_INPUT` dump | once, env-gated | info |
 | 661 | `int8 body GPU: N ms/frame (last 8), frame N` | 8f | **debug** |
 | 678 | `int8 phases: head ... quantise ... hops ... tail ... SUM ... BODY-TOTAL ...` | 8f | **debug** |
 | 689 | `int8 tail: dequant ... conv ... shuffle ... residual ... SUM ... ms` | 8f (per tail call) | **debug** |
 | 706 | `int8 head FUSED: ...` | once | info |
-| 723/775/817/825/842/850 | branch notes / certification / refusals | job | info |
+| 723/776/818/826/843/851 | branch notes / certification / refusals | job | info |
 
 ### `backend/src/pytorch/TensorRTHandler.py`
 
 | line | what it prints | frequency | level now |
 |---|---|---|---|
-| 176 | `TensorRT engine built in N s (raw builder).` | per engine build | info, **now `BACKEND:`-prefixed** |
-| 206 | `Building TensorRT engine <name>. This may take a while...` | per engine build | info, **now `BACKEND:`-prefixed** |
-| 258 | `TensorRT engine built in N s.` | per engine build | info, **now `BACKEND:`-prefixed** |
-| 279 | `raw TensorRT plan kept at ...` | per engine save | info |
-| 294 | `TensorRT engine already loaded in this process: ...` | per cached load | info |
-| 299 | **new** `Loading raw TensorRT plan from ...` + `TensorRT engine loaded in N s (...)` | per engine load | info |
-| 305/308 | **new** `Loading TensorRT engine from ...` + `TensorRT engine loaded in N s (...)` | per engine load | info |
-| 310 | `TensorRT partitioning (loaded): N sub-engine(s)` | per load | info |
+| 181 | `TensorRT engine built in N s (raw builder).` | per engine build | info, **now `BACKEND:`-prefixed** |
+| 193 | `Building TensorRT engine <name>. This may take a while...` | per engine build | info, **now `BACKEND:`-prefixed** |
+| 246 | `TensorRT engine built in N s.` | per engine build | info, **now `BACKEND:`-prefixed** |
+| 258 | `raw TensorRT plan kept at ...` | per engine save | info |
+| 281 | `TensorRT engine already loaded in this process: ...` | per cached load | info |
+| 286/288 | **new** `Loading raw TensorRT plan from ...` + `TensorRT engine loaded in N s (...)` | per engine load | info |
+| 292/294 | **new** `Loading TensorRT engine from ...` + `TensorRT engine loaded in N s (...)` | per engine load | info |
+| 299 | `TensorRT partitioning (loaded): N sub-engine(s)` | per load | info |
 
 The four build/load prints used bare `print(..., file=sys.stderr)`. They reached the pane (stderr is merged) but
 without the `BACKEND: ` prefix the pane's phase colouring and any prefix-keyed reader miss them; they now go through
