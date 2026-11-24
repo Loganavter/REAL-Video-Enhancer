@@ -7,6 +7,10 @@ from threading import Thread
 # ~1.5 s, i.e. 16 ms/frame - large enough to be misread as per-frame overhead, which is
 # exactly what happened to the budget table. These marks split it out.
 _T0 = _time.time()
+
+#: How long the streaming publishes stand aside after a seek's picture went out, seconds. The pane polls at ~10 Hz;
+#: 250 ms covers two polls, so the stamped picture is read instead of being overwritten by the next stream frame.
+DISPLAY_SEEK_HOLD_S = 0.25
 import torch
 
 import os
@@ -1130,6 +1134,11 @@ class Render:
             # Nobody is watching: this is the whole cost of the channel when it is off.
             return False
         if not force:
+            # A seek's picture must reach the pane: the pane polls at ~10 Hz while the renderer keeps publishing, so
+            # the NEXT streaming frame overwrote the seek's stamped picture before the poll - measured 2026-11-24
+            # (four backend "displayed the frame" lines, not one landed time in the pane's log).
+            if getattr(self, "_displayHoldUntil", 0.0) > _time.monotonic():
+                return False
             self._displayCounter += 1
             if self._displayCounter % self.displayEvery:
                 return False
@@ -1249,8 +1258,10 @@ class Render:
             if frame is None:
                 return
             # The seek path KNOWS the media time of this picture - it decoded that exact frame - so this is the one
-            # publish whose content can be checked against the request.
-            self._publish_display(frame, force=True, time_s=float(seconds))
+            # publish whose content can be checked against the request. The streaming publishes hold off briefly so
+            # this picture is the one the pane's next poll reads.
+            if self._publish_display(frame, force=True, time_s=float(seconds)):
+                self._displayHoldUntil = _time.monotonic() + DISPLAY_SEEK_HOLD_S
             self.lastSeekSeconds = float(seconds)
             log(f"seek: displayed the frame at {seconds:.3f}s (not written to the export)")
         except Exception as exc:

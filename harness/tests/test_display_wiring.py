@@ -799,3 +799,67 @@ def test_the_transport_glyph_follows_the_running_state():
         assert tab.page_handles.proc.startRenderButton.checked is checked, state
         assert tab.page_handles.proc.killRenderButton.enabled is cancel, state
         assert tab.page_handles.proc.startRenderButton.enabled is True, state
+
+
+# --- a seek closes on the picture that names itself, not on the next stream frame ------------------------------
+
+def _seek_tab(media_time):
+    """The smallest tab `_on_display_frame` needs, with a display reader that has (or has not) a media time."""
+    calls = []
+
+    class _Pane:
+        def set_frame(self, image, *, gui_ms=None, index=None, seq=None, media_time=None):
+            calls.append(("frame", seq, media_time))
+            self._shown = ("seq", seq) if seq is not None else None
+            self._shown_time = media_time
+
+        def shown(self):
+            return getattr(self, "_shown", None)
+
+        def shown_time(self):
+            return getattr(self, "_shown_time", None)
+
+    class _Reader:
+        def __init__(self, stamp):
+            self._stamp = stamp
+            self.seq = 196
+
+        @property
+        def media_time(self):
+            return self._stamp
+
+    pane = _Pane()
+    tab = types.SimpleNamespace(
+        page_handles=types.SimpleNamespace(proc=types.SimpleNamespace(previewLabel=pane)),
+        _display=_Reader(media_time), _display_seek_pending=True, _seek_pressed_at=0.0,
+        _seek_target_frame=27, _seek_target_s=1.139,
+        _preview_paused=False, _display_paints_pane=lambda: True,
+        _result_playhead=lambda: 0.0, _clip_duration=lambda: 20.646,
+    )
+    return tab, calls
+
+
+def test_a_streaming_frame_does_not_close_a_seek(monkeypatch):
+    """The renderer keeps publishing after the seek frame; an unnamed picture must not claim the landing."""
+    notes = []
+    monkeypatch.setattr("src.ui.video.telemetry.note_seek",
+                        lambda ms, **kw: notes.append((ms, kw)))
+    tab, calls = _seek_tab(None)
+    ProcessTab._on_display_frame(tab, QImage(2, 2, QImage.Format.Format_RGB888))
+    assert notes == [], "a picture with no media time closed the seek"
+    assert tab._seek_pressed_at == 0.0, "the seek must stay open for the stamped picture"
+    assert calls and calls[0][2] is None
+
+
+def test_the_stamped_picture_closes_the_seek_with_its_own_time(monkeypatch):
+    notes = []
+    monkeypatch.setattr("src.ui.video.telemetry.note_seek",
+                        lambda ms, **kw: notes.append((ms, kw)))
+    tab, _calls = _seek_tab(1.139)
+    ProcessTab._on_display_frame(tab, QImage(2, 2, QImage.Format.Format_RGB888))
+    assert len(notes) == 1, notes
+    _ms, fields = notes[0]
+    assert fields["landed_time"] == 1.139
+    assert fields["target_s"] == 1.139
+    assert fields["landed"] == ("seq", 196)
+    assert tab._seek_pressed_at is None

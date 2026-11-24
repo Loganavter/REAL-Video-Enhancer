@@ -892,10 +892,16 @@ class ProcessTab:
             pressed_at = getattr(self, "_seek_pressed_at", None)
             # The display channel's own sequence is the identity of a composited picture: the renderer's frame counter
             # is a different fact (it is what the log used to print, and it named frames the pane was not showing).
-            seq = getattr(getattr(self, "_display", None), "seq", None)
-            pane.set_frame(image, seq=seq,
-                           media_time=getattr(getattr(self, "_display", None), "media_time", None))
-            if pressed_at is not None and getattr(self, "_display_seek_pending", False):
+            reader = getattr(self, "_display", None)
+            seq = getattr(reader, "seq", None)
+            media_time = getattr(reader, "media_time", None)
+            pane.set_frame(image, seq=seq, media_time=media_time)
+            if pressed_at is not None and getattr(self, "_display_seek_pending", False) and media_time is not None:
+                # Close the seek ONLY on a publish that names its picture. The pane polls at 10 Hz while the renderer
+                # keeps publishing, so the seek's stamped frame is usually overwritten by the next streaming frame
+                # (which carries no time) before the poll - measured 2026-11-24: four backend "displayed the frame at
+                # 1.139s" lines and not one `landed_time`, because every landing was closed by a picture that was not
+                # the requested one.
                 shown = getattr(pane, "shown", None)
                 shown_time = getattr(pane, "shown_time", None)
                 telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
