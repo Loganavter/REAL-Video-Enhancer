@@ -11,13 +11,21 @@ second instead of a minute, and the process stays up for the next request.
 
 Protocol (files, so any tool can drive it - see ``harness/scripts/ui_live.py``):
 
-    request   "all" or "nav3-tab0,nav4"     written by the driver
+    request   "all" or "nav3-tab0,nav4"     written by the driver; may carry its answer id as `<verb>#<id>`
+    requests/<id>  "<verb>"                  one file per request, the file name IS the id (see below)
     ready     ""                             written once, after the warm-up walk
     done      "<stamp>"                      written per request; the driver removes `request` first
     quit      ""                             asks the app to exit
 
+Two request sources, one contract: **a request that reaches the intake is dispatched once or answered with an
+error** - an empty file (a client writing in place truncates first) is left for the next tick, a request that stays
+empty is rejected, and an unreadable verb is no longer a batch capture. The single `request` slot cannot hold two
+writers inside one 120 ms poll, so a client that needs that guarantee publishes `requests/<id>` with
+``write tmp; os.replace(tmp, final)``; the file name is its answer id and its content is the verb verbatim. The
+legacy slot keeps working for every existing client (`ui_live.py shot`, `live.sh ask`, the MCP backend).
+
 Why not a socket: the app may block its event loop in a modal dialog or a long paint; a file poll keeps the protocol
-trivial and crash-safe (a half-written request is simply not a valid list of pages).
+trivial and crash-safe (an unparsed request is answered, not mistaken for a page list).
 """
 
 from __future__ import annotations
@@ -62,6 +70,143 @@ def _stamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
 
 
+#: The legacy single request slot. Kept because every existing client writes it (`harness/scripts/ui_live.py`,
+#: `harness/scripts/live.sh ask`, the MCP backend, the supervisor's probes); a second client can overwrite it
+#: inside one 120 ms tick, which is why `requests/` exists.
+LEGACY_REQUEST_NAME = "request"
+#: One file per request: `requests/<id>` - the file NAME is the id, and two clients publishing with
+#: `write tmp; os.replace(tmp, final)` can never clobber each other.
+REQUESTS_DIR_NAME = "requests"
+#: How long an empty request file is left alone before it becomes a visible error. A client writing in place
+#: truncates first, so the empty window is usually milliseconds; the grace only separates "still writing" from
+#: "a client left an empty file behind".
+EMPTY_REQUEST_GRACE_S = 2.0
+
+
+def _read_request(path: str) -> str:
+    """Read one request file without ever raising on its bytes.
+
+    `errors="replace"` is the point: a verb carrying a path in a non-UTF-8 encoding used to raise
+    `UnicodeDecodeError` out of `poll`, the timer was never rescheduled, and every later request went unanswered
+    - an app that looks hung (measured 2026-11-24: `0xb7` in a Cyrillic path). A replacement character is a value
+    the handler can report; an exception costs every request after it.
+    """
+    with open(path, "r", encoding="utf-8", errors="replace") as request_file:
+        return request_file.read()
+
+
+def _discard(path: str) -> None:
+    """Remove a request that has been answered. A failure leaves it for the next tick, never eats it silently."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _dispatch_safely(dispatch, verb: str, request_id: str | None, path: str) -> None:
+    """Run one dispatch; a handler that raises must not abort the batch (this file is already off the disk)."""
+    try:
+        dispatch(verb, request_id)
+    except Exception as exc:
+        print(f"capture-server: {path} ({verb!r}) failed: {type(exc).__name__}: {exc}", flush=True)
+
+
+def page_request_error(wanted: str, known_pages) -> str | None:
+    """The sentence `handle()`'s fallthrough must answer with, or None when `wanted` IS a page request.
+
+    The fallthrough used to be `capture(wanted)`, and `capture("")` means "every page": a request file caught in
+    its truncate-then-write window was not merely lost, it ran a full batch capture (measured 2026-11-24). An
+    empty or unparseable verb answers an error bound to its id instead. A partly known list stays a capture
+    request: `capture()` answers with the pages it could name and its payload lists them, so the dropped name is
+    visible to the client.
+    """
+    if not wanted.strip():
+        return "empty request - nothing was dispatched (the file was probably still being written)"
+    if wanted.strip() == "all":
+        return None
+    names = [part.strip() for part in wanted.split(",") if part.strip()]
+    if any(name in known_pages for name in names):
+        return None
+    return (f"unknown request {wanted!r}: expected 'all', a page name ({', '.join(known_pages)}) "
+            f"or a verb such as state:, click:, preview:, render:")
+
+
+def drain_requests(root: str, dispatch, *, state: dict | None = None, now: float | None = None,
+                   grace_s: float = EMPTY_REQUEST_GRACE_S) -> int:
+    """Take every readable request out of the drop box exactly once and hand it to `dispatch(verb, id)`.
+
+    Two sources, one contract - a request either reaches `dispatch` or is answered with an error:
+
+    * `request` (legacy single slot): the verb may carry its id as `verb#<id>`, and the text is passed verbatim
+      so `handle()` keeps parsing it the way it always has;
+    * `requests/<id>`: the file NAME is the id, so two clients publishing with `os.replace` never overwrite each
+      other, and the content is the verb verbatim (a `#` inside it, as in `preview:<clip>#model=futsuu`, is the
+      verb's own, not an id).
+
+    Files are read with replacement characters (see `_read_request`), and an EMPTY file is left in place for the
+    next tick: a client writing in place truncates first, and consuming that window loses the request silently.
+    Past `grace_s` the empty file is a request the loop must answer - it is dispatched as the empty verb (which
+    `page_request_error` rejects), then removed so it cannot answer again every tick.
+
+    Returns the number of requests dispatched, rejections included: they were answered, not dropped.
+    """
+    if state is None:
+        state = {}
+    if now is None:
+        now = time.monotonic()
+    empty_since = state.setdefault("empty_since", {})
+
+    pending: list[tuple[str, str | None, bool]] = []
+    legacy_path = os.path.join(root, LEGACY_REQUEST_NAME)
+    if os.path.isfile(legacy_path):
+        pending.append((legacy_path, None, True))
+    directory = os.path.join(root, REQUESTS_DIR_NAME)
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        names = []
+    for name in names:
+        if name.startswith(".") or name.endswith(".tmp"):
+            # `write tmp; os.replace(tmp, final)` is the sanctioned way to publish a request: the stage is not a
+            # request and must not be consumed (the client may be between the two calls).
+            continue
+        path = os.path.join(directory, name)
+        if os.path.isfile(path):
+            pending.append((path, name, False))
+
+    batch: list[tuple[str, str | None, bool, str]] = []
+    for path, request_id, legacy in pending:
+        try:
+            text = _read_request(path)
+        except OSError:
+            # Not consumed: an unreadable file stays where its owner can see it and is retried next tick.
+            continue
+        batch.append((path, request_id, legacy, text))
+
+    live = {path for path, _request_id, _legacy, _text in batch}
+    for stale in [path for path in empty_since if path not in live]:
+        del empty_since[stale]
+
+    served = 0
+    for path, request_id, _legacy, text in batch:
+        if not text.strip():
+            first = empty_since.setdefault(path, now)
+            if now - first < grace_s:
+                continue
+            empty_since.pop(path, None)
+            _discard(path)
+            served += 1
+            _dispatch_safely(dispatch, "", request_id, path)
+            continue
+        empty_since.pop(path, None)
+        # Unlink BEFORE dispatch: `capture()` can run for seconds, and the legacy slot must be free for the next
+        # writer - otherwise this unlink would delete the request that writer just published.
+        _discard(path)
+        served += 1
+        _dispatch_safely(dispatch, text, request_id, path)
+    return served
+
+
 def install(window) -> None:
     """Arm the server on ``window``. Never returns anything; the app keeps running."""
     from PySide6.QtCore import QTimer
@@ -91,7 +236,7 @@ def install(window) -> None:
     # diagnosis channel must NOT walk: it would switch pages under the owner's hands. It polls immediately and only warms
     # a page when that page is asked for.
     always_on = os.environ.get("RVE_UI_CAPTURE_SERVER") is None
-    state = {"warming": not always_on, "index": 0, "request_id": None, "walk_before": None}
+    state = {"warming": not always_on, "index": 0, "request_id": None, "walk_before": None, "empty_since": {}}
 
     if always_on:
         with open(ready_path, "w", encoding="utf-8") as ready_file:
@@ -124,6 +269,22 @@ def install(window) -> None:
         QApplication.processEvents()
         QTimer.singleShot(step, lambda: warm(index + 1))
 
+    def dispatch(wanted: str, request_id: str | None = None) -> None:
+        """Dispatch ONE drained request, with its id bound before any handler can answer from a timer."""
+        state["request_id"] = request_id
+        try:
+            handle(wanted, request_id)
+        except Exception as exc:
+            # This loop IS the channel, and a handler that raises also skips the reschedule below: one bad verb
+            # then silences every later request (measured 2026-11-23). Answer the error, keep polling. The id is
+            # explicit because a handler may have raised before it bound its own answer.
+            print(f"capture-server: {wanted!r} failed: {type(exc).__name__}: {exc}", flush=True)
+            try:
+                _finish({"stamp": _stamp(), "kind": "error", "request_id": request_id,
+                         "error": f"{type(exc).__name__}: {exc}"})
+            except Exception:
+                pass
+
     def poll() -> None:
         if os.path.exists(os.path.join(root, "quit")):
             print("capture-server: quit requested", flush=True)
@@ -132,24 +293,16 @@ def install(window) -> None:
         if state["warming"]:
             QTimer.singleShot(120, poll)
             return
-        if os.path.exists(request_path):
-            try:
-                with open(request_path, encoding="utf-8") as request_file:
-                    wanted = request_file.read().strip()
-            except OSError:
-                wanted = ""
-            os.unlink(request_path)
-            try:
-                handle(wanted)
-            except Exception as exc:
-                # This loop IS the channel, and a handler that raises also skips the reschedule below: one bad verb
-                # then silences every later request (measured 2026-11-23). Answer the error, keep polling.
-                print(f"capture-server: {wanted!r} failed: {type(exc).__name__}: {exc}", flush=True)
-                try:
-                    _finish({"stamp": _stamp(), "kind": "error",
-                             "error": f"{type(exc).__name__}: {exc}"})
-                except Exception:
-                    pass
+        try:
+            # Both sources: the legacy `request` slot and one file per request under `requests/<id>`. Reading
+            # with replacement characters, keeping an empty file for the next tick and answering an unknown verb
+            # all live in `drain_requests` - the reasons are there and in the tests.
+            drain_requests(root, dispatch, state=state)
+        except Exception as exc:
+            # The reschedule BELOW is the channel, so it runs whatever the intake did: one request that surprises
+            # the reader must cost that request, never every later one (measured 2026-11-24: a `UnicodeDecodeError`
+            # inside the old read left the app answering nothing at all).
+            print(f"capture-server: request intake failed: {type(exc).__name__}: {exc}", flush=True)
         QTimer.singleShot(120, poll)
 
     if always_on:
@@ -581,9 +734,11 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: state {name!r} -> {report.get('enabled')} enabled", flush=True)
 
-    def handle(wanted: str) -> None:
-        request_id = None
-        if "#" in wanted:
+    def handle(wanted: str, request_id: str | None = None) -> None:
+        # The legacy single file carries its id inside the verb (`state:x#abc`); a file under `requests/<id>`
+        # carries it in its NAME, and its content is a verb verbatim (so `preview:<clip>#model=futsuu` keeps its
+        # own `#`). `drain_requests` passes the two forms differently and they must not be confused.
+        if request_id is None and "#" in wanted:
             wanted, _, request_id = wanted.rpartition("#")
             wanted = wanted.strip()
             request_id = request_id.strip() or None
@@ -737,6 +892,13 @@ def install(window) -> None:
             return
         if wanted.startswith("preview:"):
             preview(wanted[len("preview:"):].strip())
+            return
+        error = page_request_error(wanted, by_name)
+        if error is not None:
+            # Never `capture("")`: an empty verb used to mean every page, so a request caught mid-write ran a
+            # batch. A visible rejection bound to the request's id is the contract.
+            _finish({"stamp": _stamp(), "kind": "error", "error": error})
+            print(f"capture-server: rejected {wanted!r}: {error}", flush=True)
             return
         capture(wanted)
 
