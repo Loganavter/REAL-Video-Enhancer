@@ -7,7 +7,7 @@ pane nobody watches": run it with --wanted 0 and the renderer must not publish a
     python3 harness/scripts/display_probe.py --run -- python3 ... backend/rve-backend.py ... --display_state_id NAME
     python3 harness/scripts/display_probe.py --attach NAME [--seconds 8] [--seek 3.5]
 
-The header is the one `backend/src/utils/DisplayChannel.py` writes: `<IHHBBBI` = seq, width, height, fmt, wanted, flags,
+The header is the one `backend/src/utils/DisplayChannel.py` writes: `<IHHBBBI d` = seq, width, height, fmt, wanted, flags,
 reserved (15 bytes, little-endian, no padding; `wanted` at byte 9), then two slots of box_w * box_h * 3.
 """
 
@@ -20,7 +20,10 @@ import subprocess
 import sys
 import time
 
-HEADER = struct.Struct("<IHHBBBI")
+#: Keep in step with `backend/src/utils/DisplayChannel.py` (and the app's `src/ui/video/channel.py`): 23 bytes, the
+#: trailing double is the picture's media time (-1 = the writer could not name it). A 15-byte copy here made the probe
+#: read the slots 8 bytes early and show a torn picture.
+HEADER = struct.Struct("<IHHBBBI d")
 FMT_RGB888 = 1
 OFF_WANTED = 9
 
@@ -101,7 +104,7 @@ def main() -> int:
                 struct.pack_into("<dI", seek_block.buf, 0, float(args.seek), generation + 1)
                 seeked_at = time.time() - started
                 print(f"seek requested: t={args.seek}s (generation {generation + 1})")
-            seq, w, h, fmt, wanted, _flags, _reserved = read_header(block.buf)
+            seq, w, h, fmt, wanted, _flags, _reserved, _stamp = read_header(block.buf)
             if seq != last_seq:
                 last_seq = seq
                 frames += 1
@@ -112,7 +115,7 @@ def main() -> int:
                     seeked_at = float("inf")
             time.sleep(0.05)
     finally:
-        seq, w, h, fmt, wanted, _flags, _reserved = read_header(block.buf)
+        seq, w, h, fmt, wanted, _flags, _reserved, _stamp = read_header(block.buf)
         print(f"\nframes seen: {frames}  last seq: {seq}  size {w}x{h}  fmt {fmt}  wanted {wanted}")
         print(f"first frame after {first if first is not None else 'never'} s"
               f"{'' if frames else '  <- the renderer published nothing'}")
