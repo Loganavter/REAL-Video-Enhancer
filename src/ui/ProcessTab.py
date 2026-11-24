@@ -1239,9 +1239,7 @@ class ProcessTab:
             edge = float(getattr(live, "produced_seconds", 0.0) or 0.0)
             if edge <= 0.0:
                 return                      # nothing is written yet, so there is nothing to seek to
-            produced = self._live_produced_fraction()
-            timeline = edge / produced if produced > 0.0 else edge
-            live.seek(fraction * timeline)
+            live.seek(fraction * self._live_timeline(edge))
             return
         decoder = getattr(self, "_preview_decoder", None)
         duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
@@ -1272,6 +1270,24 @@ class ProcessTab:
             reader.set_wanted(True)
         log(f"seek: requested {target:.3f}s (generation {generation}) from the running render")
 
+    def _live_timeline(self, edge: float) -> float:
+        """The whole timeline a strip fraction is a share of, for the live tail.
+
+        The clip's own length when the job knows it (`videoFrameCount / videoFps`): the strip's white band is
+        `currentFrame / max_value`, i.e. the produced share of THAT length, so a press at 30 % has to mean 30 %
+        of it or the marker lands somewhere the finger did not. `edge / produced` is only the fallback: it is
+        exact while the tail stands on the produced edge, and a HELD pane does not - it stops polling, so `edge`
+        freezes at the last frame it published while the renderer (and the band) keeps going. Recomputing the
+        timeline from that frozen edge made the same finger position mean a different second on every press.
+
+        Returns 0.0 when neither is known: the caller then has nothing honest to seek to.
+        """
+        clip = self._clip_duration()
+        if clip > 0.0:
+            return float(clip)
+        produced = self._live_produced_fraction()
+        return float(edge) / produced if produced > 0.0 else float(edge)
+
     def _live_produced_fraction(self) -> float:
         """The share of the timeline the renderer has produced, from the same counters the strip fills with."""
         rendered = float(self.currentFrame or 0)
@@ -1281,15 +1297,20 @@ class ProcessTab:
         return max(0.0, min(1.0, rendered / total))
 
     def _live_duration_estimate(self) -> float:
-        """The timeline length the produced share implies, so the strip can draw a playhead mid-render.
+        """The timeline length the strip draws its playhead against, so the marker is a place on the clip.
 
-        `edge seconds / share produced` is exact while the renderer emits its frames uniformly, which is what the
-        strip's own `rendered/total` fill already assumes. A finished file reports its real duration instead; a
-        live render with no frame yet reports 0, and the strip hides a marker it cannot place honestly.
+        The clip's own length when the job knows it: the band is the produced share of it (`_live_produced_fraction`),
+        and the seek maps a press with the same number (`_live_timeline`), so press, marker and band share one axis.
+        Otherwise `edge seconds / share produced` is the estimate: exact while the renderer emits frames uniformly,
+        which is what the strip's own `rendered/total` fill already assumes. A live render with no frame yet reports
+        0, and the strip hides a marker it cannot place honestly.
         """
         live = getattr(self, "_live_tail", None)
         if live is None:
             return 0.0
+        clip = self._clip_duration()
+        if clip > 0.0:
+            return float(clip)
         edge = float(getattr(live, "produced_seconds", 0.0) or 0.0)
         produced = self._live_produced_fraction()
         if edge <= 0.0 or produced <= 0.0:

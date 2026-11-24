@@ -20,7 +20,11 @@ appended to at 4K, and a demuxer is not built for that. The rules this class exi
   runs. The target becomes the de-duplication floor, the container is dropped, and the next `poll`
   reopens the file at that frame - so the picture follows the strip within one poll instead of at the
   renderer's next fragment. Past the produced edge there is nothing to show, so such a target is
-  clamped to the edge, which is exactly follow-live.
+  clamped to the edge, which is exactly follow-live - unless written frames are still buffered behind
+  the playhead (a held pane publishes one frame and stops reading), where the target is attempted and
+  the edge is only the fallback.
+* **A held pane seeks ONE frame.** A press on a paused preview is answered by `poll(1)`: its target,
+  with no backlog behind it and no overshoot. A playing pane keeps the normal per-poll rate.
 
 `import av` happens in the default container factory, not at module scope: the surface can import
 this module on an interpreter without PyAV and gets an `error` signal only if it actually tails a
@@ -91,6 +95,12 @@ class TailReader(QObject):
         #: clamped to.
         self._edge_pts: float | None = None
         self._exhausted = True      # the current demux position has nothing left to give
+        #: The last poll stopped because its per-poll cap was reached, not because the demuxer ran dry: written
+        #: frames are buffered behind the playhead, so the published edge is NOT the end of the file.
+        self._backlog = False
+        #: The published edge a seek past it should fall back to, when the seek was allowed to try for a target
+        #: deeper than anything published yet (see `seek`). `None` = no such seek is outstanding.
+        self._seek_fallback: float | None = None
         self._open_failures = 0
         self._decode_failures = 0
         self._signature: tuple | None = None   # de-duplicates a repeated error
@@ -120,6 +130,8 @@ class TailReader(QObject):
         self._last_pts = None
         self._edge_pts = None
         self._exhausted = True
+        self._backlog = False
+        self._seek_fallback = None
         self._open_failures = 0
         self._decode_failures = 0
         self._signature = None
@@ -127,12 +139,16 @@ class TailReader(QObject):
 
     # -- the poll ----------------------------------------------------------------------------------
 
-    def poll(self) -> int:
+    def poll(self, max_frames: int | None = None) -> int:
         """Decode what the file has grown by; return how many frames were emitted.
 
         Called from the owner's timer. A poll that finds no growth and an exhausted demuxer does no
         I/O at all, which is the common case while the renderer is busy with a frame; a poll that
         finds buffered frames left over from a capped read continues them without waiting for growth.
+
+        `max_frames` caps what THIS call may emit, for a poll that is not a read of the file but the
+        answer to one press: a seek on a held pane asks for a single frame, its target, and must not
+        drag the backlog behind it onto the surface (see `seek`). `None` is the reader's own cap.
         """
         if self._path is None:
             return 0
@@ -159,7 +175,7 @@ class TailReader(QObject):
             # where it stopped, so try that before paying for a reopen.
             self._reset_stream()
 
-        emitted = self._read()
+        emitted = self._read(max_frames)
         if emitted == 0 and self._exhausted and self._container is not None:
             # libavformat did not notice the growth (its EOF flag is set). Reopening and seeking back
             # to the last published frame is the resume that always works; it re-decodes the current
@@ -167,7 +183,17 @@ class TailReader(QObject):
             self._drop_container()
             if not self._open_container():
                 return 0
-            emitted = self._read()
+            emitted = self._read(max_frames)
+        if emitted == 0 and self._seek_fallback is not None:
+            # The target is past the last COMPLETE frame the file holds (the renderer is mid-fragment,
+            # or the press reached just beyond what it flushed). Standing on the produced edge is the
+            # honest answer - the deepest frame that exists - instead of silently ignoring the press.
+            edge = self._seek_fallback
+            self._seek_fallback = None
+            self._last_pts = max(0.0, edge - self._interval() * 0.5) if edge > 0.0 else None
+            self._drop_container()
+            if self._open_container():
+                emitted = self._read(max_frames)
         return emitted
 
     # -- seeking -----------------------------------------------------------------------------------
@@ -190,9 +216,13 @@ class TailReader(QObject):
         file at the target and emits its frames from there, which is what makes the picture follow
         the strip within one poll instead of at the renderer's next produced frame.
 
-        The target is clamped to the produced edge - in front of it nothing is written yet, so the
-        edge (follow-live) is the only honest answer. After the seek, following resumes: the frames
-        up to the edge are read in order, each once, and new ones as the file grows.
+        Past what has been PUBLISHED the target is attempted as asked when the reader knows written
+        frames are still buffered (`_backlog`), and clamped to the published edge only when it does
+        not: a HELD pane stops polling, so its last published frame is not the end of the file -
+        clamping to it made every strip press on a held preview land on that one frame, i.e. "any
+        attempt to move it puts me at the current end of the upscale" (owner, 2026-11-24). The poll
+        itself falls back to the published edge if the file holds no frame at the target (a
+        half-written fragment), so a press past the end still lands on the deepest picture that exists.
         """
         if self._path is None:
             return 0.0
@@ -206,8 +236,12 @@ class TailReader(QObject):
             self._restart()
         target = max(0.0, float(seconds))
         edge = self.produced_seconds
+        self._seek_fallback = None
         if target > edge:
-            target = edge
+            if self._backlog:
+                self._seek_fallback = edge
+            else:
+                target = edge
         # The floor sits just under the target: the frame AT the target is emitted, while the frames
         # of the keyframe re-read behind it stay de-duplicated.
         self._last_pts = target - self._interval() * 0.5 if target > 0.0 else None
@@ -215,10 +249,10 @@ class TailReader(QObject):
         self._exhausted = False      # there is work at the new position even if the file has not grown
         return target
 
-    def _read(self) -> int:
+    def _read(self, max_frames: int | None = None) -> int:
         """One decode pass at the current end of the file, with the failure policy in one place."""
         try:
-            emitted = self._decode_available()
+            emitted = self._decode_available(max_frames)
         except Exception as exc:
             # The read position is now inside a fragment libavformat could not finish. Dropping the
             # container is what makes the next growth re-read from the last complete frame instead of
@@ -236,11 +270,18 @@ class TailReader(QObject):
             self._signature = None
         return emitted
 
-    def _decode_available(self) -> int:
-        """Pull frames until the demuxer runs dry, skipping anything already published."""
+    def _decode_available(self, limit: int | None = None) -> int:
+        """Pull frames until the demuxer runs dry or this call's cap is reached, skipping what is published.
+
+        `limit` is what THIS call may emit; `None` means the reader's per-poll cap. A `while/else` tells
+        the two stop reasons apart: reaching the cap leaves written frames buffered behind the playhead
+        (`_backlog`), which is what lets a held pane seek deeper than the last frame it published.
+        """
+        cap = self._max_frames_per_poll if limit is None else max(1, int(limit))
         emitted = 0
         fps = self._fps
-        while emitted < self._max_frames_per_poll:
+        self._backlog = False
+        while emitted < cap:
             try:
                 decoded = next(self._frame_iter)
             except StopIteration:
@@ -258,6 +299,9 @@ class TailReader(QObject):
                 self._edge_pts = pts
             self.frame_ready.emit(pack_frame(decoded, index, self._pixel_format, pts=pts))
             emitted += 1
+        else:
+            # The cap stopped the read, not the file: there is more written data behind the playhead.
+            self._backlog = True
         return emitted
 
     def _interval(self) -> float:
@@ -337,6 +381,7 @@ class TailReader(QObject):
         self._frame_iter = None
         self._stream = None
         self._exhausted = True
+        self._backlog = False
         container, self._container = self._container, None
         if container is not None:
             try:
@@ -350,6 +395,7 @@ class TailReader(QObject):
         self._emitted = 0
         self._last_pts = None
         self._edge_pts = None
+        self._seek_fallback = None
         self._decode_failures = 0
         self._signature = None
 
@@ -446,6 +492,10 @@ class LiveTailThread(QThread):
         try:
             while not self._stop_requested:
                 pending, self._pending_seek = self._pending_seek, None
+                #: A seek on a HELD pane publishes its target and nothing else: the pane stands on one frame,
+                #: so the poll that applies the press is capped at one frame. Without the cap it read a whole
+                #: per-poll burst (default 4) and left the picture and the marker that far past the press.
+                held_seek = pending is not None and self._paused
                 if pending is not None:
                     reader.seek(pending)
                 elif self._paused and reader.published_frames > 0:
@@ -458,7 +508,7 @@ class LiveTailThread(QThread):
                     # period turns "not yet a container" into a wait.
                     opened = bool(reader.open(self._path))
                 elif not self._stop_requested:
-                    reader.poll()
+                    reader.poll(1 if held_seek else None)
                 if not self._stop_requested:
                     self.msleep(self._interval_ms)
         finally:
