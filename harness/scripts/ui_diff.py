@@ -75,7 +75,15 @@ BASELINE_FLOOR = 0.05
 #: entry as the `--budget-page` fallback and says so.
 
 PAGE_BASELINE: dict[str, float] = {
-    "nav0.png": 0.05,
+    # 2026-11-24: the bundled Fira Mono (`src/ui/bundled_fonts.py`) changed the Home page's 25 pt heading from the
+    # host fallback (Noto Sans) to the packaged face - a DELIBERATE 1.0 look change, and the only page whose capture can
+    # move. The rise is bounded by a MEASUREMENT, not a guess: on the live capture the heading's own ink is 0.238 % of
+    # the page (2169 px of 1046x872, counted against the page background), and the union of the old and new ink is at
+    # most twice that, 0.476 %. 0.5 % covers it with a hair to spare and stays far below any layout regression this
+    # page could carry (the 2026-11-21 shell run measured 0.00 on every page). A "before" capture could NOT be taken:
+    # the pre-font build under a lease never exposes its main window after the first-install popup (`visible=False
+    # exposed=False`; every pixel black, `repaint:` included), so the bound is measured on the side that could be shot.
+    "nav0.png": 0.5,
     "nav1.png": 0.05,
     "nav2-tab0.png": 6.0,
     "nav2-tab1.png": 0.05,
