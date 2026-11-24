@@ -11,8 +11,9 @@ What is pinned here, offscreen and without a GPU:
 * with no ceiling the pane keeps today's behaviour - a press past produced 10 % is refused (`seekBlocked`, no
   `seekRequested`), and a drag is clamped at the same edge;
 * with a ceiling of 1.0 the same press emits `seekRequested` with that fraction, and a drag reaches the whole strip;
-* `ProcessTab._prepare_display_state` sets 1.0 only when the feed owns the pane (an export with a usable block) and
-  leaves `None` for a preview (its tail owns the edge); `_close_display_state` restores `None`;
+* `ProcessTab._prepare_display_state` sets 1.0 whenever the pane's block is usable - an export's feed paints any frame
+  on demand, and a preview's same block answers a press past the produced band with that one frame (the tail alone
+  keeps the produced edge, see `test_preview_frame_on_demand.py`); `_close_display_state` restores `None`;
 * the widget's own `set_seek_ceiling(None)` restores the produced-edge refusal.
 
 The `ProcessTab` tests build the object with `object.__new__` (the house style of `test_display_wiring.py`): the wiring
@@ -236,8 +237,13 @@ def _tab(*, pane: _Pane, preview: bool) -> ProcessTab:
     return tab
 
 
-def test_an_exports_feed_lifts_the_ceiling_and_a_preview_leaves_the_edge(monkeypatch):
-    """(c) The page says who paints the pane: the export's feed reaches the whole timeline, a tail does not."""
+def test_a_usable_block_lifts_the_ceiling_for_both_job_kinds(monkeypatch):
+    """(c) The page says what can serve a frame: with a usable block both panes reach the whole timeline.
+
+    A preview's *painter* is still its tail (`_display_owns_pane` stays False), but the block answers a press past the
+    produced band with one requested frame, so the strip must accept that press (see
+    `test_preview_frame_on_demand.py`).
+    """
     module = sys.modules[ProcessTab.__module__]
     monkeypatch.setattr(module, "DisplayReader", _FakeReader)
 
@@ -252,9 +258,27 @@ def test_an_exports_feed_lifts_the_ceiling_and_a_preview_leaves_the_edge(monkeyp
     preview_tab = _tab(pane=preview_pane, preview=True)
     preview_tab._prepare_display_state()
     assert preview_tab._display is not None, "the block is allocated for a preview too (the command carries it)"
-    assert preview_tab._display_owns_pane() is False
-    assert preview_pane.ceilings[-1] is None, (
-        "a preview's tail is the picture and only has what the renderer wrote: the produced edge stays")
+    assert preview_tab._display_owns_pane() is False, "the tail is still the preview's painter"
+    assert preview_pane.ceilings[-1] == pytest.approx(1.0), (
+        "a press past the produced band is answered by the block with that one frame, so the strip may ask")
+
+
+def test_a_preview_without_a_usable_block_keeps_the_produced_edge(monkeypatch):
+    """The other side: no block means the tail is all there is, and the produced edge stays the honest reach."""
+    module = sys.modules[ProcessTab.__module__]
+
+    class _Unattached(_FakeReader):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.attached = False
+
+    monkeypatch.setattr(module, "DisplayReader", _Unattached)
+    pane = _Pane()
+    tab = _tab(pane=pane, preview=True)
+    tab._prepare_display_state()
+
+    assert tab._display is None
+    assert pane.ceilings[-1] is None
 
 
 def test_closing_the_block_restores_the_produced_edge(monkeypatch):
