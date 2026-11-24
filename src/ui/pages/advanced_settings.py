@@ -9,14 +9,16 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
+from PySide6.QtCore import (QCoreApplication, QSize, Qt)
 from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CheckBox` where it had a
 # `QCheckBox`, `ComboBox` where it had a `QComboBox`. Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from sli_ui_toolkit.widgets import CheckBox, ComboBox, SurfacePanel, SurfaceScrollArea, Text
+from src.ui.scale_follower import ScaleFollower
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 from src.ui.pages.handles import AdvancedSettingsHandles
@@ -26,6 +28,37 @@ from src.ui import i18n
 #: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
 #: to come from the compatibility layer (`STOCK_SCROLLBAR_WIDTH`), which this page no longer imports.
 STOCK_SCROLLBAR_WIDTH = 8
+
+#: The page's gaps in DESIGN px, resolved through `scaled_px()` where the page is built and again on every
+#: `UiScale.scale_changed` (`_apply_gaps`) - never at import. Three values cover every gap the Designer stated on this
+#: page: the body's own inset against the scroll area, the gap between groups and the inset of a row inside its group,
+#: and the gap between a row's label and its control. They are design gaps, not measurements: at 2.0 a 9 px gutter
+#: beside a doubled label reads as no gutter at all.
+BODY_INSET_PX = 11
+GROUP_GAP_PX = 9
+ROW_GAP_PX = 6
+
+
+def _apply_gaps(page) -> None:
+    """Re-state this page's design gaps at the factor in force.
+
+    Called when the page is built and again on `UiScale.scale_changed` (through `ScaleFollower`), so the gaps
+    follow the same factor as the labels and controls they separate. The layouts are the builder's own attributes
+    (`page.verticalLayout_33`, ...), which is why this takes the builder and not the page widget: layout spacings are
+    not reachable from the widget tree without guessing which layout is which.
+    """
+    inset = scaled_px(BODY_INSET_PX)
+    group = scaled_px(GROUP_GAP_PX)
+    row = scaled_px(ROW_GAP_PX)
+    page.verticalLayout_33.setSpacing(group)
+    page.verticalLayout_33.setContentsMargins(inset, inset, inset, inset)
+    page.verticalLayout_31.setSpacing(row)
+    page.horizontalLayout_42.setSpacing(row)
+    page.horizontalLayout_42.setContentsMargins(group, group, group, group)
+    page.horizontalLayout_16.setSpacing(row)
+    page.horizontalLayout_16.setContentsMargins(group, 0, group, group)
+    page.horizontalLayout_18.setSpacing(row)
+    page.horizontalLayout_18.setContentsMargins(group, 0, group, 0)
 
 
 def _row_checkbox(parent) -> CheckBox:
@@ -91,20 +124,21 @@ class AdvancedSettingsPage:
         self.scrollArea_5.setAlignment(Qt.AlignmentFlag.AlignLeading|Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignTop)
         self.scrollAreaWidgetContents_5 = QWidget()
         self.scrollAreaWidgetContents_5.setObjectName(u"scrollAreaWidgetContents_5")
-        self.scrollAreaWidgetContents_5.setGeometry(QRect(0, 0, 460, 516))
+        # No `setGeometry(QRect(0, 0, 460, 516))`: that was a MEASUREMENT of the content widget, not a design value - the
+        # Designer's preview canvas at 1.0. The scroll area is `setWidgetResizable(True)` below, so the area sets this
+        # widget's box from its viewport and the layout below gives it its minimum height; a geometry stated here would
+        # be overwritten on the first resize and would pin the content at a 460 px width that no longer means anything
+        # once the labels and controls follow the factor. The layout's own sizing is the honest owner.
         sizePolicy2.setHeightForWidth(self.scrollAreaWidgetContents_5.sizePolicy().hasHeightForWidth())
         self.scrollAreaWidgetContents_5.setSizePolicy(sizePolicy2)
         self.scrollAreaWidgetContents_5.setMinimumSize(QSize(0, 0))
         self.verticalLayout_33 = QVBoxLayout(self.scrollAreaWidgetContents_5)
-        self.verticalLayout_33.setSpacing(9)
         self.verticalLayout_33.setObjectName(u"verticalLayout_33")
-        self.verticalLayout_33.setContentsMargins(11, 11, 11, 11)
         self.generalContainer = QWidget(self.scrollAreaWidgetContents_5)
         self.generalContainer.setObjectName(u"generalContainer")
         sizePolicy2.setHeightForWidth(self.generalContainer.sizePolicy().hasHeightForWidth())
         self.generalContainer.setSizePolicy(sizePolicy2)
         self.verticalLayout_31 = QVBoxLayout(self.generalContainer)
-        self.verticalLayout_31.setSpacing(6)
         self.verticalLayout_31.setObjectName(u"verticalLayout_31")
         self.verticalLayout_31.setContentsMargins(0, 0, 0, 0)
         self.label_41 = Text(parent=self.generalContainer)
@@ -114,9 +148,7 @@ class AdvancedSettingsPage:
         self.benchmarkModeContainer = QWidget(self.generalContainer)
         self.benchmarkModeContainer.setObjectName(u"benchmarkModeContainer")
         self.horizontalLayout_42 = QHBoxLayout(self.benchmarkModeContainer)
-        self.horizontalLayout_42.setSpacing(6)
         self.horizontalLayout_42.setObjectName(u"horizontalLayout_42")
-        self.horizontalLayout_42.setContentsMargins(9, 9, 9, 9)
         self.label_18 = Text(parent=self.benchmarkModeContainer)
         self.label_18.setObjectName(u"label_18")
         apply(self.label_18, BODY_PT)
@@ -150,9 +182,7 @@ class AdvancedSettingsPage:
         self.tilingContainer = QWidget(self.upscaleContainer)
         self.tilingContainer.setObjectName(u"tilingContainer")
         self.horizontalLayout_16 = QHBoxLayout(self.tilingContainer)
-        self.horizontalLayout_16.setSpacing(6)
         self.horizontalLayout_16.setObjectName(u"horizontalLayout_16")
-        self.horizontalLayout_16.setContentsMargins(9, 0, 9, 9)
         self.label_33 = Text(parent=self.tilingContainer)
         self.label_33.setObjectName(u"label_33")
         apply(self.label_33, BODY_PT)
@@ -167,9 +197,7 @@ class AdvancedSettingsPage:
         self.tileSizeContainer = QWidget(self.upscaleContainer)
         self.tileSizeContainer.setObjectName(u"tileSizeContainer")
         self.horizontalLayout_18 = QHBoxLayout(self.tileSizeContainer)
-        self.horizontalLayout_18.setSpacing(6)
         self.horizontalLayout_18.setObjectName(u"horizontalLayout_18")
-        self.horizontalLayout_18.setContentsMargins(9, 0, 9, 0)
         self.label_32 = Text(parent=self.tileSizeContainer)
         self.label_32.setObjectName(u"label_32")
         apply(self.label_32, BODY_PT)
@@ -248,6 +276,11 @@ class AdvancedSettingsPage:
         self.verticalLayout_33.addItem(self.verticalSpacer)
         self.scrollArea_5.setWidget(self.scrollAreaWidgetContents_5)
         self.verticalLayout_29.addWidget(self.scrollArea_5)
+        # The gaps are design px, resolved at the factor in force when the page is built and re-resolved on every UI
+        # scale change (see `_apply_gaps`). Stated here, after the last layout exists, instead of at each layout's
+        # construction: one owner for the numbers, so a later edit cannot scale eight gaps and leave the ninth.
+        _apply_gaps(self)
+        self._scale_follower = ScaleFollower(self.advancedSettings, lambda: _apply_gaps(self))
         self._handles = AdvancedSettingsHandles(
             tilingCheckBox=self.tilingCheckBox,
             tileSizeContainer=self.tileSizeContainer,

@@ -30,10 +30,12 @@ from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSpacerItem,
     QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 import resources_rc
 
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from sli_ui_toolkit.widgets import Button, SurfacePanel
 
 from src.ui import toolkit_theme
 from src.ui import i18n
+from src.ui.scale_follower import ScaleFollower
 from src.ui.pages.home_page import HomePagePage
 from src.ui.pages.more_page import MorePagePage
 from src.ui.pages.proc_page import ProcPagePage
@@ -46,6 +48,62 @@ from src.ui.pages.handles import MenuHandles, PAGE_NAMES, PageSelector, WindowHa
 #: it 20 px wider (measured against a capture of the same tree before the sheet went).
 PAGE_INSET_H = 10
 PAGE_INSET_V = 5
+
+#: The window's default size in DESIGN px - 1163x700 is what the Designer's window opened at and what every layout gate
+#: measures at 1.0. It is a design value like any other: `window_default_size()` resolves it through `scaled_px()` where
+#: the window is built and again on every `UiScale.scale_changed`, never at import (an import-time number would freeze
+#: the factor the process happened to start with).
+WINDOW_DEFAULT_PX = (1163, 700)
+
+#: The window's minimum in DESIGN px: 1050x700 at 1.0, exactly as the Designer stated it.
+WINDOW_MIN_PX = (1050, 700)
+
+#: The ceiling the minimum stops at: a 1366x768 laptop's client area, the narrowest panel class this app supports (its
+#: 1.0 minimum is already 1050 px wide, so it cannot go below that). The minimum is a USABILITY floor, not a CONTENT
+#: floor: the process page body scrolls (wave 2), so content wider or taller than the window is reachable instead of
+#: clipped - which is what lets this number stop growing. Scaling the whole 1050 design px to 2.0 would state a
+#: 2100x1400 minimum, a window no laptop can fit, and a minimum larger than the screen is a window the user cannot make
+#: usable at all. At the cap the rail (110 design px at 2.0), the page insets (40) and the 1000 px process column still
+#: fit inside 1366 px, so the cap does not force a horizontal scroll on the column itself; the squeezed preview at 2.0
+#: is the owner's accepted trade. The HEIGHT stops at its 1.0 value for the same reason: a 768 px panel leaves about
+#: 700 px of client area after decorations, and rows that do not fit scroll.
+WINDOW_MIN_CEILING_PX = (1366, 700)
+
+#: The nav rail's width in DESIGN px - the four buttons' shared maximum, because the rail is as wide as its buttons -
+#: and their icon box. The rail width is resolved through `scaled_px()` (55 -> 82 -> 110): it is a geometry the shell
+#: owns, so it scales here. The icon box is passed to `Button.setIconSize` in DESIGN px instead, because the toolkit's
+#: own `sizeHint()` and painter multiply that field (`scaled_px(self._icon_size_px)`, and the region spec reaches
+#: `content.py`'s `scaled_px(ctx.region_icon_size_px)`) - scaling it here as well would paint a 140 px glyph at 2.0.
+NAV_RAIL_PX = 55
+NAV_ICON_PX = 35
+
+#: `homeBtn`'s own floor (the Designer's `setMinimumSize(31, 0)`), design px.
+NAV_BUTTON_MIN_PX = 31
+
+#: `QWIDGETSIZE_MAX`: "this axis has no maximum", for the axis a `setMaximumSize` does not constrain.
+UNBOUNDED_PX = 16777215
+
+
+def window_default_size() -> QSize:
+    """The window's default size at the factor in force: the design size times the factor.
+
+    A function, not a module constant, so a caller cannot accidentally freeze the factor at import. Called by the shell
+    at build and again on `scale_changed`, so opening at 1.5/2.0 - or switching to it live - gives a larger window.
+    """
+    return QSize(scaled_px(WINDOW_DEFAULT_PX[0]), scaled_px(WINDOW_DEFAULT_PX[1]))
+
+
+def window_minimum_size() -> QSize:
+    """The window's minimum at the factor in force, capped at `WINDOW_MIN_CEILING_PX`.
+
+    The cap is the policy, not a rounding: at 1.0 the minimum is the design 1050x700; at 1.5 and 2.0 it stops at
+    1366x700 because a larger minimum cannot be fitted on the laptops this app still supports. Content beyond the
+    window is reachable through the process page's own scroll surface, so nothing is clipped that cannot be scrolled to.
+    """
+    return QSize(
+        min(scaled_px(WINDOW_MIN_PX[0]), WINDOW_MIN_CEILING_PX[0]),
+        min(scaled_px(WINDOW_MIN_PX[1]), WINDOW_MIN_CEILING_PX[1]),
+    )
 
 
 # The page-attribute copy lived here until 2026-11-23: it copied every public attribute of each page onto the window,
@@ -76,13 +134,13 @@ class MainWindowShell:
         # splitter: skipped 'sizePolicy12.setHeightForWidth(self.dynamic_tensorrt_engine.sizePolicy().hasHeightForWidth())' (['dynamic_tensorrt_engine'] live outside this page)
         if not window.objectName():
             window.setObjectName(u"MainWindow")
-        window.resize(1163, 700)
+        window.resize(window_default_size())
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(window.sizePolicy().hasHeightForWidth())
         window.setSizePolicy(sizePolicy)
-        window.setMinimumSize(QSize(1050, 700))
+        window.setMinimumSize(window_minimum_size())
         window.setMaximumSize(QSize(16777215, 16777215))
         window.setSizeIncrement(QSize(1, 1))
         window.setToolTipDuration(0)
@@ -114,8 +172,12 @@ class MainWindowShell:
         # The gutter around every page used to come from the window stylesheet (`QStackedWidget{padding:5px 10px}`),
         # which styled COLOUR and INSET in one place; deleting the sheet without moving this moved every page 10 px
         # left and made it 20 px wider (measured against a capture of the same tree before the sheet went). The inset
-        # belongs to the container, so it is stated here and nowhere else.
-        self.stackedWidget.setContentsMargins(PAGE_INSET_H, PAGE_INSET_V, PAGE_INSET_H, PAGE_INSET_V)
+        # belongs to the container, so it is stated here and nowhere else - in design px, re-resolved on `scale_changed`
+        # below with the rest of the window's own geometry.
+        self.stackedWidget.setContentsMargins(
+            scaled_px(PAGE_INSET_H), scaled_px(PAGE_INSET_V),
+            scaled_px(PAGE_INSET_H), scaled_px(PAGE_INSET_V),
+        )
         # The gutter has to be the page colour, or it reads as a 10 px lighter frame: the deleted sheet also painted the
         # stack (`QStackedWidget{background-color:#16191d}`), and without it the palette's Window role shows through
         # (measured: a 10x670 and a 1044x5 band, 2.9 % of the page, all of it that frame).
@@ -182,25 +244,25 @@ class MainWindowShell:
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.homeBtn.setObjectName(u"homeBtn")
-        self.homeBtn.setMinimumSize(QSize(31, 0))
-        self.homeBtn.setMaximumSize(QSize(55, 16777215))
+        self.homeBtn.setMinimumSize(QSize(scaled_px(NAV_BUTTON_MIN_PX), 0))
+        self.homeBtn.setMaximumSize(QSize(scaled_px(NAV_RAIL_PX), UNBOUNDED_PX))
         self.homeBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         icon8 = QIcon()
         icon8.addFile(u":/icons/icons/home.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.homeBtn.setIcon(icon8)
-        self.homeBtn.setIconSize(QSize(35, 35))
+        self.homeBtn.setIconSize(QSize(NAV_ICON_PX, NAV_ICON_PX))
         self.homeBtn.setChecked(True)
         self.verticalLayout_6.addWidget(self.homeBtn)
         self.processBtn = Button(parent=self.verticalWidget_2, text="", variant="surface", toggle=True,
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.processBtn.setObjectName(u"processBtn")
-        self.processBtn.setMaximumSize(QSize(55, 16777215))
+        self.processBtn.setMaximumSize(QSize(scaled_px(NAV_RAIL_PX), UNBOUNDED_PX))
         self.processBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         icon9 = QIcon()
         icon9.addFile(u":/icons/icons/cpu.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.processBtn.setIcon(icon9)
-        self.processBtn.setIconSize(QSize(35, 35))
+        self.processBtn.setIconSize(QSize(NAV_ICON_PX, NAV_ICON_PX))
         self.verticalLayout_6.addWidget(self.processBtn)
         self.verticalLayout_3.addWidget(self.verticalWidget_2)
         self.verticalWidget = QWidget(self.leftMenuSubContainer)
@@ -217,21 +279,21 @@ class MainWindowShell:
         self.settingsBtn.setObjectName(u"settingsBtn")
         sizePolicy12.setHeightForWidth(self.settingsBtn.sizePolicy().hasHeightForWidth())
         self.settingsBtn.setSizePolicy(sizePolicy12)
-        self.settingsBtn.setMaximumSize(QSize(55, 16777215))
+        self.settingsBtn.setMaximumSize(QSize(scaled_px(NAV_RAIL_PX), UNBOUNDED_PX))
         self.settingsBtn.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         icon10 = QIcon()
         icon10.addFile(u":/icons/icons/settings.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.settingsBtn.setIcon(icon10)
-        self.settingsBtn.setIconSize(QSize(35, 35))
+        self.settingsBtn.setIconSize(QSize(NAV_ICON_PX, NAV_ICON_PX))
         self.verticalLayout_4.addWidget(self.settingsBtn)
         self.downloadBtn = Button(parent=self.verticalWidget, text="", variant="surface", toggle=True,
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.downloadBtn.setObjectName(u"downloadBtn")
-        self.downloadBtn.setMaximumSize(QSize(55, 16777215))
+        self.downloadBtn.setMaximumSize(QSize(scaled_px(NAV_RAIL_PX), UNBOUNDED_PX))
         self.downloadBtn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.downloadBtn.setIcon(icon7)
-        self.downloadBtn.setIconSize(QSize(35, 35))
+        self.downloadBtn.setIconSize(QSize(NAV_ICON_PX, NAV_ICON_PX))
         self.verticalLayout_4.addWidget(self.downloadBtn)
         self.verticalLayout_3.addWidget(self.verticalWidget)
         self.verticalLayout.addWidget(self.leftMenuSubContainer)
@@ -385,6 +447,38 @@ class MainWindowShell:
         )
 
         window._page_stack_fit = _page_fit
+
+        # --- the window's own geometry, stated once --------------------------------------------------------------
+        # Everything below is a design value from this module's constants. `scaled_px` runs HERE - at build, and again
+        # on every `UiScale.scale_changed` through the follower installed after this - never at import, where it would
+        # freeze whatever factor the process started with. The icon box is the one deliberate exception: it stays in
+        # design px because the toolkit's `Button` multiplies that field itself (see `NAV_ICON_PX`), and a scaled value
+        # here would be scaled a second time inside `sizeHint`/the painter.
+        #
+        # A scale change re-applies the DEFAULT size, so a window the user had resized is re-stated at the new factor
+        # rather than kept at a px box that means a different thing at 1.5 or 2.0. Changing the UI scale is a global
+        # geometry change; the alternative (keep the box, leave the chrome cramped or huge) is what the migration fixed.
+        def _apply_window_geometry() -> None:
+            # The minimum FIRST: a resize below a minimum still in force is silently clamped away, so going 2.0 -> 1.0
+            # left the window at the 2.0 floor (1366x700) instead of returning to its 1.0 size.
+            window.setMinimumSize(window_minimum_size())
+            window.resize(window_default_size())
+            inset_h = scaled_px(PAGE_INSET_H)
+            inset_v = scaled_px(PAGE_INSET_V)
+            self.stackedWidget.setContentsMargins(inset_h, inset_v, inset_h, inset_v)
+            for button in (self.homeBtn, self.processBtn, self.settingsBtn, self.downloadBtn):
+                button.setMaximumSize(QSize(scaled_px(NAV_RAIL_PX), UNBOUNDED_PX))
+                button.setIconSize(QSize(NAV_ICON_PX, NAV_ICON_PX))
+            self.homeBtn.setMinimumSize(QSize(scaled_px(NAV_BUTTON_MIN_PX), 0))
+            # A page's box is the stack MINUS its inset, and the pages were laid out for the old one. Re-fit them in the
+            # same turn instead of leaving every page's children at the previous gutter until the next window resize.
+            fit = getattr(self, "_page_stack_fit", None)
+            if fit is not None:
+                fit.fit()
+
+        # The follower calls the statement once now and again on `UiScale.scale_changed`; parented to the window, so Qt
+        # drops the connection when the window goes away (a process-wide signal would fire into deleted widgets).
+        window._ui_scale_follower = ScaleFollower(window, _apply_window_geometry)
         # One place for the control type size: a page's 12 pt container font would otherwise cascade 16 px into every
         # toolkit control (the deleted adapter stated 12 px per control; this states it per window).
         from src.ui.typography import apply_control_fonts
