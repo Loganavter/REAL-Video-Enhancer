@@ -46,7 +46,10 @@ asked to hand over 20 GB of renders to check a number.
   (kibibytes, as the 30 records whose JSON/logs live in `verified/artifacts/` do), or the record names the **run** that
   reproduces it instead, or it carries no artifact and says so (`artifact_note`) - see the 2026-11-24 cleanup of the
   21 GB `~/rve-scratch` tree, which left 45 records pointing at committed files and 9 stating that their renders/logs
-  were not retained;
+  were not retained. The same pass turned 48 further records into notes rather than citations - 24 inputs named by their
+  sha256 (models and engines are not evidence material) and 24 logs that later runs rewrote - and
+  `harness/scripts/check_artifacts.py` now fails on a bare digest in `artifact`, a path outside the tree, a missing
+  file, a missing digest or a digest that no longer matches. Its baseline is **empty**: any new violation fails;
 - large media (renders, clips, videos) is never cited: cite the frame population and the instrument, and name the
   command that regenerates the file if it matters.
 
