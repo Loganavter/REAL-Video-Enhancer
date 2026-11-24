@@ -1,17 +1,22 @@
-"""A disabled line edit draws a GREY underline, not the white one an editable field carries.
+"""A disabled line edit draws its OWN grey line, never the button family's white one.
 
-Owner, 2026-11-24: the disabled output-path field kept a bright white bottom edge, so "this is not editable" was
-invisible - it looked like any other input. The underline came from one shared token with one alpha
-(`button.default.bottom.edge`, white, `alpha=60`) for every state, and the theme has no mid-grey key to reach for:
-`input.text.disabled` / `dialog.text.disabled` are the plate's own colour (`#2c313c`), which draws nothing.
+History, because the file has changed sides once already. Owner, 2026-11-24: the disabled output-path field kept a
+bright white bottom edge, so "not editable" was invisible. Then the underline had one shared token at one alpha
+(`button.default.bottom.edge`, white, 60) for every state, and no mid-grey key existed to reach for.
 
-So the control derives the colour: the plate token (`surface.background`) nudged toward the text token
-(`dialog.text`) by `DISABLED_UNDERLINE_MIX` - a neutral grey that still reads as the field's edge - and a host can
-override it outright with `setDisabledUnderlineColor`.
+Since then the toolkit lane gave the field its own token family (`input.underline` / `.focused` / `.disabled`, commit
+`d9c154b`) and the RVE bridge stayed as the no-token fallback. So the contract this file pins is the PRECEDENCE, not
+one implementation:
 
-Measured on the real plate (disabled output field, factor 1.0): the drawn line is `#6b6f76` where the unfocused enabled
-field draws `#8f9298` from the shared token. The pin below states the contract, not the pixels: an alpha drop alone was
-tried first and vanished into the plate (24/255 of white), which is why the colour is asserted here.
+1. an explicit `setDisabledUnderlineColor` wins;
+2. else the family's `input.underline.disabled` token;
+3. else the derived grey (`_disabled_underline_colour`, the bridge).
+
+Whatever the source, a disabled field may never paint the shared white line, and an enabled field must keep the theme's
+own answer (the token, or - on a palette that has none - the legacy `None` + alpha 60).
+
+The spy takes `**kwargs` on purpose: the toolkit passes `token_prefix=` to the painter now, and a spy narrower than the
+real signature raises *inside* `paintEvent`, which pytest-qt then reports as a crash rather than a failure.
 """
 
 from __future__ import annotations
@@ -35,17 +40,15 @@ def captured(qapp, monkeypatch):
     from sli_ui_toolkit.ui.widgets.atomic import custom_line_edit as module
 
     toolkit_boot.ensure()
-    toolkit_theme.install(qapp)     # the derived grey is read OUT of the palette, so the palette has to be the app's
+    toolkit_theme.install(qapp)     # the line's colours are read OUT of the palette, so it has to be the app's
 
     seen = []
-    original = module.draw_bottom_underline
 
-    def spy(painter, rect, theme_manager, config=None):
+    def spy(painter, rect, theme_manager, config=None, **kwargs):
         seen.append(config)
         return None  # the paint itself is not what this gate is about
 
     monkeypatch.setattr(module, "draw_bottom_underline", spy)
-    monkeypatch.setattr(module.draw_bottom_underline, "__wrapped__", original, raising=False)
     return module, seen
 
 
@@ -62,7 +65,31 @@ def _field(module, qapp, *, enabled: bool):
     return widget
 
 
-def test_a_disabled_field_asks_for_a_grey_line_not_the_shared_white(captured, qapp):
+def _family_token(module, field):
+    """The field's own disabled token, when the toolkit version has the family (it is the preferred source)."""
+    from PySide6.QtGui import QColor
+
+    name = getattr(module.CustomLineEdit, "UNDERLINE_DISABLED_TOKEN", None)
+    if name is None:
+        return None
+    colour = field.theme_manager.try_get_color(name)
+    return None if colour is None else QColor(colour)
+
+
+def _expected_disabled(field):
+    """The precedence the control promises: override, then the family token, then the derived grey."""
+    from PySide6.QtGui import QColor
+
+    override = field.disabledUnderlineColor()
+    if override is not None:
+        return QColor(override)
+    token = _family_token(sys.modules[field.__class__.__module__], field)
+    if token is not None:
+        return token
+    return field._disabled_underline_colour()
+
+
+def test_a_disabled_field_never_paints_the_shared_white_line(captured, qapp):
     module, seen = captured
     field = _field(module, qapp, enabled=False)
     try:
@@ -70,27 +97,35 @@ def test_a_disabled_field_asks_for_a_grey_line_not_the_shared_white(captured, qa
         assert config.color is not None, (
             "the disabled field fell back to the shared white token - the defect this gate was written for")
         assert config.color.name() != "#ffffff", "the disabled underline is still the white one"
-        expected = field._disabled_underline_colour()
-        assert config.color == expected, f"the disabled underline is {config.color.name()}, not the derived grey"
-        assert config.alpha is None, "the derived grey is passed as a solid colour; an alpha would dim it to nothing"
+        assert config.color == _expected_disabled(field), (
+            f"the disabled underline is {config.color.name()}, not the family token / derived grey")
+        assert config.alpha is None, "the disabled colour is a solid one; an alpha would dim it to nothing"
     finally:
         field.close()
 
 
-def test_an_enabled_field_keeps_the_shared_token(captured, qapp):
-    """The cure must not change the editable look: that one still comes from the theme, at its own alpha."""
+def test_an_enabled_field_keeps_the_theme_answer(captured, qapp):
+    """No hard-coded colour for an editable field: the family token when the palette has one, else the legacy pair."""
+    from PySide6.QtGui import QColor
+
     module, seen = captured
     field = _field(module, qapp, enabled=True)
     try:
         config = seen[-1]
-        assert config.color is None, "an enabled field now paints a hard-coded colour instead of the theme's"
-        assert config.alpha == 60
+        token_name = getattr(module.CustomLineEdit, "UNDERLINE_TOKEN", None)
+        token = field.theme_manager.try_get_color(token_name) if token_name else None
+        if token is None:
+            assert config.color is None, "an enabled field invented a colour where the palette has no token"
+            assert config.alpha == 60
+        else:
+            assert config.color == QColor(token)
+            assert config.alpha is None
     finally:
         field.close()
 
 
 def test_a_host_can_state_the_disabled_colour(captured, qapp):
-    """`setDisabledUnderlineColor` wins over the derived grey - the API the theme cannot cover."""
+    """`setDisabledUnderlineColor` outranks both the family token and the derived grey."""
     from PySide6.QtGui import QColor
 
     module, seen = captured
@@ -106,19 +141,21 @@ def test_a_host_can_state_the_disabled_colour(captured, qapp):
         field.update()
         for _ in range(6):
             qapp.processEvents()
-        assert seen[-1].color == field._disabled_underline_colour()
+        assert seen[-1].color == _expected_disabled(field)
     finally:
         field.close()
 
 
 def test_the_derived_grey_sits_between_the_plate_and_the_text(captured, qapp):
-    """The colour is derived from two tokens, so every channel lands strictly between them."""
+    """The bridge fallback is derived from two tokens, so every channel lands strictly between them."""
     module, seen = captured
     field = _field(module, qapp, enabled=False)
     try:
         grey = field._disabled_underline_colour()
-        plate = module.QColor(field.theme_manager.get_color("surface.background"))
-        text = module.QColor(field.theme_manager.get_color("dialog.text"))
+        from PySide6.QtGui import QColor
+
+        plate = QColor(field.theme_manager.get_color("surface.background"))
+        text = QColor(field.theme_manager.get_color("dialog.text"))
         for channel in ("red", "green", "blue"):
             low, high = sorted((getattr(plate, channel)(), getattr(text, channel)()))
             value = getattr(grey, channel)()

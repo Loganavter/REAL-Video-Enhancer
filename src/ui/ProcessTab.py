@@ -1,5 +1,6 @@
 import subprocess
 import os
+import time
 from threading import Thread
 import re
 from time import sleep
@@ -12,6 +13,7 @@ from PySide6.QtCore import Qt, QSize, QUrl
 from .RenderQueue import RenderQueue
 from ..render_jobs import short_duration
 from .render_log import LogLine, RenderLogFilter
+from .video import telemetry
 from . import shared_flag
 from . import i18n
 
@@ -464,8 +466,9 @@ class ProcessTab:
         self.page_handles.general.inputFileText.textChanged.connect(self.parent.loadVideo)
         self.page_handles.general.outputFileSelectButton.clicked.connect(self.parent.openOutputFolder)
         self.page_handles.general.openOutputFolderButton.clicked.connect(self.openOutputFolderInExplorer)
-        # connect render button
-        self.page_handles.proc.startRenderButton.clicked.connect(self.parent.startRender)
+        # One press handler for the transport (play / pause / resume): it dispatches on `_render_state`, so the button
+        # never has to be re-connected when the job changes state (owner, 2026-11-24: one button, the icon follows).
+        self.page_handles.proc.startRenderButton.clicked.connect(self._on_transport_pressed)
         # set tile size visible to false by default
         self.page_handles.advanced.tileSizeContainer.setVisible(False)
         # set slo mo container visable to false by default
@@ -505,7 +508,6 @@ class ProcessTab:
         # `harness/tests/test_page_overflow.py`).
         # connect up pausing
         self._set_render_controls("idle")
-        self.page_handles.proc.pauseRenderButton.clicked.connect(self.pauseRender)
         self.page_handles.proc.killRenderButton.clicked.connect(self.killRenderProcess)
         # The preview's own transport: it stands PAUSED until this is pressed (owner, 2026-11-23), and the toggle's
         # checked state is the truth for both owners of the pane (the live tail and the finished-file decoder).
@@ -520,20 +522,52 @@ class ProcessTab:
     #: button always, just inactive while nothing runs") - hiding a button made the row either re-flow at the press or
     #: reserve its box as an empty gap, and a disabled button avoids both while still reading as unavailable.
     RENDER_CONTROLS = {
-        "idle": {"start": True, "pause": False, "kill": False},
-        "running": {"start": False, "pause": True, "kill": True},
-        "paused": {"start": True, "pause": False, "kill": True},
+        "idle": {"transport": True, "kill": False},
+        "running": {"transport": True, "kill": True},
+        "paused": {"transport": True, "kill": True},
     }
 
     def _set_render_controls(self, state: str) -> None:
-        """Enable the buttons `state` allows and disable the rest; every button stays in the row."""
+        """Apply `state`: the transport stays usable and its glyph follows, the cancel follows the job.
+
+        One button carries play, pause and resume (owner, 2026-11-24: "join the pause and play buttons - just change the
+        icon"). Checked means "a job is running", i.e. the pause glyph; the press is dispatched by `_render_state`, not
+        by the toggle value, because a toggle flips before the handler runs.
+        """
         proc = self.page_handles.proc
-        controls = {"start": proc.startRenderButton, "pause": proc.pauseRenderButton, "kill": proc.killRenderButton}
         wanted = self.RENDER_CONTROLS[state]
         proc.onRenderButtonsContiainer.setEnabled(True)
-        for name, widget in controls.items():
+        for name, widget in (("transport", proc.startRenderButton), ("kill", proc.killRenderButton)):
             widget.setVisible(True)
             widget.setEnabled(bool(wanted[name]))
+        self._render_state = state
+        # `setChecked` emits `toggled`; the guard keeps our own state write out of the dispatcher.
+        self._applying_controls = True
+        try:
+            proc.startRenderButton.setChecked(state == "running")
+        finally:
+            self._applying_controls = False
+
+    def _on_transport_pressed(self) -> None:
+        """The one press handler: dispatch on the state the glue is in, never on the glyph.
+
+        The button is a toggle, so the press flips it BEFORE this runs. A start that does not happen (no file picked,
+        the overwrite dialog cancelled, a backend missing) would then leave the glyph on "pause" with nothing running -
+        measured live 2026-11-24 on a fresh instance. The state is re-asserted in `finally`, which is the same single
+        writer every other transition uses.
+        """
+        if getattr(self, "_applying_controls", False):
+            return
+        state = getattr(self, "_render_state", "idle")
+        try:
+            if state == "running":
+                self.pauseRender()
+            elif state == "paused":
+                self.resumeRender()
+            else:
+                self.parent.startRender()
+        finally:
+            self._set_render_controls(getattr(self, "_render_state", "idle"))
 
     def killRenderProcess(self):
         try:  # kills  render process if necessary
@@ -616,8 +650,6 @@ class ProcessTab:
         self._render_started_mono = monotonic()
         self.setStatus("Preparing")
         self._set_render_controls("running")
-        self.page_handles.proc.startRenderButton.clicked.disconnect()
-        self.page_handles.proc.startRenderButton.clicked.connect(self.resumeRender)
 
         if not self.checkForOverwrite(renderQueue):
             return
@@ -854,7 +886,16 @@ class ProcessTab:
             return
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_frame"):
-            pane.set_frame(image)
+            # Only the seek's clock is closed here: the FRAME itself is counted by the pane (`set_frame`), because this
+            # function and the panel would otherwise count the same picture twice (measured 2026-11-24: `frames=2`
+            # for one frame on screen).
+            pressed_at = getattr(self, "_seek_pressed_at", None)
+            if pressed_at is not None and getattr(self, "_display_seek_pending", False):
+                telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
+                                    target=getattr(self, "_seek_target_frame", None),
+                                    landed=int(getattr(self, "currentFrame", 0) or 0))
+                self._seek_pressed_at = None
+            pane.set_frame(image, index=int(getattr(self, "currentFrame", 0) or 0))
             if hasattr(pane, "set_progress"):
                 pane.set_progress(
                     rendered=self.currentFrame,
@@ -1122,8 +1163,6 @@ class ProcessTab:
         # playback, and a plain render has no second painter, so the display feed's last frame IS the result the user
         # wants to look at. The frame is replaced by the next job's first frame; nothing stale is left behind.
         log("preview: keeping the last painted frame at the end of the job")
-        self.page_handles.proc.startRenderButton.clicked.disconnect()
-        self.page_handles.proc.startRenderButton.clicked.connect(self.parent.startRender)
         self.parent.enableProcessPage()
         self._render_started_mono = None
         self.setProgressDetail("")
@@ -1299,6 +1338,7 @@ class ProcessTab:
         log(f"preview transport: resuming at the render's head {target:.3f}s (produced {produced:.1%} of {clip:.3f}s)")
 
     def _on_preview_pause_toggled(self, paused: bool) -> None:
+        telemetry.event("transport", paused=int(bool(paused)))
         """Hold the preview on this frame, or let it follow the render again (the button's `toggled(bool)`).
 
         One state for both owners of the pane: the live tail simply stops polling (no decode, no I/O, the picture
@@ -1631,11 +1671,13 @@ class ProcessTab:
             return
         from PySide6.QtGui import QImage
 
+        path_started = time.perf_counter()
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_frame"):
-            pane.set_frame(image)
+            pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
+                           index=getattr(frame, "index", None))
         elif hasattr(pane, "setPixmap"):
             pane.setPixmap(self.getRoundedPixmap(QtGui.QPixmap.fromImage(image), corner_radius=10))
         pts = float(getattr(frame, "pts", 0.0) or 0.0)
@@ -1750,6 +1792,21 @@ class ProcessTab:
         fills its white band.
         """
         fraction = max(0.0, min(1.0, float(fraction)))
+        self._seek_pressed_at = time.perf_counter()
+        # The press names the FRAME it points at, not only the share: a turnaround in milliseconds says nothing about
+        # whether the picture is the one asked for (owner, 2026-11-24: "write where the seek went and what is shown").
+        total_frames = float(getattr(self, "max_value", 0) or 0)
+        if total_frames <= 0:
+            fps = float(getattr(getattr(self, "_preview_decoder", None), "fps", 0) or 0)
+            duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
+            total_frames = round(duration * fps)
+        if total_frames <= 0:
+            # The render publishes its total late; the CLIP's own frame count is known from the probe at load time and
+            # is the right denominator for a share -> frame conversion in the meantime.
+            total_frames = float(getattr(self, "videoFrameCount", 0) or 0)
+        target_frame = int(round(fraction * total_frames)) if total_frames > 0 else None
+        self._seek_target_frame = target_frame
+        telemetry.event("seek press", fraction=f"{fraction:.4f}", target_frame=target_frame)
         if self._queue_owns_pane():
             decoder = getattr(self, "_queue_pane_decoder", None)
             duration = float(getattr(decoder, "duration", 0.0) or 0.0)
@@ -2001,11 +2058,13 @@ class ProcessTab:
         if (getattr(self, "_live_tail", None) is None
                 and getattr(self, "_preview_decoder", None) is None):
             return
+        path_started = time.perf_counter()
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
         pane = self.page_handles.proc.previewLabel
         if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
-            pane.set_frame(image)
+            pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
+                           index=getattr(frame, "index", None))
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
             watched = getattr(self, "_seek_watch", None)
             if watched is not None:
@@ -2013,6 +2072,12 @@ class ProcessTab:
                 # asked to go and where the picture actually landed. Without it a press and the frame it produced were
                 # two separate facts and "it still does not work" could not be argued either way.
                 self._seek_watch = None
+                pressed_at = getattr(self, "_seek_pressed_at", None)
+                if pressed_at is not None:
+                    telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
+                                        target=getattr(self, "_seek_target_frame", None),
+                                        landed=getattr(frame, "index", None))
+                    self._seek_pressed_at = None
                 log(f"seek: press wanted {watched:.3f}s, the picture landed at {self._preview_playhead:.3f}s "
                     f"(delta {self._preview_playhead - watched:+.3f}s)")
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)

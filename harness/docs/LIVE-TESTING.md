@@ -60,6 +60,54 @@ run is still the final word for the shipped platform.
    capture run that warms every page once (`capture-server: ready (13 pages)`) and restores the page it started on.
    `live.sh`/`ui_live.py` always pass a directory, so the harness is unaffected.
 
+## The preview pane has its own measurement file
+
+`src/ui/video/telemetry.py` writes the pane's numbers to `preview-log.txt` in the app's working directory (override with
+`RVE_PREVIEW_LOG_FILE`), never into `log.txt`. One record per line, appended and flushed, with a header per process:
+
+```
+# preview telemetry session 2026-11-24T20:45:41 level=1 pid=3103220
+preview: session file=/…/preview-log.txt pane_w=504 pane_h=721 dpr=1.0 mode=single
+preview: stats frames=24 paints=27 up=24 up_ms=0.01/0.02/1.34 pass_ms=0.40/0.52/0.98 gui_ms=0.62/0.71/0.98 int_ms=41.2/44.0/90.1 drop=0 shown=209 seek_ms=38.4/… window_s=1.0
+preview: seek press fraction=0.4210 target_frame=208
+preview: seek turnaround_ms=38.9 target_frame=208 landed_frame=209
+preview: hold on playhead=12.500
+```
+
+Collection:
+
+```bash
+RVE_PREVIEW_LOG=1 python REAL-Video-Enhancer.py     # events + one aggregate line per second
+RVE_PREVIEW_LOG=2 python REAL-Video-Enhancer.py     # + one line per frame (short sessions only)
+RVE_PREVIEW_LOG=0 …                                  # events only (the default; the flag may also be unset)
+```
+
+What the fields mean, so a line can be read without the source:
+
+* `frames` - pictures the pane ACCEPTED (`set_frame`, plus `set_original` for a compare mode's source half). Counted in
+  one place only; a `frames=2` line is two pictures, not one picture twice.
+* `paints` - completed render passes, including the empty pane's clear. A cadence with `frames=0` means "the pane was
+  repainted and nothing fed it".
+* `up` / `up_ms` - uploads and the cost of the **enqueue call** (`QRhiResourceUpdateBatch.uploadTexture`), which is
+  microseconds: the copy itself happens inside the pass, so `up_ms` is not the hand-off cost - `pass_ms` is. `up` counts
+  every upload, including a re-upload on resize and the compare mode's second picture, so `up > frames` is normal.
+  `up=0` with `frames>0` means the pane received pictures and no paint followed that second - a finding, not a bug.
+* `pass_ms` - one render pass end to end (resource update + draws + `endPass`). This is the pane's real cost per
+  painted frame; an empty pane's clear is measured too, which is how "the pane repaints 10x/s while idle" shows up.
+* `gui_ms` - the GUI thread's per-frame path in the app (`bytes` -> `QImage` -> `.copy()` -> RGBA conversion), measured
+  at the call site and handed to the pane. A dash is meaningful: the live feed builds its picture on the display
+  thread, so the GUI thread had nothing to time.
+* `int_ms` - interval between paints: median/p95/max. On an idle pane it measures repaint-on-demand, not video cadence.
+* `drop` - frames the queue discarded (oldest for the live stream, late for the playback grid).
+* `seek_ms` - press -> first new picture. A turnaround under `MIN_SEEK_MS` (1 ms) is logged as `seek instant`, because it
+  means a picture was already in flight, not that the seek was free.
+* `target_frame` / `landed_frame` - the frame the press pointed at and the frame that actually arrived first (the target
+  is `fraction x total`; the total is the render's frame count, or `duration x fps` on a file). A `landed != target` is
+  the honest measure of "the seek went where it was told"; `seek instant` carries the pair too, so a stale press is
+  visible instead of hidden.
+* `shown` - the producer's frame number for the last picture the pane accepted (`FrameRef.index` on the decoder paths,
+  the renderer's own counter on the live feed). A dash means the producer did not name the frame.
+
 ## The same surface as an MCP server (`harness/mcp-server/app`)
 
 `live.sh` is the shell handle; the MCP server is the typed one, and it is what an agent should call.

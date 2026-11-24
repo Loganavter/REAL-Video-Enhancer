@@ -34,3 +34,6 @@ harness/docs/wsp/ledger.db
 /ffmpeg_log.txt
 /backend_log.txt
 .rve-control/
+
+# the preview pane's own measurement record (src/ui/video/telemetry.py)
+/preview-log.txt

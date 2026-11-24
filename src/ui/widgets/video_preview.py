@@ -25,6 +25,7 @@ Decisions encoded here, each from a measurement or an owner call:
 from __future__ import annotations
 
 import os
+import time
 
 from dataclasses import dataclass
 
@@ -53,6 +54,7 @@ from PySide6.QtWidgets import QRhiWidget
 from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager
 from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
 
+from src.ui.video import telemetry
 from src.ui.widgets.playback_strip import (
     PlaybackTimeReadout,
     playhead_halo_radius,
@@ -175,6 +177,9 @@ class VideoPreviewSurface(QRhiWidget):
         """Ask for a repaint after a resize - `initialize()` has just been called with a new target size."""
         super().resizeEvent(event)
         self._position_readout()
+        if telemetry.level() >= 1:
+            telemetry.event("resize", w=self.width(), h=self.height(),
+                            dpr=round(float(self.devicePixelRatioF()), 2))
         self.update()
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt spelling
@@ -187,7 +192,8 @@ class VideoPreviewSurface(QRhiWidget):
 
     # -- data ------------------------------------------------------------
 
-    def set_frame(self, image: QImage | None) -> None:
+    def set_frame(self, image: QImage | None, *, gui_ms: float | None = None,
+                  index: int | None = None) -> None:
         """Show this picture. A `None` clears the pane (no frame yet)."""
         self._frame = None if image is None else image.convertToFormat(QImage.Format.Format_RGBA8888)
         self._texture_dirty = self._frame is not None
@@ -199,11 +205,14 @@ class VideoPreviewSurface(QRhiWidget):
             self._ensure_texture(self._frame.size())
         self._refresh_readout()
         self.update()
+        telemetry.note_frame(gui_ms=gui_ms, index=index)
 
     def has_frame(self) -> bool:
         return self._frame is not None
 
     def set_original(self, image: QImage | None) -> None:
+        if image is not None:
+            telemetry.note_frame()      # the source half of a compare mode: a picture the pane accepted too
         """The source frame for the compare: the LMB flash in `single`, a standing pane in the compare modes.
 
         The source is **stretched up to the rendered frame's size with nearest-neighbour** (`FastTransformation`): the
@@ -254,6 +263,7 @@ class VideoPreviewSurface(QRhiWidget):
         if mode == self._view_mode:
             return
         self._view_mode = mode
+        telemetry.event("view", mode=self._view_mode)
         # Leaving "single" ends a flash: the source becomes the standing pane instead of a held picture.
         self._showing_original = False
         self._hud_dirty = True
@@ -381,6 +391,7 @@ class VideoPreviewSurface(QRhiWidget):
                     event.accept()
                     return
                 self._scrubbing = True
+                telemetry.event("strip press", fraction=f"{fraction:.4f}")
                 self.seekRequested.emit(fraction)
                 event.accept()
                 return
@@ -394,6 +405,7 @@ class VideoPreviewSurface(QRhiWidget):
             # stream - the renderer's own original is never involved (plan: 3b, GUI-only).
             self._showing_original = True
             _, _, playhead, _ = self._progress
+            telemetry.event("hold on", playhead=f"{float(playhead):.3f}")
             self.originalRequested.emit(float(playhead))
             self.update()
             event.accept()
@@ -441,9 +453,12 @@ class VideoPreviewSurface(QRhiWidget):
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._scrubbing:
+                telemetry.event("strip release")
             self._scrubbing = False
             if self._showing_original:
                 self._showing_original = False
+                telemetry.event("hold off")
                 self.set_original(None)   # one frame is held at a time; the next press asks again
             event.accept()
             return
@@ -564,6 +579,7 @@ class VideoPreviewSurface(QRhiWidget):
                 self._pan[0] = anchor.x() - u * drawn_w - view.left() - (view.width() - drawn_w) / 2.0
                 self._pan[1] = anchor.y() - v * drawn_h - view.top() - (view.height() - drawn_h) / 2.0
         self._zoom = target
+        telemetry.event("zoom", zoom=f"{self._zoom:.3f}", fit=int(self._zoom_is_fit))
         self._zoom_is_fit = False
         self._clamp_pan()
         self.update()
@@ -704,6 +720,10 @@ class VideoPreviewSurface(QRhiWidget):
         undrawn texture until the NEXT frame. A finished or paused render never sends one: the pane stays see-through
         after any window resize or sibling repaint. That is the "the preview turns transparent at any sneeze" defect.
         """
+        if not getattr(self, "_telemetry_session", False):
+            self._telemetry_session = True
+            telemetry.session_start(pane_w=self.width(), pane_h=self.height(),
+                                    dpr=round(float(self.devicePixelRatioF()), 2), mode=self._view_mode)
         rhi = self.rhi()
         if rhi is None:
             # The platform has no QRhi at all (measured 2026-11-23 on the owner's Wayland/NVIDIA session: Qt prints
@@ -978,8 +998,13 @@ class VideoPreviewSurface(QRhiWidget):
             # Nothing to show yet: an OPAQUE clear on EVERY render, so the pane reads as an empty plate rather than a
             # hole. It used to clear once (`_cleared_empty`) - a latch that is false on the next paint, which leaves the
             # region undrawn after any repaint and shows the window behind it (the "transparent at any sneeze" half).
+            pass_started = time.perf_counter()
             command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0))
             command_buffer.endPass()
+            # An empty pane still paints: counting it keeps the cadence honest before the first frame arrives, and
+            # `frames=0` in a stats line is itself an answer ("the render never fed the pane").
+            telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
+            telemetry.maybe_stats()
             return
         if getattr(self, "_deferred", False) or getattr(self, "_rhi", None) is None:
             self._release()
@@ -1003,7 +1028,10 @@ class VideoPreviewSurface(QRhiWidget):
                 return
         updates = self.rhi().nextResourceUpdateBatch()
         if self._texture_dirty:
+            upload_started = time.perf_counter()
             updates.uploadTexture(self._texture, picture)
+            telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
+                                  size_bytes=picture.width() * picture.height() * 4)
             self._texture_dirty = False
         updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(self._mvp_floats()))
         updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(list(self._tint)))
@@ -1015,6 +1043,7 @@ class VideoPreviewSurface(QRhiWidget):
                                         _floats([float(self.width()), float(self.height()),
                                                  float(self.devicePixelRatioF() or 1.0), 0.0]))
             updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
+        pass_started = time.perf_counter()
         command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
         command_buffer.setGraphicsPipeline(self._pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
@@ -1033,6 +1062,8 @@ class VideoPreviewSurface(QRhiWidget):
             command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
             command_buffer.draw(len(hud_vertices) // 6)
         command_buffer.endPass()
+        telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
+        telemetry.maybe_stats()
 
     def _render_two_surfaces(self, command_buffer, target) -> None:
         """The result and the source in ONE pass: one clear, then up to two draws, each clipped to its own surface.
@@ -1056,7 +1087,10 @@ class VideoPreviewSurface(QRhiWidget):
                 return
         updates = self.rhi().nextResourceUpdateBatch()
         if self._texture_dirty:
+            upload_started = time.perf_counter()
             updates.uploadTexture(self._texture, frame)
+            telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
+                                  size_bytes=frame.width() * frame.height() * 4)
             self._texture_dirty = False
         tint = list(self._tint)
         updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(self._mvp_floats(self._frame_rect())))
@@ -1064,7 +1098,10 @@ class VideoPreviewSurface(QRhiWidget):
         draw_original = original is not None and getattr(self, "_original_texture", None) is not None
         if draw_original:
             if self._original_texture_dirty:
+                upload_started = time.perf_counter()
                 updates.uploadTexture(self._original_texture, original)
+                telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
+                                      size_bytes=original.width() * original.height() * 4)
                 self._original_texture_dirty = False
             updates.updateDynamicBuffer(self._original_uniforms, 0, 64,
                                         _floats(self._mvp_floats(self._original_rect())))
@@ -1075,6 +1112,7 @@ class VideoPreviewSurface(QRhiWidget):
                                         _floats([float(self.width()), float(self.height()),
                                                  float(self.devicePixelRatioF() or 1.0), 0.0]))
             updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
+        pass_started = time.perf_counter()
         command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
         command_buffer.setGraphicsPipeline(self._pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
@@ -1107,6 +1145,8 @@ class VideoPreviewSurface(QRhiWidget):
             command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
             command_buffer.draw(len(hud_vertices) // 6)
         command_buffer.endPass()
+        telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
+        telemetry.maybe_stats()
 
     def _scissor(self, command_buffer, rect: QRectF) -> None:
         """Confine the next draw to a widget-space rect (QRhi scissors are in framebuffer pixels)."""

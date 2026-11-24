@@ -565,7 +565,9 @@ class ProcPagePage:
         self.horizontalLayout_39.setSpacing(0)
         self.horizontalLayout_39.setObjectName(u"horizontalLayout_39")
         self.horizontalLayout_39.setContentsMargins(0, 0, 0, 0)
-        self.startRenderButton = Button(parent=self.widget_24, text="", variant="surface",
+        # `toggle=True`: the transport is one button whose glyph IS the state (unchecked play, checked pause), so it
+        # has to be checkable - without it `setChecked` is a silent no-op and the icon never swaps.
+        self.startRenderButton = Button(parent=self.widget_24, text="", variant="surface", toggle=True,
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(59, 55))
         self.startRenderButton.setObjectName(u"startRenderButton")
@@ -579,12 +581,12 @@ class ProcPagePage:
         # QPushButton's own policy: as wide as it needs, exactly as tall as its hint - the toolkit button would
         # otherwise fill the cell and grow past the Designer's 55 px ceiling in a taller row.
         self.startRenderButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        icon3 = QIcon()
-        icon3.addFile(u":/icons/icons/play-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
-        self.startRenderButton.setIcon(icon3)
+        # ONE transport button (owner, 2026-11-24): play and pause are the same control seen twice - the glyph is the
+        # ACTION the press performs, exactly like the preview's own transport (`icon=(play, pause)` = unchecked,
+        # checked). Checked means "a job is running"; `ProcessTab._set_render_controls` is the one writer of that state.
+        self.startRenderButton.setIcon((QIcon(u":/icons/icons/play-circle.svg"),
+                                        QIcon(u":/icons/icons/pause-circle.svg")))
         self.startRenderButton.setIconSize(QSize(40, 45))
-        # `setCheckable(False)` states the button's own default and `Button` has no such setter (toggle mode is the
-        # constructor's `toggle=`), so the Designer's line is a no-op here; the two state resets below are kept.
         self.startRenderButton.setChecked(False)
         self.startRenderButton.setAutoRepeat(False)
         self.startRenderButton.setAutoExclusive(False)
@@ -592,19 +594,6 @@ class ProcPagePage:
         self.horizontalLayout_32.addWidget(self.widget_24)
         self.onRenderButtonsContiainer = QHBoxLayout()
         self.onRenderButtonsContiainer.setObjectName(u"onRenderButtonsContiainer")
-        self.pauseRenderButton = Button(parent=self.widget_13, text="", variant="surface",
-            content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
-        self.pauseRenderButton.setObjectName(u"pauseRenderButton")
-        self.pauseRenderButton.setEnabled(True)
-        self.pauseRenderButton.setMaximumSize(QSize(scaled_px(59), scaled_px(55)))
-        self.pauseRenderButton.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        icon4 = QIcon()
-        icon4.addFile(u":/icons/icons/pause-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
-        self.pauseRenderButton.setIcon(icon4)
-        self.pauseRenderButton.setIconSize(QSize(40, 45))
-        self.pauseRenderButton.setChecked(False)
-        self.onRenderButtonsContiainer.addWidget(self.pauseRenderButton)
         self.killRenderButton = Button(parent=self.widget_13, text="", variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
@@ -703,7 +692,6 @@ class ProcPagePage:
         # missing widget is a TypeError here, not a silent `None` at first render.
         self._handles = ProcPageHandles(
             startRenderButton=self.startRenderButton,
-            pauseRenderButton=self.pauseRenderButton,
             killRenderButton=self.killRenderButton,
             onRenderButtonsContiainer=self.onRenderButtonsContiainer,
             previewLabel=self.previewLabel,
@@ -913,5 +901,4 @@ class ProcPagePage:
         # The labels are what the strip measures: re-run the answer once they are the real ones.
         self._tab_strip.refresh()
         self.startRenderButton.setText("")
-        self.pauseRenderButton.setText("")
         self.killRenderButton.setText("")

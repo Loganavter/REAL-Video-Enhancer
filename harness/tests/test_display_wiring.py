@@ -325,7 +325,8 @@ class _Pane:
     def isVisible(self) -> bool:  # noqa: N802 - Qt spelling
         return bool(self.visible)
 
-    def set_frame(self, image) -> None:
+    def set_frame(self, image, *, gui_ms: float | None = None,
+                  index: int | None = None) -> None:
         self.frames.append(image)
 
     def set_progress(self, **values) -> None:
@@ -723,3 +724,76 @@ def test_the_default_box_is_the_probe_constant():
     assert DISPLAY_HEADER_SIZE == 15
     assert DISPLAY_OFFSET_SEQ == 0
     assert DISPLAY_OFFSET_WANTED == 9
+
+
+# --- the merged transport: the glyph must never outlive the state ------------------------------------------------
+
+class _WidgetStub:
+    """The three calls `_set_render_controls` makes on a button; nothing else is needed to test the state machine."""
+
+    def __init__(self) -> None:
+        self.visible = False
+        self.enabled = False
+        self.checked = False
+
+    def setVisible(self, value) -> None:  # noqa: N802 - Qt spelling
+        self.visible = bool(value)
+
+    def setEnabled(self, value) -> None:  # noqa: N802 - Qt spelling
+        self.enabled = bool(value)
+
+    def setChecked(self, value) -> None:  # noqa: N802 - Qt spelling
+        self.checked = bool(value)
+
+
+def test_a_failed_start_puts_the_transport_glyph_back():
+    """The transport is a toggle, so a press flips it before the handler; a start that does nothing must un-flip it.
+
+    Measured live 2026-11-24 on a fresh instance with no clip picked: pressing the transport left the pause glyph on a
+    row where nothing ran, and the cancel button stayed disabled - the toggle lied about the state.
+    """
+    class _Proc:
+        def __init__(self) -> None:
+            self.startRenderButton = _WidgetStub()
+            self.killRenderButton = _WidgetStub()
+            self.onRenderButtonsContiainer = types.SimpleNamespace(setEnabled=lambda value: None)
+
+    class _Parent:
+        def startRender(self) -> None:      # a start that never reaches the running state (no file chosen)
+            return
+
+    tab = types.SimpleNamespace(
+        page_handles=types.SimpleNamespace(proc=_Proc()), parent=_Parent(),
+        _render_state="idle", _applying_controls=False,
+        RENDER_CONTROLS=ProcessTab.RENDER_CONTROLS,     # a class attribute the stub does not inherit
+    )
+    # the `finally` writes the state back through the same method; bind it to the stub
+    tab._set_render_controls = lambda state, _tab=tab: ProcessTab._set_render_controls(_tab, state)
+    ProcessTab._set_render_controls(tab, "idle")
+    assert tab.page_handles.proc.startRenderButton.checked is False
+    assert tab.page_handles.proc.killRenderButton.enabled is False
+
+    tab.page_handles.proc.startRenderButton.checked = True      # what the toggle does before the handler runs
+    ProcessTab._on_transport_pressed(tab)
+
+    assert tab.page_handles.proc.startRenderButton.checked is False, (
+        "the glyph claims a job that never started")
+    assert tab.page_handles.proc.killRenderButton.enabled is False
+
+
+def test_the_transport_glyph_follows_the_running_state():
+    """Checked == a job is running (the pause glyph); the same writer every transition uses."""
+    class _Proc:
+        def __init__(self) -> None:
+            self.startRenderButton = _WidgetStub()
+            self.killRenderButton = _WidgetStub()
+            self.onRenderButtonsContiainer = types.SimpleNamespace(setEnabled=lambda value: None)
+
+    tab = types.SimpleNamespace(page_handles=types.SimpleNamespace(proc=_Proc()), parent=None,
+                                _render_state="idle", _applying_controls=False,
+                                RENDER_CONTROLS=ProcessTab.RENDER_CONTROLS)
+    for state, checked, cancel in (("idle", False, False), ("running", True, True), ("paused", False, True)):
+        ProcessTab._set_render_controls(tab, state)
+        assert tab.page_handles.proc.startRenderButton.checked is checked, state
+        assert tab.page_handles.proc.killRenderButton.enabled is cancel, state
+        assert tab.page_handles.proc.startRenderButton.enabled is True, state

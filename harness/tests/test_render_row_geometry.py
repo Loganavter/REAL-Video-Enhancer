@@ -12,9 +12,12 @@ This file changed sides twice on the owner's calls, and the three states are the
    contract below: no button is ever hidden, so the row has ONE geometry in every state, and nothing is reserved
    because nothing is missing. `ProcessTab._set_render_controls` is the single place a state is applied, and the
    mechanism half of this file keeps the retention demonstration as the reason the third option was chosen.
+4. **Then** - "join the pause and play buttons into one, just change the icon". The transport is now a single toggle:
+   unchecked = play glyph (idle / paused), checked = pause glyph (a job is running), and the press is dispatched by
+   `_render_state` in the glue rather than by the glyph.
 
-States (from `ProcessTab.RENDER_CONTROLS`): idle -> start usable, pause/kill visible but disabled; running -> start
-disabled, pause/kill usable; paused -> start (resume) and kill usable, pause disabled.
+States (from `ProcessTab.RENDER_CONTROLS`): idle -> transport usable (play), cancel visible but disabled; running ->
+transport usable (pause), cancel usable; paused -> transport usable (play = resume), cancel usable.
 """
 
 from __future__ import annotations
@@ -188,7 +191,6 @@ def _row_rects(proc, row: QWidget) -> dict[str, QRect]:
     """
     widgets = {
         "startRenderButton": proc.startRenderButton,
-        "pauseRenderButton": proc.pauseRenderButton,
         "killRenderButton": proc.killRenderButton,
         "progressBar": proc.progressBar,
     }
@@ -197,9 +199,9 @@ def _row_rects(proc, row: QWidget) -> dict[str, QRect]:
 
 #: The three states the glue applies, as `ProcessTab.RENDER_CONTROLS` states them (`src/ui/ProcessTab.py`).
 STATES = {
-    "idle": {"start": True, "pause": False, "kill": False},
-    "running": {"start": False, "pause": True, "kill": True},
-    "paused": {"start": True, "pause": False, "kill": True},
+    "idle": {"transport": True, "kill": False},
+    "running": {"transport": True, "kill": True},
+    "paused": {"transport": True, "kill": True},
 }
 
 
@@ -211,10 +213,10 @@ def _apply_state(proc, state: str) -> None:
     that the glue is the one place these calls live.
     """
     wanted = STATES[state]
-    for name, widget in (("start", proc.startRenderButton), ("pause", proc.pauseRenderButton),
-                         ("kill", proc.killRenderButton)):
+    for name, widget in (("transport", proc.startRenderButton), ("kill", proc.killRenderButton)):
         widget.setVisible(True)
         widget.setEnabled(bool(wanted[name]))
+    proc.startRenderButton.setChecked(state == "running")
 
 
 def test_every_render_button_stays_in_the_row_and_only_its_state_changes(qapp: QApplication):
@@ -232,12 +234,14 @@ def test_every_render_button_stays_in_the_row_and_only_its_state_changes(qapp: Q
         for state in STATES:
             _apply_state(proc, state)
             _settle(app)
-            for name in ("startRenderButton", "pauseRenderButton", "killRenderButton"):
+            for name in ("startRenderButton", "killRenderButton"):
                 assert getattr(proc, name).isVisible(), f"{name} is hidden in the {state} state"
             rects[state] = _row_rects(proc, row)
-            assert proc.startRenderButton.isEnabled() == STATES[state]["start"]
-            assert proc.pauseRenderButton.isEnabled() == STATES[state]["pause"]
+            assert proc.startRenderButton.isEnabled() == STATES[state]["transport"]
             assert proc.killRenderButton.isEnabled() == STATES[state]["kill"]
+            # the glyph IS the state: checked = a job is running = the pause icon
+            assert proc.startRenderButton.isChecked() == (state == "running"), (
+                f"the transport's glyph does not follow the {state} state")
 
         idle = rects["idle"]
         for state, measured in rects.items():
@@ -247,7 +251,7 @@ def test_every_render_button_stays_in_the_row_and_only_its_state_changes(qapp: Q
                 "not:\n" + "\n".join(f"  {line}" for line in moved))
 
         # No reservation is needed any more: nothing is hidden, so no policy may claim a box for a hidden widget.
-        for name in ("startRenderButton", "pauseRenderButton", "killRenderButton"):
+        for name in ("startRenderButton", "killRenderButton"):
             assert not getattr(proc, name).sizePolicy().retainSizeWhenHidden(), (
                 f"{name} retains its size when hidden - with nothing hidden that can only hide a real regression")
     finally:
@@ -263,9 +267,11 @@ def test_the_glue_owns_the_row_state():
     text = source.read_text(encoding="utf-8")
     assert "_set_render_controls(" in text, "the glue lost its single state writer"
     assert "RENDER_CONTROLS" in text, "the states are no longer stated as data"
-    for name in ("startRenderButton", "pauseRenderButton", "killRenderButton"):
+    for name in ("startRenderButton", "killRenderButton"):
         for call in (f"{name}.setVisible(False)", f"{name}.hide()"):
-            assert call not in text, f"{call} is back - the cancel pair must stay in the row, only disabled"
+            assert call not in text, f"{call} is back - the row's buttons stay in the row, only disabled"
+    assert "pauseRenderButton" not in text, (
+        "the pause button came back - play/pause/resume are one transport whose glyph follows the state")
 
     tree = ast.parse(text)
     states = None

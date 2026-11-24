@@ -138,7 +138,6 @@ class ProcPageHandles:
     """The process page's own chrome (`src/ui/pages/proc_page.py`)."""
 
     startRenderButton: "Button"
-    pauseRenderButton: "Button"
     killRenderButton: "Button"
     onRenderButtonsContiainer: "QHBoxLayout"
     previewLabel: "QWidget"
