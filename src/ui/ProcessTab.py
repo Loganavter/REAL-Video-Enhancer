@@ -1161,11 +1161,18 @@ class ProcessTab:
                     # Resuming means "follow the render again", not "replay everything the file gained while I was
                     # held". A held pane's tail stopped at its last published frame; resuming there starts the picture
                     # seconds behind the head and then races to catch up (measured live 2026-11-24: play after a held
-                    # seek restarted at 0.459 s while the renderer stood at ~14 % of the clip). Jump to the published
-                    # edge first, which is exactly follow-live.
-                    edge = float(getattr(tail, "produced_seconds", 0.0) or 0.0)
-                    if edge > 0.0:
-                        tail.seek(edge)
+                    # seek restarted at 0.459 s while the renderer stood at ~11 % of the clip). The head is the
+                    # RENDERER's produced time, not the tail's published edge - the tail lags it by exactly the backlog
+                    # it did not read while held (the first attempt at this fix sought the tail's own edge and changed
+                    # nothing, which the second live run showed).
+                    clip = self._clip_duration()
+                    produced = self._live_produced_fraction()
+                    target = (produced * clip if clip > 0.0 and produced > 0.0
+                              else float(getattr(tail, "produced_seconds", 0.0) or 0.0))
+                    if target > 0.0:
+                        tail.seek(target)
+                        log(f"preview transport: resuming at the render's head {target:.3f}s "
+                            f"(produced {produced:.1%} of {clip:.3f}s)")
                 tail.set_paused(self._preview_paused)
             except Exception as exc:
                 log(f"preview transport: {exc}")
