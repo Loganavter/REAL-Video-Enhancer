@@ -236,15 +236,17 @@ def log(message: str, level: str = "info"):
         print(f"An error occurred while logging: {e}", file=sys.stderr)
 
 
-#: Keep the PREVIOUS run instead of erasing it. `log.txt` used to be truncated here, so the backend's `seek:` lines
-#: and the pane's own decisions of the run that just misbehaved were gone by the time anyone could read them - measured
-#: 2026-11-24: the owner's `log.txt` held 147 bytes (two lines) while `preview-log.txt` had three hours of history,
-#: because only the latter appends. One rotation is enough to answer "what did the last run do".
+#: Keep the last TWO runs instead of erasing them. `log.txt` used to be truncated here, so the backend's `seek:` lines
+#: and the pane's own decisions of the run that just misbehaved were gone by the time anyone could read them -
+#: measured 2026-11-24: the owner's `log.txt` held 147 bytes (two lines) while `preview-log.txt` had three hours of
+#: history, because only the latter appends. One generation proved too few on 2026-11-25: two harness runs 33 s apart
+#: rotated the only backend seek breakdown of a session away, so the profile was measured on air.
 _LOG_PATH = os.path.join(CWD, "log.txt")
 try:
-    if os.path.exists(_LOG_PATH) and os.path.getsize(_LOG_PATH) > 0:
-        os.replace(_LOG_PATH, os.path.join(CWD, "log.prev.txt"))
-except OSError:
+    from .log_rotation import rotate
+
+    rotate(_LOG_PATH, generations=2)
+except Exception:
     pass                                    # a read-only tree keeps the old behaviour rather than failing to start
 with open(_LOG_PATH, "w") as f:
     pass
