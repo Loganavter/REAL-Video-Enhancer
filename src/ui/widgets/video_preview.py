@@ -70,6 +70,47 @@ SHADER_DIR = "shaders"
 #: the whole frame by default and the wheel can go back to that, while 1:1 is just a step inside the range. Zoom is a
 #: source-pixel scale, so the same factor means the same detail whatever the pane size.
 MAX_ZOOM = 8.0
+#: One physical wheel notch. Qt reports wheel deltas in 120ths of a notch on every platform, so the factor is
+#: `WHEEL_ZOOM_PER_NOTCH ** (delta / 120)` - a coalesced burst of N notches and N separate notches then produce the
+#: same total zoom, which a fixed per-EVENT step cannot do (BlinkTable: `ui/canvas_infra/viewport/zoom.py:135-147`,
+#: the reference the owner named). 1.1 per notch is that reference's step.
+WHEEL_UNITS_PER_NOTCH = 120.0
+WHEEL_ZOOM_PER_NOTCH = 1.2
+#: How far the pointer must travel before an LMB press becomes a pan instead of the compare flash.
+PAN_THRESHOLD_PX = 3.0
+#: The magnification ladder for NEAREST sampling. `Nearest` duplicates a source pixel by a WHOLE number of screen
+#: pixels; at a fractional factor the blocks are 3 px wide in one place and 4 px in the next, which is the ragged
+#: "рванина" the owner refused (2026-11-24: "мне нужны по ближайшим, но при этом качество не рванина"). So the applied
+#: zoom is always one of these, and the wheel moves a target between them. libplacebo calls the same mode
+#: `oversample` ("aspect-ratio preserving nearest neighbour sampling").
+ZOOM_STEPS = (1.0, 2.0, 3.0, 4.0, 6.0, 8.0)
+
+
+def nearest_zoom_step(zoom: float) -> float:
+    """The allowed magnification step closest to `zoom`, compared in log space so the feel is even.
+
+    Below 1.0 the value is returned untouched: that is MINIFICATION (fit and tighter), where `Nearest` would alias
+    rather than preserve pixels, so the caller keeps the linear sampler there until the mip chain lands.
+    """
+    value = float(zoom)
+    if value < 1.0:
+        return value
+    import math
+
+    return min(ZOOM_STEPS, key=lambda step: abs(math.log(value / step)))
+
+
+def wheel_zoom_factor(angle_delta: float | None) -> float | None:
+    """The zoom factor ONE wheel event asks for, or None when it asks for nothing.
+
+    Proportional to the magnitude: `120` is one notch (`x1.1`), `240` is two (`x1.21`), `60` is half (`x1.0488`). A
+    fixed step per event - what this surface used to do - makes the gesture depend on how many notches the OS happened
+    to bundle, which is exactly the "jerky" zoom the owner reported (owner, 2026-11-24: "посмотри почему у нас
+    зуммирование какое-то рванное, эталон - blinktable").
+    """
+    if not angle_delta:
+        return None
+    return WHEEL_ZOOM_PER_NOTCH ** (float(angle_delta) / WHEEL_UNITS_PER_NOTCH)
 MIN_ZOOM = 1.0
 
 #: What the pane can show: the result alone, result + original side by side, or both under one divider. The names are
@@ -99,6 +140,9 @@ class VideoPreviewSurface(QRhiWidget):
         self._original: QImage | None = None
         self._texture_dirty = False
         self._zoom = MIN_ZOOM
+        #: What the wheel is aiming at. The APPLIED zoom is quantised to `ZOOM_STEPS` (nearest needs whole factors), so
+        #: without a separate target the wheel would multiply the snapped value and stall at 1x forever.
+        self._zoom_target = MIN_ZOOM
         self._zoom_is_fit = True
         self._pan = [0.0, 0.0]
         #: straight-alpha multiply tint; (1,1,1,0.55) dims a stale frame while a seek is in flight
@@ -110,6 +154,8 @@ class VideoPreviewSurface(QRhiWidget):
         self._hud_dirty = True
         self._scrubbing = False
         self._panning = False
+        #: Where the LMB went down, while a drag could still turn into a pan (cleared once it does).
+        self._left_press = None
         self._pan_anchor = QPointF()
         self._showing_original = False
         #: which surfaces the pane shows: "single" (today), "sbs" or "split" - see `set_view_mode`
@@ -377,17 +423,24 @@ class VideoPreviewSurface(QRhiWidget):
     # -- interaction -----------------------------------------------------
 
     def wheelEvent(self, event) -> None:  # noqa: N802 - Qt spelling
-        delta = event.angleDelta().y()
-        if not delta:
-            return
+        angle = event.angleDelta().y()
+        pixels = event.pixelDelta().y()
+        if telemetry.level() >= 2:
+            # Both raw deltas, because the step is proportional to them: a device that sends only `pixelDelta` would
+            # otherwise look like "the wheel does nothing" with no evidence in the log.
+            telemetry.event("zoom raw", angle=angle, pixel=pixels)
+        factor = wheel_zoom_factor(angle)
+        if factor is None:
+            event.accept()
+            return                      # a zero delta is not a zoom; a pixel-only device answers `zoom raw` above
         # In `sbs` the original is placed from the result's scale, so a wheel over that half has nothing of its own
         # to change: doing nothing there (instead of silently moving the far picture) is what keeps the two surfaces
         # comparable one gesture at a time.
         if self._view_mode == "sbs" and self._original_view_rect().contains(event.position()):
             event.accept()
             return
-        factor = 1.15 if delta > 0 else 1 / 1.15
-        self.set_zoom(self._zoom * factor, around=QRectF(event.position(), QSize(1, 1)))
+        target = getattr(self, "_zoom_target", self._zoom) * factor
+        self.set_zoom(target, around=QRectF(event.position(), QSize(1, 1)))
         self.zoomChanged.emit(self._zoom)
         event.accept()
 
@@ -421,6 +474,10 @@ class VideoPreviewSurface(QRhiWidget):
             # soon as `set_original` arrives. The request carries the media time, so the host decodes one frame, not a
             # stream - the renderer's own original is never involved (plan: 3b, GUI-only).
             self._showing_original = True
+            # LMB drag pans (owner, 2026-11-24: "вместо СКМ перевесить на ЛКМ драг"; BlinkTable's `drag_pan` is the
+            # reference). The press still ASKS for the original immediately - holding the button to compare is a
+            # measured behaviour and a drag only cancels it once the pointer actually moves.
+            self._left_press = QPointF(position)
             _, _, playhead, _ = self._progress
             telemetry.event("hold on", playhead=f"{float(playhead):.3f}")
             self.originalRequested.emit(float(playhead))
@@ -444,6 +501,25 @@ class VideoPreviewSurface(QRhiWidget):
             self.pan_by(delta.x(), delta.y())
             event.accept()
             return
+        if self._left_press is not None and (event.buttons() & Qt.MouseButton.LeftButton):
+            moved = position - self._left_press
+            if abs(moved.x()) > PAN_THRESHOLD_PX or abs(moved.y()) > PAN_THRESHOLD_PX:
+                if self._showing_original:
+                    # The drag won: the compare flash was a press, and the press is now a pan. Ending it first keeps
+                    # the two gestures from fighting over the picture.
+                    self._showing_original = False
+                    telemetry.event("hold off")
+                    self.set_original(None)
+                self._left_press = None
+                self._panning = True
+                self._pan_anchor = position
+                # The distance already travelled counts: without this the first move of every drag was a dead zone,
+                # which reads as "the picture sticks for a moment before it follows".
+                self.pan_by(moved.x(), moved.y())
+                event.accept()
+                return
+            event.accept()
+            return
         self._update_hover(position)
         super().mouseMoveEvent(event)
 
@@ -465,14 +541,16 @@ class VideoPreviewSurface(QRhiWidget):
             self.update()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt spelling
-        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
+        if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.LeftButton) and self._panning:
             self._panning = False
+            self._left_press = None
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
             if self._scrubbing:
                 telemetry.event("strip release")
             self._scrubbing = False
+            self._left_press = None
             if self._showing_original:
                 self._showing_original = False
                 telemetry.event("hold off")
@@ -567,7 +645,24 @@ class VideoPreviewSurface(QRhiWidget):
 
     # -- view ------------------------------------------------------------
 
+    def samples_nearest(self) -> bool:
+        """Whether the view is magnified (or exactly 1:1) and therefore sampled with `Nearest`.
+
+        Magnification is where the owner wants crisp source pixels; below 1 the linear sampler averages, because
+        nearest-neighbour MINIFICATION is aliasing, not sharpness. The FIT view draws at `_fit_scale()`, not at
+        `_zoom`, so it is the effective scale that decides - a fit of a frame SMALLER than the pane does magnify.
+        """
+        scale = self._fit_scale() if self._zoom_is_fit else float(self._zoom)
+        return scale >= 1.0 - 1e-9
+
     def zoom(self) -> float:
+        """The scale the picture is DRAWN at: `_fit_scale()` while the view is fitted, else the stored factor.
+
+        Reporting `_zoom` alone lied in the opening view - it said 1.0 while the pane drew the frame at 0.5 (measured
+        2026-11-24: the zoom line read `zoom=1.000 fit=1` on a fitted 1600x900 frame in an 800x600 pane).
+        """
+        if self._zoom_is_fit:
+            return float(self._fit_scale())
         return self._zoom
 
     def _min_zoom(self) -> float:
@@ -582,6 +677,10 @@ class VideoPreviewSurface(QRhiWidget):
         small pane `fit` is below 1 and the range is [fit, 8].
         """
         target = max(self._min_zoom(), min(MAX_ZOOM, float(zoom)))
+        self._zoom_target = target
+        # Magnification is a ladder of whole factors: `Nearest` at 1.87x draws uneven pixel blocks. Minification
+        # (fit and tighter) stays continuous, because there the sampler averages.
+        target = nearest_zoom_step(target)
         if around is not None:
             # Keep the frame point under the cursor where it is: solve for the pan that puts it back after the scale
             # change. The first version scaled the offset by a factor, which drifted the picture at the edges.
@@ -596,14 +695,17 @@ class VideoPreviewSurface(QRhiWidget):
                 self._pan[0] = anchor.x() - u * drawn_w - view.left() - (view.width() - drawn_w) / 2.0
                 self._pan[1] = anchor.y() - v * drawn_h - view.top() - (view.height() - drawn_h) / 2.0
         self._zoom = target
-        telemetry.event("zoom", zoom=f"{self._zoom:.3f}", fit=int(self._zoom_is_fit))
         self._zoom_is_fit = False
+        # After the flag flips: the line used to print the PREVIOUS state (`fit=1` on a zoom that just left fit).
+        telemetry.event("zoom", zoom=f"{self._zoom:.3f}", fit=int(self._zoom_is_fit),
+                        nearest=int(self.samples_nearest()))
         self._clamp_pan()
         self.update()
 
     def reset_view(self, *, actual_size: bool = False) -> None:
         """Back to the opening view: the whole frame fitted into the pane (or 1:1 when the user asks for it)."""
         self._zoom = 1.0
+        self._zoom_target = self._fit_scale() if not actual_size else 1.0
         self._zoom_is_fit = not actual_size
         self._pan = [0.0, 0.0]
         self.update()
@@ -1064,7 +1166,7 @@ class VideoPreviewSurface(QRhiWidget):
         command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
         command_buffer.setGraphicsPipeline(self._pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
-        sample_at_one = (not self._zoom_is_fit) and abs(self._zoom - 1.0) < 1e-6
+        sample_at_one = self.samples_nearest()
         # The pipeline declares `UsesScissor` (the compare modes need it), so the scissor state is LIVE here: a frame
         # must state its own scissor before drawing, or it inherits the last one set on the command buffer - an empty
         # one clipped the whole picture away in `single` after a compare mode had run (pixel gate, 2026-11-24).
@@ -1133,7 +1235,7 @@ class VideoPreviewSurface(QRhiWidget):
         command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
         command_buffer.setGraphicsPipeline(self._pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
-        sample_at_one = (not self._zoom_is_fit) and abs(self._zoom - 1.0) < 1e-6
+        sample_at_one = self.samples_nearest()
         result_bindings = self._bindings_nearest if sample_at_one else self._bindings
         result_clip = self._view_rect()
         if result_bindings is not None and not result_clip.isEmpty() and self._frame_rect().intersects(result_clip):

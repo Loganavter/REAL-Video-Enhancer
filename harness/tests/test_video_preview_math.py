@@ -13,11 +13,28 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QImage  # noqa: E402
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt  # noqa: E402
+from PySide6.QtGui import QColor, QImage, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.ui.widgets.video_preview import VideoPreviewSurface  # noqa: E402
+from src.ui.widgets.video_preview import (  # noqa: E402
+    VideoPreviewSurface,
+    nearest_zoom_step,
+    wheel_zoom_factor,
+)
+
+
+def _send(widget, kind, point: QPointF, *, held) -> None:
+    """One mouse event at `point`; `held` is what `buttons()` reports (Qt's own convention)."""
+    event = QMouseEvent(kind, QPointF(point), QPointF(point), held, held, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(widget, event)
+
+
+def _release_with_clip(widget, point: QPointF) -> None:
+    """A release carries `NoButton` in `buttons()`: the button that went up is in `button()` only."""
+    event = QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(point), QPointF(point),
+                        Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(widget, event)
 
 
 @pytest.fixture()
@@ -63,6 +80,98 @@ def test_zoom_is_clamped_and_anchored_at_the_cursor(surface):
     assert after.width() == pytest.approx(1600 * 2.0, rel=1e-6), (
         "zoom is a source-pixel scale: 2x a 1600 px frame is 3200 px on screen")
     surface.reset_view()
+
+
+def test_a_wheel_notch_scales_by_its_magnitude_not_by_the_event():
+    """A burst and N separate notches must give the same zoom: the step is proportional to the delta.
+
+    The surface used to multiply by a fixed 1.15 per EVENT, so one notch and an OS-coalesced burst of five looked the
+    same and every step was a 15 % jump - the "jerky" the owner reported, against BlinkTable
+    (`ui/canvas_infra/viewport/zoom.py:135-147`: `1.1 ** (delta / 120)`). The per-notch step here is 1.2 rather than
+    their 1.1 because the applied magnification is quantised to whole factors; with 1.1 a step would need four notches.
+    """
+    assert wheel_zoom_factor(120) == pytest.approx(1.2)
+    assert wheel_zoom_factor(240) == pytest.approx(1.44)
+    assert wheel_zoom_factor(60) == pytest.approx(1.2 ** 0.5)
+    assert wheel_zoom_factor(-120) == pytest.approx(1 / 1.2)
+    assert wheel_zoom_factor(360) == pytest.approx(wheel_zoom_factor(120) ** 3), \
+        "three notches in one event are three notches"
+    assert wheel_zoom_factor(0) is None, "a zero delta is not a zoom"
+    assert wheel_zoom_factor(None) is None
+
+
+def test_magnification_snaps_to_whole_steps_because_nearest_needs_them():
+    """`Nearest` duplicates a source pixel by a WHOLE number; at 1.87x the blocks are uneven - the ragged look.
+
+    The owner asked for nearest ("по ближайшим") AND no raggedness ("качество не рванина"), which is only possible on
+    a ladder of whole factors. Minification stays continuous: there the sampler averages instead.
+    """
+    assert nearest_zoom_step(1.0) == 1.0
+    assert nearest_zoom_step(1.4) == 1.0, "just under the geometric midpoint stays at 1x"
+    assert nearest_zoom_step(1.5) == 2.0
+    assert nearest_zoom_step(1.87) == 2.0
+    assert nearest_zoom_step(3.4) == 3.0
+    assert nearest_zoom_step(5.9) == 6.0
+    assert nearest_zoom_step(0.29) == 0.29, "minification is not on the ladder"
+    assert nearest_zoom_step(0.5) == 0.5
+
+
+def test_magnified_views_sample_nearest_and_fitted_ones_do_not(surface):
+    """Crisp pixels when magnified, averaging when the pane is smaller than the frame."""
+    surface.reset_view()
+    assert surface.samples_nearest() is False, "the fit view MINIFIES: nearest there is aliasing, not sharpness"
+    surface.set_zoom(2.0)
+    assert surface.zoom() == 2.0 and surface.samples_nearest() is True
+    surface.set_zoom(1.87)
+    assert surface.zoom() == 2.0, "a fractional magnification is snapped to the ladder"
+    surface.reset_view(actual_size=True)
+    assert surface.samples_nearest() is True, "exactly 1:1 is a source pixel per screen pixel"
+
+
+def test_a_left_drag_pans_and_cancels_the_compare_flash(surface):
+    """Panning moved to the LEFT button (owner, 2026-11-24), and the press still starts the compare.
+
+    The flash is what a HOLD shows, so the press cannot be deferred to the release; instead the first move past the
+    threshold ends the flash and the drag pans from that point.
+    """
+    surface.set_zoom(surface.zoom() * 2.0)
+    start = QPointF(200.0, 200.0)
+    asked = []
+    surface.originalRequested.connect(lambda pts: asked.append(pts))
+
+    _send(surface, QEvent.Type.MouseButtonPress, start, held=Qt.MouseButton.LeftButton)
+    assert surface._showing_original is True, "the press asks for the original at once - a hold shows the compare"
+    assert asked, "and it asked exactly once"
+
+    _send(surface, QEvent.Type.MouseMove, QPointF(240.0, 220.0), held=Qt.MouseButton.LeftButton)
+    assert surface._panning is True, "a left drag pans"
+    assert surface._showing_original is False, "the drag won the gesture: the flash is gone"
+    _release_with_clip(surface, QPointF(240.0, 220.0))
+
+    assert surface._panning is False
+    assert surface._pan != [0.0, 0.0], "the picture moved with the drag"
+
+
+def test_a_left_click_without_movement_still_shows_the_original(surface):
+    """A press that does not move is the compare, not a pan: the two gestures share one button by distance alone."""
+    start = QPointF(200.0, 200.0)
+    asked = []
+    surface.originalRequested.connect(lambda pts: asked.append(pts))
+
+    _send(surface, QEvent.Type.MouseButtonPress, start, held=Qt.MouseButton.LeftButton)
+    _send(surface, QEvent.Type.MouseMove, QPointF(201.0, 200.5), held=Qt.MouseButton.LeftButton)
+    _release_with_clip(surface, QPointF(201.0, 200.5))
+
+    assert surface._panning is False, "1 px is a click, not a drag"
+    assert len(asked) == 1
+    assert surface._pan == [0.0, 0.0]
+
+
+def test_a_middle_drag_still_pans(surface):
+    """The binding moved to the left button; the middle one keeps working, so nobody's habit breaks."""
+    surface.set_zoom(surface.zoom() * 2.0)
+    _send(surface, QEvent.Type.MouseButtonPress, QPointF(200.0, 200.0), held=Qt.MouseButton.MiddleButton)
+    assert surface._panning is True
 
 
 def test_pan_is_clamped_to_the_picture(surface):
