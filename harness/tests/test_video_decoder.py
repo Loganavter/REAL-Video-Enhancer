@@ -31,6 +31,41 @@ def test_the_module_imports_without_pyav():
     assert VideoDecoder.frame_ready is not None
 
 
+def test_a_name_whose_millisecond_rounding_goes_up_still_finds_its_own_frame():
+    """The compare's one-frame desync, as arithmetic (owner, 2026-11-25: "рассинхрон в пару кадров при зажатии лкм").
+
+    Containers store PTS in whole milliseconds; the pane names a frame by an exact rational. On the owner's clip frame
+    77 is named `77/23.976024 = 3.21154s` and stored as `3.212s`, so a plain `pts <= name` published frame 76 (3.170s)
+    while the render's own `-ss` path (ceil) returned 3.212s - one frame earlier, on half of all presses. The slack is
+    the exact inverse of that rounding, not a fudge: half a millisecond.
+    """
+    from src.ui.video.decode import frame_belongs_to
+
+    assert frame_belongs_to(3.212, 3.21154) is True, "the frame whose PTS rounded UP to 3.212 is the one named"
+    assert frame_belongs_to(3.170, 3.21154) is True, "and so is the frame before it - the walk still lands on 3.212"
+    assert frame_belongs_to(3.253, 3.21154) is False, "the next frame is the following tick, not this seek's result"
+    assert frame_belongs_to(float("nan"), 3.2) is False, "an unusable PTS never matches"
+
+
+def test_a_one_off_request_picks_the_same_frame_the_render_returns():
+    """The compare and the render must agree on WHICH frame a between-frames time names.
+
+    The render's seek is `-ss` (ceil); the compare's one-off request must use the same rule, or the original sits one
+    frame behind the upscale forever. Measured on the owner's clip (2026-11-25): ask 8.105s, frames at 8.091 and 8.133;
+    the result was the 8.133 frame while the compare showed 8.091.
+    """
+    from src.ui.video.decode import frame_at_or_after, frame_belongs_to
+
+    ask = 8.105
+    assert frame_at_or_after(8.091, ask) is False, "the frame the ask lands inside is not the one `-ss` returns"
+    assert frame_at_or_after(8.133, ask) is True, "the first frame at or after it is"
+    assert frame_belongs_to(8.091, ask) is True and frame_belongs_to(8.133, ask) is False, \
+        "playback keeps the other rule: it starts inside the frame the position falls in"
+    # Both rules agree when the ask already IS a frame boundary, which is the case once the pane names pictures by
+    # their own media time.
+    assert frame_at_or_after(8.133, 8.133) is True and frame_belongs_to(8.133, 8.133) is True
+
+
 def test_open_without_pyav_reports_an_error_and_returns_false(qapp):
     if _pyav_installed():
         pytest.skip("PyAV is installed here; the no-decoder path is covered where it is missing")

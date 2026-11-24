@@ -478,9 +478,14 @@ class VideoPreviewSurface(QRhiWidget):
             # reference). The press still ASKS for the original immediately - holding the button to compare is a
             # measured behaviour and a drag only cancels it once the pointer actually moves.
             self._left_press = QPointF(position)
-            _, _, playhead, _ = self._progress
-            telemetry.event("hold on", playhead=f"{float(playhead):.3f}")
-            self.originalRequested.emit(float(playhead))
+            # Ask for the SHOWN picture's own media time, not the progress marker. `_progress` is refreshed only when a
+            # frame paints, so after a strip press it still carries the previous clock (measured 2026-11-25: a press
+            # logged "asked for the source at 2.383s (pane playhead 9.827s)"). The picture names itself through
+            # `set_frame`, which is the same number the result half is drawn from.
+            named = self.shown_time()
+            ask = float(named) if named is not None else float(self._progress[2])
+            telemetry.event("hold on", playhead=f"{ask:.3f}")
+            self.originalRequested.emit(ask)
             self.update()
             event.accept()
             return

@@ -43,6 +43,36 @@ _MICROS = 1_000_000
 NO_PYAV = "PyAV is not installed: the file player needs `pip install av`"
 
 
+#: Containers store PTS rounded to whole milliseconds; the names this decoder is asked to find are exact (`n/fps`, or
+#: a request's seconds). Half a millisecond of slack is the exact inverse of that rounding: without it the frame whose
+#: stored PTS rounded UP reads as "after the target" and the PREVIOUS frame is published. Measured on the owner's clip
+#: (2026-11-25): the name 3.21154s is stored as 3.212s, so `pts <= name` published 3.170s - one frame early, on half of
+#: all presses, while the render's own path (`-ss`, ceil) returned 3.212s. That one frame is the compare's desync.
+PTS_QUANTISATION_S = 0.0005
+
+
+def frame_belongs_to(frame_pts: float, target: float) -> bool:
+    """Whether the frame at `frame_pts` is the last one at or before the target (playback: the frame it lands in)."""
+    try:
+        return float(frame_pts) <= float(target) + PTS_QUANTISATION_S
+    except (TypeError, ValueError):
+        return False
+
+
+def frame_at_or_after(frame_pts: float, target: float) -> bool:
+    """Whether the frame at `frame_pts` is the FIRST one at or after the target - the frame `-ss target` returns.
+
+    This is the rule the render's own seek path uses (`SeekReader._index_at` is a `ceil`), so a ONE-OFF request (the
+    LMB compare) must use it too: a `floor` here and a `ceil` there put the source one frame behind the result on every
+    press whose target sits between two frames. Measured 2026-11-25: ask 8.105s, frames at 8.091/8.133, the result was
+    the 8.133 frame and the compare showed 8.091.
+    """
+    try:
+        return float(frame_pts) >= float(target) - PTS_QUANTISATION_S
+    except (TypeError, ValueError):
+        return False
+
+
 class VideoDecoder(QObject):
     """One video file, opened once and played/seeked from its own thread."""
 
@@ -340,25 +370,42 @@ class VideoDecoder(QObject):
     # -- seeking -----------------------------------------------------------------------------------
 
     def _seek_and_publish(self, target: float, *, announce: bool = True) -> None:
-        """Keyframe rewind, decode forward, publish the last frame at or before `target`.
+        """Keyframe rewind, decode forward, publish the frame the target names.
 
-        ``announce=False`` is the one-off request path: the frame is published but the playhead did
-        not move, so the surface must not be told that it did.
+        Two rounding rules, and the caller chooses the one its counterpart uses:
+
+        * ``announce=True`` (playback start): the LAST frame at or before the target - the frame the position lands in;
+        * ``announce=False`` (a one-off request, the LMB compare): the FIRST frame at or after it - the frame the
+          render's own `-ss` seek returns (`SeekReader._index_at` is a `ceil`). Using the other rule here is what put
+          the compared original one frame behind the rendered picture on every press (2026-11-25).
+
+        The frame is published but the playhead did not move, so the surface must not be told that it did.
         """
         self._rewind(target)
         published: FrameRef | None = None
+        #: The last frame before the name, kept ONLY as a fallback for a file that ends before reaching it. It must not
+        #: go back into `_held`: `_take()` returns `_held` first, so putting a frame there while walking would read the
+        #: same frame forever - an infinite loop on the GUI thread (measured live 2026-11-25: the request logged and
+        #: then the app stopped answering, no further line in either log).
+        fallback: FrameRef | None = None
         while True:
             frame = self._take()
             if frame is None:
                 break
-            if frame.pts > target:
-                # First frame after the target: it belongs to the next playback tick, not to the
-                # seek result, so it is held rather than published.
-                self._held = frame
+            if announce:
+                if not frame_belongs_to(frame.pts, target):
+                    # First frame after the name: it belongs to the next playback tick, not to this seek's result.
+                    self._held = frame
+                    break
+                published = frame
+                continue
+            if frame_at_or_after(frame.pts, target):
+                published = frame
                 break
-            published = frame
+            fallback = frame
         if published is None:
-            published, self._held = self._held, None
+            published = fallback if fallback is not None else self._held
+            self._held = None
         if published is not None:
             self.frame_ready.emit(published)
         if announce:

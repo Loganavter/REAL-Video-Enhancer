@@ -247,6 +247,22 @@ def test_the_wheel_ignores_the_original_half_and_zooms_the_result(surface):
         "and the original follows at the same apparent scale")
 
 
+def test_the_lmb_compare_asks_the_shown_pictures_time_not_the_stale_marker(surface):
+    """`_progress` moves only when a frame paints, so a strip press leaves it behind; the picture names itself.
+
+    Measured 2026-11-25 in the owner's log: "compare: asked for the source at 2.383s (pane playhead 9.827s)" - the
+    compare decoded a frame seven seconds away from the picture on screen, which is the desync he reported.
+    """
+    asked: list[float] = []
+    surface.originalRequested.connect(asked.append)
+    surface.set_frame(_picture(*FRAME_SIZE), seq=1, media_time=3.2115)
+    surface.set_progress(rendered=100.0, total=100.0, playhead=9.827, duration=20.646)
+
+    _press(surface, QPointF(PANE_SIZE[0] * 0.5, PANE_SIZE[1] * 0.5))
+
+    assert asked == [pytest.approx(3.2115)], "the ask is the picture's own time, not the marker's"
+
+
 def test_a_middle_drag_pans_the_result_in_sbs_even_from_the_original_half(surface):
     """The pan belongs to the result; the original is placed from it, so dragging anywhere moves both together
     instead of giving the left half a private framing."""
