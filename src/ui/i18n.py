@@ -78,6 +78,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # reuses it - so only the two new spellings are added.
         "FPS: ": "К/с: ",
         "Status: ": "Статус: ",
+        # --- The progress-detail line (`src/ui/ProcessTab.py::progressDetailText`) ---------------------------
+        # Also rebuilt on every tick, so also keyed at the write site. These are FRAGMENTS: the writer appends the
+        # number first and the fragment after it, so the space belongs to the key (`" elapsed"`, `" left"`) and the
+        # frame label is the prefix `"frame "`. The bare words are deliberately not keys - the writer never passes
+        # them, and a bare-word entry would answer for nothing.
+        " elapsed": " прошло",
+        " left": " осталось",
+        "frame ": "кадр ",
         # The five inner tab labels of the process page (`processSettingsContainer`).
         "General": "Общие",
         "Encoder Options": "Параметры кодирования",
