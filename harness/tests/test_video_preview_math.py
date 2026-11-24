@@ -169,6 +169,8 @@ def test_a_left_drag_pans_and_KEEPS_the_compare_on(surface):
 
     assert surface._panning is False
     assert surface._pan != [0.0, 0.0], "the picture moved with the drag"
+    assert surface._showing_original is False, "releasing the drag returns to the upscale by itself"
+    assert surface._original is None, "and the held source frame is dropped, not kept for the next press"
 
 
 def test_a_left_click_without_movement_still_shows_the_original(surface):

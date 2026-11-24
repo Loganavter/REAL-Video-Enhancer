@@ -575,6 +575,14 @@ class VideoPreviewSurface(QRhiWidget):
         if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.LeftButton) and self._panning:
             self._panning = False
             self._left_press = None
+            if self._showing_original:
+                # The drag KEEPS the compare on (it inspects the original), so the release is what ends it. Without
+                # this the pane stayed on the original for ever: `_panning` took the early return above, and the only
+                # place that clears the flag and calls `set_original(None)` was never reached (owner, 2026-11-25:
+                # "после отжимания панорамирования кадр к апскейлу не возвращается").
+                self._showing_original = False
+                telemetry.event("hold off")
+                self.set_original(None)
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
