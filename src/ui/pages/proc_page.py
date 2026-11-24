@@ -36,12 +36,36 @@ from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
 # Layer E (page migration): `Text` where the Designer had a `QLabel`, `Button` where it had a `QPushButton`,
 # `DoubleSpinBox` for a `QDoubleSpinBox` and `ToastProgressBar` for a `QProgressBar`. Nothing here needs a Qt-shaped
 # compatibility adapter.
-from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, MinimalistScrollBar, SurfacePanel, TabStyle,
-                                    Text, ToastProgressBar, TopTabHost)
+from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
+from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, MinimalistScrollBar, OverlayScrollArea,
+                                    SurfacePanel, TabStyle, Text, ToastProgressBar, TopTabHost)
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
 SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+#: The process column's width in DESIGN px (owner, 2026-11-24): the column grows strictly with the UI factor -
+#: 500 -> 750 at 1.5 -> 1000 at 2.0 - and the preview pane takes what is left. It is a design value, so every site
+#: resolves it through `scaled_px()` where the widget is built (and again on `scale_changed`), never at import: an
+#: import-time number would freeze the factor the process happened to start with.
+PROCESS_COLUMN_PX = 500
+
+
+class _UiScaleFollower(QObject):
+    """Calls ``apply`` once now and again on every `UiScale.scale_changed`.
+
+    Parented to the page so Qt drops the connection with the widget: a plain callable connected to the process-wide
+    manager would outlive the window and fire into deleted C++ objects after a close.
+    """
+
+    def __init__(self, parent: QObject, apply) -> None:
+        super().__init__(parent)
+        self._apply = apply
+        UiScale.get_instance().scale_changed.connect(self._refresh)
+        self._refresh()
+
+    def _refresh(self, *_args) -> None:
+        self._apply()
 
 
 def _retain_box_when_hidden(*widgets: QWidget) -> None:
@@ -105,7 +129,8 @@ def fit_tab_strip(label_widths: Iterable[int], available: int, *, gap: int = 0) 
     ``label_widths`` are the tab buttons' own hints (label + padding + any floor the style asks for), and ``gap`` is
     the strip's non-label width, so the answer is exactly "do the buttons fit in the bar" - no guessed constants
     that could drift away from the toolkit's own numbers. Callers that can widen the strip use ``fits``; a caller
-    that cannot (this page's column is capped at 500 px) uses ``overflow`` to size and expose its affordance.
+    that cannot (this page's column is 500 design px, 750/1000 at 1.5/2.0) uses ``overflow`` to size and expose its
+    affordance.
     """
     widths = tuple(max(0, int(width)) for width in label_widths)
     return TabStripFit(widths=widths, available=max(0, int(available)), gap=max(0, int(gap)))
@@ -249,14 +274,29 @@ class ProcPagePage:
         # splitter: skipped 'sizePolicy1.setHeightForWidth(self.renderQueueTab.sizePolicy().hasHeightForWidth())' (['renderQueueTab'] live outside this page)
         self.procPage = SurfacePanel(background_token="surface.page")
         self.procPage.setObjectName(u"procPage")
+        # The page body scrolls (owner, 2026-11-24). At a raised factor the content is taller than the window and the
+        # process column wider than the page, so the alternative to a scroll surface is squeezing (which is what the
+        # owner reported) or clipping. The surface is the toolkit's own `OverlayScrollArea`, not a stock `QScrollArea`:
+        # this page paints from tokens and a stock area brings the widget style back. `content_inset=0` because there is
+        # no stock frame here to reproduce (any inset would move the 1.0 page by a pixel), and
+        # `reserve_scrollbar_space=False` because the bar is an overlay - it must not narrow the columns when it
+        # appears. `corner_radius=0`: the page is a square rect and the bar's corner follows it.
+        self.pageScroll = OverlayScrollArea(self.procPage, content_inset=0, reserve_scrollbar_space=False,
+                                            corner_radius=0)
+        self.pageScroll.setObjectName(u"procPageScroll")
+        self.pageScroll.setWidgetResizable(True)
+        # The content is a toolkit container, not a bare `QWidget` wrapper: it paints nothing (`background_token=None`)
+        # so the page's own `surface.page` shows through, and the tree reads page -> scroll -> body -> columns.
+        self.pageScrollBody = SurfacePanel(self.pageScroll, background_token=None)
+        self.pageScrollBody.setObjectName(u"procPageScrollBody")
         # Layer C: the page body paints itself (`surface.page`); every control rule this sheet carried styled a widget
         # that is now a toolkit control painting from tokens. The one rule kept is the read-only rich-text panel on
         # the General tab, which is still a stock `QTextEdit` (a toolkit row: no rich-text pane with a scroll host).
         # No page stylesheet: every control on this page (and its tabs) paints itself from tokens. The read-only
         # rich-text panes are the toolkit's `RichTextView`, which carries its own plate.
-        self.gridLayout_3 = QGridLayout(self.procPage)
+        self.gridLayout_3 = QGridLayout(self.pageScrollBody)
         self.gridLayout_3.setObjectName(u"gridLayout_3")
-        self.processInfoContainer = SurfacePanel(self.procPage, background_token="dialog.background", radius=10)
+        self.processInfoContainer = SurfacePanel(self.pageScrollBody, background_token="dialog.background", radius=10)
         self.processInfoContainer.setObjectName(u"processInfoContainer")
         sizePolicy3 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Expanding)
         sizePolicy3.setHorizontalStretch(0)
@@ -422,14 +462,17 @@ class ProcPagePage:
         self.verticalLayout_34.addWidget(self.STATUS)
         self.verticalLayout_5.addLayout(self.verticalLayout_34)
         self.gridLayout_3.addWidget(self.processInfoContainer, 0, 2, 1, 1)
-        self.processContainer = QWidget(self.procPage)
+        self.processContainer = QWidget(self.pageScrollBody)
         self.processContainer.setObjectName(u"processContainer")
         sizePolicy5 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         sizePolicy5.setHorizontalStretch(0)
         sizePolicy5.setVerticalStretch(0)
         sizePolicy5.setHeightForWidth(self.processContainer.sizePolicy().hasHeightForWidth())
         self.processContainer.setSizePolicy(sizePolicy5)
-        self.processContainer.setMaximumSize(QSize(500, 16777215))
+        # The column is STATED at the factor in force, not merely capped: the owner asked for 500/750/1000 exactly, and
+        # the content's own hint at 1.5 (668 px) is narrower than 750, so a maximum alone would leave the column short.
+        # A narrower window is carried by the page scroll area above, not by squeezing this column.
+        self.processContainer.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
         # No stylesheet: a disabled toolkit control takes its colour from its token. The rule only tinted the two stock
         # queue lists, which carry their own look until the toolkit grows a compact list.
         self.verticalLayout_7 = QVBoxLayout(self.processContainer)
@@ -444,7 +487,7 @@ class ProcPagePage:
         sizePolicy6.setHeightForWidth(self.bottomMenuSubContainer.sizePolicy().hasHeightForWidth())
         self.bottomMenuSubContainer.setSizePolicy(sizePolicy6)
         self.bottomMenuSubContainer.setMinimumSize(QSize(0, 0))
-        self.bottomMenuSubContainer.setMaximumSize(QSize(500, 16777215))
+        self.bottomMenuSubContainer.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
 
         self.verticalLayout_21 = QVBoxLayout(self.bottomMenuSubContainer)
         self.verticalLayout_21.setSpacing(0)
@@ -458,8 +501,9 @@ class ProcPagePage:
         self.verticalLayout_24.setContentsMargins(0, 0, 0, 0)
         # The original interface's tabs are BUTTONS standing apart from the content: no folder outline, no join cover,
         # a plate on the selected one and a gap under the strip. `TabStyle` is the toolkit's styling surface for that.
-        # The only difference from the shared style is the overflow row's policy (`overflow_style`): this column is
-        # capped at 500 px, so five labels do not always fit, and an affordance that waits for the pointer is not one.
+        # The only difference from the shared style is the overflow row's policy (`overflow_style`): this column is 500
+        # design px, so five labels do not fit at a raised factor (and at 1.0 in a long translation), and an affordance
+        # that waits for the pointer is not one.
         strip_style = overflow_style(tab_style())
         strip_buttons = TabButtonFactory()
         self.processSettingsContainer = TopTabHost(self.widget_2, tab_height=TAB_HEIGHT, pane_radius=0, pane_inset=(10, 5, 10, 5),
@@ -490,7 +534,7 @@ class ProcPagePage:
         self.verticalLayout_21.addWidget(self.widget_2)
         self.widget_13 = SurfacePanel(self.bottomMenuSubContainer, background_token="surface.page")
         self.widget_13.setObjectName(u"widget_13")
-        self.widget_13.setMaximumSize(QSize(500, 16777215))
+        self.widget_13.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
         self.horizontalLayout_32 = QHBoxLayout(self.widget_13)
         self.horizontalLayout_32.setSpacing(6)
         self.horizontalLayout_32.setObjectName(u"horizontalLayout_32")
@@ -585,6 +629,20 @@ class ProcPagePage:
         self.verticalLayout_21.addWidget(self.progressDetail)
         self.verticalLayout_7.addWidget(self.bottomMenuSubContainer)
         self.gridLayout_3.addWidget(self.processContainer, 0, 1, 1, 1)
+        # The body is complete, so it becomes the scroll surface's widget and the surface fills the page. The page
+        # itself keeps its rect (`MainWindowShell` lays pages out for the stack's contents rect); scrolling happens
+        # inside it.
+        self.pageScroll.setWidget(self.pageScrollBody)
+        self.verticalLayout_page = QVBoxLayout(self.procPage)
+        self.verticalLayout_page.setObjectName(u"verticalLayout_page")
+        self.verticalLayout_page.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_page.addWidget(self.pageScroll)
+        # The column's width is resolved at construction and re-resolved on every factor change, so `scale:<factor>`
+        # on a live window moves it without a restart (see `_UiScaleFollower`).
+        self._column_scale = _UiScaleFollower(
+            self.procPage,
+            lambda: self._apply_column_width(self.processContainer, self.bottomMenuSubContainer, self.widget_13),
+        )
         self.processSettingsContainer.setCurrentIndex(0)
         # The strip's host half (see `TabStripHost`): measures the labels, exposes an overflow the user can reach,
         # and paints the selected plate from the host's token. It must come after the labels are set, or it would
@@ -618,6 +676,17 @@ class ProcPagePage:
         i18n.bind_page(self, self.procPage)
         self.retranslate()
         return self.procPage
+
+    @staticmethod
+    def _apply_column_width(*columns: QWidget) -> None:
+        """Give the process column and its inner containers the design width at the factor in force now.
+
+        `scaled_px` runs HERE - at build and on every `UiScale.scale_changed` - never at import, so the number follows
+        the factor the window is actually using. All three sites take the same number: one column, stated once.
+        """
+        width = scaled_px(PROCESS_COLUMN_PX)
+        for column in columns:
+            column.setFixedWidth(width)
 
     def retranslate(self, language: str | None = None) -> None:
         self.label_9.setText(QCoreApplication.translate("MainWindow", u"Start Time (seconds)", None))

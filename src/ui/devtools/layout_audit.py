@@ -40,6 +40,26 @@ def _chain(widget: QWidget | None) -> str:
     return " < ".join(parts)
 
 
+def _scroll_reach(widget: QWidget) -> int | None:
+    """How far a strip can scroll its children into view, or ``None`` when it has no scrolling mechanism.
+
+    A `TopTabBar` fixes each tab to its own hint and the strip to their sum, so a bar narrower than that sum lays its
+    last tabs past its own edge. That is not a clip when the bar's own offset can reach them: the strip exposes the
+    overflow as a row the user can scroll (the process page's column is narrower than five labels at a raised factor,
+    by design). A child past ``required_width()`` is beyond even the far end of the strip and stays a finding.
+
+    Duck-typed on purpose: this module reports geometry and must not import the toolkit to recognise one widget class.
+    """
+    required = getattr(widget, "required_width", None)
+    set_offset = getattr(widget, "set_scroll_offset", None)
+    if not (callable(required) and callable(set_offset)):
+        return None
+    try:
+        return int(required())
+    except Exception:                      # a widget mid-build answers what it can; no number is no exemption
+        return None
+
+
 def audit(window: QWidget) -> list[str]:
     """Return the report as lines; empty when nothing looks clipped or stale."""
     lines: list[str] = ["layout audit " + time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -62,6 +82,12 @@ def audit(window: QWidget) -> list[str]:
             # clipping. Only geometry that is not a scroll view's content is a finding.
             if parent.objectName() == "qt_scrollarea_viewport":
                 continue
+            if over_right > 1:
+                reach = _scroll_reach(parent)
+                if reach is not None and goal.right() <= reach:
+                    # A tab strip narrower than its tabs: the bar's offset reaches this child, so it is scrollable,
+                    # not clipped. Past `required_width()` the child is out of reach and is reported below.
+                    continue
             if over_right > 1 or over_bottom > 1:
                 problems += 1
                 lines.append(
