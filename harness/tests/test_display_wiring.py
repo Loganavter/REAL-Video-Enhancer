@@ -63,7 +63,7 @@ from PySide6.QtGui import QColor, QImage  # noqa: E402
 
 from src.ui import shared_flag  # noqa: E402
 from src.ui.ProcessTab import ProcessTab  # noqa: E402
-from src.ui.QTcustom import (  # noqa: E402
+from src.ui.video.channel import (  # noqa: E402
     DEFAULT_DISPLAY_BOX,
     DISPLAY_FMT_RGB888,
     DISPLAY_TIME_UNSET,

@@ -19,12 +19,14 @@ from . import i18n
 
 from .AnimationHandler import AnimationHandler
 from .QTcustom import (
+    RegularQTPopup,
+    UpdateGUIThread,
+)
+from .video.channel import (
     DEFAULT_DISPLAY_BOX,
     DISPLAY_STATE_SHARED_MEMORY_ID,
     SEEK_STATE_SHARED_MEMORY_ID,
     DisplayReader,
-    RegularQTPopup,
-    UpdateGUIThread,
 )
 from ..constants import (
     BACKEND_PATH,
@@ -191,7 +193,7 @@ class ProcessTab:
         self._queue_pane_owns = False
         #: The index of the Render Queue page in `processSettingsContainer`, resolved by identity in `QConnect`.
         self._queue_tab_index: int | None = None
-        #: The export pane's display channel (`QTcustom.DisplayReader`): the block the GUI allocates before the backend
+        #: The export pane's display channel (`video.channel.DisplayReader`): the block the GUI allocates before the backend
         #: starts and the renderer publishes into while `wanted` is 1. `None` when no render has run.
         self._display = None
         #: The box the block was allocated at (the pane's device pixels, or `DEFAULT_DISPLAY_BOX`); the command's

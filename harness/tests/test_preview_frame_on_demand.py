@@ -66,7 +66,7 @@ from PySide6.QtGui import QColor, QImage, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from src.ui.ProcessTab import ProcessTab  # noqa: E402
-from src.ui.QTcustom import DisplayReader  # noqa: E402
+from src.ui.video.channel import DisplayReader  # noqa: E402
 from src.ui.video.frames import FrameRef  # noqa: E402
 from src.ui.widgets.video_preview import VideoPreviewSurface  # noqa: E402
 
