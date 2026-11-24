@@ -1157,6 +1157,15 @@ class ProcessTab:
         tail = getattr(self, "_live_tail", None)
         if tail is not None:
             try:
+                if not self._preview_paused:
+                    # Resuming means "follow the render again", not "replay everything the file gained while I was
+                    # held". A held pane's tail stopped at its last published frame; resuming there starts the picture
+                    # seconds behind the head and then races to catch up (measured live 2026-11-24: play after a held
+                    # seek restarted at 0.459 s while the renderer stood at ~14 % of the clip). Jump to the published
+                    # edge first, which is exactly follow-live.
+                    edge = float(getattr(tail, "produced_seconds", 0.0) or 0.0)
+                    if edge > 0.0:
+                        tail.seek(edge)
                 tail.set_paused(self._preview_paused)
             except Exception as exc:
                 log(f"preview transport: {exc}")
