@@ -19,10 +19,17 @@ appended to at 4K, and a demuxer is not built for that. The rules this class exi
 * **A seek repositions inside what is written.** The owner can drag the strip while the render still
   runs. The target becomes the de-duplication floor, the container is dropped, and the next `poll`
   reopens the file at that frame - so the picture follows the strip within one poll instead of at the
-  renderer's next fragment. Past the produced edge there is nothing to show, so such a target is
-  clamped to the edge, which is exactly follow-live - unless written frames are still buffered behind
-  the playhead (a held pane publishes one frame and stops reading), where the target is attempted and
-  the edge is only the fallback.
+  renderer's next fragment. Past the produced edge the reader does not assume there is nothing: a HELD
+  pane stops polling, so "past the edge" only means "past what this reader last published" while the
+  muxer may have flushed since the pause. Such a target is attempted, and the press is judged
+  unreachable only by the read that answers it.
+* **A seek that is not in the file publishes NOTHING.** When the container holds no frame at the
+  target (the renderer is mid-fragment, or the press reached beyond what it flushed) the picture and
+  its marker stay where they are and the refusal is reported. It is never answered by the published
+  edge: on a held pane that edge is stale, so it lands the picture somewhere the finger did not ask
+  for - and once behind the standing frame (measured live 2026-11-24: a strip press at 30 % put the
+  playhead on 0.79 s after it had stood at 3.88 s, which is the owner's "any attempt to move it puts
+  me at the current end of the upscale").
 * **A held pane seeks ONE frame.** A press on a paused preview is answered by `poll(1)`: its target,
   with no backlog behind it and no overshoot. A playing pane keeps the normal per-poll rate.
 
@@ -66,6 +73,9 @@ class TailReader(QObject):
     grew = Signal(int)
     #: A failure worth reporting; a successful read clears the de-duplication.
     error = Signal(str)
+    #: A seek the container could not satisfy: its target is past the last complete frame the file holds. The picture
+    #: does not move; the message is for the owner's log, because a press that silently does nothing reads as a bug.
+    seek_unavailable = Signal(str)
 
     def __init__(self, parent: QObject | None = None, *, pixel_format: str = "rgb24",
                  max_frames_per_poll: int = 4, codec_threads: int = 2,
@@ -98,9 +108,10 @@ class TailReader(QObject):
         #: The last poll stopped because its per-poll cap was reached, not because the demuxer ran dry: written
         #: frames are buffered behind the playhead, so the published edge is NOT the end of the file.
         self._backlog = False
-        #: The published edge a seek past it should fall back to, when the seek was allowed to try for a target
-        #: deeper than anything published yet (see `seek`). `None` = no such seek is outstanding.
-        self._seek_fallback: float | None = None
+        #: The seek this reader still owes an answer to: `(target seconds, pts of the frame on screen)`. Only set for a
+        #: target past everything published, whose reachability only the answering `poll` can decide. `None` = no such
+        #: press outstanding.
+        self._seek_attempt: tuple[float, float | None] | None = None
         self._open_failures = 0
         self._decode_failures = 0
         self._signature: tuple | None = None   # de-duplicates a repeated error
@@ -131,7 +142,7 @@ class TailReader(QObject):
         self._edge_pts = None
         self._exhausted = True
         self._backlog = False
-        self._seek_fallback = None
+        self._seek_attempt = None
         self._open_failures = 0
         self._decode_failures = 0
         self._signature = None
@@ -184,16 +195,23 @@ class TailReader(QObject):
             if not self._open_container():
                 return 0
             emitted = self._read(max_frames)
-        if emitted == 0 and self._seek_fallback is not None:
-            # The target is past the last COMPLETE frame the file holds (the renderer is mid-fragment,
-            # or the press reached just beyond what it flushed). Standing on the produced edge is the
-            # honest answer - the deepest frame that exists - instead of silently ignoring the press.
-            edge = self._seek_fallback
-            self._seek_fallback = None
-            self._last_pts = max(0.0, edge - self._interval() * 0.5) if edge > 0.0 else None
+        if emitted and self._seek_attempt is not None:
+            # The press was answered: the target (or the first frame after it) is in the file.
+            self._seek_attempt = None
+        if emitted == 0 and self._seek_attempt is not None:
+            # The target is past the last COMPLETE frame the container holds: the renderer is mid-fragment, or the press
+            # reached beyond what it flushed (a held pane does not poll, so its published edge says nothing about the
+            # file). Say so and publish NOTHING - the pane keeps the frame it stands on. Falling back to the published
+            # edge here is what moved the picture backwards live (2026-11-24): that edge is stale on a held pane.
+            target, standing = self._seek_attempt
+            self._seek_attempt = None
+            self._last_pts = standing           # the de-duplication floor goes back to the frame on screen
             self._drop_container()
-            if self._open_container():
-                emitted = self._read(max_frames)
+            self._exhausted = False             # the next poll reopens at that frame instead of waiting for growth
+            where = f"{standing:.3f} s" if standing is not None else "no frame published yet"
+            self.seek_unavailable.emit(
+                f"seek to {target:.3f} s is not in the flushed file ({self._path}); "
+                f"the picture stays at {where}")
         return emitted
 
     # -- seeking -----------------------------------------------------------------------------------
@@ -208,7 +226,7 @@ class TailReader(QObject):
         """How many frames the surface has seen from this reader (0 until the first one)."""
         return int(self._emitted)
 
-    def seek(self, seconds: float) -> float:
+    def seek(self, seconds: float, *, attempt_past_edge: bool = False) -> float:
         """Move the playhead inside the already-written part; return where it landed, in seconds.
 
         Only `poll` reads, so a seek is cheap and a drag coalesces: it moves the de-duplication
@@ -216,13 +234,13 @@ class TailReader(QObject):
         file at the target and emits its frames from there, which is what makes the picture follow
         the strip within one poll instead of at the renderer's next produced frame.
 
-        Past what has been PUBLISHED the target is attempted as asked when the reader knows written
-        frames are still buffered (`_backlog`), and clamped to the published edge only when it does
-        not: a HELD pane stops polling, so its last published frame is not the end of the file -
-        clamping to it made every strip press on a held preview land on that one frame, i.e. "any
-        attempt to move it puts me at the current end of the upscale" (owner, 2026-11-24). The poll
-        itself falls back to the published edge if the file holds no frame at the target (a
-        half-written fragment), so a press past the end still lands on the deepest picture that exists.
+        A target past what has been PUBLISHED is only clamped to the published edge when nothing says
+        the file may hold more (`attempt_past_edge` false and no buffered frames - i.e. a playing pane
+        that read to the end of the demuxer, where the edge IS the file). A HELD pane passes
+        `attempt_past_edge`: it stopped polling at the pause, so its edge is stale and the muxer may
+        have flushed since, and only the answering `poll` can tell. That poll publishes the target, or
+        nothing at all when the file has no frame there (see `poll`); it never falls back to the edge,
+        which would put the picture behind itself.
         """
         if self._path is None:
             return 0.0
@@ -236,15 +254,22 @@ class TailReader(QObject):
             self._restart()
         target = max(0.0, float(seconds))
         edge = self.produced_seconds
-        self._seek_fallback = None
-        if target > edge:
-            if self._backlog:
-                self._seek_fallback = edge
-            else:
-                target = edge
+        standing = self._last_pts        # the frame on screen: the last one this reader actually decoded
+        self._seek_attempt = None
         # The floor sits just under the target: the frame AT the target is emitted, while the frames
         # of the keyframe re-read behind it stay de-duplicated.
-        self._last_pts = target - self._interval() * 0.5 if target > 0.0 else None
+        floor = target - self._interval() * 0.5 if target > 0.0 else None
+        if target > edge:
+            if attempt_past_edge or self._backlog:
+                self._seek_attempt = (target, standing)
+                if floor is not None and standing is not None:
+                    # An attempt past the edge may never land BEHIND the frame on screen: the floor under a target
+                    # that is barely past it would otherwise admit one frame the picture already passed.
+                    floor = max(floor, standing)
+            else:
+                target = edge
+                floor = target - self._interval() * 0.5 if target > 0.0 else None
+        self._last_pts = floor
         self._drop_container()
         self._exhausted = False      # there is work at the new position even if the file has not grown
         return target
@@ -395,7 +420,7 @@ class TailReader(QObject):
         self._emitted = 0
         self._last_pts = None
         self._edge_pts = None
-        self._seek_fallback = None
+        self._seek_attempt = None
         self._decode_failures = 0
         self._signature = None
 
@@ -430,6 +455,8 @@ class LiveTailThread(QThread):
     frame_ready = Signal(object)
     #: A failure worth reporting (re-emitted from the reader).
     error = Signal(str)
+    #: A press the file could not satisfy: the picture stays, the message goes to the owner's log.
+    seek_unavailable = Signal(str)
 
     def __init__(self, path: str, parent: QObject | None = None, *, interval_ms: int = 120,
                  paused: bool = True, **reader_kwargs) -> None:
@@ -487,6 +514,7 @@ class LiveTailThread(QThread):
         reader = TailReader(pixel_format="rgb24", **self._reader_kwargs)
         reader.frame_ready.connect(self.frame_ready)
         reader.error.connect(self.error)
+        reader.seek_unavailable.connect(self.seek_unavailable)
         self._reader = reader
         opened = False
         try:
@@ -497,7 +525,10 @@ class LiveTailThread(QThread):
                 #: per-poll burst (default 4) and left the picture and the marker that far past the press.
                 held_seek = pending is not None and self._paused
                 if pending is not None:
-                    reader.seek(pending)
+                    # A held pane stopped polling at the pause, so its published edge is stale: the press is
+                    # attempted against the file rather than clamped to it (the answering poll publishes the
+                    # target, or nothing at all - see `TailReader.seek`). A playing seek keeps the old rule.
+                    reader.seek(pending, attempt_past_edge=held_seek)
                 elif self._paused and reader.published_frames > 0:
                     # Held: no read, no decode, the pane keeps this frame. A seek above skips this branch exactly
                     # once, so its target becomes visible.
