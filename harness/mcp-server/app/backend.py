@@ -58,6 +58,13 @@ class RveBackend:
         except OSError:
             recorded = ""
         self.state_dir = Path(recorded) if recorded else base_state
+        #: An explicit state dir is the caller's (the tests pass one); otherwise the pointer is re-read on every use.
+        #: It used to be resolved ONCE, at construction: the server booted an instance, `live.sh` moved the pointer to
+        #: the new tree, and every later `instance_status` still read the directory it had cached at startup - so a
+        #: warm instance reported "no live instance", `instance_stop` did not stop it, and an agent concluded the MCP
+        #: was not wired at all (measured 2026-11-24: pid 987708 alive while `running: false`).
+        self._state_base = base_state
+        self._state_explicit = state_dir is not None
         self._control_override = control_dir or (Path(os.environ["RVE_CONTROL_DIR"])
                                                  if os.environ.get("RVE_CONTROL_DIR") else None)
         self.timeout_s = float(os.environ.get("RVE_MCP_TIMEOUT", timeout_s))
@@ -65,7 +72,19 @@ class RveBackend:
 
     # -- instance ------------------------------------------------------
 
+    def _refresh_state_dir(self) -> None:
+        """Follow `live.sh`'s pointer again: it moves whenever a boot leases a new tree."""
+        if self._state_explicit:
+            return
+        try:
+            recorded = (self._state_base / "state_dir").read_text().strip()
+        except OSError:
+            return
+        if recorded:
+            self.state_dir = Path(recorded)
+
     def _read(self, name: str) -> str | None:
+        self._refresh_state_dir()
         path = self.state_dir / name
         try:
             return path.read_text().strip()
@@ -106,6 +125,7 @@ class RveBackend:
         return existing[0] if existing else candidates[0]
 
     def _status(self) -> dict:
+        self._refresh_state_dir()
         control = self.control_dir()
         log = self.state_dir / "app.log"
         tail = ""
