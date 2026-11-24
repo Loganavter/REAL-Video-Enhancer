@@ -85,25 +85,55 @@ UNBOUNDED_PX = 16777215
 
 
 def window_default_size() -> QSize:
-    """The window's default size at the factor in force: the design size times the factor.
+    """The window's default size: the design size, NOT multiplied by the UI scale.
 
-    A function, not a module constant, so a caller cannot accidentally freeze the factor at import. Called by the shell
-    at build and again on `scale_changed`, so opening at 1.5/2.0 - or switching to it live - gives a larger window.
+    Measured against BlinkTable on 2026-11-24 (its `src/ui/layout_geometry.py:16` + `shared_toolkit/ui/layout_sizing.py:445`):
+    a scaled window default is how an app ends up opening a 2326x1400 window on a 2000x1400 screen. BlinkTable keeps its
+    window size design-space and lets the CONTENT scale inside it; overflow is carried by scroll areas and an expanding
+    canvas, so the failure mode at 2.0 is cramped content, not an unreachable window. RVE now does the same: the type,
+    the rail, the column and every page's boxes scale, the window does not.
     """
-    return QSize(scaled_px(WINDOW_DEFAULT_PX[0]), scaled_px(WINDOW_DEFAULT_PX[1]))
+    return QSize(*WINDOW_DEFAULT_PX)
 
 
 def window_minimum_size() -> QSize:
-    """The window's minimum at the factor in force, capped at `WINDOW_MIN_CEILING_PX`.
+    """The window's minimum: the design size, in DESIGN space, never multiplied by the UI scale.
 
-    The cap is the policy, not a rounding: at 1.0 the minimum is the design 1050x700; at 1.5 and 2.0 it stops at
-    1366x700 because a larger minimum cannot be fitted on the laptops this app still supports. Content beyond the
-    window is reachable through the process page's own scroll surface, so nothing is clipped that cannot be scrolled to.
+    A scaled floor is a trap and BlinkTable's contract test names it (`tests/contracts/test_window_minimum_size_design_space.py`):
+    a 700 px floor at 1.5 states 1050 px, which can exceed the height a user's screen lets them use - and a minimum
+    larger than the screen is a window they cannot shrink. The pages scroll (the process page since wave 2, settings
+    since before), so the minimum is a usability floor, not a content floor.
     """
-    return QSize(
-        min(scaled_px(WINDOW_MIN_PX[0]), WINDOW_MIN_CEILING_PX[0]),
-        min(scaled_px(WINDOW_MIN_PX[1]), WINDOW_MIN_CEILING_PX[1]),
-    )
+    return QSize(*WINDOW_MIN_PX)
+
+
+def _available_window_rect(window):
+    """The available rect of the window's screen (or the primary one), or ``None`` when there is no screen.
+
+    Read at the moment of use: the window may be unplaced at build time, and on a multi-monitor desktop `screen()` can
+    answer with a small panel. `None` (offscreen/headless) leaves the size alone rather than inventing a bound.
+    """
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        screen = window.screen() if window is not None else None
+        if screen is None and QApplication.instance() is not None:
+            screen = QApplication.primaryScreen()
+        return None if screen is None else screen.availableGeometry()
+    except Exception:
+        return None
+
+
+def fit_size(size: QSize, available) -> QSize:
+    """``size`` clamped into ``available`` (a ``QRect`` or ``None``); never larger than the screen.
+
+    Pure on purpose: the caller passes the available rect it read at that moment, so a test can prove the clamp with a
+    fake screen instead of depending on the machine. ``None`` means "no screen information" and returns ``size``
+    unchanged - a headless or offscreen run must not be silently shrunk by a made-up number.
+    """
+    if available is None:
+        return QSize(size)
+    return QSize(min(size.width(), available.width()), min(size.height(), available.height()))
 
 
 # The page-attribute copy lived here until 2026-11-23: it copied every public attribute of each page onto the window,
@@ -134,7 +164,7 @@ class MainWindowShell:
         # splitter: skipped 'sizePolicy12.setHeightForWidth(self.dynamic_tensorrt_engine.sizePolicy().hasHeightForWidth())' (['dynamic_tensorrt_engine'] live outside this page)
         if not window.objectName():
             window.setObjectName(u"MainWindow")
-        window.resize(window_default_size())
+        window.resize(fit_size(window_default_size(), _available_window_rect(window)))
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -459,10 +489,12 @@ class MainWindowShell:
         # rather than kept at a px box that means a different thing at 1.5 or 2.0. Changing the UI scale is a global
         # geometry change; the alternative (keep the box, leave the chrome cramped or huge) is what the migration fixed.
         def _apply_window_geometry() -> None:
-            # The minimum FIRST: a resize below a minimum still in force is silently clamped away, so going 2.0 -> 1.0
-            # left the window at the 2.0 floor (1366x700) instead of returning to its 1.0 size.
+            # The minimum is design-space and therefore constant across factors; a sealed change of it is still the
+            # right order (a resize below a minimum in force is silently clamped away).
             window.setMinimumSize(window_minimum_size())
-            window.resize(window_default_size())
+            # NO `resize()` here: the window does not follow the factor (see `window_default_size`), and resizing on a
+            # scale change would undo a size the user chose by hand. BlinkTable's main-window policy returns before
+            # `resize()` for exactly this reason (`shared_toolkit/ui/layout_sizing.py:445`, `resize_when_hidden=False`).
             inset_h = scaled_px(PAGE_INSET_H)
             inset_v = scaled_px(PAGE_INSET_V)
             self.stackedWidget.setContentsMargins(inset_h, inset_v, inset_h, inset_v)

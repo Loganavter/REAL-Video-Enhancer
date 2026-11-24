@@ -1,4 +1,4 @@
-"""The window's own geometry and the nav rail follow the UI scale - and 1.0 is exactly what it was.
+"""The nav rail and the page insets follow the UI scale; the WINDOW does not - measured against BlinkTable.
 
 This is the last wave of the UI-scale migration: typography already follows the factor (the toolkit's squared-size
 `paint_font` bug is fixed upstream), the process column grows strictly 500 -> 750 -> 1000 and its page body scrolls
@@ -9,10 +9,12 @@ raw maximum).
 
 The pins, factor by factor (measured offscreen on the real `MainWindowShell`, not derived):
 
-* default size 1163x700 -> 1744x1050 -> 2326x1400 (`scaled_px` rounds 1163 * 1.5 = 1744.5 with Python's round);
-* minimum 1050x700 -> 1366x700 -> 1366x700, and the cap is the policy: the honest content minimum would be the scaled
-  2100x1400, wider than a 1920 laptop and taller than any of them, while the page body scrolls - so the minimum is a
-  usability floor that stops at a 1366x768 laptop's client area;
+* default size 1163x700 at EVERY factor, and the same 1050x700 minimum: the window is design space, the content inside
+  it scales (BlinkTable, measured 2026-11-24: `src/ui/layout_geometry.py:16` `resize_when_hidden=False` +
+  `shared_toolkit/ui/layout_sizing.py:445`, plus a contract test that forbids `scaled_px` in a window minimum). The
+  first version of this wave DID scale the default - 2326x1400 at 2.0, wider than a 2000 px screen - and that is the
+  defect this policy removes;
+* `fit_size(size, available)` clamps the default into the screen, tested with a fake rect rather than the machine's;
 * nav rail 54 -> 72 -> 90 px wide (the rail is its buttons plus the 18 px nav margins, which do not scale), the
   buttons' cap 55 -> 82 -> 110, and the icon box stays a DESIGN 35 at every factor because the toolkit's `sizeHint`
   and painter multiply it themselves (a scaled value here would paint a 140 px glyph at 2.0);
@@ -47,8 +49,9 @@ ADVANCED_SETTINGS = Path(__file__).resolve().parents[2] / "src" / "ui" / "pages"
 
 #: The window's own numbers at each factor, MEASURED on this tree. A change here is a geometry change and belongs in a
 #: review, not in a tolerance.
-DEFAULT_SIZE = {1.0: (1163, 700), 1.5: (1744, 1050), 2.0: (2326, 1400)}
-MINIMUM_SIZE = {1.0: (1050, 700), 1.5: (1366, 700), 2.0: (1366, 700)}
+#: The window and its minimum are DESIGN space: the same numbers at every factor, by policy (see the module docstring).
+DEFAULT_SIZE = {1.0: (1163, 700), 1.5: (1163, 700), 2.0: (1163, 700)}
+MINIMUM_SIZE = {1.0: (1050, 700), 1.5: (1050, 700), 2.0: (1050, 700)}
 PAGE_INSETS = {1.0: (10, 5), 1.5: (15, 8), 2.0: (20, 10)}
 #: The nav buttons' own box (the toolkit's 36 px icon floor times the factor) and the rail that wraps them (that box
 #: plus the nav's 2x9 px margins, which are not on the scale yet).
@@ -108,6 +111,22 @@ def _margins(widget) -> tuple[int, int]:
     return margins.left(), margins.top()
 
 
+
+def _expected_window_size(window):
+    """What the window must be: the design default clamped into ITS screen, then raised to its minimum by Qt.
+
+    The offscreen platform reports an 800x800 screen, so the built window here is the 1050x700 minimum while a real
+    desktop shows the design 1163x700 - the live lease proved that at 1.0. Asserting the design value directly would
+    make this suite machine-dependent; the pure value is pinned by `test_the_window_size_is_design_space...` instead.
+    """
+    from PySide6.QtCore import QSize
+
+    screen = window.screen()
+    available = None if screen is None else screen.availableGeometry()
+    fitted = shell_window.fit_size(QSize(*DEFAULT_SIZE[1.0]), available)
+    minimum = shell_window.window_minimum_size()
+    return (max(fitted.width(), minimum.width()), max(fitted.height(), minimum.height()))
+
 def _nav_buttons(builder):
     return builder.homeBtn, builder.processBtn, builder.settingsBtn, builder.downloadBtn
 
@@ -119,7 +138,8 @@ def test_one_point_zero_is_the_window_it_was_before_this_wave(qapp, factor_state
     """The gate: 1163x700, a 1050x700 minimum, the rail and the icon boxes exactly as shipped today."""
     builder, window = _shell(qapp, 1.0)
     try:
-        assert _size(window) == DEFAULT_SIZE[1.0]
+        assert _size(window) == _expected_window_size(window), (
+            f"the 1.0 window is {_size(window)}; the design default clamped into this screen is {_expected_window_size(window)}")
         assert (window.minimumSize().width(), window.minimumSize().height()) == MINIMUM_SIZE[1.0]
         assert _margins(builder.stackedWidget) == PAGE_INSETS[1.0]
 
@@ -137,36 +157,64 @@ def test_one_point_zero_is_the_window_it_was_before_this_wave(qapp, factor_state
         window.close()
 
 
-def test_the_design_constants_are_resolved_at_call_time_not_at_import(factor_state):
-    """A module-level `scaled_px(CONST)` would freeze the factor the process started with; these functions do not."""
+def test_the_window_size_is_design_space_at_every_factor_and_the_rail_is_not(factor_state):
+    """The window must NOT move with the factor; the rail and the insets must. One test, both halves.
+
+    A module-level `scaled_px(CONST)` would freeze the factor the process started with - that is why the rail resolves
+    at call time. The window is the opposite case on purpose: it is design space, so a factor change must leave it alone.
+    """
     from sli_ui_toolkit.ui.managers.ui_scale import UiScale
 
     scale = UiScale.get_instance()
-    scale.set_factor(1.0)
-    default = shell_window.window_default_size()
-    minimum = shell_window.window_minimum_size()
-    assert (default.width(), default.height()) == (1163, 700)
-    assert (minimum.width(), minimum.height()) == (1050, 700)
+    for factor in (1.0, 1.5, 2.0):
+        scale.set_factor(factor)
+        default = shell_window.window_default_size()
+        minimum = shell_window.window_minimum_size()
+        assert (default.width(), default.height()) == (1163, 700), (
+            f"at {factor} the window default became {default.width()}x{default.height()}: the window is design space")
+        assert (minimum.width(), minimum.height()) == (1050, 700), (
+            f"at {factor} the minimum became {minimum.width()}x{minimum.height()}: a scaled floor can exceed the screen")
 
-    scale.set_factor(1.5)
-    assert shell_window.window_default_size().width() == 1744
-    scale.set_factor(2.0)
-    assert shell_window.window_default_size().width() == 2326
-    assert shell_window.window_default_size().height() == 1400
-    # `window` is imported once, at factor 1.0 in most runs - the numbers still moved, so nothing was frozen.
-    assert shell_window.window_minimum_size().width() == 1366
+
+def test_no_scale_call_reaches_the_window_size_functions():
+    """The contract, mechanically: `window_default_size`/`window_minimum_size` must not resolve the factor.
+
+    BlinkTable guards the same rule with `tests/contracts/test_window_minimum_size_design_space.py`; a scaled floor can
+    exceed a user's screen height and a scaled default is how a 2x window ends up wider than the display.
+    """
+    tree = ast.parse(Path(shell_window.__file__).read_text(encoding="utf-8"))
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    for name in ("window_default_size", "window_minimum_size"):
+        node = functions[name]
+        calls = [n for n in ast.walk(node) if isinstance(n, ast.Call)]
+        names = {getattr(c.func, "id", getattr(c.func, "attr", "")) for c in calls}
+        assert "scaled_px" not in names, f"{name} resolves the scale: {sorted(names)}"
+        assert "UiScale" not in {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}, (
+            f"{name} touches UiScale directly")
+
+
+def test_fit_size_clamps_an_oversized_window_into_the_screen():
+    """The clamp is pure, so it is proven with a fake screen instead of whatever display runs the suite."""
+    from PySide6.QtCore import QRect, QSize
+
+    screen = QRect(0, 0, 1280, 800)
+    assert shell_window.fit_size(QSize(2326, 1400), screen) == QSize(1280, 800), (
+        "a stored or scaled rect larger than the screen must be clamped, not opened off-screen")
+    assert shell_window.fit_size(QSize(1163, 700), screen) == QSize(1163, 700), "a fitting size is untouched"
+    assert shell_window.fit_size(QSize(1163, 700), None) == QSize(1163, 700), (
+        "no screen information (offscreen/headless) must not invent a bound")
 
 
 # --- the raised factors ------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("factor", (1.5, 2.0))
-def test_the_window_opens_larger_and_the_rail_grows_with_it(qapp, factor_state, factor):
+def test_the_window_keeps_its_size_and_the_rail_grows_inside_it(qapp, factor_state, factor):
     builder, window = _shell(qapp, factor)
     try:
-        assert _size(window) == DEFAULT_SIZE[factor], (
-            f"at {factor} the window opened {_size(window)}, not {DEFAULT_SIZE[factor]}: the default size is still a "
-            "raw literal")
+        assert _size(window) == _expected_window_size(window), (
+            f"at {factor} the window opened {_size(window)}, not the design default clamped into this screen "
+            f"({_expected_window_size(window)}): a scaled window default is how an app ends up wider than the screen")
         assert (window.minimumSize().width(), window.minimumSize().height()) == MINIMUM_SIZE[factor]
         assert _margins(builder.stackedWidget) == PAGE_INSETS[factor]
 
@@ -183,23 +231,28 @@ def test_the_window_opens_larger_and_the_rail_grows_with_it(qapp, factor_state, 
         window.close()
 
 
-def test_a_live_factor_change_restates_the_window_without_a_restart(qapp, factor_state):
-    """The capture channel's `scale:<factor>` moves the real window - the follower must re-resolve, not freeze."""
+def test_a_live_factor_change_moves_the_rail_and_leaves_the_window_alone(qapp, factor_state):
+    """The channel's `scale:<factor>` must re-resolve the rail, and must NOT resize the window.
+
+    Resizing on a scale change would undo a size the user chose by hand; BlinkTable's main-window policy returns before
+    `resize()` for exactly that reason.
+    """
     builder, window = _shell(qapp, 1.0)
     try:
-        assert _size(window) == DEFAULT_SIZE[1.0]
+        assert _size(window) == _expected_window_size(window)
+        fixed_size = _size(window)
         for step in (1.5, 2.0):
             factor_state.set_factor(step)
             _settle(qapp)
-            assert _size(window) == DEFAULT_SIZE[step], (
-                f"after a live switch to {step} the window is {_size(window)}, not {DEFAULT_SIZE[step]}")
+            assert _size(window) == fixed_size, (
+                f"after a live switch to {step} the window resized to {_size(window)}: the window is design space")
             assert (window.minimumSize().width(), window.minimumSize().height()) == MINIMUM_SIZE[step]
             assert _margins(builder.stackedWidget) == PAGE_INSETS[step]
             assert builder.leftMenuSubContainer.width() == NAV_RAIL_WIDTH[step]
 
         factor_state.set_factor(1.0)
         _settle(qapp)
-        assert _size(window) == DEFAULT_SIZE[1.0], "and back: 1.0 must be reachable again, exactly"
+        assert _size(window) == fixed_size
         assert _margins(builder.stackedWidget) == PAGE_INSETS[1.0]
     finally:
         window.close()
@@ -208,29 +261,26 @@ def test_a_live_factor_change_restates_the_window_without_a_restart(qapp, factor
 # --- the minimum-size policy ------------------------------------------------------------------------------------
 
 
-def test_the_minimum_stops_at_a_laptop_and_the_column_still_fits_inside_it(qapp, factor_state):
-    """The 2.0 minimum is 1366x700, not the scaled 2100x1400 - and the 1000 px column still fits at that floor.
+def test_the_minimum_is_design_space_and_the_page_carries_the_overflow(qapp, factor_state):
+    """The minimum stays 1050x700 at 2.0; the 1000 px column plus the preview does not fit, so the PAGE scrolls.
 
-    The policy: the minimum is a USABILITY floor, not a content floor. The page body scrolls (wave 2), so content that
-    does not fit is reachable; a minimum larger than a laptop screen is a window a user cannot fit at all. What the cap
-    may not do is squeeze the process column into a horizontal scroll of its own - hence the second half of this pin.
+    The policy is BlinkTable's: a minimum is a usability floor, never a content floor. At 2.0 the honest content minimum
+    would be 2100x1400 - larger than any laptop - so the window keeps a floor a user can fit and the overflow lives in
+    the page's own scroll surface.
     """
     from sli_ui_toolkit.ui.managers.ui_scale import UiScale
 
     builder, window = _shell(qapp, 2.0)
     try:
-        assert UiScale.get_instance().scaled_px(1050) == 2100, "the uncapped design minimum at 2.0"
+        assert UiScale.get_instance().scaled_px(1050) == 2100, "the scaled design minimum at 2.0"
         assert UiScale.get_instance().scaled_px(700) == 1400
         assert (window.minimumSize().width(), window.minimumSize().height()) == MINIMUM_SIZE[2.0]
 
-        window.resize(window.minimumSize())
-        _settle(qapp)
-        assert window.width() == MINIMUM_SIZE[2.0][0]
         page = builder.procPage_page
         assert page.processContainer.width() == 1000
-        assert page.pageScroll.viewport().width() >= 1000, (
-            "at the minimum window the page area is narrower than the column: the cap would have traded a laptop-"
-            "unfittable window for a horizontal scroll on the column itself")
+        assert page.pageScroll.horizontalScrollBar().maximum() > 0, (
+            "a 1000 px column plus the preview does not fit the 1163 px window at 2.0, so the page must scroll "
+            "horizontally: the alternative was a window wider than the screen")
     finally:
         window.close()
 
