@@ -1173,7 +1173,9 @@ def main(file_to_open=None):
     try:
         from src.ui import i18n
 
-        _language = i18n.configure_i18n(Settings().settings.get("language"))
+        # Early on purpose: the window owner (`MainWindowShell.build`) guarantees the same configuration for every
+        # other entry point, but doing it before the window exists is what makes the FIRST paint translated.
+        _language = i18n.ensure_configured()
         log(f"interface language: {_language}")
     except Exception as _i18n_exc:
         # A language is a preference, not a precondition: the app runs in English rather than not at all.

@@ -57,6 +57,16 @@ class MainWindowShell:
     """Builds the main window's chrome and the five nav pages into a `QMainWindow`."""
 
     def build(self, window):
+        # The interface language is configured HERE, by the window's owner, not only in `main()`: three entry points
+        # build this window (the app's `main`, the live harness, the tests) and they used to differ - a live instance
+        # ran in English whatever `settings.txt` said, and the first switch answered "i18n root not configured"
+        # (measured on a lease, 2026-11-24). `main()` still gets there first; this is the guarantee for the rest.
+        try:
+            from src.ui import i18n
+
+            i18n.ensure_configured()
+        except Exception as _i18n_exc:  # a language is a preference, not a precondition
+            print(f"[window] interface language failed: {type(_i18n_exc).__name__}: {_i18n_exc}", flush=True)
         sizePolicy12 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         sizePolicy12.setHorizontalStretch(0)
         sizePolicy12.setVerticalStretch(0)

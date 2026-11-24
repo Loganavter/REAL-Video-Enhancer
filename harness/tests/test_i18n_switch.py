@@ -292,3 +292,38 @@ def test_the_language_key_is_a_setting_with_a_validator(tmp_path):
         default_output_folder="/fixed/Videos",
     )
     assert unknown.settings["language"] == validate_language("de") == "en"
+
+
+def test_the_window_owner_configures_the_language_without_main(qapp, monkeypatch):
+    """The live defect (2026-11-24): configuration lived only in `main()`.
+
+    On a lease, `harness/scripts/live_boot.py` builds `MainWindow()` directly - it never runs `main()` - so the
+    instance ran in English whatever `settings.txt` said, and the first switch the control channel performed printed
+    `i18n root not configured — call configure_i18n(i18n_root=...)` from the toolkit and changed nothing on screen.
+    Three entry points build this window (the app, the live harness, the tests), so its OWNER configures the language
+    and `main()` is only the one that gets there first. This test calls nothing before `build()`.
+    """
+    from sli_ui_toolkit.i18n import tr as toolkit_tr
+
+    from src.ui import i18n
+
+    monkeypatch.setattr(i18n, "_configured", False)
+    monkeypatch.setattr(i18n, "_current_language", "en")
+
+    class _StoredRussian:
+        def __init__(self, *args, **kwargs) -> None:
+            self.settings = {"language": "ru"}
+
+    monkeypatch.setattr("src.ui.settings_store.Settings", _StoredRussian)
+    assert i18n.is_configured() is False, "the guard must start from 'nothing configured' for this test to mean anything"
+
+    shell, window = _build_shell(qapp)
+    try:
+        assert i18n.current_language() == "ru", (
+            "building the window must read `settings.txt` itself - `main()` is not the only entry point")
+        assert toolkit_tr("Language") == "Язык", (
+            "the toolkit backend must be registered by the window, not left unconfigured (the live warning)")
+        assert shell.procPage_page.processSettingsContainer.tabText(0) == "Общие", (
+            "the first paint must already be translated: the hook runs before the pages are built")
+    finally:
+        window.close()

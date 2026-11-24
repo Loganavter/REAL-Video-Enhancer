@@ -102,6 +102,10 @@ _current_language: str = DEFAULT_LANGUAGE
 #: The installed `QTranslator`. Module-level so it is not garbage-collected (Qt does not keep a Python reference).
 _qt_translator: "_SourceTranslator | None" = None
 
+#: True once the table, the toolkit backend and the Qt translator are in place. The window owner calls
+#: `ensure_configured()`; `main()` calls it first so the very first paint is already translated.
+_configured: bool = False
+
 
 def language_name(code: str | None) -> str:
     """The language's own name, or the code when it is not one of ours."""
@@ -156,7 +160,7 @@ def configure_i18n(language: str | None = None, *, application=None) -> str:
     Safe to call more than once: the `QTranslator` is installed once, later calls only select a language. Returns the
     language actually selected (unknown values are coerced to `en` before anything is installed).
     """
-    global _current_language, _qt_translator
+    global _current_language, _qt_translator, _configured
 
     _current_language = validate_language(language)
 
@@ -173,7 +177,33 @@ def configure_i18n(language: str | None = None, *, application=None) -> str:
         _qt_translator = _SourceTranslator()
         app.installTranslator(_qt_translator)
 
+    _configured = True
     return _current_language
+
+
+def is_configured() -> bool:
+    """Whether the translator and the toolkit backend are in place (`ensure_configured`'s guard)."""
+    return _configured
+
+
+def configure_from_settings(application=None) -> str:
+    """Configure the language `settings.txt` stores - the window owner's entry point."""
+    from src.ui.settings_store import Settings
+
+    return configure_i18n(Settings().settings.get("language"), application=application)
+
+
+def ensure_configured(application=None) -> str:
+    """Configure from `settings.txt` once; later calls keep the language in force.
+
+    Every entry point that builds the window calls this: `main()` first, so the first paint is already translated,
+    and the shell itself as the guarantee for owners that never run `main()`. That second call is not decoration -
+    the live harness builds `MainWindow` directly, and without it a live instance ignored `settings.txt` and the
+    first language switch answered `i18n root not configured` (measured on a lease, 2026-11-24).
+    """
+    if _configured:
+        return _current_language
+    return configure_from_settings(application=application)
 
 
 def emit_language_changed(language: str | None) -> str:
