@@ -28,6 +28,7 @@ from .video.channel import (
     SEEK_STATE_SHARED_MEMORY_ID,
     DisplayReader,
 )
+from .video.feed import PreviewFeed
 from ..constants import (
     BACKEND_PATH,
     PYTHON_EXECUTABLE_PATH,
@@ -194,8 +195,14 @@ class ProcessTab:
         #: The index of the Render Queue page in `processSettingsContainer`, resolved by identity in `QConnect`.
         self._queue_tab_index: int | None = None
         #: The export pane's display channel (`video.channel.DisplayReader`): the block the GUI allocates before the backend
-        #: starts and the renderer publishes into while `wanted` is 1. `None` when no render has run.
+        #: starts and the renderer publishes into while `wanted` is 1. `None` when no render has run. The attachment
+        #: itself stays the reader's fact: `_display_can_seek_any_frame`/`_display_owns_pane`/`_display_paints_pane`
+        #: ask it about the block, and the seek/wanted writes reach the block through it.
         self._display = None
+        #: The chain over that block (`video.feed.PreviewFeed`): the newest picture, its identity, its drop count and
+        #: the seek request. Built with the reader in `_prepare_display_state`, so the two describe one block; `None`
+        #: whenever `_display` is (see `_display_chain`).
+        self._feed = None
         #: The box the block was allocated at (the pane's device pixels, or `DEFAULT_DISPLAY_BOX`); the command's
         #: `--display_size` has to be the same box, so it is kept for the whole render pass.
         self._display_box = DEFAULT_DISPLAY_BOX
@@ -737,14 +744,32 @@ class ProcessTab:
         except Exception as exc:  # a pane that cannot allocate must not take the export down
             log(f"display: cannot allocate the pane's block ({exc}); the export runs without it")
             self._display = None
+            self._feed = None
             return
         if not reader.attached:
             log("display: the pane's block is not usable; the export runs without it")
             reader.release()
             self._display = None
+            self._feed = None
             return
-        reader.display_frame.connect(self._on_display_frame)
+        # The chain over that block: it decides what the newest picture is, reads its identity off the reader at the
+        # moment it is accepted, counts the pictures it replaces, and writes the seek request. The pane paints from
+        # `picture_changed`, so nothing has to re-derive "which frame is this" mid-paint any more.
+        feed = PreviewFeed(
+            DISPLAY_STATE_SHARED_MEMORY_ID,
+            box=box,
+            seek_name=SEEK_STATE_SHARED_MEMORY_ID,
+            reader=reader,
+        )
+        if not feed.attach():  # the block is usable (checked above), so this only fails on a broken reader
+            log("display: the pane's feed cannot take the block; the export runs without it")
+            feed.detach()
+            self._display = None
+            self._feed = None
+            return
+        feed.picture_changed.connect(self._on_display_frame)
         self._display = reader
+        self._feed = feed
         # The strip and the compare need their signals for an export too: without this only a preview ever wire them,
         # and a strip press during an export reached nothing (the seek then had two routes, neither connected).
         self._wire_preview_strip()
@@ -757,9 +782,17 @@ class ProcessTab:
 
     def _close_display_state(self) -> None:
         """Release the frame and seek blocks; safe twice, and safe when nothing was prepared."""
+        feed = getattr(self, "_feed", None)
         reader = getattr(self, "_display", None)
+        self._feed = None
         self._display = None
-        if reader is not None:
+        if feed is not None:
+            try:
+                feed.detach()           # releases the reader's two blocks
+            except Exception:
+                pass
+        elif reader is not None:
+            # A tab a test wired by hand (or one whose feed never attached): the reader is still the block's owner.
             try:
                 reader.release()
             except Exception:
@@ -852,25 +885,44 @@ class ProcessTab:
         except Exception:
             return True
 
+    def _display_chain(self):
+        """The object that carries the picture and the seek request: the feed when there is one, else the reader.
+
+        The reader stays the block's owner (`self._display`): the reach and painter predicates ask IT whether the
+        block is usable, and nothing about them changed. The feed is the chain over it. A tab wired by hand (a
+        test with a stub reader) has the reader only, and both answer the same calls.
+        """
+        feed = getattr(self, "_feed", None)
+        return feed if feed is not None else getattr(self, "_display", None)
+
+    @staticmethod
+    def _block_attached(display) -> bool:
+        """`attached` is a property on the reader and a method on the feed; one question, both shapes."""
+        value = getattr(display, "attached", False)
+        try:
+            return bool(value() if callable(value) else value)
+        except Exception:
+            return False
+
     def _update_display_wanted(self) -> None:
         """Re-assert the request byte after anything that changes the answer (pause, job start, page hide)."""
-        reader = getattr(self, "_display", None)
-        if reader is None or not reader.attached:
+        display = self._display_chain()
+        if display is None or not self._block_attached(display):
             return
-        reader.set_wanted(self._display_should_want())
+        display.set_wanted(self._display_should_want())
 
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
-        reader = getattr(self, "_display", None)
-        if reader is None or not reader.attached:
+        display = self._display_chain()
+        if display is None or not self._block_attached(display):
             return
         wanted = self._display_should_want()
-        reader.set_wanted(wanted)
+        display.set_wanted(wanted)
         if not wanted:
             return
-        reader.poll()          # emits `display_frame` only when the sequence moved
+        display.poll()          # the feed emits `picture_changed` only when the sequence moved
 
-    def _on_display_frame(self, image) -> None:
+    def _on_display_frame(self, image=None) -> None:
         """The renderer's composited frame for the pane (one picture, one painter).
 
         An export's feed paints it whenever the block is usable. A preview's tail is that pane's painter, so a display
@@ -878,7 +930,14 @@ class ProcessTab:
         while `_display_seek_pending` is set. While the transport holds a frame, display frames are dropped too and the
         picture stays. The progress is republished with every fresh frame because the strip's produced band is the
         render's own counters, not the picture's timestamp.
+
+        `image` is passed only by a caller that already holds the picture (a test's stub reader emitting its own
+        signal); the feed's `picture_changed` carries nothing, so the feed is where the picture and its identity are
+        read from.
         """
+        feed = getattr(self, "_feed", None)
+        if image is None and feed is not None:
+            image = feed.image()
         if image is None:
             return
         if not self._display_paints_pane():
@@ -894,9 +953,17 @@ class ProcessTab:
             pressed_at = getattr(self, "_seek_pressed_at", None)
             # The display channel's own sequence is the identity of a composited picture: the renderer's frame counter
             # is a different fact (it is what the log used to print, and it named frames the pane was not showing).
-            reader = getattr(self, "_display", None)
-            seq = getattr(reader, "seq", None)
-            media_time = getattr(reader, "media_time", None)
+            # The feed read that identity when it accepted this picture, so a repaint cannot pair a picture with the
+            # counter of the one that replaced it.
+            if feed is not None and callable(getattr(feed, "shown", None)):
+                named = feed.shown()
+                seq = named[1] if named else None
+                media_time = feed.shown_time()
+            else:
+                # A tab wired by hand (a test's stub reader): the reader still carries the two attributes.
+                reader = getattr(self, "_display", None)
+                seq = getattr(reader, "seq", None)
+                media_time = getattr(reader, "media_time", None)
             pane.set_frame(image, seq=seq, media_time=media_time)
             if pressed_at is not None and getattr(self, "_display_seek_pending", False) and media_time is not None:
                 # Close the seek ONLY on a publish that names its picture. The pane polls at 10 Hz while the renderer
@@ -1907,16 +1974,19 @@ class ProcessTab:
         if clip <= 0.0:
             return False                # the timeline length is unknown, so a share cannot become seconds
         target = fraction * clip
+        # The seek slot belongs to the reader's block; with a feed attached the write goes through the feed, which
+        # is the object that owns "the pane asked for this generation" (newest wins, one slot).
+        chain = self._display_chain()
         if hold and not bool(getattr(self, "_preview_paused", True)):
             # Park the transport on the frame it asked for. A playing tail would otherwise paint its own (produced)
             # frame over it a moment later; play resumes the follow from the produced edge, as before.
             self._on_preview_pause_toggled(True)
-        generation = reader.request_seek(target)
+        generation = chain.request_seek(target)
         if hold or bool(getattr(self, "_preview_paused", True)):
             # A held pane has `wanted` 0, so the renderer would stage the requested frame and never publish it. Ask
             # for exactly that one frame: `_on_display_frame` paints it and clears this again.
             self._display_seek_pending = True
-            reader.set_wanted(True)
+            chain.set_wanted(True)
         if hold:
             # The marker and the compare's source clock stand on the requested frame; the produced band keeps
             # advancing from the renderer's own counters (republished with the frame).
