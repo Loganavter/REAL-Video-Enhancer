@@ -310,7 +310,12 @@ class GeneralSettingsPage:
         self.outputFileText = CustomLineEdit(self.scrollAreaWidgetContents_4)
         self.outputFileText.setObjectName(u"outputFileText")
         self.outputFileText.setEnabled(False)
-        sizePolicy8 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
+        # `Expanding`, not the Designer's `MinimumExpanding`: the latter has no ShrinkFlag, so `qSmartMinSize` takes
+        # the field's `sizeHint` - its TEXT width - as the row's MINIMUM, and a long output path then sets the whole
+        # General tab's minimum width (measured 2026-11-24: a 464 px path made the content 486 px inside a 470 px
+        # viewport, clipping every field at the column's edge after a page switch). `Expanding` keeps the field
+        # filling its row while letting it shrink, which is what the input field next door already does.
+        sizePolicy8 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         sizePolicy8.setHorizontalStretch(0)
         sizePolicy8.setVerticalStretch(0)
         sizePolicy8.setHeightForWidth(self.outputFileText.sizePolicy().hasHeightForWidth())
