@@ -360,6 +360,51 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: probe {target}@({wx},{wy}) -> {len(report['chain'])} step(s)", flush=True)
 
+    def tab(spec: str) -> None:
+        """Select an inner tab by name or index: `tab:<objectName>@<index|label>`.
+
+        The process page's tabs (General / Encoder Options / Render Queue / ...) are a toolkit `TopTabHost` inside the
+        page, not the outer nav stack - `page:` cannot reach them, and clicking a strip whose tab widths depend on the
+        theme and the label text is a guess that reads as "the click did nothing" (the same failure the old
+        `click:processSettingsContainer@25,25` workaround existed for). This answers with the index and the text so a
+        probe can prove WHICH tab it got.
+        """
+        from PySide6.QtWidgets import QWidget
+
+        target, _, which = spec.partition("@")
+        host = window.findChild(QWidget, target.strip())
+        report = {"stamp": _stamp(), "kind": "tab", "target": target.strip(), "requested": which.strip(),
+                  "error": None, "index": None, "text": None}
+        if host is None or not hasattr(host, "setCurrentIndex"):
+            report["error"] = "widget not found" if host is None else "not a tab host"
+            _finish(report)
+            return
+        index = None
+        if which.strip().isdigit():
+            index = int(which.strip())
+        else:
+            try:
+                for candidate in range(host.count()):
+                    if host.tabText(candidate).strip().lower() == which.strip().lower():
+                        index = candidate
+                        break
+            except Exception as exc:
+                report["error"] = f"{type(exc).__name__}: {exc}"
+        if index is None or not 0 <= index < host.count():
+            report["error"] = f"no tab {which.strip()!r} on {target.strip()} ({host.count()} tabs)"
+            _finish(report)
+            return
+        host.setCurrentIndex(index)
+        for _ in range(4):
+            QApplication.processEvents()
+        report["index"] = int(host.currentIndex())
+        try:
+            report["text"] = host.tabText(report["index"])
+        except Exception:
+            report["text"] = None
+        _finish(report)
+        print(f"capture-server: tab {target.strip()} -> {report['index']} ({report['text']!r})", flush=True)
+
     def click(spec: str) -> None:
         """Send a real left click: `click:<objectName>@x,y`.
 
@@ -921,6 +966,9 @@ def install(window) -> None:
             return
         if wanted.startswith("tail:"):
             tail_state()
+            return
+        if wanted.startswith("tab:"):
+            tab(wanted[len("tab:"):])
             return
         if wanted.startswith("click:"):
             click(wanted[len("click:"):])
