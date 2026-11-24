@@ -9,6 +9,11 @@ With ``RVE_UI_CAPTURE_SERVER=<dir>`` the app boots once, warms every page, write
 ``<page>.json`` into ``<dir>/<stamp>/`` and writes ``<dir>/done`` with that stamp. A single page then costs about a
 second instead of a minute, and the process stays up for the next request.
 
+The switch is OPT-IN (owner, 2026-11-24): unset or empty means the channel is not installed at all, ``=1`` installs it
+on the default drop box with no page walk, and a directory installs it there with the warm-up walk. An ordinary launch
+must never create files in the tree or move the pages on its own - see :class:`Mode` for why the empty-but-exported
+case was the one that looked like that.
+
 Protocol (files, so any tool can drive it - see ``harness/scripts/ui_live.py``):
 
     request   "all" or "nav3-tab0,nav4"     written by the driver; may carry its answer id as `<verb>#<id>`
@@ -33,18 +38,57 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import dataclass
 
 
-#: Where the always-on channel lives: `<app root>/.rve-control`. Relative to the running script, so a launch from any
-#: directory still gives one predictable drop box next to `log.txt`.
+#: Where the channel lives when it is switched on without naming a directory: `<app root>/.rve-control`.
+#: Relative to the running script, so a launch from any directory still gives one predictable drop box next to `log.txt`.
 CONTROL_DIR_NAME = ".rve-control"
+
+#: The switch. **Unset or empty means OFF**: this channel is a supervisor instrument, and an ordinary launch must not
+#: create files in the tree or poll a drop box nobody asked for (`=0` is the explicit spelling of the same answer).
+ENV_NAME = "RVE_UI_CAPTURE_SERVER"
+
+#: Values that turn the channel on without naming a directory (`=1`). It does NOT walk the pages - see `Mode.walk`.
+_ON_FLAGS = ("1", "true", "yes", "on")
+_OFF_FLAGS = ("0", "false", "no", "off")
+
+
+@dataclass(frozen=True)
+class Mode:
+    """Whether the channel is on, which drop box it uses, and whether it pays the warm-up walk before `ready`.
+
+    `directory is None` means the default (`<app root>/.rve-control`). `walk` is true only for an explicit DIRECTORY:
+    a capture run warms every page once so the first grab is settled, while a bare `=1` channel polls immediately and
+    warms a page only when a request asks for it (a walk would switch pages under the owner's hands).
+
+    Why the enable flag is opt-in (owner, 2026-11-24): an ordinary launch used to start the channel by default, and an
+    empty-but-exported `RVE_UI_CAPTURE_SERVER=` (a leftover from a copied recipe) was read as "explicit directory" -
+    the app then walked all 13 pages in the repo's `.rve-control` and printed `walk restored to page 2`, which looks
+    like the app doing work on its own. Empty now means unset, and unset now means off.
+    """
+
+    on: bool
+    directory: str | None
+    walk: bool
+
+
+def mode() -> Mode:
+    """The channel's mode from `RVE_UI_CAPTURE_SERVER`; the single place the switch is parsed."""
+    value = str(os.environ.get(ENV_NAME) or "").strip()
+    lowered = value.lower()
+    if not value or lowered in _OFF_FLAGS:
+        return Mode(False, None, False)
+    if lowered in _ON_FLAGS:
+        return Mode(True, None, False)
+    return Mode(True, value, True)
 
 
 def control_root() -> str:
-    """The request/reply directory: `RVE_UI_CAPTURE_SERVER` when set, else `<app root>/.rve-control`."""
-    explicit = os.environ.get("RVE_UI_CAPTURE_SERVER")
-    if explicit:
-        return explicit
+    """The request/reply directory: the directory the switch names, else `<app root>/.rve-control`."""
+    channel = mode()
+    if channel.directory:
+        return channel.directory
     import sys
 
     script = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else os.getcwd()
@@ -52,18 +96,16 @@ def control_root() -> str:
 
 
 def enabled() -> bool:
-    """Always on unless explicitly switched off (`RVE_UI_CAPTURE_SERVER=0`).
+    """Off unless `RVE_UI_CAPTURE_SERVER` names a directory or an on-flag (`=1`).
 
-    Why always: automation through the keyboard was the wrong instrument on this host - `Ctrl+Shift+<letter>` is eaten by
-    the input method (only the modifier's auto-repeats reached the app), so a probe the owner pressed never ran. The
-    reference host answers this with an always-available in-app control server (`QLocalServer` + JSON lines,
-    BlinkTable `src/core/control/server.py`); this is the same idea over a drop-box directory that needs no listener and
-    no clipboard/grab. The owner can still switch it off with `RVE_UI_CAPTURE_SERVER=0`.
+    Why the instrument exists at all: automation through the keyboard was the wrong instrument on this host -
+    `Ctrl+Shift+<letter>` is eaten by the input method (only the modifier's auto-repeats reached the app), so a probe
+    the owner pressed never ran. The reference host answers this with an always-available in-app control server
+    (`QLocalServer` + JSON lines, BlinkTable `src/core/control/server.py`); this is the same idea over a drop-box
+    directory that needs no listener and no clipboard/grab. The harness passes the directory explicitly
+    (`harness/scripts/live.sh`, `ui_live.py`), so opt-in costs the automation nothing.
     """
-    value = os.environ.get("RVE_UI_CAPTURE_SERVER")
-    if value is None:
-        return True
-    return str(value).strip().lower() not in ("0", "false", "no", "off")
+    return mode().on
 
 
 def _stamp() -> str:
@@ -229,7 +271,8 @@ def install(window) -> None:
 
     from src.ui import layout_dump, page_capture
 
-    root = control_root()
+    channel = mode()
+    root = channel.directory or control_root()
     os.makedirs(root, exist_ok=True)
     delay = int(os.environ.get("RVE_UI_CAPTURE_DELAY_MS", "40000"))
     step = int(os.environ.get("RVE_UI_CAPTURE_STEP_MS", "120"))
@@ -247,10 +290,11 @@ def install(window) -> None:
         except FileNotFoundError:
             pass
 
-    # The warm-up walk exists for measurement runs (every page touched once so the first grab is settled). The always-on
-    # diagnosis channel must NOT walk: it would switch pages under the owner's hands. It polls immediately and only warms
-    # a page when that page is asked for.
-    always_on = os.environ.get("RVE_UI_CAPTURE_SERVER") is None
+    # The warm-up walk exists for measurement runs (every page touched once so the first grab is settled). The bare
+    # `=1` channel must NOT walk: it would switch pages under the owner's hands. It polls immediately and only warms
+    # a page when a request asks for it. The mode decides - never the raw environment again (an empty-but-exported
+    # value used to land here as "explicit directory", `Mode` in one place).
+    always_on = not channel.walk
     state = {"warming": not always_on, "index": 0, "request_id": None, "walk_before": None, "empty_since": {}}
 
     if always_on:

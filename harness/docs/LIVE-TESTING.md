@@ -55,7 +55,10 @@ run is still the final word for the shipped platform.
 5. **`grab:` is not screen truth.** It re-renders; `import -window root` (what `shot` does) is the framebuffer. Use the
    first for "what should be there", the second for "what is actually there".
 6. The app's control directory is the server's choice, not the repo's: read it from the boot log (`control channel: ready
-   in …`) or set `RVE_CONTROL_DIR`.
+   in …`) or set `RVE_CONTROL_DIR`. **The channel is opt-in** (owner, 2026-11-24): unset or empty installs nothing,
+   `RVE_UI_CAPTURE_SERVER=1` gives the diagnosis channel on the default box with **no page walk**, and a directory is a
+   capture run that warms every page once (`capture-server: ready (13 pages)`) and restores the page it started on.
+   `live.sh`/`ui_live.py` always pass a directory, so the harness is unaffected.
 
 ## The same surface as an MCP server (`harness/mcp-server/app`)
 
