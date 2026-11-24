@@ -871,3 +871,26 @@ def test_mediainfo_wins_over_ffmpeg_when_both_could_answer(tmp_path):
     )
     assert started == [], "MediaInfo answered, so ffmpeg was not started"
     assert result.source == "mediainfo 26.10"
+
+
+def test_the_dialog_tabs_use_the_main_windows_strip_style(tmp_path):
+    """The owner asked for the main window's tabs, not the toolkit default.
+
+    `src/ui/widgets/tab_strip.py` exists because the process and settings strips drifted into two looks; a dialog that
+    builds its host without `tab_style()`/`TabButtonFactory` is the third look. The default host builds `TopTabButton`;
+    the shared factory hands it a plain toolkit `Button` and a flat, borderless style with a gap under the strip.
+    """
+    dialog = _dialog(tmp_path / "clip.mp4")
+    try:
+        host = dialog.tabs
+        style = host.tab_bar._style
+        assert style.flat is True, "the strip must be the flat button strip the pages use"
+        assert style.border is False, "the main window's strip has no folder outline"
+        assert style.gap == 8, f"the gap under the strip is the shared 8 px, got {style.gap}"
+        # `TabItem` carries text/data only (the bar's own docstring says so); the built button lives in the bar's tab
+        # list, which is exactly where `TabButtonFactory` records what it built.
+        button = host.tab_bar._tabs[0].button
+        assert type(button).__name__ == "Button", (
+            f"a host-built tab is a toolkit Button; the default host would build {type(button).__name__}")
+    finally:
+        dialog.close()

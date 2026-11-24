@@ -1367,8 +1367,22 @@ class QueuePropertiesDialog(ToolkitDialog):
 
         # The toolkit's folder-tab host, never a stock QTabWidget: the app's tabs are painted by the toolkit, and a
         # QTabWidget here would be the one stock strip in a window that is otherwise the toolkit's.
+        # The MAIN WINDOW's strip, not the toolkit default (owner, 2026-11-24: "the tabs are better styled like the main
+        # window's"): `tab_style()` + `TabButtonFactory` are the one look the process and settings pages already share, and
+        # a dialog with the stock folder tabs would be the third strip look in one app - the exact drift
+        # `src/ui/widgets/tab_strip.py` exists to prevent.
+        from ..pages.proc_page import TabButtonFactory
+        from ..widgets.tab_strip import TAB_HEIGHT, tab_style
+
         self.tabs = TopTabHost(
-            self, tab_height=30, pane_radius=0, pane_inset=(0, 0, 0, 0), chrome_inset=0, pane_fill_token=None
+            self,
+            tab_height=TAB_HEIGHT,
+            pane_radius=0,
+            pane_inset=(0, 0, 0, 0),
+            chrome_inset=0,
+            pane_fill_token=None,
+            tab_factory=TabButtonFactory(),
+            tab_style=tab_style(),
         )
         self.documents: dict = {}
         for tab in self.properties.tabs:
