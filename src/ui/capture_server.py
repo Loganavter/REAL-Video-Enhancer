@@ -405,6 +405,39 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: tab {target.strip()} -> {report['index']} ({report['text']!r})", flush=True)
 
+    def scale(spec: str) -> None:
+        """Set the toolkit's process-wide UI scale: `scale:1.5`.
+
+        The scale is one factor for the whole window (`UiScale`), so judging it needs the SAME window before and
+        after - which a re-run with a different environment cannot give. The answer echoes the factor actually in
+        force (the toolkit clamps to its own range) and the resolved application-font pixel size, so a probe can
+        tell "the number moved" from "the number moved and the text followed"; page overflow is judged by the
+        existing `audit:` verb right after.
+        """
+        from PySide6.QtWidgets import QApplication
+
+        from sli_ui_toolkit.ui.managers import UiScale
+
+        report = {"stamp": _stamp(), "kind": "scale", "requested": spec.strip(), "error": None}
+        manager = UiScale.get_instance()
+        try:
+            requested = float(spec.strip())
+        except ValueError:
+            report["error"] = f"not a number: {spec.strip()!r}"
+            _finish(report)
+            return
+        report["before"] = float(manager.factor())
+        manager.set_factor(requested)
+        for _ in range(6):
+            QApplication.processEvents()
+        report["factor"] = float(manager.factor())
+        # Qt reports exactly one of the two (-1 for the unused channel): the app face is a POINT size on this host.
+        font = QApplication.font()
+        report["applicationFontPx"] = int(font.pixelSize())
+        report["applicationFontPt"] = round(float(font.pointSizeF()), 2)
+        _finish(report)
+        print(f"capture-server: scale {requested} -> {report['factor']}", flush=True)
+
     def click(spec: str) -> None:
         """Send a real left click: `click:<objectName>@x,y`.
 
@@ -969,6 +1002,9 @@ def install(window) -> None:
             return
         if wanted.startswith("tab:"):
             tab(wanted[len("tab:"):])
+            return
+        if wanted.startswith("scale:"):
+            scale(wanted[len("scale:"):])
             return
         if wanted.startswith("click:"):
             click(wanted[len("click:"):])
