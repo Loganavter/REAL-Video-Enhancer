@@ -56,13 +56,23 @@ class VideoDecoder(QObject):
     error = Signal(str)
 
     def __init__(self, parent: QObject | None = None, *, pixel_format: str = "rgb24",
-                 max_frames_per_tick: int = 4, codec_threads: int = 2) -> None:
+                 max_frames_per_tick: int = 4, codec_threads: int = 2,
+                 max_size: tuple[int, int] | None = None) -> None:
         super().__init__(parent)
         if pixel_format not in FORMATS:
             raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
         self._pixel_format = pixel_format
         self._max_frames_per_tick = max(1, int(max_frames_per_tick))
         self._codec_threads = max(1, int(codec_threads))
+        #: The largest picture this decoder will hand over, or ``None`` for the file's own resolution.
+        #:
+        #: Playback cost is decode + conversion + upload per frame, and all three grow with the pixel count. Packed
+        #: RGB24 is ``width * height * 3`` bytes: 24.9 MB for a 3840x2160 frame, 6.2 MB at 1080p, 1.56 MB at 960x540.
+        #: The queue pane shows one held picture in a box that is a few hundred pixels wide, so the extra pixels are
+        #: paid for by the decoder, copied and uploaded only to be thrown away by the surface. `_fit` asks PyAV for the
+        #: smaller picture instead (swscale, in the decode already happening) - a 4K item on a 960x540 pane packs 16x
+        #: less per frame. The file's timestamps and the seek path are untouched.
+        self._max_size = None if max_size is None else (max(2, int(max_size[0])), max(2, int(max_size[1])))
 
         self._container = None
         self._stream = None
@@ -292,7 +302,28 @@ class VideoDecoder(QObject):
         self._decode_pts = pts
         self._packed += 1
         index = int(round(pts / self._interval)) if self._fps > 0 else self._packed
-        return pack_frame(decoded, index, self._pixel_format, pts=pts)
+        return pack_frame(self._fit(decoded), index, self._pixel_format, pts=pts)
+
+    def _fit(self, frame):
+        """The frame at the decoder's size cap, aspect kept, or the frame itself when it already fits.
+
+        ``frame.reformat`` is PyAV's own scaler: one call inside the decode tick, down to a WIDTHxHEIGHT of our
+        choosing. The cap is applied to BOTH axes with a single scale factor, so a 3840x2160 source on a 960x540 pane
+        becomes exactly 960x540 rather than a stretched or centre-cropped picture. Even dimensions keep the RGB rows
+        and the YUV chroma planes happy (a 2-pixel floor stops a thumbnail-sized cap from producing a zero).
+        """
+        if self._max_size is None:
+            return frame
+        limit_w, limit_h = self._max_size
+        width, height = int(frame.width), int(frame.height)
+        if width <= limit_w and height <= limit_h:
+            return frame
+        scale = min(limit_w / float(width), limit_h / float(height))
+        target_w = max(2, int(width * scale)) & ~1
+        target_h = max(2, int(height * scale)) & ~1
+        if target_w == width and target_h == height:
+            return frame
+        return frame.reformat(width=target_w, height=target_h)
 
     def _delay_until(self, pts: float, position: float) -> int:
         delay_ms = (pts - position) * 1000.0

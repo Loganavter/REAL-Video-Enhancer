@@ -38,6 +38,7 @@ if TYPE_CHECKING:  # pragma: no cover - annotations only; this module must impor
         Text,
         TextListWidget,
         ToastProgressBar,
+        TopTabHost,
     )
 
 #: The nav stack's pages, in the order `MainWindowShell.build` adds them. The names are stable identifiers the
@@ -142,6 +143,11 @@ class ProcPageHandles:
     previewLabel: "QWidget"
     #: The preview's transport toggle: checked = the preview holds this frame.
     previewPauseButton: "Button"
+    # The inner tab strip and the Render Queue page inside it. The glue listens to `currentChanged` because the pane's
+    # content follows the INNER tab (owner, 2026-11-24), and it needs the queue page's identity to know which switch
+    # is the queue's own - an index literal would drift the moment a tab is inserted.
+    processSettingsContainer: "TopTabHost"
+    renderQueueTab: "QWidget"
     progressBar: "ToastProgressBar"
     progressDetail: "Text"
     FPS: "Text"

@@ -598,6 +598,8 @@ class ProcPagePage:
             onRenderButtonsContiainer=self.onRenderButtonsContiainer,
             previewLabel=self.previewLabel,
             previewPauseButton=self.previewPauseButton,
+            processSettingsContainer=self.processSettingsContainer,
+            renderQueueTab=self.renderQueueTab,
             progressBar=self.progressBar,
             progressDetail=self.progressDetail,
             FPS=self.FPS,
