@@ -1120,6 +1120,22 @@ class Render:
         except Exception as exc:  # a report must never take a render down
             log(f"run report FAILED ({exc}); the render is unaffected")
 
+    def _stream_media_time(self, frames_rendered: int) -> float | None:
+        """The media time of the frame the loop is drawing, derived from the export's own counter.
+
+        `frames_rendered` counts OUTPUT frames (it advances by the interpolation factor per input frame), so the input
+        media time is `frames_rendered / (fps * interpolateFactor)`. None when the numbers are unusable - a wrong time
+        is worse than a missing one, because the pane compares this against a seek request.
+        """
+        try:
+            fps = float(self.fps)
+            factor = float(getattr(self, "interpolateFactor", 1) or 1)
+        except (TypeError, ValueError):
+            return None
+        if fps <= 0:
+            return None
+        return max(0.0, float(frames_rendered) / (fps * factor))
+
     def _publish_display(self, frame, force: bool = False, time_s: float | None = None) -> bool:
         """Offer this composited frame to the pane; returns whether a publish actually happened.
 
@@ -1236,11 +1252,13 @@ class Render:
                 log("seek: preview disabled - this upscaler emits frames N-1 late (tensorrt, "
                     "trt_streams > 1), and a seek frame through it would corrupt the export")
             return
+        _t_pick = _perf_counter()
         try:
             chunk = self._seek_reader(seconds).frame_at(seconds)
         except Exception as exc:
             log(f"seek: could not decode a frame at {seconds:.3f}s ({exc})")
             return
+        _t_decoded = _perf_counter()
         if chunk is None:
             return
         try:
@@ -1260,10 +1278,20 @@ class Render:
             # The seek path KNOWS the media time of this picture - it decoded that exact frame - so this is the one
             # publish whose content can be checked against the request. The streaming publishes hold off briefly so
             # this picture is the one the pane's next poll reads.
-            if self._publish_display(frame, force=True, time_s=float(seconds)):
+            _t_prepared = _perf_counter()
+            published = self._publish_display(frame, force=True, time_s=float(seconds))
+            _t_published = _perf_counter()
+            if published:
                 self._displayHoldUntil = _time.monotonic() + DISPLAY_SEEK_HOLD_S
             self.lastSeekSeconds = float(seconds)
-            log(f"seek: displayed the frame at {seconds:.3f}s (not written to the export)")
+            # The stages, so a turnaround can be read instead of guessed: decode is whatever the resident reader paid,
+            # prepare is restoration/upscale, publish is the channel (staging copy + header). The pane's own poll is
+            # the fourth stage and only the app side can see it.
+            log(f"seek: displayed the frame at {seconds:.3f}s (not written to the export); stages "
+                f"decode={(_t_decoded - _t_pick) * 1000.0:.1f}ms "
+                f"prepare={(_t_prepared - _t_decoded) * 1000.0:.1f}ms "
+                f"publish={(_t_published - _t_prepared) * 1000.0:.1f}ms "
+                f"backend_total={(_t_published - _t_pick) * 1000.0:.1f}ms")
         except Exception as exc:
             log(f"seek: frame at {seconds:.3f}s could not be displayed ({exc})")
 
@@ -1400,8 +1428,11 @@ class Render:
                 
                 
                 # The composited frame, offered to the pane BEFORE the override resize: that call returns
-                # raw pipe bytes, and the display channel speaks RGB888 only.
-                self._publish_display(frame)
+                # raw pipe bytes, and the display channel speaks RGB888 only. The media time is DERIVED from the
+                # export's own frame counter (`frames_rendered` counts output frames, so the interpolation factor
+                # divides it out): an unnamed picture cannot be checked against a seek, and leaving it unnamed hid
+                # which frame the render actually drew (owner, 2026-11-24).
+                self._publish_display(frame, time_s=self._stream_media_time(frames_rendered))
 
                 if self.override_upscale_scale:
                     # Source geometry comes from the frame the upscaler returned, never from
