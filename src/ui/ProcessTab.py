@@ -757,7 +757,13 @@ class ProcessTab:
         if previous is not None and abs(playhead - previous) < 1e-3:
             return
         self._second_surface_pts = playhead
-        self._on_original_requested(playhead)
+        # The tick asks every 100 ms while the playhead moves: its own requests are not presses and must not
+        # fill log.txt, so the compare's one-line-per-press instrument is told which one this is.
+        self._compare_from_tick = True
+        try:
+            self._on_original_requested(playhead)
+        finally:
+            self._compare_from_tick = False
 
     def renderToPipeThread(
         self,
@@ -936,10 +942,12 @@ class ProcessTab:
         self._second_surface_pts = None
         self._display_seek_pending = False
         self._end_job_painters()
-        if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
-            self.page_handles.proc.previewLabel.set_frame(None)
-        else:
-            self.page_handles.proc.previewLabel.clear()
+        # The pane KEEPS the last picture at the end of a job. It used to be cleared here unconditionally, which left
+        # an empty pane after every plain render - "the preview is cleared when processing ends, even when it is the
+        # only video in the queue" (owner, 2026-11-24). A preview job is repainted a moment later by the finished-file
+        # playback, and a plain render has no second painter, so the display feed's last frame IS the result the user
+        # wants to look at. The frame is replaced by the next job's first frame; nothing stale is left behind.
+        log("preview: keeping the last painted frame at the end of the job")
         self.page_handles.proc.startRenderButton.clicked.disconnect()
         self.page_handles.proc.startRenderButton.clicked.connect(self.parent.startRender)
         self.parent.enableProcessPage()
@@ -1247,11 +1255,21 @@ class ProcessTab:
         """
         fraction = max(0.0, min(1.0, float(fraction)))
         live = getattr(self, "_live_tail", None)
+        produced = self._live_produced_fraction()
+        clip = self._clip_duration()
+        # The instrument: every press says what it meant, in the units the answer will be checked against. One line per
+        # press (a drag sends many), which is why the target is what is logged and not the fraction alone.
+        log(f"seek: press {fraction:.1%} of the strip (clip {clip:.3f}s, produced {produced:.1%}, "
+            f"tail={'yes' if live is not None else 'no'}, preview={bool(getattr(self, 'isPreview', False))})")
         if live is not None:
             edge = float(getattr(live, "produced_seconds", 0.0) or 0.0)
             if edge <= 0.0:
+                log("seek: refused - nothing is written yet")
                 return                      # nothing is written yet, so there is nothing to seek to
-            live.seek(fraction * self._live_timeline(edge))
+            target = fraction * self._live_timeline(edge)
+            self._seek_watch = target
+            live.seek(target)
+            log(f"seek: tail asked for {target:.3f}s (published edge {edge:.3f}s)")
             return
         decoder = getattr(self, "_preview_decoder", None)
         duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
@@ -1332,14 +1350,21 @@ class ProcessTab:
     def _on_original_requested(self, seconds: float) -> None:
         """Decode ONE source frame at the playhead for the LMB compare (the input file, never the renderer).
 
-        The image is what the platform's decoder produces from the input, which is the honest comparison: the renderer's
-        own source buffer would need a second channel and would make the render pay for a preview-only action. It is
-        then cropped to the box the render reported (`BORDERS`, parsed out of this job's output) - see
+        The image is what the platform's decoder produces from the input, which is the honest comparison: the
+        renderer's own source buffer would need a second channel and would make the render pay for a preview-only
+        action. It is then cropped to the box the render reported (`BORDERS`, parsed out of this job's output) - see
         `_on_original_frame`.
         """
         # The pane's own `originalRequested` (a compare mode's playhead moved) and the 100 ms tick both arrive here;
         # recording what was asked keeps one moved playhead to one source decode.
         self._second_surface_pts = float(seconds)
+        # The compare's own instrument: what was asked, and (in `_on_original_frame`) what came back. The owner's
+        # report was "a couple of frames after the right one" and neither number existed anywhere before this line.
+        self._compare_watch = float(seconds)
+        if not getattr(self, "_compare_from_tick", False):
+            log(f"compare: asked for the source at {seconds:.3f}s (pane playhead "
+                f"{float(getattr(self, '_preview_playhead', 0.0)):.3f}s, "
+                f"mode {getattr(self.page_handles.proc.previewLabel, '_view_mode', '?')})")
         decoder = getattr(self, "_source_decoder", None)
         try:
             if decoder is None:
@@ -1382,6 +1407,12 @@ class ProcessTab:
                     f"the render reported {box} but the source frame is {image.width()}x{image.height()}")
         else:
             image = image.copy(*region)
+        watched = getattr(self, "_compare_watch", None)
+        self._compare_watch = None
+        if watched is not None:
+            pts = float(getattr(frame, "pts", 0.0) or 0.0)
+            log(f"compare: the source frame is {pts:.3f}s for an ask of {watched:.3f}s "
+                f"(delta {pts - watched:+.3f}s, {abs(pts - watched) * 24.0:.1f} frames at 24 fps)")
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_original"):
             pane.set_original(image)
@@ -1430,6 +1461,14 @@ class ProcessTab:
         if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             pane.set_frame(image)
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
+            watched = getattr(self, "_seek_watch", None)
+            if watched is not None:
+                # The seek instrument the owner asked for: one line per PRESS (not per frame), naming where the press
+                # asked to go and where the picture actually landed. Without it a press and the frame it produced were
+                # two separate facts and "it still does not work" could not be argued either way.
+                self._seek_watch = None
+                log(f"seek: press wanted {watched:.3f}s, the picture landed at {self._preview_playhead:.3f}s "
+                    f"(delta {self._preview_playhead - watched:+.3f}s)")
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
             live_tail = getattr(self, "_live_tail", None)
             running = self.renderProcess is not None and self.renderProcess.poll() is None
