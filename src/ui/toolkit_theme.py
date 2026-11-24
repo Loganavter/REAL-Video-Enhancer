@@ -225,10 +225,9 @@ def install(app) -> list[str]:
     # RVE's CONTROLS are 12 px while its labels are 12 pt (16 px at 96 dpi): the compatibility layer forced that pixel
     # size in each adapter's constructor, and without it every toolkit control inherited the 16 px application font -
     # measured as the single largest parity delta after the layer went (controls +33 % text, every row taller). Labels
-    # keep their own `typography.apply(..., BODY_PT)`.
-    from PySide6.QtGui import QFont
+    # keep their own `typography.apply(..., BODY_PT)`. The size comes from `typography.CONTROL_PX` and stays at its
+    # DESIGN value here: `UiFont.base_font` multiplies the application font by `UiScale` at resolution time.
+    from src.ui.typography import application_font
 
-    control_font = QFont(app.font())
-    control_font.setPixelSize(12)
-    app.setFont(control_font)
+    app.setFont(application_font(app.font()))
     return [f"{rule} -> {token} = {hex_value}" for rule, (token, hex_value) in LOOK.items()]
