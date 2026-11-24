@@ -487,6 +487,16 @@ class DisplayReader(QObject):
         width, height = int(width), int(height)
         if fmt != DISPLAY_FMT_RGB888 or width <= 0 or height <= 0:
             return None
+        # The payload's own size, once per change: this is the picture the writer is producing, and it is the number
+        # that proves a resize reached the RENDERER (the block is allocated for a maximum, the pane announces its box
+        # and the writer answers - the pane cannot see the answer, only the result). Owner, 2026-11-25: "при ресайзе
+        # окна разрешение не меняется" - with this line it either changes or the log says it did not.
+        named = (width, height)
+        if named != getattr(self, "_payload_size", None):
+            self._payload_size = named
+            from . import telemetry
+
+            telemetry.event("payload", w=width, h=height)
         needed = width * height * DISPLAY_RGB_BYTES_PER_PIXEL
         slot = (seq - 1) & 1
         start = DISPLAY_HEADER_SIZE + slot * self._slot_size

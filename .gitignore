@@ -23,6 +23,9 @@ harness/docs/wsp/ledger.db
 /log.prev.txt
 /log.txt.prev2.txt
 /log.txt.prev
+/logs-terminal.txt
+/logs-terminal.txt.prev
+/logs-terminal.txt.prev2
 /log.txt.prev2
 /settings.txt
 /temp/

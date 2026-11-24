@@ -1347,6 +1347,15 @@ class ProcessTab:
             self._log_filter = RenderLogFilter()
             self.renderLogLines = []
             render_failure = ""
+            # The backend's raw stream, kept in its own file: the tab filter decides what a person reads, this keeps
+            # what the backend actually printed (owner, 2026-11-25: "логично тогда иметь условно файл logs-terminal.txt").
+            terminal_log = None
+            try:
+                from .terminal_log import TerminalLog
+
+                terminal_log = TerminalLog()
+            except Exception as exc:
+                log(f"terminal log: not available ({exc}); the backend stream stays on its tab only")
             # Read to EOF, not "until poll() says the process is gone": the old loop checked poll()
             # BEFORE handling the line it had just read, so the last lines of a dying render - the
             # `RENDER FAILED: ...` summary included - were dropped on the floor and the job ended
@@ -1354,6 +1363,8 @@ class ProcessTab:
             # is the sentinel that actually terminates this iterator.
             for line in iter(self.renderProcess.stdout.readline, ""):
                 try:
+                    if terminal_log is not None:
+                        terminal_log.write(line)
                     line = str(line.strip())
                     if "BORDERS" in line:
                         # The crop the backend actually handed its reader, kept with this job so the LMB
@@ -1385,6 +1396,8 @@ class ProcessTab:
                     pass
                 if "Time to complete render" in line:
                     break
+            if terminal_log is not None:
+                terminal_log.close()
             self.return_codes.append(self.renderProcess.wait())
             code = self.return_codes[-1]
             ok = code in (0, 3221225477) and not render_failure
