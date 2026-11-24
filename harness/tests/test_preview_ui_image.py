@@ -87,15 +87,24 @@ class P(QtWidgets.QWidget):
             menu=types.SimpleNamespace(pages=types.SimpleNamespace(name_of=lambda: "home")),
         )
 
+current = {"name": "home"}
 p = P()
+p.page_handles.menu.pages = types.SimpleNamespace(name_of=lambda: current["name"])
 log = p.page_handles.home.changeLogText
 tab = HT.HomeTab(p)
 before = log.toPlainText()
+# While the HOME page is current the fetched notes are cached, not pasted over what the user is reading.
 tab.applyFetchedNotes("# 9.9.9\nfrom the api")
+on_home = log.toPlainText().splitlines()[:2]
+# On any other page they are applied - that is the other half of the same contract.
+current["name"] = "proc"
+tab.applyFetchedNotes("# 9.9.9\nfrom the api")
+off_home = log.toPlainText().splitlines()[:2]
 print(json.dumps({
     "shipped_chars": len(tab.getChangelog()),
     "panel_before_head": before.splitlines()[:1],
-    "panel_after_head": log.toPlainText().splitlines()[:2],
+    "panel_on_home_head": on_home,
+    "panel_off_home_head": off_home,
     "cache_written": open(cache).read().splitlines()[:2] if os.path.exists(cache) else None,
 }))
 """
@@ -115,5 +124,13 @@ def test_the_changelog_panel_opens_on_the_shipped_file():
     got = json.loads(proc.stdout.strip().splitlines()[-1])
     assert got["shipped_chars"] > 1000, f"the shipped changelog is {got['shipped_chars']} chars"
     assert got["panel_before_head"] == ["RVE 2.4.1"], got["panel_before_head"]
-    assert got["panel_after_head"][0] == "9.9.9", "a fetched update replaces the panel"
+    # `HomeTab.applyFetchedNotes` returns EARLY while the home page is current - "never replace text the user is
+    # looking at" (its own docstring) - and writes the cache first. The old assertion here demanded the opposite
+    # (a fetched update replacing the panel), which stopped being true when that guard landed; the suite went red on
+    # every run since and everyone learned to read past it. The contract that exists has two halves, and both are
+    # asserted now.
+    assert got["panel_on_home_head"][0] == "RVE 2.4.1", (
+        f"a fetch must not paste over the panel the user is reading, got {got['panel_on_home_head']}")
+    assert got["panel_off_home_head"][0] == "9.9.9", (
+        f"on another page the fetched notes DO replace the panel, got {got['panel_off_home_head']}")
     assert got["cache_written"] == ["# 9.9.9", "from the api"], "and it is cached for the next start"
