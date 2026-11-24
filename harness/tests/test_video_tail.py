@@ -587,7 +587,7 @@ def test_the_tail_presents_at_the_media_rate_not_at_the_production_rate(qapp):
         state["slept"].append(round(float(seconds), 4))
         state["now"] += float(seconds)
 
-    thread = LiveTailThread("clip.mkv", clock=clock, sleep=sleep)
+    thread = LiveTailThread("clip.mkv", paused=False, clock=clock, sleep=sleep)
     shown = []
     thread.frame_ready.connect(lambda frame: shown.append(round(frame.pts, 4)))
 
@@ -611,7 +611,7 @@ def test_a_seek_re_anchors_the_media_clock(qapp):
     from types import SimpleNamespace
 
     state = {"now": 0.0, "slept": []}
-    thread = LiveTailThread("clip.mkv", clock=lambda: state["now"],
+    thread = LiveTailThread("clip.mkv", paused=False, clock=lambda: state["now"],
                             sleep=lambda seconds: (state["slept"].append(seconds), state.__setitem__("now", state["now"] + seconds)))
     thread._present(SimpleNamespace(pts=10.0))
     state["now"] = 30.0
@@ -619,3 +619,37 @@ def test_a_seek_re_anchors_the_media_clock(qapp):
     before = len(state["slept"])
     thread._present(SimpleNamespace(pts=100.0))
     assert len(state["slept"]) == before, "the first frame after a seek is presented at once"
+
+
+def test_a_slow_decoder_drops_frames_instead_of_playing_at_its_own_speed(qapp):
+    """Playback holds the FILE's rate: a frame already behind the media clock is skipped, not shown late.
+
+    Owner, 2026-11-25: "воспроизведение ... едет на скорости ??? вместо оригинального для файла фпс". The pacing alone
+    is not enough: when the decoder needs longer per frame than the frame's own interval (a 2880x2160 upscale does), a
+    presenter that emits every frame advances the picture at the DECODE rate. The clock here is injected, so the
+    assertion is the drop itself.
+    """
+    from types import SimpleNamespace
+
+    state = {"now": 0.0, "slept": []}
+
+    def clock():
+        return state["now"]
+
+    def sleep(seconds):
+        state["slept"].append(round(float(seconds), 4))
+        state["now"] += float(seconds)
+
+    thread = LiveTailThread("clip.mkv", paused=False, clock=clock, sleep=sleep)
+    thread._frame_interval = 1.0 / 24.0
+    shown: list[float] = []
+    thread.frame_ready.connect(lambda frame: shown.append(round(frame.pts, 4)))
+
+    thread._present(SimpleNamespace(pts=0.0))
+    state["now"] += 0.25                     # the decoder took six frames' worth of time on the next one
+    thread._present(SimpleNamespace(pts=1 / 24))
+    assert shown == [0.0], "a frame 0.2 s behind the clock is skipped, not painted late"
+    assert thread._dropped_late == 1
+
+    thread._present(SimpleNamespace(pts=0.25))   # this one is current again
+    assert shown == [0.0, 0.25]

@@ -479,6 +479,10 @@ class LiveTailThread(QThread):
         self._target_size = None if target_size is None else (max(1, int(target_size[0])), max(1, int(target_size[1])))
         #: `(pts, wall)` the media clock is anchored to, or None before the first presented frame / after a seek.
         self._present_anchor: tuple[float, float] | None = None
+        #: One source interval, learned from the reader once it opens; 24 fps until then.
+        self._frame_interval = 1.0 / 24.0
+        #: Frames skipped because they were already behind the media clock (evidence for the log, not a cost).
+        self._dropped_late = 0
         self._path = str(path)
         self._interval_ms = max(20, int(interval_ms))
         self._reader_kwargs = reader_kwargs
@@ -552,6 +556,11 @@ class LiveTailThread(QThread):
 
         A bounding wait keeps a gap or a distant seek from parking the thread on a stale estimate.
         """
+        if self._paused:
+            # A held pane shows the ONE frame it has: no pacing and no dropping there, or a seek's target would be
+            # skipped for being "late" against a clock that stopped (the anchor is reset by `set_paused`/`seek`).
+            self.frame_ready.emit(frame)
+            return
         pts = float(getattr(frame, "pts", 0.0) or 0.0)
         now = float(self._clock())
         anchor = self._present_anchor
@@ -562,12 +571,19 @@ class LiveTailThread(QThread):
         ahead = pts - due
         if ahead > 0.0:
             self._sleep(min(ahead, self.MAX_PRESENT_WAIT_S))
+        elif -ahead > 1.5 * self._frame_interval:
+            # The decoder fell more than a frame behind the media clock (a 4K-class decode does): play the TIMELINE,
+            # not every frame. Emitting this one would make the picture advance at the decode rate - the reported "play
+            # runs at some other speed than the file's fps" (owner, 2026-11-25). The next frame is closer to `due`.
+            self._dropped_late += 1
+            return
         self.frame_ready.emit(frame)
 
     # -- the loop ------------------------------------------------------------------------------------
 
     def run(self) -> None:
         reader = TailReader(pixel_format="rgb24", target_size=self._target_size, **self._reader_kwargs)
+        interval_of = getattr(reader, "_interval", None)
         reader.frame_ready.connect(self._present)
         reader.error.connect(self.error)
         reader.seek_unavailable.connect(self.seek_unavailable)
@@ -595,8 +611,19 @@ class LiveTailThread(QThread):
                     # The container does not exist for the first moment of a render; the reader's own grace
                     # period turns "not yet a container" into a wait.
                     opened = bool(reader.open(self._path))
+                    if opened:
+                        try:
+                            self._frame_interval = float(reader._interval())
+                        except Exception:
+                            pass
                 elif not self._stop_requested:
-                    reader.poll(1 if held_seek else None)
+                    produced = reader.poll(1 if held_seek else None)
+                    if not produced:
+                        # Nothing was written for a poll or more: the media clock must not keep running through a stall,
+                        # or the next frames arrive "late" and the drop rule would throw them away (measured: a paused
+                        # write made a growing file's next two frames 0.9 s behind and the tail skipped both). A stall
+                        # re-anchors; a burst of frames keeps the clock, which is what makes the drop rule work.
+                        self._present_anchor = None
                 if not self._stop_requested:
                     self.msleep(self._interval_ms)
         finally:
