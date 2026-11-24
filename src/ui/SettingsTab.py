@@ -11,6 +11,7 @@ from ..GenerateFFMpegCommand import FFMpegCommand
 from ..VideoInfo import VideoLoader
 from ..video_probe import is_probeable_input
 from .pages.handles import WindowHandles
+from . import i18n
 
 # the combo box shows user words, the backend wants flag values.
 # this is the single place where the two are mapped.
@@ -137,6 +138,21 @@ class SettingsTab:
         self.encoder_command_user = True
         self.page_handles.encoder.EncoderCommand.setText(saved)
 
+    def applyLanguageSetting(self) -> None:
+        """Persist and apply the language chosen in the row - no restart.
+
+        `emit_language_changed` selects the language and lets the toolkit fan `retranslate(lang)` out to every bound
+        page (`src/ui/i18n.py`); the Qt translator reads the same cached value, so each page's
+        `QCoreApplication.translate(...)` calls resolve in the new language during that pass. Persisting is separate
+        on purpose: the switch must survive a restart, and `settings.txt` owns the value.
+        """
+        selected = self.page_handles.app_settings.language.currentData()
+        if not selected:
+            return
+        language = i18n.emit_language_changed(selected)
+        if self.settings.settings.get("language") != language:
+            self.settings.writeSetting("language", language)
+
     def onEncoderCommandEdited(self) -> None:
         """The user typed in the command line: stop regenerating it, and persist what they typed.
 
@@ -254,6 +270,7 @@ class SettingsTab:
                 "True" if self.page_handles.app_settings.discord_rich_presence.isChecked() else "False",
             )
         )
+        self.page_handles.app_settings.language.currentIndexChanged.connect(self.applyLanguageSetting)
         self.page_handles.output.scene_change_detection_method.currentIndexChanged.connect(
             lambda: self.settings.writeSetting(
                 "scene_change_detection_method",
@@ -458,6 +475,11 @@ class SettingsTab:
         )
         self.page_handles.app_settings.discord_rich_presence.setChecked(
             self.settings.settings["discord_rich_presence"] == "True"
+        )
+        # The language row shows the language actually in force (the validator already turned an unknown stored value
+        # into English, `src/ui/settings_store.py::validate_language`).
+        self.page_handles.app_settings.language.setCurrentIndex(
+            max(0, self.page_handles.app_settings.language.findData(i18n.current_language()))
         )
         self.page_handles.output.scene_change_detection_enabled.setChecked(
             self.settings.settings["scene_change_detection_enabled"] == "True"

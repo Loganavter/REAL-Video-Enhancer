@@ -27,6 +27,7 @@ from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
 from sli_ui_toolkit.widgets import Button, ImageLabel, RichTextView, SurfacePanel, Text
 
 from src.ui.pages.handles import HomePageHandles
+from src.ui import i18n
 
 
 class HomePagePage:
@@ -128,10 +129,13 @@ class HomePagePage:
             githubBtn=self.githubBtn,
             kofiBtn=self.kofiBtn,
         )
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.homePage)
         self.retranslate()
         return self.homePage
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.label_13.setText(QCoreApplication.translate("MainWindow", u"Support Me!", None))
         self.kofiBtn.setToolTip(QCoreApplication.translate("MainWindow", u"Support Me!", None))
         self.kofiBtn.setStatusTip(QCoreApplication.translate("MainWindow", u"\"Support Me!\"", None))

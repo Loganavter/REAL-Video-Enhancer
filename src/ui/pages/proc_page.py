@@ -24,6 +24,7 @@ from src.ui.pages.render_queue_tab import RenderQueueTabPage
 from src.ui.pages.advanced_settings import AdvancedSettingsPage
 from src.ui.pages.tab_5 import Tab5Page
 from src.ui.pages.handles import ProcPageHandles
+from src.ui import i18n
 from src.ui.typography import apply, CAPTION_PT
 from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
 
@@ -612,10 +613,13 @@ class ProcPagePage:
             endTimeSpinBox=self.endTimeSpinBox,
             timeInVideoScrollBar=self.timeInVideoScrollBar,
         )
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.procPage)
         self.retranslate()
         return self.procPage
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.label_9.setText(QCoreApplication.translate("MainWindow", u"Start Time (seconds)", None))
         self.label_52.setText(QCoreApplication.translate("MainWindow", u"End Time (seconds)", None))
         self.renderPreviewBtn.setText(QCoreApplication.translate("MainWindow", u"Render Preview", None))

@@ -208,6 +208,7 @@ class AppSettingsHandles:
 
     preview_enabled: "CheckBox"
     discord_rich_presence: "CheckBox"
+    language: "ComboBox"
     openRVEFolderBtn: "Button"
 
 

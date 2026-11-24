@@ -20,6 +20,7 @@ from sli_ui_toolkit.widgets import ComboBox, CustomLineEdit, OverlayScrollArea, 
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, GROUP_TITLE_PT
 from src.ui.pages.handles import EncoderHandles
+from src.ui import i18n
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
 #: not the toolkit's default 10: measured on the settings rows, the 2 px difference narrowed every row. The value used
@@ -363,10 +364,13 @@ class Tab6Page:
             subtitle_encoder=self.subtitle_encoder,
             encoderSettings=self.encoderSettings,
         )
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.tab_6)
         self.retranslate()
         return self.tab_6
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self._encoder_command_tooltip.set_help(QCoreApplication.translate(
             "MainWindow",
             u"Encoder command: the encoder settings passed to FFMpeg, can be manually tweaked. "

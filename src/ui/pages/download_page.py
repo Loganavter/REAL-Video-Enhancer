@@ -21,6 +21,7 @@ from sli_ui_toolkit.widgets import Button, ComboBox, OverlayScrollArea, SurfaceP
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, DISPLAY_PT
 from src.ui.pages.handles import DownloadPageHandles
+from src.ui import i18n
 
 # Layer B3 (2026-11-21): the two widget classes this page no longer builds stock. `OverlayScrollArea` is the
 # `QScrollArea` counterpart whose surface is transparent - the page's rule is `QScrollArea{background:transparent}`,
@@ -328,6 +329,9 @@ class DownloadPagePage:
         self.scrollArea_2.setWidget(self.scrollAreaWidgetContents_2)
         self.verticalLayout_11.addWidget(self.scrollArea_2)
         self.gridLayout_5.addWidget(self.backendSelectContainer, 1, 0, 1, 1)
+        # The page pass needs a QObject to walk; the relay is that object and forwards
+        # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
+        i18n.bind_page(self, self.downloadPage)
         self.retranslate()
         self._handles = DownloadPageHandles(
             pytorch_version=self.pytorch_version,
@@ -350,7 +354,7 @@ class DownloadPagePage:
         )
         return self.downloadPage
 
-    def retranslate(self) -> None:
+    def retranslate(self, language: str | None = None) -> None:
         self.encoderLabel_4.setText(QCoreApplication.translate("MainWindow", u"Import Custom Upscale Model", None))
         self.selectNCNNCustomModel.setText(QCoreApplication.translate("MainWindow", u"Select Model (NCNN/.bin+.param)", None))
         self.selectPytorchCustomModel.setText(QCoreApplication.translate("MainWindow", u"Select Model (PyTorch/TensorRT/.pth)", None))
