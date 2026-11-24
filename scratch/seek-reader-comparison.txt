@@ -1,0 +1,12 @@
+SeekReader vs one FFmpegRead spawn per request
+clip: seek-clip.mp4, 160x120, 10 fps, 6 s, rgb24 read
+timestamps (s): 0.30, 0.72, 1.14, 1.56, 1.98, 2.40, 2.82, 3.24, 3.66, 4.08
+per request (ms): 46.6, 48.7, 47.9, 48.8, 51.0, 50.2, 48.7, 48.6, 47.5, 49.2
+resident (ms):    97.6, 0.7, 0.4, 0.4, 0.5, 0.3, 0.4, 0.2, 0.2, 0.3
+median per request: 48.7 ms
+median resident (all 10, first includes the spawn+probe): 0.4 ms
+median resident (9 warm): 0.4 ms
+walk cost per skipped frame: 0.09 ms (a 4-frame, 0.42s step)
+one spawn is worth about 555.2 frames (55.52 s of walking)
+decoder spawns over the 10 requests: 1; frames skipped: 29
+stats: seek: 10 preview request(s), 10 frame(s) decoded, 1 decoder spawn(s), 29 frame(s) skipped

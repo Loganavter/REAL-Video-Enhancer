@@ -465,7 +465,9 @@ class LiveTailThread(QThread):
         self._interval_ms = max(20, int(interval_ms))
         self._reader_kwargs = reader_kwargs
         self._reader: TailReader | None = None
-        self._pending_seek: float | None = None
+        #: (seconds, attempt_past_edge): the flag is True when the ask may be ahead of what this reader
+        #: has published (a held press, or a resume that jumps to the renderer's head).
+        self._pending_seek: tuple[float, bool] | None = None
         self._stop_requested = False
         #: A preview stands still until its transport is pressed (the owner's default), so `paused` starts True: the
         #: loop still reads until the FIRST frame exists (an empty pane would be "paused on nothing"), then holds it.
@@ -487,9 +489,15 @@ class LiveTailThread(QThread):
         reader = self._reader
         return float(reader.produced_seconds) if reader is not None else 0.0
 
-    def seek(self, seconds: float) -> None:
-        """Ask the loop to reposition before its next poll; coalesces while a drag is in flight."""
-        self._pending_seek = max(0.0, float(seconds))
+    def seek(self, seconds: float, *, attempt_past_edge: bool = False) -> None:
+        """Ask the loop to reposition before its next poll; coalesces while a drag is in flight.
+
+        `attempt_past_edge` says the ask is allowed to be ahead of what this reader published - a held press asks the
+        renderer-side machinery for a frame, and resuming asks for the RENDERER's head, which the tail has not read yet.
+        Without it the ask is clamped to the published edge, which is right for an implicit follow and wrong for both of
+        those (measured live 2026-11-24: a resume aimed at 2.544 s landed on 0.334 s because the edge still said 0.1).
+        """
+        self._pending_seek = (max(0.0, float(seconds)), bool(attempt_past_edge))
 
     @property
     def paused(self) -> bool:
@@ -519,7 +527,8 @@ class LiveTailThread(QThread):
         opened = False
         try:
             while not self._stop_requested:
-                pending, self._pending_seek = self._pending_seek, None
+                ask, self._pending_seek = self._pending_seek, None
+                pending, ask_past_edge = ask if ask is not None else (None, False)
                 #: A seek on a HELD pane publishes its target and nothing else: the pane stands on one frame,
                 #: so the poll that applies the press is capped at one frame. Without the cap it read a whole
                 #: per-poll burst (default 4) and left the picture and the marker that far past the press.
@@ -528,7 +537,7 @@ class LiveTailThread(QThread):
                     # A held pane stopped polling at the pause, so its published edge is stale: the press is
                     # attempted against the file rather than clamped to it (the answering poll publishes the
                     # target, or nothing at all - see `TailReader.seek`). A playing seek keeps the old rule.
-                    reader.seek(pending, attempt_past_edge=held_seek)
+                    reader.seek(pending, attempt_past_edge=held_seek or ask_past_edge)
                 elif self._paused and reader.published_frames > 0:
                     # Held: no read, no decode, the pane keeps this frame. A seek above skips this branch exactly
                     # once, so its target becomes visible.

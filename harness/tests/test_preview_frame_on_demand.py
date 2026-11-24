@@ -172,6 +172,7 @@ class _FakeBlockReader:
     def __init__(self, generation: int = 0) -> None:
         self.generation = int(generation)
         self.seeks: list[float] = []
+        self.seek_past_edge: list[bool] = []
         self.wants: list[bool] = []
         self.display_frame = _Signal()
         self.released = False
@@ -208,8 +209,11 @@ class _FakeTail:
         self.paused = True
         self.pause_calls: list[bool] = []
 
-    def seek(self, seconds: float) -> None:
+    def seek(self, seconds: float, *, attempt_past_edge: bool = False) -> None:
+        # The real thread takes the flag: a resume asks for the RENDERER's head, which this tail has not read, so the ask
+        # must not be clamped to its own published edge (that clamp is what the live run showed: 2.544 s -> 0.334 s).
         self.seeks.append(float(seconds))
+        self.seek_past_edge.append(bool(attempt_past_edge))
 
     def set_paused(self, paused: bool) -> None:
         self.paused = bool(paused)

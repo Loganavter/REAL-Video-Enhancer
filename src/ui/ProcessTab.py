@@ -1139,6 +1139,23 @@ class ProcessTab:
             self._live_tail = None
         self._sync_preview_transport()
 
+    def _resume_tail_at_the_head(self, tail) -> None:
+        """On play, put the tail where the RENDERER is, not where the tail stopped.
+
+        A held pane stops polling: its published edge is frozen at the last frame it read, and the file has grown since.
+        Resuming from that edge replays the backlog and starts the picture seconds behind the head (measured live
+        2026-11-24: play after a held seek restarted at 0.459 s while the renderer stood at 11 % of the clip). The head is
+        the produced share of the clip; the tail's own edge is only the fallback when the clip length is unknown.
+        """
+        clip = self._clip_duration()
+        produced = self._live_produced_fraction()
+        target = (produced * clip if clip > 0.0 and produced > 0.0
+                  else float(getattr(tail, "produced_seconds", 0.0) or 0.0))
+        if target <= 0.0:
+            return
+        tail.seek(target, attempt_past_edge=True)
+        log(f"preview transport: resuming at the render's head {target:.3f}s (produced {produced:.1%} of {clip:.3f}s)")
+
     def _on_preview_pause_toggled(self, paused: bool) -> None:
         """Hold the preview on this frame, or let it follow the render again (the button's `toggled(bool)`).
 
@@ -1156,23 +1173,14 @@ class ProcessTab:
         log(f"preview transport: {'paused' if self._preview_paused else 'playing'} (owner={owner})")
         tail = getattr(self, "_live_tail", None)
         if tail is not None:
+            if not self._preview_paused:
+                # Its own try: a resume that cannot work out the head must still unpause the tail (the first version
+                # put both in one block, and an AttributeError in the head arithmetic skipped `set_paused` entirely).
+                try:
+                    self._resume_tail_at_the_head(tail)
+                except Exception as exc:
+                    log(f"preview transport: resume at the head failed ({exc})")
             try:
-                if not self._preview_paused:
-                    # Resuming means "follow the render again", not "replay everything the file gained while I was
-                    # held". A held pane's tail stopped at its last published frame; resuming there starts the picture
-                    # seconds behind the head and then races to catch up (measured live 2026-11-24: play after a held
-                    # seek restarted at 0.459 s while the renderer stood at ~11 % of the clip). The head is the
-                    # RENDERER's produced time, not the tail's published edge - the tail lags it by exactly the backlog
-                    # it did not read while held (the first attempt at this fix sought the tail's own edge and changed
-                    # nothing, which the second live run showed).
-                    clip = self._clip_duration()
-                    produced = self._live_produced_fraction()
-                    target = (produced * clip if clip > 0.0 and produced > 0.0
-                              else float(getattr(tail, "produced_seconds", 0.0) or 0.0))
-                    if target > 0.0:
-                        tail.seek(target)
-                        log(f"preview transport: resuming at the render's head {target:.3f}s "
-                            f"(produced {produced:.1%} of {clip:.3f}s)")
                 tail.set_paused(self._preview_paused)
             except Exception as exc:
                 log(f"preview transport: {exc}")
