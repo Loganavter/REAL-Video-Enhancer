@@ -307,6 +307,8 @@ class JobState:
 
     status: str = "pending"          # pending | rendering | done | failed
     progress: float | None = None    # 0..1 while rendering, 1.0 when done
+    added_mono: float | None = None   # when the item entered the queue
+    added_wall: float | None = None
     started_mono: float | None = None
     started_wall: float | None = None
     finished_mono: float | None = None
@@ -360,6 +362,7 @@ class RenderQueue:
         if getattr(renderable, "state", None) is None:
             renderable.state = JobState(source_seconds=float(getattr(renderable, "videoFrameCount", 0) or 0)
                                         / max(1.0, float(getattr(renderable, "videoFps", 1) or 1)))
+        self._stamp_added(renderable)
         self.queue.append(renderable)
         self.qlistwidget.addItem(renderable.inputFile)
         self.inputNameList.append(renderable.inputFile)
@@ -367,9 +370,24 @@ class RenderQueue:
     def addToStart(self, renderable: RenderOptions):
         if self.locked:
             return
+        if getattr(renderable, "state", None) is None:
+            renderable.state = JobState(source_seconds=float(getattr(renderable, "videoFrameCount", 0) or 0)
+                                        / max(1.0, float(getattr(renderable, "videoFps", 1) or 1)))
+        self._stamp_added(renderable)
         self.queue.insert(0, renderable)
         self.qlistwidget.insertItem(0, renderable.inputFile)
         self.inputNameList.insert(0, renderable.inputFile)
+
+    @staticmethod
+    def _stamp_added(renderable: RenderOptions) -> None:
+        """Record when the item entered the queue - once. `started_*`/`finished_*` already live on `JobState`; this is
+        the only moment the queue knows and the job does not, so it is stamped here and never overwritten (a re-add
+        of an item that carries a state keeps the arrival it already reported)."""
+        state = getattr(renderable, "state", None)
+        if state is None or getattr(state, "added_wall", None) is not None:
+            return
+        state.added_mono = _monotonic()
+        state.added_wall = _wallclock()
 
     def clear(self):
         self.queue.clear()

@@ -46,6 +46,7 @@ from ..DiscordRPC import DiscordRPC
 from ..ModelHandler import getModels
 from .RenderQueue import RenderOptions
 from .pages.handles import WindowHandles
+from .dialogs.queue_properties import QueuePropertiesDialog
 
 
 #: The read side of the backend's one crop record (`backend/src/RenderVideo.py: format_borders_line`).
@@ -82,6 +83,56 @@ def crop_region(box, source_width: int, source_height: int) -> tuple[int, int, i
     if x + width > int(source_width) or y + height > int(source_height):
         return None
     return x, y, width, height
+
+
+def queue_menu_entries(queue):
+    """The rows of the queue's right-click menu, built from the current queue state.
+
+    Module level (not a closure inside `installQueueMenu`) so the menu the app shows is the menu the harness pins:
+    the previous inline version could only be reached by building a whole page. The entries are rebuilt on every
+    request because their enabled state depends on the selection and on the render lock.
+
+    **Properties** is read-only and therefore does NOT follow the render lock: a locked queue is being consumed by the
+    writer thread, but what a queued file IS does not change, and looking it up while the render runs is exactly when
+    a user asks. The mutating rows keep following it.
+    """
+    from sli_ui_toolkit.widgets import ContextMenuAction, ContextMenuSeparator
+
+    locked = queue.is_locked()
+    has_selection = bool(queue.selectedRows())
+    # A locked queue is being consumed by the running render: the actions are shown DISABLED rather than the
+    # whole list being disabled, so the user can still scroll it while the render runs.
+    return (
+        ContextMenuAction("queue.properties", "Properties…", enabled=has_selection),
+        ContextMenuSeparator(),
+        ContextMenuAction(
+            "queue.remove", "Remove from queue",
+            enabled=has_selection and not locked, danger=True,
+        ),
+        ContextMenuSeparator(),
+        ContextMenuAction("queue.up", "Move Up", enabled=has_selection and not locked),
+        ContextMenuAction("queue.down", "Move Down", enabled=has_selection and not locked),
+        ContextMenuSeparator(),
+        ContextMenuAction(
+            "queue.clear", "Clear queue", enabled=bool(queue.getQueue()) and not locked, danger=True,
+        ),
+    )
+
+
+def queue_properties_target(queue):
+    """``(job, row, row_count, selected_count)`` for the row Properties applies to, or ``None``.
+
+    Properties describes ONE file, so it applies to the FIRST selected row - the lowest index, i.e. the topmost of a
+    rubber-band selection - and the window says which row that is. ``selected_count`` lets the window add "3 rows
+    selected — showing row 1" instead of silently dropping the other two.
+    """
+    rows = sorted({int(row) for row in queue.selectedRows() if int(row) >= 0})
+    items = queue.getQueue()
+    valid = [row for row in rows if row < len(items)]
+    if not valid:
+        return None
+    row = valid[0]
+    return items[row], row, len(items), len(rows)
 
 
 class ProcessTab:
@@ -299,31 +350,13 @@ class ProcessTab:
 
         Built from the toolkit's own `ContextMenu` (theme surface, keyboard focus, the danger colour on the destructive
         rows). The rows are selected by the list before `customContextMenuRequested` fires, so every action applies to
-        the whole selection: remove the picked items, or slide the block up/down. The entries are rebuilt on every
-        request because their enabled state depends on the selection and on the render lock.
+        the whole selection: remove the picked items, or slide the block up/down; **Properties…** describes the first
+        selected row. The entries themselves live in `queue_menu_entries` (module level) because their enabled state
+        depends on the selection and on the render lock, and the harness pins exactly the rows the app shows.
         """
-        from sli_ui_toolkit.widgets import ContextMenu, ContextMenuAction, ContextMenuSeparator
+        from sli_ui_toolkit.widgets import ContextMenu
 
         widget = self.page_handles.queue.renderQueueListWidget
-
-        def entries_for(queue):
-            locked = queue.is_locked()
-            has_selection = bool(queue.selectedRows())
-            # A locked queue is being consumed by the running render: the actions are shown DISABLED rather than the
-            # whole list being disabled, so the user can still scroll it while the render runs.
-            return (
-                ContextMenuAction(
-                    "queue.remove", "Remove from queue",
-                    enabled=has_selection and not locked, danger=True,
-                ),
-                ContextMenuSeparator(),
-                ContextMenuAction("queue.up", "Move Up", enabled=has_selection and not locked),
-                ContextMenuAction("queue.down", "Move Down", enabled=has_selection and not locked),
-                ContextMenuSeparator(),
-                ContextMenuAction(
-                    "queue.clear", "Clear queue", enabled=bool(queue.getQueue()) and not locked, danger=True,
-                ),
-            )
 
         def on_action(action_id: str, _data=None) -> None:
             queue = self.parent.renderQueue
@@ -335,6 +368,8 @@ class ProcessTab:
                 queue.moveSelected("down")
             elif action_id == "queue.clear":
                 queue.clear()
+            elif action_id == "queue.properties":
+                self.openQueueProperties()
 
         def on_context_menu(point) -> None:
             # A FRESH menu per request: the toolkit's popup surface destroys itself when it hides, so reusing one
@@ -345,7 +380,7 @@ class ProcessTab:
             # opaque black, existing QRhiWidgets slow down" (blinktable docs/dev/investigations/
             # inv-2026-10-06-ql-rhi-menu-first.md, Root cause RESOLVED). The toolkit's default surface is the in-window
             # one, which is what every other menu in that app uses; the popup mode is opt-in and we opted in by accident.
-            menu = ContextMenu(widget, entries=entries_for(self.parent.renderQueue),
+            menu = ContextMenu(widget, entries=queue_menu_entries(self.parent.renderQueue),
                                on_triggered=on_action)
             # `on_triggered` is constructor state (the toolkit keeps it as `_on_triggered`), so it is passed here and
             # not assigned afterwards - an attribute set after construction would never fire.
@@ -353,6 +388,28 @@ class ProcessTab:
             menu.popup_at(widget.mapToGlobal(point))
 
         widget.customContextMenuRequested.connect(on_context_menu)
+
+    def openQueueProperties(self) -> None:
+        """Open the Properties window for the queue's first selected row (nothing selected -> nothing to show).
+
+        The probe runs at open time, on this thread, reading the file (see `queue_properties`): it is two short
+        subprocesses with hard timeouts, not a render, so the window can wait for it. A locked queue is fine - this
+        path mutates nothing.
+        """
+        target = queue_properties_target(self.parent.renderQueue)
+        if target is None:
+            return
+        job, row, row_count, selected_count = target
+        dialog = QueuePropertiesDialog(
+            job,
+            row=row,
+            row_count=row_count,
+            selected_count=selected_count,
+            parent=self.parent,
+            blocking=False,
+        )
+        self._queue_properties_dialog = dialog
+        dialog.exec()
 
     def QConnect(self):
         # connect file select buttons
