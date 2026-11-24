@@ -822,16 +822,21 @@ class MainWindow(QMainWindow):
         self.processTab.run(renderQueue)
 
     def disableProcessPage(self):
-        for child in self.page_handles.general.generalSettings.children():
+        from src.ui.widget_tree import enabled_widget_children
+
+        # WIDGETS only: `children()` also returns plain `QObject`s, and the i18n relay (`src/ui/i18n._PageRelay`) is
+        # one - `child.setEnabled` on it raised AttributeError and killed `startRender` before the first frame
+        # (measured live 2026-11-24, found by a preview that answered nothing at all).
+        for child in enabled_widget_children(self.page_handles.general.generalSettings):
             child.setEnabled(False)
-        for child in self.page_handles.advanced.advancedSettings.children():
+        for child in enabled_widget_children(self.page_handles.advanced.advancedSettings):
             child.setEnabled(False)
         # NOT `self.renderQueueTab.children()`: disabling the page disabled its LIST, and the wheel over a disabled
         # widget does nothing - the owner could not scroll the queue while a render ran (2026-11-22). The tab stays
         # interactive; only mutations are locked, which keeps the queue coherent under the writer thread that is
         # consuming it.
         self.renderQueue.set_locked(True)
-        for child in self.page_handles.encoder.encoderSettings.children():
+        for child in enabled_widget_children(self.page_handles.encoder.encoderSettings):
             child.setEnabled(False)
         self.page_handles.proc.RenderedPreviewControlsContainer.setEnabled(False)
         self.page_handles.general.scrollArea_4.setEnabled(True)
@@ -842,12 +847,14 @@ class MainWindow(QMainWindow):
         self.page_handles.general.outputFileContainer.setEnabled(True)
 
     def enableProcessPage(self):
-        for child in self.page_handles.general.generalSettings.children():
+        from src.ui.widget_tree import enabled_widget_children
+
+        for child in enabled_widget_children(self.page_handles.general.generalSettings):
             child.setEnabled(True)
-        for child in self.page_handles.advanced.advancedSettings.children():
+        for child in enabled_widget_children(self.page_handles.advanced.advancedSettings):
             child.setEnabled(True)
         self.renderQueue.set_locked(False)
-        for child in self.page_handles.encoder.encoderSettings.children():
+        for child in enabled_widget_children(self.page_handles.encoder.encoderSettings):
             child.setEnabled(True)
         self.page_handles.proc.RenderedPreviewControlsContainer.setEnabled(True)
         self.page_handles.general.scrollAreaWidgetContents_4.setEnabled(True)
