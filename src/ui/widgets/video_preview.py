@@ -50,7 +50,18 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QRhiWidget
 
-from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
+from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager
+from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
+
+from src.ui.widgets.playback_strip import (
+    PlaybackTimeReadout,
+    playhead_halo_radius,
+    rgba,
+    strip_colours,
+    strip_handle_radius,
+    strip_margin,
+    strip_track_height,
+)
 
 SHADER_DIR = "shaders"
 #: 8 source pixels per screen pixel at most. The floor is the FIT scale (computed per frame), not 1:1: the pane shows
@@ -113,10 +124,12 @@ class VideoPreviewSurface(QRhiWidget):
         #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
         #: precedents. The pane is therefore always opaque, with the page's own colour.
         self._clear_colour = self.palette().window().color()
-        #: strip geometry in design px; the widget scales it with the device pixel ratio at paint time
-        self._strip_height = scaled_px(6)
-        self._strip_margin = scaled_px(10)
-        self._handle_radius = scaled_px(7)
+        #: strip geometry in widget px, from the toolkit's own `Slider` constants through `UiScale` (see
+        #: `_apply_strip_metrics`); the HUD pass draws in widget pixels, so nothing here is a hand-picked number
+        self._strip_margin = strip_margin()
+        self._strip_height = strip_track_height()
+        self._handle_radius = strip_handle_radius()
+        self._playhead_halo_radius = playhead_halo_radius(self._handle_radius)
         #: hovered position on the strip (fraction 0..1), and whether it is past the produced edge
         self._hover_fraction: float | None = None
         self._hover_blocked = False
@@ -133,6 +146,16 @@ class VideoPreviewSurface(QRhiWidget):
         # button is held; without tracking, `mouseMoveEvent` only arrives during a drag (measured: the cursor never
         # changed in the hover test).
         self.setMouseTracking(True)
+        #: The time display is a real widget, NOT part of the HUD: that pass is one rect-only draw and has no glyphs.
+        #: A child of the pane composites above the RHI surface (the framework's precedent for a QRhiWidget: it
+        #: overwrites its own rect and cannot alpha-blend, while its children are composed by Qt afterwards), and the
+        #: pane owns both its text and its placement so a resize/seek keeps the two in step.
+        self._time_readout = PlaybackTimeReadout(self)
+        self._time_readout.setVisible(self._strip_visible)
+        # The strip reads the theme at paint time, so a theme flip must repaint it; the readout recolours itself.
+        ThemeManager.get_instance().theme_changed.connect(self._on_theme_changed)
+        # The toolkit scale multiplies the strip's geometry; re-read the constants and re-place the caption.
+        UiScale.get_instance().scale_changed.connect(self._on_scale_changed)
 
     def setAutoFillBackground(self, enabled: bool) -> None:  # noqa: N802 - Qt spelling
         """A no-op, on purpose.
@@ -145,11 +168,13 @@ class VideoPreviewSurface(QRhiWidget):
     def showEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         """Re-post a paint after being shown: a widget that was hidden may come back with an undrawn target."""
         super().showEvent(event)
+        self._position_readout()
         self.update()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         """Ask for a repaint after a resize - `initialize()` has just been called with a new target size."""
         super().resizeEvent(event)
+        self._position_readout()
         self.update()
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt spelling
@@ -172,6 +197,7 @@ class VideoPreviewSurface(QRhiWidget):
             # while a frame is being recorded is refused by the backend without an exception (the frame then samples
             # the 1x1 placeholder - opaque black, which reads exactly like "the upload was skipped").
             self._ensure_texture(self._frame.size())
+        self._refresh_readout()
         self.update()
 
     def has_frame(self) -> bool:
@@ -280,6 +306,7 @@ class VideoPreviewSurface(QRhiWidget):
         previous_playhead = self._progress[2]
         self._progress = (float(rendered), float(total), float(playhead), float(duration))
         self._hud_dirty = True
+        self._refresh_readout()
         self.update()
         if float(playhead) != float(previous_playhead):
             self._request_standing_original()
@@ -295,6 +322,8 @@ class VideoPreviewSurface(QRhiWidget):
     def set_strip_visible(self, visible: bool) -> None:
         self._strip_visible = bool(visible)
         self._hud_dirty = True
+        self._time_readout.setVisible(self._strip_visible)
+        self._position_readout()
         self.update()
 
     def set_seek_ceiling(self, fraction: float | None) -> None:
@@ -426,6 +455,48 @@ class VideoPreviewSurface(QRhiWidget):
         event.accept()
 
     # -- strip geometry ---------------------------------------------------
+
+    def _apply_strip_metrics(self) -> None:
+        """Re-read the toolkit's strip constants (the scale changed under us) and re-place the caption."""
+        self._strip_margin = strip_margin()
+        self._strip_height = strip_track_height()
+        self._handle_radius = strip_handle_radius()
+        self._playhead_halo_radius = playhead_halo_radius(self._handle_radius)
+        self._position_readout()
+        self.update()
+
+    def _on_scale_changed(self, *_args) -> None:
+        """`UiScale.scale_changed`: the strip's geometry is design px times the factor - re-read, do not freeze."""
+        self._apply_strip_metrics()
+
+    def _on_theme_changed(self) -> None:
+        """The strip resolves its tokens at paint time; a light/dark switch only needs a repaint."""
+        self.update()
+
+    def _refresh_readout(self) -> None:
+        """Feed the widget from the pane's own progress (the playhead and duration it already keeps)."""
+        if not self.has_frame():
+            self._time_readout.set_times(None, None)
+        else:
+            _, _, playhead, duration = self._progress
+            self._time_readout.set_times(playhead, duration if duration > 0 else None)
+        self._position_readout()
+
+    def _position_readout(self) -> None:
+        """Put the caption just above the strip, right-aligned to the pane's margin.
+
+        The strip occupies the bottom margin, so the caption's home is the band above it; before a frame (and
+        therefore before a strip) it still shows its em dashes, at the same bottom-right corner.
+        """
+        readout = self._time_readout
+        readout.adjustSize()
+        margin = self._strip_margin
+        strip = self._strip_rect()
+        bottom = strip.top() - scaled_px(4) if not strip.isEmpty() else self.height() - margin
+        x = max(margin, self.width() - margin - readout.width())
+        y = max(margin, int(bottom) - readout.height())
+        readout.move(x, y)
+        readout.raise_()
 
     def _strip_rect(self) -> QRectF:
         if not self._strip_visible or not self.has_frame():
@@ -1082,37 +1153,50 @@ class VideoPreviewSurface(QRhiWidget):
         return colour
 
     def _hud_vertices(self) -> list[float]:
-        """Rectangles for the strip, in widget pixels: track, rendered range, playhead, render head, handle."""
+        """Rectangles for the strip, in widget pixels: track, produced band, playhead, handle, hover marker.
+
+        The design language's numbers and colours, not this file's: the track is the toolkit slider's track height,
+        the handle is its thumb radius (inside the timeline's playhead handle), and every colour is resolved from
+        ``STRIP_TOKENS`` through `ThemeManager` at paint time. The strip is a *timeline* - it keeps its produced band,
+        hover marker and blocked marker - but it borrows the slider's groove/thumb language so it reads as the same
+        control family. The HUD is a rect-only pass, which is why the time text lives in a widget above it instead.
+        """
         strip = self._strip_rect()
         if strip.isEmpty():
             return []
         rendered, total, playhead, duration = self._progress
-        # Two colours, by the owner's rule (2026-11-23): the DARK band is what the renderer has not produced yet, the
-        # WHITE part is what it has. No accent colour on the strip - the fill's own edge is the render head, so a tick
-        # there was the same information drawn twice.
+        colours = strip_colours()
+        track = rgba(colours["track"])
+        produced = rgba(colours["produced"])
+        playhead_fill = rgba(colours["playhead"])
+        outline = rgba(colours["playhead_outline"], 0.70)
+        divider = rgba(colours["divider"], 0.35)
+        hover = rgba(colours["hover"], 0.65)
+        blocked = rgba(colours["blocked"], 0.55)
+        # The DARK band is what the renderer has not produced yet, the ACCENT part is what it has. No extra tick on the
+        # fill's edge: the edge itself is the render head.
         rects: list[tuple[float, float, float, float, tuple[float, float, float, float]]] = [
-            (strip.left(), strip.top(), strip.width(), strip.height(), (1.0, 1.0, 1.0, 0.14)),
+            (strip.left(), strip.top(), strip.width(), strip.height(), track),
         ]
         if total > 0:
             filled = max(0.0, min(1.0, rendered / total))
             if filled > 0:
-                rects.append((strip.left(), strip.top(), strip.width() * filled, strip.height(),
-                              (1.0, 1.0, 1.0, 0.92)))
+                rects.append((strip.left(), strip.top(), strip.width() * filled, strip.height(), produced))
         if duration > 0:
             fraction = max(0.0, min(1.0, playhead / duration))
             x = strip.left() + strip.width() * fraction
             handle = self._handle_radius
-            # A dark halo behind the playhead: a white marker disappears on the white "processed" part, and a dark one
-            # disappears on the dark part - the pair is visible on both.
-            rects.append((x - 2.5, strip.top() - 6.0, 5.0, strip.height() + 12.0, (0.0, 0.0, 0.0, 0.45)))
-            rects.append((x - 1.0, strip.top() - 5.0, 2.0, strip.height() + 10.0, (1.0, 1.0, 1.0, 0.95)))
-            rects.append((x - handle - 1.5, strip.top() - 6.0 - handle - 1.5, (handle + 1.5) * 2.0, (handle + 1.5) * 2.0,
-                          (0.0, 0.0, 0.0, 0.45)))
-            rects.append((x - handle, strip.top() - 6.0 - handle, handle * 2.0, handle * 2.0,
-                          (1.0, 1.0, 1.0, 0.95)))
+            halo = self._playhead_halo_radius
+            # A backdrop behind the line and the handle: the thumb is white in light mode and dark in dark mode, so a
+            # token-coloured plate (not a fixed black or white) is what stays legible in both themes.
+            rects.append((x - 2.5, strip.top() - 6.0, 5.0, strip.height() + 12.0, outline))
+            rects.append((x - 1.0, strip.top() - 5.0, 2.0, strip.height() + 10.0, produced))
+            rects.append((x - halo, strip.top() - 6.0 - halo, halo * 2.0, halo * 2.0, outline))
+            # The handle is the slider's thumb, from the toolkit's own thumb token.
+            rects.append((x - handle, strip.top() - 6.0 - handle, handle * 2.0, handle * 2.0, playhead_fill))
         if self._hover_fraction is not None and not self._scrubbing:
             x = strip.left() + strip.width() * self._hover_fraction
-            colour = (1.0, 0.45, 0.45, 0.55) if self._hover_blocked else (1.0, 1.0, 1.0, 0.55)
+            colour = blocked if self._hover_blocked else hover
             rects.append((x - 0.5, strip.top() - 3.0, 1.0, strip.height() + 6.0, colour))
         # The two-surface modes draw ONE boundary, not a second HUD: a faint line between the halves in `sbs`, and
         # the divider itself in `split`. Both stop above the strip so the playhead stays readable across the width.
@@ -1120,7 +1204,7 @@ class VideoPreviewSurface(QRhiWidget):
         if self._view_mode == "sbs":
             middle = self.width() / 2.0
             if strip_top > 0:
-                rects.append((middle - 0.5, 0.0, 1.0, strip_top, (1.0, 1.0, 1.0, 0.18)))
+                rects.append((middle - 0.5, 0.0, 1.0, strip_top, divider))
         elif (self._view_mode == "split" and self._original is not None
               and not self._original.isNull()):
             picture = self._frame_rect()
@@ -1128,7 +1212,7 @@ class VideoPreviewSurface(QRhiWidget):
             bottom = min(strip_top, picture.bottom())
             if bottom > top:
                 x = picture.left() + picture.width() * self._split_fraction
-                rects.append((x - 1.0, top, 2.0, bottom - top, (1.0, 1.0, 1.0, 0.85)))
+                rects.append((x - 1.0, top, 2.0, bottom - top, rgba(colours["divider"], 0.85)))
         vertices: list[float] = []
         for x, y, w, h, colour in rects:
             corners = [(x, y), (x + w, y), (x, y + h), (x + w, y), (x + w, y + h), (x, y + h)]
