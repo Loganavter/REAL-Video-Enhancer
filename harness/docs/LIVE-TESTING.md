@@ -99,16 +99,26 @@ What the fields mean, so a line can be read without the source:
   thread, so the GUI thread had nothing to time.
 * `int_ms` - interval between paints: median/p95/max. On an idle pane it measures repaint-on-demand, not video cadence.
 * `drop` - frames the queue discarded (oldest for the live stream, late for the playback grid).
-* `seek_ms` - press -> first new picture. A turnaround under `MIN_SEEK_MS` (1 ms) is logged as `seek instant`, because it
-  means a picture was already in flight, not that the seek was free.
+* `seek_ms` - press -> the picture that ANSWERS the request. A turnaround under `MIN_SEEK_MS` (1 ms) is logged as
+  `seek instant`, and on the shipped reader that can no longer happen: it means the producer could not name a
+  generation and the old "any named picture" rule closed the seek on whatever was already in flight.
+* The times and generations above come from the display-channel path (a running render). A press on a finished file or
+  on a preview's own tail closes through the decoder instead and logs `landed_frame` without `landed_time`; its delta
+  is in `log.txt` as `seek: press wanted X, the picture landed at Y`.
 * `produced` - the share of the timeline the renderer had already written when the press landed. A press past it is a
   request for a frame that does not exist yet, which is a different event from a press inside the produced band.
 * `target_frame` / `target_s` - the frame and the second the press pointed at (`fraction x total`; the total is the
   render's frame count, `duration x fps`, or the clip's own count).
 * `landed_time` / `delta_s` - the media time the published picture carries, and its distance from `target_s`. **This is
-  the number that answers "did the seek go where it was told"**: the display channel's header carries the media time of
-  each picture (backend `DisplayChannel.HEADER`, `<IHHBBBI d`, the trailing double), the seek path always stamps the
-  frame it decoded, and a streaming frame leaves it at `TIME_UNSET` (-1) rather than pretending to be second zero.
+  the number that answers "did the seek go where it was told"**: the display channel's header carries a media time for
+  EVERY picture (`<IHHBBBI d`, the trailing double) - the seek path stamps the frame it decoded, and the streaming path
+  derives one from the export's counter - so a time alone does NOT prove the picture is the one the press asked for. A
+  picture the writer cannot name at all carries `TIME_UNSET` (-1) instead of pretending to be second zero.
+* `target_gen` / `landed_gen` - the seek generation the press wrote, and the generation the picture says it ANSWERS
+  (`flags` bit 0 plus the reserved word in the same header). A held seek closes ONLY on `landed_gen >= target_gen`, and
+  a streaming frame answers no generation at all. This pair is what makes the times above decidable: on 2026-11-24 a
+  press at 1.888 s was closed by the streaming frame at 4.046 s (`delta_s=+2.158`) because that frame carried a time
+  too, while the answer arrived one publication later with nobody waiting for it.
 * `landed_frame` / `landed_seq` - the picture the PANE was painting when the seek closed: a decoder's frame number, or
   the display channel's sequence. **Neither is the renderer's frame counter** - that counter named a frame the pane was
   not showing once, and a `landed == target` from it proved nothing.
