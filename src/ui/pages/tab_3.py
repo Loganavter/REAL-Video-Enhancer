@@ -17,15 +17,20 @@ import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `ComboBox` for a `QComboBox`,
 # `CheckBox` for a `QCheckBox` and `Stepper` for a `QSpinBox` (the toolkit `SpinBox` plus the step gutter RVE's
 # `::up-button`/`::down-button` rules drew). Nothing here needs a Qt-shaped compatibility adapter.
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from sli_ui_toolkit.widgets import CheckBox, ComboBox, Stepper, SurfacePanel, Text
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
 from src.ui.pages.handles import RenderSettingsHandles
+from src.ui.pages.ui_scale_follow import UiScaleFollower
 from src.ui import i18n
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
 SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+#: The render rows' design gap in DESIGN px (the Designer's 10 between every label and its control).
+ROW_GAP_PX = 10
 
 
 def _row_checkbox(parent) -> CheckBox:
@@ -67,7 +72,6 @@ class Tab3Page:
         self.verticalLayout_12 = QVBoxLayout(self.renderSettingsContainer)
         self.verticalLayout_12.setObjectName(u"verticalLayout_12")
         self.precisionSettingsContainer = QHBoxLayout()
-        self.precisionSettingsContainer.setSpacing(10)
         self.precisionSettingsContainer.setObjectName(u"precisionSettingsContainer")
         self.label_3 = Text(parent=self.renderSettingsContainer)
         self.label_3.setObjectName(u"label_3")
@@ -84,7 +88,6 @@ class Tab3Page:
         self.precisionSettingsContainer.addWidget(self.precision)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer)
         self.tensorRTOptLevelSettingsContainer = QHBoxLayout()
-        self.tensorRTOptLevelSettingsContainer.setSpacing(10)
         self.tensorRTOptLevelSettingsContainer.setObjectName(u"tensorRTOptLevelSettingsContainer")
         self.label_15 = Text(parent=self.renderSettingsContainer)
         self.label_15.setObjectName(u"label_15")
@@ -103,7 +106,6 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer.addWidget(self.tensorrt_optimization_level)
         self.verticalLayout_12.addLayout(self.tensorRTOptLevelSettingsContainer)
         self.horizontalLayout_67 = QHBoxLayout()
-        self.horizontalLayout_67.setSpacing(10)
         self.horizontalLayout_67.setObjectName(u"horizontalLayout_67")
         self.label_88 = Text(parent=self.renderSettingsContainer)
         self.label_88.setObjectName(u"label_88")
@@ -122,7 +124,6 @@ class Tab3Page:
         self.horizontalLayout_67.addWidget(self.auto_hdr_mode)
         self.verticalLayout_12.addLayout(self.horizontalLayout_67)
         self.tensorRTOptLevelSettingsContainer_3 = QHBoxLayout()
-        self.tensorRTOptLevelSettingsContainer_3.setSpacing(10)
         self.tensorRTOptLevelSettingsContainer_3.setObjectName(u"tensorRTOptLevelSettingsContainer_3")
         self.label_84 = Text(parent=self.renderSettingsContainer)
         self.label_84.setObjectName(u"label_84")
@@ -138,7 +139,6 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer_3.addWidget(self.dynamic_tensorrt_engine)
         self.verticalLayout_12.addLayout(self.tensorRTOptLevelSettingsContainer_3)
         self.precisionSettingsContainer_2 = QHBoxLayout()
-        self.precisionSettingsContainer_2.setSpacing(10)
         self.precisionSettingsContainer_2.setObjectName(u"precisionSettingsContainer_2")
         self.label_22 = Text(parent=self.renderSettingsContainer)
         self.label_22.setObjectName(u"label_22")
@@ -152,7 +152,6 @@ class Tab3Page:
         self.precisionSettingsContainer_2.addWidget(self.uhd_mode)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_2)
         self.precisionSettingsContainer_4 = QHBoxLayout()
-        self.precisionSettingsContainer_4.setSpacing(10)
         self.precisionSettingsContainer_4.setObjectName(u"precisionSettingsContainer_4")
         self.label_45 = Text(parent=self.renderSettingsContainer)
         self.label_45.setObjectName(u"label_45")
@@ -168,7 +167,6 @@ class Tab3Page:
         self.precisionSettingsContainer_4.addWidget(self.ncnn_gpu_id)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_4)
         self.precisionSettingsContainer_3 = QHBoxLayout()
-        self.precisionSettingsContainer_3.setSpacing(10)
         self.precisionSettingsContainer_3.setObjectName(u"precisionSettingsContainer_3")
         self.label_43 = Text(parent=self.renderSettingsContainer)
         self.label_43.setObjectName(u"label_43")
@@ -200,7 +198,18 @@ class Tab3Page:
         # `retranslate(lang)` to this builder (`src/ui/i18n.py`).
         i18n.bind_page(self, self.tab_3)
         self.retranslate()
+        # Construction is the first run of the page's one size statement; the follower re-runs it on a factor change.
+        self._scale = UiScaleFollower(self.tab_3, self._apply_scale)
         return self.tab_3
+
+    def _apply_scale(self) -> None:
+        """Resolve this page's design gap at the factor in force now (never at import)."""
+        gap = scaled_px(ROW_GAP_PX)
+        for layout in (self.precisionSettingsContainer, self.tensorRTOptLevelSettingsContainer,
+                       self.horizontalLayout_67, self.tensorRTOptLevelSettingsContainer_3,
+                       self.precisionSettingsContainer_2, self.precisionSettingsContainer_4,
+                       self.precisionSettingsContainer_3):
+            layout.setSpacing(gap)
 
     def retranslate(self, language: str | None = None) -> None:
         self.label_3.setText(QCoreApplication.translate("MainWindow", u"Precision", None))
