@@ -1397,6 +1397,11 @@ class ProcessTab:
     def _enter_queue_pane(self) -> None:
         """The queue tab now owns the pane: the remembered item at its playhead, or an EMPTY field."""
         self._queue_pane_owns = True
+        # The strip's signals are wired by the render owners (`_prepare_display_state`, the tail, the finished-file
+        # playback), so on an instance that has not rendered yet the queue item's strip was deaf: a press was accepted by
+        # the widget and emitted into nothing (measured live 2026-11-24: the queue item showed its first frame and a press
+        # at 40 % left the playhead at 0.0 with no `seek:` line at all). Wiring here is idempotent.
+        self._wire_preview_strip()
         path = getattr(self, "_queue_pane_path", None)
         if path:
             self._show_queue_item(path)
@@ -1784,6 +1789,10 @@ class ProcessTab:
         action. It is then cropped to the box the render reported (`BORDERS`, parsed out of this job's output) - see
         `_on_original_frame`.
         """
+        if self._queue_owns_pane():
+            # A queue item IS the source: there is no render to compare it against, and decoding the last render's
+            # input file over it would show a picture of a different video.
+            return
         # The pane's own `originalRequested` (a compare mode's playhead moved) and the 100 ms tick both arrive here;
         # recording what was asked keeps one moved playhead to one source decode.
         self._second_surface_pts = float(seconds)

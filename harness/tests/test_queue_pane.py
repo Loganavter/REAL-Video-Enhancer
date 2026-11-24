@@ -509,3 +509,28 @@ def test_the_queue_pane_opens_its_decoder_at_the_pane_box(fake_decoder):
     decoder = fake_decoder.instances[-1]
     assert decoder.kwargs.get("max_size") == (960, 540), (
         "the pane's box is the decode cap: playback must not cost a full-resolution decode")
+
+
+def test_a_press_on_the_queue_item_seeks_it(app=None):
+    """The strip belongs to the pane's owner: with the queue item up, a press seeks THAT decoder.
+
+    Measured live (2026-11-24): the queue item showed its first frame and the strip appeared, but a press at 40 % left
+    the playhead at 0.0 - the host's seek route had no queue branch at the top and fell through to the render's owners,
+    none of which was alive. The press is one decoder seek at `fraction * duration`, and the position it lands on is what
+    the remembered map keeps.
+    """
+    _FakeDecoder.instances.clear()
+    pane = _Pane()
+    tab = _tab(pane=pane)
+    tab._queue_pane_owns = True
+    tab._queue_pane_path = "/films/a.mkv"
+    tab._queue_pane_duration = 20.0
+    decoder = _FakeDecoder()
+    decoder._duration = 20.0
+    tab._queue_pane_decoder = decoder
+
+    tab._on_preview_seek(0.40)
+
+    assert decoder.seeks == [8.0], f"the press must reach the queue decoder at 40 % of 20 s, got {decoder.seeks}"
+    # The remembered position is written by the frame the decoder publishes (`_on_queue_pane_frame`), not by the press -
+    # a press that lands nowhere must not move the map either.
