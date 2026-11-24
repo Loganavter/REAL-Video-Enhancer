@@ -23,6 +23,16 @@ What is pinned, in the owner's terms:
 (c) a seek while PLAYING still emits a run of frames from the target, each once (the 2026-11-23 fix stays);
 (d) the time the LMB press puts on `originalRequested` equals the pts of the frame the pane was last given.
 
+Round 2 (2026-11-24, the second live run) pins the part the first pass got wrong. A press past the published
+edge used to be answered by falling back to that edge, and on a HELD pane the edge is stale - the reader stopped
+polling at the pause - so the picture landed where the pane last stood, or behind it:
+
+(e) a press with no frame at it publishes NOTHING, and the next reachable press still lands exactly one frame;
+(f) a press past the edge is judged on FRESH information: the muxer may have flushed between the pause and the
+    press, and the frame written after the pause must be found;
+(g) over a run of held presses the playhead never decreases and is never re-published onto a stale edge, while the
+    deepest frame the file holds stays reachable.
+
 Files live under the clone's `scratch/` - this cell may not write outside its workdir.
 """
 
@@ -307,14 +317,138 @@ def test_a_second_held_seek_publishes_one_frame_again(qapp, scratch_dir):
         second = _pts(frames[5:])
         assert second == [0.2], f"second held seek: got {second}"
 
-        # A press past everything the pane has read is still one frame: the deepest picture that exists, which for a
-        # held pane is the frame it stands on (the file holds 0.9, but a hold never read it - the band is the
-        # renderer's business, see `test_a_held_pane_advances_the_produced_band_without_moving_the_playhead`).
+        # A press past everything the file holds is not answered by the frame the pane already stands on: the reader
+        # attempts it, finds nothing at the target, and publishes NOTHING (the picture and the marker stay put). It used
+        # to fall back to the published edge, i.e. re-publish 0.5 - a frame the press did not ask for, and the path that
+        # moved the picture backwards live.
+        refusals: list[str] = []
+        thread.seek_unavailable.connect(refusals.append)
         thread.seek(9.0)
-        assert _wait_for(qapp, lambda: len(frames) > 6)
         _settle(qapp)
-        third = _pts(frames[6:])
-        assert third == [0.5], f"a press past what is read holds the deepest picture that exists: got {third}"
+        assert _pts(frames[6:]) == [], (
+            f"a press the file cannot satisfy publishes nothing, got {_pts(frames[6:])}")
+        assert round(thread.produced_seconds, 3) == 0.5, (
+            "the reader's own edge stays the highest frame it published - a refusal never lowers it")
+        assert refusals and "9.000" in refusals[-1] and "0.200" in refusals[-1], (
+            f"the refusal names the target and the frame that stays on screen, got {refusals}")
+    finally:
+        thread.stop_and_wait()
+
+
+def test_a_held_seek_past_the_flushed_file_holds_the_picture(qapp, scratch_dir):
+    """A press with no frame behind it publishes nothing, and the NEXT reachable press still lands exactly one frame.
+
+    The live shape (2026-11-24, 12.5 % produced): the band says a place exists, the muxer has flushed less, and the
+    target is past it. The answer must be "the file has no frame there" - not the stale published edge, which is where
+    the picture already stands (or, worse, behind it).
+    """
+    path = _written(scratch_dir, 10)                 # the whole file is 0.0 .. 0.9 s
+    thread = _spawn(path, paused=True)
+    frames: list = []
+    refusals: list[str] = []
+    thread.frame_ready.connect(frames.append)
+    thread.seek_unavailable.connect(refusals.append)
+    thread.start()
+    try:
+        assert _wait_for(qapp, lambda: len(frames) >= 4)
+        _settle(qapp)
+        assert _pts(frames) == [0.0, 0.1, 0.2, 0.3], f"the held band (got {_pts(frames)})"
+        standing = len(frames)
+        before = round(thread.produced_seconds, 3)
+        assert before == 0.3
+
+        thread.seek(2.0)                             # past the file's own end
+        _settle(qapp)
+        assert _pts(frames[standing:]) == [], (
+            f"nothing exists at 2.0 s, so nothing is published (got {_pts(frames[standing:])})")
+        assert round(thread.produced_seconds, 3) == before, (
+            "the reported playhead is the frame on screen - it does not move to a stale edge")
+        assert refusals, "the attempt is legible in the log"
+        assert "2.000" in refusals[-1], f"the log names the target, got {refusals[-1]!r}"
+
+        thread.seek(0.5)                             # a target the file does have
+        assert _wait_for(qapp, lambda: len(frames) > standing), "the next reachable press still acts"
+        _settle(qapp)
+        assert _pts(frames[standing:]) == [0.5], (
+            f"one frame, at the target, after an unreachable press (got {_pts(frames[standing:])})")
+    finally:
+        thread.stop_and_wait()
+
+
+def test_a_held_press_polls_the_file_the_muxer_grew_since_the_pause(qapp, scratch_dir):
+    """A held pane judges its press on FRESH information: the file may have grown between the pause and the press.
+
+    That is why the press is not clamped to the published edge before the read: the clamp was decided on a snapshot
+    from the pause, while the muxer kept flushing. Here the frame written after the pause must be found.
+    """
+    path = _written(scratch_dir, 3)                  # 0.0 .. 0.2 s: fewer than the per-poll cap, so nothing is buffered
+    thread = _spawn(path, paused=True)
+    frames: list = []
+    thread.frame_ready.connect(frames.append)
+    thread.start()
+    try:
+        assert _wait_for(qapp, lambda: len(frames) >= 3)
+        _settle(qapp)
+        assert _pts(frames) == [0.0, 0.1, 0.2], f"the held band (got {_pts(frames)})"
+
+        _append(path, 6, start=3)                    # the renderer keeps writing while the pane is held: 0.3 .. 0.8
+        _settle(qapp)
+        assert _pts(frames) == [0.0, 0.1, 0.2], "a held pane does not read on its own"
+
+        thread.seek(0.7)
+        assert _wait_for(qapp, lambda: len(frames) > 3), "the press polls"
+        _settle(qapp)
+        assert _pts(frames[3:]) == [0.7], (
+            f"the press must find the frame flushed after the pause, got {_pts(frames[3:])}")
+    finally:
+        thread.stop_and_wait()
+
+
+def test_the_playhead_never_moves_backwards_across_held_presses(qapp, scratch_dir):
+    """The live sequence: a reachable press, then presses past the flush, then one at the deepest flushed frame.
+
+    The picture must only ever move forward through such a run, must not be re-published onto a stale edge, and must
+    still reach the deepest frame the file holds (the band edge) at the end.
+    """
+    path = _written(scratch_dir, 14)                 # 0.0 .. 1.3 s
+    thread = _spawn(path, paused=True)
+    frames: list = []
+    refusals: list[str] = []
+    thread.frame_ready.connect(frames.append)
+    thread.seek_unavailable.connect(refusals.append)
+    thread.start()
+    try:
+        assert _wait_for(qapp, lambda: len(frames) >= 4)
+        _settle(qapp)
+        seen = _pts(frames)
+        held = len(frames)
+
+        for target, reachable in ((0.9, True), (1.1, True), (2.0, False), (3.0, False), (1.3, True)):
+            before = len(frames)
+            edge_before = round(thread.produced_seconds, 3)
+            thread.seek(target)
+            if reachable:
+                assert _wait_for(qapp, lambda: len(frames) > before), f"the press at {target} s must act"
+            _settle(qapp)
+            emitted = _pts(frames[before:])
+            if reachable:
+                assert emitted == [round(target, 3)], (
+                    f"a reachable held press shows exactly its target, got {emitted} for {target} s")
+            else:
+                assert emitted == [], (
+                    f"a press at {target} s has no frame behind it, so it publishes nothing (got {emitted}); "
+                    f"the frame on screen is {edge_before} s")
+                assert round(thread.produced_seconds, 3) == edge_before, (
+                    f"an unreachable press must not move the reported playhead off {edge_before} s")
+            seen = _pts(frames)
+            assert seen == sorted(seen), f"the playhead never decreases over these presses, got {seen}"
+
+        assert refusals, "and every unreachable press says so in the log"
+        assert any("2.000" in message for message in refusals)
+        assert any("3.000" in message for message in refusals)
+        assert _pts(frames)[-1] == 1.3, "the deepest flushed frame is still reachable"
+        assert len(frames) == held + 3, (
+            f"three reachable presses publish three frames, nothing more (got {len(frames) - held})")
     finally:
         thread.stop_and_wait()
 

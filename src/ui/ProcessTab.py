@@ -1072,6 +1072,9 @@ class ProcessTab:
             tail = LiveTailThread(path, paused=self._preview_paused)
             tail.frame_ready.connect(self._on_preview_frame)
             tail.error.connect(lambda message: log(f"preview tail: {message}"))
+            # A press the file could not answer must be legible in log.txt: "it did nothing" and "it snapped to the
+            # end of the upscale" are the same silence from the outside (owner, 2026-11-24).
+            tail.seek_unavailable.connect(lambda message: log(f"preview tail: {message}"))
             # The strip's signals too: a press must seek the tail, and the LMB compare must decode the source at the
             # current playhead. Connected here (GUI thread) or the seek lands in a queue nobody drains.
             self._wire_preview_strip()
@@ -1182,6 +1185,15 @@ class ProcessTab:
         if hasattr(pane, "originalRequested"):
             try:
                 pane.originalRequested.connect(self._on_original_requested)
+            except Exception:
+                pass
+        if hasattr(pane, "seekBlocked"):
+            # The pane refuses a press past the produced band before the host ever sees it. That is the right answer
+            # while the render is still writing, but it is also the third way a press can "do nothing", so it says so.
+            try:
+                pane.seekBlocked.connect(
+                    lambda fraction: log(
+                        f"seek: {float(fraction):.1%} of the strip is past the produced band; nothing to show there"))
             except Exception:
                 pass
         self._preview_strip_wired_for = pane
