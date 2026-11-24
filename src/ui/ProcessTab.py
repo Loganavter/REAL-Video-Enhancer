@@ -1482,6 +1482,26 @@ class ProcessTab:
         self._restoreQueueAfterPreview()
         if self.currentRenderOptions.isPreview:
             self._start_preview_playback(self.currentRenderOptions.outputPath)
+        elif finished_ok:
+            # The export is done, and its pane had NO source after this point: the display feed is released, the tail
+            # was stopped, and `_request_display_seek` refuses a press because no process will answer it. That is why
+            # "the last seeks do nothing on a fully rendered file" (owner, 2026-11-25). The finished file becomes the
+            # pane's source, HELD at the position the render stood on: the strip scrubs it, Play runs it at the media
+            # rate (the decoder paces by PTS), and the picture is the real output rather than the last live frame.
+            output = str(getattr(self.currentRenderOptions, "outputPath", "") or "")
+            try:
+                import os as _os
+
+                readable = bool(output) and _os.path.exists(output) and _os.path.getsize(output) > 0
+            except Exception:
+                readable = False
+            if readable:
+                self._preview_paused = True
+                self._start_preview_playback(output)
+                self._sync_preview_transport()
+                log(f"preview: the finished file is the pane's source ({output}); the strip scrubs it")
+            else:
+                log(f"preview: no finished file to hand the pane ({output!r}); the last painted frame stays")
 
     def _end_job_painters(self) -> None:
         """Stop whoever followed the finished job's file, then release the block the renderer published into.
