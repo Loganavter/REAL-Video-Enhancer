@@ -84,8 +84,8 @@ def _scale():
     return UiScale.get_instance()
 
 
-def _shell(qapp, factor: float, width: int):
-    """The real window at `factor` and `width`, shown and settled; the page has applied its policy by then."""
+def _shell(qapp, factor: float, width: int, height: int = WINDOW_HEIGHT):
+    """The real window at `factor`, `width` and `height`, shown and settled; the page has applied its policy by then."""
     from src.ui import i18n, toolkit_boot, toolkit_theme
     from src.ui.shell.window import MainWindowShell
 
@@ -96,13 +96,42 @@ def _shell(qapp, factor: float, width: int):
     window = QMainWindow()
     shell = MainWindowShell()
     shell.build(window)
-    window.resize(width, WINDOW_HEIGHT)
+    window.resize(width, height)
     window.show()
     _settle(qapp)
     # A show can land its own geometry first; state the measured box once more and let the page's resize hook run.
-    window.resize(width, WINDOW_HEIGHT)
+    window.resize(width, height)
     _settle(qapp)
     return shell, window
+
+
+#: The window's minimum height in DESIGN px (`window_minimum_size()`): the shortest the owner can make the window.
+WINDOW_MIN_HEIGHT = 700
+
+
+@pytest.mark.parametrize("factor", [1.0, 1.5])
+def test_the_bottom_strip_stays_visible_at_the_minimum_window_height(qapp, process_state, factor):
+    """Owner, 2026-11-24: the render row and the status line must never slide under the window's bottom edge.
+
+    The column's vertical policy is `Preferred` in `side` and `Minimum` in `stack`. With `Minimum` everywhere,
+    `qSmartMinSize` took the column's size hint (685 px) as its floor: at the 700 px window the page body needed 703 px
+    in a 672 px viewport, the page scrolled 31 px on its own, and the bottom strip (render row, progress detail line,
+    ETA/FPS/STATUS) was cut by the window edge. Measured: before the mode-dependent policy, 1.0/700 gave
+    `scroll_max=31` with the row's bottom at 675 in a 672 px viewport.
+    """
+    shell, win = _shell(qapp, factor, 1163, WINDOW_MIN_HEIGHT)
+    try:
+        page = shell.procPage_page
+        assert page.layout_mode == SIDE, "the design window at 1.0/1.5 is side by side"
+        assert page.pageScroll.verticalScrollBar().maximum() == 0, (
+            "the process page scrolls at its own minimum height - the bottom strip would be pushed under the edge")
+        viewport = _viewport(page)
+        for widget, name in ((page.renderRow, "render row"), (page.progressDetail, "progress detail"),
+                             (page.STATUS, "STATUS")):
+            bottom = widget.mapTo(viewport, widget.rect().bottomLeft()).y()
+            assert bottom <= viewport.height(), f"the {name} ends at {bottom} in a {viewport.height()} px viewport"
+    finally:
+        win.close()
 
 
 def _settle(qapp, turns: int = 10) -> None:

@@ -833,6 +833,19 @@ class ProcPagePage:
         # One column, stated once: the outer container and the two inner strips that were fixed separately before.
         for container in (self.processContainer, self.bottomMenuSubContainer, self.widget_13):
             container.setFixedWidth(column)
+        # The column's VERTICAL policy is a property of the mode (owner, 2026-11-24: "the render row and the status
+        # line should always be visible"). `Minimum` has no ShrinkFlag, so `qSmartMinSize` takes the column's size hint
+        # as its minimum - at the 700 px window floor the body then needed 703 px in a 672 px viewport and the page's
+        # own 31 px scroll pushed the bottom strip under the window edge. In `side` the column shares its grid row with
+        # the preview, so it can yield those 31 px to the tab pane's own scroll (`Preferred`, which has ShrinkFlag);
+        # in `stack` the column IS the page's height (the band above it is a fixed 16:9 box), so it keeps `Minimum` -
+        # its content stays whole, the page scrolls, and the sticky footer carries the render row.
+        policy = self.processContainer.sizePolicy()
+        wanted = QSizePolicy.Policy.Preferred if mode == SIDE else QSizePolicy.Policy.Minimum
+        if policy.verticalPolicy() != wanted:
+            policy.setVerticalPolicy(wanted)
+            self.processContainer.setSizePolicy(policy)
+            self.processContainer.updateGeometry()
         self.processInfoContainer.setVisible(not self._preview_collapsed)
 
     def _apply_preview_band(self, mode: str, column: int) -> None:

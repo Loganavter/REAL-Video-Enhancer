@@ -191,9 +191,17 @@ def test_at_one_point_zero_the_body_does_not_scroll_in_a_window_that_fits_it(qap
         window.close()
 
 
-@pytest.mark.parametrize("factor", (1.5, 2.0))
+@pytest.mark.parametrize("factor", (2.0,))
 def test_the_body_scrolls_to_its_content_at_a_raised_factor(qapp, process_state, factor):
-    """Taller than the viewport, and a real wheel over it moves the viewport to the far end."""
+    """Taller than the viewport, and a real wheel over it moves the viewport to the far end.
+
+    Only the STACKED factor is a page-scroll case now. 1.5 used to be one of these two: since the column yields its
+    vertical slack in `side` mode (owner, 2026-11-24: the render row and the status line must stay visible at the
+    700 px window floor), the page at 1.5/1163x700 fits exactly and the tab pane is what scrolls inside itself -
+    `test_the_bottom_strip_stays_visible_at_the_minimum_window_height` pins that side of the same rule. In `stack`
+    the preview band above the column is a fixed 16:9 box, so the body is genuinely taller than the window and the
+    wheel mechanism is proven here.
+    """
     shell, window = _shell(qapp, factor)
     try:
         # The window's own default size follows the factor (wave 5) and its follower re-applies that default after the
