@@ -14,8 +14,8 @@ Layout (little-endian, the invariant both sides copy verbatim; the reader's copy
     6       2     height   uint16
     8       1     fmt      uint8    1 = interleaved RGB888
     9       1     wanted   uint8    0 = the viewer is not asking; the writer publishes nothing
-    10      1     flags    uint8    reserved for the writer, 0 today
-    11      4     reserved uint32   0
+    10      1     flags    uint8    bit 0 = this picture ANSWERS a seek request (see `DISPLAY_FLAG_SEEK_ANSWER`)
+    11      4     reserved uint32   the seek generation this picture answers, 0 when it answers none
     15      8     time     double   media time of the picture in the newest slot, seconds;
                                     ``TIME_UNSET`` (-1) when the writer cannot name it
     23      ...   two payload slots, each ``box_w * box_h * 3`` bytes
@@ -51,6 +51,13 @@ from __future__ import annotations
 import os
 import struct
 import threading
+
+#: `flags` bit 0: the picture in the newest slot is the answer to a seek request, and `reserved` holds that
+#: request's generation. The pane needs the pair because a sequence number proves a NEW picture, not the ONE it asked
+#: for: the streaming path names every frame it draws, so "the first picture with a media time" stopped meaning "the
+#: seek's answer" the day streaming frames got names (measured 2026-11-24: a press at 1.888 s closed on the streaming
+#: frame at 4.046 s, +2.158 s off, because that frame carried a time too).
+DISPLAY_FLAG_SEEK_ANSWER = 0x01
 
 #: The header. `<` = little-endian, standard sizes, no padding - 23 bytes. The `I` is the reserved word
 #: (4 bytes) and the trailing `d` is the frame's media time, so a reader that assumed a 15-byte header
@@ -222,12 +229,16 @@ class DisplayChannel:
         return None if stamp < 0 else float(stamp)
 
     def publish(self, payload, width: int, height: int, fmt: int = FMT_RGB888,
-                time_s: float | None = None) -> bool:
+                time_s: float | None = None, seek_generation: int | None = None) -> bool:
         """Copy one composited frame into the free slot. False when nobody asked or it does not fit.
 
-        `time_s` is the media time of THIS picture: the seek path knows it exactly (it decoded that frame),
-        a streaming frame often does not, and the header says which case it is instead of leaving the
-        reader to guess.
+        `time_s` is the media time of THIS picture: the seek path knows it exactly (it decoded that frame), a
+        streaming frame derives it from the export's counter (or cannot name it at all), and the header says which
+        case it is instead of leaving the reader to guess.
+
+        `seek_generation` is set by the ONE publish that answers a seek request - the renderer passes the generation
+        it acted on. The pane closes a seek only on a picture that carries the generation it asked for; without it the
+        only available rule was "the first named picture", which the streaming path now satisfies first.
 
         The payload is `width * height * 3` bytes of interleaved RGB888 (so it may be smaller than the
         slot: a box fit keeps the picture's aspect, and the header says what the payload really is).
@@ -259,9 +270,19 @@ class DisplayChannel:
         # payload was copied, and its byte must survive this header write untouched either way.
         wanted = buf[OFFSET_WANTED]
         stamp = TIME_UNSET if time_s is None else float(time_s)
+        answers = int(seek_generation or 0) & UINT32_MAX
         HEADER.pack_into(buf, 0, (seq + 1) & UINT32_MAX, width, height, FMT_RGB888,
-                         wanted, 0, 0, stamp)
+                         wanted, DISPLAY_FLAG_SEEK_ANSWER if answers else 0, answers, stamp)
         return True
+
+    def published_seek_generation(self) -> int:
+        """The seek generation the newest picture answers, or 0 when it answers none."""
+        if not self.attached:
+            return 0
+        flags = HEADER.unpack_from(self._shm.buf, 0)[5]
+        if not int(flags) & DISPLAY_FLAG_SEEK_ANSWER:
+            return 0
+        return int(HEADER.unpack_from(self._shm.buf, 0)[6])
 
     def close(self) -> None:
         """Release the block. Unlink only when this process created it (the GUI owns its own names)."""

@@ -279,6 +279,19 @@ def test_the_reader_and_the_real_writer_and_seek_reader_agree_byte_for_byte():
         assert image is not None
         assert image.pixelColor(0, 0) == QColor(second[0], second[1], second[2])
 
+        # The seek answer: the real writer names the generation it answers, the real reader reports it beside the
+        # picture. Without it the pane's only rule was "the first picture with a media time", and the streaming path
+        # names every frame it draws (measured 2026-11-24: a press at 1.888 s was closed by the frame at 4.046 s).
+        third = bytes(((value + 180) & 0xFF) for value in range(18))
+        assert channel.publish(third, 3, 2, time_s=1.888, seek_generation=2) is True
+        assert channel.published_seek_generation() == 2
+        assert reader.poll() is not None
+        assert reader.seek_answer == 2, "the answered generation rides in the same header as the picture"
+        fourth = bytes(((value + 45) & 0xFF) for value in range(18))
+        assert channel.publish(fourth, 3, 2, time_s=4.046) is True
+        assert reader.poll() is not None
+        assert reader.seek_answer is None, "a streaming frame answers no request, even when it names its time"
+
         seek_state = SeekState(name + "_seek")
         assert seek_state.attached
         assert seek_state.pending() is None
@@ -803,8 +816,17 @@ def test_the_transport_glyph_follows_the_running_state():
 
 # --- a seek closes on the picture that names itself, not on the next stream frame ------------------------------
 
-def _seek_tab(media_time):
-    """The smallest tab `_on_display_frame` needs, with a display reader that has (or has not) a media time."""
+#: The reader never grew the field: a stub, or a backend older than the header change.
+_NO_FIELD = object()
+
+
+def _seek_tab(media_time, seek_answer=_NO_FIELD, seek_generation=None, target_s=1.139):
+    """The smallest tab `_on_display_frame` needs, with a display reader that has (or has not) a media time.
+
+    `seek_answer` has three cases and they are NOT the same: an int is the generation the picture answers, `None` is a
+    streaming frame from a producer that names generations, and `_NO_FIELD` is a producer that cannot say - where the
+    pane has nothing but the media time to go on.
+    """
     calls = []
 
     class _Pane:
@@ -820,9 +842,11 @@ def _seek_tab(media_time):
             return getattr(self, "_shown_time", None)
 
     class _Reader:
-        def __init__(self, stamp):
+        def __init__(self, stamp, answer=_NO_FIELD):
             self._stamp = stamp
             self.seq = 196
+            if answer is not _NO_FIELD:
+                self.seek_answer = answer
 
         @property
         def media_time(self):
@@ -831,16 +855,61 @@ def _seek_tab(media_time):
     pane = _Pane()
     tab = types.SimpleNamespace(
         page_handles=types.SimpleNamespace(proc=types.SimpleNamespace(previewLabel=pane)),
-        _display=_Reader(media_time), _display_seek_pending=True, _seek_pressed_at=0.0,
-        _seek_target_frame=27, _seek_target_s=1.139,
+        _display=_Reader(media_time, seek_answer), _seek_generation=seek_generation,
+        _display_seek_pending=True, _seek_pressed_at=0.0,
+        _seek_target_frame=27, _seek_target_s=target_s,
         _preview_paused=False, _display_paints_pane=lambda: True,
         _result_playhead=lambda: 0.0, _clip_duration=lambda: 20.646,
     )
+    # The seek rules themselves, bound to the fake tab: stubbing them would pin the call, not the rule. `getattr`
+    # because an older `ProcessTab` has no such rule - then the red-before run of this module fails on the ASSERTION
+    # (the wrong picture closing the seek), which is the defect, instead of on a missing attribute.
+    for _name in ("_picture_answers_seek", "_picture_seek_answer", "_picture_names_its_seek"):
+        _rule = getattr(ProcessTab, _name, None)
+        if _rule is not None:
+            setattr(tab, _name, _rule.__get__(tab))
     return tab, calls
 
 
+def test_a_named_streaming_frame_no_longer_closes_the_seek(monkeypatch):
+    """The measured case: a press at 1.888 s was answered by the streaming frame at 4.046 s, +2.158 s off.
+
+    `preview-log.txt`, 2026-11-24 23:11, lines 2281-2289: the press asked for 1.888 s (frame 45), the pane showed
+    4.046 s and closed the request, and the answer (seq 99, 1.888 s) arrived one publication later with nobody waiting
+    for it. The picture WAS named, which is all the old rule asked for - the streaming path now names every frame it
+    draws, so "named" stopped meaning "asked for". Only the generation the writer puts in the header can tell them
+    apart, and a picture that is not the answer must not be painted either: that flash is half the report.
+    """
+    notes = []
+    monkeypatch.setattr("src.ui.video.telemetry.note_seek",
+                        lambda ms, **kw: notes.append((ms, kw)))
+    tab, calls = _seek_tab(4.046, seek_answer=None, seek_generation=7, target_s=1.888)
+
+    ProcessTab._on_display_frame(tab, QImage(2, 2, QImage.Format.Format_RGB888))
+    assert notes == [], "a streaming frame closed a seek it does not answer"
+    assert calls == [], "and it was painted over the held picture"
+    assert tab._seek_pressed_at == 0.0, "the request must stay open for its own answer"
+
+    tab._display._stamp = 1.888          # the answer, one publication later
+    tab._display.seek_answer = 7
+    tab._display.seq = 99
+    ProcessTab._on_display_frame(tab, QImage(2, 2, QImage.Format.Format_RGB888))
+    assert len(notes) == 1, notes
+    _ms, fields = notes[0]
+    # `delta_s` is the formatter's job (`note_seek`, pinned in test_preview_telemetry.py); here the two times are the
+    # evidence that the closed publication really is the requested picture.
+    assert (fields["landed_time"], fields["target_s"]) == (1.888, 1.888), "the answer, not the playhead"
+    assert (fields["target_gen"], fields["landed_gen"]) == (7, 7), "the log names both halves of the identity"
+    assert len(calls) == 1 and calls[0][1] == 99
+    assert tab._seek_pressed_at is None
+
+
 def test_a_streaming_frame_does_not_close_a_seek(monkeypatch):
-    """The renderer keeps publishing after the seek frame; an unnamed picture must not claim the landing."""
+    """The renderer keeps publishing after the seek frame; an UNNAMED picture must not claim the landing.
+
+    The producer here cannot say which request a picture answers (`_NO_FIELD`), so the picture has to name its own time
+    to be evidence at all - and an unnamed one never does.
+    """
     notes = []
     monkeypatch.setattr("src.ui.video.telemetry.note_seek",
                         lambda ms, **kw: notes.append((ms, kw)))
@@ -852,6 +921,12 @@ def test_a_streaming_frame_does_not_close_a_seek(monkeypatch):
 
 
 def test_the_stamped_picture_closes_the_seek_with_its_own_time(monkeypatch):
+    """The renderer's stamped frame is the evidence; the pane must report ITS time, not the target's.
+
+    The fallback path, kept honest: a producer that names no generation (`_NO_FIELD`) still closes on a named picture,
+    because there is nothing better to go on. The real reader and feed always name one, so this is not the shipped
+    rule - `test_a_named_streaming_frame_no_longer_closes_the_seek` is.
+    """
     notes = []
     monkeypatch.setattr("src.ui.video.telemetry.note_seek",
                         lambda ms, **kw: notes.append((ms, kw)))

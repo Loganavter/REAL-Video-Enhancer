@@ -146,6 +146,29 @@ def test_a_publish_can_name_the_picture_it_sends():
         channel.close()
 
 
+def test_a_publish_can_name_the_seek_request_it_answers():
+    """The one publish that answers a seek carries the generation, so the pane can close on identity, not on a name.
+
+    A media time cannot be that identity: the streaming path names every frame it draws, so "the first picture with a
+    time" is the playhead, not the request (measured live 2026-11-24: a press at 1.888 s was closed by 4.046 s).
+    """
+    channel = _channel(box=(2, 2))
+    try:
+        _ask(channel)
+        assert channel.publish(_frame(0, 2, 2), 2, 2, time_s=4.046) is True
+        assert channel.published_seek_generation() == 0, "a streaming frame answers no request"
+        assert channel.publish(_frame(1, 2, 2), 2, 2, time_s=1.888, seek_generation=7) is True
+        assert channel.published_seek_generation() == 7
+        assert channel.published_time() == pytest.approx(1.888)
+        flags, reserved = DC.HEADER.unpack_from(channel._shm.buf, 0)[5:7]
+        assert (flags, reserved) == (DC.DISPLAY_FLAG_SEEK_ANSWER, 7)
+        assert channel.publish(_frame(2, 2, 2), 2, 2, time_s=4.1) is True
+        assert channel.published_seek_generation() == 0, "the flag and the word go back to zero with the next stream frame"
+        assert DC.HEADER.unpack_from(channel._shm.buf, 0)[5:7] == (0, 0)
+    finally:
+        channel.close()
+
+
 # --- the reader's side, through a real segment -----------------------------------------------------
 
 

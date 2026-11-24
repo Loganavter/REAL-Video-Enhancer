@@ -78,6 +78,7 @@ class PreviewFeed(QObject):
         self._image: QImage | None = None
         self._shown: tuple[str, int] | None = None
         self._shown_time: float | None = None
+        self._shown_seek: int | None = None
         self._dropped = 0
         #: A picture counts as taken once `image()` was read for it; only an untaken one is a drop when replaced.
         self._taken = True
@@ -117,6 +118,7 @@ class PreviewFeed(QObject):
         self._image = None
         self._shown = None
         self._shown_time = None
+        self._shown_seek = None
         self._taken = True
         if reader is not None:
             releaser = getattr(reader, "release", None)
@@ -187,6 +189,13 @@ class PreviewFeed(QObject):
             self._shown_time = None if media_time is None else float(media_time)
         except Exception:
             self._shown_time = None
+        # Beside the time: the seek request this picture answers, when the writer names one. A streaming frame answers
+        # none, and that distinction is the whole reason the field exists.
+        answer = getattr(self._reader, "seek_answer", None)
+        try:
+            self._shown_seek = None if answer is None else int(answer)
+        except Exception:
+            self._shown_seek = None
         self.picture_changed.emit()
 
     def image(self) -> QImage | None:
@@ -205,6 +214,14 @@ class PreviewFeed(QObject):
     def shown_time(self) -> float | None:
         """That picture's media time in seconds, or None when the writer could not name it."""
         return self._shown_time
+
+    def shown_seek(self) -> int | None:
+        """The seek generation that picture answers, or None when it is a streaming frame.
+
+        `None` is the discriminator the pane needs: a named picture is not the same thing as the requested one, because
+        the streaming path names every frame it draws.
+        """
+        return self._shown_seek
 
     def dropped(self) -> int:
         """How many accepted pictures were replaced before anyone took them (latest-wins, no queue)."""

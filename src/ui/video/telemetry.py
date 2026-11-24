@@ -212,7 +212,8 @@ MIN_SEEK_MS = 1.0
 
 def note_seek(turnaround_ms: float, *, target: int | None = None,
               landed: tuple[str, int] | None = None, target_s: float | None = None,
-              landed_time: float | None = None) -> None:
+              landed_time: float | None = None, target_gen: int | None = None,
+              landed_gen: int | None = None) -> None:
     """Press -> first new picture, in milliseconds, naming the frame that was asked for and the one the PANE shows.
 
     `target` is the frame the press pointed at (`fraction x the strip's total`). `landed` is the pane's own identity for
@@ -234,6 +235,12 @@ def note_seek(turnaround_ms: float, *, target: int | None = None,
         fields["landed_time"] = f"{float(landed_time):.3f}"
         if target_s is not None:
             fields["delta_s"] = f"{float(landed_time) - float(target_s):+.3f}"
+    if target_gen is not None:
+        fields["target_gen"] = int(target_gen)
+    if landed_gen is not None:
+        # The pair that says whether this CLOSE is legitimate: the pane asked for generation N and the picture answers
+        # M. `landed_gen` absent means the picture is a streaming frame - which never closes a seek any more.
+        fields["landed_gen"] = int(landed_gen)
     if turnaround_ms < MIN_SEEK_MS:
         event("seek instant", turnaround_ms=f"{turnaround_ms:.2f}", **fields)
         return

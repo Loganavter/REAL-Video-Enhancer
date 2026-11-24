@@ -1207,7 +1207,8 @@ class Render:
         except Exception:
             pass
 
-    def _publish_display(self, frame, force: bool = False, time_s: float | None = None) -> bool:
+    def _publish_display(self, frame, force: bool = False, time_s: float | None = None,
+                         seek_generation: int | None = None) -> bool:
         """Offer this composited frame to the pane; returns whether a publish actually happened.
 
         Bounded on purpose: at most one staged frame is in flight, and a normal render publishes at most
@@ -1241,7 +1242,10 @@ class Render:
             if previous is None:
                 return False
             payload, fmt, width, height, stamp = previous
-            return channel.publish(payload, width, height, fmt=fmt, time_s=stamp)
+            # The generation this picture answers rides in the header: only the seek path has one, and the pane closes
+            # the request on that identity, not on "the first picture with a media time".
+            return channel.publish(payload, width, height, fmt=fmt, time_s=stamp,
+                                   seek_generation=seek_generation)
         published = False
         previous = stager.take()
         if previous is not None:
@@ -1301,7 +1305,7 @@ class Render:
             )
         return self._seekReader
 
-    def _seek_preview(self, seconds: float) -> None:
+    def _seek_preview(self, seconds: float, generation: int | None = None) -> None:
         """Decode one frame at `seconds`, run it through the model path and show it - nothing else.
 
         Not written to the writer, not counted in `frames_rendered`, no gate/tuner state touched: the
@@ -1349,8 +1353,14 @@ class Render:
             # The seek path KNOWS the media time of this picture - it decoded that exact frame - so this is the one
             # publish whose content can be checked against the request. The streaming publishes hold off briefly so
             # this picture is the one the pane's next poll reads.
+            #
+            # The generation goes into the header too: the pane can then close a seek on the picture that ANSWERS it
+            # instead of on the first picture that happens to carry a media time - the streaming path names every
+            # frame it draws, so "named" stopped meaning "asked for" (measured 2026-11-24: a press at 1.888 s was
+            # closed by the streaming frame at 4.046 s, +2.158 s off).
             _t_prepared = _perf_counter()
-            published = self._publish_display(frame, force=True, time_s=float(seconds))
+            published = self._publish_display(frame, force=True, time_s=float(seconds),
+                                              seek_generation=generation)
             _t_published = _perf_counter()
             if published:
                 self._displayHoldUntil = _time.monotonic() + DISPLAY_SEEK_HOLD_S
@@ -1358,7 +1368,8 @@ class Render:
             # The stages, so a turnaround can be read instead of guessed: decode is whatever the resident reader paid,
             # prepare is restoration/upscale, publish is the channel (staging copy + header). The pane's own poll is
             # the fourth stage and only the app side can see it.
-            log(f"seek: displayed the frame at {seconds:.3f}s (not written to the export); stages "
+            log(f"seek: displayed the frame at {seconds:.3f}s (generation {generation}, not written to the export); "
+                f"stages "
                 f"decode={(_t_decoded - _t_pick) * 1000.0:.1f}ms "
                 f"prepare={(_t_prepared - _t_decoded) * 1000.0:.1f}ms "
                 f"publish={(_t_published - _t_prepared) * 1000.0:.1f}ms "
@@ -1385,7 +1396,7 @@ class Render:
                 # slot, so a newer one simply replaces this one - the loop never waits for the pane.
                 requested = self._take_seek_request()
                 if requested is not None:
-                    self._seek_preview(requested)
+                    self._seek_preview(requested, getattr(self.seekState, "last_generation", None))
                     continue
                 _t_read = _perf_counter()
                 frame = self.readBuffer.get()

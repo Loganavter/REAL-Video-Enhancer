@@ -225,6 +225,10 @@ class ProcessTab:
         #: A paused pane may still be shown ONE frame - the one a strip press asked for. While this is set the request
         #: byte stays 1 and the next published frame paints even though the transport is holding.
         self._display_seek_pending = False
+        #: The seek generation the pane is waiting for (`None` before the first press): a picture closes the seek only
+        #: when the writer says it answers THIS one - "a named picture" is not the same thing, because the streaming
+        #: path names every frame it draws.
+        self._seek_generation = None
         #: monotonic stamp of the current render, for the "elapsed" half of the progress line
         self._render_started_mono = None
         self.animationHandler = AnimationHandler()
@@ -996,7 +1000,14 @@ class ProcessTab:
         if not self._display_paints_pane():
             return
         holding = bool(getattr(self, "_preview_paused", True))
-        if holding and not getattr(self, "_display_seek_pending", False):
+        pending = bool(getattr(self, "_display_seek_pending", False))
+        if holding and not pending:
+            return
+        if pending and not self._picture_answers_seek():
+            # A seek is pending and this is not its answer: paint NOTHING. A held pane waits for one picture, and
+            # showing the in-flight streaming frame first is the flash this gate exists to stop - measured live
+            # (2026-11-24): a press at 1.888 s painted the streaming frame at 4.046 s, then the answer at 1.888 s.
+            # The request byte stays 1, so the answer still arrives.
             return
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_frame"):
@@ -1018,19 +1029,19 @@ class ProcessTab:
                 seq = getattr(reader, "seq", None)
                 media_time = getattr(reader, "media_time", None)
             pane.set_frame(image, seq=seq, media_time=media_time)
-            if pressed_at is not None and getattr(self, "_display_seek_pending", False) and media_time is not None:
-                # Close the seek ONLY on a publish that names its picture. The pane polls at 10 Hz while the renderer
-                # keeps publishing, so the seek's stamped frame is usually overwritten by the next streaming frame
-                # (which carries no time) before the poll - measured 2026-11-24: four backend "displayed the frame at
-                # 1.139s" lines and not one `landed_time`, because every landing was closed by a picture that was not
-                # the requested one.
+            if pressed_at is not None and pending and media_time is not None:
+                # Close the seek here, and only here: the gate above already refused every picture that does not
+                # answer the request, so this publication IS the answer. The log names both generations as well as the
+                # two times, because a press -> answer turnaround is only a cost when the picture is the right one.
                 shown = getattr(pane, "shown", None)
                 shown_time = getattr(pane, "shown_time", None)
                 telemetry.note_seek((time.perf_counter() - pressed_at) * 1000.0,
                                     target=getattr(self, "_seek_target_frame", None),
                                     landed=shown() if callable(shown) else None,
                                     target_s=getattr(self, "_seek_target_s", None),
-                                    landed_time=shown_time() if callable(shown_time) else None)
+                                    landed_time=shown_time() if callable(shown_time) else None,
+                                    target_gen=getattr(self, "_seek_generation", None),
+                                    landed_gen=self._picture_seek_answer())
                 self._seek_pressed_at = None
             if hasattr(pane, "set_progress"):
                 pane.set_progress(
@@ -1047,6 +1058,47 @@ class ProcessTab:
             # the renderer stop staging for a picture nobody is following.
             self._display_seek_pending = False
             self._update_display_wanted()
+
+    def _picture_seek_answer(self) -> int | None:
+        """The seek generation the pane's current picture answers, or None when it is a streaming frame."""
+        feed = getattr(self, "_feed", None)
+        getter = getattr(feed, "shown_seek", None)
+        if callable(getter):
+            return getter()
+        return getattr(getattr(self, "_display", None), "seek_answer", None)
+
+    def _picture_names_its_seek(self) -> bool:
+        """Whether this producer can say WHICH request a picture answers at all.
+
+        A stub reader and a backend older than the header field cannot, and there the media time is the only evidence
+        there is. The real `DisplayReader` and `PreviewFeed` always can - and then `None` means "a streaming frame",
+        which is the distinction that was missing.
+        """
+        feed = getattr(self, "_feed", None)
+        if callable(getattr(feed, "shown_seek", None)):
+            return True
+        return hasattr(getattr(self, "_display", None), "seek_answer")
+
+    def _picture_answers_seek(self) -> bool:
+        """Whether the picture on hand is the answer to the seek the pane asked for.
+
+        Identity, not proximity, and it fails CLOSED: a producer that names generations can only close a seek on the
+        generation it asked for, so a named streaming frame is refused even though its media time is present. That is
+        the defect this rule replaces - measured live (2026-11-24): a press at 1.888 s was closed by the streaming
+        frame at 4.046 s (+2.158 s), because the streaming path names every frame it draws.
+        """
+        if not self._picture_names_its_seek():
+            return True                     # an older producer: a named picture is all the evidence there is
+        answer = self._picture_seek_answer()
+        if answer is None:
+            return False                    # a streaming frame answers no request, whatever it names
+        wanted = getattr(self, "_seek_generation", None)
+        if wanted is None:
+            return True
+        try:
+            return int(answer) >= int(wanted)
+        except (TypeError, ValueError):
+            return True
 
     def _clip_duration(self) -> float:
         """The clip's length in seconds, as far as the pane knows it: the opened file's duration, else frames / fps."""
@@ -2023,6 +2075,7 @@ class ProcessTab:
             # frame over it a moment later; play resumes the follow from the produced edge, as before.
             self._on_preview_pause_toggled(True)
         generation = chain.request_seek(target)
+        self._seek_generation = generation or None
         if hold or bool(getattr(self, "_preview_paused", True)):
             # A held pane has `wanted` 0, so the renderer would stage the requested frame and never publish it. Ask
             # for exactly that one frame: `_on_display_frame` paints it and clears this again.

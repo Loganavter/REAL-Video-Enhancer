@@ -47,9 +47,14 @@ DISPLAY_OFFSET_TIME = 15
 #: The `time` value the writer packs when it cannot name the picture.
 DISPLAY_TIME_UNSET = -1.0
 DISPLAY_OFFSET_WANTED = 9
-#: The writer's byte at 10 (0 today) and its reserved word at 11; named so neither side spells the gap by hand.
+#: The writer's byte at 10 and its reserved word at 11; named so neither side spells the gap by hand.
 DISPLAY_OFFSET_FLAGS = 10
 DISPLAY_OFFSET_RESERVED = 11
+#: `flags` bit 0: the newest picture ANSWERS a seek, and `reserved` holds that request's generation. It exists because
+#: "the first picture with a media time" is no longer the seek's answer - the streaming path names every frame it
+#: draws, so an in-flight streaming frame (the playhead) satisfied that rule first and the pane showed it
+#: (measured 2026-11-24: a press at 1.888 s displayed 4.046 s, +2.158 s off).
+DISPLAY_FLAG_SEEK_ANSWER = 0x01
 DISPLAY_FMT_RGB888 = 1
 DISPLAY_RGB_BYTES_PER_PIXEL = 3
 
@@ -181,6 +186,16 @@ class DisplayReader(QObject):
         showing the frame that was asked for (owner, 2026-11-24).
         """
         return getattr(self, "_media_time", None)
+
+    @property
+    def seek_answer(self) -> int | None:
+        """The seek generation the picture this reader last handed over answers, or None when it answers none.
+
+        `None` is not "no answer": it is "this picture is a streaming frame", which is what the pane must not close a
+        seek on. A producer that predates the field says `None` for every picture, and the caller then falls back to
+        the older "any named picture" rule - see `_seek_answer_matches`.
+        """
+        return getattr(self, "_seek_answer", None)
 
     @property
     def seq(self) -> int:
@@ -379,6 +394,9 @@ class DisplayReader(QObject):
         seq = int(seq)
         # The picture about to be handed over carries its own time; -1 means the writer could not name it.
         self._media_time = float(stamp) if stamp >= 0 else None
+        # ... and, when the writer says so, the seek request it answers. Read in the SAME header unpack as the picture
+        # it belongs to, so a repaint cannot pair a picture with another publication's generation.
+        self._seek_answer = int(_reserved) if int(_flags) & DISPLAY_FLAG_SEEK_ANSWER else None
         if seq == self._last_seq:
             return None
         width, height = int(width), int(height)

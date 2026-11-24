@@ -100,16 +100,19 @@ class _StubReader:
         self.attached = bool(attached)
         self.seq = 0
         self.media_time = None
+        self.seek_answer = None
         self.generation = int(generation)
         self.wants: list[bool] = []
         self.seeks: list[float] = []
         self.released = False
         self._next = None
 
-    def publish(self, image, *, seq: int | None = None, media_time: float | None = None) -> None:
+    def publish(self, image, *, seq: int | None = None, media_time: float | None = None,
+                seek_answer: int | None = None) -> None:
         if seq is not None:
             self.seq = int(seq)
         self.media_time = media_time
+        self.seek_answer = seek_answer
         self._next = image
 
     def poll(self):
@@ -152,6 +155,31 @@ def test_a_polled_picture_is_the_one_picture_and_carries_its_identity():
     assert feed.shown() == ("seq", 41)
     assert feed.shown_time() == pytest.approx(1.25)
     assert feed.dropped() == 0, "nothing was replaced: the first picture is not a drop"
+
+
+def test_the_seek_answer_is_captured_beside_the_time_and_cleared_by_a_streaming_frame():
+    """`shown_seek` is the identity a seek closes on; `None` is a streaming frame, not a missing value.
+
+    The pair exists because the streaming path names every frame it draws: a media time alone cannot say whether the
+    picture ANSWERS the request (measured 2026-11-24: a press at 1.888 s was closed by the streaming frame at 4.046 s).
+    """
+    reader = _StubReader()
+    feed = _feed(reader)
+
+    reader.publish(_picture(), seq=97, media_time=3.962)                  # the last streaming picture
+    assert feed.poll() is True
+    assert feed.shown_seek() is None, "a streaming frame answers no seek"
+
+    reader.publish(_picture(), seq=98, media_time=1.888, seek_answer=7)   # the answer to request 7
+    assert feed.poll() is True
+    assert (feed.shown(), feed.shown_time(), feed.shown_seek()) == (("seq", 98), pytest.approx(1.888), 7)
+
+    reader.publish(_picture(), seq=99, media_time=4.0)                    # streaming resumes: answers none
+    assert feed.poll() is True
+    assert feed.shown_seek() is None
+
+    feed.detach()
+    assert feed.shown_seek() is None, "a detached feed forgets the answer with the picture"
 
 
 def test_a_picture_replaced_before_anyone_took_it_is_one_drop():
