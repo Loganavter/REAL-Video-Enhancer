@@ -102,3 +102,35 @@ class PreviewState:
         if self.duration <= 0.0:
             return 0.0
         return max(0.0, min(1.0, self.produced / self.duration))
+
+    def playhead_fraction(self) -> float:
+        """Where the playhead stands, 0..1 of the whole timeline (the scrubber's thumb)."""
+        if self.duration <= 0.0:
+            return 0.0
+        return max(0.0, min(1.0, self.playhead / self.duration))
+
+    def at_produced_edge(self, tolerance: float | None = None) -> bool:
+        """Whether the playhead has reached the furthest moment this backend can show.
+
+        A growing file's edge is the produced band; a finished file's edge is its duration. `tolerance` defaults to
+        half a frame, so a player that lands on the last produced frame is at the edge instead of a hair before it.
+        """
+        span = self.frame_interval() / 2.0 if tolerance is None else max(0.0, float(tolerance))
+        return self.playhead >= self.seekable_ceiling() - span
+
+    def is_growing(self) -> bool:
+        """A live tail over a file the renderer is still writing (the one backend with a real produced edge)."""
+        return self.backend is PreviewBackendKind.LIVE_TAIL
+
+    def frame_ratio(self) -> str:
+        """`f <source frames processed> / <source frames>`.
+
+        BOTH numbers are the source packet set (`frames_done`/`source_frames`). The writer's CFR count is a separate
+        fact (`output_frames`) and is never a denominator here: subtracting the two populations is exactly the
+        `493/495` report of 2026-11-25.
+        """
+        total = max(0, int(self.source_frames))
+        done = max(0, min(total, int(self.frames_done))) if total else max(0, int(self.frames_done))
+        if total <= 0:
+            return "f \u2014"
+        return f"f {done} / {total}"
