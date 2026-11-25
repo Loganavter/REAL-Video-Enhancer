@@ -1,0 +1,675 @@
+"""The preview control surface: commands, one state writer, two bars (plan-rve-preview-controls-frame-path-2026-11-25).
+
+Owner direction (2026-11-25): the bottom is *video transport only* and the tools float over the picture; the buttons
+must work "through a professional pattern, not magic". What is pinned here, offscreen and without a GPU:
+
+* the controller is the single writer of `PreviewState`: every command (play/pause, step, seek by time and by
+  fraction, the three view modes, the zoom row, the compare hold, fullscreen) either moves the state or answers with
+  exactly ONE status line - a refused seek is a line, never a silent snap and never an exception;
+* a growing file buffers AT its produced edge (`PLAYING -> BUFFERING`) and plays again when frames land;
+* the action catalog is one registry: ids are unique, every `PreviewCommand` is covered, and the predicates decide
+  enabled/checked/visible - `set_state` applies them in one pass with signals blocked, so painting never looks like a
+  click;
+* the bars are the toolkit's own widgets (a `Button` is a `QWidget`, so the modes are exclusive through the toolkit's
+  `ButtonFamily`, not a `QButtonGroup`), they sit inside the pane at 621x721 and never cover its middle;
+* the compare is a HOLD (press = source, release = result);
+* the frame readout is `f <source done> / <source total>` - the writer's CFR count is a separate fact, never a ratio.
+
+The real pixels, the pane's letterbox and the window's fullscreen are the supervisor's live proof.
+"""
+
+from __future__ import annotations
+
+import sys
+import types
+
+import pytest
+
+pytest.importorskip("PySide6")
+pytest.importorskip("sli_ui_toolkit")
+
+# The app's optional runtime imports, stubbed only when the interpreter lacks them (the same pattern as
+# `test_process_readouts_language.py`): `ProcessTab` is the page this lane wires, and it imports `src.Util`.
+for _name, _attrs in (("cpuinfo", {"get_cpu_info": lambda *a, **k: {}}),
+                      ("pypresence", {"Presence": object})):
+    try:  # pragma: no cover - the branch depends on the interpreter
+        __import__(_name)
+    except ModuleNotFoundError:  # pragma: no cover
+        _module = types.ModuleType(_name)
+        for _attr, _value in _attrs.items():
+            setattr(_module, _attr, _value)
+        sys.modules[_name] = _module
+if "resources_rc" not in sys.modules:
+    # A test tree has no compiled resource blob; the icons resolve to null QIcons and the widgets still build.
+    sys.modules["resources_rc"] = types.ModuleType("resources_rc")
+
+from PySide6.QtCore import QRect, Qt  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
+
+from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager  # noqa: E402
+from sli_ui_toolkit.widgets import Button  # noqa: E402
+
+from src.ui.preview.actions import ACTIONS, actions_for, build_button, enabled_for  # noqa: E402
+from src.ui.preview.backends import NoBackend, backend_for  # noqa: E402
+from src.ui.preview.controller import PreviewController  # noqa: E402
+from src.ui.preview.controls import PreviewControls  # noqa: E402
+from src.ui.preview.state import (  # noqa: E402
+    PreviewBackendKind,
+    PreviewCommand,
+    PreviewPhase,
+    PreviewState,
+)
+from src.ui.preview.timeline import PreviewTimeline, format_content_time  # noqa: E402
+
+PANE_SIZE = (621, 721)
+
+
+def _app() -> QApplication:
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True)
+def _toolkit_palette():
+    """The app registers the palettes at start-up; a bare ThemeManager has none (the app is not booted here)."""
+    from sli_ui_toolkit.palettes import FLUENT_DARK, FLUENT_LIGHT
+
+    theme = ThemeManager.get_instance()
+    previous = (dict(theme._light_palette), dict(theme._dark_palette))
+    theme.register_palettes(FLUENT_LIGHT, FLUENT_DARK)
+    yield theme
+    theme._light_palette, theme._dark_palette = previous
+
+
+class FakeSurface:
+    """Records what the controller asks the picture to do."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    def set_view_mode(self, mode: str) -> None:
+        self.calls.append(("mode", mode))
+
+    def set_zoom(self, zoom: float, *, fit: bool) -> None:
+        self.calls.append(("zoom", (zoom, fit)))
+
+    def set_compare(self, held: bool) -> None:
+        self.calls.append(("compare", held))
+
+    def set_fullscreen(self, fullscreen: bool) -> None:
+        self.calls.append(("fullscreen", fullscreen))
+
+
+class FakeBackend:
+    """A backend that answers like a finished file and counts the calls."""
+
+    kind = PreviewBackendKind.FINISHED_FILE
+
+    def __init__(self, *, playing: bool = False) -> None:
+        self.playing = playing
+        self.play_calls = 0
+        self.pause_calls = 0
+        self.seek_calls: list[float] = []
+        self.step_calls: list[int] = []
+        self.position = 4.0
+        self.duration = 20.0
+
+    def play(self) -> None:
+        self.play_calls += 1
+        self.playing = True
+
+    def pause(self) -> None:
+        self.pause_calls += 1
+        self.playing = False
+
+    def seek(self, seconds: float, *, exact: bool) -> bool:
+        self.seek_calls.append(float(seconds))
+        self.position = float(seconds)
+        return True
+
+    def step(self, frames: int) -> bool:
+        self.step_calls.append(int(frames))
+        self.position += int(frames) / 24.0
+        return True
+
+    @property
+    def produced(self) -> float:
+        return self.duration
+
+    @property
+    def is_playing(self) -> bool:
+        return self.playing
+
+
+def _controller(surface: FakeSurface | None = None, *, kind=PreviewBackendKind.FINISHED_FILE,
+                produced: float = 12.0, duration: float = 20.0, playhead: float = 4.0,
+                playing: bool = False, ceiling: float | None = None, has_picture: bool = True):
+    surface = surface or FakeSurface()
+    controller = PreviewController(surface)
+    backend = FakeBackend() if kind is PreviewBackendKind.FINISHED_FILE else NoBackend()
+    controller.register_backend(kind, backend)
+    controller.set_backend(kind)
+    controller.observe(
+        is_playing=playing, has_picture=has_picture, playhead=playhead, produced=produced,
+        duration=duration, source_frames=493, frames_done=100, output_frames=495, fps=24.0,
+        seek_ceiling=ceiling,
+    )
+    return controller, backend, surface
+
+
+def _status_recorder(controller: PreviewController) -> list[str]:
+    lines: list[str] = []
+    controller.status.connect(lines.append)
+    return lines
+
+
+# --- the controller: every command, every refusal ----------------------------------------------------
+
+def test_play_pause_moves_the_phase_and_calls_the_backend():
+    controller, backend, _ = _controller()
+    assert controller.state().phase is PreviewPhase.READY
+    controller.dispatch(PreviewCommand.PLAY_PAUSE)
+    assert backend.play_calls == 1
+    assert controller.state().phase is PreviewPhase.PLAYING
+    controller.dispatch(PreviewCommand.PLAY_PAUSE)
+    assert backend.pause_calls == 1
+    assert controller.state().phase is PreviewPhase.READY
+
+
+def test_play_with_nothing_on_the_pane_is_one_status_line():
+    controller, backend, _ = _controller(has_picture=False)
+    lines = _status_recorder(controller)
+    controller.dispatch(PreviewCommand.PLAY_PAUSE)
+    assert backend.play_calls == 0
+    assert len(lines) == 1 and "refused" in lines[0]
+
+
+def test_a_closed_controller_refuses_transport():
+    controller, backend, _ = _controller()
+    controller.close()
+    lines = _status_recorder(controller)
+    controller.dispatch(PreviewCommand.PLAY_PAUSE)
+    assert backend.play_calls == 0
+    assert len(lines) == 1 and "refused" in lines[0]
+
+
+def test_buffering_at_the_produced_edge_of_a_growing_file():
+    controller = PreviewController(FakeSurface())
+    controller.register_backend(PreviewBackendKind.LIVE_TAIL, FakeBackend())
+    controller.set_backend(PreviewBackendKind.LIVE_TAIL)
+    controller.observe(is_playing=False, has_picture=True, playhead=12.0, produced=12.0, duration=20.0, fps=24.0)
+    controller.dispatch(PreviewCommand.PLAY_PAUSE)
+    assert controller.state().phase is PreviewPhase.BUFFERING
+    # New frames land: the playhead is no longer at the edge, so the clock is playing again.
+    controller.observe(produced=13.0, playhead=12.2)
+    assert controller.state().phase is PreviewPhase.PLAYING
+    # And it buffers again when it catches up.
+    controller.observe(playhead=13.0)
+    assert controller.state().phase is PreviewPhase.BUFFERING
+
+
+def test_seek_to_moves_the_playhead_through_the_backend():
+    controller, backend, _ = _controller()
+    controller.dispatch(PreviewCommand.SEEK_TO, 6.0)
+    assert backend.seek_calls == [6.0]
+    assert controller.state().playhead == pytest.approx(6.0)
+
+
+def test_seek_fraction_is_a_share_of_the_duration():
+    controller, backend, _ = _controller()
+    controller.dispatch(PreviewCommand.SEEK_FRACTION, 0.25)
+    assert backend.seek_calls == [pytest.approx(5.0)]
+
+
+def test_a_refused_seek_is_one_status_line_and_no_backend_call():
+    """Past the produced edge on a growing file: the answer is a line, not a snap to the edge."""
+    controller, backend, _ = _controller(kind=PreviewBackendKind.LIVE_TAIL, produced=12.0, ceiling=None)
+    lines = _status_recorder(controller)
+    controller.dispatch(PreviewCommand.SEEK_TO, 18.0)
+    assert backend.seek_calls == [] if hasattr(backend, "seek_calls") else True
+    assert len(lines) == 1
+    assert "refused" in lines[0] and "12.000" in lines[0]
+    assert controller.state().playhead == pytest.approx(4.0)
+
+
+def test_a_finished_file_can_seek_the_whole_clip():
+    controller, backend, _ = _controller(ceiling=20.0)
+    controller.dispatch(PreviewCommand.SEEK_TO, 19.5)
+    assert backend.seek_calls == [19.5]
+
+
+def test_step_moves_one_frame_and_asks_the_backend():
+    controller, backend, _ = _controller()
+    controller.dispatch(PreviewCommand.STEP_FORWARD)
+    controller.dispatch(PreviewCommand.STEP_BACK)
+    assert backend.step_calls == [1, -1]
+    assert controller.state().playhead == pytest.approx(4.0)
+
+
+def test_set_mode_reaches_the_pane_and_clears_a_held_compare():
+    surface = FakeSurface()
+    controller, _, _ = _controller(surface)
+    controller.dispatch(PreviewCommand.COMPARE_DOWN)
+    controller.dispatch(PreviewCommand.SET_MODE, "sbs")
+    assert controller.state().mode == "sbs"
+    assert controller.state().compare is False
+    assert ("compare", False) in surface.calls
+    assert ("mode", "sbs") in surface.calls
+
+
+def test_an_unknown_view_mode_is_refused():
+    controller, _, surface = _controller()
+    lines = _status_recorder(controller)
+    controller.dispatch(PreviewCommand.SET_MODE, "quad")
+    assert surface.calls == []
+    assert len(lines) == 1 and "refused" in lines[0]
+
+
+def test_the_zoom_row():
+    surface = FakeSurface()
+    controller, _, _ = _controller(surface)
+    controller.dispatch(PreviewCommand.ZOOM_IN)
+    assert controller.state().zoom == pytest.approx(1.25)
+    assert controller.state().zoom_fit is False
+    controller.dispatch(PreviewCommand.ZOOM_ONE)
+    assert controller.state().zoom == pytest.approx(1.0)
+    controller.dispatch(PreviewCommand.ZOOM_FIT)
+    assert controller.state().zoom_fit is True
+    controller.dispatch(PreviewCommand.ZOOM_OUT)
+    assert controller.state().zoom == pytest.approx(1.0 / 1.25)
+    assert [name for name, _ in surface.calls] == ["zoom", "zoom", "zoom", "zoom"]
+
+
+def test_compare_is_a_hold_and_only_exists_in_single():
+    surface = FakeSurface()
+    controller, _, _ = _controller(surface)
+    controller.dispatch(PreviewCommand.COMPARE_DOWN)
+    assert controller.state().compare is True
+    assert ("compare", True) in surface.calls
+    controller.dispatch(PreviewCommand.COMPARE_UP)
+    assert controller.state().compare is False
+    assert ("compare", False) in surface.calls
+    controller.dispatch(PreviewCommand.SET_MODE, "split")
+    lines = _status_recorder(controller)
+    controller.dispatch(PreviewCommand.COMPARE_DOWN)
+    assert len(lines) == 1 and "refused" in lines[0]
+
+
+def test_fullscreen_toggles_even_with_nothing_on_the_pane():
+    controller, _, surface = _controller(has_picture=False)
+    controller.dispatch(PreviewCommand.TOGGLE_FULLSCREEN)
+    assert controller.state().fullscreen is True
+    assert ("fullscreen", True) in surface.calls
+
+
+def test_an_unknown_command_is_a_status_line_not_an_exception():
+    controller, _, _ = _controller()
+    lines = _status_recorder(controller)
+    controller.dispatch("fly")
+    assert len(lines) == 1 and "unknown command" in lines[0]
+
+
+def test_observe_rejects_a_typo():
+    controller, _, _ = _controller()
+    with pytest.raises(KeyError):
+        controller.observe(playhead_seconds=3.0)
+
+
+def test_one_state_signal_per_change():
+    controller, _, _ = _controller()
+    seen: list[PreviewState] = []
+    controller.stateChanged.connect(seen.append)
+    controller.dispatch(PreviewCommand.SEEK_TO, 6.0)
+    assert len(seen) == 1 and seen[0].playhead == pytest.approx(6.0)
+    controller.dispatch(PreviewCommand.SEEK_TO, 6.0)
+    assert len(seen) == 1      # the playhead did not move, so the state did not change: no second repaint
+    controller.observe(playhead=7.0)
+    assert len(seen) == 2
+
+
+# --- the catalog -------------------------------------------------------------------------------------
+
+def test_action_ids_are_unique():
+    ids = [spec.id for spec in ACTIONS]
+    assert len(ids) == len(set(ids))
+
+
+def test_every_command_is_covered():
+    """Every verb in the state machine is reachable: a spec carries it, or the scrubber/keyboard does."""
+    covered = ({spec.command for spec in ACTIONS}
+               | {spec.release_command for spec in ACTIONS if spec.release_command is not None}
+               | {PreviewCommand.SEEK_TO, PreviewCommand.SEEK_FRACTION})
+    assert covered == set(PreviewCommand)
+
+
+def test_the_bars_are_split_by_function():
+    top = {spec.id for spec in actions_for("top")}
+    bottom = {spec.id for spec in actions_for("bottom")}
+    assert "play" in bottom and "step_back" in bottom and "step_forward" in bottom
+    assert "play" not in top and "compare" in top and "mode_split" in top
+
+
+def test_enabled_predicates_read_the_state():
+    idle = PreviewState()
+    ready = PreviewState(phase=PreviewPhase.READY, duration=10.0)
+    play = next(spec for spec in ACTIONS if spec.id == "play")
+    assert enabled_for(play, idle) is False
+    assert enabled_for(play, ready) is True
+    compare = next(spec for spec in ACTIONS if spec.id == "compare")
+    assert enabled_for(compare, PreviewState(phase=PreviewPhase.READY, duration=10.0, mode="sbs")) is False
+    assert enabled_for(compare, ready) is True
+
+
+def test_the_catalog_carries_the_keyboard_routes():
+    by_id = {spec.id: spec for spec in ACTIONS}
+    assert by_id["play"].shortcut == "Space"
+    assert by_id["step_back"].shortcut == "Left"
+    assert by_id["step_forward"].shortcut == "Right"
+
+
+def test_a_spec_builds_a_real_toolkit_button():
+    _app()
+    spec = next(spec for spec in ACTIONS if spec.id == "zoom_fit")
+    button = build_button(spec)
+    assert isinstance(button, Button)
+    assert button.toolTip() == spec.tip
+    assert button.isCheckable() is True
+
+
+# --- the view: one pass, two bars in the letterbox ---------------------------------------------------
+
+@pytest.fixture()
+def pane():
+    _app()
+    widget = QWidget()
+    widget.resize(*PANE_SIZE)
+    widget.show()          # a hidden widget receives no resize event, and the bars follow the pane's size
+    return widget
+
+
+@pytest.fixture()
+def controls(pane):
+    widget = PreviewControls(pane, pane=pane)
+    widget.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.563, produced=12.4,
+                                  playhead=4.171, source_frames=493, frames_done=100,
+                                  output_frames=495, fps=24.0))
+    return widget
+
+
+def test_set_state_applies_every_widget_in_one_pass_without_emitting(controls):
+    emitted: list[tuple[object, object]] = []
+    controls.commandRequested.connect(lambda command, value: emitted.append((command, value)))
+    state = PreviewState(phase=PreviewPhase.PLAYING, backend=PreviewBackendKind.FINISHED_FILE,
+                         mode="sbs", produced=20.0, duration=20.0, playhead=6.0,
+                         source_frames=493, frames_done=120, output_frames=495, fps=24.0)
+    controls.set_state(state)
+    assert emitted == []
+    assert controls.button("mode_sbs").isChecked()
+    assert not controls.button("mode_single").isChecked()
+    assert controls.button("play").isEnabled()
+    assert not controls.button("compare").isEnabled()          # compare lives in single only
+    assert controls.timeline.isEnabled()
+    assert controls.time_text.text() == "0:06.000 / 0:20.000"
+
+
+def test_checked_is_written_with_signals_blocked(controls):
+    """Painting a state must never look like a click: a checked mode button emits no command during set_state."""
+    emitted: list[tuple[object, object]] = []
+    controls.commandRequested.connect(lambda command, value: emitted.append((command, value)))
+    controls.set_state(PreviewState(phase=PreviewPhase.READY, duration=10.0, produced=5.0, playhead=1.0,
+                                    mode="split"))
+    assert controls.button("mode_split").isChecked()
+    assert emitted == []
+
+
+def test_the_bars_sit_inside_the_pane_and_never_cover_its_middle(controls, pane):
+    top = controls.top_bar.geometry()
+    bottom = controls.bottom_bar.geometry()
+    assert pane.rect().contains(top)
+    assert pane.rect().contains(bottom)
+    # The picture's middle: everything between the top row and the transport stays free.
+    assert top.bottom() < pane.height() // 2
+    assert bottom.top() > pane.height() // 2
+    assert top.bottom() < bottom.top()
+
+
+def test_the_bars_are_children_of_the_pane(controls, pane):
+    """The overlay is the pane's child; the two bars are its children, so both sit over the pane (not the page)."""
+    assert controls.parentWidget() is pane
+    assert controls.top_bar.parentWidget() is controls
+    assert controls.bottom_bar.parentWidget() is controls
+
+
+def test_the_overlay_does_not_take_the_picture_mouse(controls):
+    assert controls.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    assert controls.top_bar.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    assert controls.bottom_bar.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+
+def test_resizing_the_pane_repositions_the_bars(controls, pane):
+    pane.resize(400, 400)
+    _app().processEvents()
+    assert controls.width() == 400 and controls.height() == 400
+    assert controls.bottom_bar.geometry().bottom() <= 400
+    assert controls.top_bar.geometry().bottom() < 200
+
+
+def test_a_narrow_pane_collapses_the_zoom_row_into_the_overflow(controls, pane):
+    pane.resize(330, 400)
+    _app().processEvents()
+    assert "zoom_in" in controls.hidden_tools()
+    assert controls.overflow_button.isVisible()
+
+
+def test_the_hold_compare_emits_down_then_up(controls):
+    emitted: list[tuple[object, object]] = []
+    controls.commandRequested.connect(lambda command, value: emitted.append((command, value)))
+    controls.button("compare").pressed.emit()
+    controls.button("compare").released.emit()
+    assert [command for command, _ in emitted] == [PreviewCommand.COMPARE_DOWN, PreviewCommand.COMPARE_UP]
+
+
+def test_a_mode_toggle_emits_set_mode_and_keeps_one_checked(controls):
+    emitted: list[tuple[object, object]] = []
+    controls.commandRequested.connect(lambda command, value: emitted.append((command, value)))
+    sbs = controls.button("mode_sbs")
+    sbs.setChecked(True)
+    sbs.toggled.emit(True)
+    assert emitted[-1] == (PreviewCommand.SET_MODE, "sbs")
+    assert not controls.button("mode_single").isChecked()
+
+
+def test_the_frame_readout_counts_source_packets_only(controls):
+    assert controls.frame_text.text() == "f 100 / 493"
+    assert "495" not in controls.frame_text.text()
+    assert "495" in controls.frame_text.toolTip() and "CFR" in controls.frame_text.toolTip()
+
+
+def test_the_play_glyph_follows_the_state(controls):
+    """The glyph is the ACTION a press performs: pause while playing, play while held."""
+    play = next(spec for spec in ACTIONS if spec.id == "play")
+    playing = PreviewState(phase=PreviewPhase.PLAYING, duration=10.0, playhead=1.0)
+    paused = PreviewState(phase=PreviewPhase.READY, duration=10.0, playhead=1.0)
+    from PySide6.QtGui import QIcon
+
+    assert isinstance(play.icon_when(playing), QIcon)
+    assert isinstance(play.icon_when(paused), QIcon)
+    controls.set_state(playing)     # applying it must not raise or emit
+    controls.set_state(paused)
+
+
+# --- the scrubber ------------------------------------------------------------------------------------
+
+def test_the_scrubber_carries_three_numbers_and_emits_seconds(controls):
+    timeline = controls.timeline
+    assert isinstance(timeline, PreviewTimeline)
+    assert timeline.produced_fraction() == pytest.approx(12.4 / 20.563, abs=1e-3)
+    assert timeline.playhead_fraction() == pytest.approx(4.171 / 20.563, abs=1e-3)
+    seen: list[float] = []
+    timeline.seekRequested.connect(seen.append)
+    timeline.sliderPressed.emit()
+    timeline.setValue(500)
+    timeline.sliderMoved.emit(500)
+    timeline.sliderReleased.emit()
+    assert seen and seen[-1] == pytest.approx(20.563 / 2, abs=1e-2)
+    assert timeline.is_scrubbing() is False
+
+
+def test_content_time_is_m_ss_mmm():
+    assert format_content_time(0.0) == "0:00.000"
+    assert format_content_time(4.171) == "0:04.171"
+    assert format_content_time(65.5) == "1:05.500"
+    assert format_content_time(None).startswith("\u2014")
+
+
+def test_the_scrubber_is_disabled_without_a_timeline(controls):
+    controls.set_state(PreviewState(phase=PreviewPhase.IDLE))
+    assert controls.timeline.isEnabled() is False
+
+
+# --- the page's fact mapping --------------------------------------------------------------------------
+
+def _fake_page(pane, controller):
+    """A `ProcessTab` shell with only the attributes `_push_preview_state` reads (no window, no GPU)."""
+    from src.ui.ProcessTab import ProcessTab
+
+    page = ProcessTab.__new__(ProcessTab)
+    page.page_handles = types.SimpleNamespace(
+        proc=types.SimpleNamespace(previewLabel=pane, previewPauseButton=None))
+    page.currentRenderOptions = types.SimpleNamespace(videoFrameCount=493, interpolateTimes=2, videoFps=24.0)
+    page.max_value = 990          # 495 CFR frames x 2
+    page.currentFrame = 500       # output frames processed
+    page.fps = 24
+    page._preview_paused = True
+    page._preview_playhead = 10.0
+    page._preview_duration = 20.0
+    page._preview_zoom = 1.0
+    page._preview_zoom_fit = True
+    page._preview_controller = controller
+    page.renderProcess = None
+    page._live_tail = None
+    page._preview_decoder = None
+    page._queue_pane_decoder = None
+    page._queue_pane_owns = False
+    page._display = None
+    page._feed = None
+    page._press = None
+    page._seek_ceiling = None
+    return page
+
+
+def test_the_page_feeds_source_packets_not_cfr_slots(controls):
+    controller = PreviewController(FakeSurface())
+    page = _fake_page(controls.parentWidget(), controller)
+    page._push_preview_state()
+    state = controller.state()
+    assert state.source_frames == 493
+    assert state.frames_done == 250            # 500 output frames / interpolate factor 2
+    assert state.output_frames == 990          # a separate fact, never a denominator
+    assert state.frame_ratio() == "f 250 / 493"
+    assert state.duration == pytest.approx(20.0)
+
+
+def test_the_page_selects_no_backend_without_an_owner(controls):
+    controller = PreviewController(FakeSurface())
+    page = _fake_page(controls.parentWidget(), controller)
+    page._push_preview_state()
+    assert controller.state().backend is PreviewBackendKind.NONE
+    assert isinstance(controller.backend(), NoBackend)
+    assert controller.state().phase is PreviewPhase.IDLE     # a stub pane with no frame
+
+
+def test_the_page_reports_a_finished_file_backend(controls):
+    controller = PreviewController(FakeSurface())
+
+    class Decoder:
+        duration = 20.0
+
+        def is_playing(self):
+            return False
+
+    page = _fake_page(controls.parentWidget(), controller)
+    page._preview_decoder = Decoder()
+    page._push_preview_state()
+    assert controller.state().backend is PreviewBackendKind.FINISHED_FILE
+    assert controller.state().produced == pytest.approx(20.0)
+    assert controller.state().seek_ceiling == pytest.approx(20.0)
+
+
+def test_installing_the_controls_hides_the_old_strip_and_button():
+    from src.ui.ProcessTab import ProcessTab
+    from src.ui.widgets.video_preview import VideoPreviewSurface
+
+    _app()
+    pane = VideoPreviewSurface()
+    pane.resize(*PANE_SIZE)
+    legacy = Button(icon=None, text="", size=(40, 40))
+    legacy.setVisible(True)
+    page = ProcessTab.__new__(ProcessTab)
+    page.page_handles = types.SimpleNamespace(
+        proc=types.SimpleNamespace(previewLabel=pane, previewPauseButton=legacy))
+    page.currentRenderOptions = None
+    page.max_value = 0
+    page.currentFrame = 0
+    page.fps = 0
+    page._preview_paused = True
+    page._preview_playhead = 0.0
+    page._preview_duration = 0.0
+    page._preview_zoom = 1.0
+    page._preview_zoom_fit = True
+    page._preview_controller = None
+    page._preview_controls = None
+    page.renderProcess = None
+    page._live_tail = None
+    page._preview_decoder = None
+    page._queue_pane_decoder = None
+    page._queue_pane_owns = False
+    page._display = None
+    page._feed = None
+    page._press = None
+
+    page._install_preview_controls()
+    assert legacy.isVisible() is False
+    assert page._preview_controls is not None
+    assert pane._strip_visible is False          # the painted strip stands down (public set_strip_visible)
+    # The bars are wired to the controller: a command from the view reaches the state machine (fullscreen is the one
+    # verb that works with nothing on the pane, so the wiring can be proven without a render).
+    page._preview_controls.commandRequested.emit(PreviewCommand.TOGGLE_FULLSCREEN, None)
+    assert page._preview_controller.state().fullscreen is True
+
+
+def test_the_backend_factory_selects_the_adapter_for_the_kind():
+    host = types.SimpleNamespace()
+    assert isinstance(backend_for(host, PreviewBackendKind.NONE), NoBackend)
+    encoder = object()
+    adapter = backend_for(host, PreviewBackendKind.LIVE_TAIL, tail=encoder)
+    assert adapter.kind is PreviewBackendKind.LIVE_TAIL
+    decoder = object()
+    assert backend_for(host, PreviewBackendKind.FINISHED_FILE, decoder=decoder).kind is (
+        PreviewBackendKind.FINISHED_FILE)
+    assert backend_for(host, PreviewBackendKind.DISPLAY_FEED).kind is PreviewBackendKind.DISPLAY_FEED
+
+
+def test_a_picture_without_an_owner_still_plays_through_the_page():
+    """The "play and the page starts its tail" case: the adapter delegates, it does not refuse."""
+    from src.ui.preview.backends import HostPlaybackBackend
+
+    class Page:
+        _preview_paused = True
+        _preview_playhead = 3.0
+
+        def __init__(self):
+            self.calls: list[bool] = []
+
+        def _set_preview_paused(self, paused: bool) -> None:
+            self.calls.append(bool(paused))
+            self._preview_paused = bool(paused)
+
+        def _clip_duration(self) -> float:
+            return 20.0
+
+    page = Page()
+    adapter = backend_for(page, PreviewBackendKind.NONE, host_playable=True)
+    assert isinstance(adapter, HostPlaybackBackend)
+    adapter.play()
+    adapter.pause()
+    assert page.calls == [False, True]

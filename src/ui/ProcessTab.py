@@ -150,6 +150,78 @@ def queue_properties_target(queue):
     return items[row], row, len(items), len(rows)
 
 
+class _PreviewSurfacePort:
+    """The page's picture verbs for `PreviewController` (view mode, zoom, compare, fullscreen).
+
+    The controller owns the state and the commands; this object is the only place the state reaches the pane/widgets,
+    and it uses the pane's PUBLIC API (`set_view_mode`, `set_zoom`, `reset_view`, `set_original`) - the internals of
+    `video_preview.py` belong to another lane.
+    """
+
+    def __init__(self, page: "ProcessTab") -> None:
+        self._page = page
+
+    def _pane(self):
+        return getattr(getattr(self._page.page_handles, "proc", None), "previewLabel", None)
+
+    def set_view_mode(self, mode: str) -> None:
+        pane = self._pane()
+        setter = getattr(pane, "set_view_mode", None)
+        if callable(setter):
+            try:
+                setter(str(mode))
+            except Exception as exc:
+                log(f"preview: view mode {mode} failed ({exc})")
+
+    def set_zoom(self, zoom: float, *, fit: bool) -> None:
+        pane = self._pane()
+        if pane is None:
+            return
+        try:
+            if fit:
+                pane.reset_view()
+            else:
+                setter = getattr(pane, "set_zoom", None)
+                if callable(setter):
+                    setter(float(zoom))
+        except Exception as exc:
+            log(f"preview: zoom {zoom} (fit={fit}) failed ({exc})")
+
+    def set_compare(self, held: bool) -> None:
+        """Hold the SOURCE at the playhead, or give the pane back to the result.
+
+        The decode is the page's existing compare route (`_on_original_requested` -> decoder -> `_on_original_frame` ->
+        `pane.set_original`): one source decode, cropped to the render's box. Releasing clears the held picture.
+        """
+        pane = self._pane()
+        if held:
+            try:
+                self._page._on_original_requested(float(getattr(self._page, "_preview_playhead", 0.0) or 0.0))
+            except Exception as exc:
+                log(f"preview: compare source decode failed ({exc})")
+            return
+        setter = getattr(pane, "set_original", None)
+        if callable(setter):
+            try:
+                setter(None)
+            except Exception:
+                pass
+
+    def set_fullscreen(self, fullscreen: bool) -> None:
+        window = self._page.window() if callable(getattr(self._page, "window", None)) else None
+        if window is None:
+            window = getattr(self._page, "parent", None)
+        if window is None:
+            return
+        try:
+            if fullscreen:
+                window.showFullScreen()
+            else:
+                window.showNormal()
+        except Exception as exc:
+            log(f"preview: fullscreen {fullscreen} failed ({exc})")
+
+
 class ProcessTab:
     def __init__(self, parent, settings: Settings):
         self.parent = parent
@@ -190,6 +262,14 @@ class ProcessTab:
         #: A preview does not run away by itself: it stands paused on a frame until the transport is pressed (owner,
         #: 2026-11-23: "добавь паузу и чтобы изначально на ней и стояло"). One flag for both owners of the pane.
         self._preview_paused = True
+        #: The control surface's one source of truth (`src/ui/preview/`): the page feeds it facts, the bars render it.
+        #: Built in `_install_preview_controls` (QConnect) once the page's widgets exist; `None` on a page without a
+        #: preview surface (the raster fallback or a stub in a test).
+        self._preview_controller = None
+        self._preview_controls = None
+        self._preview_surface = None
+        self._preview_zoom = 1.0
+        self._preview_zoom_fit = True
         #: The media time of the last frame the pane was given, so a paused hand-over to the finished file stands
         #: where the picture already is instead of jumping to 0.
         self._preview_playhead = 0.0
@@ -544,6 +624,9 @@ class ProcessTab:
         # early run showed a click that left the button checked with nothing moved (2026-11-23, not reproduced after
         # the switch, and the state can no longer disagree with the signal that carries it).
         self.page_handles.proc.previewPauseButton.toggled.connect(self._on_preview_pause_toggled)
+        # The new transport (plan-rve-preview-controls-frame-path-2026-11-25, layout E): the floating tools over the
+        # picture and the transport in the letterbox replace the painted strip and the page's one pause button.
+        self._install_preview_controls()
         self._sync_preview_transport()
 
     #: Which render button each state leaves USABLE. Visibility never changes (owner, 2026-11-24: "show the cancel
@@ -1792,6 +1875,7 @@ class ProcessTab:
         """
         button = getattr(self.page_handles.proc, "previewPauseButton", None)
         if button is None:
+            self._push_preview_state()
             return
         from PySide6.QtCore import QThread, QTimer
 
@@ -1823,6 +1907,201 @@ class ProcessTab:
                         or getattr(self, "_queue_pane_decoder", None) is not None
                         or rendering)
         button.setEnabled(bool(owns_picture))
+        # The bars read the same truth the legacy button does: one push per change, no second timer.
+        self._push_preview_state()
+
+    # -- the control surface (plan-rve-preview-controls-frame-path-2026-11-25) -------------------------
+
+    def _install_preview_controls(self) -> None:
+        """Build the controller, the backend adapters and the two bars over the pane.
+
+        The old painted strip and the page's one pause button stand down here: the strip is hidden with the pane's
+        PUBLIC `set_strip_visible(False)` (its signals stay wired, the transport is the new one), and the button is
+        hidden rather than removed because the page owns it. The page keeps its own LMB compare/pan: the bars are
+        children of the pane and only the controls take the mouse.
+        """
+        pane = getattr(getattr(self.page_handles, "proc", None), "previewLabel", None)
+        if pane is None or not hasattr(pane, "set_view_mode"):
+            return
+        from .preview.controller import PreviewController
+
+        try:
+            pane.set_strip_visible(False)
+        except Exception as exc:
+            log(f"preview: the pane's painted strip could not be hidden ({exc})")
+        legacy = getattr(self.page_handles.proc, "previewPauseButton", None)
+        if legacy is not None:
+            # The new transport replaces it. Its `toggled` connection stays (unused while hidden) so `_sync_preview_transport`
+            # keeps painting a widget somebody may still show for an A/B.
+            legacy.setVisible(False)
+        controller = PreviewController(self)
+        controller.set_logger(log)
+        self._preview_surface = _PreviewSurfacePort(self)
+        controller.set_surface(self._preview_surface)
+        self._preview_controller = controller
+        # The pane's wheel moves the zoom without the controller: mirror it so the Fit / 1:1 buttons stay honest.
+        zoom_changed = getattr(pane, "zoomChanged", None)
+        if zoom_changed is not None and hasattr(zoom_changed, "connect"):
+            zoom_changed.connect(self._on_preview_zoom_changed)
+        try:
+            from .preview.controls import PreviewControls
+
+            controls = PreviewControls(pane, pane=pane)
+        except Exception as exc:
+            log(f"preview: the control bars could not be built ({exc})")
+            self._preview_controller = None
+            return
+        controls.commandRequested.connect(controller.dispatch)
+        controller.stateChanged.connect(controls.set_state)
+        controller.stateChanged.connect(self._on_preview_state_changed)
+        controller.status.connect(self._on_preview_status)
+        self._preview_controls = controls
+        self._push_preview_state()
+
+    def _on_preview_state_changed(self, state) -> None:
+        """Mirror the state's own view fields so the next fact push cannot overwrite them with stale page values."""
+        self._preview_zoom = float(getattr(state, "zoom", 1.0) or 1.0)
+        self._preview_zoom_fit = bool(getattr(state, "zoom_fit", True))
+
+    def _on_preview_status(self, line: str) -> None:
+        """One controller line (a refused command, a log record) - always visible in log.txt."""
+        log(str(line))
+
+    def _on_preview_zoom_changed(self, zoom: float) -> None:
+        """The pane's own wheel zoom: the state follows the picture, the controller re-derives Fit vs 1:1."""
+        try:
+            self._preview_zoom = float(zoom)
+        except (TypeError, ValueError):
+            return
+        self._preview_zoom_fit = False
+        controller = getattr(self, "_preview_controller", None)
+        if controller is not None:
+            controller.observe(zoom=self._preview_zoom, zoom_fit=False)
+
+    def _set_preview_paused(self, paused: bool) -> None:
+        """The controller's play/pause entry: the shipped handler, which selects and moves the pane's owner.
+
+        Kept as a method because it is the page's public edge for the backend adapters (they never re-implement the
+        tail/decoder choice).
+        """
+        self._on_preview_pause_toggled(bool(paused))
+
+    def _preview_backend_kind(self):
+        """Who answers the transport right now: a finished file, a live tail, the export's feed, or nobody."""
+        from .preview.state import PreviewBackendKind
+
+        if self._queue_owns_pane():
+            return PreviewBackendKind.NONE
+        if getattr(self, "_preview_decoder", None) is not None:
+            return PreviewBackendKind.FINISHED_FILE
+        if getattr(self, "_live_tail", None) is not None:
+            return PreviewBackendKind.LIVE_TAIL
+        if self._display_can_seek_any_frame() and not bool(getattr(self, "isPreview", False)):
+            return PreviewBackendKind.DISPLAY_FEED
+        return PreviewBackendKind.NONE
+
+    def _preview_seek_ceiling(self, kind, duration: float) -> float | None:
+        """The furthest content time the transport may ask for.
+
+        A finished file and a feed that renders any frame on demand reach the whole clip; a growing file's tail only
+        has what the renderer has written (the state then defaults to the produced edge). Mirrors what the pane's own
+        strip is told in `_apply_seek_ceiling`.
+        """
+        from .preview.state import PreviewBackendKind
+
+        if duration <= 0.0:
+            return None
+        if kind in (PreviewBackendKind.FINISHED_FILE, PreviewBackendKind.DISPLAY_FEED):
+            return duration
+        if self._display_can_seek_any_frame() and not self._queue_owns_pane():
+            # A preview with a usable block answers a press past the edge with one decoded frame (`_request_display_seek`).
+            return duration
+        return None
+
+    def _push_preview_state(self) -> None:
+        """Feed the controller the facts it cannot see: the pane's numbers, its owners, the probe's frame counts."""
+        controller = getattr(self, "_preview_controller", None)
+        if controller is None:
+            return
+        from .preview.backends import backend_for
+        from .preview.state import PreviewBackendKind
+
+        pane = getattr(getattr(self.page_handles, "proc", None), "previewLabel", None)
+        if pane is None:
+            return
+        options = getattr(self, "currentRenderOptions", None)
+        duration = float(self._clip_duration() or 0.0)
+        source_frames = int(getattr(options, "videoFrameCount", 0) or 0)
+        factor = max(1, int(getattr(options, "interpolateTimes", 1) or 1))
+        output_frames = int(getattr(self, "max_value", 0) or 0) or source_frames * factor
+        frames_done = int(round(float(getattr(self, "currentFrame", 0) or 0) / factor))
+        if source_frames > 0:
+            frames_done = min(frames_done, source_frames)
+        fps = 0.0
+        try:
+            fps = float(getattr(options, "videoFps", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            fps = 0.0
+        if fps <= 0.0:
+            try:
+                fps = float(getattr(self, "fps", 0) or 0)
+            except (TypeError, ValueError):
+                fps = 0.0
+        kind = self._preview_backend_kind()
+        produced_fraction = self._live_produced_fraction()
+        if kind in (PreviewBackendKind.FINISHED_FILE, PreviewBackendKind.DISPLAY_FEED) and duration > 0.0:
+            produced = duration
+        else:
+            produced = produced_fraction * duration if duration > 0.0 else 0.0
+        process = getattr(self, "renderProcess", None)
+        rendering = process is not None and process.poll() is None
+        owners = (getattr(self, "_live_tail", None) is not None
+                  or getattr(self, "_preview_decoder", None) is not None
+                  or getattr(self, "_queue_pane_decoder", None) is not None)
+        try:
+            has_frame = bool(pane.has_frame()) if callable(getattr(pane, "has_frame", None)) else False
+        except Exception:
+            has_frame = False
+        has_picture = bool(has_frame or owners or rendering)
+        playing = bool(not self._preview_paused and has_picture)
+        try:
+            mode = str(pane.view_mode()) if callable(getattr(pane, "view_mode", None)) else "single"
+        except Exception:
+            mode = "single"
+        zoom = float(getattr(self, "_preview_zoom", 1.0) or 1.0)
+        pane_zoom = getattr(pane, "zoom", None)
+        if callable(pane_zoom):
+            try:
+                # The pane's APPLIED factor (the fit scale at open) is what the zoom buttons step from: stepping from
+                # a hard-coded 1.0 would jump a fitted 0.35 picture to 1.25 on the first press.
+                zoom = float(pane_zoom())
+                self._preview_zoom = zoom
+            except Exception:
+                pass
+        tail = getattr(self, "_live_tail", None)
+        decoder = getattr(self, "_preview_decoder", None)
+        controller.register_backend(
+            kind, backend_for(self, kind, tail=tail, decoder=decoder, host_playable=bool(has_picture)))
+        controller.set_backend(kind)
+        try:
+            playhead = float(self._result_playhead())
+        except Exception:
+            playhead = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        controller.observe(
+            is_playing=playing,
+            has_picture=has_picture,
+            playhead=max(0.0, playhead),
+            produced=max(0.0, produced),
+            duration=duration,
+            source_frames=source_frames,
+            frames_done=frames_done,
+            output_frames=output_frames,
+            fps=fps,
+            seek_ceiling=self._preview_seek_ceiling(kind, duration),
+            mode=mode,
+            zoom=zoom,
+            zoom_fit=bool(getattr(self, "_preview_zoom_fit", True)),
+        )
 
     def _wire_preview_strip(self) -> None:
         """Connect the pane's strip signals once, whoever owns the picture (live tail or finished file).
@@ -2608,6 +2887,8 @@ class ProcessTab:
         else:
             pixmap = QtGui.QPixmap.fromImage(image)
             pane.setPixmap(self.getRoundedPixmap(pixmap, corner_radius=10))
+        # The frame names the playhead; the readout and the scrubber follow the picture, not a timer.
+        self._push_preview_state()
 
     def onRenderCompletion(self):
         self.eta = 0
