@@ -240,7 +240,7 @@ class VideoDecoder(QObject):
             self._clock.pause(now)
         self._kick()
 
-    def request_frame(self, seconds: float) -> None:
+    def request_frame(self, seconds: float, *, exact: bool = False) -> None:
         """Decode and publish one frame at `seconds` without moving the play position.
 
         This is the LMB "show the original" path. A second decoder instance on the input file is the
@@ -250,7 +250,7 @@ class VideoDecoder(QObject):
         if self._container is None:
             self.error.emit("request_frame() called before open()")
             return
-        self._request = self._clamp(seconds)
+        self._request = (self._clamp(seconds), bool(exact))
         self._kick()
 
     def is_playing(self) -> bool:
@@ -277,9 +277,9 @@ class VideoDecoder(QObject):
         # while playing has to put the play position back afterwards).
         while True:
             if self._request is not None:
-                target, self._request = self._request, None
+                (target, exact), self._request = self._request, None
                 resume_at = self._clock.position(time.monotonic())
-                self._seek_and_publish(target, announce=False)
+                self._seek_and_publish(target, announce=False, exact=exact)
                 if self._playing:
                     self._pending_seek = resume_at
                 continue
@@ -375,7 +375,7 @@ class VideoDecoder(QObject):
 
     # -- seeking -----------------------------------------------------------------------------------
 
-    def _seek_and_publish(self, target: float, *, announce: bool = True) -> None:
+    def _seek_and_publish(self, target: float, *, announce: bool = True, exact: bool = False) -> None:
         """Keyframe rewind, decode forward, publish the frame the target names.
 
         Two rounding rules, and the caller chooses the one its counterpart uses:
@@ -405,7 +405,13 @@ class VideoDecoder(QObject):
                     break
                 published = frame
                 continue
-            if frame_at_or_after(frame.pts, target, tolerance=0.5 * self._interval):
+            # EXACT when the caller's target is the frame's own timestamp (the renderer names its pictures with the
+            # source PTS now): no slack, so a frame BEFORE the target can never be chosen. The slack exists only for a
+            # FITTED name - the seek answer's grid time can sit a few milliseconds off - and a half-frame slack was
+            # measured to be the one thing that picks the previous frame (mpv's own tolerance is 3-5 ms, inclusive on
+            # the past side; tdesktop uses none when the timestamp is exact).
+            if frame_at_or_after(frame.pts, target,
+                                 tolerance=0.0 if exact else 0.5 * self._interval):
                 published = frame
                 break
             fallback = frame

@@ -1117,8 +1117,12 @@ class ProcessTab:
                 seq = getattr(reader, "seq", None)
                 media_time = getattr(reader, "media_time", None)
             answer_of = getattr(self, "_picture_seek_answer", None)
-            pane.set_frame(image, seq=seq, media_time=media_time,
-                           generation=answer_of() if callable(answer_of) else None)
+            answer = answer_of() if callable(answer_of) else None
+            # A seek answer is named by the reader's FITTED grid (a few milliseconds off the container); a streaming
+            # picture is named by the frame's own PTS. The compare needs to know which, because a fitted name needs the
+            # half-frame slack and an exact one must have none.
+            self._shown_name_is_fitted = answer is not None
+            pane.set_frame(image, seq=seq, media_time=media_time, generation=answer)
             if pressed_at is not None and pending and media_time is not None:
                 # Close the seek here, and only here: the gate above already refused every picture that does not
                 # answer the request, so this publication IS the answer. The log names both generations as well as the
@@ -2413,7 +2417,8 @@ class ProcessTab:
                     log(f"source decoder: cannot open {path}")
                     return
                 self._source_decoder = decoder
-            decoder.request_frame(max(0.0, float(seconds)))
+            decoder.request_frame(max(0.0, float(seconds)),
+                                  exact=not bool(getattr(self, "_shown_name_is_fitted", False)))
         except Exception as exc:
             log(f"original frame failed: {exc}")
 

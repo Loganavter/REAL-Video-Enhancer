@@ -117,3 +117,27 @@ def test_a_name_a_few_milliseconds_off_its_frame_still_picks_that_frame():
     frames = [8.091, 8.133, 8.175]
     first = next(pts for pts in frames if frame_at_or_after(pts, name, tolerance=0.5 * interval))
     assert first == 8.133, f"the walk would publish {first}, not the frame the picture came from"
+
+
+def test_an_exact_name_never_accepts_the_frame_before_it():
+    """A name that IS a frame's own PTS must have NO slack: a half-frame tolerance picks the previous frame.
+
+    Precedent, from the research: mpv tolerates 3-5 ms and only on the past side (`common/common.h`,
+    `player/video.c`); Telegram Desktop decodes forward until `at >= position` with no tolerance
+    (`media_video_frames.cpp`); LosslessCut's time-equality with a 0.3 s drift allowance is the counter-example that
+    proves time equality is not frame equality. Our streaming names are real source PTS now, so the slack belongs only
+    to the fitted name of a seek answer.
+    """
+    from src.ui.video.decode import frame_at_or_after
+
+    interval = 1.0 / 23.976
+    name = 12.554208                                   # a frame's own pts
+    previous = name - interval                          # 12.5125
+    assert frame_at_or_after(name, name, tolerance=0.0) is True
+    assert frame_at_or_after(previous, name, tolerance=0.0) is False, "the frame before an exact name is not the answer"
+    # A full interval back is outside even a half-interval slack, so the slack was NOT the cause of a one-frame-behind
+    # report - the difference has to be measured from the two indices, not argued (that is why the publish and the
+    # compare both print their frame now).
+    assert frame_at_or_after(previous, name, tolerance=0.5 * interval) is False
+    # What the slack DOES buy: a fitted name a few milliseconds below its frame still finds that frame.
+    assert frame_at_or_after(name, name + 0.008, tolerance=0.5 * interval) is True
