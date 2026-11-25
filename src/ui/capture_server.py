@@ -1068,6 +1068,16 @@ def install(window) -> None:
             "translucent": bool(target.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)),
             "autofill": bool(target.autoFillBackground()),
         })
+        scrub_report = getattr(target, "scrub_report", None)
+        if callable(scrub_report):
+            # A custom-painted control's own answer (the preview's scrubber): fractions, whether a drag is in flight,
+            # the last ASK, and its recent actions. `value` above is the thumb alone, which cannot say whether a press
+            # was refused or never arrived (owner, 2026-11-26: "сделай отладку для этого слайдера рядом с отладкой
+            # превью").
+            try:
+                report["scrub"] = scrub_report()
+            except Exception as exc:  # a broken report must not take the channel down
+                report["scrub"] = {"error": f"{type(exc).__name__}: {exc}"}
         is_checked = getattr(target, "isChecked", None)
         if callable(is_checked):
             try:

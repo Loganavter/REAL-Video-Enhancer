@@ -15,6 +15,7 @@ state puts it).
 from __future__ import annotations
 
 import math
+import time
 
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
@@ -22,12 +23,21 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from sli_ui_toolkit.theme import ThemeManager
 from sli_ui_toolkit.ui.widgets.atomic.slider import Slider
 
+from ..video import telemetry as _telemetry
 from .state import PreviewState
 
 #: The toolbar's slider range: a 0..1000 integer track is finer than a millisecond at any realistic clip length.
 TRACK_STEPS = 1000
 #: Rounded ends and a 2 px marker keep the band's edge legible without competing with the thumb.
 MARKER_WIDTH = 2
+
+#: How many recent scrub actions the widget keeps for the control surface (`state:preview_timeline` -> `scrub`).
+#: The preview's own telemetry is `preview-log.txt`; this is the same session's answer for THIS control, in memory, so a
+#: diagnosis is one call instead of a screenshot argument ("the thumb did not move" vs "the press never landed").
+RECENT_SCRUB_ACTIONS = 16
+
+#: How long after asking a position a mismatch still counts as a refusal of THAT ask, seconds.
+SNAP_BACK_WINDOW_S = 3.0
 
 #: The colours the scrubber paints, by role. Nothing here is a literal RGBA; a missing token falls back neutral.
 TIMELINE_TOKENS = {
@@ -78,6 +88,14 @@ class PreviewTimeline(Slider):
         self._scrubbing = False
         #: The last value the widget ASKED for: a press and a release at one point are one seek, not two.
         self._last_emitted: int | None = None
+        #: (seconds, monotonic stamp) of the last ASK - what the host was asked to show.
+        self._asked: tuple[float, float] | None = None
+        #: The last value/fill this widget APPLIED from a state: what the user sees after this control's own state.
+        self._applied_value: int | None = None
+        self._applied_fill = 0.0
+        self._applied_playhead = 0.0
+        #: A small ring of what this control did, read back through the control surface.
+        self._recent: list[dict] = []
         self.setTrackPainter(self._paint_track)
         self.sliderPressed.connect(self._on_pressed)
         self.sliderReleased.connect(self._on_released)
@@ -87,6 +105,8 @@ class PreviewTimeline(Slider):
 
     def set_state(self, state: PreviewState) -> None:
         """Adopt the state's numbers; a drag in flight owns the thumb until it is released."""
+        before_value = int(self.value())
+        before_fill = float(self._played_fraction)
         self._duration = max(0.0, float(state.duration))
         self._produced_fraction = max(0.0, min(1.0, state.progress_percent()))
         self._played_fraction = state.played_fraction()
@@ -95,6 +115,7 @@ class PreviewTimeline(Slider):
         if not self._scrubbing:
             self._set_silent_value(round(self._playhead_fraction * TRACK_STEPS))
         self.update()
+        self._note_apply(state, before_value=before_value, before_fill=before_fill)
 
     def produced_fraction(self) -> float:
         return self._produced_fraction
@@ -108,6 +129,70 @@ class PreviewTimeline(Slider):
 
     def is_scrubbing(self) -> bool:
         return self._scrubbing
+
+    # -- what this control did (the preview's `preview-log.txt`, one file for both) -----------------
+
+    def scrub_report(self) -> dict:
+        """The control surface's single answer: the two fractions, whether a drag is in flight, who asked what last,
+        and the recent actions. Numbers, because a screenshot cannot tell "ignored" from "never delivered"."""
+        asked_s = None if self._asked is None else float(self._asked[0])
+        asked_age_ms = None if self._asked is None else (time.monotonic() - self._asked[1]) * 1000.0
+        return {
+            "duration": float(self._duration),
+            "value": int(self.value()),
+            "thumb": {"fraction": float(self._playhead_fraction), "seconds": self._playhead_fraction * self._duration},
+            "fill": {"fraction": float(self._played_fraction), "seconds": self._played_fraction * self._duration},
+            "produced": {"fraction": float(self._produced_fraction), "seconds": self._produced_fraction * self._duration},
+            "scrubbing": bool(self._scrubbing),
+            "asked": None if asked_s is None else {"seconds": asked_s, "age_ms": round(asked_age_ms or 0.0, 1)},
+            "recent": [{key: value for key, value in entry.items() if key != "_t"} for entry in self._recent],
+        }
+
+    def _note(self, kind: str, **fields) -> None:
+        """Record one action twice: the preview's own file (greppable, beside the preview's lines) and the widget's
+        ring, which `state:preview_timeline` reads back."""
+        clean = {key: value for key, value in fields.items() if value is not None}
+        _telemetry.event(f"scrub {kind}", **clean)
+        entry = {"kind": kind, "age_ms": 0.0}
+        entry.update({key: (round(value, 4) if isinstance(value, float) else value) for key, value in clean.items()})
+        now = time.monotonic()
+        for old in self._recent:
+            old["age_ms"] = round((now - float(old.get("_t", now))) * 1000.0, 1)
+        entry["_t"] = now
+        self._recent.append(entry)
+        del self._recent[:-RECENT_SCRUB_ACTIONS]
+
+    def _note_apply(self, state: PreviewState, *, before_value: int, before_fill: float) -> None:
+        """Log what a STATE did to this control - only when it moved something.
+
+        Two facts that used to be indistinguishable in a report: the fill/thumb the state asks for, and whether the
+        thumb was allowed to follow (a drag in flight owns it). A press the host refuses shows up as `snapback`, naming
+        the asked time, what the state showed instead, and the ceiling if the state carries one.
+        """
+        after_value = int(self.value())
+        moved_thumb = bool(after_value != before_value)
+        moved_fill = abs(float(self._played_fraction) - float(before_fill)) > 1e-6
+        if not moved_thumb and not moved_fill:
+            return
+        self._applied_value = after_value
+        self._applied_fill = float(self._played_fraction)
+        self._applied_playhead = float(self._playhead_fraction)
+        self._note("apply", value=after_value, thumb=round(self._playhead_fraction, 4),
+                   fill=round(self._played_fraction, 4), produced=round(self._produced_fraction, 4),
+                   scrubbing=int(bool(self._scrubbing)))
+        if self._asked is None or self._scrubbing or not moved_thumb:
+            return
+        asked_s, asked_at = self._asked
+        age = time.monotonic() - asked_at
+        tolerance = max(0.05, state.frame_interval())
+        shown = float(self._playhead_fraction) * float(self._duration)
+        if age <= SNAP_BACK_WINDOW_S and abs(shown - asked_s) > tolerance:
+            ceiling = state.seekable_ceiling()
+            self._note("snapback", asked_s=round(float(asked_s), 3), shown_s=round(shown, 3),
+                       age_ms=round(age * 1000.0, 1),
+                       ceiling_s=None if ceiling is None else round(float(ceiling), 3),
+                       produced_s=round(float(self._produced_fraction) * float(self._duration), 3),
+                       why="ask-not-shown")
 
     # -- interaction -----------------------------------------------------------------------------
 
@@ -135,6 +220,9 @@ class PreviewTimeline(Slider):
             return
         self._last_emitted = int(raw)
         seconds = max(0.0, min(1.0, raw / float(TRACK_STEPS))) * self._duration
+        self._asked = (float(seconds), time.monotonic())
+        self._note("ask", value=int(raw), seconds=round(float(seconds), 3),
+                   produced=round(float(self._produced_fraction), 4), scrubbing=int(bool(self._scrubbing)))
         self.seekRequested.emit(float(seconds))
 
     def _set_silent_value(self, value: int) -> None:

@@ -770,3 +770,44 @@ def test_the_bars_and_the_scrubber_carry_control_names(controls):
     assert controls.bottom_bar.objectName() == "preview_bottom_bar"
     assert controls.timeline.objectName() == "preview_timeline"
     assert controls.timeline.parent() is controls.bottom_bar
+
+
+def test_the_scrubber_writes_its_own_debug_lines_and_reports_what_it_did(controls):
+    """The owner's ask: debug for this slider beside the preview's own.
+
+    A press writes `preview: scrub ask …` into the preview's telemetry file and lands in `scrub_report()`, so "the thumb
+    did not move" can be answered with numbers instead of a screenshot: what was asked, what the state showed instead,
+    and the ceiling that refused it.
+    """
+    from src.ui.video import telemetry
+
+    lines: list[tuple[str, str]] = []
+    previous = telemetry._writer
+    telemetry.set_writer(lambda line, which: lines.append((which, line)))
+    try:
+        timeline = controls.timeline
+        timeline.resize(400, 24)
+        timeline.show()
+        QTest.qWaitForWindowExposed(timeline)
+        groove = timeline._groove_rect()
+        point = QPoint(int(groove.left() + groove.width() * 0.4), int(groove.center().y()))
+        QTest.mousePress(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        QTest.mouseRelease(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        report = timeline.scrub_report()
+        assert any(entry["kind"] == "ask" for entry in report["recent"]), report["recent"]
+        assert any("scrub ask" in line for _which, line in lines), lines
+
+        # The host refuses (a ceiling below the ask): the state puts the thumb somewhere else, and the report says why.
+        asked = report["asked"]["seconds"]
+        refused = PreviewState(phase=PreviewPhase.READY, duration=20.0, playhead=1.0, played=1.0,
+                               seek_ceiling=2.0, produced=2.0, fps=24.0)
+        timeline.set_state(refused)
+        report = timeline.scrub_report()
+        snaps = [entry for entry in report["recent"] if entry["kind"] == "snapback"]
+        assert snaps, report["recent"]
+        assert snaps[-1]["asked_s"] == pytest.approx(asked, abs=0.05)
+        assert snaps[-1]["shown_s"] == pytest.approx(1.0, abs=0.05)
+        assert snaps[-1]["ceiling_s"] == pytest.approx(2.0)
+        assert any("scrub snapback" in line for _which, line in lines), lines
+    finally:
+        telemetry.set_writer(previous)
