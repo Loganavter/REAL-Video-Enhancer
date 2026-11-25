@@ -1145,3 +1145,18 @@ def test_a_planes_frame_goes_to_the_pane_as_planes_and_an_rgb_frame_as_an_image(
     assert [call[0] for call in calls].count("image") == 1
     image_call = next(call for call in calls if call[0] == "image")
     assert image_call[1:3] == (2, 2)
+
+
+def test_a_press_inside_the_band_but_past_the_tails_flushed_edge_goes_on_demand():
+    """The band is the RENDERER's progress; the tail only serves what the muxer flushed. A press between the two used
+    to die inside the tail ("not in the flushed file") while the strip advertised the band as reachable - the owner's
+    own log (2026-11-26) pressed 8.164 s at produced=0.603 and the picture stayed at 4.17 s.
+    """
+    reader = _Reader()
+    tab = _tab(preview=True, paused=False, alive=True, reader=reader)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)   # a 10 s clip
+    tab.currentFrame, tab.max_value = 60, 100                                       # the renderer says 60%
+    tab.fps = 10
+    tab._live_tail = SimpleNamespace(produced_seconds=2.0, seek=lambda *a, **k: None)
+    tab._on_preview_seek(0.5)                                                       # 5 s: inside the band, past 2 s
+    assert reader.seeks == [pytest.approx(5.0)], "the tail cannot answer 5 s; the renderer can"

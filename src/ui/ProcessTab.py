@@ -2589,9 +2589,17 @@ class ProcessTab:
         # press (a drag sends many), which is why the target is what is logged and not the fraction alone.
         log(f"seek: press {fraction:.1%} of the strip (clip {clip:.3f}s, produced {produced:.1%}, "
             f"tail={'yes' if live is not None else 'no'}, preview={bool(getattr(self, 'isPreview', False))})")
+        # Two edges, not one: the band is the RENDERER's progress (`currentFrame / max_value`) and the tail can only
+        # serve what the muxer has FLUSHED - a preview at 60% whose file holds 20% refused every press between them
+        # inside the tail ("not in the flushed file"), with the strip advertising the whole 60% as reachable (owner's
+        # log, 2026-11-26: press at 8.164 s with produced=0.603, no seek record, the thumb stayed at 4.17 s).
+        tail_edge = float(getattr(live, "produced_seconds", 0.0) or 0.0) if live is not None else 0.0
+        tail_tolerance = 0.5 / max(1.0, float(getattr(self, "fps", 0) or 0.0) or 24.0)
+        past_tail = (live is not None and target_s is not None and tail_edge > 0.0
+                     and float(target_s) > tail_edge + tail_tolerance)
         if (bool(getattr(self, "isPreview", False))
                 and self._display_can_seek_any_frame()
-                and (live is None or fraction > produced + 1e-6)):
+                and (live is None or fraction > produced + 1e-6 or past_tail)):
             # The renderer can render this frame even though the tail cannot: the same block an export uses. Inside
             # the produced band the tail stays the answer (exact, and it costs the renderer nothing); past it the
             # press is one request and a hold on the picture it yields.
