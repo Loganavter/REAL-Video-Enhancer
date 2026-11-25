@@ -660,3 +660,18 @@ def test_the_compare_modes_draw_a_planes_result_and_an_rgb24_source_in_one_pass(
     assert image_uploads == [renderer._original_texture], "the source's one RGBA image, in the same batch"
     assert command_buffer.passes == 2 and command_buffer.draws == 2
     assert command_buffer.pipelines == [yuv_sentinel, rgba_sentinel], "the pipeline is stated per draw"
+
+
+def test_the_chroma_sampler_is_never_nearest_even_when_the_luma_one_is():
+    """A planes picture at 1:1 magnifies nothing in luma but still upsamples chroma 2x - so only luma may go nearest.
+
+    The chroma plane is half the picture's size on every draw, so a nearest tap there paints 2x2 colour blocks.
+    Measured at fit 1:1 on the 20 s preview (2026-11-25): nearest chroma cost 3.37% of pixels >8 levels off the RGBA
+    path on detailed frames vs 1.43% filtered; against zimg 0.50% vs 0.40%. This pins the policy that the two
+    samplers are chosen per role, not one per view.
+    """
+    pytest.importorskip("PySide6")
+    from src.ui.widgets.preview_renderer import plane_samplers
+
+    assert plane_samplers(nearest=True) == (True, False), "luma nearest, chroma filtered"
+    assert plane_samplers(nearest=False) == (False, False), "the fit view filters both"

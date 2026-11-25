@@ -17,8 +17,9 @@
 //      bt2020nc), supplied per frame from `PreviewFrame.color_space`. Nothing here assumes BT.709: a bt601 or a
 //      bt2020-tagged file gets its own coefficients, and an untagged file of this app's writer is bt709/tv.
 //
-// Chroma is sampled at the same uv as luma, so bilinear filtering upsamples 4:2:0 to full resolution the standard way
-// (the sampler is linear for the fit view and nearest at 1:1, the same rule the RGBA path follows).
+// Chroma is sampled at the same uv as luma, with a LINEAR sampler even in the nearest view: 4:2:0 chroma is half the
+// picture's size, so every draw upsamples it 2x and a nearest tap there would replicate 2x2 colour blocks. Luma keeps
+// the view's rule (nearest is pixel-exact at 1:1 and above), the RGBA path's rule.
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 fragColor;
 

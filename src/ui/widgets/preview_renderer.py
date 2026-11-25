@@ -143,6 +143,19 @@ def yuv_code_to_rgb(y: float, u: float, v: float, *, color_space: str | None = N
         max(0.0, min(1.0, row[0] * yy + row[1] * cb + row[2] * cr)) * 255.0 for row in rows)
 
 
+def plane_samplers(*, nearest: bool) -> tuple[bool, bool]:
+    """Which of a planes picture's two sampler roles are NEAREST: `(luma, chroma)`.
+
+    Luma follows the view's rule - `Nearest` is pixel-exact at 1:1 and above, exactly like the RGBA path. Chroma
+    never does: the chroma texture is half the picture's size, so every draw upsamples it 2x, and a nearest tap
+    replicates 2x2 colour blocks instead of interpolating. Measured at fit 1:1 on the 20 s preview (supervisor's
+    pixel gate + zimg, 2026-11-25): nearest chroma put 3.37% of pixels more than 8 levels off the RGBA path on
+    detailed frames against 1.43% for the filtered tap; against the independent H.273 reference (zimg) 0.50% vs
+    0.40%. The block edges are visible on detailed content, so the choice is not a matter of taste.
+    """
+    return bool(nearest), False
+
+
 def mip_minify_enabled() -> bool:
     """Mipminification on/off. The chain is the whole fix for the fit view (a 1440x1080 frame in a 421x512 pane is a
     3.42x minification through ONE bilinear tap, which aliases); the switch exists so an A/B runs on ONE build and the
@@ -1060,26 +1073,27 @@ class PreviewRenderer:
                  | QRhiShaderResourceBinding.StageFlag.FragmentStage)
         frag = QRhiShaderResourceBinding.StageFlag.FragmentStage
         specs = (
-            ("_yuv_bindings", self._yuv_uniforms, self._plane_textures, self._sampler_yuv_linear),
-            ("_yuv_bindings_nearest", self._yuv_uniforms, self._plane_textures, self._sampler_yuv_nearest),
-            ("_original_yuv_bindings", self._original_yuv_uniforms, self._original_plane_textures,
-             self._sampler_yuv_linear),
-            ("_original_yuv_bindings_nearest", self._original_yuv_uniforms, self._original_plane_textures,
-             self._sampler_yuv_nearest),
+            ("_yuv_bindings", self._yuv_uniforms, self._plane_textures, False),
+            ("_yuv_bindings_nearest", self._yuv_uniforms, self._plane_textures, True),
+            ("_original_yuv_bindings", self._original_yuv_uniforms, self._original_plane_textures, False),
+            ("_original_yuv_bindings_nearest", self._original_yuv_uniforms, self._original_plane_textures, True),
         )
-        for attribute, uniforms, textures, sampler in specs:
+        for attribute, uniforms, textures, nearest in specs:
             current = getattr(self, attribute, None)
             if current is not None:
                 current.destroy()
                 setattr(self, attribute, None)
             if textures is None or len(textures) != 3 or uniforms is None:
                 continue
+            luma_nearest, chroma_nearest = plane_samplers(nearest=nearest)
+            luma_sampler = self._sampler_yuv_nearest if luma_nearest else self._sampler_yuv_linear
+            chroma_sampler = self._sampler_yuv_nearest if chroma_nearest else self._sampler_yuv_linear
             bindings = rhi.newShaderResourceBindings()
             bindings.setBindings([
                 QRhiShaderResourceBinding.uniformBuffer(0, flags, uniforms),
-                QRhiShaderResourceBinding.sampledTexture(1, frag, textures[0], sampler),
-                QRhiShaderResourceBinding.sampledTexture(2, frag, textures[1], sampler),
-                QRhiShaderResourceBinding.sampledTexture(3, frag, textures[2], sampler),
+                QRhiShaderResourceBinding.sampledTexture(1, frag, textures[0], luma_sampler),
+                QRhiShaderResourceBinding.sampledTexture(2, frag, textures[1], chroma_sampler),
+                QRhiShaderResourceBinding.sampledTexture(3, frag, textures[2], chroma_sampler),
             ])
             bindings.create()
             setattr(self, attribute, bindings)
