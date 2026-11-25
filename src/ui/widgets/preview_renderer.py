@@ -26,9 +26,12 @@ releasing the resources there unconditionally leaves the pane sampling an undraw
 "preview turns transparent at any sneeze" defect). Same context -> keep the resources and re-upload the standing
 pictures; new context -> release and rebuild.
 
-Frame ingestion is `PreviewFrame` (frozen): `format="rgba8"` with `image=` today, and the `yuv420p10le`/`yuv420p`
-plane descriptors are the contract the next lane fills in. This file implements `rgba8` only and says so loudly for any
-other format instead of drawing a black pane.
+Frame ingestion is `PreviewFrame` (frozen): `format="rgba8"` with `image=`, or one of the planar formats
+(`yuv420p10le`, `yuv420p`) with `planes=`/`strides=`. The RGBA path is the fallback and is byte-identical to what it
+was; the planes path uploads three textures (Y full size, U/V half) in ONE resource-update batch and converts colour in
+the fragment shader (`yuv.frag`), with the matrix and the range taken from the frame's own tags (`color_space`,
+`color_range`) rather than from a constant. `yuv_code_to_rgb` below is the CPU mirror of that shader for tests and for
+the pixel gate's reference.
 """
 
 from __future__ import annotations
@@ -51,6 +54,9 @@ from PySide6.QtGui import (
     QRhiShaderResourceBinding,
     QRhiShaderStage,
     QRhiTexture,
+    QRhiTextureUploadDescription,
+    QRhiTextureUploadEntry,
+    QRhiTextureSubresourceUploadDescription,
     QRhiVertexInputAttribute,
     QRhiVertexInputBinding,
     QRhiVertexInputLayout,
@@ -59,8 +65,82 @@ from PySide6.QtGui import (
 )
 
 from src.ui.video import telemetry
+from src.ui.video.frames import PLANAR_FORMATS, SAMPLE_BYTES, plane_geometry
 
 SHADER_DIR = "shaders"
+
+#: The planar formats this renderer uploads as three textures.
+YUV_FORMATS = PLANAR_FORMATS
+
+#: The planes uniform block: mat4 mvp (64) + vec4 tint (16) + luma (16) + chroma (16) + three matrix
+#: rows (48). std140 packs vec4 members on 16-byte boundaries, so this is also the byte size.
+YUV_UNIFORM_BYTES = 160
+
+#: The full-range matrices (luma already expanded to 0..1, chroma centred on 0). Rows are
+#: `(Y, Cb, Cr) -> R|G|B`. These are the standard full-range coefficients of each matrix: the
+#: LIMITED range is handled by the luma/chroma affine below, so the matrix itself is range-free -
+#: exactly how a decoder separates "range expansion" from "matrix" (ITU-T H.273).
+YUV_MATRICES = {
+    "bt709": ((1.0, 0.0, 1.5748), (1.0, -0.187324, -0.468124), (1.0, 1.8556, 0.0)),
+    "smpte170m": ((1.0, 0.0, 1.402), (1.0, -0.344136, -0.714136), (1.0, 1.772, 0.0)),
+    "bt470bg": ((1.0, 0.0, 1.402), (1.0, -0.344136, -0.714136), (1.0, 1.772, 0.0)),
+    "bt2020nc": ((1.0, 0.0, 1.4746), (1.0, -0.164553, -0.571353), (1.0, 1.8814, 0.0)),
+}
+#: Every matrix this app's writer can tag, and the fallback when a file declares none. The writer
+#: emits `-colorspace bt709 -color_range tv`, so bt709/tv is what an untagged file of ours is.
+DEFAULT_COLOR_SPACE = "bt709"
+DEFAULT_COLOR_RANGE = "tv"
+
+#: Per-depth code ranges of the two ranges (H.273): luma `(offset, span)`, chroma `(offset, span)`.
+#: Limited ("tv") 10-bit is 64..940 luma and 64..960 chroma; 8-bit is 16..235 and 16..240.
+_RANGE_CODES = {
+    8: {"tv": ((16, 219), (128, 224)), "pc": ((0, 255), (128, 255))},
+    10: {"tv": ((64, 876), (512, 896)), "pc": ((0, 1023), (512, 1023))},
+}
+
+
+def yuv_uniform_floats(color_space: str | None = None, color_range: str | None = None,
+                       *, depth: int = 10) -> tuple[float, ...]:
+    """The 20 floats the YUV shader reads: luma/chroma affine, then the three matrix rows.
+
+    Layout (std140, four `vec4`s after the mvp/tint): `luma = (multiplier, offset, 0, 0)`,
+    `chroma = (multiplier, offset, 0, 0)`, then `row0/row1/row2 = (Y, Cb, Cr, 0)`.
+
+    The multipliers fold the sample normalisation IN: an R16 texture samples `code / 65535`, an R8
+    texture `code / 255`, and the shader only ever writes `s * multiplier + offset`. So the one
+    arithmetic trap of a 10-bit plane upload (dividing by 65535 instead of 1023) is answered here,
+    once, where a test can read it.
+    """
+    matrix = YUV_MATRICES.get(str(color_space or DEFAULT_COLOR_SPACE), YUV_MATRICES[DEFAULT_COLOR_SPACE])
+    rng = "pc" if str(color_range or DEFAULT_COLOR_RANGE).lower() in ("pc", "jpeg", "full") else "tv"
+    (y_off, y_span), (c_off, c_span) = _RANGE_CODES[int(depth)][rng]
+    sample_max = 65535.0 if int(depth) > 8 else 255.0
+    luma = (sample_max / float(y_span), -float(y_off) / float(y_span), 0.0, 0.0)
+    chroma = (sample_max / float(c_span), -float(c_off) / float(c_span), 0.0, 0.0)
+    floats: list[float] = [*luma, *chroma]
+    for row in matrix:
+        floats.extend([float(row[0]), float(row[1]), float(row[2]), 0.0])
+    return tuple(floats)
+
+
+def yuv_code_to_rgb(y: float, u: float, v: float, *, color_space: str | None = None,
+                    color_range: str | None = None, depth: int = 10) -> tuple[float, float, float]:
+    """The CPU mirror of `yuv.frag`: code values at `depth` -> RGB in 0..255 (clamped).
+
+    Same numbers the shader gets, applied in Python: the uniform floats are scaled back into "code
+    space" by the sample maximum, which is exactly what `s * multiplier + offset` does when
+    `s = code / sample_max`. Used by the tests' reference and by the pixel gate's comparison.
+    """
+    sample_max = 65535.0 if int(depth) > 8 else 255.0
+    params = yuv_uniform_floats(color_space, color_range, depth=depth)
+    luma_x, luma_y = params[0], params[1]
+    chroma_x, chroma_y = params[4], params[5]
+    rows = YUV_MATRICES.get(str(color_space or DEFAULT_COLOR_SPACE), YUV_MATRICES[DEFAULT_COLOR_SPACE])
+    yy = (float(y) / sample_max) * luma_x + luma_y
+    cb = (float(u) / sample_max) * chroma_x + chroma_y
+    cr = (float(v) / sample_max) * chroma_x + chroma_y
+    return tuple(  # type: ignore[return-value]
+        max(0.0, min(1.0, row[0] * yy + row[1] * cb + row[2] * cr)) * 255.0 for row in rows)
 
 
 def mip_minify_enabled() -> bool:
@@ -76,12 +156,13 @@ def mip_minify_enabled() -> bool:
 class PreviewFrame:
     """One picture to ingest: its pixel format, its size and its identity.
 
-    `rgba8` carries the pixels as a `QImage` (already converted by the caller). The YUV formats carry the planes and
-    their byte strides instead - the next lane (the YUV path) fills those in; the renderer refuses anything that is not
-    `rgba8` today rather than sampling an unbound texture.
+    `rgba8` carries the pixels as a `QImage` (already converted by the caller). The planar formats
+    (`yuv420p10le`, `yuv420p`) carry the three planes and their byte strides (`Y` full size, `U`/`V`
+    half size) plus the stream's colour tags, and the renderer converts colour in the shader.
 
-    `width`/`height` describe the PICTURE. For `rgba8` the texture is sized from the image itself (implicit-sharing
-    cheap), so a descriptor that disagrees with its image still uploads what it draws.
+    `width`/`height` describe the PICTURE. For `rgba8` the texture is sized from the image itself
+    (implicit-sharing cheap), so a descriptor that disagrees with its image still uploads what it
+    draws.
     """
 
     format: str                    # "rgba8" | "yuv420p10le" | "yuv420p"
@@ -92,6 +173,11 @@ class PreviewFrame:
     image: QImage | None = None    # rgba8 only
     planes: tuple[memoryview, ...] | None = None   # Y, U, V
     strides: tuple[int, ...] | None = None
+    #: The stream's own colour tags, when its producer could read them (`"bt709"`, `"tv"`). `None`
+    #: means "not declared": the renderer then uses bt709/tv, which is what this app's writer emits.
+    #: Never hard-coded for a file that DOES declare another space (H.273 tags are read, not assumed).
+    color_space: str | None = None
+    color_range: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,8 +247,7 @@ class PreviewRenderer:
         #: Geometry for the paint that is about to run; `set_scene` fills it in every frame.
         self._scene: PreviewScene | None = None
         self._target: QRhiRenderTarget | None = None
-        #: The ingested pictures. `rgba8` only today; the descriptors are the frame-ingestion contract
-        #: (`PreviewFrame`).
+        #: The ingested pictures. `rgba8` uses one texture, the planar formats three.
         self._frame: PreviewFrame | None = None
         self._original: PreviewFrame | None = None
         #: The view mode as `set_view_mode` last stated it: `set_original` reads it to decide WHICH texture is dirty
@@ -177,16 +262,32 @@ class PreviewRenderer:
         # Everything below is None until `_create_resources` ran; `release` puts it back to None.
         self._texture = None
         self._original_texture = None
+        #: The planar pictures' own textures: three per picture (Y, U, V), R16 for 10-bit and R8 for
+        #: 8-bit, created/resized as a set so a mid-playback format change cannot leave a half-bound
+        #: SRB (the same rule the RGBA texture learned the expensive way).
+        self._plane_textures = None
+        self._original_plane_textures = None
         self._sampler_nearest = None
         self._sampler_linear = None
+        #: The planes samplers: always single-level (`None_` mip filter), because a mipmap filter over
+        #: a texture with no chain sampled opaque black on llvmpipe once - see `_create_resources`.
+        self._sampler_yuv_nearest = None
+        self._sampler_yuv_linear = None
         self._uniforms = None
         self._original_uniforms = None
+        self._yuv_uniforms = None
+        self._original_yuv_uniforms = None
         self._vertices = None
         self._bindings = None
         self._bindings_nearest = None
         self._original_bindings = None
         self._original_bindings_nearest = None
+        self._yuv_bindings = None
+        self._yuv_bindings_nearest = None
+        self._original_yuv_bindings = None
+        self._original_yuv_bindings_nearest = None
         self._pipeline = None
+        self._yuv_pipeline = None
         self._hud_uniforms = None
         self._hud_buffer = None
         self._hud_bindings = None
@@ -200,11 +301,15 @@ class PreviewRenderer:
         self._check_frame(frame)
         self._frame = frame
         self._result_dirty = frame is not None
-        if self._result_dirty and self._texture is not None:
+        if self._result_dirty:
             # Create the texture OUTSIDE a frame: QRhi resources are created between frames, and a create() issued
             # while a frame is being recorded is refused by the backend without an exception (the frame then samples
             # the 1x1 placeholder - opaque black, which reads exactly like "the upload was skipped").
-            self._ensure_texture(self._frame_size(frame))
+            if frame.format in YUV_FORMATS:
+                if self._yuv_uniforms is not None:
+                    self._ensure_plane_textures(frame, original=False)
+            elif self._texture is not None:
+                self._ensure_texture(self._frame_size(frame))
 
     def set_original(self, frame: PreviewFrame | None) -> None:
         """The source picture for the compare; `None` drops it.
@@ -218,8 +323,12 @@ class PreviewRenderer:
             self._result_dirty = True
         else:
             self._original_dirty = frame is not None
-            if frame is not None and self._texture is not None:
-                self._ensure_original_texture(self._frame_size(frame))
+            if frame is not None:
+                if frame.format in YUV_FORMATS:
+                    if self._yuv_uniforms is not None:
+                        self._ensure_plane_textures(frame, original=True)
+                elif self._texture is not None:
+                    self._ensure_original_texture(self._frame_size(frame))
 
     def set_view_mode(self, mode: str) -> None:
         """State the view mode; both textures are re-uploaded once on a real change.
@@ -235,13 +344,30 @@ class PreviewRenderer:
 
     @staticmethod
     def _check_frame(frame: PreviewFrame | None) -> None:
-        """Refuse a frame this renderer cannot upload yet - loudly, not as a silently black pane."""
+        """Refuse a frame this renderer cannot upload - loudly, not as a silently black pane."""
         if frame is None:
+            return
+        if frame.format in YUV_FORMATS:
+            if not frame.planes or frame.strides is None or len(frame.planes) != 3 or len(frame.strides) != 3:
+                raise ValueError(f"PreviewRenderer: a {frame.format!r} PreviewFrame needs three planes and three "
+                                 "strides (Y, U, V)")
+            if int(frame.width) < 1 or int(frame.height) < 1:
+                raise ValueError(f"PreviewRenderer: a {frame.format!r} frame needs a positive size, got "
+                                 f"{frame.width}x{frame.height}")
+            sample_bytes = SAMPLE_BYTES[frame.format]
+            luma, chroma = plane_geometry(frame.width, frame.height)
+            for index, (plane, stride, (plane_w, plane_h)) in enumerate(
+                    zip(frame.planes, frame.strides, (luma, chroma, chroma))):
+                row_bytes = int(plane_w) * sample_bytes
+                if int(stride) < row_bytes or len(plane) < int(stride) * int(plane_h):
+                    raise ValueError(
+                        f"PreviewRenderer: plane {index} of a {frame.format!r} frame carries {len(plane)} bytes at "
+                        f"stride {stride}; {plane_w}x{plane_h} needs at least {row_bytes} per row")
             return
         if frame.format != "rgba8":
             raise NotImplementedError(
-                f"PreviewRenderer: frame format {frame.format!r} is not implemented yet (only 'rgba8'; the YUV planes "
-                "path is the next lane)")
+                f"PreviewRenderer: frame format {frame.format!r} is not implemented (expected 'rgba8', "
+                f"{', '.join(repr(name) for name in YUV_FORMATS)})")
         if frame.image is None:
             raise ValueError("PreviewRenderer: an 'rgba8' PreviewFrame must carry its QImage in `image`")
 
@@ -284,9 +410,15 @@ class PreviewRenderer:
 
     def release(self) -> None:
         """Destroy every QRhi object. Idempotent: the names stay (as None) for the next `initialize`."""
-        for name in ("_pipeline", "_bindings", "_bindings_nearest", "_vertices", "_uniforms",
+        for attr in ("_plane_textures", "_original_plane_textures"):
+            self._destroy_textures(getattr(self, attr, None))
+            setattr(self, attr, None)
+        for name in ("_pipeline", "_yuv_pipeline", "_bindings", "_bindings_nearest", "_vertices", "_uniforms",
                      "_sampler_nearest", "_sampler_linear", "_texture", "_original_texture",
                      "_original_bindings", "_original_bindings_nearest", "_original_uniforms",
+                     "_yuv_bindings", "_yuv_bindings_nearest", "_original_yuv_bindings",
+                     "_original_yuv_bindings_nearest", "_yuv_uniforms", "_original_yuv_uniforms",
+                     "_sampler_yuv_nearest", "_sampler_yuv_linear",
                      "_hud_pipeline", "_hud_bindings", "_hud_buffer", "_hud_uniforms"):
             item = getattr(self, name, None)
             if item is not None:
@@ -295,6 +427,14 @@ class PreviewRenderer:
                 except Exception:  # a resource the context already took: teardown must not raise
                     pass
                 setattr(self, name, None)
+
+    @staticmethod
+    def _destroy_textures(textures) -> None:
+        for texture in textures or ():
+            try:
+                texture.destroy()
+            except Exception:  # a resource the context already took
+                pass
 
     # -- the pass --------------------------------------------------------
 
@@ -338,26 +478,41 @@ class PreviewRenderer:
         picture = self._original if showing_original else self._frame
         if picture is None:
             return
+        is_yuv = picture.format in YUV_FORMATS
         if self._result_dirty:
-            self._ensure_texture(self._frame_size(picture))
-        if self._pipeline is None:
-            self._build_pipeline()
-            if self._pipeline is None:
+            if is_yuv:
+                self._ensure_plane_textures(picture, original=False)
+            else:
+                self._ensure_texture(self._frame_size(picture))
+        pipeline = self._pipeline_for(picture)
+        if pipeline is None:
+            pipeline = self._build_pipeline_for(picture)
+            if pipeline is None:
                 return
         updates = self._rhi.nextResourceUpdateBatch()
         if self._result_dirty:
             upload_started = time.perf_counter()
-            updates.uploadTexture(self._texture, picture.image)
-            if mip_minify_enabled():
-                # Same batch as the upload, BEFORE the pass: the chain is built from level 0 on the queue, and
-                # `resourceUpdate` is only legal outside a render pass. Cost is one-time per uploaded frame (the chain
-                # of an 1440x1080 RGBA8 is ~2.1 MB - noise against the 6.2 MB level 0 that already crossed the bus).
-                updates.generateMips(self._texture)
+            if is_yuv:
+                self._upload_planes(updates, picture, self._plane_textures)
+            else:
+                updates.uploadTexture(self._texture, picture.image)
+                if mip_minify_enabled():
+                    # Same batch as the upload, BEFORE the pass: the chain is built from level 0 on the queue, and
+                    # `resourceUpdate` is only legal outside a render pass. Cost is one-time per uploaded frame (the chain
+                    # of an 1440x1080 RGBA8 is ~2.1 MB - noise against the 6.2 MB level 0 that already crossed the bus).
+                    updates.generateMips(self._texture)
             telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
                                   size_bytes=self._pixel_bytes(picture))
             self._result_dirty = False
-        updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(scene.result_mvp))
-        updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(list(scene.tint)))
+        if is_yuv:
+            updates.updateDynamicBuffer(
+                self._yuv_uniforms, 0, YUV_UNIFORM_BYTES,
+                self._yuv_uniform_block(picture, scene.result_mvp, scene.tint))
+            bindings = self._yuv_bindings_nearest if scene.nearest else self._yuv_bindings
+        else:
+            updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(scene.result_mvp))
+            updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(list(scene.tint)))
+            bindings = self._bindings_nearest if scene.nearest else self._bindings
         # The HUD's buffers are filled into the SAME batch, before the pass: `QRhiCommandBuffer::resourceUpdate` must be
         # called outside a render pass, so building the strip inside one (the first version did) is not allowed.
         hud_vertices = list(scene.hud_vertices)
@@ -368,14 +523,14 @@ class PreviewRenderer:
             updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
         pass_started = time.perf_counter()
         command_buffer.beginPass(target, scene.clear, QRhiDepthStencilClearValue(1.0, 0), updates)
-        command_buffer.setGraphicsPipeline(self._pipeline)
+        command_buffer.setGraphicsPipeline(pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
         # The pipeline declares `UsesScissor` (the compare modes need it), so the scissor state is LIVE here: a frame
         # must state its own scissor before drawing, or it inherits the last one set on the command buffer - an empty
         # one clipped the whole picture away in `single` after a compare mode had run (pixel gate, 2026-11-24).
         command_buffer.setScissor(
             QRhiScissor(0, 0, target.pixelSize().width(), target.pixelSize().height()))
-        command_buffer.setShaderResources(self._bindings_nearest if scene.nearest else self._bindings)
+        command_buffer.setShaderResources(bindings)
         command_buffer.setVertexInput(0, [(self._vertices, 0)])
         command_buffer.draw(6)
         if hud_vertices and self._hud_pipeline is not None:
@@ -402,41 +557,63 @@ class PreviewRenderer:
         frame = self._frame
         if frame is None:
             return
-        self._ensure_texture(self._frame_size(frame))
+        if frame.format in YUV_FORMATS:
+            self._ensure_plane_textures(frame, original=False)
+        else:
+            self._ensure_texture(self._frame_size(frame))
         original = self._original
         if original is not None and _null_picture(original):
             # The old inline path treated a null source image as "no source half" - it must not reach
             # `_ensure_original_texture` with a 0x0 size, which QRhi refuses.
             original = None
         if original is not None:
-            self._ensure_original_texture(self._frame_size(original))
-        if self._pipeline is None:
-            self._build_pipeline()
-            if self._pipeline is None:
+            if original.format in YUV_FORMATS:
+                self._ensure_plane_textures(original, original=True)
+            else:
+                self._ensure_original_texture(self._frame_size(original))
+        if self._pipeline_for(frame) is None and self._build_pipeline_for(frame) is None:
+            return
+        if original is not None and self._pipeline_for(original) is None:
+            if self._build_pipeline_for(original) is None:
                 return
         updates = self._rhi.nextResourceUpdateBatch()
         if self._result_dirty:
             upload_started = time.perf_counter()
-            updates.uploadTexture(self._texture, frame.image)
-            if mip_minify_enabled():
-                updates.generateMips(self._texture)
+            if frame.format in YUV_FORMATS:
+                self._upload_planes(updates, frame, self._plane_textures)
+            else:
+                updates.uploadTexture(self._texture, frame.image)
+                if mip_minify_enabled():
+                    updates.generateMips(self._texture)
             telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
                                   size_bytes=self._pixel_bytes(frame))
             self._result_dirty = False
         tint = list(scene.tint)
-        updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(scene.result_mvp))
-        updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(tint))
-        draw_original = (original is not None and self._original_texture is not None
+        if frame.format in YUV_FORMATS:
+            updates.updateDynamicBuffer(self._yuv_uniforms, 0, YUV_UNIFORM_BYTES,
+                                        self._yuv_uniform_block(frame, scene.result_mvp, tint))
+        else:
+            updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(scene.result_mvp))
+            updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(tint))
+        draw_original = (original is not None
+                         and (self._original_texture is not None or self._original_plane_textures is not None)
                          and scene.original_mvp is not None)
         if draw_original:
             if self._original_dirty:
                 upload_started = time.perf_counter()
-                updates.uploadTexture(self._original_texture, original.image)
+                if original.format in YUV_FORMATS:
+                    self._upload_planes(updates, original, self._original_plane_textures)
+                else:
+                    updates.uploadTexture(self._original_texture, original.image)
                 telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
                                       size_bytes=self._pixel_bytes(original))
                 self._original_dirty = False
-            updates.updateDynamicBuffer(self._original_uniforms, 0, 64, _floats(scene.original_mvp))
-            updates.updateDynamicBuffer(self._original_uniforms, 64, 16, _floats(tint))
+            if original.format in YUV_FORMATS:
+                updates.updateDynamicBuffer(self._original_yuv_uniforms, 0, YUV_UNIFORM_BYTES,
+                                            self._yuv_uniform_block(original, scene.original_mvp, tint))
+            else:
+                updates.updateDynamicBuffer(self._original_uniforms, 0, 64, _floats(scene.original_mvp))
+                updates.updateDynamicBuffer(self._original_uniforms, 64, 16, _floats(tint))
         hud_vertices = list(scene.hud_vertices)
         if hud_vertices and self._hud_pipeline is not None:
             updates.updateDynamicBuffer(self._hud_uniforms, 0, 16,
@@ -445,20 +622,22 @@ class PreviewRenderer:
             updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
         pass_started = time.perf_counter()
         command_buffer.beginPass(target, scene.clear, QRhiDepthStencilClearValue(1.0, 0), updates)
-        command_buffer.setGraphicsPipeline(self._pipeline)
         command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
-        result_bindings = self._bindings_nearest if scene.nearest else self._bindings
+        result_bindings = self._bindings_for(frame, original=False, nearest=scene.nearest)
         result_clip = scene.result_clip
         if result_bindings is not None and not result_clip.isEmpty() and scene.result_rect.intersects(result_clip):
+            # Each half may carry a different pixel format (a YUV result against an RGB24 source), so the
+            # pipeline is stated per draw - the two SRB layouts differ in their texture bindings.
+            command_buffer.setGraphicsPipeline(self._pipeline_for(frame))
             command_buffer.setShaderResources(result_bindings)
             command_buffer.setVertexInput(0, [(self._vertices, 0)])
             self._scissor(command_buffer, result_clip, target, scene.dpr)
             command_buffer.draw(6)
         if draw_original:
-            original_bindings = (self._original_bindings_nearest if scene.nearest
-                                 else self._original_bindings)
+            original_bindings = self._bindings_for(original, original=True, nearest=scene.nearest)
             original_clip = scene.original_clip
             if original_bindings is not None and not original_clip.isEmpty():
+                command_buffer.setGraphicsPipeline(self._pipeline_for(original))
                 command_buffer.setShaderResources(original_bindings)
                 command_buffer.setVertexInput(0, [(self._vertices, 0)])
                 self._scissor(command_buffer, original_clip, target, scene.dpr)
@@ -495,7 +674,8 @@ class PreviewRenderer:
         why this is a method taking it rather than a constructor-time step.
         """
         rhi = self._rhi
-        initial_size = self._frame_size(self._frame) if self._frame is not None else QSize(1, 1)
+        initial_size = (self._frame_size(self._frame)
+                        if self._frame is not None and self._frame.format == "rgba8" else QSize(1, 1))
         # `MipMapped` makes Qt allocate the chain (`mipLevelsForSize` = 11 for 1440x1080) and requires the levels to be
         # generated after each upload; `UsedWithGenerateMips` is what the backend needs to accept `generateMips`.
         flags = QRhiTexture.Flag.UsedAsTransferSource
@@ -520,6 +700,20 @@ class PreviewRenderer:
                                               mip_mode, QRhiSampler.AddressMode.ClampToEdge,
                                               QRhiSampler.AddressMode.ClampToEdge)
         self._sampler_linear.create()
+        # The planes' samplers are a SEPARATE pair with a `None_` mip filter in both: the plane textures carry no chain
+        # (a mip chain over half-size chroma is a blur nobody asked for), and a mipmap filter over a single-level
+        # texture is the documented llvmpipe black-sample trap above. Linear for the fit view and the chroma upsample,
+        # nearest for the magnified 1:1 view - the same rule as the RGBA pair, one mip filter less.
+        self._sampler_yuv_nearest = rhi.newSampler(QRhiSampler.Filter.Nearest, QRhiSampler.Filter.Nearest,
+                                                   QRhiSampler.Filter.None_,
+                                                   QRhiSampler.AddressMode.ClampToEdge,
+                                                   QRhiSampler.AddressMode.ClampToEdge)
+        self._sampler_yuv_nearest.create()
+        self._sampler_yuv_linear = rhi.newSampler(QRhiSampler.Filter.Linear, QRhiSampler.Filter.Linear,
+                                                  QRhiSampler.Filter.None_,
+                                                  QRhiSampler.AddressMode.ClampToEdge,
+                                                  QRhiSampler.AddressMode.ClampToEdge)
+        self._sampler_yuv_linear.create()
 
         self._uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer, 64 + 16)
         self._uniforms.create()
@@ -528,6 +722,14 @@ class PreviewRenderer:
         self._original_uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer,
                                                 64 + 16)
         self._original_uniforms.create()
+        # The planes' block: mvp + tint + the luma/chroma affine + three matrix rows (`yuv.frag`'s std140 layout).
+        # Kept apart from the RGBA block so the RGBA shaders stay byte-for-byte what they were.
+        self._yuv_uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer,
+                                           YUV_UNIFORM_BYTES)
+        self._yuv_uniforms.create()
+        self._original_yuv_uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer,
+                                                    YUV_UNIFORM_BYTES)
+        self._original_yuv_uniforms.create()
 
         # A unit quad: two triangles, positions in [-1,1] and matching uv.
         # NDC -1 is the bottom of the pane while a QImage row 0 is its top, so the texture's v axis is flipped here
@@ -590,12 +792,22 @@ class PreviewRenderer:
         self._deferred = False
         self._result_dirty = self._frame is not None
         self._pipeline = None
+        self._yuv_pipeline = None
         self._original_texture = None
+        self._plane_textures = None
+        self._original_plane_textures = None
+        if self._frame is not None and self._frame.format in YUV_FORMATS:
+            # The standing picture came in as planes (a context change or a resize while it stood): build its
+            # textures now, outside any frame, exactly like the RGBA path's own texture.
+            self._ensure_plane_textures(self._frame, original=False)
         if self._original is not None and not _null_picture(self._original):
             # A compare mode was opened before the first frame (or the resources were rebuilt while it stood). The
             # source's texture is created exactly like the frame's, outside a frame, and its own upload follows.
             self._original_dirty = True
-            self._ensure_original_texture(self._frame_size(self._original))
+            if self._original.format in YUV_FORMATS:
+                self._ensure_plane_textures(self._original, original=True)
+            else:
+                self._ensure_original_texture(self._frame_size(self._original))
 
     def _build_pipeline(self) -> None:
         """Build the graphics pipeline for the CURRENT SRB. Re-run whenever the texture (and so its SRB) is re-created:
@@ -631,6 +843,95 @@ class PreviewRenderer:
         blend.dstAlpha = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
         self._pipeline.setTargetBlends([blend])
         self._pipeline.create()
+
+    def _build_yuv_pipeline(self) -> None:
+        """The planes pipeline: three samplers and the 160-byte block, everything else as the RGBA one.
+
+        A separate pipeline rather than a branch in `frame.frag`: an SRB layout with three textures is not the same
+        layout as one with a single texture, and QRhi compares layouts, not objects - so the format decides the
+        pipeline. Both are `UsesScissor`, both write straight alpha, and the compare modes may draw one of each in the
+        same pass (a planes result against an RGB24 source).
+        """
+        rhi = self._rhi
+        layout = QRhiVertexInputLayout()
+        layout.setBindings([QRhiVertexInputBinding(4 * 4)])
+        layout.setAttributes([
+            QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute.Format.Float2, 0),
+            QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute.Format.Float2, 2 * 4),
+        ])
+        bindings = self._yuv_bindings or self._original_yuv_bindings
+        pipeline = rhi.newGraphicsPipeline()
+        pipeline.setShaderStages([
+            QRhiShaderStage(QRhiShaderStage.Type.Vertex, _shader("yuv.vert.qsb")),
+            QRhiShaderStage(QRhiShaderStage.Type.Fragment, _shader("yuv.frag.qsb")),
+        ])
+        pipeline.setVertexInputLayout(layout)
+        pipeline.setShaderResourceBindings(bindings)
+        pipeline.setRenderPassDescriptor(self._target.renderPassDescriptor())
+        pipeline.setFlags(QRhiGraphicsPipeline.Flag.UsesScissor)
+        pipeline.setDepthTest(False)
+        pipeline.setDepthWrite(False)
+        blend = QRhiGraphicsPipeline.TargetBlend()
+        blend.enable = True
+        blend.srcColor = QRhiGraphicsPipeline.BlendFactor.SrcAlpha
+        blend.dstColor = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
+        blend.srcAlpha = QRhiGraphicsPipeline.BlendFactor.One
+        blend.dstAlpha = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
+        pipeline.setTargetBlends([blend])
+        pipeline.create()
+        self._yuv_pipeline = pipeline
+
+    def _pipeline_for(self, frame: PreviewFrame):
+        """The pipeline for this picture's format, or None when it is not built yet."""
+        return self._yuv_pipeline if frame.format in YUV_FORMATS else self._pipeline
+
+    def _build_pipeline_for(self, frame: PreviewFrame):
+        """Build the pipeline this picture needs (and only that one), returning it or None on refusal."""
+        if frame.format in YUV_FORMATS:
+            if (self._yuv_bindings is None and self._original_yuv_bindings is None) or self._yuv_pipeline is not None:
+                return self._yuv_pipeline
+            self._build_yuv_pipeline()
+            return self._yuv_pipeline
+        if self._pipeline is not None:
+            return self._pipeline
+        self._build_pipeline()
+        return self._pipeline
+
+    def _bindings_for(self, frame: PreviewFrame, *, original: bool, nearest: bool):
+        """The SRB for one half at one sampler: planes and RGBA have different layouts."""
+        if frame.format in YUV_FORMATS:
+            if original:
+                return self._original_yuv_bindings_nearest if nearest else self._original_yuv_bindings
+            return self._yuv_bindings_nearest if nearest else self._yuv_bindings
+        if original:
+            return self._original_bindings_nearest if nearest else self._original_bindings
+        return self._bindings_nearest if nearest else self._bindings
+
+    @staticmethod
+    def _yuv_uniform_block(frame: PreviewFrame, mvp, tint) -> bytes:
+        """mvp + tint + the matrix affine, 160 bytes, packed once per draw."""
+        depth = 10 if frame.format == "yuv420p10le" else 8
+        return _floats(list(mvp) + list(tint)) + _floats(
+            yuv_uniform_floats(frame.color_space, frame.color_range, depth=depth))
+
+    @staticmethod
+    def _upload_planes(updates, frame: PreviewFrame, textures) -> None:
+        """One batch entry per plane, raw bytes with their own stride - no QImage in the path.
+
+        `QRhiTextureSubresourceUploadDescription` takes the plane's bytes directly, which is what makes a 10-bit plane
+        upload possible at all (`uploadTexture(texture, QImage)` would have to invent a QImage format for a 16-bit
+        single-channel picture). Three entries, one `uploadTexture` call each, all in the ONE batch the pass consumes.
+
+        `bytes(plane)` is the batch's own copy - QRhi stores the data until the pass runs - and it is the ONLY copy in
+        this path: no numpy array, no QImage, no `convertToFormat`, no scaler pass.
+        """
+        if textures is None:
+            return
+        for texture, plane, stride in zip(textures, frame.planes, frame.strides):
+            description = QRhiTextureSubresourceUploadDescription(bytes(plane))
+            description.setDataStride(int(stride))
+            updates.uploadTexture(
+                texture, QRhiTextureUploadDescription(QRhiTextureUploadEntry(0, 0, description)))
 
     def _ensure_texture(self, size) -> None:
         if self._texture is None:
@@ -712,11 +1013,90 @@ class PreviewRenderer:
             bindings.create()
             setattr(self, attribute, bindings)
 
+    def _ensure_plane_textures(self, frame: PreviewFrame, *, original: bool) -> None:
+        """Create or resize one picture's three plane textures (R16 for 10-bit, R8 for 8-bit).
+
+        A set, not three independent textures: a format change (a 10-bit file replaced by an 8-bit one) must replace
+        all three together, and any SRB naming the old set is invalid the moment a texture is destroyed - so the
+        bindings and the planes pipeline are dropped here, exactly like the RGBA path does for its one texture.
+        """
+        if self._rhi is None or self._yuv_uniforms is None:
+            return
+        attr = "_original_plane_textures" if original else "_plane_textures"
+        existing = getattr(self, attr, None)
+        fmt = QRhiTexture.Format.R16 if frame.format == "yuv420p10le" else QRhiTexture.Format.R8
+        (luma_w, luma_h), (chroma_w, chroma_h) = plane_geometry(frame.width, frame.height)
+        sizes = (QSize(luma_w, luma_h), QSize(chroma_w, chroma_h), QSize(chroma_w, chroma_h))
+        if (existing is not None and len(existing) == 3
+                and all(tex.format() == fmt and tex.pixelSize() == size
+                        for tex, size in zip(existing, sizes))):
+            return
+        self._destroy_textures(existing)
+        textures = []
+        for size in sizes:
+            texture = self._rhi.newTexture(fmt, size, 1)
+            if not texture.create():
+                raise RuntimeError(f"plane texture {size.width()}x{size.height()} ({fmt}) was refused by QRhi")
+            textures.append(texture)
+        setattr(self, attr, textures)
+        self._build_plane_bindings()
+        # The pipeline was compiled against the SRB objects that named the old textures: rebuild it, exactly as
+        # `_ensure_texture` does for the RGBA path (a stale-layout bind samples black rather than raising).
+        if self._yuv_pipeline is not None:
+            self._yuv_pipeline.destroy()
+            self._yuv_pipeline = None
+
+    def _build_plane_bindings(self) -> None:
+        """(Re)create the planes SRBs: a uniform buffer at 0 and the three plane samplers at 1, 2, 3.
+
+        The binding indices must equal `binding = 1/2/3` in `yuv.frag` for the same reason the RGBA one must equal 1:
+        QRhi assigns texture units by SRB binding index, and a mismatch reads an unbound unit - black, which reads
+        exactly like "the planes were never uploaded".
+        """
+        rhi = self._rhi
+        if rhi is None:
+            return
+        flags = (QRhiShaderResourceBinding.StageFlag.VertexStage
+                 | QRhiShaderResourceBinding.StageFlag.FragmentStage)
+        frag = QRhiShaderResourceBinding.StageFlag.FragmentStage
+        specs = (
+            ("_yuv_bindings", self._yuv_uniforms, self._plane_textures, self._sampler_yuv_linear),
+            ("_yuv_bindings_nearest", self._yuv_uniforms, self._plane_textures, self._sampler_yuv_nearest),
+            ("_original_yuv_bindings", self._original_yuv_uniforms, self._original_plane_textures,
+             self._sampler_yuv_linear),
+            ("_original_yuv_bindings_nearest", self._original_yuv_uniforms, self._original_plane_textures,
+             self._sampler_yuv_nearest),
+        )
+        for attribute, uniforms, textures, sampler in specs:
+            current = getattr(self, attribute, None)
+            if current is not None:
+                current.destroy()
+                setattr(self, attribute, None)
+            if textures is None or len(textures) != 3 or uniforms is None:
+                continue
+            bindings = rhi.newShaderResourceBindings()
+            bindings.setBindings([
+                QRhiShaderResourceBinding.uniformBuffer(0, flags, uniforms),
+                QRhiShaderResourceBinding.sampledTexture(1, frag, textures[0], sampler),
+                QRhiShaderResourceBinding.sampledTexture(2, frag, textures[1], sampler),
+                QRhiShaderResourceBinding.sampledTexture(3, frag, textures[2], sampler),
+            ])
+            bindings.create()
+            setattr(self, attribute, bindings)
+
     # -- helpers ---------------------------------------------------------
 
     @staticmethod
     def _pixel_bytes(frame: PreviewFrame) -> int:
-        """The bytes one uploaded picture costs, for the upload telemetry (RGBA8888: 4 per pixel)."""
+        """The bytes one uploaded picture costs, for the upload telemetry.
+
+        RGBA8888 is 4 per pixel; a 4:2:0 set is `width * height * 1.5` samples, each 1 byte (8-bit) or 2 (10-bit) -
+        which is the whole point of the plane path (3 B/px against 4 for 10-bit, 1.5 against 4 for 8-bit).
+        """
+        if frame.format in YUV_FORMATS:
+            (luma_w, luma_h), (chroma_w, chroma_h) = plane_geometry(frame.width, frame.height)
+            samples = luma_w * luma_h + 2 * chroma_w * chroma_h
+            return samples * SAMPLE_BYTES[frame.format]
         size = PreviewRenderer._frame_size(frame)
         return size.width() * size.height() * 4
 

@@ -46,7 +46,7 @@ import os
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from .frames import FORMATS, frame_pts, pack_frame
+from .frames import FORMATS, frame_pts, pack_frame, stream_color_tags
 
 _MICROS = 1_000_000
 
@@ -82,11 +82,18 @@ class TailReader(QObject):
     def __init__(self, parent: QObject | None = None, *, pixel_format: str = "rgb24",
                  max_frames_per_poll: int = 4, codec_threads: int = 2,
                  container_factory=None, open_grace_polls: int = 40,
-                 target_size: tuple[int, int] | None = None) -> None:
+                 target_size: tuple[int, int] | None = None,
+                 color_space: str | None = None, color_range: str | None = None) -> None:
         super().__init__(parent)
         if pixel_format not in FORMATS:
             raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
         self._pixel_format = pixel_format
+        #: The matrix/range the shader converts the planes with (see `VideoDecoder`): the stream's own
+        #: tags when the caller has none, and the renderer's bt709/tv fallback when the file has none.
+        self._color_space = color_space
+        self._color_range = color_range
+        #: True when the CALLER stated them: an auto-read pair must be re-read on the next file.
+        self._color_explicit = color_space is not None or color_range is not None
         #: `(w, h)` the decoded picture is converted to; None keeps the file's own size. The pane cannot show more
         #: than its box, and converting a 2880x2160 frame to RGB costs 24.9 MB of traffic per frame.
         self._target_size = None if target_size is None else (max(1, int(target_size[0])), max(1, int(target_size[1])))
@@ -369,7 +376,9 @@ class TailReader(QObject):
             if self._edge_pts is None or pts > self._edge_pts:
                 self._edge_pts = pts
             self.frame_ready.emit(pack_frame(decoded, index, self._pixel_format, pts=shown_pts,
-                                             size=self._target_size))
+                                             size=self._target_size,
+                                             color_space=self._color_space,
+                                             color_range=self._color_range))
             emitted += 1
         else:
             # The cap stopped the read, not the file: there is more written data behind the playhead.
@@ -404,6 +413,11 @@ class TailReader(QObject):
 
         stream = video[0]
         stream.codec_context.thread_count = self._codec_threads
+        if not self._color_explicit:
+            # The file's own tags, read once per reader: the writer emits bt709/tv for a 10-bit output,
+            # but the SHADER's matrix must come from the file rather than from a constant (an HDR or a
+            # bt601 source would otherwise be converted with the wrong coefficients).
+            self._color_space, self._color_range = stream_color_tags(stream)
         self._container = container
         self._stream = stream
         self._fps = float(stream.average_rate) if stream.average_rate else 0.0
@@ -520,8 +534,19 @@ class LiveTailThread(QThread):
     MAX_PRESENT_WAIT_S = 0.5
 
     def __init__(self, path: str, parent: QObject | None = None, *, interval_ms: int = 120,
-                 paused: bool = True, clock=None, sleep=None, target_size=None, **reader_kwargs) -> None:
+                 paused: bool = True, clock=None, sleep=None, target_size=None,
+                 pixel_format: str = "rgb24", color_space: str | None = None,
+                 color_range: str | None = None, **reader_kwargs) -> None:
         super().__init__(parent)
+        #: The picture format this player asks the reader for: `rgb24` (the default, the QImage path)
+        #: or one of the planar formats (`yuv420p10le` preferred for a 10-bit file, `yuv420p` as the
+        #: 8-bit fallback), which the pane uploads as three plane textures. OPT-IN: the queue pane and
+        #: the source decoder stay rgb24, so nothing changes for them.
+        if pixel_format not in FORMATS:
+            raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
+        self._pixel_format = pixel_format
+        self._color_space = color_space
+        self._color_range = color_range
         #: Injected by tests; the thread itself uses the real clocks. Pacing by media time is the whole difference
         #: between "the preview plays at the renderer's production rate" and "at the file's own fps".
         self._clock = clock or time.monotonic
@@ -639,7 +664,9 @@ class LiveTailThread(QThread):
     # -- the loop ------------------------------------------------------------------------------------
 
     def run(self) -> None:
-        reader = TailReader(pixel_format="rgb24", target_size=self._target_size, **self._reader_kwargs)
+        reader = TailReader(pixel_format=self._pixel_format, target_size=self._target_size,
+                            color_space=self._color_space, color_range=self._color_range,
+                            **self._reader_kwargs)
         interval_of = getattr(reader, "_interval", None)
         reader.frame_ready.connect(self._present)
         reader.error.connect(self.error)

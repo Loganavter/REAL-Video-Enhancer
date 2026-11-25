@@ -25,6 +25,10 @@ Since the phase-0 seam of `plan-rve-preview-controls-frame-path-2026-11-25` the 
 `src/ui/widgets/preview_renderer.py`: `PreviewRenderer` owns the textures, samplers, SRBs, pipelines, uploads and the
 pass; this class owns the widget API, the zoom/pan/mvp geometry, the frame/state bookkeeping, the strip and its child
 widgets. It hands the renderer one `PreviewScene` per paint and receives what was drawn back through `on_draw`.
+
+The pane accepts a picture in two shapes: `set_frame(image, ...)` (RGBA8888, the fallback and the compare's source
+path, unchanged) and `set_frame_planes(planes, strides, w, h, ...)` (YUV420 planes, the playback path's cheap one - no
+QImage, no `to_ndarray`, the colour conversion in the fragment shader). Both feed the same geometry, HUD and log.
 """
 
 from __future__ import annotations
@@ -129,6 +133,9 @@ class VideoPreviewSurface(QRhiWidget):
         #: through `_on_rhi_draw`, so the draw log keeps the widget's own bookkeeping.
         self._renderer = PreviewRenderer(on_draw=self._on_rhi_draw)
         self._frame: QImage | None = None
+        #: The size of a planes picture (`set_frame_planes`): a YUV frame has no QImage, and the geometry/HUD must
+        #: read its size from somewhere - this is that somewhere, and `set_frame(image)` clears it.
+        self._planes_size: tuple[int, int] | None = None
         self._original: QImage | None = None
         self._zoom = MIN_ZOOM
         #: What the wheel is aiming at. The APPLIED zoom is quantised to `ZOOM_STEPS` (nearest needs whole factors), so
@@ -245,6 +252,9 @@ class VideoPreviewSurface(QRhiWidget):
         change - a producer that speaks planes will hand the renderer a `PreviewFrame` directly (the YUV lane).
         """
         self._frame = None if image is None else image.convertToFormat(QImage.Format.Format_RGBA8888)
+        # An image frame replaces any standing planes picture: the geometry reads `_planes_size` when there is no
+        # image, and the two shapes must never both claim the same frame.
+        self._planes_size = None
         self._renderer.set_frame(self._preview_frame(self._frame, index=index, pts=media_time))
         self._cleared_empty = False
         self._refresh_readout()
@@ -259,8 +269,48 @@ class VideoPreviewSurface(QRhiWidget):
         self._shown_time = None if media_time is None else float(media_time)
         telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=media_time, generation=generation)
 
+    def set_frame_planes(self, planes, strides, width: int, height: int, *, index: int | None = None,
+                         pts: float | None = None, format: str = "yuv420p10le",
+                         color_space: str | None = None, color_range: str | None = None,
+                         gui_ms: float | None = None, seq: int | None = None) -> None:
+        """Show a picture that arrives as YUV planes: (Y, U, V) bytes, their strides, and the picture's size.
+
+        ADDITIVE to `set_frame(image, ...)`, which is unchanged: the RGBA path is the fallback, this is the one the
+        playback host can choose, and it is driven directly by tests and by the RHI proof. `format` is
+        `"yuv420p10le"` (10-bit, R16 textures) or `"yuv420p"` (8-bit, R8); `color_space`/`color_range` are the file's
+        own tags (`"bt709"`/`"tv"`) and the shader's matrix is built from them - a `None` here means "not declared",
+        and the renderer uses this app's writer's tags (bt709/tv) rather than guessing per file.
+
+        No QImage, no `to_ndarray`, no `tobytes`: the planes are the producer's bytes and the renderer uploads them as
+        they are (`PreviewRenderer.set_frame(PreviewFrame(...))`). The geometry (zoom/pan/fit), the HUD and the compare
+        arithmetic all read the picture's SIZE, which is kept here (`_planes_size`) instead of in an image.
+        """
+        frame = PreviewFrame(
+            format=str(format),
+            width=int(width),
+            height=int(height),
+            pts=None if pts is None else float(pts),
+            index=None if index is None else int(index),
+            planes=tuple(memoryview(plane) for plane in planes),
+            strides=tuple(int(stride) for stride in strides),
+            color_space=color_space,
+            color_range=color_range,
+        )
+        self._frame = None
+        self._planes_size = (int(width), int(height))
+        self._renderer.set_frame(frame)
+        self._cleared_empty = False
+        self._refresh_readout()
+        self.update()
+        if index is not None:
+            self._shown = ("frame", int(index))
+        elif seq is not None:
+            self._shown = ("seq", int(seq))
+        self._shown_time = None if pts is None else float(pts)
+        telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=pts)
+
     def has_frame(self) -> bool:
-        return self._frame is not None
+        return self._frame is not None or self._planes_size is not None
 
     def shown_time(self) -> float | None:
         """The media time of the picture on screen, when the publisher named it."""
@@ -324,19 +374,26 @@ class VideoPreviewSurface(QRhiWidget):
         fields["idx"] = "-" if kind is None else int(kind[1])
         return fields
 
-    def _log_draw(self, *, half: str, picture: QImage | None, level: int | None = None) -> None:
+    def _log_draw(self, *, half: str, picture: QImage | None, level: int | None = None,
+                  present: bool | None = None) -> None:
         """One line per picture actually DRAWN: what, where, and when, with the ask it answers.
 
         `single` draws one half and replaces the other in the same texture, so its `original` line also names the
         result it is standing over - that pair IS the LMB compare, and printing both makes "one frame behind" a
         subtraction. `sbs`/`split` draw both halves in one pass; the line names both.
+
+        `present` is for the planes path: a YUV picture has no QImage to fingerprint (`fp` prints `-`), but it is still
+        a picture that was drawn, and a draw log that goes silent the moment the pane switches format would hide
+        exactly the frames a colour regression appears in.
         """
-        if picture is None or picture.isNull():
+        if present is None:
+            present = picture is not None and not picture.isNull()
+        if not present:
             return
         mode = self._view_mode
         fields: dict[str, object] = {"mode": mode, "half": half}
         fields.update(self._identity_fields(original=(half == "original")))
-        fields["fp"] = self._fingerprint(picture)
+        fields["fp"] = "-" if picture is None or picture.isNull() else self._fingerprint(picture)
         if half == "original" and mode == "single":
             other = self._identity_fields(original=False)
             fields["result_t"] = other["t"]
@@ -353,13 +410,16 @@ class VideoPreviewSurface(QRhiWidget):
         fields["wall"] = telemetry.wall()
         telemetry.event("draw", **fields)
 
-    def _log_draw_two(self, result: QImage | None, original: QImage | None) -> None:
+    def _log_draw_two(self, result: QImage | None, original: QImage | None, *,
+                      present: bool | None = None) -> None:
         """The compare modes paint both halves in ONE pass: name both pictures in one line."""
-        if result is None or result.isNull():
+        if present is None:
+            present = result is not None and not result.isNull()
+        if not present:
             return
         fields: dict[str, object] = {"mode": self._view_mode, "half": "pair"}
         fields.update({f"result_{k}": v for k, v in self._identity_fields(original=False).items()})
-        fields["result_fp"] = self._fingerprint(result)
+        fields["result_fp"] = "-" if result is None or result.isNull() else self._fingerprint(result)
         if original is not None and not original.isNull():
             fields.update({f"original_{k}": v for k, v in self._identity_fields(original=True).items()})
             fields["original_fp"] = self._fingerprint(original)
@@ -847,7 +907,10 @@ class VideoPreviewSurface(QRhiWidget):
         # screen rect, which is also what "hold to see the original" means in the reference app).
         image = self._frame
         if image is None or image.isNull():
-            return (0, 0)
+            # A planes frame carries no image: its size is the descriptor's, and it is the same number the RGBA path
+            # would have produced for the same picture.
+            planes_size = getattr(self, "_planes_size", None)
+            return (0, 0) if planes_size is None else (int(planes_size[0]), int(planes_size[1]))
         return (image.width(), image.height())
 
     def _fit_scale(self) -> float:
@@ -1006,11 +1069,12 @@ class VideoPreviewSurface(QRhiWidget):
         """
         if drawn.mode == "single":
             picture = self._original if drawn.half == "original" else self._frame
+            present = self._has_picture() if drawn.half == "result" else picture is not None
             if drawn.half == "original" and (self._original_changed or telemetry.level() >= 2):
                 self._log_draw(half="original", picture=picture)
                 self._original_changed = False
             elif drawn.half == "result" and telemetry.level() >= 2:
-                self._log_draw(half="result", picture=picture)
+                self._log_draw(half="result", picture=picture, present=present)
             return
         # Both halves in one pass: one line names both pictures (a new original always, every paint at level 2).
         original = self._original if drawn.drew_original else None
@@ -1018,7 +1082,11 @@ class VideoPreviewSurface(QRhiWidget):
             self._log_draw_two(self._frame, original)
             self._original_changed = False
         elif telemetry.level() >= 2:
-            self._log_draw_two(self._frame, None)
+            self._log_draw_two(self._frame, None, present=self._has_picture())
+
+    def _has_picture(self) -> bool:
+        """Whether the RESULT half carries a picture at all - an image, or the planes of a YUV frame."""
+        return self._frame is not None or getattr(self, "_planes_size", None) is not None
 
     def initialize(self, command_buffer) -> None:  # noqa: N802 - Qt spelling
         """Start the telemetry session, then hand the resource lifetime to the renderer.
