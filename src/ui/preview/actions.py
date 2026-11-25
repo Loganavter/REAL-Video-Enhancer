@@ -77,46 +77,39 @@ class ActionSpec:
 #: The catalog. One list for both bars: `bar` puts a control in the picture's top row or the transport below it.
 ACTIONS: tuple[ActionSpec, ...] = (
     ActionSpec(
-        id="compare", command=PreviewCommand.COMPARE_DOWN, release_command=PreviewCommand.COMPARE_UP,
-        text="Compare", tip="Hold to see the source frame at the playhead", icon=icon("columns"),
-        hold=True, bar=TOP, priority=90,
-        enabled_when=lambda s: s.has_picture() and s.mode == "single",
-        checked_when=lambda s: s.compare,
-    ),
-    ActionSpec(
         id="mode_single", command=PreviewCommand.SET_MODE, value="single", tip="Single picture",
-        icon=icon("square"), checkable=True, group="view_mode", bar=TOP, size=(30, 30), priority=70,
+        icon=icon("square"), checkable=True, group="view_mode", variant="ghost", bar=TOP, size=(30, 30), priority=70,
         enabled_when=_picture, checked_when=lambda s: s.mode == "single",
     ),
     ActionSpec(
         id="mode_sbs", command=PreviewCommand.SET_MODE, value="sbs", tip="Side by side: source | result",
-        icon=icon("columns"), checkable=True, group="view_mode", bar=TOP, size=(30, 30), priority=70,
+        icon=icon("columns"), checkable=True, group="view_mode", variant="ghost", bar=TOP, size=(30, 30), priority=70,
         enabled_when=_picture, checked_when=lambda s: s.mode == "sbs",
     ),
     ActionSpec(
         id="mode_split", command=PreviewCommand.SET_MODE, value="split", tip="Split: source left of the divider",
-        icon=icon("divide-square"), checkable=True, group="view_mode", bar=TOP, size=(30, 30), priority=70,
+        icon=icon("divide-square"), checkable=True, group="view_mode", variant="ghost", bar=TOP, size=(30, 30), priority=70,
         enabled_when=_picture, checked_when=lambda s: s.mode == "split",
     ),
     ActionSpec(
         id="zoom_out", command=PreviewCommand.ZOOM_OUT, tip="Zoom out", icon=icon("zoom-out"),
-        variant="ghost", bar=TOP, size=(28, 30), priority=30,
+        variant="ghost", group="zoom", bar=TOP, size=(28, 30), priority=30,
         enabled_when=_picture,
     ),
     ActionSpec(
         id="zoom_fit", command=PreviewCommand.ZOOM_FIT, text="Fit", tip="Fit the picture to the pane",
-        checkable=True, group="zoom", bar=TOP, size=(0, 30), priority=40,
+        checkable=True, group="zoom", variant="ghost", bar=TOP, size=(0, 30), priority=40,
         enabled_when=_picture, checked_when=lambda s: s.zoom_fit,
     ),
     ActionSpec(
         id="zoom_one", command=PreviewCommand.ZOOM_ONE, text="1:1", tip="One source pixel per screen pixel",
-        checkable=True, group="zoom", bar=TOP, size=(0, 30), priority=40,
+        checkable=True, group="zoom", variant="ghost", bar=TOP, size=(0, 30), priority=40,
         enabled_when=_picture,
         checked_when=lambda s: (not s.zoom_fit) and abs(float(s.zoom) - 1.0) < 1e-3,
     ),
     ActionSpec(
         id="zoom_in", command=PreviewCommand.ZOOM_IN, tip="Zoom in", icon=icon("zoom-in"),
-        variant="ghost", bar=TOP, size=(28, 30), priority=30,
+        variant="ghost", group="zoom", bar=TOP, size=(28, 30), priority=30,
         enabled_when=_picture,
     ),
     ActionSpec(
@@ -162,12 +155,16 @@ def build_button(spec: ActionSpec, parent=None) -> Button:
         # The app installs the toolkit's tooltip filter at start-up (`install_application_tooltips`), so this string is
         # rendered by the toolkit's own tooltip system - no hand-rolled tooltip widget.
         button.setToolTip(spec.tip)
+    # A stable name for the control channel and the tests: `preview_<id>` addresses the button without coordinates.
+    button.setObjectName(f"preview_{spec.id}")
     if spec.id == "play":
         # The transport's one accent control: an exact opaque base (a tint seed would wash out over the picture).
+        # The toolkit's API is `set_background_color` (`set_override_bg_color` does not exist; the old call raised and
+        # was swallowed, leaving the surface white under a white glyph - measured live 2026-11-25).
         from sli_ui_toolkit.theme import ThemeManager
 
         try:
-            button.set_override_bg_color(ThemeManager.get_instance().get_color("accent"))
+            button.set_background_color(ThemeManager.get_instance().get_color("accent"))
         except Exception:
             pass
     return button

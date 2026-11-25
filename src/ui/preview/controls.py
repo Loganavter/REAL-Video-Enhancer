@@ -2,15 +2,15 @@
 
 Layout E (owner-approved mockup, 2026-11-25):
 
-* **top** - no common backing bar. A `produced 12.4 s · 60%` pill owns its own small surface; Compare (hold), the
-  three view modes (exclusive toggle buttons), the zoom row (`-` Fit `1:1` `+`) and fullscreen are separate toolkit
-  `Button`s, each with its own surface.
+* **top** - no common backing bar. A `produced 12.4 s · 60%` pill owns its own small surface; the three view modes
+  and the zoom row (`-` Fit `1:1` `+`) are each a CAPSULE (one SurfacePanel behind the group's ghost Buttons), and
+  fullscreen is a standalone Button. The compare is NOT a button: holding LMB on the picture is the gesture.
 * **bottom** - video transport only: play/pause, step, content time `m:ss.mmm / m:ss.mmm`, source frame
   `f 100 / 493`, and the scrubber.
 
 Both bars are normal child widgets of the pane (the toolkit's time readout precedent: children of a `QRhiWidget`
-composite above it). They sit in the pane's top/bottom inset and never in the middle, so the pane's own LMB
-compare/pan keeps the picture. The whole overlay is `WA_TransparentForMouseEvents`; only the controls take the mouse.
+composite above it). They sit in the pane's top/bottom inset and never in the middle. The overlay spans the pane but is
+MASKED to the two bars, so the buttons take their presses and the picture's middle stays the pane's compare/pan.
 
 `set_state(state)` is the ONE paint pass: it walks the catalog, applies `visible`/`enabled`/`checked` with signals
 blocked (a state write must never look like a click), updates the three readouts and hands the timeline its numbers.
@@ -48,15 +48,18 @@ class PreviewControls(QWidget):
     def __init__(self, parent: QWidget, *, pane: QWidget | None = None) -> None:
         super().__init__(parent)
         self._pane = pane if pane is not None else parent
-        # The overlay itself and its empty areas must not eat the picture's mouse; the buttons and the slider are
-        # children and are hit-tested first, so they keep their own presses.
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # The overlay spans the pane but only its two BARS may take the mouse: a widget mask (set in `_place`) is the
+        # clip that keeps the picture's middle clickable. `WA_TransparentForMouseEvents` would make the bars and every
+        # button in them dead (measured live 2026-11-25: the top tools and the transport ignored the pointer).
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._state = PreviewState()
         self._buttons: dict[str, Button] = {}
         self._specs: dict[str, ActionSpec] = {spec.id: spec for spec in ACTIONS}
         self._hidden_top: list[ActionSpec] = []
         self._groups: dict[str, ButtonFamily] = {}
+        #: The visual capsules: one SurfacePanel per group, with the specs it holds (hidden together when it empties).
+        self._group_panels: dict[str, SurfacePanel] = {}
+        self._group_specs: dict[str, tuple[str, ...]] = {}
 
         self.top_bar = self._make_bar()
         self.bottom_bar = self._make_bar()
@@ -76,7 +79,6 @@ class PreviewControls(QWidget):
 
     def _make_bar(self) -> QWidget:
         bar = QWidget(self)
-        bar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         bar.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -85,7 +87,13 @@ class PreviewControls(QWidget):
         return bar
 
     def _add_button(self, layout: QHBoxLayout, spec: ActionSpec) -> Button:
-        button = build_button(spec, parent=layout.parentWidget())
+        button = self._prepare_button(spec, layout.parentWidget())
+        layout.addWidget(button)
+        return button
+
+    def _prepare_button(self, spec: ActionSpec, parent: QWidget) -> Button:
+        """Build + wire one catalog entry. The layout that hosts it is the caller's (a bar row or a group capsule)."""
+        button = build_button(spec, parent=parent)
         button.setFocusPolicy(Qt.FocusPolicy.NoFocus)   # the pane keeps its Space/arrows, see `_build_shortcuts`
         if spec.checkable:
             if spec.group:
@@ -107,8 +115,25 @@ class PreviewControls(QWidget):
         else:
             button.clicked.connect(lambda _=False, s=spec: self.commandRequested.emit(s.command, s.value))
         self._buttons[spec.id] = button
-        layout.addWidget(button)
         return button
+
+    def _add_group(self, layout: QHBoxLayout, name: str, spec_ids: tuple[str, ...]) -> SurfacePanel:
+        """A group capsule: one toolkit surface behind ghost buttons - the backing the owner asked for.
+
+        The group is ONE unit for the overflow too: a capsule with half its buttons in a menu and half on the bar is
+        not a control a person can read.
+        """
+        panel = SurfacePanel(self.top_bar, background_token="flyout.background", radius=scaled_px(10))
+        row = QHBoxLayout(panel)
+        inset = scaled_px(2)
+        row.setContentsMargins(inset, inset, inset, inset)
+        row.setSpacing(inset)
+        for spec_id in spec_ids:
+            row.addWidget(self._prepare_button(self._specs[spec_id], panel))
+        self._group_panels[name] = panel
+        self._group_specs[name] = tuple(spec_ids)
+        layout.addWidget(panel)
+        return panel
 
     def _make_toggle_handler(self, spec: ActionSpec):
         def handle(checked: bool) -> None:
@@ -132,11 +157,10 @@ class PreviewControls(QWidget):
         pill_row.addWidget(self.produced_text, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.pill)
 
-        self._add_button(layout, self._specs["compare"])
         layout.addStretch(1)
-        for spec_id in ("mode_single", "mode_sbs", "mode_split", "zoom_out", "zoom_fit", "zoom_one", "zoom_in",
-                        "fullscreen"):
-            self._add_button(layout, self._specs[spec_id])
+        self._add_group(layout, "view_mode", ("mode_single", "mode_sbs", "mode_split"))
+        self._add_group(layout, "zoom", ("zoom_out", "zoom_fit", "zoom_one", "zoom_in"))
+        self._add_button(layout, self._specs["fullscreen"])
 
         # The overflow affordance for a narrow pane: the lowest-priority tools collapse here instead of shrinking.
         self.overflow_button = Button(text="\u2026", variant="surface", size=(scaled_px(30), scaled_px(30)),
@@ -199,6 +223,10 @@ class PreviewControls(QWidget):
         self.bottom_bar.setGeometry(margin, bottom, span, scaled_px(BOTTOM_HEIGHT))
         self.top_bar.raise_()
         self.bottom_bar.raise_()
+        # Only the bars take the mouse; the rest of the overlay is a hole the pane's compare/pan sees through.
+        from PySide6.QtGui import QRegion
+
+        self.setMask(QRegion(self.top_bar.geometry()) | QRegion(self.bottom_bar.geometry()))
 
     def _top_specs(self) -> list[ActionSpec]:
         return list(actions_for("top"))
@@ -209,6 +237,8 @@ class PreviewControls(QWidget):
             return
         for spec in self._top_specs():
             self._buttons[spec.id].setVisible(visible_for(spec, self._state))
+        for panel in self._group_panels.values():
+            panel.setVisible(True)
         self._hidden_top = []
         needed = self.top_bar.sizeHint().width()
         if needed <= available:
@@ -229,6 +259,9 @@ class PreviewControls(QWidget):
             for spec in visible:
                 self._buttons[spec.id].setVisible(False)
                 self._hidden_top.append(spec)
+            panel = self._group_panels.get(_unit)
+            if panel is not None:
+                panel.setVisible(False)     # the whole capsule went with its last visible button
             needed = self.top_bar.sizeHint().width()
         self.overflow_button.setVisible(bool(self._hidden_top))
 

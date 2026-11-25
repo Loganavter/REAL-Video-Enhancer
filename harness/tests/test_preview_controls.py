@@ -334,10 +334,16 @@ def test_action_ids_are_unique():
 
 
 def test_every_command_is_covered():
-    """Every verb in the state machine is reachable: a spec carries it, or the scrubber/keyboard does."""
+    """Every verb is reachable: a spec carries it, the scrubber does, or it is the pane's LMB gesture.
+
+    The compare is deliberately NOT a button (owner, 2026-11-25: "Зачем нужна кнопка compare?"): holding LMB on the
+    picture is the gesture, so `COMPARE_DOWN/UP` have no catalog entry - the controller still dispatches them for the
+    surface port.
+    """
     covered = ({spec.command for spec in ACTIONS}
                | {spec.release_command for spec in ACTIONS if spec.release_command is not None}
-               | {PreviewCommand.SEEK_TO, PreviewCommand.SEEK_FRACTION})
+               | {PreviewCommand.SEEK_TO, PreviewCommand.SEEK_FRACTION,
+                  PreviewCommand.COMPARE_DOWN, PreviewCommand.COMPARE_UP})
     assert covered == set(PreviewCommand)
 
 
@@ -345,7 +351,8 @@ def test_the_bars_are_split_by_function():
     top = {spec.id for spec in actions_for("top")}
     bottom = {spec.id for spec in actions_for("bottom")}
     assert "play" in bottom and "step_back" in bottom and "step_forward" in bottom
-    assert "play" not in top and "compare" in top and "mode_split" in top
+    assert "play" not in top and "compare" not in top
+    assert {"mode_single", "mode_sbs", "mode_split", "zoom_fit", "fullscreen"} <= top
 
 
 def test_enabled_predicates_read_the_state():
@@ -354,9 +361,6 @@ def test_enabled_predicates_read_the_state():
     play = next(spec for spec in ACTIONS if spec.id == "play")
     assert enabled_for(play, idle) is False
     assert enabled_for(play, ready) is True
-    compare = next(spec for spec in ACTIONS if spec.id == "compare")
-    assert enabled_for(compare, PreviewState(phase=PreviewPhase.READY, duration=10.0, mode="sbs")) is False
-    assert enabled_for(compare, ready) is True
 
 
 def test_the_catalog_carries_the_keyboard_routes():
@@ -406,7 +410,6 @@ def test_set_state_applies_every_widget_in_one_pass_without_emitting(controls):
     assert controls.button("mode_sbs").isChecked()
     assert not controls.button("mode_single").isChecked()
     assert controls.button("play").isEnabled()
-    assert not controls.button("compare").isEnabled()          # compare lives in single only
     assert controls.timeline.isEnabled()
     assert controls.time_text.text() == "0:06.000 / 0:20.000"
 
@@ -439,10 +442,22 @@ def test_the_bars_are_children_of_the_pane(controls, pane):
     assert controls.bottom_bar.parentWidget() is controls
 
 
-def test_the_overlay_does_not_take_the_picture_mouse(controls):
-    assert controls.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-    assert controls.top_bar.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-    assert controls.bottom_bar.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+def test_the_overlay_does_not_take_the_picture_mouse(controls, pane):
+    """The overlay spans the pane, so a widget MASK keeps only the bars hittable.
+
+    The first cut set `WA_TransparentForMouseEvents` on the overlay and the bars; live (2026-11-25) that made the whole
+    new surface dead - the play square, Compare, the modes and the zoom all hit the pane underneath. The mask is the
+    clip that gives the buttons their presses AND leaves the picture's middle to the pane.
+    """
+    from PySide6.QtCore import QPoint
+
+    mask = controls.mask()
+    assert not mask.isEmpty()
+    assert mask.contains(controls.top_bar.geometry().center())
+    assert mask.contains(controls.bottom_bar.geometry().center())
+    assert not mask.contains(QPoint(pane.width() // 2, pane.height() // 2))
+    assert not controls.top_bar.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    assert not controls.bottom_bar.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
 
 def test_resizing_the_pane_repositions_the_bars(controls, pane):
@@ -458,14 +473,23 @@ def test_a_narrow_pane_collapses_the_zoom_row_into_the_overflow(controls, pane):
     _app().processEvents()
     assert "zoom_in" in controls.hidden_tools()
     assert controls.overflow_button.isVisible()
+    assert controls._group_panels["zoom"].isHidden(), "a group leaves as one capsule, not half a row"
 
 
-def test_the_hold_compare_emits_down_then_up(controls):
-    emitted: list[tuple[object, object]] = []
-    controls.commandRequested.connect(lambda command, value: emitted.append((command, value)))
-    controls.button("compare").pressed.emit()
-    controls.button("compare").released.emit()
-    assert [command for command, _ in emitted] == [PreviewCommand.COMPARE_DOWN, PreviewCommand.COMPARE_UP]
+def test_each_group_has_its_own_capsule(controls):
+    """Owner, 2026-11-25: "ты забыл делать подложки у групп кнопок".
+
+    The produced pill was the only surface; the mode row and the zoom row are groups, so each owns one capsule
+    (`SurfacePanel`) behind ghost buttons. The capsule is the backing; the buttons inside it are transparent until
+    hover/checked, so the group reads as one control.
+    """
+    for name, ids in (("view_mode", ("mode_single", "mode_sbs", "mode_split")),
+                      ("zoom", ("zoom_out", "zoom_fit", "zoom_one", "zoom_in"))):
+        panel = controls._group_panels[name]
+        assert panel.isVisible(), f"the {name} capsule must be visible"
+        assert all(controls.button(spec_id).parent() is panel for spec_id in ids)
+        assert all(controls._specs[spec_id].variant == "ghost" for spec_id in ids)
+        assert panel.width() > 0 and panel.height() > 0
 
 
 def test_a_mode_toggle_emits_set_mode_and_keeps_one_checked(controls):
@@ -673,3 +697,4 @@ def test_a_picture_without_an_owner_still_plays_through_the_page():
     adapter.play()
     adapter.pause()
     assert page.calls == [False, True]
+
