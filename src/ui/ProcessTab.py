@@ -1304,6 +1304,48 @@ class ProcessTab:
             return frames / fps
         return 0.0
 
+    #: A press whose frame never lands (a decode that died, a target the tail cannot reach) must still close, or the
+    #: thumb stands on the requested time forever. The delta in the settle line says the picture did not get there.
+    SEEK_WATCH_TIMEOUT_S = 1.5
+
+    def _frame_answers_watch(self, watched: float) -> bool:
+        """Whether the frame just painted is the ANSWER to the press, not one that was already in flight.
+
+        A frame that was decoded before the press arrives after it; closing the press on such a frame moved the marker
+        back to the old position for a few frames and then forward again (owner, 2026-11-26: "скачет назад-вперёд пару
+        раз несколько кадров подряд"). The timeout is the escape hatch, so a seek that cannot land still settles.
+        """
+        landed = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        if abs(landed - float(watched)) <= self._seek_landing_tolerance():
+            return True
+        pressed_at = getattr(self, "_seek_pressed_at", None)
+        return pressed_at is not None and (time.perf_counter() - pressed_at) >= self.SEEK_WATCH_TIMEOUT_S
+
+    def _seek_landing_tolerance(self) -> float:
+        """How close a painted frame must be to the asked time to count as ITS answer.
+
+        Two frame intervals with a floor of 50 ms: the tail seeks to a timestamp and lands on the frame containing it,
+        so exact equality is not the contract - but a frame from BEFORE the press must never close the press, which is
+        what made the marker jump back to the old position for a few frames and then forward again (owner, 2026-11-26).
+        """
+        fps = 0.0
+        options = getattr(self, "currentRenderOptions", None)
+        try:
+            fps = float(getattr(options, "videoFps", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            fps = 0.0
+        if fps <= 0.0:
+            try:
+                fps = float(getattr(getattr(self, "_preview_decoder", None), "fps", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                fps = 0.0
+        if fps <= 0.0:
+            try:
+                fps = float(getattr(self, "fps", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                fps = 0.0
+        return max(0.05, 2.0 / fps) if fps > 0.0 else 0.1
+
     def _result_playhead(self) -> float:
         """Where the RESULT's playhead is: the tail's or file decoder's PTS, else the render's produced share.
 
@@ -2093,10 +2135,16 @@ class ProcessTab:
             playhead = float(self._result_playhead())
         except Exception:
             playhead = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        try:
+            shown = pane.shown_time() if callable(getattr(pane, "shown_time", None)) else None
+        except Exception:
+            shown = None
+        played = float(shown) if shown is not None else float(getattr(self, "_preview_playhead", 0.0) or 0.0)
         controller.observe(
             is_playing=playing,
             has_picture=has_picture,
             playhead=max(0.0, playhead),
+            played=max(0.0, played),
             produced=max(0.0, produced),
             duration=duration,
             source_frames=source_frames,
@@ -2866,19 +2914,21 @@ class ProcessTab:
                                index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
             watched = getattr(self, "_seek_watch", None)
-            if watched is not None:
+            if watched is not None and self._frame_answers_watch(watched):
                 # The seek instrument the owner asked for: one line per PRESS (not per frame), naming where the press
                 # asked to go and where the picture actually landed. Without it a press and the frame it produced were
                 # two separate facts and "it still does not work" could not be argued either way.
                 self._seek_watch = None
                 pressed_at = getattr(self, "_seek_pressed_at", None)
+                landed = float(self._preview_playhead)
+                late = pressed_at is not None and (time.perf_counter() - pressed_at) >= self.SEEK_WATCH_TIMEOUT_S
                 if pressed_at is not None:
                     shown = getattr(pane, "shown", None)
                     turnaround_ms = (time.perf_counter() - pressed_at) * 1000.0
                     spot = getattr(self, "_press", None)
                     if spot is not None and spot.open:
                         spot.settled(landed=shown() if callable(shown) else None,
-                                     landed_time=float(getattr(frame, "pts", 0.0) or 0.0),
+                                     landed_time=landed,
                                      turnaround_ms=turnaround_ms, landed_gen=None)
                     else:
                         telemetry.note_seek(turnaround_ms, target=getattr(self, "_seek_target_frame", None),
@@ -2886,8 +2936,8 @@ class ProcessTab:
                     self._seek_pressed_at = None
                     # The request is answered, by this path or not at all: a later press must not call it superseded.
                     self._seek_generation = None
-                log(f"seek: press wanted {watched:.3f}s, the picture landed at {self._preview_playhead:.3f}s "
-                    f"(delta {self._preview_playhead - watched:+.3f}s)")
+                log(f"seek: press wanted {watched:.3f}s, the picture landed at {landed:.3f}s "
+                    f"(delta {landed - watched:+.3f}s{', watch timed out' if late else ''})")
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
             live_tail = getattr(self, "_live_tail", None)
             running = self.renderProcess is not None and self.renderProcess.poll() is None

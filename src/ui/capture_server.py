@@ -1089,8 +1089,12 @@ def install(window) -> None:
                     pass
         # `toolTip` is here because a tooltip is text the channel could not read: proving a translated tooltip needs
         # the string, and hovering under Xvfb does not reliably pop one (measured 2026-11-24).
+        # `playhead_fraction` / `played_fraction` are the scrubber's two facts (thumb and fill): a seek's bounce and its
+        # fill lag are claims about those numbers, so the channel must be able to read them instead of guessing from a
+        # screenshot (owner, 2026-11-26: the fill "splits exactly at the thumb" and the marker jumped back and forth).
         for attr in ("count", "currentRow", "selectedRows", "selectedCount", "value", "text",
-                     "currentIndex", "currentText", "toolTip"):
+                     "currentIndex", "currentText", "toolTip",
+                     "playhead_fraction", "played_fraction", "produced_fraction", "is_scrubbing"):
             getter = getattr(target, attr, None)
             if callable(getter):
                 try:

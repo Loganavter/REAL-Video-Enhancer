@@ -562,6 +562,44 @@ def test_a_real_press_on_the_scrubber_asks_for_a_seek(controls):
     assert timeline.is_scrubbing() is False, "the release must end the drag"
 
 
+def test_the_played_fill_is_the_picture_and_the_thumb_is_the_host(controls):
+    """Two facts, two fractions: a press moves the thumb at once, the fill follows the frame that is actually shown.
+
+    Painting both from the playhead made a seek invisible until it landed and made the fill jump back with every
+    stale frame the decoder delivered after the press (owner, 2026-11-26).
+    """
+    state = controls.controller.state() if hasattr(controls, "controller") else None
+    if state is None:
+        from src.ui.preview.state import PreviewState
+        state = PreviewState(duration=20.0, playhead=10.0, played=2.0, produced=20.0)
+    timeline = controls.timeline
+    timeline.set_state(state.with_(duration=20.0, playhead=10.0, played=2.0, produced=20.0))
+    assert timeline.playhead_fraction() == pytest.approx(0.5)
+    assert timeline.played_fraction() == pytest.approx(0.1)
+    # An unknown `played` (nothing painted yet) falls back to the thumb, never to zero.
+    timeline.set_state(state.with_(duration=20.0, playhead=10.0, played=None, produced=20.0))
+    assert timeline.played_fraction() == pytest.approx(0.5)
+
+
+def test_a_click_that_never_moves_asks_once(controls):
+    """Press and release at one point are ONE seek: the second request re-armed the marker and cost a second decode."""
+    timeline = controls.timeline
+    seen: list[float] = []
+    timeline.seekRequested.connect(seen.append)
+    groove = timeline._groove_rect()
+    point = QPoint(int(groove.left() + groove.width() * 0.4), int(groove.center().y()))
+    QTest.mousePress(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    QTest.mouseRelease(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    assert len(seen) == 1, f"one click, one ask (got {seen})"
+    # A drag still asks as it moves.
+    seen.clear()
+    QTest.mousePress(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    QTest.mouseMove(timeline, QPoint(int(groove.left() + groove.width() * 0.7), int(groove.center().y())), 20)
+    QTest.mouseRelease(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                       QPoint(int(groove.left() + groove.width() * 0.7), int(groove.center().y())))
+    assert len(seen) >= 2, f"a drag must ask for its intermediate positions too (got {seen})"
+
+
 def test_content_time_is_m_ss_mmm():
     assert format_content_time(0.0) == "0:00.000"
     assert format_content_time(4.171) == "0:04.171"

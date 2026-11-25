@@ -65,6 +65,10 @@ class PreviewState:
     zoom: float = 1.0
     compare: bool = False
     playhead: float = 0.0
+    #: Where the PICTURE is: the media time of the frame on screen. The playhead is where the host stands (the requested
+    #: time while a press is unanswered); this one lags while the decoder catches up, and it is what the scrubber paints
+    #: as played. `None` means "unknown", and the painter then falls back to the playhead.
+    played: float | None = None
     produced: float = 0.0
     duration: float = 0.0
     source_frames: int = 0
@@ -108,6 +112,18 @@ class PreviewState:
         if self.duration <= 0.0:
             return 0.0
         return max(0.0, min(1.0, self.playhead / self.duration))
+
+    def played_fraction(self) -> float:
+        """How much of the timeline the PICTURE covers, 0..1 - the scrubber's played fill.
+
+        Deliberately not the playhead: a press moves the thumb to the requested time at once, while the picture still
+        shows the old frame for a few frames. Painting both from one number made a seek invisible until it landed (and
+        made the fill jump with every stale frame); the two are separate facts.
+        """
+        if self.duration <= 0.0:
+            return 0.0
+        value = self.playhead if self.played is None else self.played
+        return max(0.0, min(1.0, float(value) / self.duration))
 
     def at_produced_edge(self, tolerance: float | None = None) -> bool:
         """Whether the playhead has reached the furthest moment this backend can show.
