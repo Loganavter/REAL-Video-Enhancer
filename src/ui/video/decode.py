@@ -33,7 +33,7 @@ import time
 from PySide6.QtCore import QMetaObject, QObject, Qt, QTimer, Signal, Slot
 
 from .clock import PlaybackClock
-from .frames import FORMATS, FrameRef, frame_pts, pack_frame
+from .frames import FORMATS, FrameRef, frame_pts, pack_frame, stream_color_tags
 
 #: Microsecond seek unit: `av.time_base` is 1/1000000 and `container.seek()` without `stream=` reads
 #: its offset in that unit.
@@ -93,11 +93,20 @@ class VideoDecoder(QObject):
 
     def __init__(self, parent: QObject | None = None, *, pixel_format: str = "rgb24",
                  max_frames_per_tick: int = 4, codec_threads: int = 2,
-                 max_size: tuple[int, int] | None = None, content_time: bool = False) -> None:
+                 max_size: tuple[int, int] | None = None, content_time: bool = False,
+                 color_space: str | None = None, color_range: str | None = None) -> None:
         super().__init__(parent)
         if pixel_format not in FORMATS:
             raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
         self._pixel_format = pixel_format
+        #: The matrix/range the shader converts the planes with. `None` means "read the stream's own
+        #: tags at open, and let the renderer fall back to bt709/tv when the file has none" - which
+        #: is what this app's writer declares. A caller that produced the file itself (the playback
+        #: host knows the job's settings) may pass them and they win.
+        self._color_space = color_space
+        self._color_range = color_range
+        #: True when the CALLER stated them: an auto-read pair must be re-read on the next file.
+        self._color_explicit = color_space is not None or color_range is not None
         self._max_frames_per_tick = max(1, int(max_frames_per_tick))
         self._codec_threads = max(1, int(codec_threads))
         #: The largest picture this decoder will hand over, or ``None`` for the file's own resolution.
@@ -188,6 +197,11 @@ class VideoDecoder(QObject):
 
         self._container = container
         self._stream = stream
+        #: The stream's own colour tags, read once: the YUV planes are converted in the shader with
+        #: THIS file's matrix, and a caller that knows them better (the renderer's own settings) may
+        #: pass them in. Tuple order is `(color_space, color_range)`.
+        if not self._color_explicit:
+            self._color_space, self._color_range = stream_color_tags(stream)
         self._duration = duration
         self._fps = fps
         self._interval = 1.0 / fps if fps > 0 else 0.04
@@ -368,7 +382,8 @@ class VideoDecoder(QObject):
         # for a source file, so a compare's own decoder keeps the source's absolute times).
         pts = raw - self._origin
         index = int(round(pts / self._interval)) if self._fps > 0 else self._packed
-        return pack_frame(self._fit(decoded), index, self._pixel_format, pts=pts)
+        return pack_frame(self._fit(decoded), index, self._pixel_format, pts=pts,
+                          color_space=self._color_space, color_range=self._color_range)
 
     def _fit(self, frame):
         """The frame at the decoder's size cap, aspect kept, or the frame itself when it already fits.

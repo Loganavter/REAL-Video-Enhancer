@@ -12,9 +12,11 @@ queue hands back. Nothing in here touches a widget.
 """
 
 from .clock import PlaybackClock
-from .frames import FrameQueue, FrameRef, frame_pts, pack_frame
+from .frames import FORMATS, PLANAR_FORMATS, FrameQueue, FrameRef, frame_pts, pack_frame, pack_planes
 
 __all__ = [
+    "FORMATS",
+    "PLANAR_FORMATS",
     "FrameQueue",
     "FrameRef",
     "PlaybackClock",
@@ -22,6 +24,7 @@ __all__ = [
     "TailReader",
     "frame_pts",
     "pack_frame",
+    "pack_planes",
 ]
 
 

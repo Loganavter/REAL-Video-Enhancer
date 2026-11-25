@@ -15,20 +15,34 @@ where that difference lives:
 it on its own thread, the surface uploads from it on the GUI thread, and nothing in between needs a
 ``QImage`` (which would be a copy per frame - the thing the plan's resource budget forbids).
 
+The YUV formats carry the three planes twice over: ``buffer`` keeps the historical STACKED layout
+(Y, then U, then V) that the queue/legacy consumers read, and ``planes``/``strides`` name each plane
+separately - which is what the GPU path uploads, one texture per plane, with no untangling and no
+``to_ndarray``/``tobytes`` in the middle when the decoder's rows are already packed.
+
 This module imports neither Qt nor PyAV, on purpose: the queue policy is the half whose bugs look
 like "the preview stutters", and it has to be testable on an interpreter that has neither installed
-(this repo's test interpreter has no ``av``). ``pack_frame`` needs a *decoded* frame, but only
-through the tiny duck-typed surface PyAV offers (``to_ndarray``, ``time``, ``width``, ``height``),
-so a stub object exercises it in the tests.
+(this repo's test interpreter has no ``av``). ``pack_frame``/``pack_planes`` need a *decoded* frame,
+but only through the duck-typed surface PyAV offers (``planes`` with ``line_size``, or ``to_ndarray``,
+plus ``time``, ``width``, ``height``), so a stub object exercises them in the tests.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: The formats a ``FrameRef`` can carry today: packed 8-bit RGB, or the three YUV420 planes in one
-#: buffer (Y, then U, then V - the same layout the shared-memory preview channel uses).
-FORMATS = ("rgb24", "yuv420p")
+#: The formats a ``FrameRef`` can carry today: packed 8-bit RGB, or the three YUV420 planes - 8-bit
+#: (``yuv420p``, 1 byte/sample) and 10-bit little-endian (``yuv420p10le``, 2 bytes/sample, the code
+#: value in the low 10 bits - exactly what PyAV hands over and what the writer emits for 10-bit).
+FORMATS = ("rgb24", "yuv420p", "yuv420p10le")
+
+#: Bytes per sample of the planar formats. A 10-bit sample occupies 16 bits; the shader divides by
+#: the code maximum (1023), not by 65535, which is the one arithmetic detail a plane upload gets wrong
+#: by default (an R16 texture samples ``code / 65535``).
+SAMPLE_BYTES = {"yuv420p": 1, "yuv420p10le": 2}
+
+#: The planar formats, as a tuple, for callers that branch on "is this a planes frame".
+PLANAR_FORMATS = ("yuv420p", "yuv420p10le")
 
 
 @dataclass(frozen=True)
@@ -36,9 +50,15 @@ class FrameRef:
     """One decoded frame, owned by whoever produced it.
 
     ``buffer`` is the whole picture: ``stride * height`` bytes for ``rgb24``, or
-    ``stride * height + 2 * chroma_stride * chroma_height`` for ``yuv420p`` where the chroma planes
-    are stacked after the luma plane (``(width + 1) // 2`` columns each).
+    ``stride * height + 2 * chroma_stride * chroma_height`` for the planar formats where the chroma
+    planes are stacked after the luma plane (``(width + 1) // 2`` columns each).
     ``pts`` is container time in seconds; ``index`` is the frame's number in the stream.
+
+    For the planar formats ``planes``/``strides`` name the three planes as the GPU uploads them
+    (``Y`` full size, ``U``/``V`` half size in both axes) and ``stride`` is the LUMA ROW LENGTH IN
+    BYTES (``width`` for 8-bit, ``width * 2`` for 10-bit). ``color_space``/``color_range`` carry the
+    stream's own tags when the producer could read them (``"bt709"``/``"tv"``) - the renderer's
+    matrix comes from these, never from a hard-coded BT.709.
     """
 
     buffer: object
@@ -48,6 +68,16 @@ class FrameRef:
     stride: int
     pts: float
     index: int
+    planes: tuple[object, ...] | None = None
+    strides: tuple[int, ...] | None = None
+    color_space: str | None = None
+    color_range: str | None = None
+
+
+def plane_geometry(width: int, height: int) -> tuple[tuple[int, int], tuple[int, int]]:
+    """The ``(luma, chroma)`` plane sizes of a 4:2:0 picture. Odd sizes are legal in YUV."""
+    width, height = int(width), int(height)
+    return (width, height), ((width + 1) // 2, (height + 1) // 2)
 
 
 def frame_pts(frame) -> float:
@@ -62,16 +92,20 @@ def frame_pts(frame) -> float:
 
 
 def pack_frame(frame, index: int, pixel_format: str = "rgb24",
-               pts: float | None = None, size: tuple[int, int] | None = None) -> FrameRef:
+               pts: float | None = None, size: tuple[int, int] | None = None,
+               color_space: str | None = None, color_range: str | None = None) -> FrameRef:
     """A :class:`FrameRef` from one decoded PyAV-style frame, with no copy beyond the pack itself.
 
-    ``rgb24`` asks PyAV for a packed RGB picture; ``yuv420p`` asks for the three planes and keeps
-    them stacked, which is a third of the traffic per 1080p frame (3.1 MB against 8.3 MB) at the
-    price of the conversion happening in the fragment shader. Which one wins is P0's decision; both
-    exist here so the surface can be pointed at either without touching the decoder.
+    ``rgb24`` asks PyAV for a packed RGB picture; the planar formats ask for the three planes instead,
+    which is 1.5 bytes/pixel (8-bit) or 3 (10-bit) against RGB's 4 at the same size, at the price of
+    the colour conversion happening in the fragment shader. Scaling stays in swscale (``size``), the
+    matrix does not: a planar request never makes the scaler convert colour, only resample.
 
     ``pts`` overrides the frame's own timestamp; a caller uses it for a container that left the
     timestamp out (the caller knows the previous frame's time and the stream's interval).
+    ``color_space``/``color_range`` are the stream's own tags; the renderer's matrix is built from
+    them (``None`` means "the producer could not read them" and the renderer falls back to bt709/tv,
+    which is what this app's writer emits).
     """
     if pixel_format not in FORMATS:
         raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
@@ -97,23 +131,135 @@ def pack_frame(frame, index: int, pixel_format: str = "rgb24",
             index=int(index),
         )
 
-    # PyAV hands yuv420p back as one array: `height` luma rows, then the two chroma planes in half
-    # resolution. Odd sizes are legal in YUV, so the chroma width is ceil(width / 2) and the rows
-    # are sliced to it (PyAV pads the array to the luma line size).
-    plane = frame.to_ndarray(format="yuv420p")
-    chroma_w, chroma_h = (width + 1) // 2, (height + 1) // 2
-    luma = plane[:height, :width].tobytes()
-    u = plane[height:height + chroma_h, :chroma_w].tobytes()
-    v = plane[height + chroma_h:height + 2 * chroma_h, :chroma_w].tobytes()
+    planes, strides = pack_planes(frame, pixel_format)
+    # The STACKED buffer stays as it was: the queue pane and the display channel read one flat picture,
+    # and the renderer reads `planes` - so a caller that only wants bytes keeps working unchanged.
+    stacked = b"".join(bytes(plane) for plane in planes)
     return FrameRef(
-        buffer=luma + u + v,
+        buffer=stacked,
         width=width,
         height=height,
-        format="yuv420p",
-        stride=width,
+        format=pixel_format,
+        stride=strides[0],
         pts=pts,
         index=int(index),
+        planes=planes,
+        strides=strides,
+        color_space=color_space,
+        color_range=color_range,
     )
+
+
+def pack_planes(frame, pixel_format: str = "yuv420p10le") -> tuple[tuple[object, ...], tuple[int, ...]]:
+    """The three plane views and byte strides of a decoded frame, at the frame's own size.
+
+    ``(Y, U, V)`` with ``strides`` = the row length in BYTES of each plane. PyAV's own ``planes`` are
+    used when the frame already IS the requested format: a packed plane is then a ``memoryview`` over
+    the decoder's buffer (no copy at all), a padded one is repacked row by row (the only copy left,
+    and swscale pads rarely). A frame that is not the requested format is ``reformat``-ed first - a
+    pixel-format conversion inside the YUV family, which is a bit-depth shift, not a colour matrix.
+
+    A frame without ``planes`` (the duck-typed stub in the tests, and any object that only offers
+    ``to_ndarray``) takes the array path: PyAV's planar array is ``height`` luma rows then the two
+    chroma planes, and each plane is packed to its natural stride.
+    """
+    if pixel_format not in PLANAR_FORMATS:
+        raise ValueError(f"pack_planes needs one of {PLANAR_FORMATS}, got {pixel_format!r}")
+    sample_bytes = SAMPLE_BYTES[pixel_format]
+    if _frame_format_name(frame) not in (None, pixel_format):
+        frame = frame.reformat(format=pixel_format)
+    width, height = int(frame.width), int(frame.height)
+    _, chroma = plane_geometry(width, height)
+    sizes = ((width, height), chroma, chroma)
+
+    direct = _decoder_planes(frame, sizes, sample_bytes)
+    if direct is not None:
+        return direct
+    return _array_planes(frame, pixel_format, sizes, sample_bytes)
+
+
+def _frame_format_name(frame) -> str | None:
+    """The decoded frame's pixel-format name (``"yuv420p10le"``), or None when the object has none."""
+    name = getattr(getattr(frame, "format", None), "name", None)
+    return name if isinstance(name, str) else None
+
+
+def _decoder_planes(frame, sizes, sample_bytes):
+    """Plane views over PyAV's own buffers, or None when this object has no ``planes``."""
+    planes = getattr(frame, "planes", None)
+    if planes is None:
+        return None
+    try:
+        selected = list(planes)[:3]
+        if len(selected) < 3:
+            return None
+        views: list[object] = []
+        strides: list[int] = []
+        for plane, (plane_w, plane_h) in zip(selected, sizes):
+            row_bytes = int(plane_w) * sample_bytes
+            view = memoryview(plane)
+            stride = int(getattr(plane, "line_size", row_bytes) or row_bytes)
+            if stride == row_bytes:
+                views.append(view[:row_bytes * plane_h])
+            else:
+                # swscale padded the rows: the upload wants a contiguous picture, so repack. The common
+                # case (line_size == width * bytes) never reaches this branch.
+                views.append(memoryview(b"".join(
+                    bytes(view[row * stride:row * stride + row_bytes]) for row in range(plane_h))))
+            strides.append(row_bytes)
+        return tuple(views), tuple(strides)
+    except Exception:
+        return None
+
+
+def _array_planes(frame, pixel_format, sizes, sample_bytes):
+    """The ``to_ndarray`` path: PyAV's planar array, sliced to the three planes and packed."""
+    plane = frame.to_ndarray(format=pixel_format)
+    (width, height), (chroma_w, chroma_h), _ = sizes
+    # Odd sizes are legal in YUV, so the chroma width is ceil(width / 2) and the rows are sliced to
+    # it (PyAV pads the array to the luma line size).
+    luma = plane[:height, :width]
+    u = plane[height:height + chroma_h, :chroma_w]
+    v = plane[height + chroma_h:height + 2 * chroma_h, :chroma_w]
+    views = tuple(memoryview(part.tobytes()) for part in (luma, u, v))
+    strides = (width * sample_bytes, chroma_w * sample_bytes, chroma_w * sample_bytes)
+    return views, strides
+
+
+#: ``AVColorSpace`` / ``AVColorRange`` values PyAV may hand back as ints (the enums are not always
+#: exposed as strings). Only the ones this app writes or reads today, plus the HDR family the tags
+#: can name; anything unknown falls back to None and the renderer's default.
+_COLOR_SPACES = {1: "bt709", 5: "bt470bg", 6: "smpte170m", 9: "bt2020nc", 10: "bt2020c"}
+_COLOR_RANGES = {1: "tv", 2: "pc"}
+
+
+def stream_color_tags(stream) -> tuple[str | None, str | None]:
+    """The stream's ``(color_space, color_range)`` tags, or ``(None, None)`` when they are absent.
+
+    PyAV's own attribute names for these have moved between releases, so every read is a ``getattr``
+    on the stream and on its codec context, with the int enums mapped by hand. Absent tags are a real
+    answer: a file written without ``-colorspace``/``-color_range`` has no declaration, and inventing
+    one here would make the renderer's matrix look authoritative when nothing said so.
+    """
+    for holder in (stream, getattr(stream, "codec_context", None)):
+        if holder is None:
+            continue
+        space = getattr(holder, "color_space", None)
+        rng = getattr(holder, "color_range", None)
+        if space is not None or rng is not None:
+            return _tag_name(space, _COLOR_SPACES), _tag_name(rng, _COLOR_RANGES)
+    return None, None
+
+
+def _tag_name(value, table: dict[int, str]) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        return table.get(int(value))
+    except (TypeError, ValueError):
+        return None
 
 
 class FrameQueue:
