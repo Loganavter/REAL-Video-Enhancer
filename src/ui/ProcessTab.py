@@ -1241,6 +1241,8 @@ class ProcessTab:
                     duration=self._clip_duration(),
                 )
         else:
+            image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
+                           QImage.Format.Format_RGB888).copy()
             pixmap = QtGui.QPixmap.fromImage(image)
             pane.setPixmap(self.getRoundedPixmap(pixmap, corner_radius=10))
         if holding:
@@ -1716,7 +1718,11 @@ class ProcessTab:
 
         try:
             box = self._pane_display_box()
-            tail = LiveTailThread(path, paused=self._preview_paused, target_size=box)
+            # YUV420 planes, not RGB24: the pane uploads three plane textures and the shader converts. The 10-bit
+            # arm is the preview file's own format; `pixel_format="yuv420p"` is the 8-bit fallback if R16 sampling
+            # is unusable on the host's RHI backend.
+            tail = LiveTailThread(path, paused=self._preview_paused, target_size=box,
+                                  pixel_format="yuv420p10le")
             tail.frame_ready.connect(self._on_preview_frame)
             tail.error.connect(lambda message: log(f"preview tail: {message}"))
             # A press the file could not answer must be legible in log.txt: "it did nothing" and "it snapped to the
@@ -2153,7 +2159,7 @@ class ProcessTab:
             # `set_frame` calls before Qt paints ONCE - the pane then shows only the last of the burst and skips the
             # rest (measured: 96 frames delivered, 66 painted, every second picture lost). One per tick leaves the
             # event loop a paint between frames.
-            decoder = VideoDecoder(pixel_format="rgb24", content_time=True,
+            decoder = VideoDecoder(pixel_format="yuv420p10le", content_time=True,
                                    max_size=self._pane_display_box(), max_frames_per_tick=1)
             decoder.frame_ready.connect(self._on_preview_frame)
             decoder.opened.connect(self._on_preview_opened)
@@ -2831,8 +2837,6 @@ class ProcessTab:
                 and getattr(self, "_preview_decoder", None) is None):
             return
         path_started = time.perf_counter()
-        image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
-                       QImage.Format.Format_RGB888).copy()
         # The file's own clock, once: the writer's `make_zero` muxes a content-zero frame at the encoder's B-frame
         # delay, and the tail subtracts that origin from every name (measured 2026-11-25: 0.083 s, two frames).
         if getattr(self, "_live_tail", None) is not None and not getattr(self, "_tail_origin_logged", False):
@@ -2843,9 +2847,23 @@ class ProcessTab:
                 log(f"preview: file timeline starts at {float(origin):.3f}s; picture names are CONTENT times "
                     f"(this one is {named:.3f}s = {named + float(origin):.3f}s in the file)")
         pane = self.page_handles.proc.previewLabel
-        if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
-            pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
-                           index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
+        planes_frame = str(getattr(frame, "format", "") or "") in ("yuv420p10le", "yuv420p")
+        if hasattr(pane, "set_frame"):
+            if planes_frame and hasattr(pane, "set_frame_planes"):
+                # The playback path: the producer's YUV planes go to the GPU as they are, the shader converts.
+                # No QImage, no `to_ndarray`/`tobytes`, no RGBA conversion - the short path of direction 2.
+                pane.set_frame_planes(
+                    frame.planes, frame.strides, frame.width, frame.height,
+                    index=getattr(frame, "index", None), pts=getattr(frame, "pts", None),
+                    format=str(frame.format),
+                    color_space=getattr(frame, "color_space", None),
+                    color_range=getattr(frame, "color_range", None),
+                    gui_ms=(time.perf_counter() - path_started) * 1000.0)
+            else:
+                image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
+                               QImage.Format.Format_RGB888).copy()
+                pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
+                               index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
             watched = getattr(self, "_seek_watch", None)
             if watched is not None:

@@ -449,8 +449,15 @@ class VideoPreviewSurface(QRhiWidget):
             self._original_time = None if media_time is None else float(media_time)
             self._original_changed = True
             picture = image.convertToFormat(QImage.Format.Format_RGBA8888)
-            if self._frame is not None and picture.size() != self._frame.size():
-                target = self._frame.size()
+            # The target is the RESULT's picture size: its QImage, or the planes descriptor when the playback path
+            # carries YUV. A planes result has no `_frame`; without this the source half kept its native 1440x1080 and
+            # the two halves were at different scales (measured live 2026-11-25: single held fine, sbs's source did
+            # not match the result).
+            target_size = None if self._frame is None else self._frame.size()
+            if target_size is None and getattr(self, "_planes_size", None) is not None:
+                target_size = QSize(int(self._planes_size[0]), int(self._planes_size[1]))
+            if target_size is not None and picture.size() != target_size:
+                target = target_size
                 # TWO cases, and the difference is measurable. The channel's payload box rounds each side to an even
                 # number independently (`fit_box`), so a 4:3 source in a 421x512 pane becomes a 420x314 payload whose
                 # aspect is 0.32 % wide; scaling the source into it with `KeepAspectRatio` gave 418x314 and the draw

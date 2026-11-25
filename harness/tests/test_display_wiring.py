@@ -1092,3 +1092,56 @@ def test_play_on_a_finished_export_uses_its_decoder_not_a_playback_tail(monkeypa
 
     assert started == [], "a finished file must not be replayed through the tail"
     assert calls == ["play"], "the finished-file decoder is the player"
+
+
+def test_a_planes_frame_goes_to_the_pane_as_planes_and_an_rgb_frame_as_an_image():
+    """The host's playback path: a YUV frame is handed over as planes (the shader converts), an RGB one as a QImage.
+
+    The producer's format decides; the pane's `set_frame_planes` is the short path (no QImage/RGBA copies on the
+    playback chain), and the rgba8 fallback keeps working for a frame that is not planar.
+    """
+    calls: list[tuple] = []
+
+    class _Pane:
+        def set_frame_planes(self, planes, strides, width, height, **kw):
+            calls.append(("planes", planes, strides, width, height, kw))
+
+        def set_frame(self, image, **kw):
+            calls.append(("image", image.width(), image.height(), kw))
+
+        def set_progress(self, **kw):
+            calls.append(("progress", kw))
+
+    tab = SimpleNamespace(
+        page_handles=SimpleNamespace(proc=SimpleNamespace(previewLabel=_Pane())),
+        _display_paints_pane=lambda: False,
+        _queue_owns_pane=lambda: False,
+        _live_tail=None,
+        _preview_decoder=SimpleNamespace(),
+        _preview_playhead=0.0,
+        _preview_duration=10.0,
+        currentFrame=5,
+        max_value=10,
+        renderProcess=None,
+        _seek_watch=None,
+        _tail_origin_logged=True,
+        _push_preview_state=lambda: None,
+    )
+    y_plane, u_plane, v_plane = bytes(8), bytes(2), bytes(2)
+    planes = SimpleNamespace(format="yuv420p10le", planes=(y_plane, u_plane, v_plane), strides=(4, 2, 2),
+                             width=2, height=2, index=7, pts=0.5, color_space="bt709", color_range="tv")
+    ProcessTab._on_preview_frame(tab, planes)
+    kind, got_planes, got_strides, width, height, kw = calls[0]
+    assert kind == "planes"
+    assert got_planes == (y_plane, u_plane, v_plane) and got_strides == (4, 2, 2)
+    assert (width, height) == (2, 2)
+    assert kw["pts"] == 0.5 and kw["index"] == 7 and kw["format"] == "yuv420p10le"
+    assert kw["color_space"] == "bt709" and kw["color_range"] == "tv"
+    assert tab._preview_playhead == 0.5
+
+    # An RGB frame (the fallback and the source/compare producers) still becomes a QImage.
+    rgb = SimpleNamespace(format="rgb24", buffer=bytes(12), width=2, height=2, stride=6, index=8, pts=0.1)
+    ProcessTab._on_preview_frame(tab, rgb)
+    assert [call[0] for call in calls].count("image") == 1
+    image_call = next(call for call in calls if call[0] == "image")
+    assert image_call[1:3] == (2, 2)

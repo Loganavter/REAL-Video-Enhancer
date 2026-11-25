@@ -295,3 +295,21 @@ def test_a_really_different_aspect_is_letterboxed_and_named(surface):
     surface.set_frame(QImage(420, 300, QImage.Format.Format_RGB32))
     surface.set_original(QImage(1440, 1080, QImage.Format.Format_RGB32))
     assert surface._original.size().toTuple() == (400, 300), "4:3 inside a 7:5 frame keeps its proportions"
+
+
+def test_the_original_scales_to_a_planes_picture_size(surface):
+    """The compare's source is scaled to the RESULT's size - including when the result is YUV planes.
+
+    The YUV playback path has no `_frame` QImage, so `set_original` used to skip the scaling entirely and the sbs
+    source half kept its native size (measured live 2026-11-25: the result half was the pane's fit, the source half a
+    cropped native frame). The target is `_frame.size()` or the planes descriptor.
+    """
+    width, height = 320, 180
+    planes = (bytes(width * 2 * height), bytes((width // 2) * 2 * (height // 2)),
+              bytes((width // 2) * 2 * (height // 2)))
+    surface.set_frame_planes(planes, (width * 2, width, width), width, height)
+    source = QImage(640, 360, QImage.Format.Format_RGBA8888)
+    source.fill(QColor("#204060"))
+    surface.set_original(source)
+    assert surface._original is not None
+    assert (surface._original.width(), surface._original.height()) == (width, height)

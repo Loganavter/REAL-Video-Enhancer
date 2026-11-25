@@ -1531,9 +1531,19 @@ def install(window) -> None:
             if pane is None:
                 return None
             frame = getattr(pane, "_frame", None)
+            # A planes picture has no `_frame` (the YUV playback path): the pane's own `has_frame()` and the
+            # descriptor's size are the truth, or the verb answers "no frame" over a picture that is on screen
+            # (measured live 2026-11-25: the pane showed the YUV preview while the answer said has_frame=false).
+            planes = getattr(pane, "_planes_size", None)
+            present = bool(pane.has_frame()) if callable(getattr(pane, "has_frame", None)) else frame is not None
+            size = None
+            if frame is not None:
+                size = [frame.width(), frame.height()]
+            elif planes is not None:
+                size = [int(planes[0]), int(planes[1])]
             return {"class": type(pane).__name__, "visible": bool(pane.isVisible()),
-                    "has_frame": frame is not None,
-                    "frame": [frame.width(), frame.height()] if frame is not None else None,
+                    "has_frame": present,
+                    "frame": size,
                     # (rendered, total, playhead, duration): the strip's two bases, so a live seek can be read
                     # from outside instead of guessed from a screenshot.
                     "progress": list(getattr(pane, "_progress", ()) or ())}
