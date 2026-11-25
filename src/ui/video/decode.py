@@ -93,7 +93,7 @@ class VideoDecoder(QObject):
 
     def __init__(self, parent: QObject | None = None, *, pixel_format: str = "rgb24",
                  max_frames_per_tick: int = 4, codec_threads: int = 2,
-                 max_size: tuple[int, int] | None = None) -> None:
+                 max_size: tuple[int, int] | None = None, content_time: bool = False) -> None:
         super().__init__(parent)
         if pixel_format not in FORMATS:
             raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
@@ -109,6 +109,15 @@ class VideoDecoder(QObject):
         #: smaller picture instead (swscale, in the decode already happening) - a 4K item on a 960x540 pane packs 16x
         #: less per frame. The file's timestamps and the seek path are untouched.
         self._max_size = None if max_size is None else (max(2, int(max_size[0])), max(2, int(max_size[1])))
+
+        #: Name frames in CONTENT time: the file's PTS minus the container's own start. A rendered output is written
+        #: with `-avoid_negative_ts make_zero`, which shifts the whole timeline by the encoder's B-frame delay
+        #: (measured 2026-11-25: 0.083 s, two frames at 23.976) while the first frame is still the source's first.
+        #: A SOURCE file must keep its own absolute times - the renderer seeks by them - so this is opt-in and only the
+        #: playback of an output turns it on.
+        self._content_time = bool(content_time)
+        self._media_origin: float | None = None
+        self._origin = 0.0
 
         self._container = None
         self._stream = None
@@ -166,6 +175,17 @@ class VideoDecoder(QObject):
         fps = float(stream.average_rate) if stream.average_rate else 0.0
         frames_total = float(stream.frames or (round(duration * fps) if fps else 0))
 
+        try:
+            start = stream.start_time
+            self._media_origin = float(start * stream.time_base) if start is not None else 0.0
+        except Exception:
+            self._media_origin = None
+        self._origin = (self._media_origin if (self._content_time and self._media_origin is not None) else 0.0)
+        if self._origin:
+            # The timeline the caller sees starts where the CONTENT starts: the file's first frame is time zero of
+            # the render, not `origin` (the encoder's delay). The frame count is untouched - it is a count.
+            duration = max(0.0, duration - self._origin)
+
         self._container = container
         self._stream = stream
         self._duration = duration
@@ -190,6 +210,8 @@ class VideoDecoder(QObject):
         self._held = None
         self._pending_seek = None
         self._request = None
+        self._origin = 0.0
+        self._media_origin = None
         self._demux = None
         self._frame_iter = None
         self._stream = None
@@ -264,6 +286,11 @@ class VideoDecoder(QObject):
     def fps(self) -> float:
         return self._fps
 
+    @property
+    def media_origin(self) -> float | None:
+        """The container's own first timestamp (file time); non-zero means its PTS are shifted from its content."""
+        return self._media_origin
+
     # -- the pump ----------------------------------------------------------------------------------
 
     @Slot()
@@ -332,11 +359,14 @@ class VideoDecoder(QObject):
         return self._pack(decoded)
 
     def _pack(self, decoded) -> FrameRef:
-        pts = frame_pts(decoded)
+        raw = frame_pts(decoded)
         if getattr(decoded, "time", None) is None:
-            pts = self._decode_pts + self._interval
-        self._decode_pts = pts
+            raw = self._decode_pts + self._interval
+        self._decode_pts = raw
         self._packed += 1
+        # The name the pane reads is CONTENT time when this decoder was opened for a rendered output (`_origin` is 0
+        # for a source file, so a compare's own decoder keeps the source's absolute times).
+        pts = raw - self._origin
         index = int(round(pts / self._interval)) if self._fps > 0 else self._packed
         return pack_frame(self._fit(decoded), index, self._pixel_format, pts=pts)
 
@@ -424,9 +454,10 @@ class VideoDecoder(QObject):
             self.seeked.emit(float(target))
 
     def _rewind(self, target: float) -> None:
-        # A frame held from the old position belongs to that position, not to this one.
+        # A frame held from the old position belongs to that position, not to this one. `target` is the caller's clock
+        # (content time when `content_time` is on); the container seeks in FILE time, so the origin goes back on here.
         self._held = None
-        self._container.seek(int(max(0.0, target) * _MICROS), backward=True)
+        self._container.seek(int(max(0.0, target + self._origin) * _MICROS), backward=True)
         self._reset_stream()
 
     def _reset_stream(self) -> None:

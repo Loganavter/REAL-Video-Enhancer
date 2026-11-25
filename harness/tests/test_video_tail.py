@@ -74,12 +74,13 @@ class _FakeFrame:
 
 
 class _FakePacket:
-    def __init__(self, index: int, payload: bytes) -> None:
+    def __init__(self, index: int, payload: bytes, origin: float = 0.0) -> None:
         self._index = index
         self._payload = payload
+        self._origin = float(origin)
 
     def decode(self):
-        return [_FakeFrame(self._payload, self._index / FPS)]
+        return [_FakeFrame(self._payload, self._origin + self._index / FPS)]
 
 
 class _CodecContext:
@@ -101,6 +102,9 @@ class _FakeContainer:
         self.path = path
         self.streams = types.SimpleNamespace(video=[_FakeStream()])
         self.offset = 0
+        #: Every fake frame's timestamp is `origin + index/FPS`: a non-zero origin is a file written with
+        #: `-avoid_negative_ts make_zero`, whose content still starts at zero (the shift the pane must subtract).
+        self.origin = float(getattr(type(self), "origin", 0.0) or 0.0)
         self.seeks: list[tuple[int, bool]] = []
         self.closed = False
         self._dead = False
@@ -114,7 +118,7 @@ class _FakeContainer:
         count = len(data) // FRAME_BYTES
         first = self.offset // FRAME_BYTES
         packets = [
-            _FakePacket(first + i, data[i * FRAME_BYTES:(i + 1) * FRAME_BYTES])
+            _FakePacket(first + i, data[i * FRAME_BYTES:(i + 1) * FRAME_BYTES], self.origin)
             for i in range(count)
         ]
         self.offset += count * FRAME_BYTES
@@ -653,3 +657,51 @@ def test_a_slow_decoder_drops_frames_instead_of_playing_at_its_own_speed(qapp):
 
     thread._present(SimpleNamespace(pts=0.25))   # this one is current again
     assert shown == [0.0, 0.25]
+
+
+def test_the_file_origin_is_reported_when_the_writer_shifted_the_timeline(qapp, scratch_dir, monkeypatch):
+    """A file's own first timestamp is not zero when the writer shifted the timeline, and the pane must know.
+
+    Measured 2026-11-25: the preview writer's `-avoid_negative_ts make_zero` (plus x264's B-frame delay) muxes the
+    source's first frame at 0.083 s. The pane names every picture with the FILE's PTS, so a press then decodes the
+    source at a time two frames LATER than the frame it is standing on - the LMB compare's "one frame" report. The
+    reader exposes the origin instead of assuming 0, so the shift is printed once and can be subtracted.
+    """
+    monkeypatch.setattr(_FakeStream, "start_time", 83, raising=False)
+    monkeypatch.setattr(_FakeStream, "time_base", 1 / 1000, raising=False)
+    path = _emptied(scratch_dir)
+    harness = _Harness(path)
+    harness.append(1)
+    assert harness.reader.open(path) is True
+    assert harness.reader.media_origin is None, "nothing is known before the container opens"
+    harness.reader.poll()
+    assert harness.reader.media_origin == pytest.approx(0.083)
+
+
+def test_media_time_is_content_time_not_the_file_timeline(qapp, scratch_dir, monkeypatch):
+    """A file shifted by `make_zero` is read as CONTENT time: label, frame index and seek all agree with the source.
+
+    The writer muxes the content's first frame at `origin` (0.083 s = the encoder's B-frame delay) while the frame
+    itself is the source's first. Naming pictures with the file's PTS put the pane two frames ahead of its own
+    content, and the LMB compare then decoded the source two frames after the result's frame (measured 2026-11-25).
+    The reader subtracts the origin from every published name/index and adds it back when it seeks the container.
+    """
+    monkeypatch.setattr(_FakeStream, "start_time", 83, raising=False)
+    monkeypatch.setattr(_FakeStream, "time_base", 1 / 1000, raising=False)
+    monkeypatch.setattr(_FakeContainer, "origin", 0.083, raising=False)
+    path = _emptied(scratch_dir)
+    harness = _Harness(path)
+    harness.append(3)
+    assert harness.reader.open(path) is True
+    assert harness.reader.poll() == 3
+    assert [round(frame.pts, 3) for frame in harness.frames] == [0.0, 0.1, 0.2], "names are content time"
+    assert [frame.index for frame in harness.frames] == [0, 1, 2], "the index follows the content name"
+    assert round(harness.reader.produced_seconds, 3) == 0.2
+
+    # A content-time seek goes into the FILE at content + origin: 0.1 s of content = 0.183 s of file. The floor sits
+    # half an interval under it (0.05 s of content), i.e. 0.133 s of file.
+    assert round(harness.reader.seek(0.1), 3) == 0.1
+    before = len(harness.frames)
+    harness.reader.poll()
+    assert harness.containers[-1].seeks[-1][0] == 133000, "the container was asked for FILE time"
+    assert round(harness.frames[before].pts, 3) == 0.1, "and the picture that came back is content 0.1 s"

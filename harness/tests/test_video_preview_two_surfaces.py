@@ -305,3 +305,34 @@ def test_a_compare_mode_keeps_the_original_on_the_playhead(surface):
     surface.set_view_mode("single")
     surface.set_progress(10.0, 10.0, playhead=4.0, duration=10.0)
     assert asked == [1.0, 2.5], "single goes back to the flash: no standing requests"
+
+
+def test_the_last_step_names_both_halves_in_one_line(surface):
+    """The compare's DRAW is the only record of what was actually on screen - and labels alone cannot prove it.
+
+    A writer that shifts its timeline (`-avoid_negative_ts make_zero` plus an encoder's B-frame delay) names every
+    picture later than the frame it carries: measured 2026-11-25, the preview file starts at 0.083 s while its first
+    frame is the source's 0.000 s frame, so a compare whose labels agree still shows two different frames. The pane
+    therefore prints, at the draw: its own media time and index, the source's, a cheap pixel fingerprint of each, and
+    the ask -> on-screen milliseconds. `result_t` is what makes "one frame behind" a subtraction.
+    """
+    from src.ui.video import telemetry
+
+    lines: list[str] = []
+    telemetry.set_writer(lambda line, _which: lines.append(line))
+    try:
+        surface.set_view_mode("single")
+        surface.set_frame(_picture(*FRAME_SIZE), index=221, media_time=9.218)
+        surface._showing_original = True
+        surface._note_original_ask(9.301)
+        surface.set_original(_picture(*FRAME_SIZE, "#30a028"), media_time=9.301, index=223)
+        surface._log_draw(half="original", picture=surface._original)
+    finally:
+        telemetry.set_writer(None)
+
+    line = [one for one in lines if one.startswith("preview: draw ")][-1]
+    for piece in ("mode=single", "half=original", "t=9.301", "idx=223",
+                  "result_t=9.218", "result_idx=221", "fp=", "ask_ms=", "ask_wall="):
+        assert piece in line, f"{piece!r} is missing from the draw line: {line}"
+    assert surface.original_shown_time() == 9.301
+    assert surface.original_shown() == ("frame", 223), "the source half keeps the identity its decoder gave it"

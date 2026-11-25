@@ -1666,6 +1666,7 @@ class ProcessTab:
     def _stop_live_tail(self) -> None:
         self._live_tail_wanted = False
         self._playback_tail = False
+        self._tail_origin_logged = False
         tail = getattr(self, "_live_tail", None)
         if tail is not None:
             try:
@@ -1850,7 +1851,10 @@ class ProcessTab:
 
         try:
             self._stop_preview_playback()
-            decoder = VideoDecoder(pixel_format="rgb24")
+            # CONTENT time: this decoder reads the render's OWN output, whose container timeline starts at the
+            # encoder's B-frame delay (0.083 s on the owner's clip) while its first frame is the source's first.
+            # Without this the pane's times, its strip and the LMB compare are all two frames late.
+            decoder = VideoDecoder(pixel_format="rgb24", content_time=True)
             decoder.frame_ready.connect(self._on_preview_frame)
             decoder.opened.connect(self._on_preview_opened)
             decoder.error.connect(lambda message: log(f"preview decoder: {message}"))
@@ -2401,9 +2405,16 @@ class ProcessTab:
         # report was "a couple of frames after the right one" and neither number existed anywhere before this line.
         self._compare_watch = float(seconds)
         if not getattr(self, "_compare_from_tick", False):
+            pane = self.page_handles.proc.previewLabel
+            showing = "-"
+            try:
+                shown = pane.shown_time() if hasattr(pane, "shown_time") else None
+                showing = "-" if shown is None else f"{float(shown):.3f}"
+            except Exception:
+                pass
             log(f"compare: asked for the source at {seconds:.3f}s (pane playhead "
-                f"{float(getattr(self, '_preview_playhead', 0.0)):.3f}s, "
-                f"mode {getattr(self.page_handles.proc.previewLabel, '_view_mode', '?')})")
+                f"{float(getattr(self, '_preview_playhead', 0.0)):.3f}s, showing {showing}s, "
+                f"mode {getattr(pane, '_view_mode', '?')})")
         decoder = getattr(self, "_source_decoder", None)
         try:
             if decoder is None:
@@ -2449,16 +2460,33 @@ class ProcessTab:
             image = image.copy(*region)
         watched = getattr(self, "_compare_watch", None)
         self._compare_watch = None
-        if watched is not None:
-            pts = float(getattr(frame, "pts", 0.0) or 0.0)
-            # Both halves print their index: the ask's frame (the picture's own time -> its grid index) and the frame the
-            # compare decoded. "One frame behind" is then a subtraction, not an impression.
-            index = getattr(frame, "index", None)
-            log(f"compare: the source frame is {pts:.3f}s idx={index} for an ask of {watched:.3f}s "
-                f"(delta {pts - watched:+.3f}s, {abs(pts - watched) * 24.0:.1f} frames at 24 fps)")
+        pts = float(getattr(frame, "pts", 0.0) or 0.0)
+        index = getattr(frame, "index", None)
         pane = self.page_handles.proc.previewLabel
+        # The LAST step's other half: what the pane was showing when the press asked for this source frame. The labels
+        # can agree and the pictures still differ (a shifted file timeline names every frame late), so the draw line in
+        # the pane's own log carries a content fingerprint next to this one.
+        result_time = None
+        result_kind = None
+        try:
+            result_time = pane.shown_time() if hasattr(pane, "shown_time") else None
+            result_kind = pane.shown() if hasattr(pane, "shown") else None
+        except Exception:
+            pass
+        if watched is not None:
+            fps = 0.0
+            try:
+                fps = float(self._source_decoder.fps()) if getattr(self, "_source_decoder", None) is not None else 0.0
+            except Exception:
+                fps = 0.0
+            fps = fps if fps > 0.0 else 24.0
+            gap = "" if result_time is None else (
+                f", result {float(result_time):.3f}s {result_kind}"
+                f" -> gap {pts - float(result_time):+.3f}s ({(pts - float(result_time)) * fps:+.1f} frames)")
+            log(f"compare: the source frame is {pts:.3f}s idx={index} for an ask of {watched:.3f}s "
+                f"(delta {pts - watched:+.3f}s, {abs(pts - watched) * fps:.1f} frames at {fps:.2f} fps{gap})")
         if hasattr(pane, "set_original"):
-            pane.set_original(image)
+            pane.set_original(image, media_time=pts, index=index)
 
     def _log_source_crop_unknown(self, reason: str) -> None:
         """One line per job when the compare cannot crop: the preview then shows the uncropped source."""
@@ -2505,6 +2533,15 @@ class ProcessTab:
         path_started = time.perf_counter()
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
+        # The file's own clock, once: the writer's `make_zero` muxes a content-zero frame at the encoder's B-frame
+        # delay, and the tail subtracts that origin from every name (measured 2026-11-25: 0.083 s, two frames).
+        if getattr(self, "_live_tail", None) is not None and not getattr(self, "_tail_origin_logged", False):
+            origin = getattr(self._live_tail, "media_origin", None)
+            if origin is not None:
+                self._tail_origin_logged = True
+                named = float(getattr(frame, "pts", 0.0) or 0.0)
+                log(f"preview: file timeline starts at {float(origin):.3f}s; picture names are CONTENT times "
+                    f"(this one is {named:.3f}s = {named + float(origin):.3f}s in the file)")
         pane = self.page_handles.proc.previewLabel
         if hasattr(self.page_handles.proc.previewLabel, "set_frame"):
             pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,

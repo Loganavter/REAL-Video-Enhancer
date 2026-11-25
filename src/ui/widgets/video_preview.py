@@ -24,6 +24,7 @@ Decisions encoded here, each from a measurement or an owner call:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 
@@ -167,6 +168,15 @@ class VideoPreviewSurface(QRhiWidget):
         self._split_fraction = 0.5
         #: the playhead the standing original was last asked for, so playback refreshes it once per move
         self._original_requested_at: float | None = None
+        #: The identity of the source picture the host handed over (`("frame", n)`, its media time) and the moment the
+        #: pane asked for it. The compare's "last step" is the DRAW, and a draw that cannot name both halves cannot
+        #: answer "what was on screen when the offset happened" (owner, 2026-11-25).
+        self._original_shown: tuple[str, int] | None = None
+        self._original_time: float | None = None
+        self._original_ask_time: float | None = None
+        self._original_ask_wall: str | None = None
+        self._original_ask_target: float | None = None
+        self._original_changed = False
         #: Opaque clear colour for the pane. QRhiWidgets composite by OVERWRITING their rect, so a clear with alpha
         #: below 255 punches a hole (black on Wayland, white on xcb) instead of letting the page show through - the
         #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
@@ -273,9 +283,104 @@ class VideoPreviewSurface(QRhiWidget):
         """What the pane is painting: ``("frame", n)`` or ``("seq", n)``, or None before the first picture."""
         return getattr(self, "_shown", None)
 
-    def set_original(self, image: QImage | None) -> None:
-        if image is not None:
-            telemetry.note_frame()      # the source half of a compare mode: a picture the pane accepted too
+    def original_shown(self) -> tuple[str, int] | None:
+        """What the SOURCE half carries, when its host named it (the compare's other side of the subtraction)."""
+        return getattr(self, "_original_shown", None)
+
+    def original_shown_time(self) -> float | None:
+        """The media time of the source picture, straight from the decoder that produced it."""
+        return getattr(self, "_original_time", None)
+
+    def shown_fingerprint(self) -> str | None:
+        """A cheap fingerprint of the RESULT picture, for a log line that can be compared with a decode's pixels."""
+        if telemetry.level() < 1 or self._frame is None:
+            return None
+        return self._fingerprint(self._frame)
+
+    def _note_original_ask(self, seconds: float) -> None:
+        """Remember when the source half was asked for: the draw line reports ask -> on screen."""
+        self._original_ask_time = time.perf_counter()
+        self._original_ask_wall = telemetry.wall()
+        self._original_ask_target = float(seconds)
+
+    @staticmethod
+    def _fingerprint(image: QImage) -> str:
+        """A small content hash of a picture, for the LAST step of the compare.
+
+        The labels are not the proof: a file whose timeline is shifted names a picture with the wrong time and a
+        compare of labels agrees with itself (measured 2026-11-25: the preview file starts at 0.083 s while its first
+        frame is the source's 0.000 s frame - see the writer's `-avoid_negative_ts make_zero`). A 32x18 grey hash costs
+        ~0.1 ms, is stable frame to frame, and lets two logs be joined by PIXELS, not by the name printed beside them.
+        """
+        try:
+            small = image.scaled(32, 18, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                 Qt.TransformationMode.FastTransformation)
+            small = small.convertToFormat(QImage.Format.Format_Grayscale8)
+            if small.isNull():
+                return "-"
+            bits = small.constBits()
+            raw = bits.tobytes() if hasattr(bits, "tobytes") else bytes(bits)
+            return hashlib.blake2b(raw[:small.sizeInBytes()], digest_size=6).hexdigest()
+        except Exception:
+            return "-"
+
+    def _identity_fields(self, *, original: bool) -> dict[str, object]:
+        """The names of one half, as the log prints them (a bare `-` where the producer gave no name)."""
+        if original:
+            kind = self._original_shown
+            media = self._original_time
+        else:
+            kind = getattr(self, "_shown", None)
+            media = getattr(self, "_shown_time", None)
+        fields: dict[str, object] = {}
+        fields["t"] = "-" if media is None else f"{float(media):.3f}"
+        fields["idx"] = "-" if kind is None else int(kind[1])
+        return fields
+
+    def _log_draw(self, *, half: str, picture: QImage | None, level: int | None = None) -> None:
+        """One line per picture actually DRAWN: what, where, and when, with the ask it answers.
+
+        `single` draws one half and replaces the other in the same texture, so its `original` line also names the
+        result it is standing over - that pair IS the LMB compare, and printing both makes "one frame behind" a
+        subtraction. `sbs`/`split` draw both halves in one pass; the line names both.
+        """
+        if picture is None or picture.isNull():
+            return
+        mode = self._view_mode
+        fields: dict[str, object] = {"mode": mode, "half": half}
+        fields.update(self._identity_fields(original=(half == "original")))
+        fields["fp"] = self._fingerprint(picture)
+        if half == "original" and mode == "single":
+            other = self._identity_fields(original=False)
+            fields["result_t"] = other["t"]
+            fields["result_idx"] = other["idx"]
+        if half == "original":
+            asked = getattr(self, "_original_ask_target", None)
+            asked_at = getattr(self, "_original_ask_time", None)
+            if asked is not None:
+                fields["asked"] = f"{float(asked):.3f}"
+            if asked_at is not None:
+                fields["ask_ms"] = f"{(time.perf_counter() - asked_at) * 1000.0:.1f}"
+            if getattr(self, "_original_ask_wall", None) is not None:
+                fields["ask_wall"] = self._original_ask_wall
+        fields["wall"] = telemetry.wall()
+        telemetry.event("draw", **fields)
+
+    def _log_draw_two(self, result: QImage | None, original: QImage | None) -> None:
+        """The compare modes paint both halves in ONE pass: name both pictures in one line."""
+        if result is None or result.isNull():
+            return
+        fields: dict[str, object] = {"mode": self._view_mode, "half": "pair"}
+        fields.update({f"result_{k}": v for k, v in self._identity_fields(original=False).items()})
+        fields["result_fp"] = self._fingerprint(result)
+        if original is not None and not original.isNull():
+            fields.update({f"original_{k}": v for k, v in self._identity_fields(original=True).items()})
+            fields["original_fp"] = self._fingerprint(original)
+        fields["wall"] = telemetry.wall()
+        telemetry.event("draw", **fields)
+
+    def set_original(self, image: QImage | None, *, media_time: float | None = None,
+                     index: int | None = None) -> None:
         """The source frame for the compare: the LMB flash in `single`, a standing pane in the compare modes.
 
         The source is **stretched up to the rendered frame's size with nearest-neighbour** (`FastTransformation`): the
@@ -287,7 +392,15 @@ class VideoPreviewSurface(QRhiWidget):
         """
         if image is None:
             self._original = None
+            self._original_shown = None
+            self._original_time = None
+            self._original_changed = False
         else:
+            # The source half of a compare mode: a picture the pane accepted, counted in the window's `frames`.
+            telemetry.note_frame()
+            self._original_shown = ("frame", int(index)) if index is not None else None
+            self._original_time = None if media_time is None else float(media_time)
+            self._original_changed = True
             picture = image.convertToFormat(QImage.Format.Format_RGBA8888)
             if self._frame is not None and picture.size() != self._frame.size():
                 target = self._frame.size()
@@ -376,6 +489,7 @@ class VideoPreviewSurface(QRhiWidget):
         if self._original is not None and playhead == self._original_requested_at:
             return
         self._original_requested_at = playhead
+        self._note_original_ask(playhead)
         self.originalRequested.emit(playhead)
 
     def set_tint(self, rgba: tuple[float, float, float, float]) -> None:
@@ -504,6 +618,7 @@ class VideoPreviewSurface(QRhiWidget):
             named = self.shown_time()
             ask = float(named) if named is not None else float(self._progress[2])
             telemetry.event("hold on", playhead=f"{ask:.3f}")
+            self._note_original_ask(ask)
             self.originalRequested.emit(ask)
             self.update()
             event.accept()
@@ -1173,7 +1288,8 @@ class VideoPreviewSurface(QRhiWidget):
 
     def _render_single(self, command_buffer, target) -> None:
         """Today's pane: one picture per frame, in one pass (the LMB flash replaces it in place)."""
-        picture = self._original if (self._showing_original and self._original is not None) else self._frame
+        showing_original = bool(self._showing_original and self._original is not None)
+        picture = self._original if showing_original else self._frame
         if picture is None:
             return
         if self._texture_dirty and picture is not None:
@@ -1224,6 +1340,13 @@ class VideoPreviewSurface(QRhiWidget):
             command_buffer.draw(len(hud_vertices) // 6)
         command_buffer.endPass()
         telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
+        # The LAST step, named: a press is one line (the original it put on screen, plus the result it stands over);
+        # level 2 additionally names every result picture, so a shift is visible frame by frame.
+        if showing_original and (self._original_changed or telemetry.level() >= 2):
+            self._log_draw(half="original", picture=picture)
+            self._original_changed = False
+        elif not showing_original and telemetry.level() >= 2:
+            self._log_draw(half="result", picture=picture)
         telemetry.maybe_stats()
 
     def _render_two_surfaces(self, command_buffer, target) -> None:
@@ -1309,6 +1432,12 @@ class VideoPreviewSurface(QRhiWidget):
             command_buffer.draw(len(hud_vertices) // 6)
         command_buffer.endPass()
         telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
+        # Both halves in one pass: one line names both pictures (a new original always, every paint at level 2).
+        if draw_original and (self._original_changed or telemetry.level() >= 2):
+            self._log_draw_two(frame, original)
+            self._original_changed = False
+        elif telemetry.level() >= 2:
+            self._log_draw_two(frame, None)
         telemetry.maybe_stats()
 
     def _scissor(self, command_buffer, rect: QRectF) -> None:

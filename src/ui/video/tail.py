@@ -105,6 +105,12 @@ class TailReader(QObject):
         self._frame_iter = None
         self._fps = 0.0
         self._emitted = 0
+        #: The container's own first timestamp, seconds. A writer that shifts the whole timeline
+        #: (`-avoid_negative_ts make_zero` + an encoder's B-frame delay, measured 2026-11-25: the first frame of a
+        #: source at 0.000 s lands at 0.083 s) makes every PTS a little LATER than the frame it names. It is subtracted
+        #: from every published name and index, and added back to every container seek, so the pane's clock is the
+        #: CONTENT's; see `_origin`.
+        self._media_origin: float | None = None
         self._last_pts: float | None = None
         #: The highest PTS this reader has published - the produced edge as far as the reader knows it.
         #: Unlike `_last_pts` (the de-duplication floor) a seek never lowers it: it is what a seek is
@@ -146,6 +152,7 @@ class TailReader(QObject):
         self._emitted = 0
         self._last_pts = None
         self._edge_pts = None
+        self._media_origin = None
         self._exhausted = True
         self._backlog = False
         self._seek_attempt = None
@@ -211,10 +218,11 @@ class TailReader(QObject):
             # edge here is what moved the picture backwards live (2026-11-24): that edge is stale on a held pane.
             target, standing = self._seek_attempt
             self._seek_attempt = None
-            self._last_pts = standing           # the de-duplication floor goes back to the frame on screen
+            self._last_pts = standing           # the de-duplication floor goes back to the frame on screen (FILE time)
             self._drop_container()
             self._exhausted = False             # the next poll reopens at that frame instead of waiting for growth
-            where = f"{standing:.3f} s" if standing is not None else "no frame published yet"
+            where = (f"{max(0.0, float(standing) - self._origin()):.3f} s"
+                     if standing is not None else "no frame published yet")
             self.seek_unavailable.emit(
                 f"seek to {target:.3f} s is not in the flushed file ({self._path}); "
                 f"the picture stays at {where}")
@@ -225,7 +233,30 @@ class TailReader(QObject):
     @property
     def produced_seconds(self) -> float:
         """Media time of the last frame this reader published: the produced edge, as far as it knows."""
-        return float(self._edge_pts or 0.0)
+        edge = self._edge_pts
+        if edge is None:
+            return 0.0
+        return max(0.0, float(edge) - self._origin())
+
+    def _origin(self) -> float:
+        """The file timeline's own start, seconds; 0 until the container says otherwise.
+
+        Media time here is CONTENT time: a file written with `-avoid_negative_ts make_zero` starts at the encoder's
+        B-frame delay (measured 2026-11-25: 0.083 s, two frames at 23.976), while its first frame is the source's
+        first. Without this subtraction the pane names every picture two frames later than the frame it shows, and
+        the LMB compare then decodes the source at a time two frames after the result's frame.
+        """
+        value = self._media_origin
+        return 0.0 if value is None else float(value)
+
+    @property
+    def media_origin(self) -> float | None:
+        """The file's own first timestamp, seconds; None until the container is open.
+
+        It is SUBTRACTED from every published media time and index (the pane's clock is content time) and added back
+        to every container seek; it stays readable for the log line and for tests that pin the shift.
+        """
+        return self._media_origin
 
     @property
     def published_frames(self) -> int:
@@ -234,6 +265,9 @@ class TailReader(QObject):
 
     def seek(self, seconds: float, *, attempt_past_edge: bool = False) -> float:
         """Move the playhead inside the already-written part; return where it landed, in seconds.
+
+        `seconds` is CONTENT time (the pane's clock); the container is asked for `seconds + media_origin`, the file's
+        own timestamp for that content.
 
         Only `poll` reads, so a seek is cheap and a drag coalesces: it moves the de-duplication
         floor, drops the demuxer and marks the reader as having work. The next `poll` reopens the
@@ -258,13 +292,14 @@ class TailReader(QObject):
         if size < self._size:
             # A new render at the same path: the old playhead says nothing about this file.
             self._restart()
-        target = max(0.0, float(seconds))
+        target = max(0.0, float(seconds))          # CONTENT time (the pane's clock), not the file's
+        origin = self._origin()
         edge = self.produced_seconds
-        standing = self._last_pts        # the frame on screen: the last one this reader actually decoded
+        standing = self._last_pts        # the frame on screen, in FILE time (the de-duplication floor's unit)
         self._seek_attempt = None
         # The floor sits just under the target: the frame AT the target is emitted, while the frames
-        # of the keyframe re-read behind it stay de-duplicated.
-        floor = target - self._interval() * 0.5 if target > 0.0 else None
+        # of the keyframe re-read behind it stay de-duplicated. Both are FILE time.
+        floor = target - self._interval() * 0.5 + origin if target > 0.0 else None
         if target > edge:
             if attempt_past_edge or self._backlog:
                 self._seek_attempt = (target, standing)
@@ -274,7 +309,7 @@ class TailReader(QObject):
                     floor = max(floor, standing)
             else:
                 target = edge
-                floor = target - self._interval() * 0.5 if target > 0.0 else None
+                floor = target - self._interval() * 0.5 + origin if target > 0.0 else None
         self._last_pts = floor
         self._drop_container()
         self._exhausted = False      # there is work at the new position even if the file has not grown
@@ -324,11 +359,17 @@ class TailReader(QObject):
             if self._last_pts is not None and pts <= self._last_pts:
                 continue  # a re-read after a resume: this frame is already on screen
             self._emitted += 1
-            index = int(round(pts * fps)) if fps > 0 else self._emitted
+            # The pane's clock is CONTENT time, the file's PTS is not (see `_origin`): subtract the file's own start
+            # from the name AND from the index, so a picture's label, its frame number and the source decoder's answer
+            # are the same number.
+            origin = self._origin()
+            shown_pts = pts - origin
+            index = int(round(shown_pts * fps)) if fps > 0 else self._emitted
             self._last_pts = pts
             if self._edge_pts is None or pts > self._edge_pts:
                 self._edge_pts = pts
-            self.frame_ready.emit(pack_frame(decoded, index, self._pixel_format, pts=pts, size=self._target_size))
+            self.frame_ready.emit(pack_frame(decoded, index, self._pixel_format, pts=shown_pts,
+                                             size=self._target_size))
             emitted += 1
         else:
             # The cap stopped the read, not the file: there is more written data behind the playhead.
@@ -366,6 +407,15 @@ class TailReader(QObject):
         self._container = container
         self._stream = stream
         self._fps = float(stream.average_rate) if stream.average_rate else 0.0
+        try:
+            start = stream.start_time
+            origin = float(start * stream.time_base) if start is not None else 0.0
+        except Exception:
+            origin = None
+        # Pin it: the file's own start is read once, and a reopen of the same growing file may not move it under
+        # pictures already named (the header can be parsed before its first cluster's timestamp is known).
+        if origin is not None and (self._media_origin is None or self._emitted == 0):
+            self._media_origin = origin
         self._open_failures = 0
         self._resume_at_last_frame()
         self._reset_stream()
@@ -426,6 +476,7 @@ class TailReader(QObject):
         self._emitted = 0
         self._last_pts = None
         self._edge_pts = None
+        self._media_origin = None
         self._seek_attempt = None
         self._decode_failures = 0
         self._signature = None
@@ -511,6 +562,12 @@ class LiveTailThread(QThread):
     def produced_seconds(self) -> float:
         reader = self._reader
         return float(reader.produced_seconds) if reader is not None else 0.0
+
+    @property
+    def media_origin(self) -> float | None:
+        """The file's own first timestamp (see `TailReader.media_origin`)."""
+        reader = self._reader
+        return reader.media_origin if reader is not None else None
 
     def seek(self, seconds: float, *, attempt_past_edge: bool = False) -> None:
         """Ask the loop to reposition before its next poll; coalesces while a drag is in flight.
