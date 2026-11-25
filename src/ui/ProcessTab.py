@@ -2446,7 +2446,10 @@ class ProcessTab:
         self._compare_watch = None
         if watched is not None:
             pts = float(getattr(frame, "pts", 0.0) or 0.0)
-            log(f"compare: the source frame is {pts:.3f}s for an ask of {watched:.3f}s "
+            # Both halves print their index: the ask's frame (the picture's own time -> its grid index) and the frame the
+            # compare decoded. "One frame behind" is then a subtraction, not an impression.
+            index = getattr(frame, "index", None)
+            log(f"compare: the source frame is {pts:.3f}s idx={index} for an ask of {watched:.3f}s "
                 f"(delta {pts - watched:+.3f}s, {abs(pts - watched) * 24.0:.1f} frames at 24 fps)")
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_original"):

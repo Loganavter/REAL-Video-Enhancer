@@ -1598,6 +1598,12 @@ class Render:
                 source_pts = getattr(frame, "pts", None)
                 named = float(source_pts) if (self.stamped_frames and source_pts is not None) else \
                     self._stream_media_time(frames_rendered)
+                # The identity the pane will show, in the numbers the compare can be checked against: the source time the
+                # picture carries AND the pipe index it came from. A "one frame behind" claim is only decidable when both
+                # sides print their index, so the publish says what it just drew (owner, 2026-11-25).
+                if self._displayCounter % 24 == 1:
+                    log(f"display: drew source frame {frames_rendered} named {named:.3f}s"
+                        f"{'' if source_pts is None else f' (pts {source_pts:.3f}s)'}")
                 self._publish_display(frame, time_s=named)
 
                 if self.override_upscale_scale:
