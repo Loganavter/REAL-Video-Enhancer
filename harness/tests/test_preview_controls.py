@@ -722,3 +722,13 @@ def test_a_picture_without_an_owner_still_plays_through_the_page():
     adapter.pause()
     assert page.calls == [False, True]
 
+
+
+def test_the_bars_and_the_scrubber_carry_control_names(controls):
+    """A live probe can only reach a custom-painted widget by NAME: the strip is the one control whose gesture must be
+    provable (`click:preview_timeline@x,y`), and without a name a press that never landed read exactly like a press
+    that did nothing (2026-11-25)."""
+    assert controls.top_bar.objectName() == "preview_top_bar"
+    assert controls.bottom_bar.objectName() == "preview_bottom_bar"
+    assert controls.timeline.objectName() == "preview_timeline"
+    assert controls.timeline.parent() is controls.bottom_bar

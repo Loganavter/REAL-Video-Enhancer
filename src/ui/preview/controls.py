@@ -63,6 +63,8 @@ class PreviewControls(QWidget):
 
         self.top_bar = self._make_bar()
         self.bottom_bar = self._make_bar()
+        self.top_bar.setObjectName("preview_top_bar")
+        self.bottom_bar.setObjectName("preview_bottom_bar")
         self._build_top()
         self._build_bottom()
         self._build_shortcuts()
@@ -186,6 +188,11 @@ class PreviewControls(QWidget):
         layout.addWidget(self.frame_text, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.timeline = PreviewTimeline(self.bottom_bar)
+        #: Named for the control surface: a strip is a custom-painted widget, so a probe can only reach it by name and
+        #: a point (`click:preview_timeline@x,y`) - and a seek is exactly the gesture that must be provable live, not
+        #: inferred from a screenshot (2026-11-25: an unnamed strip made "the press did nothing" indistinguishable
+        #: from "the press never landed").
+        self.timeline.setObjectName("preview_timeline")
         self.timeline.seekRequested.connect(self._on_seek_requested)
         layout.addWidget(self.timeline, 1)
 
