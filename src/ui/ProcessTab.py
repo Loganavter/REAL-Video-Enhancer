@@ -1854,7 +1854,15 @@ class ProcessTab:
             # CONTENT time: this decoder reads the render's OWN output, whose container timeline starts at the
             # encoder's B-frame delay (0.083 s on the owner's clip) while its first frame is the source's first.
             # Without this the pane's times, its strip and the LMB compare are all two frames late.
-            decoder = VideoDecoder(pixel_format="rgb24", content_time=True)
+            # Capped to the pane's box, like the queue decoder: the pane cannot show more than that, and a 2880x2160
+            # frame costs 24.9 MB of pack + a 33 MB RGBA upload per picture - the cost that kept the paint at ~9 fps
+            # while the decoder delivered 24 (measured 2026-11-25).
+            # One frame per tick: this decoder runs on the GUI thread, so a burst of due frames lands as several
+            # `set_frame` calls before Qt paints ONCE - the pane then shows only the last of the burst and skips the
+            # rest (measured: 96 frames delivered, 66 painted, every second picture lost). One per tick leaves the
+            # event loop a paint between frames.
+            decoder = VideoDecoder(pixel_format="rgb24", content_time=True,
+                                   max_size=self._pane_display_box(), max_frames_per_tick=1)
             decoder.frame_ready.connect(self._on_preview_frame)
             decoder.opened.connect(self._on_preview_opened)
             decoder.error.connect(lambda message: log(f"preview decoder: {message}"))

@@ -536,3 +536,27 @@ def test_a_press_on_the_queue_item_seeks_it(app=None):
     assert decoder.seeks == [8.0], f"the press must reach the queue decoder at 40 % of 20 s, got {decoder.seeks}"
     # The remembered position is written by the frame the decoder publishes (`_on_queue_pane_frame`), not by the press -
     # a press that lands nowhere must not move the map either.
+
+
+def test_the_finished_preview_decoder_is_capped_to_the_pane_box(fake_decoder):
+    """The preview PLAYBACK reads the render's 4K output; it must decode at the box the pane can show.
+
+    Measured live 2026-11-25: the finished playback delivered 24 frames/s but the pane painted only ~9/s, and the
+    picture jumped two to three frames per paint. A 2880x2160 frame costs 24.9 MB to pack and 33 MB to convert to
+    RGBA and upload; at the pane's box the same frame costs 1.8 MB. The queue decoder has carried this cap since it
+    existed - the playback path was the one that did not.
+    """
+    tab = _tab(paused=True)
+    tab._stop_preview_playback = lambda: None
+    tab._wire_preview_strip = lambda: None
+    tab._sync_preview_transport = lambda: None
+
+    tab._start_preview_playback("/out/preview.mkv")
+
+    decoder = fake_decoder.instances[-1]
+    assert decoder.kwargs.get("max_size") == (960, 540), (
+        "the playback decoder must be capped to the pane's box, not the file's 4K resolution")
+    assert decoder.kwargs.get("max_frames_per_tick") == 1, (
+        "one frame per tick: on the GUI thread a burst is painted once and the rest are lost")
+    assert decoder.kwargs.get("content_time") is True, "a rendered output is read in content time"
+    assert decoder.path == "/out/preview.mkv"
