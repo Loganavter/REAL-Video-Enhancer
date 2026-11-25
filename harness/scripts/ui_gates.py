@@ -170,7 +170,6 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
         ('src/ui/dialogs/toolkit_dialogs.py', 'except Exception: pass'): 3,
         ('src/ui/dialogs/toolkit_dialogs.py', 'except RuntimeError: pass'): 1,
         ('src/ui/shell/window.py', 'except Exception: pass'): 1,
-        ('src/ui/widgets/video_preview.py', 'except Exception: pass'): 1,
     },
     "stock-widget": {},
     "theme-read-at-build": {},
