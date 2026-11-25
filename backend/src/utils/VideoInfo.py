@@ -264,6 +264,7 @@ class OpenCVInfo(VideoInfo):
         self.start_time = start_time
         self.end_time = end_time
         self.cap = cv2.VideoCapture(input_file)
+        self.ffmpeg_path = ffmpeg_path
         self.ffmpeg_info = FFMpegInfoWrapper(input_file, ffmpeg_path=ffmpeg_path)
 
     def is_valid_video(self):
@@ -287,12 +288,29 @@ class OpenCVInfo(VideoInfo):
         return duration
 
     def get_total_frames(self) -> int:
-        
+        """The SOURCE frame count: exact for a whole file, an estimate only for a bounded segment.
+
+        `CAP_PROP_FRAME_COUNT` is a CFR-slot estimate (duration x fps): on the owner's clip it says 495 while the
+        container carries 493 packets across a PTS gap, and the UI then read `493/495` as two lost frames (measured
+        2026-11-25). A whole file is counted by demuxing it (`count_video_packets`, no decode); a segment keeps the
+        estimate because the exact count would need the same keyframe-refined walk the reader does, and the slot
+        estimate is the length that segment's timeline uses.
+        """
         if self.start_time or self.end_time:
             fc = int(self.get_duration_seconds() * self.get_fps())
         else:
-            fc =  int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        return fc
+            fc = None
+            try:
+                try:
+                    from .MediaCount import count_video_packets
+                except ImportError:
+                    from MediaCount import count_video_packets
+                fc = count_video_packets(self.ffmpeg_path, self.input_file)
+            except Exception:
+                fc = None
+            if fc is None or fc <= 1:
+                fc = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        return int(fc)
 
     def get_width_x_height(self) -> List[int]:
         res = [int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))]
