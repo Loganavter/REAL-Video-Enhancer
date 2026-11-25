@@ -1,4 +1,6 @@
 import queue
+import re
+import threading
 import sys
 from abc import ABC, abstractmethod
 import os
@@ -49,6 +51,7 @@ class FFmpegRead(Buffer):
             color_range=None,
             input_pixel_format: str | None = None,
             ffmpeg_path: str = "./bin/ffmpeg",
+            stamp_pts: bool = False,
         ):
         
         self.inputFile = inputFile
@@ -75,6 +78,11 @@ class FFmpegRead(Buffer):
         self.input_pixel_format = input_pixel_format
         self.yuv420pMOD = self.input_pixel_format == "yuv420p" and not self.high_bitdepth
         self.ffmpeg_path = ffmpeg_path
+        #: Name every frame with its SOURCE presentation time (see `Frame.pts`). It costs one `showinfo` line per frame
+        #: and one stderr drain thread, and it switches the pipe to `-fps_mode passthrough`: with the default CFR the
+        #: muxer inserts held frames for PTS gaps, and those inserted frames exist in NO source frame, so a counter can
+        #: never name them (495 pipe frames against a 493-frame container, measured).
+        self.stamp_pts = bool(stamp_pts)
         #self.yuv420pMOD = False
         if self.high_bitdepth and not self.hdr_mode:
             # 3 bytes/pixel: the GPU does YUV->RGB itself (see TorchUtils.yuv420p10_to_tensor)
@@ -91,9 +99,18 @@ class FFmpegRead(Buffer):
         self.readProcess = subprocess_popen_without_terminal(
             self.command(),
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE if self.stamp_pts else subprocess.DEVNULL,
         )
         self.readQueue = queue.Queue(maxsize=25)
+        self._pts_queue = None
+        self._pts_thread = None
+        if self.stamp_pts:
+            # `showinfo` prints one line per frame that enters the pipe, and pairing is by COUNT, not by wall order:
+            # stderr is unbuffered and runs AHEAD of the pipe, so a frame's line is always ready before its bytes -
+            # never missing. The drain thread is mandatory: an unread stderr fills its pipe and ffmpeg blocks.
+            self._pts_queue = queue.Queue()
+            self._pts_thread = threading.Thread(target=self._drain_pts, daemon=True)
+            self._pts_thread.start()
 
     def command(self):
 
@@ -122,6 +139,10 @@ class FFmpegRead(Buffer):
         #if not self.hdr_mode:
         #    if self.input_pixel_format == "yuv420p":
         #        filter_string += ":in_range=tv:out_range=pc" # color shifts a smidgen but helps with artifacts when converting yuv to raw
+        if self.stamp_pts:
+            # The timestamp of the frame this filter chain hands over, printed once per frame; and NO CFR conversion,
+            # so the pipe carries the container's own frames (493, not 495) and the line count matches the chunk count.
+            filter_string += ",showinfo"
         command += [
             "-vf",
             filter_string,
@@ -135,12 +156,40 @@ class FFmpegRead(Buffer):
             "rawvideo",
             "-s",
             f"{self.width}x{self.height}",
-            "-"
-            
         ]
+        if self.stamp_pts:
+            # After the output spec: passthrough is an output option, and the default (CFR) inserts duplicate frames
+            # for PTS gaps - frames no source contains.
+            command += ["-fps_mode", "passthrough"]
+        command += ["-"]
 
         log("FFMPEG READ COMMAND: " + str(command))
         return command
+
+    # -- timestamps ---------------------------------------------------------------------------------
+    _PTS_TIME = re.compile(r"pts_time:(-?\d+(?:\.\d+)?)")
+
+    def _drain_pts(self) -> None:
+        """One `pts_time` per pipe frame, in order; the sentinel None ends the stream (EOF or a dead process)."""
+        stream = self.readProcess.stderr
+        try:
+            for line in iter(stream.readline, b""):
+                match = self._PTS_TIME.search(line.decode("utf-8", "replace"))
+                if match is not None:
+                    self._pts_queue.put(float(match.group(1)))
+        except Exception:
+            pass
+        self._pts_queue.put(None)
+
+    def _take_pts(self) -> float | None:
+        """The next frame's source time; None when the stream ended or the line never came."""
+        if not self.stamp_pts or self._pts_queue is None:
+            return None
+        try:
+            value = self._pts_queue.get(timeout=5.0)
+        except queue.Empty:
+            return None
+        return None if value is None else float(value)
 
     def read_frame(self):
         chunk = self.readProcess.stdout.read(self.inputFrameChunkSize)
@@ -170,6 +219,9 @@ class FFmpegRead(Buffer):
                           high_bitdepth=self.high_bitdepth)
             frame.yuv10_input = bool(self.high_bitdepth and not self.hdr_mode)
             frame.set_frame_bytes(chunk)
+            if self.stamp_pts:
+                # Paired AFTER the chunk was read: the line is buffered or imminent (stderr runs ahead), never late.
+                frame.pts = self._take_pts()
             self.readQueue.put(frame)
         self.readQueue.put(None)
 

@@ -544,6 +544,13 @@ class Render:
         # The pane's block: sized by the GUI, written only while the pane asks. Building it is cheap -
         # no GPU work happens until the first frame is actually published (utils/DisplayStager.py).
         self.displayEvery = max(1, int(os.environ.get("RVE_DISPLAY_EVERY", "1") or 1))
+        #: Name every published picture by the SOURCE frame's PTS instead of the pipe counter, and rebuild the CFR output
+        #: the counter used to get for free (duplicate the previous frame at a PTS gap). ON by default: a compare against
+        #: a name that no source frame carries is meaningless, and the export's own accounting is preserved by the
+        #: rebuild below (measured: 495 output frames either way). `RVE_STAMPED_FRAMES=0` is the escape hatch.
+        self.stamped_frames = str(os.environ.get("RVE_STAMPED_FRAMES", "1")).strip() != "0"
+        self._last_source_pts = None
+        self._last_payload = None
         self.displayChannel = None
         self.displayStager = None
         self.displayBox = None
@@ -1587,7 +1594,10 @@ class Render:
                 # export's own frame counter (`frames_rendered` counts output frames, so the interpolation factor
                 # divides it out): an unnamed picture cannot be checked against a seek, and leaving it unnamed hid
                 # which frame the render actually drew (owner, 2026-11-24).
-                self._publish_display(frame, time_s=self._stream_media_time(frames_rendered))
+                source_pts = getattr(frame, "pts", None)
+                named = float(source_pts) if (self.stamped_frames and source_pts is not None) else \
+                    self._stream_media_time(frames_rendered)
+                self._publish_display(frame, time_s=named)
 
                 if self.override_upscale_scale:
                     # Source geometry comes from the frame the upscaler returned, never from
@@ -1621,6 +1631,29 @@ class Render:
                 else:
                     self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
                 self._profile["pack"] += (_perf_counter() - _t_pack) * 1000.0
+                if self.stamped_frames:
+                    # The pipe is VFR in this mode (a real frame per container frame), so a PTS gap would shorten the
+                    # export. The muxer's CFR insertion is rebuilt here, where the gap is KNOWN: hold the previous
+                    # picture for the missing slots. `_last_payload` is a copy because a pooled frame's slot is
+                    # overwritten by the next frame before this point.
+                    pts_now = getattr(frame, "pts", None)
+                    if pts_now is not None and self._last_source_pts is not None:
+                        try:
+                            missing = int(round((float(pts_now) - float(self._last_source_pts)) * float(self.fps))) - 1
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            missing = 0
+                        if missing > 0 and self._last_payload is not None:
+                            for _ in range(min(missing, 240)):
+                                self.writeBuffer.writeQueue.put(self._last_payload)
+                                frames_rendered += int(self.ceilInterpolateFactor)
+                                self._write_status(frames_rendered)
+                    if pts_now is not None:
+                        self._last_source_pts = float(pts_now)
+                    try:
+                        now_payload = frame.get_frame_bytes() if type(frame) is not bytes else frame
+                        self._last_payload = now_payload if isinstance(now_payload, bytes) else bytes(now_payload)
+                    except Exception:
+                        self._last_payload = None
                 frames_rendered += int(self.ceilInterpolateFactor)
                 # Once per rendered frame: the counters, ETA and FPS the pane shows, beside the log line
                 # the information thread keeps printing (the slot never replaces it).

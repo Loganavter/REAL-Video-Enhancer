@@ -234,6 +234,12 @@ class Frame:
         self.yuv8_output = False
         # set by the reader: the incoming bytes are packed yuv420p10le, not RGB
         self.yuv10_input = False
+        #: The SOURCE frame's presentation time in seconds, when the reader can name it (`stamp_pts`). The renderer
+        #: publishes THIS as the picture's media time. A counter names the frame the PIPE emitted, and the pipe may be
+        #: CFR-converted (495 frames from a 493-frame container, measured 2026-11-25) - from the first gap on, the
+        #: counter is no longer the source frame's number and every comparison against the source drifts by a frame.
+        #: None means "the reader could not name it", which leaves the counter as the fallback.
+        self.pts: float | None = None
         # "yuv420p10le" (planar, libx265) or "p010le" (NVENC wants the interleaved one)
         self.yuv10_format = "yuv420p10le"
         self.dtype = dtype
