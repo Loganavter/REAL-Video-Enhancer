@@ -1,0 +1,104 @@
+"""The preview control surface's state and commands.
+
+One frozen state object is the single source of truth for every control: the transport, the view modes, the zoom, the
+compare hold, the timeline bands and the frame statistics. Widgets never own any of it; they render a `PreviewState`
+and send a `PreviewCommand`. The state has a `phase` and a `backend` kind instead of loose booleans, so "playing a live
+tail at its produced edge" (BUFFERING) is a state, not a combination three handlers must agree on.
+
+Frame statistics are TWO facts on purpose: `source_frames`/`frames_done` are the container's video packets (the reader
+is passthrough; 493 on the owner's clip), `output_frames` is what the writer's CFR rebuild will emit (495, two of them
+repeats across a PTS gap). They are never subtracted from each other - the `493/495` report (2026-11-25) was exactly
+that subtraction.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from enum import Enum
+
+
+class PreviewPhase(Enum):
+    """IDLE = nothing to show; READY = a picture, not playing; PLAYING; BUFFERING = playing but at the produced edge
+    of a file that is still being written; CLOSED = the pane was released."""
+    IDLE = "idle"
+    READY = "ready"
+    PLAYING = "playing"
+    BUFFERING = "buffering"
+    CLOSED = "closed"
+
+
+class PreviewBackendKind(Enum):
+    """Who answers transport commands: a growing file's tail, a finished file's decoder, the export's display feed."""
+    NONE = "none"
+    LIVE_TAIL = "live_tail"
+    FINISHED_FILE = "finished_file"
+    DISPLAY_FEED = "display_feed"
+
+
+class PreviewCommand(Enum):
+    PLAY_PAUSE = "play_pause"
+    STEP_BACK = "step_back"
+    STEP_FORWARD = "step_forward"
+    SEEK_TO = "seek_to"                    # value: seconds (content time)
+    SEEK_FRACTION = "seek_fraction"        # value: 0..1 of the duration
+    SET_MODE = "set_mode"                  # value: "single" | "sbs" | "split"
+    ZOOM_IN = "zoom_in"
+    ZOOM_OUT = "zoom_out"
+    ZOOM_FIT = "zoom_fit"
+    ZOOM_ONE = "zoom_one"
+    COMPARE_DOWN = "compare_down"
+    COMPARE_UP = "compare_up"
+    TOGGLE_FULLSCREEN = "toggle_fullscreen"
+
+
+VIEW_MODES = ("single", "sbs", "split")
+MIN_ZOOM = 0.02
+MAX_ZOOM = 8.0
+
+
+@dataclass(frozen=True)
+class PreviewState:
+    phase: PreviewPhase = PreviewPhase.IDLE
+    backend: PreviewBackendKind = PreviewBackendKind.NONE
+    mode: str = "single"
+    zoom_fit: bool = True
+    zoom: float = 1.0
+    compare: bool = False
+    playhead: float = 0.0
+    produced: float = 0.0
+    duration: float = 0.0
+    source_frames: int = 0
+    frames_done: int = 0
+    output_frames: int = 0
+    fps: float = 0.0
+    seek_ceiling: float | None = None
+    fullscreen: bool = False
+
+    def with_(self, **fields) -> "PreviewState":
+        """A copy with the named fields replaced (frozen state; the controller is the only updater)."""
+        allowed = set(self.__dataclass_fields__)
+        unknown = set(fields) - allowed
+        if unknown:
+            raise KeyError(f"unknown PreviewState field(s): {', '.join(sorted(unknown))}")
+        return replace(self, **fields)
+
+    def frame_interval(self) -> float:
+        return 1.0 / self.fps if self.fps > 0 else 1.0 / 24.0
+
+    def has_picture(self) -> bool:
+        return self.phase in (PreviewPhase.READY, PreviewPhase.PLAYING, PreviewPhase.BUFFERING)
+
+    def playing(self) -> bool:
+        return self.phase in (PreviewPhase.PLAYING, PreviewPhase.BUFFERING)
+
+    def seekable_ceiling(self) -> float:
+        """The furthest content time a press may ask for: the host's frame-on-demand ceiling, else the produced edge."""
+        if self.seek_ceiling is not None:
+            return max(0.0, self.seek_ceiling)
+        return max(0.0, self.produced)
+
+    def progress_percent(self) -> float:
+        """The produced share, 0..1 (a growing file's band; a finished file reports the whole timeline)."""
+        if self.duration <= 0.0:
+            return 0.0
+        return max(0.0, min(1.0, self.produced / self.duration))
