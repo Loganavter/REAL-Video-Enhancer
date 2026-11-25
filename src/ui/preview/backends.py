@@ -254,8 +254,10 @@ class FinishedFileBackend(_HostBackend):
         super().__init__(host)
         self._decoder = decoder
 
-    def seek(self, seconds: float, *, exact: bool) -> bool:
-        return self._direct_seek(seconds)
+    # `seek` is not overridden (see `LiveTailBackend`): the page's press route is the only one that opens a press
+    # ticket, and the open ticket is what keeps the marker on the REQUESTED time until the frame that answers it is
+    # painted. Seeking the decoder directly left the marker on the old frame for ~150 ms after every press, i.e. the
+    # thumb jumped back and forth on a finished file too (found in the owner's log, 2026-11-26).
 
     def _direct_seek(self, seconds: float) -> bool:
         if self._decoder is None:
@@ -297,8 +299,7 @@ class DisplayFeedBackend(_HostBackend):
 
     kind = PreviewBackendKind.DISPLAY_FEED
 
-    def seek(self, seconds: float, *, exact: bool) -> bool:
-        return self._direct_seek(seconds)
+    # `seek` is not overridden: the page decides between "the renderer answers one frame" and "nothing can answer".
 
     def _direct_seek(self, seconds: float) -> bool:
         duration = self.duration

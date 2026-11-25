@@ -2617,7 +2617,11 @@ class ProcessTab:
         duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
         if decoder is not None and duration > 0:
             ticket.decide(route="decoder", answerable=True)
+            # The same landing instrument as the tail's: without it the press stayed open on the timestamp alone (the
+            # marker on the requested time with nothing to close it) and the next press could settle on this one.
+            self._seek_watch = fraction * duration
             decoder.seek(fraction * duration)
+            log(f"seek: decoder asked for {fraction * duration:.3f}s")
             return
         # EXPORT, third route: no tail and no file decoder, but a renderer is alive and publishing into the pane's
         # block. The strip's share becomes a newest-wins request - `(seconds, generation + 1)` - and the renderer

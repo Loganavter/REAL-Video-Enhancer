@@ -846,3 +846,39 @@ def test_a_live_tail_seeks_through_the_page_so_a_press_past_the_edge_is_answerab
     adapter2 = backend_for(page2, PreviewBackendKind.LIVE_TAIL, tail=tail)
     assert adapter2.seek(1.0, exact=True) is True
     assert tail.seeks == [1.0]
+
+
+@pytest.mark.parametrize("kind", [PreviewBackendKind.FINISHED_FILE, PreviewBackendKind.DISPLAY_FEED])
+def test_every_owner_seeks_through_the_page_not_behind_its_back(kind):
+    """The finished-file decoder and the display feed too: the page's press route is what opens the ticket that keeps
+    the marker on the requested time. Seeking them directly made the thumb jump back to the old frame for ~150 ms after
+    every press (the owner's log, 2026-11-26)."""
+    class Page:
+        def __init__(self) -> None:
+            self.asked: list[float] = []
+            self.requests: list[float] = []
+
+        def _clip_duration(self) -> float:
+            return 20.0
+
+        def _on_preview_seek(self, fraction: float) -> None:
+            self.asked.append(float(fraction))
+
+        def _request_display_seek(self, fraction: float) -> bool:
+            self.requests.append(float(fraction))
+            return True
+
+    class Owner:
+        duration = 20.0
+
+        def __init__(self) -> None:
+            self.seeks: list[float] = []
+
+        def seek(self, seconds: float) -> None:
+            self.seeks.append(float(seconds))
+
+    page, owner = Page(), Owner()
+    adapter = backend_for(page, kind, decoder=owner)
+    assert adapter.seek(10.0, exact=True) is True
+    assert page.asked == [pytest.approx(0.5)], page.asked
+    assert owner.seeks == [], "the page routes the press; the adapter must not seek the owner behind its back"
