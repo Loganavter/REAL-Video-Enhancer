@@ -206,8 +206,11 @@ class LiveTailBackend(_HostBackend):
         super().__init__(host)
         self._tail = tail
 
-    def seek(self, seconds: float, *, exact: bool) -> bool:
-        return self._direct_seek(seconds)
+    # `seek` is NOT overridden: a live tail is exactly the case `_HostBackend.seek` describes - the page decides, and
+    # it is the only place that can tell "inside the produced band" (the tail repositions) from "past it" (the
+    # renderer's one on-demand frame, or a visible refusal). Seeking `self._tail` directly skipped the press ticket,
+    # the landing watch and the on-demand route: a press past the edge then failed inside the tail and the marker
+    # snapped back with no line saying why (found 2026-11-26 with the scrubber's own `scrub snapback` report).
 
     def _direct_seek(self, seconds: float) -> bool:
         if self._tail is None:

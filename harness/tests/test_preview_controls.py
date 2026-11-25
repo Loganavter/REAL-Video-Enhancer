@@ -811,3 +811,38 @@ def test_the_scrubber_writes_its_own_debug_lines_and_reports_what_it_did(control
         assert any("scrub snapback" in line for _which, line in lines), lines
     finally:
         telemetry.set_writer(previous)
+
+
+def test_a_live_tail_seeks_through_the_page_so_a_press_past_the_edge_is_answerable():
+    """The tail adapter must not seek the tail itself: the PAGE is what knows the produced edge, the on-demand route
+    and the press ticket. Seeking the tail directly made a past-the-edge press die inside the tail and the marker snap
+    back with no record of why (found 2026-11-26 with the scrubber's own report).
+    """
+    class Page:
+        def __init__(self) -> None:
+            self.asked: list[float] = []
+
+        def _clip_duration(self) -> float:
+            return 20.0
+
+        def _on_preview_seek(self, fraction: float) -> None:
+            self.asked.append(float(fraction))
+
+    class Tail:
+        def __init__(self) -> None:
+            self.seeks: list[float] = []
+
+        def seek(self, seconds: float, *, attempt_past_edge: bool = True) -> None:
+            self.seeks.append(float(seconds))
+
+    page, tail = Page(), Tail()
+    adapter = backend_for(page, PreviewBackendKind.LIVE_TAIL, tail=tail)
+    assert adapter.seek(18.958, exact=True) is True
+    assert page.asked and page.asked[-1] == pytest.approx(18.958 / 20.0, abs=1e-6), page.asked
+    assert tail.seeks == [], "the page routes the press; the adapter must not seek the tail behind its back"
+
+    # With no clip length the page cannot map a fraction; the direct tail seek stays the honest fallback.
+    page2 = types.SimpleNamespace(_clip_duration=lambda: 0.0)
+    adapter2 = backend_for(page2, PreviewBackendKind.LIVE_TAIL, tail=tail)
+    assert adapter2.seek(1.0, exact=True) is True
+    assert tail.seeks == [1.0]
