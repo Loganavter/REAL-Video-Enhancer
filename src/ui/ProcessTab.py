@@ -1123,6 +1123,11 @@ class ProcessTab:
             # half-frame slack and an exact one must have none.
             self._shown_name_is_fitted = answer is not None
             pane.set_frame(image, seq=seq, media_time=media_time, generation=answer)
+            if media_time is not None:
+                # The picture's own time IS the pane's position. Without this the feed's pane left the position at
+                # 0.0 and Play then started the file at its beginning instead of where the render stood (measured
+                # 2026-11-25: an export at 21 % and a Play that replayed from 0.000 s).
+                self._preview_playhead = float(media_time)
             if pressed_at is not None and pending and media_time is not None:
                 # Close the seek here, and only here: the gate above already refused every picture that does not
                 # answer the request, so this publication IS the answer. The log names both generations as well as the
@@ -1729,12 +1734,21 @@ class ProcessTab:
             # owns (the queue tab's hand-back) are NOT ours to stop - they are the picture there.
             self._stop_live_tail()
         tail = getattr(self, "_live_tail", None)
-        if not holding and tail is None and not queue_owns and not bool(getattr(self, "isPreview", False)):
-            # PLAY, export, no tail: the pane was following the renderer's newest frames, which is not playback. The
-            # output file is the timeline; start the tail here (the GUI tick builds it) at the pane's own position, and
-            # the feed stands down while it paints. Pausing drops it again, so the feed's cheap path is what a held
-            # pane uses (owner, 2026-11-25: "воспроизведение всё ещё просто переключает нас на слежение за последними
-            # апкад кадрами").
+        decoder = getattr(self, "_preview_decoder", None)
+        if not holding and decoder is not None and getattr(self, "_playback_tail", False):
+            # A finished file has a real player (media-rate pacing, one frame per tick, box-capped). The playback tail
+            # polls the file every 120 ms and hands a backlog burst to the GUI, which paints once per burst - measured
+            # 2026-11-25: 18 frames/s delivered, 9 painted, the drawn index stepping by 2. The tail is the player for a
+            # file still being WRITTEN; once the job is done its decoder owns the timeline.
+            self._stop_live_tail()
+            tail = None
+        if (not holding and tail is None and not queue_owns and not bool(getattr(self, "isPreview", False))
+                and decoder is None):
+            # PLAY, export, no tail and no finished-file decoder: the pane was following the renderer's newest frames,
+            # which is not playback. The output file is the timeline; start the tail here (the GUI tick builds it) at
+            # the pane's own position, and the feed stands down while it paints. Pausing drops it again, so the feed's
+            # cheap path is what a held pane uses (owner, 2026-11-25: "воспроизведение всё ещё просто переключает нас
+            # на слежение за последними апкад кадрами").
             options = getattr(self, "currentRenderOptions", None)
             path = str(getattr(options, "outputPath", "") or "")
             if path:
@@ -1754,7 +1768,6 @@ class ProcessTab:
                 tail.set_paused(holding or queue_owns)
             except Exception as exc:
                 log(f"preview transport: {exc}")
-        decoder = getattr(self, "_preview_decoder", None)
         if decoder is not None:
             try:
                 decoder.pause() if (holding or queue_owns) else decoder.play()

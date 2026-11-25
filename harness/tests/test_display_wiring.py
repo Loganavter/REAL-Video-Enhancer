@@ -1022,6 +1022,7 @@ def test_the_stamped_picture_closes_the_seek_with_its_own_time(monkeypatch):
     assert fields["target_s"] == 1.139
     assert fields["landed"] == ("seq", 196)
     assert tab._seek_pressed_at is None
+    assert tab._preview_playhead == 1.139, "the picture's own time is the pane's position - Play resumes from it"
 
 
 def test_the_pane_announces_a_resize_once_and_only_when_it_changed():
@@ -1068,3 +1069,26 @@ def test_the_pane_announces_a_resize_once_and_only_when_it_changed():
 
     writer.release()
     reader.close()
+
+
+def test_play_on_a_finished_export_uses_its_decoder_not_a_playback_tail(monkeypatch):
+    """Once the job is over, the file has a real player; the 120 ms tail must not take the pane back.
+
+    Measured 2026-11-25 on the owner's finished export: the pane delivered 18 frames/s but painted 9, with the drawn
+    index stepping by two and paints 120 ms apart - the playback tail's poll cadence, not the decoder's. The tail is
+    the player for a file still being WRITTEN; a finished file is the decoder's timeline (media rate, one frame per
+    tick, box-capped).
+    """
+    tab = _tab(preview=False, paused=True)
+    tab.currentRenderOptions = SimpleNamespace(outputPath="/out/finished.mkv")
+    calls: list[str] = []
+    tab._preview_decoder = SimpleNamespace(play=lambda: calls.append("play"),
+                                           pause=lambda: calls.append("pause"))
+    tab._playback_tail = False
+    started: list[str] = []
+    monkeypatch.setattr(ProcessTab, "_start_live_tail", lambda self, path: started.append(path))
+
+    ProcessTab._on_preview_pause_toggled(tab, False)
+
+    assert started == [], "a finished file must not be replayed through the tail"
+    assert calls == ["play"], "the finished-file decoder is the player"
