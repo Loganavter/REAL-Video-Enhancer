@@ -43,7 +43,8 @@ if "resources_rc" not in sys.modules:
     # A test tree has no compiled resource blob; the icons resolve to null QIcons and the widgets still build.
     sys.modules["resources_rc"] = types.ModuleType("resources_rc")
 
-from PySide6.QtCore import QRect, Qt  # noqa: E402
+from PySide6.QtCore import QPoint, QRect, Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager  # noqa: E402
@@ -536,6 +537,29 @@ def test_the_scrubber_carries_three_numbers_and_emits_seconds(controls):
     timeline.sliderReleased.emit()
     assert seen and seen[-1] == pytest.approx(20.563 / 2, abs=1e-2)
     assert timeline.is_scrubbing() is False
+
+
+def test_a_real_press_on_the_scrubber_asks_for_a_seek(controls):
+    """The signal's PRODUCER, not only its consumer: a mouse press must reach `seekRequested`.
+
+    The test above emits `sliderPressed`/`sliderMoved`/`sliderReleased` by hand, so it proved the timeline reacts to
+    signals the toolkit `Slider` never emitted - it drew its own groove, handled the mouse itself and skipped the base
+    class, so a press moved the thumb under the cursor and asked the host for nothing (measured live 2026-11-25).
+    This drives the real widget with real mouse events.
+    """
+    timeline = controls.timeline
+    timeline.resize(400, 24)
+    timeline.show()
+    QTest.qWaitForWindowExposed(timeline)
+    seen: list[float] = []
+    timeline.seekRequested.connect(seen.append)
+    groove = timeline._groove_rect()
+    point = QPoint(int(groove.left() + groove.width() * 0.5), int(groove.center().y()))
+    QTest.mousePress(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    QTest.mouseRelease(timeline, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    assert seen, "a press on the scrubber asked for nothing"
+    assert seen[-1] == pytest.approx(20.563 / 2, abs=0.4)
+    assert timeline.is_scrubbing() is False, "the release must end the drag"
 
 
 def test_content_time_is_m_ss_mmm():

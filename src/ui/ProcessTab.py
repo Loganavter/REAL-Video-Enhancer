@@ -3035,6 +3035,12 @@ class ProcessTab:
         # enabled button that holds nothing, or a disabled one that holds the picture, is worse than no button.
         self._sync_preview_transport()
         self._refresh_held_progress()
+        # The bottom bar reads `PreviewState`, and the state used to be pushed ONLY when a frame was painted - so a
+        # paused pane froze the produced band and the thumb at the last frame while the renderer kept producing
+        # (owner, 2026-11-25: the white band stood at f 316/493 under a "100%" pill, and a press on the scrubber moved
+        # nothing). The tick is the only clock a paused pane has, and `Controller._emit` drops an unchanged state, so
+        # this costs nothing until a number actually moves.
+        self._push_preview_state()
         # The export pane's feed and the standing original both run on this same clock: the reader takes at most one
         # new `seq` per tick, and the compare's source decode is coalesced to the playhead the result just reached.
         self._tick_display()
