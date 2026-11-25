@@ -470,6 +470,13 @@ class Render:
         log("HDR Mode: " + str(hdr_mode))
 
         _t_reader = _perf_counter()
+        #: Name every published picture by the SOURCE frame's PTS instead of the pipe counter, and rebuild the CFR output
+        #: the counter used to get for free (duplicate the previous frame at a PTS gap). ON by default: a compare against
+        #: a name that no source frame carries is meaningless, and the export's own accounting is preserved by the
+        #: rebuild below (measured: 495 output frames either way). `RVE_STAMPED_FRAMES=0` is the escape hatch.
+        self.stamped_frames = str(os.environ.get("RVE_STAMPED_FRAMES", "1")).strip() != "0"
+        self._last_source_pts = None
+        self._last_payload = None
         self.readBuffer = FFmpegRead(  # input width
             inputFile=inputFile,
             width=self.width,
@@ -545,13 +552,6 @@ class Render:
         # The pane's block: sized by the GUI, written only while the pane asks. Building it is cheap -
         # no GPU work happens until the first frame is actually published (utils/DisplayStager.py).
         self.displayEvery = max(1, int(os.environ.get("RVE_DISPLAY_EVERY", "1") or 1))
-        #: Name every published picture by the SOURCE frame's PTS instead of the pipe counter, and rebuild the CFR output
-        #: the counter used to get for free (duplicate the previous frame at a PTS gap). ON by default: a compare against
-        #: a name that no source frame carries is meaningless, and the export's own accounting is preserved by the
-        #: rebuild below (measured: 495 output frames either way). `RVE_STAMPED_FRAMES=0` is the escape hatch.
-        self.stamped_frames = str(os.environ.get("RVE_STAMPED_FRAMES", "1")).strip() != "0"
-        self._last_source_pts = None
-        self._last_payload = None
         self.displayChannel = None
         self.displayStager = None
         self.displayBox = None
