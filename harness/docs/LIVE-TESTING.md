@@ -198,7 +198,15 @@ Compare two captures with `python3 harness/scripts/ui_diff.py compare --stock-du
 pane (the plain `render:` verb leaves the pane empty). The answer names the preview file, its size, and what the pane
 holds: `class`, `visible`, `has_frame`, `frame` and `progress` (rendered, total, playhead, duration).
 
-Three answers this verb learned to give the hard way (2026-11-23):
+Four answers this verb learned to give the hard way (2026-11-23, 2026-11-25):
+
+- **`finished` is the backend child's exit, never the button's look.** The transport button is enabled in *every*
+  render state (`ProcessTab.RENDER_CONTROLS`; one button carries play/pause/resume), so "enabled" was always true and
+  the verb answered `finished: true` in ~1.2 s while the render ran 18-20 s and wrote 493 frames (measured three
+  times on 2026-11-25: 18:19, 18:43, 18:45). The rule (`src/ui/capture_server.py: PreviewWatch`) requires a child the
+  press did not inherit, its EXIT, and either a non-empty `_preview.mkv` or the app's own completion path (`idle`
+  after the job). A child that is alive keeps the verb pending however the button looks; an exited child that wrote
+  nothing is an error, not a finish.
 
 - **A refusal is named, with the app's own words.** A click that leaves no backend and an enabled button is a refusal,
   not a render that finished in 0.9 s: `error` carries the toast text (`Video is not loaded!`, `Not a valid input!`,

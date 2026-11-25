@@ -264,6 +264,147 @@ def validate_input_path(path: str) -> tuple[str | None, str | None]:
     return None, resolved
 
 
+#: What one poll of a `preview:` job says. `PREVIEW_PENDING` keeps the verb waiting; every other verdict is an answer.
+PREVIEW_PENDING = "pending"
+PREVIEW_FINISHED = "finished"
+PREVIEW_REFUSED = "refused"
+PREVIEW_FAILED = "failed"
+
+#: How long a DELIVERED click may take to produce a backend child before its absence counts as a refusal.
+PREVIEW_SPAWN_GRACE_S = 5.0
+#: ... and how long the app's own toast then gets to be read (`NotificationOverlay(..., timeout=1500)`).
+PREVIEW_REFUSAL_GRACE_S = 0.6
+#: How long a child that has EXITED may take to leave its file and the app's completion path behind it: `wait()`
+#: returns in the writer thread before the last bytes are flushed and before `guiChangesOnRenderCompletion` runs.
+PREVIEW_EXIT_SETTLE_S = 5.0
+#: The verb's whole ceiling: a 4K preview of a long clip is minutes, a wedged job must not hold the channel for ever.
+PREVIEW_TIMEOUT_S = 300.0
+#: Exit codes `ProcessTab.guiChangesOnRenderCompletion` itself counts as a finished job (the Windows ncnn fault).
+PREVIEW_OK_CODES = (0, 3221225477)
+
+
+def preview_output_bytes(path: str) -> int | None:
+    """The preview file's size when it is a REAL file with bytes in it - else None (missing, empty, unreadable).
+
+    A truncate-then-grow file is the normal shape of a running render, so "exists" is never enough: a zero-byte
+    `_preview.mkv` left by the app's `FileHandler().removeFile()`/an opening writer is not a finished preview.
+    """
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    return size if size > 0 else None
+
+
+def _preview_child(window):
+    """The backend child: `renderProcess` lives on the ProcessTab, never on the window (see the verb's history)."""
+    tab = getattr(window, "processTab", None)
+    return getattr(tab, "renderProcess", None) if tab is not None else None
+
+
+def _preview_render_state(window):
+    """The glue's own state word (`idle`/`running`/`paused`), the app's statement that a job is in flight."""
+    tab = getattr(window, "processTab", None)
+    return getattr(tab, "_render_state", None) if tab is not None else None
+
+
+def _preview_button_enabled(window) -> bool:
+    """Whether the transport button is usable - the ONLY signal the old rule trusted, and it is always true.
+
+    `ProcessTab.RENDER_CONTROLS` enables the transport in `idle`, `running` AND `paused` (one button carries
+    play/pause/resume), so "the button looks enabled" says nothing about a job; the child does.
+    """
+    proc = getattr(getattr(window, "page_handles", None), "proc", None)
+    button = getattr(proc, "startRenderButton", None)
+    try:
+        return bool(button is not None and button.isEnabled())
+    except Exception:
+        return False
+
+
+def _preview_exit_code(child) -> int | None:
+    """The child's exit code, or None while it is alive (a child that cannot be polled counts as alive)."""
+    try:
+        return child.poll()
+    except Exception:
+        return None
+
+
+@dataclass
+class PreviewWatch:
+    """The `preview:` verb's completion rule: the BACKEND CHILD's exit, never the button's look.
+
+    Why this is a class and not a closure: the rule it replaces answered `finished: true` in ~1.2 s while the render
+    ran 18-20 s and wrote 493 frames (measured three times on 2026-11-25). The transport button is enabled in every
+    state, so `wait_finish` concluded "the job is over" before the backend child even existed. Three things make
+    that impossible now:
+
+    * `finished` needs a child we did NOT see before the press (a `renderProcess` left over from an earlier job is
+      not this job's child), the child EXITED, and either its file holds bytes or the app's completion path ran;
+    * a child that is alive keeps the verb pending however the button looks;
+    * a refusal is the app's own answer: no child ever appeared, the glue stayed `idle` and the button stayed
+      enabled - wait out the spawn and toast windows, then answer with the toast text (never with `finished`).
+
+    Pure on purpose: `tick()` reads a window-like object and the real file, so a fake window/process/button proves
+    the rule offscreen (``harness/tests/test_control_preview_verb.py``) and the verb applies exactly that rule.
+    """
+
+    output_path: str
+    #: `time.monotonic()` at the press - the clock of every comparison in `tick()` (never the wall clock).
+    started_at: float
+    previous_child: object | None = None
+    spawn_grace_s: float = PREVIEW_SPAWN_GRACE_S
+    refusal_grace_s: float = PREVIEW_REFUSAL_GRACE_S
+    exit_settle_s: float = PREVIEW_EXIT_SETTLE_S
+    timeout_s: float = PREVIEW_TIMEOUT_S
+    seen_child: bool = False
+    exited_at: float | None = None
+
+    def tick(self, window, *, now: float | None = None) -> tuple[str, str | None]:
+        """One poll: ``(verdict, reason)``; the reason is filled only for ``PREVIEW_FAILED``."""
+        now = time.monotonic() if now is None else now
+        elapsed = now - self.started_at
+        child = _preview_child(window)
+        state = _preview_render_state(window)
+        fresh = child is not None and child is not self.previous_child
+        if fresh:
+            self.seen_child = True
+
+        if fresh:
+            code = _preview_exit_code(child)
+            if code is None:
+                # The backend exists and is alive: this is a render in progress, whatever the button says.
+                return PREVIEW_PENDING, None
+            self.exited_at = self.exited_at if self.exited_at is not None else now
+            size = preview_output_bytes(self.output_path)
+            # `idle` after a child existed is `guiChangesOnRenderCompletion` having run (the glue is `running` from
+            # the press, synchronously, before the writer thread spawns the child).
+            completed = state == "idle"
+            if size is not None or completed:
+                if code not in PREVIEW_OK_CODES:
+                    return PREVIEW_FAILED, (f"the backend exited with code {code} before the render finished "
+                                            f"(the preview file holds {size or 0} bytes)")
+                if size is None and not completed:
+                    return PREVIEW_FAILED, "the backend exited cleanly but wrote no preview file"
+                return PREVIEW_FINISHED, None
+            # Exited, but neither the file nor the app's completion has landed yet: the last bytes are flushed and
+            # the hand-over runs after `wait()`, so give them a bounded settle window instead of a verdict now.
+            if now - self.exited_at >= self.exit_settle_s:
+                return PREVIEW_FAILED, (f"the backend exited with code {code} and left no preview file at "
+                                        f"{self.output_path}")
+            return PREVIEW_PENDING, None
+
+        if not self.seen_child and elapsed >= self.spawn_grace_s + self.refusal_grace_s:
+            # No child ever appeared. The click only "did nothing" when the app refused it - and a refusal is
+            # answered by the app's own toast, so wait that window out and let the verb read the text.
+            if _preview_button_enabled(window) and state in (None, "idle"):
+                return PREVIEW_REFUSED, None
+
+        if elapsed >= self.timeout_s:
+            return PREVIEW_FAILED, "timeout waiting for the preview render to finish"
+        return PREVIEW_PENDING, None
+
+
 def install(window) -> None:
     """Arm the server on ``window``. Never returns anything; the app keeps running."""
     from PySide6.QtCore import QTimer
@@ -1375,7 +1516,8 @@ def install(window) -> None:
             video, _, model_hint = video.partition("#model=")
             model_hint = model_hint.strip() or None
         result = {"stamp": _stamp(), "kind": "preview", "video": video, "started": False, "finished": False,
-                  "seconds": 0.0, "output": None, "pane": None, "output_bytes": None, "error": None}
+                  "seconds": 0.0, "output": None, "pane": None, "output_bytes": None, "error": None,
+                  "toasts": [], "model": None}
         # Bind the answer to THIS request now: `_finish` publishes under the id it is given, and the verb answers
         # seconds later from a timer. Without this, a request that arrived meanwhile claims the preview's answer and
         # the caller sees a payload of the wrong kind (measured 2026-11-23: `preview:` answered "widget not found",
@@ -1435,37 +1577,44 @@ def install(window) -> None:
                     result["output_bytes"] = os.path.getsize(candidate)
                     break
             result["pane"] = pane_state()
-            result["toasts"] = toast_texts()
+            result["toasts"] = remember_toasts()
             if error:
                 result["error"] = error
             _finish(result)
             print(f"capture-server: preview {result}", flush=True)
 
-        def confirm_refusal() -> None:
-            """A click that leaves no backend and no disabled button did nothing - say why, in the app's own words."""
-            if render_process() is None and window.page_handles.proc.startRenderButton.isEnabled():
-                reason = "; ".join(toast_texts()) or "no toast was shown"
-                finish(f"the app refused the preview: {reason}")
-                return
-            wait_finish(1)
+        #: The completion rule the verb applies - the backend child's exit, never the button's look. It is a
+        #: module-level object so the offscreen test proves the very rule a live run obeys. It runs on the MONOTONIC
+        #: clock (the wall clock jumps; a verdict must not), while `started_at` above stays the wall clock `seconds`
+        #: is reported from.
+        watch = PreviewWatch(expected, time.monotonic())
+        #: Toasts are transient (`timeout=1500`); a refusal may be answered after the spawn grace, so every poll
+        #: remembers what the app said instead of reading only the (possibly expired) live set at the end.
+        seen_toasts: list[str] = []
 
-        def wait_finish(ticks: int = 0) -> None:
-            if ticks == 0 and render_process() is None \
-                    and window.page_handles.proc.startRenderButton.isEnabled():
-                # "started" is what the click asked for, not what happened: a refusal returns from the slot before
-                # any backend exists and leaves the button enabled - indistinguishable from a render that finished
-                # in under a second (measured: a preview answered "finished in 0.9 s, no output" for exactly this
-                # reason while the real cause was a missing input file). Give the toast 600 ms, then read it.
-                QTimer.singleShot(600, confirm_refusal)
-                return
-            if result["started"] and window.page_handles.proc.startRenderButton.isEnabled():
+        def remember_toasts() -> list[str]:
+            for text in toast_texts():
+                if text not in seen_toasts:
+                    seen_toasts.append(text)
+            return seen_toasts
+
+        def wait_finish() -> None:
+            remember_toasts()
+            verdict, reason = watch.tick(window)
+            if verdict == PREVIEW_FINISHED:
                 result["finished"] = True
                 finish()
                 return
-            if ticks > 3000:                     # 3000 * 100 ms = 5 min
-                finish("timeout waiting for the preview render to finish")
+            if verdict == PREVIEW_REFUSED:
+                # The app's own words: a click that leaves no backend ever is a refusal, and nothing about it
+                # reaches the app log - the toast is the answer.
+                why = "; ".join(remember_toasts()) or "no toast was shown"
+                finish(f"the app refused the preview: {why}")
                 return
-            QTimer.singleShot(100, lambda: wait_finish(ticks + 1))
+            if verdict == PREVIEW_FAILED:
+                finish(reason or "the preview render failed")
+                return
+            QTimer.singleShot(100, wait_finish)
 
         def press_preview() -> None:
             select_a_backend()
@@ -1494,6 +1643,9 @@ def install(window) -> None:
             if button is None:
                 finish("no renderPreviewBtn on the window")
                 return
+            # A stale `renderProcess` from an earlier job is not THIS job's child: remember it, so an exit that
+            # already happened cannot be read as this press finishing.
+            watch.previous_child = render_process()
             result["started"] = True
             button.click()
             QTimer.singleShot(400, wait_finish)
