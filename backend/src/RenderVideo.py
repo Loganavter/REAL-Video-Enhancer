@@ -490,6 +490,7 @@ class Render:
             high_bitdepth=high_bitdepth,
             input_pixel_format=input_pix_fmt,
             ffmpeg_path=ffmpeg_path,
+            stamp_pts=self.stamped_frames,
         )
         log(f"phase: reader open {(_perf_counter() - _t_reader) * 1000.0:.0f} ms")
 
