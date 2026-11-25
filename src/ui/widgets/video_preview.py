@@ -20,36 +20,22 @@ Decisions encoded here, each from a measurement or an owner call:
 * **readback is the pixel instrument**: under llvmpipe a composited RHI widget comes out black in the window, while
   `grabFramebuffer()` shows the truth (harness/docs/LIVE-TESTING.md, 2026-11-23) - so `grabFrame()` exists and is what
   the tests use.
+
+Since the phase-0 seam of `plan-rve-preview-controls-frame-path-2026-11-25` the RHI side lives in
+`src/ui/widgets/preview_renderer.py`: `PreviewRenderer` owns the textures, samplers, SRBs, pipelines, uploads and the
+pass; this class owns the widget API, the zoom/pan/mvp geometry, the frame/state bookkeeping, the strip and its child
+widgets. It hands the renderer one `PreviewScene` per paint and receives what was drawn back through `on_draw`.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
 import time
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import (
-    QColor,
-    QImage,
-    QRhi,
-    QRhiBuffer,
-    QRhiDepthStencilClearValue,
-    QRhiGraphicsPipeline,
-    QRhiSampler,
-    QRhiShaderResourceBinding,
-    QRhiScissor,
-    QRhiShaderResourceBindings,
-    QRhiShaderStage,
-    QRhiTexture,
-    QRhiVertexInputAttribute,
-    QRhiViewport,
-    QRhiVertexInputBinding,
-    QRhiVertexInputLayout,
-    QShader,
-)
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QRhiWidget
 
 from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager
@@ -65,8 +51,14 @@ from src.ui.widgets.playback_strip import (
     strip_margin,
     strip_track_height,
 )
+from src.ui.widgets.preview_renderer import (
+    PreviewDrawn,
+    PreviewFrame,
+    PreviewRenderer,
+    PreviewScene,
+    mip_minify_enabled,  # noqa: F401 - re-exported here: the harness imports it from this module
+)
 
-SHADER_DIR = "shaders"
 #: 8 source pixels per screen pixel at most. The floor is the FIT scale (computed per frame), not 1:1: the pane shows
 #: the whole frame by default and the wheel can go back to that, while 1:1 is just a step inside the range. Zoom is a
 #: source-pixel scale, so the same factor means the same detail whatever the pane size.
@@ -79,13 +71,8 @@ WHEEL_UNITS_PER_NOTCH = 120.0
 WHEEL_ZOOM_PER_NOTCH = 1.2
 #: How far the pointer must travel before an LMB press becomes a pan instead of the compare flash.
 PAN_THRESHOLD_PX = 3.0
-#: Mipminification on/off. The chain is the whole fix for the fit view (a 1440x1080 frame in a 421x512 pane is a
-#: 3.42x minification through ONE bilinear tap, which aliases); the switch exists so an A/B runs on ONE build and the
-#: owner can compare the two arms himself. `RVE_MIP_MINIFY=0` keeps the old single-level texture.
-def mip_minify_enabled() -> bool:
-    import os
-
-    return str(os.environ.get("RVE_MIP_MINIFY", "1")).strip() != "0"
+#: `mip_minify_enabled` (the `RVE_MIP_MINIFY` A/B switch) now lives in `preview_renderer.py`, which owns the texture
+#: flags and the samplers; it is imported above and stays importable from this module (the harness does that).
 
 
 #: NEAREST on every magnification, like the reference viewer. BlinkTable's own constant says why in one line:
@@ -137,9 +124,12 @@ class VideoPreviewSurface(QRhiWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        #: The RHI side of the pane: textures, samplers, SRBs, pipelines and the pass (`preview_renderer.py`). It
+        #: receives every number it draws through a `PreviewScene` (see `_preview_scene`) and reports what it drew back
+        #: through `_on_rhi_draw`, so the draw log keeps the widget's own bookkeeping.
+        self._renderer = PreviewRenderer(on_draw=self._on_rhi_draw)
         self._frame: QImage | None = None
         self._original: QImage | None = None
-        self._texture_dirty = False
         self._zoom = MIN_ZOOM
         #: What the wheel is aiming at. The APPLIED zoom is quantised to `ZOOM_STEPS` (nearest needs whole factors), so
         #: without a separate target the wheel would multiply the snapped value and stall at 1x forever.
@@ -161,9 +151,6 @@ class VideoPreviewSurface(QRhiWidget):
         self._showing_original = False
         #: which surfaces the pane shows: "single" (today), "sbs" or "split" - see `set_view_mode`
         self._view_mode = "single"
-        #: the source picture has its OWN texture, used by the compare modes; "single" keeps drawing it through
-        #: `_texture` (the flash replaces the frame, so one texture is enough there)
-        self._original_texture_dirty = False
         #: where the split divider sits, as a share of the picture's width; the pane's rule, not a per-frame value
         self._split_fraction = 0.5
         #: the playhead the standing original was last asked for, so playback refreshes it once per move
@@ -251,15 +238,15 @@ class VideoPreviewSurface(QRhiWidget):
     def set_frame(self, image: QImage | None, *, gui_ms: float | None = None,
                   index: int | None = None, seq: int | None = None,
                   media_time: float | None = None, generation: int | None = None) -> None:
-        """Show this picture. A `None` clears the pane (no frame yet)."""
+        """Show this picture. A `None` clears the pane (no frame yet).
+
+        The pixels go to the renderer as a `PreviewFrame` (`format="rgba8"`, the converted image); the widget keeps the
+        same image for its geometry, its fingerprints and the draw log. Signatures here are the public API and do not
+        change - a producer that speaks planes will hand the renderer a `PreviewFrame` directly (the YUV lane).
+        """
         self._frame = None if image is None else image.convertToFormat(QImage.Format.Format_RGBA8888)
-        self._texture_dirty = self._frame is not None
+        self._renderer.set_frame(self._preview_frame(self._frame, index=index, pts=media_time))
         self._cleared_empty = False
-        if self._texture_dirty and getattr(self, "_texture", None) is not None:
-            # Create the texture OUTSIDE a frame: QRhi resources are created between frames, and a create() issued
-            # while a frame is being recorded is refused by the backend without an exception (the frame then samples
-            # the 1x1 placeholder - opaque black, which reads exactly like "the upload was skipped").
-            self._ensure_texture(self._frame.size())
         self._refresh_readout()
         self.update()
         # The pane is the only place that knows what it PAINTS: a decoder's frame number when the producer has one,
@@ -429,15 +416,7 @@ class VideoPreviewSurface(QRhiWidget):
                                         frame=f"{target.width()}x{target.height()}",
                                         diff_pct=f"{relative * 100.0:.2f}")
             self._original = picture
-        if self._view_mode == "single":
-            # The flash replaces the frame in the one shared texture.
-            self._texture_dirty = True
-        else:
-            # The compare modes draw both pictures at once, so the source has its own texture and the result's
-            # upload is untouched by an arriving source frame.
-            self._original_texture_dirty = self._original is not None
-            if self._original is not None and getattr(self, "_texture", None) is not None:
-                self._ensure_original_texture(self._original.size())
+        self._renderer.set_original(self._preview_frame(self._original, index=index, pts=media_time))
         self.update()
 
     def set_view_mode(self, mode: str) -> None:
@@ -463,9 +442,9 @@ class VideoPreviewSurface(QRhiWidget):
         self._showing_original = False
         self._hud_dirty = True
         # Both textures get re-uploaded once: `single` may have left the source in the shared one, and the compare
-        # modes keep the result there. Cheap (one upload) and it removes a whole class of "stale half" readings.
-        self._texture_dirty = self._frame is not None
-        self._original_texture_dirty = self._original is not None
+        # modes keep the result there. Cheap (one upload) and it removes a whole class of "stale half" readings. The
+        # renderer owns those flags and the mode they depend on, so it hears the mode change before any frame arrives.
+        self._renderer.set_view_mode(mode)
         if mode != "single":
             self._request_standing_original()
         self.update()
@@ -971,17 +950,85 @@ class VideoPreviewSurface(QRhiWidget):
         self._pan[1] = max(-max_y, min(max_y, self._pan[1]))
 
     # -- RHI ---------------------------------------------------------------
+    #
+    # The renderer (`preview_renderer.py`) owns every QRhi object, the uploads and the pass; this side owns the widget
+    # contract. Three members are the whole interface between them: `_preview_frame` wraps a picture into the ingestion
+    # contract, `_preview_scene` hands over one frame's geometry, and `_on_rhi_draw` turns "what was drawn" into the
+    # draw log.
+
+    def _preview_frame(self, image: QImage | None, *, index: int | None = None,
+                       pts: float | None = None) -> PreviewFrame | None:
+        """Wrap a picture into the renderer's ingestion contract (`rgba8`, the image already converted).
+
+        This is the additive seam the YUV lane grows from: a producer with planes will build its own `PreviewFrame`
+        (`format="yuv420p10le"`, `planes=`, `strides=`) and hand it to the renderer; the image path below stays the
+        rgba8 wrapper, and `set_frame`/`set_original` keep the signatures their callers already use.
+        """
+        if image is None:
+            return None
+        return PreviewFrame(format="rgba8", width=image.width(), height=image.height(),
+                            pts=None if pts is None else float(pts),
+                            index=None if index is None else int(index), image=image)
+
+    def _preview_scene(self, target) -> PreviewScene:
+        """Everything the renderer draws this frame, computed here: geometry, clips, HUD, sampler, clear.
+
+        The renderer never reads the widget: the mvp blocks are the same `_mvp_floats` the tests pin, the clip rects
+        are the same `_view_rect`/`_original_clip_rect` the compare modes always used, and the HUD vertices are
+        `_hud_vertices` unchanged. `target` is the CURRENT paint's render target - a resize replaces it, so it is
+        passed per frame instead of cached.
+        """
+        original = self._original
+        return PreviewScene(
+            target=target,
+            rhi=self.rhi(),
+            mode=self._view_mode,
+            result_mvp=tuple(self._mvp_floats(self._frame_rect())),
+            original_mvp=None if original is None else tuple(self._mvp_floats(self._original_rect())),
+            tint=tuple(self._tint),
+            nearest=self.samples_nearest(),
+            result_rect=self._frame_rect(),
+            result_clip=self._view_rect(),
+            original_clip=self._original_clip_rect(),
+            show_original=bool(self._showing_original and original is not None),
+            hud_vertices=tuple(self._hud_vertices()),
+            viewport=(float(self.width()), float(self.height())),
+            dpr=float(self.devicePixelRatioF() or 1.0),
+            clear=self._opaque_clear(),
+        )
+
+    def _on_rhi_draw(self, drawn: PreviewDrawn) -> None:
+        """One pass finished: write the draw line from the widget's own bookkeeping (`_log_draw`).
+
+        The renderer reports WHAT it drew (which half, whether the source was in the pass); the identity, the media
+        times, the fingerprints and the telemetry level all live here, so the lines are exactly the ones the old
+        in-render logging wrote.
+        """
+        if drawn.mode == "single":
+            picture = self._original if drawn.half == "original" else self._frame
+            if drawn.half == "original" and (self._original_changed or telemetry.level() >= 2):
+                self._log_draw(half="original", picture=picture)
+                self._original_changed = False
+            elif drawn.half == "result" and telemetry.level() >= 2:
+                self._log_draw(half="result", picture=picture)
+            return
+        # Both halves in one pass: one line names both pictures (a new original always, every paint at level 2).
+        original = self._original if drawn.drew_original else None
+        if drawn.drew_original and (self._original_changed or telemetry.level() >= 2):
+            self._log_draw_two(self._frame, original)
+            self._original_changed = False
+        elif telemetry.level() >= 2:
+            self._log_draw_two(self._frame, None)
 
     def initialize(self, command_buffer) -> None:  # noqa: N802 - Qt spelling
-        """Build the resource set - but not on a mere resize.
+        """Start the telemetry session, then hand the resource lifetime to the renderer.
 
         Qt calls `initialize()`/`releaseResources()` on EVERY resize (the widget's backing target is reallocated at the
-        new pixel size), not only on a real context change - the framework's `qrhi-gotchas.md` §"Canvas resize tears down
-        the whole tile array on every resize" measured it at ~1 s per resize in BlinkTable. Releasing here unconditionally
-        is worse than slow for a still picture: the frame texture is destroyed with it, the next `render()` builds a fresh
-        texture and only uploads when `_texture_dirty` is set - which a resize does not set - so the pane draws an
-        undrawn texture until the NEXT frame. A finished or paused render never sends one: the pane stays see-through
-        after any window resize or sibling repaint. That is the "the preview turns transparent at any sneeze" defect.
+        new pixel size), not only on a real context change. The renderer's rule for that is unchanged: the same RHI
+        keeps its resources and re-uploads the standing pictures, a new one releases and rebuilds. Releasing here
+        unconditionally is the "the preview turns transparent at any sneeze" defect - the frame texture dies with the
+        resource set, a resize does not mark it dirty, and a paused render never sends another frame. This side owns
+        the session line and the no-RHI fallback message because both describe the widget, not the resources.
         """
         if not getattr(self, "_telemetry_session", False):
             self._telemetry_session = True
@@ -998,461 +1045,22 @@ class VideoPreviewSurface(QRhiWidget):
                 print("[preview] no QRhi on this platform: the pane cannot draw (set RVE_UI_RASTER_PREVIEW=1 "
                       "for the pixmap fallback)", flush=True)
             return
-        same_context = rhi is getattr(self, "_rhi", None) and getattr(self, "_pipeline", None) is not None
-        if same_context:
-            # Same RHI, just a new target size: keep every resource and re-upload the frame we already hold, so the
-            # pane shows the picture again on the very next paint instead of an empty texture.
-            self._rhi = rhi
-            if self._frame is not None:
-                self._texture_dirty = True
-            if self._original is not None:
-                self._original_texture_dirty = True
+        kept = self._renderer.initialize(command_buffer, rhi, self.renderTarget())
+        if kept:
+            # Same RHI, just a new target size: every resource is still valid, so a repaint is enough - the renderer
+            # has marked the standing pictures for re-upload.
             self.update()
-            return
-        self._release()
-        self._rhi = rhi
-        if self._frame is None:
-            # Nothing to draw yet. Building a 1x1 texture and then resizing it forces an SRB and pipeline rebuild in
-            # the middle of the first real frame - the one path that produced a black pane in every probe. Deferring
-            # the whole resource set to the first frame removes that path instead of patching it.
-            self._deferred = True
-            return
-        self._create_resources(command_buffer)
-
-    def _create_resources(self, command_buffer) -> None:
-        """All RHI resources for the CURRENT frame size, built once per size change.
-
-        `command_buffer` is needed for the static vertex upload; `initialize()` and `render()` both have one, which is
-        why this is a method taking it rather than a constructor-time step.
-        """
-        rhi = self._rhi
-        initial_size = self._frame.size() if self._frame is not None else QSize(1, 1)
-        # `MipMapped` makes Qt allocate the chain (`mipLevelsForSize` = 11 for 1440x1080) and requires the levels to be
-        # generated after each upload; `UsedWithGenerateMips` is what the backend needs to accept `generateMips`.
-        flags = QRhiTexture.Flag.UsedAsTransferSource
-        if mip_minify_enabled():
-            flags |= QRhiTexture.Flag.MipMapped | QRhiTexture.Flag.UsedWithGenerateMips
-        self._texture = rhi.newTexture(QRhiTexture.Format.RGBA8, initial_size, 1, flags)
-        if not self._texture.create():
-            raise RuntimeError(f"frame texture {initial_size.width()}x{initial_size.height()} was refused by QRhi")
-        # The THIRD filter is the mipmap mode, and it must be `None_` for a single-level texture: with a mipmap filter
-        # set, sampling returned opaque black on llvmpipe (measured: a 4x4 RGBA texture uploaded with the right colours
-        # sampled (0,0,0,255) with `Nearest` and the correct colours with `None_`). This is the kind of failure that
-        # looks like a missing upload, so the trap is named here.
-        self._sampler_nearest = rhi.newSampler(QRhiSampler.Filter.Nearest, QRhiSampler.Filter.Nearest,
-                                               QRhiSampler.Filter.None_, QRhiSampler.AddressMode.ClampToEdge,
-                                               QRhiSampler.AddressMode.ClampToEdge)
-        self._sampler_nearest.create()
-        # The THIRD argument is the mipmap mode. `Linear` there is trilinear: the fit view samples the two levels the
-        # derivative-chosen LOD falls between, which is what turns the aliasing tap into an average. Left `None_` when
-        # the chain is off, because a mipmap mode over a single-level texture sampled opaque black on llvmpipe once.
-        mip_mode = QRhiSampler.Filter.Linear if mip_minify_enabled() else QRhiSampler.Filter.None_
-        self._sampler_linear = rhi.newSampler(QRhiSampler.Filter.Linear, QRhiSampler.Filter.Linear,
-                                              mip_mode, QRhiSampler.AddressMode.ClampToEdge,
-                                              QRhiSampler.AddressMode.ClampToEdge)
-        self._sampler_linear.create()
-
-        self._uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer, 64 + 16)
-        self._uniforms.create()
-        # The source picture's own uniform buffer: same block, a different mvp (its half), and the same tint. Two
-        # buffers instead of one with two offsets keeps each SRB a plain whole-buffer binding.
-        self._original_uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer,
-                                                64 + 16)
-        self._original_uniforms.create()
-
-        # A unit quad: two triangles, positions in [-1,1] and matching uv.
-        # NDC -1 is the bottom of the pane while a QImage row 0 is its top, so the texture's v axis is flipped here
-        # rather than in the shader: v = 0 is the image's bottom row, which is the quad's bottom-left corner.
-        quad = [
-            -1.0, -1.0, 0.0, 0.0,
-            1.0, -1.0, 1.0, 0.0,
-            -1.0, 1.0, 0.0, 1.0,
-            1.0, -1.0, 1.0, 0.0,
-            1.0, 1.0, 1.0, 1.0,
-            -1.0, 1.0, 0.0, 1.0,
-        ]
-        self._vertices = rhi.newBuffer(QRhiBuffer.Type.Immutable, QRhiBuffer.UsageFlag.VertexBuffer,
-                                       len(quad) * 4)
-        self._vertices.create()
-        updates = rhi.nextResourceUpdateBatch()
-        updates.uploadStaticBuffer(self._vertices, _floats(quad))
-        command_buffer.resourceUpdate(updates)
-
-        self._build_bindings()
-
-        # HUD: its own 16-byte viewport uniform and a dynamic vertex buffer (rects are rebuilt only when they change).
-        self._hud_uniforms = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.UniformBuffer, 16)
-        self._hud_uniforms.create()
-        self._hud_capacity = 64 * 6 * 6 * 4          # 64 rectangles x 6 vertices x 6 floats
-        self._hud_buffer = rhi.newBuffer(QRhiBuffer.Type.Dynamic, QRhiBuffer.UsageFlag.VertexBuffer,
-                                         self._hud_capacity)
-        self._hud_buffer.create()
-        self._hud_bindings = rhi.newShaderResourceBindings()
-        self._hud_bindings.setBindings([
-            QRhiShaderResourceBinding.uniformBuffer(0, QRhiShaderResourceBinding.StageFlag.VertexStage,
-                                                    self._hud_uniforms),
-        ])
-        self._hud_bindings.create()
-        hud_layout = QRhiVertexInputLayout()
-        hud_layout.setBindings([QRhiVertexInputBinding(6 * 4)])
-        hud_layout.setAttributes([
-            QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute.Format.Float2, 0),
-            QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute.Format.Float4, 2 * 4),
-        ])
-        self._hud_pipeline = rhi.newGraphicsPipeline()
-        self._hud_pipeline.setShaderStages([
-            QRhiShaderStage(QRhiShaderStage.Type.Vertex, _shader("hud.vert.qsb")),
-            QRhiShaderStage(QRhiShaderStage.Type.Fragment, _shader("hud.frag.qsb")),
-        ])
-        self._hud_pipeline.setVertexInputLayout(hud_layout)
-        self._hud_pipeline.setShaderResourceBindings(self._hud_bindings)
-        self._hud_pipeline.setRenderPassDescriptor(self.renderTarget().renderPassDescriptor())
-        self._hud_pipeline.setDepthTest(False)
-        self._hud_pipeline.setDepthWrite(False)
-        hud_blend = QRhiGraphicsPipeline.TargetBlend()
-        hud_blend.enable = True
-        hud_blend.srcColor = QRhiGraphicsPipeline.BlendFactor.SrcAlpha
-        hud_blend.dstColor = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
-        hud_blend.srcAlpha = QRhiGraphicsPipeline.BlendFactor.One
-        hud_blend.dstAlpha = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
-        self._hud_pipeline.setTargetBlends([hud_blend])
-        self._hud_pipeline.create()
-        self._hud_dirty = True
-
-        self._deferred = False
-        self._texture_dirty = self._frame is not None
-        self._pipeline = None
-        self._original_texture = None
-        if self._original is not None and not self._original.isNull():
-            # A compare mode was opened before the first frame (or the resources were rebuilt while it stood). The
-            # source's texture is created exactly like the frame's, outside a frame, and its own upload follows.
-            self._original_texture_dirty = True
-            self._ensure_original_texture(self._original.size())
-
-    def _build_pipeline(self) -> None:
-        """Build the graphics pipeline for the CURRENT SRB. Re-run whenever the texture (and so its SRB) is re-created:
-        a pipeline compiled against an older SRB layout is not the same layout object, and the GL backend then binds
-        nothing (samples black) instead of raising."""
-        rhi = self._rhi
-        layout = QRhiVertexInputLayout()
-        layout.setBindings([QRhiVertexInputBinding(4 * 4)])
-        layout.setAttributes([
-            QRhiVertexInputAttribute(0, 0, QRhiVertexInputAttribute.Format.Float2, 0),
-            QRhiVertexInputAttribute(0, 1, QRhiVertexInputAttribute.Format.Float2, 2 * 4),
-        ])
-        self._pipeline = rhi.newGraphicsPipeline()
-        self._pipeline.setShaderStages([
-            QRhiShaderStage(QRhiShaderStage.Type.Vertex, _shader("frame.vert.qsb")),
-            QRhiShaderStage(QRhiShaderStage.Type.Fragment, _shader("frame.frag.qsb")),
-        ])
-        self._pipeline.setVertexInputLayout(layout)
-        self._pipeline.setShaderResourceBindings(self._bindings)
-        self._pipeline.setRenderPassDescriptor(self.renderTarget().renderPassDescriptor())
-        # Without this flag QRhi IGNORES `setScissor` on the pipeline: the scissor state is only read by a pipeline
-        # compiled with it. Both compare modes depend on that clipping (the split divider, and a zoomed `sbs` half that
-        # must not leak into the other one), and the absence was invisible while nothing sampled the pixels: the split
-        # mode painted the ORIGINAL over the whole picture rect (the pixel gate, 2026-11-24).
-        self._pipeline.setFlags(QRhiGraphicsPipeline.Flag.UsesScissor)
-        self._pipeline.setDepthTest(False)
-        self._pipeline.setDepthWrite(False)
-        blend = QRhiGraphicsPipeline.TargetBlend()
-        blend.enable = True
-        blend.srcColor = QRhiGraphicsPipeline.BlendFactor.SrcAlpha
-        blend.dstColor = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
-        blend.srcAlpha = QRhiGraphicsPipeline.BlendFactor.One
-        blend.dstAlpha = QRhiGraphicsPipeline.BlendFactor.OneMinusSrcAlpha
-        self._pipeline.setTargetBlends([blend])
-        self._pipeline.create()
-
-    def _ensure_texture(self, size) -> None:
-        if getattr(self, "_texture", None) is None:
-            return
-        if self._texture.pixelSize() == size:
-            return
-        self._texture.destroy()
-        self._texture.setPixelSize(size)
-        if not self._texture.create():
-            raise RuntimeError(f"could not resize the frame texture to {size.width()}x{size.height()}")
-        self._build_bindings()
-        pipeline = getattr(self, "_pipeline", None)
-        if pipeline is not None:
-            pipeline.destroy()
-        self._pipeline = None
-
-    def _ensure_original_texture(self, size) -> None:
-        """Create or resize the SOURCE picture's own texture (the compare modes draw both pictures in one pass).
-
-        Same rules as `_ensure_texture`, and the same trap: an SRB holds the texture's native handle, so a texture that
-        is destroyed and re-created at a new size silently invalidates every binding that names it. The pipeline is
-        built against a specific SRB object, so it is dropped too and rebuilt on the next render.
-        """
-        if getattr(self, "_texture", None) is None or getattr(self, "_rhi", None) is None:
-            # The resource set is built at the first real frame; before that there is nothing to attach a texture to.
-            return
-        texture = getattr(self, "_original_texture", None)
-        if texture is not None and texture.pixelSize() == size:
-            return
-        if texture is not None:
-            texture.destroy()
-            self._original_texture = None
-        texture = self._rhi.newTexture(QRhiTexture.Format.RGBA8, size, 1,
-                                       QRhiTexture.Flag.UsedAsTransferSource)
-        if not texture.create():
-            raise RuntimeError(f"original texture {size.width()}x{size.height()} was refused by QRhi")
-        self._original_texture = texture
-        self._build_bindings()
-        pipeline = getattr(self, "_pipeline", None)
-        if pipeline is not None:
-            pipeline.destroy()
-        self._pipeline = None
-
-    def _build_bindings(self) -> None:
-        """(Re)create the SRBs: the result's and, when it exists, the source's.
-
-        The sampler is part of the SRB, so the 1:1 (nearest) and zoomed (linear) views are two bindings that differ
-        only by the sampler; and a texture that is destroyed and re-created at a new size invalidates the native handle
-        the SRB holds, so this runs again after such a re-create. The two pictures share one binding LAYOUT (a uniform
-        buffer at 0, a sampled texture at 1) and therefore one pipeline: QRhi compares the layout, not the object.
-        """
-        rhi = self._rhi
-        # The UBO is read by BOTH stages (`mvp` in the vertex shader, `tint` in the fragment one), and the sampler's
-        # binding index must equal the `binding = 1` the fragment shader declares: QRhi assigns texture units by SRB
-        # binding index, so a mismatch reads an unbound unit and returns (0,0,0,0) - a transparent "frame" that looks
-        # like a missing upload.
-        flags = (QRhiShaderResourceBinding.StageFlag.VertexStage
-                 | QRhiShaderResourceBinding.StageFlag.FragmentStage)
-        frag = QRhiShaderResourceBinding.StageFlag.FragmentStage
-        specs = (
-            ("_bindings", self._uniforms, self._texture, self._sampler_linear),
-            ("_bindings_nearest", self._uniforms, self._texture, self._sampler_nearest),
-            ("_original_bindings", self._original_uniforms,
-             getattr(self, "_original_texture", None), self._sampler_linear),
-            ("_original_bindings_nearest", self._original_uniforms,
-             getattr(self, "_original_texture", None), self._sampler_nearest),
-        )
-        for attribute, uniforms, texture, sampler in specs:
-            current = getattr(self, attribute, None)
-            if current is not None:
-                current.destroy()
-                setattr(self, attribute, None)
-            if texture is None:
-                continue
-            bindings = rhi.newShaderResourceBindings()
-            bindings.setBindings([
-                QRhiShaderResourceBinding.uniformBuffer(0, flags, uniforms),
-                QRhiShaderResourceBinding.sampledTexture(1, frag, texture, sampler),
-            ])
-            bindings.create()
-            setattr(self, attribute, bindings)
-
-    def _release(self) -> None:
-        for name in ("_pipeline", "_bindings", "_bindings_nearest", "_vertices", "_uniforms",
-                     "_sampler_nearest", "_sampler_linear", "_texture", "_original_texture",
-                     "_original_bindings", "_original_bindings_nearest", "_original_uniforms",
-                     "_hud_pipeline", "_hud_bindings", "_hud_buffer", "_hud_uniforms"):
-            item = getattr(self, name, None)
-            if item is not None:
-                try:
-                    item.destroy()
-                except Exception:
-                    pass
-                setattr(self, name, None)
 
     def releaseResources(self) -> None:  # noqa: N802 - Qt spelling
-        self._release()
+        self._renderer.release()
 
     def render(self, command_buffer) -> None:  # noqa: N802 - Qt spelling
+        """Hand this paint to the renderer: the scene first, then one pass into the current target."""
         target = self.renderTarget()
         if target is None or self.rhi() is None:
             return
-        if self._frame is None:
-            # Nothing to show yet: an OPAQUE clear on EVERY render, so the pane reads as an empty plate rather than a
-            # hole. It used to clear once (`_cleared_empty`) - a latch that is false on the next paint, which leaves the
-            # region undrawn after any repaint and shows the window behind it (the "transparent at any sneeze" half).
-            pass_started = time.perf_counter()
-            command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0))
-            command_buffer.endPass()
-            # An empty pane still paints: counting it keeps the cadence honest before the first frame arrives, and
-            # `frames=0` in a stats line is itself an answer ("the render never fed the pane").
-            telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
-            telemetry.maybe_stats()
-            return
-        if getattr(self, "_deferred", False) or getattr(self, "_rhi", None) is None:
-            self._release()
-            self._rhi = self.rhi()
-            self._create_resources(command_buffer)
-        if self._view_mode == "single":
-            self._render_single(command_buffer, target)
-            return
-        self._render_two_surfaces(command_buffer, target)
-
-    def _render_single(self, command_buffer, target) -> None:
-        """Today's pane: one picture per frame, in one pass (the LMB flash replaces it in place)."""
-        showing_original = bool(self._showing_original and self._original is not None)
-        picture = self._original if showing_original else self._frame
-        if picture is None:
-            return
-        if self._texture_dirty and picture is not None:
-            self._ensure_texture(picture.size())
-        if getattr(self, "_pipeline", None) is None:
-            self._build_pipeline()
-            if self._pipeline is None:
-                return
-        updates = self.rhi().nextResourceUpdateBatch()
-        if self._texture_dirty:
-            upload_started = time.perf_counter()
-            updates.uploadTexture(self._texture, picture)
-            if mip_minify_enabled():
-                # Same batch as the upload, BEFORE the pass: the chain is built from level 0 on the queue, and
-                # `resourceUpdate` is only legal outside a render pass. Cost is one-time per uploaded frame (the chain
-                # of an 1440x1080 RGBA8 is ~2.1 MB - noise against the 6.2 MB level 0 that already crossed the bus).
-                updates.generateMips(self._texture)
-            telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
-                                  size_bytes=picture.width() * picture.height() * 4)
-            self._texture_dirty = False
-        updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(self._mvp_floats()))
-        updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(list(self._tint)))
-        # The HUD's buffers are filled into the SAME batch, before the pass: `QRhiCommandBuffer::resourceUpdate` must be
-        # called outside a render pass, so building the strip inside one (the first version did) is not allowed.
-        hud_vertices = self._hud_vertices()
-        if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
-            updates.updateDynamicBuffer(self._hud_uniforms, 0, 16,
-                                        _floats([float(self.width()), float(self.height()),
-                                                 float(self.devicePixelRatioF() or 1.0), 0.0]))
-            updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
-        pass_started = time.perf_counter()
-        command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
-        command_buffer.setGraphicsPipeline(self._pipeline)
-        command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
-        sample_at_one = self.samples_nearest()
-        # The pipeline declares `UsesScissor` (the compare modes need it), so the scissor state is LIVE here: a frame
-        # must state its own scissor before drawing, or it inherits the last one set on the command buffer - an empty
-        # one clipped the whole picture away in `single` after a compare mode had run (pixel gate, 2026-11-24).
-        command_buffer.setScissor(
-            QRhiScissor(0, 0, target.pixelSize().width(), target.pixelSize().height()))
-        command_buffer.setShaderResources(self._bindings_nearest if sample_at_one else self._bindings)
-        command_buffer.setVertexInput(0, [(self._vertices, 0)])
-        command_buffer.draw(6)
-        if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
-            command_buffer.setGraphicsPipeline(self._hud_pipeline)
-            command_buffer.setShaderResources(self._hud_bindings)
-            command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
-            command_buffer.draw(len(hud_vertices) // 6)
-        command_buffer.endPass()
-        telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
-        # The LAST step, named: a press is one line (the original it put on screen, plus the result it stands over);
-        # level 2 additionally names every result picture, so a shift is visible frame by frame.
-        if showing_original and (self._original_changed or telemetry.level() >= 2):
-            self._log_draw(half="original", picture=picture)
-            self._original_changed = False
-        elif not showing_original and telemetry.level() >= 2:
-            self._log_draw(half="result", picture=picture)
-        telemetry.maybe_stats()
-
-    def _render_two_surfaces(self, command_buffer, target) -> None:
-        """The result and the source in ONE pass: one clear, then up to two draws, each clipped to its own surface.
-
-        `sbs` lays each picture into its half, scissored so a zoomed picture cannot leak across the boundary; `split`
-        paints both over the same picture rect and clips the original to the left of the divider. Two textures, two
-        SRBs that share one pipeline layout, one `beginPass`/`endPass` - the pane's rect is overwritten exactly once,
-        which is the whole reason a QRhiWidget cannot alpha-blend with its siblings in the first place. The HUD is
-        drawn after the scissor is released, so the strip is the same single object under every mode.
-        """
-        frame = self._frame
-        if frame is None:
-            return
-        self._ensure_texture(frame.size())
-        original = self._original if (self._original is not None and not self._original.isNull()) else None
-        if original is not None:
-            self._ensure_original_texture(original.size())
-        if getattr(self, "_pipeline", None) is None:
-            self._build_pipeline()
-            if self._pipeline is None:
-                return
-        updates = self.rhi().nextResourceUpdateBatch()
-        if self._texture_dirty:
-            upload_started = time.perf_counter()
-            updates.uploadTexture(self._texture, frame)
-            if mip_minify_enabled():
-                updates.generateMips(self._texture)
-            telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
-                                  size_bytes=frame.width() * frame.height() * 4)
-            self._texture_dirty = False
-        tint = list(self._tint)
-        updates.updateDynamicBuffer(self._uniforms, 0, 64, _floats(self._mvp_floats(self._frame_rect())))
-        updates.updateDynamicBuffer(self._uniforms, 64, 16, _floats(tint))
-        draw_original = original is not None and getattr(self, "_original_texture", None) is not None
-        if draw_original:
-            if self._original_texture_dirty:
-                upload_started = time.perf_counter()
-                updates.uploadTexture(self._original_texture, original)
-                telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
-                                      size_bytes=original.width() * original.height() * 4)
-                self._original_texture_dirty = False
-            updates.updateDynamicBuffer(self._original_uniforms, 0, 64,
-                                        _floats(self._mvp_floats(self._original_rect())))
-            updates.updateDynamicBuffer(self._original_uniforms, 64, 16, _floats(tint))
-        hud_vertices = self._hud_vertices()
-        if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
-            updates.updateDynamicBuffer(self._hud_uniforms, 0, 16,
-                                        _floats([float(self.width()), float(self.height()),
-                                                 float(self.devicePixelRatioF() or 1.0), 0.0]))
-            updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
-        pass_started = time.perf_counter()
-        command_buffer.beginPass(target, self._opaque_clear(), QRhiDepthStencilClearValue(1.0, 0), updates)
-        command_buffer.setGraphicsPipeline(self._pipeline)
-        command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
-        sample_at_one = self.samples_nearest()
-        result_bindings = self._bindings_nearest if sample_at_one else self._bindings
-        result_clip = self._view_rect()
-        if result_bindings is not None and not result_clip.isEmpty() and self._frame_rect().intersects(result_clip):
-            command_buffer.setShaderResources(result_bindings)
-            command_buffer.setVertexInput(0, [(self._vertices, 0)])
-            self._scissor(command_buffer, result_clip)
-            command_buffer.draw(6)
-        if draw_original:
-            original_bindings = (self._original_bindings_nearest if sample_at_one
-                                 else self._original_bindings)
-            original_clip = self._original_clip_rect()
-            if original_bindings is not None and not original_clip.isEmpty():
-                command_buffer.setShaderResources(original_bindings)
-                command_buffer.setVertexInput(0, [(self._vertices, 0)])
-                self._scissor(command_buffer, original_clip)
-                command_buffer.draw(6)
-        # The HUD spans the whole widget; a scissor left over from one half would clip the far end of the strip.
-        # `QRhiCommandBuffer.setScissor` takes a `QRhiScissor`, not a `QRect`: PySide6 6.11 rejected the implicit rect
-        # with `TypeError: setScissor(QRect)` while 6.8 still accepted it, so `sbs`/`split` drew nothing there and said
-        # so only inside a paint (the two-surface pixel gate, 2026-11-24, was the first thing to see it).
-        command_buffer.setScissor(
-            QRhiScissor(0, 0, target.pixelSize().width(), target.pixelSize().height()))
-        if hud_vertices and getattr(self, "_hud_pipeline", None) is not None:
-            command_buffer.setGraphicsPipeline(self._hud_pipeline)
-            command_buffer.setShaderResources(self._hud_bindings)
-            command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
-            command_buffer.draw(len(hud_vertices) // 6)
-        command_buffer.endPass()
-        telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
-        # Both halves in one pass: one line names both pictures (a new original always, every paint at level 2).
-        if draw_original and (self._original_changed or telemetry.level() >= 2):
-            self._log_draw_two(frame, original)
-            self._original_changed = False
-        elif telemetry.level() >= 2:
-            self._log_draw_two(frame, None)
-        telemetry.maybe_stats()
-
-    def _scissor(self, command_buffer, rect: QRectF) -> None:
-        """Confine the next draw to a widget-space rect (QRhi scissors are in framebuffer pixels)."""
-        target = self.renderTarget()
-        if target is None:
-            return
-        pixels = target.pixelSize()
-        dpr = float(self.devicePixelRatioF() or 1.0)
-        left = max(0.0, rect.left() * dpr)
-        top = max(0.0, rect.top() * dpr)
-        right = min(float(pixels.width()), rect.right() * dpr)
-        bottom = min(float(pixels.height()), rect.bottom() * dpr)
-        command_buffer.setScissor(QRhiScissor(int(left), int(top),
-                                             max(0, int(right - left)), max(0, int(bottom - top))))
+        self._renderer.set_scene(self._preview_scene(target))
+        self._renderer.render(command_buffer)
 
     def _mvp_floats(self, rect: QRectF | None = None) -> list[float]:
         """Unit quad -> the picture's rect on the pane, column-major for the uniform buffer.
@@ -1554,27 +1162,3 @@ class VideoPreviewSurface(QRhiWidget):
 
     def grabFrame(self) -> QImage:  # noqa: N802 - Qt spelling is `grabFramebuffer`, this is the plan's name
         return self.grabFramebuffer()
-
-
-def _floats(values) -> bytes:
-    import struct
-
-    flat: list[float] = []
-    for value in values:
-        if isinstance(value, (list, tuple)):
-            flat.extend(float(part) for part in value)
-        else:
-            flat.append(float(value))
-    return struct.pack(f"<{len(flat)}f", *flat)
-
-
-def _shader(name: str) -> QShader:
-    import os
-
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), SHADER_DIR, name)
-    with open(path, "rb") as handle:
-        shader = QShader.fromSerialized(handle.read())
-    if not shader.isValid():
-        # A missing or half-built .qsb must be loud: a silent blank video pane is the worst failure mode here.
-        raise RuntimeError(f"shader {path} is not a valid .qsb (rebuild with harness/scripts/build_shaders.sh)")
-    return shader
