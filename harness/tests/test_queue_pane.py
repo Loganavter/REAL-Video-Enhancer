@@ -14,7 +14,9 @@ What is pinned here, offscreen and with fakes (no GPU, no `av`, no window):
 (e) a switch between two NON-queue tabs pauses too (General <-> Encoder Options);
 (f) one painter: a render frame arriving while the queue owns the pane never reaches `set_frame`, and a queue frame
     arriving after the queue tab was left does not either;
-(g) the queue decoder opens at the PANE's box, not the file's full resolution (the playback-cost cap).
+(g) the queue decoder opens at the PANE's box, not the file's full resolution (the playback-cost cap);
+(h) an EMPTY field TAKES the pane: the finished-file playback is closed (not merely paused), the field is still empty
+    after ten ticks and a late frame from that producer, and the leave re-opens the render's file at ITS head.
 
 The tab-level tests build `ProcessTab` with `object.__new__` (the house style of `test_display_wiring.py`), so the
 methods under test are the shipped ones and nothing else is constructed.
@@ -56,12 +58,13 @@ except ModuleNotFoundError:  # pragma: no cover
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtGui import QImage  # noqa: E402
+from PySide6.QtGui import QColor, QImage  # noqa: E402
 
 from src.ui import video as video_package  # noqa: E402
-from src.ui.ProcessTab import ProcessTab  # noqa: E402
+from src.ui.ProcessTab import ProcessTab, _pane_result  # noqa: E402
 from src.ui.video.decode import VideoDecoder  # noqa: E402
 from src.ui.video.frames import FrameRef  # noqa: E402
+from src.ui.widgets.video_preview import VideoPreviewSurface  # noqa: E402
 
 # Leave the suite's path order as it was (the app modules are imported and bound now).
 sys.path[:] = _ORIGINAL_SYS_PATH
@@ -560,3 +563,190 @@ def test_the_finished_preview_decoder_is_capped_to_the_pane_box(fake_decoder):
         "one frame per tick: on the GUI thread a burst is painted once and the rest are lost")
     assert decoder.kwargs.get("content_time") is True, "a rendered output is read in content time"
     assert decoder.path == "/out/preview.mkv"
+
+
+# --- (h) an EMPTY field TAKES the pane: no publisher is left, and it stays empty ----------------------
+#
+# The live state matrix caught this on a leased display (2026-11-27, `scratch/seek-clip.mp4`, leased :91): with no
+# queue item, the switch into the Render Queue tab cleared the field and the render's finished file kept painting the
+# result half for at least 10 s (`generation=14 t=4.900` at the switch, `generation=18 t=2.300` sixteen seconds later).
+# The tab had paused a CLOSED set of owners (its own decoder) and left the finished-file playback publishing: the field
+# was empty only until the next frame of the producer it had not stopped. Row `cleared pane` in
+# `harness/scripts/live_matrix.sh` is the acceptance on a real display.
+
+
+def _surface(mode: str = "single", *, playhead: float = 0.0) -> VideoPreviewSurface:
+    """A REAL pane, sized and in a mode, with the strip's progress published (`test_preview_state_matrix`'s shape)."""
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+    widget = VideoPreviewSurface()
+    widget.resize(800, 600)
+    widget.set_view_mode(mode)
+    widget.set_progress(0.0, 0.0, playhead=playhead, duration=10.0)
+    return widget
+
+
+def _painted(pane):
+    """The pair the pane says is on screen (`CommittedPair`), or None - the acceptance's own read."""
+    read = getattr(pane, "painted_pair", None)
+    return read() if callable(read) else None
+
+
+def _picture(width: int = 64, height: int = 36, colour: str = "#3060a0") -> QImage:
+    image = QImage(width, height, QImage.Format.Format_RGBA8888)
+    image.fill(QColor(colour))
+    return image
+
+
+def _live_tab(pane, *, paused: bool, decoder=None, playback_path: str | None = None):
+    """A `ProcessTab` shell whose picture path can run: the frame/picture ticks, no window, no controller."""
+    tab = _tab(pane=pane, paused=paused, decoder=decoder)
+    tab._preview_playback_path = playback_path
+    tab._preview_playhead = 4.9
+    tab._queue_pane_released_playback = None
+    tab._playback_tail = False
+    tab._live_tail_wanted = False
+    tab._feed = None
+    tab._source_register = None
+    tab._press = None
+    tab._seek_watch = None
+    tab._preview_controller = None
+    tab._preview_controls = None
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=240, videoFps=24, interpolateTimes=1)
+    return tab
+
+
+def test_the_empty_queue_field_takes_the_pane_from_the_finished_playback(fake_decoder):
+    """`cleared pane`: entering with no item CLOSES the finished-file playback and empties the field.
+
+    Who was still publishing: the decoder `_start_preview_playback` installed when the job ended. The tab paused its
+    OWN decoder and cleared the picture, then the playback's next frame painted it back - the field was never taken,
+    only repainted. A pause is not enough either (a paused decoder still delivers a frame it emitted before the pause):
+    the tab closes it and keeps the FILE for the hand-back.
+
+    Breaks it: `_take_the_empty_field` returning to `_pause_pane_transport` + `_clear_pane` (the shipped shape).
+    """
+    pane = _surface("single", playhead=4.9)
+    decoder = _FakeDecoder()
+    decoder.path = "/out/preview.mkv"
+    decoder.playing = True
+    tab = _live_tab(pane, paused=False, decoder=decoder, playback_path="/out/preview.mkv")
+    _pane_result(tab, pane, 4.9, _picture())
+    assert _painted(pane) is not None, "the finished file is on the pane before the switch"
+
+    tab._on_inner_tab_changed(_QUEUE_TAB)
+
+    assert tab._queue_owns_pane() is True
+    assert decoder.closed is True, "the finished-file playback is still open: it is a publisher, not a picture"
+    assert decoder.playing is False
+    assert tab._preview_decoder is None, "a closed decoder must not be left as the page's owner"
+    assert tab._queue_pane_released_playback == "/out/preview.mkv", (
+        "the file the hand-back has to re-open was not kept")
+    assert _painted(pane) is None, "the tab owns the pane and has nothing to show: the field is EMPTY"
+
+
+def test_the_empty_queue_field_stays_empty_over_ten_ticks_and_late_frames(fake_decoder):
+    """`cleared pane`: empty at 2 s and at 10 s - a late frame from the stopped producer must not paint it back.
+
+    Two late routes are driven for ten ticks of the tab's own picture clock: a `frame_ready` delivery queued before the
+    decoder was closed, and a publication straight into the page's result point (`_pane_result`) - the route every frame
+    handler shares. `harness/docs/CODE_PATTERNS.md` §12: a clear takes away the right to paint a leftover picture back,
+    and the pane alone cannot tell "empty because nobody has painted yet" from "empty because the owner says so".
+
+    Breaks it: dropping the `_queue_field_is_empty` refusal from `_pane_result` (the pane ACCEPTS a result after a
+    clear - its latch is about sources, not about results).
+    """
+    pane = _surface("single", playhead=4.9)
+    decoder = _FakeDecoder()
+    decoder.path = "/out/preview.mkv"
+    decoder.playing = True
+    tab = _live_tab(pane, paused=True, decoder=decoder, playback_path="/out/preview.mkv")
+    tab._on_inner_tab_changed(_QUEUE_TAB)
+    assert _painted(pane) is None
+
+    for _tick in range(10):
+        decoder.frame_ready.emit(_frame(5.0))                  # emitted before the close, delivered after it
+        tab._picture_tick()
+        tab._sync_preview_transport()
+        tab._refresh_held_progress()
+        _pane_result(tab, pane, 5.0, _picture(colour="#a03060"))  # any other route to the pane's result API
+        assert _painted(pane) is None, "the empty field was painted by a producer the tab does not own"
+        assert pane._frame is None and pane._planes_size is None, "the result half came back onto the empty field"
+
+
+def test_leaving_an_empty_queue_tab_reopens_the_render_playback_at_its_head(fake_decoder):
+    """`cleared pane` -> back: the pane returns to the render at ITS head, not at 0 and not at the item's position.
+
+    The tab closed the playback on the way in, so the way back re-opens that same file - held, at `_preview_playhead`,
+    the position the render's picture stood on when the tab took it. The queue item's playhead is a different clock
+    (`_queue_pane_position`) and must not travel into the render's decoder.
+
+    Breaks it: `_repaint_render_owner` without the `_queue_pane_released_playback` branch (the decoder is gone, so the
+    pane would fall through to `_clear_pane` and the render's picture would never come back).
+    """
+    pane = _Pane()
+    decoder = _FakeDecoder()
+    decoder.path = "/out/preview.mkv"
+    decoder.playing = True
+    tab = _live_tab(pane, paused=False, decoder=decoder, playback_path="/out/preview.mkv")
+    tab._preview_playhead = 6.25                                   # where the render's picture stood
+    tab._queue_pane_position = 2.0                                # the queue item's own playhead, a different clock
+
+    tab._on_inner_tab_changed(_QUEUE_TAB)                         # takes the empty field, closing the playback
+    assert fake_decoder.instances and fake_decoder.instances[-1].closed is True
+
+    tab._on_inner_tab_changed(0)
+
+    restored = fake_decoder.instances[-1]
+    assert restored is not decoder, "the hand-back must install the render's playback again"
+    assert restored.path == "/out/preview.mkv"
+    assert restored.seeks == [pytest.approx(6.25)], (
+        f"the hand-back must land on the render's head (6.25 s), not 0 and not the item's 2.0 s; got {restored.seeks}")
+    assert restored.playing is False, "a tab switch holds the picture: the render's file comes back paused"
+    assert tab._preview_paused is True
+    assert tab._queue_pane_released_playback is None, "the released file is consumed by the hand-back"
+
+
+def test_a_remembered_path_the_queue_no_longer_holds_leaves_the_field_empty(fake_decoder):
+    """The selection memory is the PATH (`_on_queue_row_changed(-1)` keeps it); a file nobody queued is not an item.
+
+    Measured live 2026-11-27: a preview job puts itself in the Render Queue and its end restores the previous queue, so
+    the remembered path outlives the row - and the tab re-opened a file that was no longer queued, which reads exactly
+    like "the empty field shows a picture". The memory stays (a return to a still-queued item is the 2026-11-24
+    behaviour); the field stays EMPTY while the queue does not hold it.
+
+    Breaks it: `_enter_queue_pane` showing `_queue_pane_path` without `_queue_selection`'s check.
+    """
+    pane = _Pane()
+    queue = SimpleNamespace(getQueue=lambda: [])
+    tab = _tab(pane=pane, queue=queue, paused=True)
+    tab._queue_pane_path = "/in/gone.mkv"
+    tab._queue_pane_positions["/in/gone.mkv"] = 3.5
+
+    tab._on_inner_tab_changed(_QUEUE_TAB)
+
+    assert fake_decoder.instances == [], "a decoder was opened for a file the queue no longer holds"
+    assert pane.frames and pane.frames[-1] is None, "the field is EMPTY"
+    assert tab._queue_pane_path == "/in/gone.mkv", "the selection memory is the path, not the row: it is kept"
+
+
+def test_a_switch_while_the_transport_already_reads_paused_stops_a_playing_decoder():
+    """Every switch pauses: a decoder that is playing while the flag already says "paused" is still a publisher.
+
+    The flag and the decoders can disagree - a hand-back installs the render's playback held while the transport still
+    reads "playing", and a Play pressed behind the queue tab never reaches the render's decoder - and the old body only
+    paused the QUEUE decoder in that branch. That is the state the live row 7 was in: the tab switch paused nothing.
+
+    Breaks it: `_pause_pane_transport`'s old body (flag already true -> only `_queue_pane_decoder.pause()`).
+    """
+    pane = _Pane()
+    decoder = _FakeDecoder()
+    decoder.path = "/out/preview.mkv"
+    decoder.playing = True
+    tab = _tab(pane=pane, paused=True, decoder=decoder)
+
+    tab._on_inner_tab_changed(0)                                  # a non-queue switch: General
+
+    assert decoder.playing is False, "the flag said paused, the decoder was playing, and the switch left it playing"
+    assert decoder.pause_calls == [True]

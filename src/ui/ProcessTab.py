@@ -274,6 +274,20 @@ class _PreviewSurfacePort:
             log(f"preview: fullscreen {fullscreen} failed ({exc})")
 
 
+def _queue_field_is_empty(page) -> bool:
+    """The Render Queue tab owns the pane and has NOTHING to show there: the field must stay empty.
+
+    Two facts the page already owns answer it, and neither asserts anything about a picture: the tab owns the pane
+    (`_queue_pane_owns`, written only in `_enter_queue_pane`/`_leave_queue_pane`) and the tab has no item to show
+    (`_queue_pane_path`, `None` for the empty field). `harness/docs/CODE_PATTERNS.md` §12: telling the pane to be empty
+    must also take away the right to paint a leftover picture back - a decoder the tab closed can still deliver a
+    frame it emitted before the close, and a seek it asked for before the switch can land after it.
+    """
+    if not bool(getattr(page, "_queue_pane_owns", False)):
+        return False
+    return not str(getattr(page, "_queue_pane_path", None) or "")
+
+
 def _pane_result(page, pane, moment, image, *, index: int | None = None,
                  seq: int | None = None, gui_ms: float | None = None) -> None:
     """Hand one RESULT picture to the pane, stamped with the page's generation.
@@ -282,7 +296,13 @@ def _pane_result(page, pane, moment, image, *, index: int | None = None,
     (`types.SimpleNamespace`) that have the page's FIELDS but not its methods - exactly the shape a bound helper would
     break. The pane's `set_result` enforces the generation/moment rules; a double that predates the API gets the old
     `set_frame` call with the same numbers (it is not the shipped pane, so there is no identity to defend there).
+
+    The one refusal made HERE is the empty queue field (`_queue_field_is_empty`): the frame gates above refuse through
+    the owner's kind, and this is the publication point every route passes, so a producer that outlives its owner
+    cannot hand the pane a picture the tab no longer shows anything for.
     """
+    if _queue_field_is_empty(page):
+        return
     generation = int(getattr(page, "_result_generation", 0))
     setter = getattr(pane, "set_result", None)
     if callable(setter):
@@ -296,6 +316,10 @@ def _pane_result(page, pane, moment, image, *, index: int | None = None,
 def _pane_result_planes(page, pane, planes, strides, width, height, *, index=None, pts=None,
                         format="yuv420p10le", color_space=None, color_range=None, gui_ms=None) -> None:
     """Hand one YUV result to the pane, stamped with the page's generation (the pane shares the guards)."""
+    if _queue_field_is_empty(page):
+        # The playback/decoder route (planes, not QImage) passes through this helper too: the empty queue field
+        # refuses it for the same reason `_pane_result` does (see there).
+        return
     setter = getattr(pane, "set_frame_planes", None)
     if not callable(setter):
         return
@@ -364,6 +388,10 @@ class ProcessTab:
         #: The media time of the last frame the pane was given, so a paused hand-over to the finished file stands
         #: where the picture already is instead of jumping to 0.
         self._preview_playhead = 0.0
+        #: The finished file `_preview_decoder` is playing (set when the playback opens, cleared when it closes). The
+        #: queue tab closes that playback to take an empty pane and the hand-back re-opens THIS file at the render's
+        #: head - a path is all it needs, so it survives in `_queue_pane_released_playback` while the decoder does not.
+        self._preview_playback_path: str | None = None
         #: The queue pane's owner (owner, 2026-11-24): the selected queue file's path, the playhead remembered per path,
         #: and the one decoder that serves the queue tab. The pane has exactly one owner at a time - `render` (the
         #: live feed/tail/finished playback) or `queue-item` - and every switch between inner tabs hands it over.
@@ -374,6 +402,10 @@ class ProcessTab:
         self._queue_pane_decoder = None
         self._queue_pane_decoder_path: str | None = None
         self._queue_pane_owns = False
+        #: The finished preview file the queue tab set ASIDE when it took the pane with nothing to show. Taking the
+        #: pane means closing that playback (a decoder left running is a publisher), and the hand-back re-opens it at
+        #: the render's own head. `None` when the tab released nothing.
+        self._queue_pane_released_playback: str | None = None
         #: The index of the Render Queue page in `processSettingsContainer`, resolved by identity in `QConnect`.
         self._queue_tab_index: int | None = None
         #: The export pane's display channel (`video.channel.DisplayReader`): the block the GUI allocates before the backend
@@ -915,6 +947,9 @@ class ProcessTab:
         # decoder running, and its frames would land on top of the live render (and onto the transport's state).
         self._stop_preview_playback()
         self._stop_live_tail()
+        # A playback the queue tab set aside belongs to the job that finished, not to this one: the job's own end
+        # (`job.on_job_finished`) decides what the pane shows next.
+        self._queue_pane_released_playback = None
         # A render is an owner of the pane from its first thumbnail, so the transport must say so now rather than
         # keep a state left over from the previous job (an enabled button that holds nothing is the trap this closes).
         self._sync_preview_transport()
@@ -2434,6 +2469,10 @@ class ProcessTab:
                 log(f"preview decoder: cannot open {path}")
                 return
             self._preview_decoder = decoder
+            # The file this playback plays, kept because the queue tab may CLOSE it to take the pane and the hand-back
+            # has to know what to re-open (`_queue_pane_released_playback`).
+            self._preview_playback_path = str(path)
+            self._queue_pane_released_playback = None
             self._wire_preview_strip()
             if self._preview_paused:
                 # A paused preview stands where the picture already was (the render's edge after a live tail), not at
@@ -2448,6 +2487,9 @@ class ProcessTab:
     def _stop_preview_playback(self) -> None:
         self._stop_source_decoder()
         decoder = getattr(self, "_preview_decoder", None)
+        # The file is forgotten with the decoder that played it: a path whose decoder is gone is a picture nobody
+        # paints, and the queue tab keeps its own copy while it holds the pane (`_queue_pane_released_playback`).
+        self._preview_playback_path = None
         if decoder is not None:
             try:
                 decoder.close()
@@ -2502,11 +2544,23 @@ class ProcessTab:
             self._leave_queue_pane()
 
     def _pause_pane_transport(self) -> None:
-        """Pause whoever paints: the tail, the finished-file decoder and the queue decoder, in one place."""
+        """Pause whoever paints: the tail, the finished-file playback and the queue decoder, in one place."""
         if not bool(getattr(self, "_preview_paused", True)):
             # The shipped handler already pauses every owner and repaints the toggle; reusing it keeps one pause path.
             self._on_preview_pause_toggled(True)
             return
+        # The flag and the decoders can DISAGREE, and while they do a tab switch pauses nothing: the hand-back installs
+        # the render's playback held (`_repaint_render_owner`) while the transport still reads "playing", and a Play
+        # pressed behind the queue tab never reaches the render's decoder (`on_preview_pause_toggled` holds it because
+        # `queue_owns`). A decoder that is nevertheless PLAYING is a publisher this switch must stop - `pause()` says
+        # nothing when the two already agree (measured live 2026-11-27: the finished file painted for 16 s after the
+        # switch into an empty Render Queue tab).
+        playback = getattr(self, "_preview_decoder", None)
+        if playback is not None:
+            try:
+                playback.pause()
+            except Exception as exc:
+                log(f"preview transport: pause failed ({exc})")
         decoder = getattr(self, "_queue_pane_decoder", None)
         if decoder is not None:
             try:
@@ -2524,13 +2578,67 @@ class ProcessTab:
         # the widget and emitted into nothing (measured live 2026-11-24: the queue item showed its first frame and a press
         # at 40 % left the playhead at 0.0 with no `seek:` line at all). Wiring here is idempotent.
         self._wire_preview_strip()
-        path = getattr(self, "_queue_pane_path", None)
+        path = self._queue_selection()
         if path:
             self._show_queue_item(path)
         else:
-            self._clear_pane()
+            self._take_the_empty_field()
         self._apply_seek_ceiling()
         self._sync_preview_transport()
+
+    def _queue_selection(self) -> str | None:
+        """The item the queue tab may show: the remembered path, while the queue still HOLDS that file.
+
+        The selection memory is the path, not the row (`_on_queue_row_changed(-1)` keeps it on purpose), so a queue
+        that was cleared or rebuilt would otherwise re-open a file nobody queued any more: the tab painted a picture
+        for an item that no longer exists, which read as "the empty field is not empty" (measured live 2026-11-27,
+        row `cleared pane`). A tab wired by hand (no queue object) keeps the old answer - the memory is all it has.
+        """
+        path = str(getattr(self, "_queue_pane_path", None) or "")
+        if not path:
+            return None
+        queue = getattr(self.parent, "renderQueue", None)
+        getter = getattr(queue, "getQueue", None)
+        if not callable(getter):
+            return path
+        try:
+            items = list(getter() or [])
+        except Exception:
+            return path
+        for job in items:
+            if str(getattr(job, "inputFile", "") or "") == path:
+                return path
+        log(f"queue pane: the remembered selection {path!r} is no longer queued; the field stays EMPTY")
+        return None
+
+    def _take_the_empty_field(self) -> None:
+        """Nothing to show on the queue tab: EMPTY the pane and leave no publisher behind it.
+
+        An empty field is empty only if nobody paints it. The previous owner can still be publishing: a finished
+        preview file's decoder keeps delivering frames after the job it belonged to (that is what "the render keeps
+        painting after I switched" was, measured live 2026-11-27). So the tab CLOSES that playback rather than pausing
+        it - a paused decoder is still able to deliver a frame it emitted before the pause - and keeps the FILE, not
+        the decoder, for the hand-back (`_repaint_render_owner` re-opens it at the render's own head).
+
+        A tail is paused, not stopped: it belongs to the render, which has to paint again on the way back. A playback
+        tail (one the Play button created for a finished job) is stopped like the decoder - it is the same publication.
+        """
+        tail = getattr(self, "_live_tail", None)
+        playback_tail = bool(getattr(self, "_playback_tail", False))
+        playback_file = str(getattr(self, "_preview_playback_path", None) or "")
+        if getattr(self, "_preview_decoder", None) is not None or playback_tail:
+            self._queue_pane_released_playback = playback_file or None
+            self._stop_preview_playback()
+            if playback_tail:
+                self._stop_live_tail()
+            tail = getattr(self, "_live_tail", None)
+        if tail is not None:
+            try:
+                tail.set_paused(True)
+            except Exception as exc:
+                log(f"queue pane: pausing the tail failed ({exc})")
+        self._update_display_wanted()
+        self._clear_pane()
 
     def _leave_queue_pane(self) -> None:
         """Give the pane back to the render owner at ITS position, and stop the queue decoder entirely."""
@@ -2711,12 +2819,16 @@ class ProcessTab:
     def _repaint_render_owner(self) -> None:
         """Hand the pane back to whoever followed the render, standing where IT stood.
 
-        Three possible render owners, checked in the order the pane's painters are installed: the live tail (a
-        preview), the finished-file decoder (after a preview job), the display feed (an export). The position is the
-        render's own - the produced edge for a live feed/tail, the held playhead for a finished file - never the queue
-        item's playhead the pane was just showing.
+        Four possible render owners, checked in the order the pane's painters are installed: the live tail (a
+        preview), the finished-file decoder (after a preview job), the finished file the queue tab CLOSED to take an
+        empty field, and the display feed (an export). The position is the render's own - the produced edge for a live
+        feed/tail, the held playhead (`_preview_playhead`) for a finished file - never the queue item's playhead the
+        pane was just showing.
         """
         tail = getattr(self, "_live_tail", None)
+        # One shot: whichever owner answers below consumes the file the tab set aside.
+        released = str(getattr(self, "_queue_pane_released_playback", None) or "")
+        self._queue_pane_released_playback = None
         if tail is not None:
             target = self._render_head_seconds(tail)
             try:
@@ -2734,6 +2846,16 @@ class ProcessTab:
             except Exception as exc:
                 log(f"queue pane: handing back to the finished file failed ({exc})")
             return
+        if released:
+            # The tab closed this playback on the way IN (nothing to show on the queue tab), so the render's picture
+            # comes back from that same file at the render's own head: `_preview_playhead` is untouched by the queue
+            # item (its frames write `_queue_pane_position`), so this is neither 0 nor the item's position. Held,
+            # like every other hand-back: the owner's rule is that a tab switch pauses.
+            self._preview_paused = True
+            self._start_preview_playback(released)
+            if getattr(self, "_preview_decoder", None) is not None:
+                return
+            log(f"queue pane: the render's file {released!r} could not be re-opened; falling back to the feed")
         reader = getattr(self, "_display", None)
         if reader is not None and bool(getattr(reader, "attached", False)):
             clip = self._clip_duration()
@@ -2763,13 +2885,20 @@ class ProcessTab:
         if pane is None:
             return
         try:
-            setter = getattr(pane, "set_frame", None)
-            if callable(setter):
-                setter(None)
-            elif hasattr(pane, "clear"):
-                pane.clear()
-            elif hasattr(pane, "setPixmap"):
-                pane.setPixmap(QtGui.QPixmap())
+            # The pane's PUBLIC clear, first: `set_result(None)` empties the picture, drops the pair AND refuses a
+            # source offered for a moment from before the clear (CODE_PATTERNS §12). The rest are adapters for panes
+            # that predate that API (a harness double, the raster `ImageLabel`).
+            clearer = getattr(pane, "set_result", None)
+            if callable(clearer):
+                clearer(None)
+            else:
+                setter = getattr(pane, "set_frame", None)
+                if callable(setter):
+                    setter(None)
+                elif hasattr(pane, "clear"):
+                    pane.clear()
+                elif hasattr(pane, "setPixmap"):
+                    pane.setPixmap(QtGui.QPixmap())
         except Exception:
             pass
         self._queue_pane_position = 0.0
