@@ -1347,6 +1347,9 @@ def test_the_renderers_compare_block_is_taken_only_for_the_panes_own_moment():
 
     ProcessTab._on_source_feed_frame(tab, image)
     assert pane.originals == [], "the head's picture is a different moment: it must be refused"
+    assert ProcessTab._source_feed_is_live(tab) is False, (
+        "a refused picture must NOT count as the block supplying the half, or the comparison decoder stands down and "
+        "the source half freezes on one frame (measured 2026-11-26: the owner's 'левый экран застыл')")
 
     tab._compare_playhead = lambda: 9.65
     ProcessTab._on_source_feed_frame(tab, image)

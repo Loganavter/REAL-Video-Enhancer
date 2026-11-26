@@ -1249,7 +1249,6 @@ class ProcessTab:
         feed = getattr(self, "_source_feed", None)
         if feed is None or image is None:
             return
-        self._source_feed_alive_at = time.monotonic()
         pane = self.page_handles.proc.previewLabel
         named = getattr(feed, "media_time", None)
         if named is not None:
@@ -1277,6 +1276,11 @@ class ProcessTab:
                 here = None
             if here is not None and abs(float(named) - here) > 0.25:
                 return
+        # ALIVE only when a picture is actually TAKEN. Marking it before the moment check froze the source half: a
+        # renderer publishing its head while the pane stood (or replayed) elsewhere made every picture be refused AND the
+        # comparison decoder stand down, so the half kept one frame and never followed a seek (owner, 2026-11-26: "снова
+        # левый экран застыл на одном кадре"; the log showed `asks=0 arrivals=0` with a paused "thumbnail" owner).
+        self._source_feed_alive_at = time.monotonic()
         setter = getattr(pane, "set_original", None)
         if callable(setter):
             setter(image, media_time=named)
