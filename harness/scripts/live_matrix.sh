@@ -26,11 +26,13 @@
 #     background and drives the pane while it renders);
 #   * `click:preview_mode_sbs` / `click:preview_play` — the two controls the rows about modes and transport need;
 #   * `drag:preview_timeline@x1,y1:x2,y2` — the visible scrubber (a real press + four moves + a release, i.e. the
-#     per-step `SEEK_TO` stream audit §6.3 measured). `drag:previewLabel@...` addresses the pane's own painted strip,
-#     which the shipped window HIDES (§6.6), so a drag there is a pan and not a seek: every seek row below drives
+#     per-step `SEEK_TO` stream audit §6.3 measured). It is the window's ONLY seek: the pane's own painted strip, its
+#     four gesture guards and its fraction-valued `seekRequested` are DELETED (audit §6.6, commit "one bar, one pane
+#     protocol"), so `drag:previewLabel@...` is a pan/compare gesture and never a seek, and `state:previewLabel` no
+#     longer carries `strip`/`strip_visible` (its `progress` and box still answer). Every seek row below drives
 #     `preview_timeline`, and `state:preview_timeline` supplies that widget's own box for the coordinates;
-#   * `state:previewLabel` — the pane's progress, strip and box (a read; nothing is inferred from a screenshot where a
-#     number exists);
+#   * `state:previewLabel` — the pane's progress and box (a read; nothing is inferred from a screenshot where a number
+#     exists);
 #   * `shot` — the screen truth (`live.sh shot`, ImageMagick on the root window). `window.grab()` re-renders the tree
 #     and hides exactly the stale-frame bugs these rows exist for, so it is not used.
 #

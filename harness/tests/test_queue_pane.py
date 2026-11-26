@@ -87,15 +87,17 @@ class _Signal:
 
 
 class _Pane:
-    """The pane API the page touches, recording what reached the screen and the ceiling it was given."""
+    """The pane API the page touches, recording what reached the screen.
+
+    No strip, no seek signal, no ceiling: the shipped `VideoPreviewSurface` answers none of those any more (audit
+    2026-11-27 §6.6), so a double that offers them would model a pane that does not exist. The seek in these tests is
+    the page's own route (`_on_preview_seek`), which is what the transport bar's backend calls.
+    """
 
     def __init__(self) -> None:
-        self.seekRequested = _Signal()
         self.originalRequested = _Signal()
-        self.seekBlocked = _Signal()
         self.frames: list = []
         self.progress: list[dict] = []
-        self.ceilings: list = []
 
     def set_frame(self, image, *, gui_ms: float | None = None, index: int | None = None,
                   seq: int | None = None, media_time: float | None = None,
@@ -113,9 +115,6 @@ class _Pane:
 
     def isVisible(self) -> bool:  # noqa: N802 - Qt spelling
         return True
-
-    def set_seek_ceiling(self, fraction) -> None:
-        self.ceilings.append(fraction)
 
 
 class _Reader:

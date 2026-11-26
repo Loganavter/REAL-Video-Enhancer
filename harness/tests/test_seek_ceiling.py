@@ -1,20 +1,21 @@
-"""The strip's reach: the produced edge for a live tail, the whole timeline for an export's display feed.
+"""The strip's reach: who decides it, now that the pane no longer has a strip.
 
 Measured live (2026-11-24, a 495-frame export whose produced edge stood at 7.5 %): a strip drag from 55 % to 30 %
 moved nothing. The playhead kept advancing and the backend logged no `seek: requested` line, because
-`VideoPreviewSurface.mousePressEvent` refuses a press past `_produced_fraction()` - correct for a tail (nothing exists
+`VideoPreviewSurface.mousePressEvent` refused a press past `_produced_fraction()` - correct for a tail (nothing exists
 past the edge) and wrong for the display feed, which renders any frame of the timeline on demand through
 `ProcessTab._on_preview_seek`'s third route.
 
-What is pinned here, offscreen and without a GPU:
+**The pane's half of that is deleted** (audit 2026-11-27 §6.6): the painted strip, `seekBlocked`, the fraction-valued
+`seekRequested` and the widget-side `set_seek_ceiling` are gone, so the widget no longer decides a reach at all. What
+is pinned here is the half that SURVIVES, the page's:
 
-* with no ceiling the pane keeps today's behaviour - a press past produced 10 % is refused (`seekBlocked`, no
-  `seekRequested`), and a drag is clamped at the same edge;
-* with a ceiling of 1.0 the same press emits `seekRequested` with that fraction, and a drag reaches the whole strip;
 * `ProcessTab._prepare_display_state` sets 1.0 whenever the pane's block is usable - an export's feed paints any frame
   on demand, and a preview's same block answers a press past the produced band with that one frame (the tail alone
   keeps the produced edge, see `test_preview_frame_on_demand.py`); `_close_display_state` restores `None`;
-* the widget's own `set_seek_ceiling(None)` restores the produced-edge refusal.
+* the value that reaches the BAR is the same fact, published through `PreviewState.seek_ceiling`
+  (`ProcessTab._push_preview_state`) and clamped by `PreviewTimeline`, which is why deleting the widget-side copy loses
+  no reach.
 
 The `ProcessTab` tests build the object with `object.__new__` (the house style of `test_display_wiring.py`): the wiring
 is a handful of plain methods, and constructing the window would only make the test slower. `DisplayReader` is faked
@@ -58,126 +59,13 @@ except ModuleNotFoundError:  # pragma: no cover
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QImage, QMouseEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
-
 from src.ui.ProcessTab import ProcessTab  # noqa: E402
-from src.ui.widgets.video_preview import VideoPreviewSurface  # noqa: E402
 
 # Leave the suite's path order as it was: these modules are imported (and bound) now, while backend `src.utils`
 # resolves from the backend root as before.
 sys.path[:] = _ORIGINAL_SYS_PATH
 
 PANE_SIZE = (800, 600)
-FRAME_SIZE = (1600, 900)
-
-
-def _app() -> QApplication:
-    return QApplication.instance() or QApplication([])
-
-
-def _picture(width: int, height: int, colour: str = "#204060") -> QImage:
-    image = QImage(width, height, QImage.Format.Format_RGBA8888)
-    image.fill(QColor(colour))
-    return image
-
-
-@pytest.fixture()
-def surface():
-    """A fresh surface per test: the harness sweeps top-level widgets after each test."""
-    _app()
-    widget = VideoPreviewSurface()
-    widget.resize(*PANE_SIZE)
-    widget.set_frame(_picture(*FRAME_SIZE))
-    return widget
-
-
-def _strip_point(surface, fraction: float) -> QPointF:
-    strip = surface._strip_rect()
-    assert strip.width() > 0, "the strip must be laid out for this test"
-    return QPointF(strip.left() + strip.width() * fraction, strip.center().y())
-
-
-def _press(widget, point: QPointF) -> None:
-    event = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(point), QPointF(point),
-                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
-                        Qt.KeyboardModifier.NoModifier)
-    QApplication.sendEvent(widget, event)
-
-
-def _move(widget, point: QPointF) -> None:
-    event = QMouseEvent(QEvent.Type.MouseMove, QPointF(point), QPointF(point),
-                        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
-                        Qt.KeyboardModifier.NoModifier)
-    QApplication.sendEvent(widget, event)
-
-
-def _release(widget, point: QPointF) -> None:
-    event = QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(point), QPointF(point),
-                        Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
-                        Qt.KeyboardModifier.NoModifier)
-    QApplication.sendEvent(widget, event)
-
-
-# --- the widget's rule -----------------------------------------------------------------------------
-
-def test_no_ceiling_keeps_the_produced_edge_refusal(surface):
-    """(a) Today's behaviour stays for the live tail: produced 10 %, a press at 30 % is refused."""
-    surface.set_progress(10.0, 100.0)
-    assert surface._produced_fraction() == pytest.approx(0.10)
-    blocked: list[float] = []
-    seeks: list[float] = []
-    surface.seekBlocked.connect(blocked.append)
-    surface.seekRequested.connect(seeks.append)
-
-    point = _strip_point(surface, 0.30)
-    _press(surface, point)
-    _release(surface, point)
-
-    assert blocked == [pytest.approx(0.30)], "a press past the produced edge reports the refusal"
-    assert seeks == [], "and nothing moves over a picture that does not exist"
-    assert surface._scrubbing is False, "a refused press never starts a scrub"
-
-
-def test_a_ceiling_of_one_lets_the_press_through(surface):
-    """(b) The export's feed renders any frame, so the same press is a seek - and a drag reaches the whole strip."""
-    surface.set_progress(10.0, 100.0)
-    surface.set_seek_ceiling(1.0)
-    blocked: list[float] = []
-    seeks: list[float] = []
-    surface.seekBlocked.connect(blocked.append)
-    surface.seekRequested.connect(seeks.append)
-
-    point = _strip_point(surface, 0.30)
-    _press(surface, point)
-    assert seeks == [pytest.approx(0.30)], "the press reaches the host instead of being refused"
-    assert blocked == []
-    assert surface._scrubbing is True
-
-    _move(surface, _strip_point(surface, 0.90))
-    assert seeks == [pytest.approx(0.30), pytest.approx(0.90)], (
-        "a drag follows the whole timeline the feed can render, not the produced band")
-    _release(surface, _strip_point(surface, 0.90))
-    assert surface._scrubbing is False
-
-
-def test_the_widget_can_put_the_produced_edge_back(surface):
-    """(d) `set_seek_ceiling(None)` restores the tail's rule on the same widget."""
-    surface.set_progress(10.0, 100.0)
-    surface.set_seek_ceiling(1.0)
-    surface.set_seek_ceiling(None)
-    blocked: list[float] = []
-    seeks: list[float] = []
-    surface.seekBlocked.connect(blocked.append)
-    surface.seekRequested.connect(seeks.append)
-
-    point = _strip_point(surface, 0.30)
-    _press(surface, point)
-    _release(surface, point)
-
-    assert blocked == [pytest.approx(0.30)]
-    assert seeks == []
 
 
 # --- the page's rule -------------------------------------------------------------------------------
@@ -193,7 +81,13 @@ class _Signal:
 
 
 class _Pane:
-    """The pane API `_prepare_display_state` reads, with the ceiling calls recorded."""
+    """The pane API `_prepare_display_state` reads, with the ceiling calls recorded.
+
+    The SHIPPED surface no longer answers `set_seek_ceiling` (its strip, and with it the widget-side reach, is deleted -
+    audit 2026-11-27 §6.6), so the page's call is a no-op for it. It is kept in this double because the page's DECISION
+    is what must not regress while `ProcessTab.py` belongs to another lane: "a usable block means the whole timeline is
+    reachable", and its surviving consumer is the bar (`_preview_seek_ceiling` -> `PreviewState.seek_ceiling`).
+    """
 
     def __init__(self) -> None:
         self.seekRequested = _Signal()
@@ -253,6 +147,8 @@ def test_a_usable_block_lifts_the_ceiling_for_both_job_kinds(monkeypatch):
     export_tab = _tab(pane=export_pane, preview=False)
     export_tab._prepare_display_state()
     assert owner_of(export_tab).may_paint is True, "the export's feed owns its pane"
+    assert owner_of(export_tab).may_seek_any is True, (
+        "the fact the published reach reads: the feed renders any frame on demand")
     assert export_pane.ceilings[-1] == pytest.approx(1.0), (
         "an export whose block is usable seeks the whole timeline: the feed renders any frame on demand")
 
@@ -261,12 +157,15 @@ def test_a_usable_block_lifts_the_ceiling_for_both_job_kinds(monkeypatch):
     preview_tab._prepare_display_state()
     assert preview_tab._display is not None, "the block is allocated for a preview too (the command carries it)"
     assert owner_of(preview_tab).may_paint is False, "the tail is still the preview's painter"
+    assert owner_of(preview_tab).may_seek_any is True, "the block answers one frame on demand"
     assert preview_pane.ceilings[-1] == pytest.approx(1.0), (
         "a press past the produced band is answered by the block with that one frame, so the strip may ask")
 
 
 def test_a_preview_without_a_usable_block_keeps_the_produced_edge(monkeypatch):
     """The other side: no block means the tail is all there is, and the produced edge stays the honest reach."""
+    from src.ui.preview.owner import owner_of
+
     module = sys.modules[ProcessTab.__module__]
 
     class _Unattached(_FakeReader):
@@ -281,10 +180,13 @@ def test_a_preview_without_a_usable_block_keeps_the_produced_edge(monkeypatch):
 
     assert tab._display is None
     assert pane.ceilings[-1] is None
+    assert owner_of(tab).may_seek_any is False, "nothing can serve a press past the produced edge"
 
 
 def test_closing_the_block_restores_the_produced_edge(monkeypatch):
     """(c) The feed's reach must not outlive the feed: the closing pass clears the ceiling."""
+    from src.ui.preview.owner import owner_of
+
     module = sys.modules[ProcessTab.__module__]
     monkeypatch.setattr(module, "DisplayReader", _FakeReader)
 
@@ -298,10 +200,13 @@ def test_closing_the_block_restores_the_produced_edge(monkeypatch):
     assert reader.released is True
     assert tab._display is None
     assert pane.ceilings[-1] is None
+    assert owner_of(tab).may_seek_any is False, "the reach went with the block"
 
 
 def test_an_export_without_a_usable_block_keeps_the_tail_as_its_reach(monkeypatch):
     """The fallback export (no block) is painted by a tail, so it must keep the produced edge - not inherit a ceiling."""
+    from src.ui.preview.owner import owner_of
+
     module = sys.modules[ProcessTab.__module__]
 
     class _Unattached(_FakeReader):
@@ -316,3 +221,4 @@ def test_an_export_without_a_usable_block_keeps_the_tail_as_its_reach(monkeypatc
 
     assert tab._display is None
     assert pane.ceilings[-1] is None
+    assert owner_of(tab).may_seek_any is False, "nothing can serve a press past the produced edge"

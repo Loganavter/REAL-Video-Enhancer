@@ -1,10 +1,14 @@
-"""The preview surface's geometry, without a GPU: fit, 1:1, zoom, the strip and its fractions.
+"""The preview surface's geometry, without a GPU: fit, 1:1, zoom, the HUD vertices and the compare boundary.
 
-Why these can be pinned without rendering: every number the shader receives is computed on the CPU (the mvp, the strip
-rect, the HUD vertices), and those are exactly the numbers that were wrong during the build - a flipped texture, a
-1:1 view that was not 1:1, a strip whose click mapped to the wrong time. The pixels themselves are proven on a live
-display through `grabFramebuffer()` (harness/docs/LIVE-TESTING.md); this file keeps the arithmetic honest on any
+Why these can be pinned without rendering: every number the shader receives is computed on the CPU (the mvp, the
+picture rects, the HUD vertices), and those are exactly the numbers that were wrong during the build - a flipped
+texture, a 1:1 view that was not 1:1, a divider drawn over the picture's edge. The pixels themselves are proven on a
+live display through `grabFramebuffer()` (harness/docs/LIVE-TESTING.md); this file keeps the arithmetic honest on any
 interpreter with PySide6.
+
+The pane's own painted strip - its fraction mapping, produced/playhead markers, hover cursor and seek reach - is
+DELETED with the second bar implementation (audit 2026-11-27 §6.6): that arithmetic belongs to `preview/timeline.py`
+now, and the tests that pinned it moved there (`test_preview_controls.py`) or went with the organ.
 """
 
 from __future__ import annotations
@@ -203,32 +207,19 @@ def test_pan_is_clamped_to_the_picture(surface):
     surface.reset_view()
 
 
-def test_the_strip_maps_a_click_to_the_same_fraction(surface):
-    surface.reset_view()
-    strip = surface._strip_rect()
-    assert strip.width() > 0
-    assert surface._fraction_at(strip.left()) == pytest.approx(0.0)
-    assert surface._fraction_at(strip.left() + strip.width() * 0.25) == pytest.approx(0.25)
-    assert surface._fraction_at(strip.right()) == pytest.approx(1.0)
-    assert surface._fraction_at(strip.left() - 500) == 0.0, "outside the strip clamps, never goes negative"
-    assert surface._fraction_at(strip.right() + 500) == 1.0
+def test_the_pane_paints_no_strip_and_the_visibility_hook_is_inert(surface):
+    """RETIRED organ: the pane's own painted strip is gone (audit 2026-11-27 §6.6), so `set_strip_visible` is the one
+    named survivor - the shipped page and two RHI pixel tests still call it - and it must change NOTHING.
 
-
-def test_the_hud_has_one_rect_per_marker_and_a_track(surface):
-    surface.reset_view()
-    surface.set_progress(rendered=5.0, total=20.0, playhead=2.5, duration=20.0)
-    vertices = surface._hud_vertices()
-    # track + rendered range + playhead halo + playhead line + handle halo + handle = 6 rects, 6 vertices, 6 floats
-    assert len(vertices) == 6 * 6 * 6
-    surface.set_progress(0.0, 0.0, 0.0, 0.0)
-    assert len(surface._hud_vertices()) == 1 * 6 * 6, "with no progress only the track is drawn"
-
-
-def test_the_strip_can_be_switched_off(surface):
+    The surviving seek lives in the transport bar (`preview/timeline.py`); this test is what fails if a second strip
+    ever comes back through the old entry point.
+    """
+    before = surface._hud_vertices()
     surface.set_strip_visible(False)
-    assert surface._strip_rect().isEmpty()
-    assert surface._hud_vertices() == []
+    assert surface._hud_vertices() == before, "a hidden strip cannot change a HUD that no longer has one"
     surface.set_strip_visible(True)
+    assert surface._hud_vertices() == before
+    assert not hasattr(surface, "_strip_rect"), "no strip geometry to ask about"
 
 
 def test_the_original_flag_is_what_swaps_the_picture(surface):
@@ -254,28 +245,18 @@ def test_the_compare_keeps_the_sources_proportions(surface):
     surface.set_original(None)
 
 
-def test_the_strip_refuses_a_seek_past_the_produced_edge(surface):
-    surface.reset_view()
-    surface.set_progress(rendered=12.0, total=20.0, playhead=6.0, duration=20.0)   # 60 % produced
-    assert surface._seekable(0.5)
-    assert not surface._seekable(0.75)
-    assert surface._seekable(0.0)
-    surface.set_progress(0.0, 0.0, 6.0, 20.0)   # a finished file: everything is there
-    assert surface._seekable(1.0)
+def test_the_pane_decides_no_seek_reach(surface):
+    """The reach is the BAR's fact now (`PreviewState.seekable_ceiling` -> `PreviewTimeline`), not the pane's.
 
-
-def test_hover_marks_the_unprocessed_part_with_a_forbidden_cursor(surface):
-    surface.reset_view()
-    surface.set_progress(rendered=12.0, total=20.0, playhead=6.0, duration=20.0)
-    strip = surface._strip_rect()
-    surface._update_hover(QPointF(strip.left() + strip.width() * 0.3, strip.center().y()))
-    assert surface._hover_blocked is False
-    assert surface.cursor().shape() == Qt.CursorShape.PointingHandCursor
-    surface._update_hover(QPointF(strip.left() + strip.width() * 0.85, strip.center().y()))
-    assert surface._hover_blocked is True
-    assert surface.cursor().shape() == Qt.CursorShape.ForbiddenCursor, (
-        "the pointer must say that nothing has been produced there")
-    assert surface._hover_fraction is not None
+    The pane used to refuse a press past `_produced_fraction()` and lift that edge through `set_seek_ceiling` for an
+    export's display feed. Both are deleted with the strip (audit 2026-11-27 §6.6): the widget paints no strip, so it
+    has no reach to decide, and a second copy of the reach was one of the audit's six "four answers to one question"
+    (audit §6.7, §4). What is pinned here is that the deleted API did not survive as a silent no-op a caller could
+    still believe.
+    """
+    assert not hasattr(surface, "set_seek_ceiling")
+    assert not hasattr(surface, "_seekable")
+    assert not hasattr(surface, "_produced_fraction")
 
 
 def test_the_compare_puts_the_original_on_the_results_own_pixel_grid(surface):

@@ -2,8 +2,9 @@
 
 `set_view_mode` gives the pane Topaz's three views - `single` (today), `sbs` (result right, original left) and
 `split` (one picture, the original left of a divider). What is pinned here is the part the shader cannot answer:
-which rectangle each picture gets, that both come from ONE zoom (the result's), where the strip's hit test lands
-in every mode, and that the original is a standing pane outside `single` instead of a held button.
+which rectangle each picture gets, that both come from ONE zoom (the result's), that the pane takes no seek at all
+any more (the transport bar's scrubber is the window's only one - the pane's own strip is deleted), and that the
+original is a standing pane outside `single` instead of a held button.
 
 Everything runs offscreen and without media: this platform has **no QRhi** (`VideoPreviewSurface.initialize` says so
 and returns), so `grabFrame()` is a null readback here and the pixels are proven on a live display
@@ -128,28 +129,57 @@ def test_sbs_shows_the_original_without_a_held_button(surface):
     assert surface._original is None, "the host clears it, the pane does not"
 
 
-def test_one_strip_maps_to_the_same_fraction_in_every_mode(surface):
-    """The strip is drawn once, under the whole widget, in every mode - including `sbs`, where a press at 25 % may
-    land over either half. The gesture is the same seek in all three."""
+def test_the_pane_has_no_seek_surface_and_the_picture_takes_every_press(surface):
+    """ONE seek semantics: the transport bar's scrubber (`preview/timeline.py`) is the window's only seek.
+
+    The pane used to paint a second strip and emit a fraction-valued `seekRequested` straight into
+    `ProcessTab._on_preview_seek` - a route that never got the session's clamp, epoch or deadline, while the visible
+    bar emits `SEEK_TO` in SECONDS through the controller (audit 2026-11-27 §6.6). That strip, its four gesture
+    guards and both signals are deleted; a press in the band where it used to sit is the picture's own gesture - the
+    LMB compare in `single`, a pan in the compare modes - in all three modes, and nothing can carry a seek out of the
+    widget.
+    """
+    assert not hasattr(surface, "seekRequested"), "a second seek path would have to announce itself"
+    assert not hasattr(surface, "seekBlocked"), "and a second refusal path with it"
     surface.set_progress(10.0, 10.0, playhead=3.0, duration=10.0)
-    seeks: list[tuple[str, float]] = []
-    surface.seekRequested.connect(lambda fraction: seeks.append((surface.view_mode(), fraction)))
-    strips: dict[str, QRectF] = {}
+    bottom = QPointF(PANE_SIZE[0] * 0.25, PANE_SIZE[1] - 20.0)     # where the deleted strip's track sat
 
     for mode in VIEW_MODES:
         surface.set_view_mode(mode)
-        strip = surface._strip_rect()
-        strips[mode] = QRectF(strip)
-        assert strip.width() > 0
-        x = strip.left() + strip.width() * 0.25
-        assert surface._fraction_at(x) == pytest.approx(0.25)
-        _press(surface, QPointF(x, strip.center().y()))
-        _release(surface, QPointF(x, strip.center().y()))
+        _press(surface, bottom)
+        if mode == "single":
+            assert surface._showing_original is True, "single's press is the LMB compare, exactly as above the band"
+        else:
+            assert surface._panning is True, "a compare mode's press drags the picture; it does not seek"
+        _release(surface, bottom)
+        assert surface._panning is False and surface._showing_original is False
+        assert surface.view_mode() == mode
 
-    assert strips["sbs"] == strips["single"] == strips["split"], (
-        "one strip for the whole widget: the compare modes do not move or narrow it")
-    assert seeks == [(mode, pytest.approx(0.25)) for mode in VIEW_MODES], (
-        f"each mode must seek to the same fraction, got {seeks}")
+
+def test_the_pane_protocol_is_one_surface_and_the_raster_fallback_is_named():
+    """The page builds ONE object name (`previewLabel`) from two classes (`pages/proc_page.py`); this pins what each
+    actually ANSWERS, so the `hasattr` branch in `ProcessTab._on_display_frame` is a proven decision rather than a
+    `getattr`-shaped guess (audit 2026-11-27 §6.11).
+
+    * the shipped pane is this surface: `set_result`/`set_source` are the picture protocol, and `set_frame` is exactly
+      the probe the page uses (`hasattr(pane, "set_frame")`) to route a display frame into the pane instead of into a
+      pixmap label;
+    * the raster fallback is NAMED: `sli_ui_toolkit.widgets.ImageLabel`, which `proc_page` builds only when
+      `gpu_preview_available()` says the process has no GL/EGL context. It answers none of the picture protocol, so the
+      page's pixmap branch is the only one that can run for it - and the controller is never built there
+      (`_install_preview_controls` returns early).
+    """
+    _app()
+    from sli_ui_toolkit.widgets import ImageLabel
+
+    surface = VideoPreviewSurface()
+    raster = ImageLabel()
+    for name in ("set_result", "set_source", "set_frame", "set_frame_planes", "set_view_mode", "set_progress"):
+        assert callable(getattr(surface, name, None)), f"the shipped pane must answer {name}"
+    assert not hasattr(raster, "set_result") and not hasattr(raster, "set_frame"), (
+        "the raster fallback answers the pixmap protocol only: a pane-protocol call on it would be the getattr-shaped "
+        "polymorphism with no branch behind it")
+    assert callable(getattr(raster, "setPixmap", None)), "and `setPixmap` is the branch the page takes for it"
 
 
 def test_an_empty_pane_in_sbs_does_not_crash_and_shows_no_picture_rects():
@@ -160,7 +190,6 @@ def test_an_empty_pane_in_sbs_does_not_crash_and_shows_no_picture_rects():
     empty.resize(*PANE_SIZE)
     empty.set_view_mode("sbs")
     assert empty.view_mode() == "sbs"
-    assert empty._strip_rect().isEmpty(), "no frame, no strip"
     assert empty._hud_vertices() == []
     assert empty._frame_rect().isEmpty()
     assert empty._original_rect().isEmpty()
@@ -181,10 +210,11 @@ def test_sbs_puts_the_result_right_and_the_original_left_at_one_scale(surface):
     assert surface._original_clip_rect() == QRectF(0.0, 0.0, PANE_SIZE[0] / 2.0, float(PANE_SIZE[1])), (
         "the original paints into its own half and nowhere else")
 
-    # one strip: the track plus the boundary line, not a second copy of the markers
-    assert len(surface._hud_vertices()) == 2 * 6 * 6
+    # The HUD is the picture's own boundary: one seam rect in `sbs`, and nothing in `single` (the transport bar is a
+    # sibling widget now, so the pane paints no strip of its own - audit 2026-11-27 §6.6).
+    assert len(surface._hud_vertices()) == 1 * 6 * 6
     surface.set_view_mode("single")
-    assert len(surface._hud_vertices()) == 1 * 6 * 6, "single keeps exactly the track"
+    assert surface._hud_vertices() == [], "single paints no boundary at all"
 
 
 def test_sbs_letterboxes_each_picture_at_its_own_aspect(surface):
@@ -228,8 +258,9 @@ def test_split_clips_the_original_to_the_left_of_the_divider(surface):
     assert clip.width() == pytest.approx(picture.width() / 2.0), "the divider sits in the middle of the picture"
     assert clip.top() == pytest.approx(picture.top())
     assert clip.height() == pytest.approx(picture.height())
-    # The strip paints once and the divider is a CONTROL now (an outlined rule plus a grip, so it is visible over any
-    # picture and can be dragged): count the DIVIDER, not a total that any grip detail would break.
+    # The divider is a CONTROL now (an outlined rule plus a grip, so it is visible over any picture and can be
+    # dragged). It is the WHOLE HUD in `split`: the pane paints no strip of its own any more (audit 2026-11-27 §6.6),
+    # so a full-width rect here would be a second bar that came back.
     divider_floats = [v for v in surface._hud_vertices()]
     divider_x = surface._split_divider_x()
     assert divider_x is not None
@@ -238,7 +269,8 @@ def test_split_clips_the_original_to_the_left_of_the_divider(surface):
     xs = [divider_floats[i] for i in range(0, len(divider_floats), 6)]   # [x, y, r, g, b, a] per corner
     assert any(abs(x - (divider_x - rule / 2.0)) < 0.6 for x in xs), "the divider's left edge is not in the HUD"
     assert any(abs(x - (divider_x + rule / 2.0)) < 0.6 for x in xs), "the divider's right edge is not in the HUD"
-    assert xs[0] < divider_x, "the strip is painted before the divider (one pass, strip first)"
+    assert all(abs(x - divider_x) <= float(scaled_px(12)) for x in xs), (
+        "split's HUD is the divider and its grip: a rect at the pane's edge would be the deleted strip")
     assert surface._view_rect() == QRectF(0.0, 0.0, float(PANE_SIZE[0]), float(PANE_SIZE[1])), (
         "split fits the result into the whole pane, unlike sbs")
 

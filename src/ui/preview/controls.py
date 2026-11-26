@@ -174,10 +174,6 @@ class PreviewControls(QWidget):
                     self._groups[spec.group] = family
                 family.addButton(button)
             button.toggled.connect(self._make_toggle_handler(spec))
-        elif spec.hold:
-            button.pressed.connect(lambda s=spec: self.commandRequested.emit(s.command, s.value))
-            button.released.connect(
-                lambda s=spec: self.commandRequested.emit(s.release_command or s.command, s.value))
         else:
             button.clicked.connect(lambda _=False, s=spec: self.commandRequested.emit(s.command, s.value))
         self._buttons[spec.id] = button
