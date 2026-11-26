@@ -93,8 +93,10 @@ COMPARE_LEAD_FRAMES = 3
 
 #: How long one source ask counts as "in flight". A span of `COMPARE_LEAD_FRAMES` costs ~40 ms of decode, so this is a
 #: retry deadline, not a throttle: an ask nothing answers is re-sent on the next tick after it, which keeps a paused
-#: pane's first frame arriving as quickly as the retry itself.
-COMPARE_FILL_WINDOW_S = 0.25
+#: pane's first frame arriving as quickly as the retry itself. It must stay BELOW the picture interval of a live tail
+#: (~60 ms at 16 fps): at 250 ms a pending blocked two to three fills per frame, the pool fell 1-3 frames behind the
+#: result and every pair timed out (measured 2026-11-26, split during inference).
+COMPARE_FILL_WINDOW_S = 0.08
 
 #: How many decoded source frames are kept. `COMPARE_LEAD_FRAMES` + a little history for a small backwards step; every
 #: entry is a full-size QImage (6.2 MB at 1440p), so the cap is a memory budget, not a scheduling knob.
@@ -1158,6 +1160,34 @@ class ProcessTab:
         """The PICTURE path's own clock: the export's feed and the compare's standing original."""
         self._tick_display()
         self._tick_second_surface()
+        self._compare_fill_report()
+
+    def _compare_fill_report(self) -> None:
+        """One line per second of the compare's supply: asks, frames that came back, and what the pool holds.
+
+        The pair's own counters say the halves disagree; they cannot say whether the source was never ASKED or asked and
+        never answered. This is that line, and it is how a frozen pool (asks climbing, arrivals flat) is told apart from a
+        clock that picks the wrong frame.
+        """
+        stats = getattr(self, "_compare_fill_stats", None)
+        if stats is None:
+            stats = self._compare_fill_stats = {"asks": 0, "arrivals": 0, "at": time.monotonic()}
+        now = time.monotonic()
+        if now - float(stats["at"]) < 1.0:
+            return
+        stats["at"] = now
+        pool = getattr(self, "_source_pool", None) or {}
+        try:
+            ph = round(float(self._compare_playhead()), 3)
+        except Exception:
+            ph = "-"
+        newest = None
+        if pool:
+            newest = round(max(pool), 3)
+        telemetry.event("compare fill", asks=stats["asks"], arrivals=stats["arrivals"], pool=len(pool),
+                        playhead=ph, newest=newest)
+        stats["asks"] = 0
+        stats["arrivals"] = 0
 
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
@@ -1446,7 +1476,7 @@ class ProcessTab:
         # while nothing else paints - then top the lead up. Both are cheap: the show is a lookup, the fill is at most
         # one decode, and an ask the decoder never answers is retried here (`_source_pool_newest` still lacks the frame).
         self._source_show(self._compare_playhead())
-        self._source_fill(self._compare_playhead())
+        self._source_fill(self._compare_supply_playhead())
 
     def renderToPipeThread(
         self,
@@ -3138,7 +3168,11 @@ class ProcessTab:
                 # waits behind it. Measured 2026-11-26: split playback ran at 0.20x wall with both decoders on the GUI
                 # thread, while the same two decoders in their own event loops ran at 0.94x - the decode was never the
                 # limit, the thread was. The lead below only has capacity once this decode is off the paint thread.
-                decoder = VideoDecoder(pixel_format="rgb24")
+                # AT THE PANE'S BOX, like the result's own decoder (`_start_preview_playback`): a 1440p source handed
+                # over whole costs a 6.2 MB copy, a GUI-thread scale down to the result's size, a 6.2 MB upload and a
+                # 1440p mip chain per frame - to show 504x378. The fit happens in swscale inside the decode thread, and
+                # the two halves then arrive at the SAME size, so the pane scales nothing.
+                decoder = VideoDecoder(pixel_format="rgb24", max_size=self._pane_display_box())
                 thread = QThread()
                 decoder.moveToThread(thread)
                 thread.start()
@@ -3152,6 +3186,7 @@ class ProcessTab:
                 if not decoder.open(str(path)):
                     log(f"source decoder: cannot open {path}")
                     return
+                log(f"source decoder: opened {path}")
                 self._source_decoder = decoder
             # A step FORWARD from the frame already on screen is one decode (12.5 ms measured on this 1440p source, an
             # 80 fps ceiling); a jump pays a keyframe rewind (median 176 ms, p95 321). The compare asks once per playhead
@@ -3161,8 +3196,14 @@ class ProcessTab:
             landed = getattr(self, "_second_surface_pts", None)
             step_forward = (landed is not None
                             and 0.0 <= float(seconds) - float(landed) <= 0.6)
-            decoder.request_frame(max(0.0, float(seconds)),
-                                  exact=not bool(getattr(self, "_shown_name_is_fitted", False)),
+            # EXACT only for a press: its target is a frame's own name, and "the frame before it" is the desync the
+            # exactness rule was written for. The POOL's asks walk a live grid (the tail's content times are derived, not
+            # the source's stored PTS), and a target a fraction of a frame off the grid made the walk miss, run to the end
+            # of the source and disable the decoder for the rest of the session - measured 2026-11-26: `arrivals=57` for
+            # two seconds, then `arrivals=0 pool=0` while the asks kept coming. Half a frame of slack picks the same frame.
+            exact = (not bool(getattr(self, "_compare_from_tick", False))
+                     and not bool(getattr(self, "_shown_name_is_fitted", False)))
+            decoder.request_frame(max(0.0, float(seconds)), exact=exact,
                                   seek=not step_forward,
                                   span=bool(span))
         except Exception as exc:
@@ -3250,6 +3291,9 @@ class ProcessTab:
         if chosen is None:
             return
         pts, index, image = chosen
+        stats = getattr(self, "_compare_fill_stats", None)
+        if stats is not None:
+            stats["arrivals"] += 1
         if telemetry.level() >= 2:
             # The pair's own number: how far the source half is from the result's playhead at the moment it is SHOWN.
             # One line per changed source frame, level 2 only - the compare's "the halves disagree" claim needs it.
@@ -3284,6 +3328,18 @@ class ProcessTab:
             if value is not None:
                 return float(value)
         return float(self._result_playhead())
+
+    def _compare_supply_playhead(self) -> float:
+        """Where the source pool should be AHEAD of: the picture on screen, not the newest arrival.
+
+        A lag that equals the arrival rate never closes (each result frame moves the target by one frame and the source
+        moves by one frame), so the pair gate saw a mismatch for ever and painted only on its timeout. The supply runs off
+        the COMMITTED result - a stable clock - while `_compare_playhead` (presentation) stays on the newest one.
+        """
+        # The NEWEST result: the pool has to hold the frame that is about to be painted, and the only way to have it
+        # there in time is to chase the newest one with a lead (see `COMPARE_LEAD_FRAMES`). Chasing the COMMITTED frame
+        # instead kept the pool behind the newest result - every paint then showed T+1 against the source's T.
+        return self._compare_playhead()
 
     def _source_paint_pair(self, playhead: float | None = None) -> None:
         """One entry point for "the result has just been painted; give it its other half in the same repaint".
@@ -3335,6 +3391,9 @@ class ProcessTab:
         else:
             return
         self._source_fill_pending = (float(target), time.monotonic())
+        stats = getattr(self, "_compare_fill_stats", None)
+        if stats is not None:
+            stats["asks"] += 1
         self._compare_from_tick = True
         try:
             self._on_original_requested(max(0.0, target), span=span)
@@ -3355,6 +3414,20 @@ class ProcessTab:
         image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                        QImage.Format.Format_RGB888).copy()
         box = getattr(self, "_source_crop", None)
+        if box is not None:
+            # The box is written in SOURCE pixels; this decoder hands over a fitted picture, so it is scaled by the same
+            # ratio (`stream_size` is the coded size, the one the render's BORDERS line describes).
+            source_size = None
+            decoder = getattr(self, "_source_decoder", None)
+            size_of = getattr(decoder, "stream_size", None)
+            if callable(size_of):
+                try:
+                    source_size = size_of()
+                except Exception:
+                    source_size = None
+            if source_size and source_size[0] > 0 and image.width() != source_size[0]:
+                scale = image.width() / float(source_size[0])
+                box = tuple(int(round(value * scale)) for value in box)
         region = crop_region(box, image.width(), image.height())
         if region is None:
             # Today's picture (the whole source) is the fallback, and the log says once why: a silent
@@ -3431,7 +3504,7 @@ class ProcessTab:
         else:
             playhead = self._compare_playhead()
             self._source_show(playhead)
-            self._source_fill(playhead)
+            self._source_fill(self._compare_supply_playhead())
 
     def _log_source_crop_unknown(self, reason: str) -> None:
         """One line per job when the compare cannot crop: the preview then shows the uncropped source."""

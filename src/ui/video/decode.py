@@ -294,6 +294,19 @@ class VideoDecoder(QObject):
         self._request = (self._clamp(seconds), bool(exact), bool(seek), bool(span))
         self._kick()
 
+    def stream_size(self) -> tuple[int, int] | None:
+        """The CODED picture size, before any `max_size` fit.
+
+        The units a render's `BORDERS` box is written in: the compare crops the source with that box, so a decoder that
+        hands over a fitted picture (the compare's does, at the pane's box) has to scale the box by the same ratio or the
+        crop lands on the wrong region - or, worse, is refused and the whole letterboxed frame is compared.
+        """
+        context = getattr(getattr(self, "_stream", None), "codec_context", None)
+        try:
+            return int(context.width), int(context.height)
+        except Exception:
+            return None
+
     def is_playing(self) -> bool:
         return self._playing
 
@@ -504,11 +517,20 @@ class VideoDecoder(QObject):
             for frame in walked:
                 self.frame_ready.emit(frame)
             return
-        published = walked[-1] if walked else None
-        if published is None:
+        if not walked:
+            # The frame iterator was already exhausted at the entry. A live compare walks a stream it has read past, and
+            # without this flag every later step re-walks a DEAD iterator: asks kept arriving, nothing came back, for the
+            # rest of the session (measured 2026-11-26: `asks=9 arrivals=0 pool=0`, the source half frozen while the
+            # result played on). Recording it makes the next ask take the rewind branch and reopen the stream.
+            self._at_eof = True
             published = self._held
             self._held = None
+            if published is not None:
+                self.frame_ready.emit(published)
+            return
+        published = walked[-1]
         if published is not None:
+            self._at_eof = False
             self.frame_ready.emit(published)
 
     def _rewind(self, target: float) -> None:

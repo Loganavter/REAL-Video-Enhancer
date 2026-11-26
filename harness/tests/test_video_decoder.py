@@ -216,3 +216,25 @@ def test_a_target_behind_the_read_position_falls_back_to_the_rewind():
 
     assert rewinds == [1.0], "a wrong-way jump keeps the keyframe rewind"
     assert published == [], "and it publishes nothing itself"
+
+
+def test_a_step_that_finds_a_dead_stream_records_eof_so_the_next_ask_rewinds():
+    """The compare's forward step walks a stream it has already read past; a dead iterator must not stay dead.
+
+    Measured 2026-11-26, split during inference: `asks=9 arrivals=0 pool=0` for the rest of the session - every step
+    re-walked an exhausted iterator, nothing was ever published again, and the source half froze while the result played.
+    """
+    decoder, published = _decoder_with([], position=5.0)      # the iterator has nothing left
+    rewinds = []
+    decoder._seek_and_publish = lambda target, **kw: rewinds.append(target)
+
+    decoder._step_and_publish(5.5, exact=False)
+
+    assert decoder._at_eof is True, "an exhausted walk is the end of the stream, and must be recorded"
+    assert published == []
+
+    # The next ask therefore takes the rewind branch and reopens the stream instead of walking a dead generator.
+    decoder._container = object()
+    decoder._request = (5.5, False, False, False)
+    decoder._pump()
+    assert rewinds == [5.5], "the ask after a dead walk rewinds"

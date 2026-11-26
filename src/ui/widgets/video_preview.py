@@ -113,11 +113,12 @@ VIEW_MODES = ("single", "sbs", "split")
 #: mouse, narrow enough that a press meant for the picture (pan/compare) stays one.
 SPLIT_GRAB_PX = 9
 
-#: A compare mode shows ONE moment, not two: a repaint is allowed only while the two halves are within this. Half a
-#: frame at 24 fps - deliberately tighter than a frame, because a pair one frame apart is exactly what reads as a flicker
-#: (owner, 2026-11-26: "сейчас ну типа прям мерцание происходит"). Either half may arrive first; the picture is
-#: presented when the second one lands, so every painted frame is a pair that belongs together.
-PAIR_SYNC_SLACK_S = 0.021
+#: A compare mode shows ONE moment, not two: a repaint is allowed only while the two halves are within this. One and a
+#: half frames at 24 fps: a live tail's names are derived from the output file's grid while the compare's source keeps its
+#: own stored PTS, and the two drift by up to a frame back and forth, so half a frame refused pairs that are the same
+#: picture (measured 2026-11-26: every paint a timeout with the tail at 16-20 fps). Beyond a frame and a half the eye reads
+#: two different moments, which is the flicker this gate exists for (owner: "ну типа прям мерцание происходит").
+PAIR_SYNC_SLACK_S = 0.0625
 
 #: ...but never held longer than this. A decoder that never answers, or a pair that is systematically a frame apart,
 #: must not freeze the picture: a small mismatch is better than a still image.
@@ -350,6 +351,16 @@ class VideoPreviewSurface(QRhiWidget):
 
     def has_frame(self) -> bool:
         return self._frame is not None or self._planes_size is not None
+
+    def committed_time(self) -> float | None:
+        """The media time of the pair the RENDERER holds - the picture actually on screen, not the newest arrival.
+
+        The compare's SUPPLY is driven from this (decode ahead of what is displayed) while its PRESENTATION is driven from
+        the newest result (`shown_time`). One clock for both was a permanent lag: the source was asked to lead the newest
+        frame, the newest frame moved by the same amount, and the pair never closed (measured 2026-11-26, split during
+        inference: `playhead=0.417 newest=0.375`, every paint a timeout).
+        """
+        return getattr(self, "_committed_result_time", None)
 
     def shown_time(self) -> float | None:
         """The media time of the picture on screen, when the publisher named it."""
@@ -587,7 +598,7 @@ class VideoPreviewSurface(QRhiWidget):
         return abs(position.x() - x) <= float(scaled_px(SPLIT_GRAB_PX))
 
     def pair_in_sync(self) -> bool:
-        """True when the two halves name the same moment (or there is only one picture to show)."""
+        """True when the two halves are the same picture (or there is only one picture to show)."""
         if self._view_mode == "single" or self._original is None:
             return True
         result = getattr(self, "_shown_time", None)

@@ -485,22 +485,29 @@ def test_a_compare_mode_paints_only_when_the_two_halves_are_one_moment(surface):
     assert surface.pair_in_sync(), "the same moment on both sides is the normal case"
     assert surface.pair_paint_ready()
 
-    # The result moves on one frame: the source has not caught up yet, so a paint now would show a mismatch.
+    # ONE frame apart is accepted: a live tail's names are derived from the output file's grid while the compare's source
+    # keeps its own stored PTS, and the two drift by a fraction of a frame. The eye still sees one moment.
     frame_seconds = 1.0 / 24.0
     surface.set_frame(result_image(), media_time=5.0 + frame_seconds)
+    assert surface.pair_in_sync(), "a fraction of a frame apart is the same picture"
+    assert surface.pair_paint_ready()
+
+    # TWO frames apart is a different moment, and a paint now would be the flicker: hold it.
+    surface.set_frame(result_image(), media_time=5.0 + 2 * frame_seconds)
     assert not surface.pair_in_sync()
-    assert not surface.pair_paint_ready(), "a pair one frame apart is exactly the flicker: hold it"
+    assert not surface.pair_paint_ready(), "a pair two frames apart is the flicker: hold it"
     assert not surface.pair_paint_ready(now=_time.monotonic() + PAIR_SYNC_HOLD_S / 2.0)
 
     # The source lands: the pair is whole again and the paint is allowed.
-    surface.set_original(source, media_time=5.0 + frame_seconds)
+    surface.set_original(source, media_time=5.0 + 2 * frame_seconds)
     assert surface.pair_in_sync()
     assert surface.pair_paint_ready()
 
     # Never held for ever: a decoder that does not answer must not freeze the picture.
-    surface.set_frame(result_image(), media_time=5.0 + 3 * frame_seconds)
+    surface.set_frame(result_image(), media_time=5.0 + 4 * frame_seconds)
     blocked = _time.monotonic()
     surface._pair_blocked_at = blocked
     assert not surface.pair_paint_ready(now=blocked)
     assert surface.pair_paint_ready(now=blocked + PAIR_SYNC_HOLD_S + 0.001), "the hold window is the way out"
-    assert PAIR_SYNC_SLACK_S < frame_seconds, "the slack is tighter than a frame, or a one-frame pair would pass"
+    assert frame_seconds < PAIR_SYNC_SLACK_S < 2 * frame_seconds, (
+        "the slack is a fraction over ONE frame (the timestamps' own drift) and under two (a different moment)")
