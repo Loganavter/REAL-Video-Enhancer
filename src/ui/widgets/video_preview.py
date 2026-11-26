@@ -125,6 +125,16 @@ PAIR_SYNC_SLACK_S = 0.0625
 #: must not freeze the picture: a small mismatch is better than a still image.
 PAIR_SYNC_HOLD_S = 0.25
 
+#: How close two names must be to be the same moment, in milliseconds. The keys are both `round(time * 1000)`, so this
+#: absorbs the rounding of two independently derived timestamps and nothing else.
+PAIR_MATCH_MS = 2
+
+#: How many result and source pictures the pair queue may hold while a partner is missing. The rule is GStreamer's
+#: `GstAggregator`: every input keeps its own queue, the aggregate step runs only when ALL inputs have a buffer, and a pad
+#: that misses the bounded wait has its buffers SKIPPED rather than shifting the pair (`gstaggregator.c`:
+#: `gst_aggregator_check_pads_ready`, `gst_aggregator_wait_and_check`, `gst_aggregator_pad_skip_buffers`).
+PAIR_QUEUE_MAX = 8
+
 #: The divider fades out this long after the pointer leaves it (owner, 2026-11-26: "фейд до 1 секунды срезать"), and the grip that stays is this visible: a rule at zero
 #: alpha would leave nothing to aim at, and a rule at full alpha would sit over the picture for ever (owner, 2026-11-26:
 #: "после того как курсор ушел - фейдом пропадало в течение 2 секунд (только ручка была видна с альфой 20%)").
@@ -194,6 +204,11 @@ class VideoPreviewSurface(QRhiWidget):
         self._divider_left_at: float | None = None
         #: When the pair gate started holding a paint (monotonic), or None while a paint is allowed.
         self._pair_blocked_at: float | None = None
+        #: The pair queue: `milliseconds -> picture`. The renderer is handed a RESULT and a SOURCE of the same moment,
+        #: whichever arrived first, instead of the newest of each - that is what removes "one frame ahead, one frame
+        #: behind" at the seam (owner, 2026-11-26).
+        self._result_queue: dict[int, tuple] = {}
+        self._source_queue: dict[int, tuple] = {}
         #: The time of the pair the RENDERER holds - not of the newest halves. A repaint can come from anywhere (the
         #: compositor, a HUD fade, a resize); those must draw the last pair that belonged together, not a half-updated
         #: one, or the very flicker the gate exists to remove comes back through the side door.
@@ -307,6 +322,8 @@ class VideoPreviewSurface(QRhiWidget):
         elif seq is not None:
             self._shown = ("seq", int(seq))
         self._shown_time = None if media_time is None else float(media_time)
+        self._enqueue(self._result_queue, media_time,
+                      (self._frame, getattr(self, "_shown", None), media_time, index))
         self._request_frame_paint()
         telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=media_time, generation=generation)
 
@@ -347,6 +364,7 @@ class VideoPreviewSurface(QRhiWidget):
         elif seq is not None:
             self._shown = ("seq", int(seq))
         self._shown_time = None if pts is None else float(pts)
+        self._enqueue(self._result_queue, pts, (None, getattr(self, "_shown", None), pts, index, frame))
         self._request_frame_paint()
         telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=pts)
 
@@ -534,6 +552,8 @@ class VideoPreviewSurface(QRhiWidget):
                                         frame=f"{target.width()}x{target.height()}",
                                         diff_pct=f"{relative * 100.0:.2f}")
             self._original = picture
+        if image is not None and self._original is not None:
+            self._enqueue(self._source_queue, media_time, (self._original, media_time, index))
         self._request_frame_paint()
 
     def set_view_mode(self, mode: str) -> None:
@@ -598,6 +618,37 @@ class VideoPreviewSurface(QRhiWidget):
             return False
         return abs(position.x() - x) <= float(scaled_px(SPLIT_GRAB_PX))
 
+    def _enqueue(self, queue: dict, media_time, payload) -> None:
+        """Keep one picture in a pair queue, bounded: a picture whose partner never comes is dropped, not accumulated."""
+        if media_time is None:
+            return
+        queue[int(round(float(media_time) * 1000.0))] = payload
+        while len(queue) > PAIR_QUEUE_MAX:
+            del queue[min(queue)]
+
+    def _pick_pair(self):
+        """The newest result that HAS a partner, as `(result_key, source_key)`; `None` while one is missing.
+
+        GStreamer's aggregator rule, ported: the aggregate step runs only when every input has a buffer, and a pad that
+        misses the wait has its buffers skipped rather than shifting the pair. A result older than the newest source by
+        more than the tolerance will never get a partner, so it is dropped here instead of holding the picture.
+        """
+        if not self._result_queue or not self._source_queue:
+            return None
+        # EXACT, in milliseconds: the two keys are the same moment rounded independently, so a difference of more than a
+        # couple of milliseconds is a different frame. The queue can afford this because it WAITS for the partner instead
+        # of substituting a neighbour - which is the whole point of it (measured 2026-11-26: with the gate's 1.5-frame
+        # tolerance the queue happily paired a frame with its predecessor, `delta_frames=-1.01` on 71 of 154 paints).
+        slack = PAIR_MATCH_MS
+        newest_source = max(self._source_queue)
+        for key in sorted(self._result_queue, reverse=True):
+            nearest = min(self._source_queue, key=lambda candidate: abs(candidate - key))
+            if abs(nearest - key) <= slack:
+                return key, nearest
+            if key < newest_source - slack:
+                del self._result_queue[key]
+        return None
+
     def pair_in_sync(self) -> bool:
         """True when the two halves are the same picture (or there is only one picture to show)."""
         if self._view_mode == "single" or self._original is None:
@@ -612,13 +663,8 @@ class VideoPreviewSurface(QRhiWidget):
             return True
         return abs(float(result) - float(source)) <= PAIR_SYNC_SLACK_S
 
-    def _commit_pair(self) -> None:
-        """Hand the renderer the newest halves, now that they belong together, and ask for the repaint.
-
-        The RENDERER is what draws, so it is what must hold a matched pair: keeping `_frame`/`_original` as the newest
-        for geometry and the readout is free, but handing the renderer a half whose partner has not arrived means every
-        repaint from outside the gate (a compositor frame, the divider's fade) shows the mismatch.
-        """
+    def _commit_newest(self) -> None:
+        """Hand the renderer the NEWEST of each half - `single`, and the timeout valve when no pair can be completed."""
         shown = getattr(self, "_shown", None)
         index = None if shown is None else shown[1]
         if self._frame is not None:
@@ -634,6 +680,41 @@ class VideoPreviewSurface(QRhiWidget):
         self._pair_blocked_at = None
         self._pair_release_count = 0
         self.update()
+
+    def _commit_pair(self) -> bool:
+        """Hand the renderer a RESULT and a SOURCE of the same moment; False when one of them has not arrived yet.
+
+        The RENDERER is what draws, so it is what must hold a matched pair: keeping `_frame`/`_original` as the newest
+        for geometry and the readout is free, but handing the renderer a half whose partner has not arrived means every
+        repaint from outside the gate (a compositor frame, the divider's fade) shows the mismatch. Painting the pair -
+        whichever half arrived first - is what removes "one frame ahead, one frame behind" at the seam.
+        """
+        pair = self._pick_pair()
+        if pair is None:
+            return False
+        result_key, source_key = pair
+        entry = self._result_queue[result_key]
+        picture, source_time, source_index = self._source_queue[source_key]
+        result_image, _shown, result_time = entry[0], entry[1], entry[2]
+        planes = entry[4] if len(entry) > 4 else None
+        if result_image is not None:
+            self._renderer.set_frame(self._preview_frame(result_image, index=source_index, pts=result_time))
+        elif planes is not None:
+            self._renderer.set_frame(planes)
+        else:
+            self._renderer.set_frame(None)
+        self._renderer.set_original(self._preview_frame(picture, index=source_index, pts=source_time))
+        self._committed_result_time = None if result_time is None else float(result_time)
+        self._committed_source_time = None if source_time is None else float(source_time)
+        # Everything at or before the committed pair is spent: the queues stay small and the next pick starts after it.
+        for key in [key for key in self._result_queue if key <= result_key]:
+            del self._result_queue[key]
+        for key in [key for key in self._source_queue if key <= source_key]:
+            del self._source_queue[key]
+        self._pair_blocked_at = None
+        self._pair_release_count = 0
+        self.update()
+        return True
 
     def pair_paint_ready(self, now: float | None = None) -> bool:
         """Whether a repaint may happen NOW: in sync, or the hold window has run out."""
@@ -652,8 +733,10 @@ class VideoPreviewSurface(QRhiWidget):
         at T for one frame, then both at T+1 - a 40 ms window of mismatched halves, repeated, which is the flicker the
         owner reports. The gate holds the newer half until its partner arrives; the timer is the way out when it never does.
         """
-        if self.pair_paint_ready():
-            self._commit_pair()
+        if self._view_mode == "single" or self._original is None:
+            self._commit_newest()
+            return
+        if self._commit_pair():
             return
         if getattr(self, "_pair_blocked_at", None) is None:
             self._pair_blocked_at = time.monotonic()
@@ -684,7 +767,8 @@ class VideoPreviewSurface(QRhiWidget):
         if telemetry.level() >= 2:
             telemetry.event("pair release", result=round(float(getattr(self, "_shown_time", 0.0) or 0.0), 3),
                             source=round(float(getattr(self, "_original_time", 0.0) or 0.0), 3))
-        self._commit_pair()
+        # The timeout's valve: a picture that cannot be paired is still shown, and the log says the pair was missed.
+        self._commit_newest()
 
     def divider_alpha(self, now: float | None = None) -> float:
         """The divider's alpha right now: 1 while the pointer is on it, 0 after `DIVIDER_FADE_S` away from it."""
@@ -1396,8 +1480,10 @@ class VideoPreviewSurface(QRhiWidget):
                 delta_frames = (float(source) - float(result)) * 24.0
                 telemetry.note_pair(delta_frames=delta_frames)
                 if telemetry.level() >= 2:
+                    newest = getattr(self, "_shown_time", None)
+                    lag = "" if newest is None else round((float(newest) - float(result)) * 24.0, 2)
                     telemetry.event("painted pair", result=round(float(result), 3), source=round(float(source), 3),
-                                    delta_frames=round(delta_frames, 2))
+                                    delta_frames=round(delta_frames, 2), lag_frames=lag)
         self._renderer.set_scene(self._preview_scene(target))
         self._renderer.render(command_buffer)
 
