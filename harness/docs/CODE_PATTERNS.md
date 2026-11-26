@@ -133,6 +133,11 @@ test, watch it fail, restore, watch it pass. Six fixes on 2026-11-27 carry that 
 - `state:` on a hidden widget reports its last geometry — a click on a hidden control silently does nothing. Assert the
   effect (`checked`, a log line), never the absence of an error.
 - The seek-reader tests rewrite tracked `scratch/seek-reader-*.txt`; restore them before committing.
+- **Never edit a shell script while it is running.** Bash reads a script incrementally from the file, so an edit that
+  shifts lines makes the running process execute bytes from the wrong offset: on 2026-11-27 `live_matrix.sh` was patched
+  while its own run was in stage B and the second half of that run died with `checked: command not found` /
+  `ich: command not found` - garbage the file never contained. Copy the script under a new name for a re-run, or wait for
+  it to exit; a long instrument run and an edit of the same instrument must never overlap.
 
 ## 11. Ask the pane; do not add a flag
 
