@@ -631,6 +631,10 @@ class PreviewRenderer:
                     self._upload_planes(updates, original, self._original_plane_textures)
                 else:
                     updates.uploadTexture(self._original_texture, original.image)
+                    if mip_minify_enabled():
+                        # Its chain, like the result's: without this the trilinear tap has level 0 only and llvmpipe
+                        # samples black (see `_ensure_original_texture`).
+                        updates.generateMips(self._original_texture)
                 telemetry.note_upload(upload_ms=(time.perf_counter() - upload_started) * 1000.0,
                                       size_bytes=self._pixel_bytes(original))
                 self._original_dirty = False
@@ -993,8 +997,16 @@ class PreviewRenderer:
         if texture is not None:
             texture.destroy()
             self._original_texture = None
-        texture = self._rhi.newTexture(QRhiTexture.Format.RGBA8, size, 1,
-                                       QRhiTexture.Flag.UsedAsTransferSource)
+        # The SAME flags as the result's texture: the compare's two halves are sampled by the same pair of samplers,
+        # and `_sampler_linear` asks for trilinear when mips are on. A single-level texture under that sampler returns
+        # opaque black on llvmpipe - the trap this file documents twice - and the source half is exactly such a
+        # texture: `UsedAsTransferSource` alone left it chainless, so sbs/split drew the result and a BLACK left half
+        # while every upload carried real pixels (owner, 2026-11-26; the single-mode flash stayed correct because it
+        # reuses the RESULT's mipmapped texture).
+        flags = QRhiTexture.Flag.UsedAsTransferSource
+        if mip_minify_enabled():
+            flags |= QRhiTexture.Flag.MipMapped | QRhiTexture.Flag.UsedWithGenerateMips
+        texture = self._rhi.newTexture(QRhiTexture.Format.RGBA8, size, 1, flags)
         if not texture.create():
             raise RuntimeError(f"original texture {size.width()}x{size.height()} was refused by QRhi")
         self._original_texture = texture
