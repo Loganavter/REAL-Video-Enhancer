@@ -114,10 +114,11 @@ VIEW_MODES = ("single", "sbs", "split")
 SPLIT_GRAB_PX = 9
 
 #: A compare mode shows ONE moment, not two: a repaint is allowed only while the two halves are within this. One and a
-#: half frames at 24 fps: a live tail's names are derived from the output file's grid while the compare's source keeps its
-#: own stored PTS, and the two drift by up to a frame back and forth, so half a frame refused pairs that are the same
-#: picture (measured 2026-11-26: every paint a timeout with the tail at 16-20 fps). Beyond a frame and a half the eye reads
-#: two different moments, which is the flicker this gate exists for (owner: "ну типа прям мерцание происходит").
+#: half frames at 24 fps, and the number is a MEASURED trade-off, not a preference: at half a frame the exact source
+#: arrives ~20 ms after its result, the gate holds, and the hold times out on the paints whose source is slower still
+#: (`pair_off` 20-27 of 27 in the bad seconds); at one and a half the gate paints a one-frame-old neighbour instead
+#: (`pair_sub` 7-9 of 20-27, `pair_ahead` 0 - a constant lag, never a wobble). The real fix is pairing by TIME in the
+#: pane (a result queue and a source queue, painted when both hold the same moment), not a wider or narrower gate.
 PAIR_SYNC_SLACK_S = 0.0625
 
 #: ...but never held longer than this. A decoder that never answers, or a pair that is systematically a frame apart,

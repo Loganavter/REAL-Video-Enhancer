@@ -156,6 +156,9 @@ _pair_off = 0
 #: Paints whose halves were within a frame and a half but not within half a frame: the timestamps' own drift, not a
 #: mismatch the eye would see.
 _pair_strict = 0
+#: Of the sub-frame paints: which side of the result the source was on. Alternating values = a wobble, one value = offset.
+_pair_ahead = 0
+_pair_behind = 0
 _uploads = 0
 _bytes = 0
 _gui: list[float] = []
@@ -220,13 +223,19 @@ def note_pair(*, delta_frames: float) -> None:
     distorted the very pairing it was counting), while this counter rides the one line per second that level 1 already
     writes. `pair_off` counts paints whose halves were more than half a frame apart - the flicker, as a number.
     """
-    global _pair_total, _pair_off, _pair_strict
+    global _pair_total, _pair_off, _pair_strict, _pair_ahead, _pair_behind
     _pair_total += 1
     if abs(float(delta_frames)) > 1.5:
         # "Off" is what the EYE would call a different moment: more than a frame and a half (the gate's own tolerance).
         _pair_off += 1
     elif abs(float(delta_frames)) > 0.5:
         _pair_strict += 1
+        # Which way the half is off. The owner's report - "то на кадр впереди, то на кадр позади" - is this pair of
+        # counters alternating; one of them alone growing is a constant offset, not a wobble.
+        if float(delta_frames) > 0.0:
+            _pair_ahead += 1
+        else:
+            _pair_behind += 1
 
 
 def note_paint(*, interval_ms: float | None = None, pass_ms: float | None = None) -> None:
@@ -344,10 +353,10 @@ def _reset(*, session: bool = False) -> None:
     """
     global _frames, _paints, _uploads, _bytes, _drops, _last_snapshot, _started, _last_stats, _shown
     global _snapshot_started, _last_snapshot_at
-    global _pair_total, _pair_off, _pair_strict
+    global _pair_total, _pair_off, _pair_strict, _pair_ahead, _pair_behind
     _frames = _paints = _uploads = _bytes = _drops = 0
     _pair_total = _pair_off = 0
-    _pair_strict = 0
+    _pair_strict = _pair_ahead = _pair_behind = 0
     if session:
         # `shown` is a property of the PANE (what it is painting right now), not a per-window counter: clearing it on
         # every flush made an idle second report `shown=-` while the picture was still on screen (measured 2026-11-24).
@@ -428,6 +437,7 @@ def maybe_stats(now: float | None = None, *, force: bool = False) -> bool:
         f"up_ms={_summary(_upload)} pass_ms={_summary(_pass)} gui_ms={_summary(_gui)} "
         f"int_ms={_summary(_intervals)} drop={_drops} shown={_shown_text()} "
         f"pair_off={_pair_off}/{_pair_total} pair_sub={_pair_strict} "
+        f"pair_ahead={_pair_ahead} pair_behind={_pair_behind} "
         f"seek_ms={_summary(_seek_ms)} "
         f"mb={_bytes / 1e6:.1f} window_s={minutes:.1f}"
     )

@@ -3352,11 +3352,16 @@ class ProcessTab:
         pool = getattr(self, "_source_pool", None) or {}
         if not pool:
             return None
-        slack = 0.5 / self._compare_fps()
+        # NEAREST, not "the newest at or before": a live tail's names sit a fraction of a frame off the source's grid, so
+        # "at or before" alternated between the frame on either side of the playhead as that fraction drifted - which is
+        # exactly the "one frame ahead, one frame behind" the owner sees (2026-11-26). The nearest frame is the same
+        # choice for a given offset, so the pick cannot flip while the offset holds.
         best = None
+        best_distance = None
         for pts in pool:
-            if pts <= playhead + slack and (best is None or pts > best):
-                best = pts
+            distance = abs(float(pts) - float(playhead))
+            if best_distance is None or distance < best_distance or (distance == best_distance and pts < best):
+                best, best_distance = pts, distance
         if best is None:
             return None
         index, image = pool[best]
