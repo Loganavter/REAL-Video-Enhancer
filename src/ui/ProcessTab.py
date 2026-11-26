@@ -1293,16 +1293,21 @@ class ProcessTab:
             return True
 
     def _clip_duration(self) -> float:
-        """The clip's length in seconds, as far as the pane knows it: the opened file's duration, else frames / fps."""
-        duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
-        if duration > 0.0:
-            return duration
-        options = getattr(self, "currentRenderOptions", None)
-        frames = float(getattr(options, "videoFrameCount", 0) or 0)
-        fps = float(getattr(options, "videoFps", 0) or 0)
-        if frames > 0.0 and fps > 0.0:
-            return frames / fps
-        return 0.0
+        """The clip's length in seconds (`preview.facts.clip_duration` is the one derivation; the page names inputs).
+
+        The decoder holds the opened file's length - it is what its `opened` signal copied into `_preview_duration` - so
+        a decoder that can answer is passed as-is, and that same opened length stands in when there is none. The queue
+        pane's own length is not passed yet: plan P3 owns that switch, and until then the queue's bar keeps today's
+        numbers.
+        """
+        from types import SimpleNamespace
+
+        from .preview.facts import clip_duration
+
+        decoder = getattr(self, "_preview_decoder", None)
+        if decoder is None or float(getattr(decoder, "duration", 0.0) or 0.0) <= 0.0:
+            decoder = SimpleNamespace(duration=float(getattr(self, "_preview_duration", 0.0) or 0.0))
+        return clip_duration(getattr(self, "currentRenderOptions", None), decoder)
 
     #: A press whose frame never lands (a decode that died, a target the tail cannot reach) must still close, or the
     #: thumb stands on the requested time forever. The delta in the settle line says the picture did not get there.
@@ -2049,42 +2054,30 @@ class ProcessTab:
         return PreviewBackendKind.NONE
 
     def _preview_seek_ceiling(self, kind, duration: float) -> float | None:
-        """The furthest content time the transport may ask for.
+        """The furthest content time the transport may ask for, in seconds (`preview.facts.reach_seconds`).
 
         A finished file and a feed that renders any frame on demand reach the whole clip; a growing file's tail only
-        has what the renderer has written (the state then defaults to the produced edge). Mirrors what the pane's own
-        strip is told in `_apply_seek_ceiling`.
+        has what the renderer has written, so it reaches the produced edge. Mirrors what the pane's own strip is told in
+        `_apply_seek_ceiling`.
         """
-        from .preview.state import PreviewBackendKind
+        from .preview.facts import reach_seconds
 
-        if duration <= 0.0:
-            return None
-        if kind in (PreviewBackendKind.FINISHED_FILE, PreviewBackendKind.DISPLAY_FEED):
-            return duration
-        if self._display_can_seek_any_frame() and not self._queue_owns_pane():
-            # A preview with a usable block answers a press past the edge with one decoded frame (`_request_display_seek`).
-            return duration
-        return None
+        produced = self._produced_for_band(kind, duration, fraction=self._live_produced_fraction(), rendering=True)
+        return reach_seconds(kind, duration=duration, produced=produced,
+                             any_frame=self._display_can_seek_any_frame() and not self._queue_owns_pane())
 
     def _produced_for_band(self, kind, duration: float, *, fraction: float, rendering: bool) -> float:
-        """What the strip's BLUE means: seconds the upscaler has produced.
+        """What the strip's BLUE means: seconds the upscaler has produced (`preview.facts` is the one derivation).
 
         A finished file is fully produced. Everything else is a live render and the band is its progress - including an
-        EXPORT whose pane follows the display feed: that pane used to report `produced = duration`, so a render at 14 %
-        showed the whole bar blue and the grey "not upscaled yet" half never appeared (owner, 2026-11-26, screenshot of
-        an export at frame 67/493 with a fully blue strip). The feed can seek anywhere on demand, but that is the
-        CEILING (`_preview_seek_ceiling`), not the produced share.
+        EXPORT whose pane follows the display feed: that pane used to report the whole clip as produced, so a render at
+        14 % showed the whole bar blue and the grey "not upscaled yet" half never appeared (owner, 2026-11-26,
+        screenshot of an export at frame 67/493 with a fully blue strip). The feed can seek anywhere on demand, but that
+        is the CEILING (`_preview_seek_ceiling`), not the produced share.
         """
-        from .preview.state import PreviewBackendKind
+        from .preview.facts import produced_seconds
 
-        if duration <= 0.0:
-            return 0.0
-        if kind is PreviewBackendKind.FINISHED_FILE:
-            return duration
-        if kind is PreviewBackendKind.DISPLAY_FEED and not rendering:
-            # The render is over and the feed is showing the finished file: there is nothing left to produce.
-            return duration
-        return max(0.0, min(1.0, float(fraction))) * duration
+        return produced_seconds(kind, fraction=fraction, duration=duration, rendering=rendering)
 
     def _push_preview_state(self) -> None:
         """Feed the controller the facts it cannot see: the pane's numbers, its owners, the probe's frame counts."""
