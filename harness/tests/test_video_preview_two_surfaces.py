@@ -24,6 +24,7 @@ from PySide6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from src.ui.widgets.video_preview import VIEW_MODES, VideoPreviewSurface  # noqa: E402
+from src.ui.preview.source_register import ResultPicture, SourcePicture  # noqa: E402
 
 FRAME_SIZE = (1600, 900)
 PANE_SIZE = (800, 600)
@@ -480,15 +481,126 @@ def test_the_last_step_names_both_halves_in_one_line(surface):
         surface.set_view_mode("single")
         surface.set_frame(_picture(*FRAME_SIZE), index=221, media_time=9.218)
         surface._showing_original = True
+        # The source arrives for ITS OWN moment; the half-frame refusal is keyed on the result's moment, so clear it for
+        # the handover. The draw line below still names both halves - that is the point of this test.
+        surface._shown_time = None
         surface._note_original_ask(9.301)
         surface.set_original(_picture(*FRAME_SIZE, "#30a028"), media_time=9.301, index=223)
+        surface._shown_time = 9.218
         surface._log_draw(half="original", picture=surface._original)
     finally:
         telemetry.set_writer(None)
 
     line = [one for one in lines if one.startswith("preview: draw ")][-1]
     for piece in ("mode=single", "half=original", "t=9.301", "idx=223",
-                  "result_t=9.218", "result_idx=221", "fp=", "ask_ms=", "ask_wall="):
+                  "result_t=9.218", "result_idx=221", "result_moment=9.218", "generation=0",
+                  "fp=", "ask_ms=", "ask_wall="):
         assert piece in line, f"{piece!r} is missing from the draw line: {line}"
     assert surface.original_shown_time() == 9.301
     assert surface.original_shown() == ("frame", 223), "the source half keeps the identity its decoder gave it"
+
+
+def test_set_source_shows_exactly_that_moments_picture_or_a_gap(surface):
+    """`set_source` is the pane's only source API, and it FAILS CLOSED.
+
+    A snapshot whose moment differs from the result's own moment by more than half a frame is refused: the pane shows a
+    GAP, never the previous picture (which would be a neighbour of the moment the result is showing). This is the guard
+    that makes a stale `_source_shown_pts`-style memo impossible to reintroduce: a caller cannot assert "already shown",
+    it can only name a moment.
+    """
+    surface.set_frame(_picture(*FRAME_SIZE), media_time=5.0)
+    assert surface.shown_moment() == pytest.approx(5.0), "the result names its own moment"
+
+    good = _picture(*FRAME_SIZE, "#402060")
+    surface.set_source(SourcePicture(moment=5.0, picture=good, origin="block"))
+    assert surface._original is not None, "the exact moment's picture is shown"
+    assert surface.original_shown_time() == pytest.approx(5.0)
+    assert surface._original.pixelColor(1, 1) == QColor("#402060")
+
+    # The SAME moment again is one handover, not one repaint per producer arrival.
+    before = surface._original
+    surface.set_source(SourcePicture(moment=5.0, picture=good, origin="decoder"))
+    assert surface._original is before
+
+    # Half a frame of drift is still the same picture (the tolerance the register also uses).
+    frame = 1.0 / 24.0
+    surface.set_source(SourcePicture(moment=5.0 + frame / 2.0, picture=good, origin="decoder"))
+    assert surface._original is not None
+
+    # A snapshot for ANOTHER moment is refused, and the old picture goes with it: a gap, not a neighbour.
+    surface.set_source(SourcePicture(moment=9.0, picture=_picture(*FRAME_SIZE, "#30a028"), origin="decoder"))
+    assert surface._original is None
+    assert surface.original_shown_time() is None
+
+    # An explicit None is a gap too.
+    surface.set_source(SourcePicture(moment=5.0, picture=good, origin="decoder"))
+    surface.set_source(None)
+    assert surface._original is None
+
+
+def test_set_result_refuses_an_older_generation_and_keeps_the_last_picture(surface):
+    """The result half carries its own identity: a frame from a previous render/file/seek cannot paint over the new one.
+
+    A refusal keeps the picture that is on screen and marks the half as a GAP; nothing is queued for the refused
+    result, so no source can pair with it.
+    """
+    surface.set_view_mode("split")
+    first = _picture(*FRAME_SIZE, "#402060")
+    surface.set_result(ResultPicture(moment=1.0, picture=first, generation=4))
+    assert surface.shown_moment() == pytest.approx(1.0)
+    assert surface._result_generation == 4
+    assert surface._frame.pixelColor(1, 1) == QColor("#402060")
+
+    stale = _picture(*FRAME_SIZE, "#30a028")
+    surface.set_result(ResultPicture(moment=1.042, picture=stale, generation=3))
+
+    assert surface._frame.pixelColor(1, 1) == QColor("#402060"), "the last picture stays"
+    assert surface.shown_moment() == pytest.approx(1.0), "and so does its moment"
+    assert surface._result_gap is True, "the half is a GAP after a refusal"
+    assert 1042 not in surface._result_queue, "a refused result is never queued for a pair"
+
+
+def test_set_result_refuses_a_late_frame_within_one_generation(surface):
+    """A frame older than the picture on screen, from the SAME generation, is late and must not paint."""
+    surface.set_view_mode("split")
+    surface.set_result(ResultPicture(moment=2.0, picture=_picture(*FRAME_SIZE, "#402060"), generation=7))
+    surface.set_result(ResultPicture(moment=1.958, picture=_picture(*FRAME_SIZE, "#30a028"), generation=7))
+    assert surface._frame.pixelColor(1, 1) == QColor("#402060")
+    assert surface.shown_moment() == pytest.approx(2.0)
+    assert surface._result_gap is True
+
+    # A NEW generation resets the baseline: a lower moment is a legitimate seek result, not a late frame.
+    surface.set_result(ResultPicture(moment=0.5, picture=_picture(*FRAME_SIZE, "#204020"), generation=8))
+    assert surface.shown_moment() == pytest.approx(0.5)
+    assert surface._result_generation == 8
+    assert surface._result_gap is False
+
+
+def test_set_result_refuses_a_nameless_picture_while_a_pair_is_required(surface):
+    """`pts=None` must not inherit the previous pane moment and pair with a stale source."""
+    surface.set_view_mode("split")
+    before = surface._frame
+    surface.set_result(ResultPicture(moment=None, picture=_picture(*FRAME_SIZE, "#402060"), generation=1))
+    assert surface._frame is before, "nothing was accepted over the picture that was already there"
+    assert surface._result_gap is True
+
+    # `single` has no pair to form, so a nameless result is still the pane's one picture.
+    surface.set_view_mode("single")
+    surface.set_result(ResultPicture(moment=None, picture=_picture(*FRAME_SIZE, "#402060"), generation=1))
+    assert surface._frame is not None
+    assert surface.shown_moment() is None
+
+
+def test_set_source_refuses_a_picture_from_another_generation(surface):
+    """The source rule is identity too: same generation as the result, then its moment within half a frame."""
+    surface.set_view_mode("split")
+    surface.set_result(ResultPicture(moment=3.0, picture=_picture(*FRAME_SIZE), generation=5))
+
+    stale = SourcePicture(moment=3.0, picture=_picture(*FRAME_SIZE, "#30a028"), origin="decoder", generation=4)
+    surface.set_source(stale)
+    assert surface._original is None, "a previous generation's picture is a gap, not an answer"
+
+    current = SourcePicture(moment=3.0, picture=_picture(*FRAME_SIZE, "#204020"), origin="decoder", generation=5)
+    surface.set_source(current)
+    assert surface._original is not None
+    assert surface._original.pixelColor(1, 1) == QColor("#204020")
