@@ -604,3 +604,36 @@ def test_set_source_refuses_a_picture_from_another_generation(surface):
     surface.set_source(current)
     assert surface._original is not None
     assert surface._original.pixelColor(1, 1) == QColor("#204020")
+
+
+def test_a_compare_mode_never_hands_the_renderer_a_lone_result(surface):
+    """A compare mode paints a PAIR or nothing - the gate may not open because one half is missing.
+
+    Audit 2026-11-27 (`video_preview.py:997`): the gate called `_commit_newest()` whenever `_original is None`, which is
+    the state at every source gap and before the first source frame, so the upscale was painted alone and the pair
+    followed one frame later. Owner: "оригинал не отрисовывается одновременно с апскейлом в режиме side by side".
+    """
+    surface.set_view_mode("sbs")
+    surface.set_progress(0.0, 0.0, playhead=1.0, duration=10.0)
+    surface.set_original(None)                       # the source half is a GAP
+    committed: list[tuple[str, object]] = []
+    surface._renderer.set_frame = lambda frame: committed.append(("frame", frame))
+    surface._renderer.set_original = lambda original: committed.append(("orig", original))
+
+    surface.set_result(ResultPicture(moment=1.0, picture=_picture(*FRAME_SIZE, "#3060a0"), generation=0))
+    assert committed == [], "a result without its source must not be handed over at all - not alone, not 'first'"
+
+    surface.set_source(SourcePicture(moment=1.0, picture=_picture(*FRAME_SIZE), origin="decoder", generation=0))
+    kinds = [kind for kind, _ in committed]
+    assert kinds == ["frame", "orig"] or kinds[-2:] == ["frame", "orig"], (
+        "the pair is what reaches the renderer, together")
+
+
+def test_pair_in_sync_refuses_to_call_half_a_picture_synced(surface):
+    """`pair_in_sync()` answering True with no source half is the lie that let the gate commit the result alone."""
+    surface.set_view_mode("sbs")
+    surface.set_frame(_picture(*FRAME_SIZE), media_time=1.0)
+    surface.set_original(None)
+    assert surface.pair_in_sync() is False, "one half is not a synced pair"
+    surface.set_original(_picture(*FRAME_SIZE), media_time=1.0)
+    assert surface.pair_in_sync() is True, "two halves of one moment are"

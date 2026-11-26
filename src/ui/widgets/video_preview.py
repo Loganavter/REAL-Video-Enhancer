@@ -895,9 +895,16 @@ class VideoPreviewSurface(QRhiWidget):
         return None
 
     def pair_in_sync(self) -> bool:
-        """True when the two halves are the same picture (or there is only one picture to show)."""
-        if self._view_mode == "single" or self._original is None:
+        """True when the two halves are the same picture (or there is only one picture to show).
+
+        In a compare mode, NO source half is not "in sync": it is half a picture, and answering True here was the lie
+        that opened the gate for exactly the state it exists to prevent (audit 2026-11-27, `video_preview.py:997` - the
+        compare committed the result alone and this said the halves agreed). `single` has one surface by definition.
+        """
+        if self._view_mode == "single":
             return True
+        if self._original is None:
+            return False
         # TIME, not frame numbers: the tail's index and the source decoder's index do not share a base even with both on
         # content time (measured 2026-11-26: every paint refused when the gate compared indices), while the timestamps
         # agree to within the drift the slack below covers.
@@ -994,7 +1001,24 @@ class VideoPreviewSurface(QRhiWidget):
         at T for one frame, then both at T+1 - a 40 ms window of mismatched halves, repeated, which is the flicker the
         owner reports. The gate holds the newer half until its partner arrives; the timer is the way out when it never does.
         """
-        if self._view_mode == "single" or self._original is None:
+        if self._view_mode == "single":
+            self._commit_newest()
+            return
+        if self._original is None:
+            # A compare mode paints a PAIR or nothing. This branch used to call `_commit_newest()` - so at every source
+            # gap, and before the very first source frame, the pane handed the renderer the upscaled result ALONE and
+            # then committed the pair a frame later (owner, 2026-11-27: "оригинал не отрисовывается одновременно с
+            # апскейлом в режиме side by side"). The pair that is already on screen stays until a source for the new
+            # moment arrives; the hold window is the only way out, because a source that never comes must not blank
+            # the whole pane for ever (that is the defect the source-only branch above already answers).
+            blocked = getattr(self, "_pair_blocked_at", None)
+            now = time.monotonic()
+            if self._has_picture():
+                if blocked is None:
+                    self._pair_blocked_at = now
+                    return
+                if (now - float(blocked)) < PAIR_SYNC_HOLD_S:
+                    return
             self._commit_newest()
             return
         if not self._has_picture():
