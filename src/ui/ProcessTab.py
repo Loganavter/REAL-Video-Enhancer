@@ -3462,6 +3462,12 @@ class ProcessTab:
                 best, best_distance = pts, distance
         if best is None:
             return None
+        # ...and being NEAREST is not answering: the prune keeps +-0.5 s (8-12 frames at 24 fps), so a pool whose whole
+        # content sits behind a seek still had a "nearest" frame, and the half then stayed up to a dozen frames off while
+        # every flag read fine (the seam audit of 9c2c837c, 2026-11-26: "не следит за сиком" without any freeze). Nothing
+        # beyond a frame and a half answers for this playhead; the fill then asks at it, which is the only way a gap closes.
+        if best_distance is not None and best_distance > (1.5 / max(1.0, self._compare_fps())):
+            return None
         index, image = pool[best]
         return best, index, image
 
@@ -3498,6 +3504,11 @@ class ProcessTab:
                     return       # the LMB flash has its own path and its own timing
             except Exception:
                 return
+        if self._source_feed_is_live():
+            # The render block is publishing this moment's source itself: handing the pane the decoder's picture as well
+            # is the double work that block exists to remove, and it can only make the two halves disagree (the same
+            # reason `_source_fill` stands down). The pane follows the block while it is live.
+            return
         self._source_prune(playhead)
         chosen = self._source_pool_for(playhead)
         if chosen is None:
@@ -3521,7 +3532,20 @@ class ProcessTab:
         # appearance of one freeze: `83f8212e` (the pool in the FUTURE, so the fill read "lead full"), `95b3c7bc` (the
         # render block marked alive before its picture was accepted, so the decoder stood down) and this one - each a
         # flag asserting "already supplied" with no test against what the pane actually holds.
-        if getattr(pane, "_original", None) is None:
+        # ...and "already shown" has to mean THE MOMENT, not merely "something is there": the render block's side
+        # channel calls `set_original` directly, so a pane can hold a picture this tab never handed over - possibly of a
+        # different playhead. The pane names its own source time (`original_shown_time`), so ask it. While the block is
+        # live it is the legitimate supplier and the tab must not fight it.
+        pane_time = None
+        shown_time = getattr(pane, "original_shown_time", None)
+        if callable(shown_time):
+            try:
+                pane_time = shown_time()
+            except Exception:
+                pane_time = None
+        stale = (pane_time is not None
+                 and abs(float(pane_time) - float(pts)) > 1.5 / max(1.0, self._compare_fps()))
+        if getattr(pane, "_original", None) is None or (stale and not self._source_feed_is_live()):
             shown_pts = self._source_shown_pts = None
         if shown_pts is not None and abs(pts - shown_pts) < 1e-6:
             return

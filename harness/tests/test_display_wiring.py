@@ -358,6 +358,7 @@ class _Pane:
         #: The PANE's own picture, like the real widget's: `set_original(None)` clears it, and the tab now reads it to
         #: decide whether its "already shown" memo still describes the pane (see `_source_show`).
         self._original = None
+        self._original_time = None
 
     def isVisible(self) -> bool:  # noqa: N802 - Qt spelling
         return bool(self.visible)
@@ -369,7 +370,12 @@ class _Pane:
 
     def set_original(self, image, *, media_time: float | None = None, index: int | None = None) -> None:
         self._original = image
+        self._original_time = media_time
         self.originals.append((image, media_time, index))
+
+    def original_shown_time(self) -> float | None:
+        """The moment the pane's SOURCE half carries - the tab now checks it, not just "is there a picture"."""
+        return self._original_time
 
     def set_progress(self, **values) -> None:
         self.progress.append(values)
@@ -984,6 +990,56 @@ def test_a_pane_that_lost_its_picture_is_supplied_again_even_on_a_paused_playhea
     before = len(pane.originals)
     tab._source_show(0.25)
     assert len(pane.originals) == before, "the same moment is not handed over twice while the pane already shows it"
+
+
+def test_a_source_picture_of_a_DIFFERENT_moment_is_replaced_unless_the_block_is_supplying():
+    """The pane can be moved by the render block's side channel, so "holds a picture" is not "holds THIS moment".
+
+    The first memo fix only tested `is None`, and the audit found the hole: a pane holding a picture of another playhead
+    satisfied it and the decoder never corrected it. The pane names its own source time, so the check asks for the
+    moment - and stands down while the block is live, because then the block is the legitimate supplier.
+    """
+    pane = _Pane()
+    pane.mode = "sbs"
+    pane.set_original("block picture", media_time=9.5)          # something else put a picture here
+    tab = _tab(pane=pane, preview=False, paused=True, alive=False, reader=_Reader())
+    tab._source_pool_put(0.25, 6, "pool picture")
+    tab._source_shown_pts = 0.25                                # and the memo believes it already shipped this moment
+
+    tab._source_feed_alive_at = None                            # the block is NOT supplying
+    tab._source_show(0.25)
+
+    assert pane.originals[-1][1] == pytest.approx(0.25), "a stale source picture is replaced by the pool's moment"
+    assert pane.originals[-1][0] == "pool picture"
+
+    # While the block is live it owns the half: the tab must not overwrite it.
+    pane.set_original("block picture", media_time=9.5)
+    tab._source_shown_pts = None
+    tab._source_feed_alive_at = time.monotonic()
+    tab._source_show(0.25)
+    assert pane.originals[-1][0] == "block picture", "the live block is the supplier; the decoder stands down"
+
+
+def test_a_pool_frame_far_off_the_playhead_does_not_answer_for_it():
+    """Nearest is not answering: the prune keeps +-0.5 s, so a pool left behind a seek still had a "nearest" frame.
+
+    The half then sat up to a dozen frames off while every flag read fine - the owner's "не следит за сиком" without a
+    freeze (seam audit of `9c2c837c`). Nothing beyond a frame and a half answers; the fill asks at the playhead instead,
+    which is the only way the gap closes.
+    """
+    pane = _Pane()
+    pane.mode = "sbs"
+    tab = _tab(pane=pane, preview=False, paused=True, alive=False, reader=_Reader())
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=24)
+
+    tab._source_pool_put(0.10, 3, "twelve frames behind")
+
+    assert tab._source_pool_for(0.50) is None, "12 frames away is not this playhead's partner"
+
+    tab._source_pool_put(0.48, 12, "within a frame and a half")
+
+    chosen = tab._source_pool_for(0.50)
+    assert chosen is not None and chosen[0] == pytest.approx(0.48), "half a frame off still answers"
 
 
 def test_the_default_box_is_the_probe_constant():

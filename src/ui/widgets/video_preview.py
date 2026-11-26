@@ -547,6 +547,10 @@ class VideoPreviewSurface(QRhiWidget):
             self._original_shown = None
             self._original_time = None
             self._original_changed = False
+            # The ask-ticket goes with the picture: left behind, `_request_standing_original` would suppress the next ask
+            # for the same playhead and the half would wait for the playhead to MOVE to come back (the same latch shape
+            # as `_source_shown_pts`, in this file; audit 2026-11-26).
+            self._original_requested_at = None
         else:
             # The source half of a compare mode: a picture the pane accepted, counted in the window's `frames`.
             telemetry.note_frame()
@@ -921,7 +925,11 @@ class VideoPreviewSurface(QRhiWidget):
             return
         _, _, playhead, _ = self._progress
         playhead = float(playhead)
-        if self._original is not None and playhead == self._original_requested_at:
+        # Suppress only when the pane HOLDS the moment it asked for: the ask recorded below is a request, not a picture,
+        # and `set_original(None)` used not to clear it - the fourth latch of the same shape (seam audit, 2026-11-26).
+        pane_time = self.original_shown_time()
+        if (self._original is not None and playhead == self._original_requested_at
+                and pane_time is not None and abs(float(pane_time) - float(playhead)) <= 0.1):
             return
         self._original_requested_at = playhead
         self._note_original_ask(playhead)
