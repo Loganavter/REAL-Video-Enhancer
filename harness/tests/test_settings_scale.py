@@ -1,10 +1,9 @@
-"""The settings pages follow the UI scale: rows, controls, gaps and the inline rich text.
+"""The settings pages follow the UI scale: rows, controls, gaps and the video-info pane's blocks.
 
 Why this file exists (2026-11-24): wave 2 made the process column grow and the page body scroll, but the settings
 pages still stated the Designer's pixel geometry. At factor 1.5 a 30 px row held a 12 pt label's 24 px line and clipped
 it, and the General tab's information pane stated ``font-size:10pt`` on every span - Qt's rich-text engine treats an
-inline size as ABSOLUTE, so that body stayed at 10 pt while every label around it grew (the same body measured the same
-block height with a 12 px and a 24 px document font).
+inline size as ABSOLUTE, so that body stayed at 10 pt while every label around it grew.
 
 The pins below are the wave's contract:
 
@@ -12,8 +11,12 @@ The pins below are the wave's contract:
   the output path's floor 25 -> 38 -> 50, the value fields 75x30 -> 112x45 -> 150x60, the separator 3 -> 4 -> 6,
   and the design gaps 11/10/9/6 -> 16/15/14/9 -> 22/20/18/12;
 * 1.0 is unchanged - the same numbers today, so the look does not move when the feature is off;
-* the General tab's rich body is built at DESIGN x factor (11/10 pt -> 16.5/15 pt -> 22/20 pt), which keeps 1.0
-  pixel-identical and makes the body grow with everything else.
+* the video-info pane's toolkit labels keep design pixel sizes (the toolkit scales them once) and its hairlines/insets
+  are stated through ``scaled_px`` at apply time.
+
+The pane used to be one `RichTextView` document whose ``_markup``/``label.height()`` this file pinned. Variant A
+replaced it with toolkit `Text`/`SurfacePanel`/`ProgressBar` blocks (`harness/tests/test_general_settings_info.py`
+owns their content contract), so the rich-body pins here became the block-scale pins at the bottom of the file.
 
 Everything is offscreen and builds the real pages; the compiled resource blob is stubbed because a test tree has no
 build step for it.
@@ -58,13 +61,9 @@ ROW_GAP = {1.0: 10, 1.5: 15, 2.0: 20}
 SECTION_INSET = {1.0: 9, 1.5: 14, 2.0: 18}
 TIGHT_GAP = {1.0: 6, 1.5: 9, 2.0: 12}
 
-#: The rich body's design point sizes, before the factor: the Designer's 11 pt body and 10 pt spans.
-INFO_BODY_PT = 11
-INFO_TEXT_PT = 10
-
-#: What the nine-line body measures at each factor (the 10 px rich inset plus one line per row: 18 px at 10 pt,
-#: 28 at 15 pt, 37 at 20 pt). Measured off the real pane, not derived.
-INFO_BODY_HEIGHT = {1.0: 172, 1.5: 262, 2.0: 343}
+#: The video-info pane's design geometry, before the factor: its 1 px hairline and its 12 px card inset.
+INFO_HAIRLINE_PX = 1
+INFO_CARD_INSET_PX = 12
 
 
 @pytest.fixture(autouse=True)
@@ -153,9 +152,9 @@ def test_at_factor_one_the_pages_state_todays_numbers(qapp):
     assert tab3.precisionSettingsContainer.spacing() == 10
     assert tab3.precisionSettingsContainer_3.spacing() == 10
 
-    markup = general.inputVideoInfoTextEdit._markup
-    assert "font-size:11pt" in markup, "the 1.0 body must keep the Designer's 11 pt"
-    assert "font-size:10pt" in markup, "the 1.0 spans must keep the Designer's 10 pt"
+    # The video-info pane's 1.0 geometry: a 1 px hairline and the card's 12 px inset, resolved design px.
+    assert general.infoHairlines[0].height() == INFO_HAIRLINE_PX
+    assert general.infoCellLayouts[0].contentsMargins().left() == INFO_CARD_INSET_PX
 
 
 # --- the rows and controls ---------------------------------------------------------------------------------------
@@ -221,29 +220,24 @@ def test_tab_3_gaps_follow_the_factor(qapp, factor):
         assert layout.spacing() == ROW_GAP[factor]
 
 
-# --- the rich-text body ------------------------------------------------------------------------------------------
+# --- the video-info pane's blocks --------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("factor", FACTORS)
-def test_the_info_body_is_built_at_design_times_factor(qapp, factor):
-    """An inline ``font-size`` is absolute, so the page must state the scaled point size itself."""
-    markup = _general(qapp, factor).inputVideoInfoTextEdit._markup
+def test_the_info_pane_blocks_follow_the_factor(qapp, factor):
+    """The pane's toolkit labels scale once (design px -> the toolkit's resolution) and its hairlines/insets scale."""
+    from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 
-    assert f"font-size:{INFO_TEXT_PT * factor:g}pt" in markup, (
-        f"at factor {factor} the spans must state {INFO_TEXT_PT * factor:g}pt; an unscaled 10 pt span is absolute "
-        "and keeps the body at the design size")
-    assert f"font-size:{INFO_BODY_PT * factor:g}pt" in markup
+    from src.ui.typography import CAPTION_PT, GROUP_TITLE_PT, label_px
 
+    general = _general(qapp, factor)
 
-@pytest.mark.parametrize("factor", FACTORS)
-def test_the_info_body_grows_with_the_factor(qapp, factor):
-    """The nine-line body's rendered height tracks the factor - the pin is the ink, not the markup string."""
-    pane = _general(qapp, factor).inputVideoInfoTextEdit
-    height = pane.label.height()
-
-    assert height == INFO_BODY_HEIGHT[factor], (
-        f"at factor {factor} the nine-line body measures {height} px, not {INFO_BODY_HEIGHT[factor]}: "
-        "the inline font-size must follow the factor")
+    assert general.infoSizeIn.font().pixelSize() == scaled_px(label_px(GROUP_TITLE_PT)), (
+        f"at factor {factor} the headline is {general.infoSizeIn.font().pixelSize()} px, not the design title size "
+        "resolved once by the toolkit")
+    assert general.infoFactValues["Encoder:"].font().pixelSize() == scaled_px(label_px(CAPTION_PT))
+    assert general.infoHairlines[0].height() == max(INFO_HAIRLINE_PX, scaled_px(INFO_HAIRLINE_PX))
+    assert general.infoCellLayouts[0].contentsMargins().left() == scaled_px(INFO_CARD_INSET_PX)
 
 
 # --- a live change -----------------------------------------------------------------------------------------------
@@ -259,7 +253,7 @@ def test_a_live_factor_change_reaches_every_page(qapp):
     assert general.verticalLayout_32.spacing() == 11
     assert tab2.scene_change_detection_threshold.minimumWidth() == 75
     assert tab3.precisionSettingsContainer.spacing() == 10
-    assert "font-size:10pt" in general.inputVideoInfoTextEdit._markup
+    assert general.infoHairlines[0].height() == 1
 
     UiScale.get_instance().set_factor(1.5)
     for _ in range(6):
@@ -272,8 +266,8 @@ def test_a_live_factor_change_reaches_every_page(qapp):
     assert tab2.scene_change_detection_threshold.minimumWidth() == 112
     assert tab2.scene_change_detection_threshold.minimumHeight() == 45
     assert tab3.precisionSettingsContainer.spacing() == 15
-    assert "font-size:15pt" in general.inputVideoInfoTextEdit._markup
-    assert general.inputVideoInfoTextEdit.label.height() == 262
+    assert general.infoHairlines[0].height() == 2
+    assert general.infoCellLayouts[0].contentsMargins().left() == 18
 
     UiScale.get_instance().set_factor(2.0)
     for _ in range(6):
@@ -285,5 +279,5 @@ def test_a_live_factor_change_reaches_every_page(qapp):
     assert general.verticalLayout_32.spacing() == 22
     assert tab2.scene_change_detection_threshold.minimumWidth() == 150
     assert tab3.precisionSettingsContainer.spacing() == 20
-    assert "font-size:20pt" in general.inputVideoInfoTextEdit._markup
-    assert general.inputVideoInfoTextEdit.label.height() == 343
+    assert general.infoHairlines[0].height() == 2
+    assert general.infoCellLayouts[0].contentsMargins().left() == 24

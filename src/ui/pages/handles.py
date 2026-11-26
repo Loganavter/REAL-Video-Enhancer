@@ -119,7 +119,6 @@ class GeneralSettingsHandles:
     # `widget_5` keeps its generated object name (captures and the page audits read it): it is the scroll area's outer
     # frame, and the window toggles it with the row's controls while a render runs.
     generalSettings: "QWidget"
-    inputVideoInfoTextEdit: "RichTextView"
     widget_5: "QWidget"
     scrollArea_4: "SurfaceScrollArea"
     scrollAreaWidgetContents_4: "QWidget"

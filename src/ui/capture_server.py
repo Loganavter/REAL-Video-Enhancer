@@ -153,6 +153,27 @@ def _dispatch_safely(dispatch, verb: str, request_id: str | None, path: str) -> 
         print(f"capture-server: {path} ({verb!r}) failed: {type(exc).__name__}: {exc}", flush=True)
 
 
+def _general_page(window):
+    """The General settings page builder (owner of `video_info_text`), or None on an unbuilt tree.
+
+    The pane is no longer one widget whose `toPlainText()` says "a video is loaded"; the page answers that question
+    through its own API, so the probe walks shell -> process page -> general page instead of reading a control.
+    """
+    shell = getattr(window, "shell", None)
+    return getattr(getattr(shell, "procPage_page", None), "generalSettings_page", None)
+
+
+def _video_info_text(window) -> str:
+    """The pane's nine rows as plain text, or "" when nothing is loaded (the probe's own question)."""
+    page = _general_page(window)
+    if page is None:
+        return ""
+    try:
+        return str(page.video_info_text() or "")
+    except Exception:
+        return ""
+
+
 def page_request_error(wanted: str, known_pages) -> str | None:
     """The sentence `handle()`'s fallthrough must answer with, or None when `wanted` IS a page request.
 
@@ -1677,8 +1698,7 @@ def install(window) -> None:
             QTimer.singleShot(200, press_start)
 
         def wait_loaded(ticks: int = 0) -> None:
-            info = window.page_handles.general.inputVideoInfoTextEdit
-            loaded = bool(info.toPlainText().strip()) or getattr(window, "videoLength", 1) != 1
+            loaded = bool(_video_info_text(window).strip()) or getattr(window, "videoLength", 1) != 1
             if loaded:
                 press_add()
                 return
@@ -1851,8 +1871,7 @@ def install(window) -> None:
             QTimer.singleShot(400, wait_finish)
 
         def wait_loaded(ticks: int = 0) -> None:
-            info = window.page_handles.general.inputVideoInfoTextEdit
-            loaded = bool(info is not None and info.toPlainText().strip())
+            loaded = bool(_video_info_text(window).strip())
             if loaded or ticks > 150:
                 press_preview()
                 return

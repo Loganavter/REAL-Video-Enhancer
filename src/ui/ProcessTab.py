@@ -289,6 +289,9 @@ class ProcessTab:
         self.userKilled = False
         self.currentRenderOptions = None
         self.status = "Idle"
+        #: The run-card tuple last handed to the pane (`_run_card_values`), so the 100 ms tick only repaints a card
+        #: when one of its numbers moved; `("idle",)` after the reset, so the reset itself happens once.
+        self._run_card_state = None
         #: The crop the CURRENT job's backend reported (`BORDERS w/h/x/y`), or ``None`` until a render says.
         #: The LMB compare decodes the source with this box, so it shows the same framing the renderer used.
         self._source_crop = None
@@ -446,6 +449,64 @@ class ProcessTab:
             parts.append(str(self.eta) + i18n.tr(" left"))
         parts.append(i18n.tr("frame ") + f"{done}/{total}")
         return " · ".join(parts)
+
+    def _general_settings_page(self):
+        """The video-info pane's owner object, or None on an unbuilt tree.
+
+        The page is not on the typed widget surface (`page_handles` names controls, not pages), so it is reached
+        through the shell exactly as the capture probes reach it (`capture_server._general_page`): one path, so this
+        glue and that probe cannot disagree about which object owns the pane.
+        """
+        shell = getattr(getattr(self, "parent", None), "shell", None)
+        return getattr(getattr(shell, "procPage_page", None), "generalSettings_page", None)
+
+    def _run_card_values(self) -> tuple:
+        """The run card's numbers as ONE comparable tuple, from the state this tick already carries.
+
+        `("idle",)` means no render is live - `_render_started_mono` is the same flag `progressDetailText` reads for
+        "there is nothing to show". Otherwise: (frame, total, percent, eta, fps, status, elapsed). Nothing here asks
+        the backend or re-reads a label: `currentFrame`/`max_value`/`fps`/`eta` are what `_sync_render_status` just
+        wrote, the percent is that same frame/total pair, and `elapsed` is the clock the detail line uses, in the
+        card's `h:mm:ss` shape (the mockup's "0:00:08 elapsed").
+        """
+        started = self._render_started_mono
+        if started is None:
+            return ("idle",)
+        total = max(0, int(self.max_value or 0))
+        frame = max(0, int(self.currentFrame or 0))
+        if total:
+            frame = min(frame, total)
+        percent = int(round(100.0 * frame / total)) if total else 0
+        return (
+            frame,
+            total,
+            percent,
+            str(self.eta) if self.eta else "",
+            str(self.fps) if self.fps else "",
+            str(self.status),
+            format_eta(max(0.0, time.monotonic() - started)),
+        )
+
+    def _update_run_card(self) -> None:
+        """Hand the pane its run card ONCE per change - the tick runs ten times a second.
+
+        The page owns what the card paints (`GeneralSettingsPage.set_run_status`); this glue owns the numbers. Only
+        values are set, never widgets, and the tuple compare keeps an unchanged second from repainting anything. No
+        render is live -> the card goes back to its idle state, so the last job's numbers never freeze on screen.
+        """
+        page = self._general_settings_page()
+        if page is None:
+            return
+        values = self._run_card_values()
+        if values == getattr(self, "_run_card_state", None):
+            return
+        self._run_card_state = values
+        if values == ("idle",):
+            page.reset_run_status()
+            return
+        frame, total, percent, eta, fps, status, elapsed = values
+        page.set_run_status(frame=frame, total=total, percent=percent, eta=eta,
+                            fps=fps, status=status, elapsed=elapsed)
 
     def populateModels(self, backend) -> dict:
         """
@@ -3975,6 +4036,12 @@ class ProcessTab:
             else:
                 self.page_handles.proc.ETA.setVisible(False)
             self.page_handles.proc.STATUS.setText(i18n.tr("Status: ") + self.status)
+
+        # The pane's run card takes the SAME numbers this tick just painted, and is repainted only when one moved (see
+        # `_update_run_card`). It stands OUTSIDE the console guard above on purpose: `renderTextOutputList` survives the
+        # end of a job, so it cannot tell "rendering" from "finished"; the render clock can, and that is what returns
+        # the card to its idle state instead of freezing the last job's numbers on screen.
+        self._update_run_card()
 
     def build_command(self, renderOptions: RenderOptions):
         """The backend command for one job.
