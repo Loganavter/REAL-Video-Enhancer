@@ -3160,50 +3160,7 @@ class ProcessTab:
                 return float(value)
         return float(self._result_playhead())
 
-    def _compare_display_playhead(self) -> float:
-        """The moment the PAIR QUEUE is waiting for: on screen, or the oldest result still to be paired.
 
-        The supply used to chase the NEWEST result, and the pane can be a second behind it (a live tail, a slow paint):
-        the pool then lived entirely in the future and the prune threw away the frame that was on screen, so no pair
-        could ever be completed and the 500 ms valve painted `result=9.426 source=10.135` - seventeen frames apart
-        (measured live 2026-11-26, the owner's "рассинхрон кадров вернулся"). `committed_time()` is what the renderer
-        holds; when nothing is paired yet, the oldest queued result is the next thing to show.
-        """
-        pane = self.page_handles.proc.previewLabel
-        # THE NEXT PICTURE TO PAIR comes first. On a seek the result queue jumps to the new position while the
-        # renderer still holds the old picture, so a supply clocked on `committed_time()` kept decoding around the OLD
-        # moment - and the prune threw the new frames away, so no pair could form and only the 500 ms valve painted
-        # (measured live 2026-11-26: `pair_off` 4/6 with 3-6 paints a second after a seek). In steady playback the
-        # oldest queued result is ~one frame ahead of the committed one, so this is the same clock it had.
-        oldest = getattr(pane, "oldest_result_time", None)
-        if callable(oldest):
-            try:
-                value = oldest()
-            except Exception:
-                value = None
-            if value is not None:
-                return float(value)
-        committed = getattr(pane, "committed_time", None)
-        if callable(committed):
-            try:
-                value = committed()
-            except Exception:
-                value = None
-            if value is not None:
-                return float(value)
-        return self._compare_playhead()
-
-    def _compare_supply_playhead(self) -> float:
-        """Where the source pool should be AHEAD of: the picture on screen, not the newest arrival.
-
-        A lag that equals the arrival rate never closes (each result frame moves the target by one frame and the source
-        moves by one frame), so the pair gate saw a mismatch for ever and painted only on its timeout. The supply runs off
-        the COMMITTED result - a stable clock - while `_compare_playhead` (presentation) stays on the newest one.
-        """
-        # The picture on screen, with a lead: the queue pairs the oldest unpaired result, so its source must be decoded
-        # around THAT moment. Chasing the newest kept the pool in the future while the pane lagged (see
-        # `_compare_display_playhead`) and the pair never completed.
-        return self._compare_display_playhead()
 
     def _source_paint_pair(self, playhead: float | None = None) -> None:
         """One entry point for "the result was just painted; give it its other half". Logic: `present.paint_pair`."""

@@ -280,4 +280,8 @@ def on_original_frame(tab, frame) -> None:
         except Exception:
             single = True
     if not single:
-        tab._source_fill(tab._compare_supply_playhead())
+        # The PANE's clock, like every other supply entry point: an arrival must not re-target the fill at a third
+        # clock (the pair queue's oldest result). That was the last path still doing it, so a source answered at the
+        # queue's moment while the pane showed another - the mismatch the fill's own target/playhead line reports
+        # (audit 2026-11-27 §4, CODE_PATTERNS §4: one clock).
+        tab._source_fill(tab._compare_playhead())

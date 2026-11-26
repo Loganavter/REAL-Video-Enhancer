@@ -71,7 +71,7 @@ def supply_compare_source(tab) -> None:
     if playhead <= 0.0:
         return
     # The fill asks at the moment PRESENTATION reads - the pane's own. It used to ask at
-    # `_compare_supply_playhead()` (the pair queue's oldest result), a third clock; the answer was then refused by
+    # `_compare_supply_playhead()` (the pair queue's oldest result, since deleted with its wrapper), a third clock; the answer was then refused by
     # the pane's moment guard and the half stayed blank while the decoder refilled a moment nobody showed (measured
     # live 2026-11-27: `playhead=0.167 newest=1.709 target=0.0` with the register full of render-head frames, the
     # left half empty beside the upscale). One clock: what the pane shows is what the supply fetches.

@@ -354,7 +354,6 @@ def test_on_original_frame_offers_the_decoder_picture_and_counts_the_arrival():
         _sync_compare_source=lambda: synced.append(1),
         _log_source_crop_unknown=lambda reason: None,
         _source_fill=lambda playhead: None,
-        _compare_supply_playhead=lambda: 1.0,
     )
 
     transport.on_original_frame(tab, frame)
