@@ -542,3 +542,47 @@ def test_one_wheel_nudge_steps_from_the_fitted_scale_not_from_one_to_one(surface
 
     surface.reset_view()
     assert surface.zoom() == pytest.approx(fitted, rel=0.01), "Fit restores the fitted view"
+
+
+def test_a_seek_flushes_the_pair_and_never_pairs_across_the_jump(surface):
+    """The regression that came back twice: at a SEEK the pane must not paint the new result beside the old source.
+
+    `ade25e74` clocked the compare's supply on the picture ON SCREEN - right for playback, wrong for a seek, where the
+    renderer still holds the OLD picture while the result queue has already jumped: the supply kept decoding around the
+    old moment, the prune dropped the new frames, no pair could form and the 500 ms valve painted
+    `result=20.0 source=10.0` (measured live 2026-11-26: `delta_frames=-80.06`). This pins both halves of the fix: the
+    queues are flushed on a jump, and the valve stands down for a window afterwards.
+    """
+    import time as _time
+
+    from src.ui.widgets.video_preview import PAIR_JUMP_WAIT_S, PAIR_SYNC_HOLD_S
+
+    picture = QImage(320, 180, QImage.Format.Format_RGBA8888)
+    picture.fill(QColor("#204060"))
+    surface.set_original(picture, media_time=10.0)
+    surface.set_frame(picture, media_time=10.0)
+    surface.set_view_mode("split")
+    assert surface.pair_in_sync() and surface._pick_pair() is not None, "a matching pair is the normal case"
+    assert surface._commit_pair(), "the pair paints"
+
+    # SEEK: the result jumps three seconds ahead while the renderer still holds the old picture.
+    surface.set_frame(picture, media_time=13.0)
+
+    assert not surface._source_queue, "the old source half is not kept across the jump"
+    assert surface._pick_pair() is None, "nothing may pair the new result with the old moment"
+    assert surface._pair_await_fresh_at is not None
+
+    # The valve must stay shut for its window: the picture keeps the last consistent pair instead of jumping halves.
+    surface._pair_blocked_at = _time.monotonic()
+    surface._release_pair_paint()
+    assert surface._committed_result_time == pytest.approx(10.0), (
+        "within the seek window the valve must NOT commit the new result beside the old source")
+    assert (surface._committed_source_time or 0.0) == pytest.approx(10.0)
+
+    # The new moment's source arrives: the pair completes and paints together (the pane commits it itself, so by the
+    # time this returns the queues are pruned and the committed pair is the new moment).
+    surface.set_original(picture, media_time=13.0)
+    assert surface._committed_result_time == pytest.approx(13.0), (
+        "the seek's own moment is painted once its source lands")
+    assert surface._committed_source_time == pytest.approx(13.0)
+    assert PAIR_JUMP_WAIT_S > PAIR_SYNC_HOLD_S, "the valve's stand-down must exceed one hold window"

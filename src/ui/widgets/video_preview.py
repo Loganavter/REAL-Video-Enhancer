@@ -129,6 +129,16 @@ PAIR_SYNC_HOLD_S = 0.25
 #: absorbs the rounding of two independently derived timestamps and nothing else.
 PAIR_MATCH_MS = 2
 
+#: A jump bigger than this in the result's own clock is a SEEK, not playback: the pair queues are flushed so a stale
+#: half can never be paired with a fresh one. Measured live 2026-11-26 (split, seek during playback): the transition
+#: painted `delta_frames=-80.06` twice - the valve firing while both the old and the new moments sat in the queues.
+PAIR_JUMP_S = 0.5
+
+#: How long the valve is held back after a SEEK (the queues were flushed, so the old source half is stale by definition).
+#: Long enough for a keyframe rewind plus a couple of frames (~200 ms measured), short enough that a dead decoder cannot
+#: freeze the picture: past this the valve paints whatever it has and says so in the log.
+PAIR_JUMP_WAIT_S = 1.0
+
 #: How many result and source pictures the pair queue may hold while a partner is missing. The rule is GStreamer's
 #: `GstAggregator`: every input keeps its own queue, the aggregate step runs only when ALL inputs have a buffer, and a pad
 #: that misses the bounded wait has its buffers SKIPPED rather than shifting the pair (`gstaggregator.c`:
@@ -204,6 +214,8 @@ class VideoPreviewSurface(QRhiWidget):
         self._divider_left_at: float | None = None
         #: When the pair gate started holding a paint (monotonic), or None while a paint is allowed.
         self._pair_blocked_at: float | None = None
+        #: When a seek flushed the queues (monotonic); the valve stands down for `PAIR_JUMP_WAIT_S` after it.
+        self._pair_await_fresh_at: float | None = None
         #: The pair queue: `milliseconds -> picture`. The renderer is handed a RESULT and a SOURCE of the same moment,
         #: whichever arrived first, instead of the newest of each - that is what removes "one frame ahead, one frame
         #: behind" at the seam (owner, 2026-11-26).
@@ -628,9 +640,41 @@ class VideoPreviewSurface(QRhiWidget):
         """Keep one picture in a pair queue, bounded: a picture whose partner never comes is dropped, not accumulated."""
         if media_time is None:
             return
+        self._flush_on_jump(float(media_time))
         queue[int(round(float(media_time) * 1000.0))] = payload
         while len(queue) > PAIR_QUEUE_MAX:
             del queue[min(queue)]
+
+    def _flush_on_jump(self, moment: float) -> None:
+        """Drop both queues when the picture jumps - a seek must not pair the old moment with the new one.
+
+        Playback advances by a frame at a time and never trips this; a press on the timeline does, and the pane then
+        keeps showing the LAST consistent pair until the new moment's partner arrives (the hold's own window), instead of
+        the valve painting `result=new source=old` after 500 ms (the `delta_frames=-80` transition measured live).
+        """
+        keys = list(self._result_queue) + list(self._source_queue)
+        if self._committed_result_time is not None:
+            # The committed moment is the picture ON SCREEN even when both queues are empty (a pair was painted and
+            # pruned), and a seek away from it is exactly the case that must flush.
+            keys.append(int(round(float(self._committed_result_time) * 1000.0)))
+        if not keys:
+            return
+        # Compared against EVERYTHING the queues hold, not against the committed time: after the result of the new
+        # moment has already been queued (the flush ran for it), its partner arrives and must NOT trip the flush again -
+        # that threw away the very picture the pair was waiting for (caught by the regression test the first time it
+        # ran, 2026-11-26).
+        nearest = min(abs(key / 1000.0 - float(moment)) for key in keys)
+        if nearest <= PAIR_JUMP_S:
+            return
+        self._result_queue.clear()
+        self._source_queue.clear()
+        self._pair_blocked_at = None
+        self._pair_release_count = 0
+        # ...and the valve is NOT allowed to paint the old source beside the new result: `_original` still holds the
+        # picture of the moment we just left, so `_commit_newest` would pair the two across the jump. The pane keeps the
+        # last consistent pair on screen until the new moment's partner arrives (bounded below, so a dead decode cannot
+        # freeze it for ever).
+        self._pair_await_fresh_at = time.monotonic()
 
     def _pick_pair(self):
         """The newest result that HAS a partner, as `(result_key, source_key)`; `None` while one is missing.
@@ -712,6 +756,7 @@ class VideoPreviewSurface(QRhiWidget):
         self._renderer.set_original(self._preview_frame(picture, index=source_index, pts=source_time))
         self._committed_result_time = None if result_time is None else float(result_time)
         self._committed_source_time = None if source_time is None else float(source_time)
+        self._pair_await_fresh_at = None
         # Everything at or before the committed pair is spent: the queues stay small and the next pick starts after it.
         for key in [key for key in self._result_queue if key <= result_key]:
             del self._result_queue[key]
@@ -761,6 +806,15 @@ class VideoPreviewSurface(QRhiWidget):
         mismatch is better than a still image.
         """
         if getattr(self, "_pair_blocked_at", None) is None:
+            return
+        fresh = getattr(self, "_pair_await_fresh_at", None)
+        if fresh is not None and (time.monotonic() - float(fresh)) < PAIR_JUMP_WAIT_S:
+            # A seek just happened: hold the old (consistent) pair a little longer rather than paint the new result
+            # beside the source of the moment we left. Past `PAIR_JUMP_WAIT_S` the valve is allowed again, so a dead
+            # source still cannot freeze the pane for ever.
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(int(PAIR_SYNC_HOLD_S * 1000) + 1, self._release_pair_paint)
             return
         self._pair_release_count = getattr(self, "_pair_release_count", 0) + 1
         if self._pair_release_count < 2:

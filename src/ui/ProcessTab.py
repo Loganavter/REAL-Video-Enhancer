@@ -3524,18 +3524,23 @@ class ProcessTab:
         holds; when nothing is paired yet, the oldest queued result is the next thing to show.
         """
         pane = self.page_handles.proc.previewLabel
-        committed = getattr(pane, "committed_time", None)
-        if callable(committed):
-            try:
-                value = committed()
-            except Exception:
-                value = None
-            if value is not None:
-                return float(value)
+        # THE NEXT PICTURE TO PAIR comes first. On a seek the result queue jumps to the new position while the
+        # renderer still holds the old picture, so a supply clocked on `committed_time()` kept decoding around the OLD
+        # moment - and the prune threw the new frames away, so no pair could form and only the 500 ms valve painted
+        # (measured live 2026-11-26: `pair_off` 4/6 with 3-6 paints a second after a seek). In steady playback the
+        # oldest queued result is ~one frame ahead of the committed one, so this is the same clock it had.
         oldest = getattr(pane, "oldest_result_time", None)
         if callable(oldest):
             try:
                 value = oldest()
+            except Exception:
+                value = None
+            if value is not None:
+                return float(value)
+        committed = getattr(pane, "committed_time", None)
+        if callable(committed):
+            try:
+                value = committed()
             except Exception:
                 value = None
             if value is not None:
