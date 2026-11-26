@@ -1663,7 +1663,7 @@ def install(window) -> None:
                 "bar_max": int(bar.maximum()),
                 "queue": len(getattr(queue, "queue", []) or []) if queue is not None else None,
                 "start_enabled": bool(window.page_handles.proc.startRenderButton.isEnabled()),
-                "status": window.page_handles.proc.STATUS.text(),
+                "status": str(getattr(getattr(window, "processTab", None), "status", "") or ""),
                 "backend": backend_of(),
             }
             return sample

@@ -460,24 +460,6 @@ class ProcPagePage:
         self.verticalLayout_37.addWidget(self.timeInVideoScrollBar)
         self.horizontalLayout_47.addWidget(self.widget_30)
         self.verticalLayout_5.addWidget(self.RenderedPreviewControlsContainer)
-        self.verticalLayout_34 = QVBoxLayout()
-        self.verticalLayout_34.setObjectName(u"verticalLayout_34")
-        self.ETA = Text(parent=self.processInfoContainer)
-        self.ETA.setObjectName(u"ETA")
-        apply(self.ETA, CAPTION_PT)
-
-        self.verticalLayout_34.addWidget(self.ETA)
-        self.FPS = Text(parent=self.processInfoContainer)
-        self.FPS.setObjectName(u"FPS")
-        apply(self.FPS, CAPTION_PT)
-
-        self.verticalLayout_34.addWidget(self.FPS)
-        self.STATUS = Text(parent=self.processInfoContainer)
-        self.STATUS.setObjectName(u"STATUS")
-        apply(self.STATUS, CAPTION_PT)
-
-        self.verticalLayout_34.addWidget(self.STATUS)
-        self.verticalLayout_5.addLayout(self.verticalLayout_34)
         self.gridLayout_3.addWidget(self.processInfoContainer, 0, 2, 1, 1)
         self.processContainer = QWidget(self.pageScrollBody)
         self.processContainer.setObjectName(u"processContainer")
@@ -552,7 +534,7 @@ class ProcPagePage:
         self.widget_13 = SurfacePanel(self.bottomMenuSubContainer, background_token="surface.page")
         self.widget_13.setObjectName(u"widget_13")
         self.widget_13.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
-        #: The typed name for the render row (Start/ETA/FPS/STATUS' row): in stacked mode it moves into the sticky
+        #: The typed name for the render row (Start/progress row): in stacked mode it moves into the sticky
         #: footer, in side mode it stays in the column's flow.
         self.renderRow = self.widget_13
         self.horizontalLayout_32 = QHBoxLayout(self.widget_13)
@@ -700,9 +682,6 @@ class ProcPagePage:
             renderQueueTab=self.renderQueueTab,
             progressBar=self.progressBar,
             progressDetail=self.progressDetail,
-            FPS=self.FPS,
-            ETA=self.ETA,
-            STATUS=self.STATUS,
             VideoPreview=self.VideoPreview,
             RenderedPreviewControlsContainer=self.RenderedPreviewControlsContainer,
             renderPreviewBtn=self.renderPreviewBtn,
@@ -890,9 +869,6 @@ class ProcPagePage:
         self.label_9.setText(QCoreApplication.translate("MainWindow", u"Start Time (seconds)", None))
         self.label_52.setText(QCoreApplication.translate("MainWindow", u"End Time (seconds)", None))
         self.renderPreviewBtn.setText(QCoreApplication.translate("MainWindow", u"Render Preview", None))
-        self.ETA.setText(QCoreApplication.translate("MainWindow", u"ETA: ", None))
-        self.FPS.setText(QCoreApplication.translate("MainWindow", u"FPS:", None))
-        self.STATUS.setText(QCoreApplication.translate("MainWindow", u"STATUS:", None))
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.generalSettings), QCoreApplication.translate("MainWindow", u"General", None))
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.tab_6), QCoreApplication.translate("MainWindow", u"Encoder Options", None))
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.renderQueueTab), QCoreApplication.translate("MainWindow", u"Render Queue", None))

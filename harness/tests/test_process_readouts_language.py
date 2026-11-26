@@ -1,33 +1,29 @@
-"""The process page's per-tick readouts in Russian: the labels a switch has to survive the NEXT tick.
+"""The process page's run readouts live in ONE surface: the video-info pane's run card.
 
-The page's chrome (`src/ui/pages/proc_page.py::retranslate`) restates `FPS:`, `ETA: ` and `STATUS:` on a language
-switch, so a switch looked done - for up to 100 ms. The tick in `src/ui/ProcessTab.py::updateProcessTab` rebuilds the
-same three labels from literals (`f"FPS: …"`, `f"ETA: …"`, `f"Status: …"`) and `setStatus` does it again outside the
-tick, so the Russian labels flipped back to English within one tick (measured live in `ru`, 2026-11-24):
+History: the page's chrome used to repeat the run as three `Text` labels under the preview (`ETA: …`, `FPS: …`,
+`STATUS: …`), rebuilt by the 100 ms tick in `src/ui/ProcessTab.py::updateProcessTab` and by `setStatus` outside it.
+That made the labels a language hazard (the tick's literals rewrote the chrome's Russian keys within one tick,
+measured live 2026-11-24) - and then a duplicate, once the pane grew a run card that shows frame / percent / ETA / fps /
+status / elapsed from the same state. The labels were removed on 2026-11-26 (`d87bbe98` added the card, this row
+deletes the older readouts); this module now pins the removal rather than the strings:
 
-    after switch (chrome): 'К/с:' 'Осталось: ' 'СТАТУС:'
-    ru tick:               'FPS: 42'   'ETA: 00:01:23' 'Status: Rendering'
+1. **The duplicated chrome is gone.** The page carries no `ETA`/`FPS`/`STATUS` widget - no such attribute, no child
+   with such an object name, and no text under the info pane that reads like one of the old lines.
+2. **A language switch has nothing left to repaint there** and does not raise. The catalogue's dead prefix keys went
+   with the labels; `FPS:` stays, because the info pane's own first row name is that key.
+3. **The tick keeps the state and leaves no label.** `updateProcessTab` still writes `currentFrame`/`fps`/`eta`/
+   `status`, and `_run_card_values` - the card's feed - returns the same tuple shape and numbers it returned before
+   the removal.
+4. **`setStatus` still records the phase the card reads**, and writes no widget.
 
-What is pinned here, against the real page and the real `i18n` table (no translator mock):
-
-1. **The keys are the tick's own prefixes, byte for byte.** `FPS: ` and `Status: ` are DIFFERENT keys from the
-   chrome's `FPS:`/`STATUS:` (the trailing space is part of the key), and both sides must keep working: the fix adds
-   keys, it does not rename the ones the chrome ships.
-2. **English is unchanged, byte for byte.** The numbers, their formatting and the labels are exactly what 1.0 wrote
-   before this row (`FPS: 42`, `ETA: 00:01:23`, `Status: Rendering`).
-3. **A switch repaints on the next tick, without a restart.** Same page, same labels; one `updateProcessTab()` after
-   `emit_language_changed("ru")` is enough, and switching back reads English again with the same values.
-4. **`setStatus` outside the tick follows the switch too** - the idle phase is written when the user pauses, not on
-   the render clock, so it cannot be left English by a tick that never comes.
-
-The tick's other work (live tail, display feed, console) is not under test here: the six pane helpers are stubbed so
-this file measures the strings and nothing else. The page itself is real, built and shown offscreen.
+The page is the real one, built and shown offscreen; the tab is the shipped `ProcessTab` with the tick's other pane
+work stubbed (the house style of `test_queue_pane.py`), so a failure here is about the readouts, not about a window.
 """
 
 from __future__ import annotations
 
-import re
 import sys
+import time
 import types
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,24 +66,15 @@ from src.ui.ProcessTab import ProcessTab  # noqa: E402
 # Leave the suite's path order as it was (the app modules are imported and bound now).
 sys.path[:] = _ORIGINAL_SYS_PATH
 
-#: The tick's three readout prefixes, as the source writes them. The trailing spaces are the keys.
-TICK_KEYS = {
-    "FPS: ": "К/с: ",
-    "ETA: ": "Осталось: ",
-    "Status: ": "Статус: ",
-}
+#: The three labels the page used to carry, by the object names `proc_page.py` gave them.
+REMOVED = ("ETA", "FPS", "STATUS")
 
-#: The chrome's own keys (`proc_page.retranslate`) - they must keep their old spellings and translations.
-CHROME_KEYS = {
-    "FPS:": "К/с:",
-    "STATUS:": "СТАТУС:",
-}
+#: The prefixes those labels printed. None may be the start of any text under the info pane.
+REMOVED_LINES = ("ETA:", "ETA: ", "FPS:", "FPS: ", "Status: ", "STATUS:")
 
-#: What the English tick writes for this state. The pre-fix body produced these exact strings.
-EN_READOUTS = ("FPS: 42", "ETA: 00:01:23", "Status: Rendering")
-
-#: The same three after one tick in `ru` - labels turn, values do not.
-RU_READOUTS = ("К/с: 42", "Осталось: 00:01:23", "Статус: Rendering")
+#: The catalogue keys that existed ONLY for the removed labels (the chrome's `ETA: `/`FPS:`/`STATUS:` spellings and
+#: the tick's own `FPS: `/`Status: ` twins). `FPS:` is NOT one of them - the info pane's first row name is that key.
+REMOVED_KEYS = ("ETA: ", "STATUS: ", "FPS: ", "Status: ")
 
 
 @pytest.fixture()
@@ -128,144 +115,104 @@ def _tab(page) -> ProcessTab:
 
     `object.__new__` is the house style for the tab-level tests (`test_queue_pane.py`): the methods under test are the
     shipped ones, and nothing else is constructed (no render process, no window). The stubs are the tick's other
-    owners - paint, console, queue rows - so a failure here is a string failure.
+    owners - paint, tail, console, queue rows - so a failure here is a readout failure.
     """
     tab = object.__new__(ProcessTab)
     tab.page_handles = SimpleNamespace(proc=page)
+    # The card's owner is reached through the shell (`_general_settings_page`), exactly as the capture probes do.
+    tab.parent = SimpleNamespace(shell=SimpleNamespace(procPage_page=page))
     tab.renderTextOutputList = []
-    tab.max_value = 100
-    tab.currentFrame = 50
-    tab.fps = "42"
+    tab.max_value = 493
+    tab.currentFrame = 44
+    tab.fps = 42
     tab.eta = "00:01:23"
     tab.status = "Rendering"
     tab._render_started_mono = None
     tab.currentRenderOptions = None
     for name in ("_ensure_live_tail", "_apply_seek_ceiling", "_sync_preview_transport",
                  "_refresh_held_progress", "_tick_display", "_tick_second_surface",
+                 "_push_preview_state", "_ensure_picture_timer",
                  "syncRenderConsole", "refreshQueueRows"):
         setattr(tab, name, lambda *args, **kwargs: None)
     return tab
 
 
-def _readouts(page) -> tuple[str, str, str]:
-    return (page.FPS.text(), page.ETA.text(), page.STATUS.text())
+# --- 1. the removed chrome is gone, measured on the object, not in its source -------------------------
 
 
-# --- the source gate: no readout prefix is rebuilt from a literal again ---------------------------
+def test_the_page_carries_no_eta_fps_status_labels(qapp):
+    """No handle (typed or built), no child by object name, and no old-prefix text under the info pane."""
+    import dataclasses
+
+    from PySide6.QtWidgets import QWidget
+
+    from sli_ui_toolkit.widgets import Text
+
+    from src.ui.pages.handles import ProcPageHandles
+
+    page = _page(qapp)
+    typed = {field.name for field in dataclasses.fields(ProcPageHandles)}
+    assert typed.isdisjoint(REMOVED), f"the typed surface still names {typed & set(REMOVED)}"
+    for name in REMOVED:
+        assert not hasattr(page, name), f"the removed readout {name} is back on the page"
+        assert page.procPage.findChild(QWidget, name) is None, f"a widget named {name} survived on the page"
+    texts = [widget.text() for widget in page.processInfoContainer.findChildren(Text)]
+    offenders = [text for text in texts if text.startswith(REMOVED_LINES)]
+    assert offenders == [], f"the info pane still prints a removed readout: {offenders}"
 
 
-def test_no_readout_prefix_is_a_literal_in_the_tab_source():
-    """The hazard is a literal at the WRITE site, not a key in the table: the tick rebuilt `f"FPS: …"` each 100 ms.
-
-    A key that exists does not help if the writer never asks for it, so this gate reads the shipped module: no
-    f-string may open with one of the three prefixes (the catalogue keys themselves are plain arguments to `tr`, not
-    f-strings, so they are untouched by this check).
-    """
-    source = (Path(_ROOT) / "src" / "ui" / "ProcessTab.py").read_text(encoding="utf-8")
-    offenders = [match.group(0) for match in re.finditer(r'f"(?:FPS|ETA|Status): ', source)]
-    assert not offenders, f"readout literals rebuilt at a write site: {offenders}"
-    for key in TICK_KEYS:
-        assert f'i18n.tr("{key}")' in source, f"the writer does not ask the catalogue for {key!r}"
+# --- 2. nothing left for a language switch to repaint -------------------------------------------------
 
 
-# --- the table -----------------------------------------------------------------------------------
-
-
-def test_the_table_carries_the_tick_prefixes_and_keeps_the_chrome_keys(language):
-    """The tick's keys are added beside the chrome's, not instead of them: both labels share these three widgets."""
+def test_the_catalogue_no_longer_carries_the_removed_prefix_keys(language):
+    """The dead keys went with the labels; the info pane's own `FPS:` row name stays."""
     table = language.TRANSLATIONS["ru"]
-    missing = [key for key in TICK_KEYS if key not in table]
-    assert not missing, f"missing from the ru table: {missing}"
-    for key, russian in TICK_KEYS.items():
-        assert language.translate(key, "ru") == russian
-        # The keys are the English source strings, byte for byte - `FPS:` and `FPS: ` are two keys.
-        assert language.translate(key, "en") == key
-    for key, russian in CHROME_KEYS.items():
-        assert language.translate(key, "ru") == russian, f"the chrome key {key!r} was renamed or lost"
-    # The two spellings must stay distinguishable, or one widget's key would answer for the other's.
-    assert language.translate("FPS: ", "ru") != language.translate("FPS:", "ru")
-    assert language.translate("Status: ", "ru") != language.translate("STATUS:", "ru")
-    # `ETA: ` is the one prefix the chrome already carried; the tick reuses it rather than adding a twin.
-    assert language.translate("ETA: ", "ru") == "Осталось: "
+    still_there = [key for key in REMOVED_KEYS if key in table]
+    assert still_there == [], f"a catalogue key survived its only writer: {still_there}"
+    assert language.translate("FPS:", "ru") == "К/с:", "the info pane's row name lost its translation"
 
 
-# --- English first: byte-identical to the pre-fix tick -------------------------------------------
-
-
-def test_the_english_tick_writes_the_strings_1_0_wrote(language, qapp):
+def test_a_switch_repaints_no_readout_and_does_not_raise(language, qapp):
+    """`retranslate` used to write the three labels; with them gone the switch only touches what remains."""
     page = _page(qapp)
-    tab = _tab(page)
-    tab.updateProcessTab()
-    assert _readouts(page) == EN_READOUTS
-
-
-# --- a switch, then one tick ---------------------------------------------------------------------
-
-
-def test_a_switch_repaints_the_readouts_on_the_next_tick(language, qapp):
-    """No restart and no rebuild: the same page's labels read Russian after ONE tick, values intact."""
-    page = _page(qapp)
-    tab = _tab(page)
-    tab.updateProcessTab()
-    assert _readouts(page) == EN_READOUTS
-
     language.emit_language_changed("ru")
-    # The switch alone reaches the chrome (the page's own `retranslate`), which writes the value-less labels - the
-    # state the old code left on screen for one tick before the literals won.
-    assert page.FPS.text() == "К/с:", page.FPS.text()
-
-    tab.updateProcessTab()
-    assert _readouts(page) == RU_READOUTS, f"one tick after the switch the page reads {_readouts(page)!r}"
-
-    # A second tick stays Russian (the rewrite is idempotent, not a one-shot) ...
-    tab.updateProcessTab()
-    assert _readouts(page) == RU_READOUTS
-
-    # ... and switching back is equally one tick, with the same numbers.
-    language.emit_language_changed("en")
-    tab.updateProcessTab()
-    assert _readouts(page) == EN_READOUTS
+    for _ in range(6):
+        qapp.processEvents()
+    for name in REMOVED:
+        assert not hasattr(page, name), f"a switch rebuilt the removed readout {name}"
+    assert page.label_9.text() == "Начало (секунды)", "the chrome's real labels must still follow the switch"
 
 
-def test_the_values_are_the_only_thing_the_two_language_ticks_share(language, qapp):
-    """Strict form: strip the label from each readout and compare the value halves across the switch."""
+# --- 3. the tick keeps the state and feeds the card --------------------------------------------------
+
+
+def test_the_tick_leaves_no_label_and_still_feeds_the_card(qapp):
+    """The numbers the card shows are the tab's state, produced by the same tick that used to paint the labels."""
     page = _page(qapp)
     tab = _tab(page)
+    tab._render_started_mono = time.monotonic() - 8.2
+
     tab.updateProcessTab()
 
-    # Every spelling a label can carry on screen: the English key plus each language's translation.
-    keys = list(TICK_KEYS) + list(CHROME_KEYS)
-    spellings = [spelling for key in keys for spelling in (key, language.translate(key, "ru"))]
-
-    def values(readouts):
-        halves = []
-        for text in readouts:
-            label = next((s for s in spellings if text.startswith(s)), None)
-            assert label is not None, f"no known label prefixes {text!r}"
-            halves.append(text[len(label):])
-        return halves
-
-    before = values(_readouts(page))
-    language.emit_language_changed("ru")
-    tab.updateProcessTab()
-    after = values(_readouts(page))
-    assert after == before == ["42", "00:01:23", "Rendering"]
+    for name in REMOVED:
+        assert not hasattr(page, name), f"the tick rebuilt the removed readout {name}"
+    values = tab._run_card_values()
+    assert values[:6] == (44, 493, 9, "00:01:23", "42", "Rendering"), values
+    # The tick handed that tuple to the card's owner (reached through the shell), unchanged by the removal.
+    assert tab._run_card_state == values
 
 
-# --- the status written outside the tick ---------------------------------------------------------
+# --- 4. the status written outside the tick ----------------------------------------------------------
 
 
-def test_set_status_follows_the_switch_without_a_tick(language, qapp):
-    """`setStatus` runs on pause/resume/construction, not on the 100 ms clock - it must read the catalogue itself."""
+def test_set_status_records_the_phase_the_card_reads(qapp):
+    """`setStatus` runs on pause/resume/completion, not on the 100 ms clock - it is the card's state, not a label."""
     page = _page(qapp)
     tab = _tab(page)
+    tab._render_started_mono = time.monotonic() - 1.0
+
     tab.setStatus("Paused")
-    assert page.STATUS.text() == "Status: Paused"
-
-    language.emit_language_changed("ru")
-    tab.setStatus("Paused")
-    assert page.STATUS.text() == "Статус: Paused"
-
-    language.emit_language_changed("en")
-    tab.setStatus("Idle")
-    assert page.STATUS.text() == "Status: Idle"
+    assert tab.status == "Paused"
+    assert tab._run_card_values()[5] == "Paused"
+    for name in REMOVED:
+        assert not hasattr(page, name), f"`setStatus` wrote the removed readout {name}"

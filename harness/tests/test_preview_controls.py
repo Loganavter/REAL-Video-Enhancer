@@ -13,7 +13,9 @@ must work "through a professional pattern, not magic". What is pinned here, offs
 * the bars are the toolkit's own widgets (a `Button` is a `QWidget`, so the modes are exclusive through the toolkit's
   `ButtonFamily`, not a `QButtonGroup`), they sit inside the pane at 621x721 and never cover its middle;
 * the compare is a HOLD (press = source, release = result);
-* the frame readout is `f <source done> / <source total>` - the writer's CFR count is a separate fact, never a ratio.
+* the transport carries no run readout of its own: no frame counter, no ETA/FPS/status line - the video-info pane's
+  run card is the one surface for those numbers (`f <source done> / <source total>` is `PreviewState.frame_ratio`, and
+  the card prints the same source-packet pair).
 
 The real pixels, the pane's letterbox and the window's fullscreen are the supervisor's live proof.
 """
@@ -609,10 +611,26 @@ def test_a_mode_toggle_emits_set_mode_and_keeps_one_checked(controls):
     assert not controls.button("mode_single").isChecked()
 
 
-def test_the_frame_readout_counts_source_packets_only(controls):
-    assert controls.frame_text.text() == "f 100 / 493"
-    assert "495" not in controls.frame_text.text()
-    assert "495" in controls.frame_text.toolTip() and "CFR" in controls.frame_text.toolTip()
+def test_the_transport_carries_no_frame_counter(controls):
+    """The run card owns the frame number; the transport row must not repeat it (owner, 2026-11-26).
+
+    A hidden widget still owns its stretch in the row, so the check is structural: no `frame_text` attribute, no
+    toolkit `Text` in the transport other than the content time, and the row is still exactly step-back / play /
+    step-forward / time / scrubber.
+    """
+    from sli_ui_toolkit.widgets import Text as ToolkitText
+
+    assert not hasattr(controls, "frame_text")
+    texts = [widget for widget in controls.bottom_bar.findChildren(ToolkitText)]
+    assert texts == [controls.time_text], f"a second readout survived in the transport: {texts}"
+    row = [controls.bottom_bar._row.itemAt(index).widget()
+           for index in range(controls.bottom_bar._row.count())]
+    assert row == [controls.button("step_back"), controls.button("play"), controls.button("step_forward"),
+                   controls.time_text, controls.timeline]
+    # `set_state` has nothing left to write there: the same state adds no text to the transport either.
+    controls.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, source_frames=493,
+                                    frames_done=250, output_frames=495, playhead=4.171))
+    assert [widget for widget in controls.bottom_bar.findChildren(ToolkitText)] == [controls.time_text]
 
 
 def test_the_play_glyph_follows_the_state(controls):
