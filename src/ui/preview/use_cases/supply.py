@@ -1,0 +1,193 @@
+"""Supply: keep the compare's source decoder warm and the register topped up ahead of the playhead.
+
+Owns: the decision to open the compare decoder (warm), the ask for the decode lead (one ask in flight, the arrival
+counter's `asks` side), the pause policy (a still playhead is asked for ONE picture at its own moment, never for a lead
+nobody will watch), and the tolerance at which two moments are still the same picture.
+
+May not touch: the pane (no `set_source`, no picture is handed over here - presentation is `present.py`), the view mode,
+the register's contents (producers `offer`, this module only asks), the result generation, or any state the tab does not
+already own. No widget is constructed and no signal is connected: the tab keeps its wiring and its state.
+
+Reads from the tab: `page_handles.proc.previewLabel`, `currentRenderOptions.inputFile`, `isPreview`, `_source_decoder`,
+`_source_warm_tried`, `_source_register`, `_source_fill_pending`, `_result_generation`, `_preview_paused`,
+`_compare_fill_stats`, `_compare_from_tick`, and the methods `_compare_playhead()`, `_compare_fps()`,
+`_compare_lead()`, `_on_original_requested()`, `_open_source_decoder()`. It writes exactly what the tab already wrote:
+`_source_fill_pending`, `_source_warm_tried`, `_compare_fill_stats["asks"/"target"/"span"/"newest"]`, `_compare_from_tick`.
+"""
+
+from __future__ import annotations
+
+import time
+
+from ..owner import owner_of
+from ..state import PreviewBackendKind
+
+__all__ = ["COMPARE_FILL_WINDOW_S", "source_fill", "source_tolerance", "supply_compare_source",
+           "warm_source_decoder"]
+
+#: How long one source ask counts as "in flight". A span of `COMPARE_LEAD_FRAMES` costs ~40 ms of decode, so this is a
+#: retry deadline, not a throttle: an ask nothing answers is re-sent on the next tick after it, which keeps a paused
+#: pane's first frame arriving as quickly as the retry itself. It must stay BELOW the picture interval of a live tail
+#: (~60 ms at 16 fps): at 250 ms a pending blocked two to three fills per frame, the pool fell 1-3 frames behind the
+#: result and every pair timed out (measured 2026-11-26, split during inference).
+#:
+#: Moved here with `source_fill` (the only reader). `ProcessTab.COMPARE_FILL_WINDOW_S` is the same number and becomes
+#: an alias of this one when the tab's body is deleted - one fact, one owner.
+COMPARE_FILL_WINDOW_S = 0.08
+
+
+def supply_compare_source(tab) -> None:
+    """Warm the compare decoder and ask for the lead while the register does not hold what it would ask for.
+
+    `single` keeps the LMB flash (one picture on demand, no standing fill); a queue item IS the source and has no
+    second surface. Those are SUPPLY decisions, not presentation ones - `sync_compare_source` above needs none.
+    """
+    pane = getattr(getattr(getattr(tab, "page_handles", None), "proc", None), "previewLabel", None)
+    view_mode = getattr(pane, "view_mode", None)
+    if view_mode is None:
+        return
+    if owner_of(tab).kind is PreviewBackendKind.QUEUE_FILE:
+        return
+    try:
+        mode = view_mode()
+    except Exception:
+        return
+    if mode == "single":
+        # Warm first: the point of warming is to be ready when the mode CHANGES, and during a render the pane is
+        # `single` - a warm-up below this return never ran, which is how the decoder ended up opening on the switch
+        # itself (~0.8 s of the owner's wait).
+        warm_source_decoder(tab)
+        return
+    warm_source_decoder(tab)
+    options = getattr(tab, "currentRenderOptions", None)
+    if not (getattr(options, "inputFile", "") or ""):
+        return
+    # The SAME clock presentation uses: the pane's own moment. `_result_playhead` prefers the transport while a tail
+    # or a file decoder exists, and after a render hands over the finished file it reads 0.0 while the pane already
+    # paints its first frame - so this guard returned before asking, and the source half never arrived (found live
+    # 2026-11-27 with the pair gate in place: `compare fill asks=0 newest=0.0 playhead=0.167` for a whole run, the
+    # left half blank with the upscale painted beside it).
+    playhead = tab._compare_playhead()
+    if playhead <= 0.0:
+        return
+    # The fill asks at the moment PRESENTATION reads - the pane's own. It used to ask at
+    # `_compare_supply_playhead()` (the pair queue's oldest result), a third clock; the answer was then refused by
+    # the pane's moment guard and the half stayed blank while the decoder refilled a moment nobody showed (measured
+    # live 2026-11-27: `playhead=0.167 newest=1.709 target=0.0` with the register full of render-head frames, the
+    # left half empty beside the upscale). One clock: what the pane shows is what the supply fetches.
+    source_fill(tab, playhead)
+
+
+def source_fill(tab, playhead: float) -> None:
+    """Top the register up to `COMPARE_LEAD_FRAMES` ahead of the playhead, one ask per call.
+
+    The next call comes from the frame's ARRIVAL (`_on_original_frame`): the decoder then runs flat out until the
+    lead is full and stops, instead of being polled at a timer's rate - a 10 Hz poll cannot feed a 24 fps stream, so
+    the lead would drain exactly when it is needed. The register is the pool; there is no separate prune, no "newest
+    decoded" flag, and no clock deciding who owns a moment.
+    """
+    playhead = float(playhead)
+    register = getattr(tab, "_source_register", None)
+    if register is None:
+        return
+    interval = 1.0 / tab._compare_fps()
+    generation = int(getattr(tab, "_result_generation", 0))
+    if register.owner_of(playhead, generation=generation) == "block":
+        # The renderer is publishing THIS moment's source: decoding the same file a second time is exactly the cost
+        # this block exists to remove. An older block offer owns nothing, so it cannot suppress the decoder.
+        return
+    newest = register.newest_moment(generation=generation)
+    # ONE ask in flight at a time: the arrival of each frame calls this again, and without the guard a burst would
+    # start a second span for the same moment (the decoder keeps only the last request, so the work is wasted).
+    pending = getattr(tab, "_source_fill_pending", None)
+    if pending is not None:
+        aged = time.monotonic() - float(pending[1])
+        if newest is not None and newest >= float(pending[0]) - 0.5 * interval:
+            tab._source_fill_pending = None
+        elif aged < COMPARE_FILL_WINDOW_S:
+            return
+        else:
+            tab._source_fill_pending = None      # a request nothing answered: ask again
+    span = True
+    # A PAUSED pane asks for one picture at its moment and never for a lead. The lead is a playback cost (the
+    # decoder's ~8 frames/s latency is hidden only when the playhead is moving); with a still playhead it decodes
+    # frames nobody will see - and, because the oldest entry went first, every lead walk used to evict the very
+    # picture the pane was showing (owner, 2026-11-27: the original blinked a couple of times with playback never
+    # started). The register's own anchor rule now protects that picture; this one stops the waste at the ask.
+    paused = bool(getattr(tab, "_preview_paused", False))
+    if register.picture_for(playhead, 1.5 * interval, generation=generation) is None:
+        # Nothing in the register answers for THIS playhead (an empty register, a seek, a jump back): ask at it, and
+        # take the single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder
+        # stands.
+        target = playhead
+        span = False
+    elif paused:
+        # The pane holds the moment it is showing and is not moving: there is nothing to ask for.
+        return
+    elif newest is None:
+        target = playhead
+        span = False
+    elif playhead - newest > 2.0 * interval:
+        # The register is BEHIND the playhead - a scrub, or a SPARSE tail (its lateness rule skips pictures, so two
+        # consecutive ones can be six frames apart). One frame per call cannot close a gap the playhead reopens on
+        # every picture: measured 2026-11-26, `pool=1` for ever and every pair a timeout. Ask for the far edge of the
+        # lead and take the whole walk - the burst IS the point. It is decoded FORWARD, not rewound: a rewind's ceil
+        # landed a frame off the tail's sparse grid while the forward walk lands on the frame itself.
+        target = playhead + tab._compare_lead()
+        span = True
+    elif newest < playhead + tab._compare_lead():
+        # Ask for the WHOLE lead in one call and take every frame of the walk: one round trip per lead, not one per
+        # frame (a frame-by-frame ask is latency-bound at ~8 frames/s; the decode itself runs at 80).
+        target = playhead + tab._compare_lead()
+    else:
+        return
+    if register.owner_of(target, generation=generation) is not None:
+        # Somebody already holds the very moment this ask would fetch. Asking again would decode the same picture a
+        # second time - and "somebody holds it" is the whole answer, whoever the owner is.
+        return
+    tab._source_fill_pending = (float(target), time.monotonic())
+    stats = getattr(tab, "_compare_fill_stats", None)
+    if stats is not None:
+        stats["asks"] += 1
+        stats["target"] = round(float(target), 3)
+        stats["span"] = int(bool(span))
+        stats["newest"] = None if newest is None else round(float(newest), 3)
+    tab._compare_from_tick = True
+    try:
+        tab._on_original_requested(max(0.0, target), span=span)
+    finally:
+        tab._compare_from_tick = False
+
+
+def warm_source_decoder(tab) -> None:
+    """Open the source decoder while a job runs, so the first switch to a compare mode is just a seek.
+
+    Called from the GUI tick (`_tick_second_surface`), synchronously: a `QTimer` scheduled from here never fired in a
+    live run (measured 2026-11-26 - a whole render went by with no `source decoder` line and the first switch still
+    paid the open), and `renderToPipeThread` is a worker thread where a timer cannot live at all. One open per job,
+    on the thread that owns the decoder, guarded so the tick cannot retry a failing file 10 times a second.
+
+    Why it matters: the open plus the first seek is the ~0.8 s the owner measured between the result half appearing
+    and the source half ("апскейл сразу справа отобразился, а оригинал - н-ое количество времени ожидания").
+    """
+    if getattr(tab, "_source_decoder", None) is not None or getattr(tab, "_source_warm_tried", False):
+        return
+    options = getattr(tab, "currentRenderOptions", None)
+    if not (getattr(options, "inputFile", "") or ""):
+        return
+    tab._source_warm_tried = True
+    if getattr(tab, "isPreview", False):
+        # The owner's case: a preview's first switch to a compare mode paid the open. A preview is the one flow where
+        # the pane is guaranteed to be shown and the switch is a human action a second away - open ONCE, here, on the
+        # GUI thread (a `QTimer` scheduled from this tick never fired in a live run: measured 2026-11-26, a whole
+        # render went by with no `source decoder` line).
+        tab._open_source_decoder()
+        return
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(700, tab._open_source_decoder)
+
+
+def source_tolerance(tab) -> float:
+    """Half a frame: the largest distance at which two moments are still the same picture."""
+    return 0.5 / max(1.0, tab._compare_fps())
