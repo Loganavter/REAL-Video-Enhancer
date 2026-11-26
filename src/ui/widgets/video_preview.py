@@ -113,10 +113,10 @@ VIEW_MODES = ("single", "sbs", "split")
 #: mouse, narrow enough that a press meant for the picture (pan/compare) stays one.
 SPLIT_GRAB_PX = 9
 
-#: The divider fades out this long after the pointer leaves it, and the grip that stays is this visible: a rule at zero
+#: The divider fades out this long after the pointer leaves it (owner, 2026-11-26: "фейд до 1 секунды срезать"), and the grip that stays is this visible: a rule at zero
 #: alpha would leave nothing to aim at, and a rule at full alpha would sit over the picture for ever (owner, 2026-11-26:
 #: "после того как курсор ушел - фейдом пропадало в течение 2 секунд (только ручка была видна с альфой 20%)").
-DIVIDER_FADE_S = 2.0
+DIVIDER_FADE_S = 1.0
 DIVIDER_REST_ALPHA = 0.2
 
 #: The shortest share of the picture each side keeps: a divider pushed to the very edge would hide one picture
@@ -1395,19 +1395,25 @@ class VideoPreviewSurface(QRhiWidget):
                 side = float(scaled_px(1))
                 core = float(scaled_px(2))
                 rule = side + core + side
+                # A SEAM, not a highlight: a bright white rule at 0.90 glared over the picture (owner, 2026-11-26:
+                # "линия крайне яркая"). The light edges carry the contrast at 0.38 and the dark core does the reading
+                # at 0.78, so the line is legible over a bright sky and a dark tree without being the brightest thing
+                # on screen - the GRIP is what says "control", and it is deliberately the softer of the two.
                 if alpha > 0.0:
-                    rects.append((x - rule / 2.0, top, side, bottom - top, rgba(colours["divider"], 0.90 * alpha)))
+                    rects.append((x - rule / 2.0, top, side, bottom - top, rgba(colours["divider"], 0.38 * alpha)))
                     rects.append((x - core / 2.0, top, core, bottom - top,
-                                  rgba(colours["divider_outline"], 0.90 * alpha)))
-                    rects.append((x + core / 2.0, top, side, bottom - top, rgba(colours["divider"], 0.90 * alpha)))
-                grip_alpha = max(DIVIDER_REST_ALPHA, alpha)
+                                  rgba(colours["divider_outline"], 0.78 * alpha)))
+                    rects.append((x + core / 2.0, top, side, bottom - top, rgba(colours["divider"], 0.38 * alpha)))
+                # The grip's own alpha runs from the owner's 20 % at rest to 55 % under the pointer: `max(0.2, alpha)`
+                # multiplied the tone-down's 0.55 into 11 % and the resting handle stopped reading as one.
+                grip_alpha = DIVIDER_REST_ALPHA + (0.55 - DIVIDER_REST_ALPHA) * alpha
                 grip_h = min(float(scaled_px(36)), max(float(scaled_px(24)), (bottom - top) * 0.12))
                 grip_w = float(scaled_px(14))
                 grip_top = top + (bottom - top - grip_h) / 2.0
                 outline = float(scaled_px(1))
                 rects.append((x - grip_w / 2.0, grip_top, grip_w, grip_h, rgba(colours["divider"], grip_alpha)))
                 rects.append((x - grip_w / 2.0 + outline, grip_top + outline, grip_w - 2 * outline, grip_h - 2 * outline,
-                              rgba(colours["divider_outline"], grip_alpha * 0.95)))
+                              rgba(colours["divider_outline"], grip_alpha * 0.78)))
                 chevron = max(1.0, outline)
                 for offset in (-float(scaled_px(4)), 0.0, float(scaled_px(4))):
                     rects.append((x - chevron / 2.0, grip_top + grip_h / 2.0 + offset - chevron / 2.0,

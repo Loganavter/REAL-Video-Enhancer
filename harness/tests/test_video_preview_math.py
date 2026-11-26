@@ -379,8 +379,8 @@ def test_the_divider_only_exists_in_split(surface):
     assert surface._split_divider_x() is None
 
 
-def test_the_divider_fades_over_two_seconds_and_leaves_the_grip_at_twenty_percent(surface):
-    """Owner, 2026-11-26: a rule that follows the pointer, then a 2 s fade that ends with only the grip at 20 %.
+def test_the_divider_fades_over_a_second_and_leaves_the_grip_at_twenty_percent(surface):
+    """Owner, 2026-11-26: a rule that follows the pointer, then a 1 s fade that ends with only the grip at 20 %.
 
     The curve is a pure function of a timestamp (`divider_alpha(now)`), so the test drives it without a timer.
     """
@@ -433,3 +433,28 @@ def test_the_fade_stops_repainting_once_it_reaches_the_rest_alpha(surface):
     surface._on_hover_restore = None
     surface._divider_left_at = None
     assert surface.divider_alpha() == pytest.approx(1.0)
+
+
+def test_the_divider_is_a_seam_not_a_highlight(surface):
+    """Owner, 2026-11-26: "линия крайне яркая". The light edges stay under 0.45 and the dark core does the reading.
+
+    A pin on the numbers, not on taste: the peak alpha of the light side is the thing that glared, and the grip must be
+    softer than the rule so the line reads as a seam with a handle rather than a bright bar.
+    """
+    from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
+
+    source = QImage(640, 360, QImage.Format.Format_RGBA8888)
+    source.fill(QColor("#204060"))
+    surface.set_original(source)
+    surface.set_view_mode("split")
+    surface._divider_left_at = None          # full alpha: the brightest the rule ever is
+    floats = surface._hud_vertices()
+    divider_x = surface._split_divider_x()
+    assert divider_x is not None
+    near = [(round(floats[i], 1), round(floats[i + 5], 3)) for i in range(0, len(floats), 6)
+            if abs(floats[i] - divider_x) <= float(scaled_px(12))]
+    light = max(alpha for _x, alpha in near if alpha > 0.3)
+    alphas = {round(alpha, 2) for _x, alpha in near}
+    assert 0.38 in alphas, f"the light edges must be subdued at 0.38, got {sorted(alphas)}"
+    assert 0.78 in alphas, f"the dark core must carry the reading at 0.78, got {sorted(alphas)}"
+    assert max(alphas) <= 0.80, f"nothing on the divider may glare: {sorted(alphas)}"
