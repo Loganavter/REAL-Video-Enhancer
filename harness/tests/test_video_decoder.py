@@ -141,3 +141,78 @@ def test_an_exact_name_never_accepts_the_frame_before_it():
     assert frame_at_or_after(previous, name, tolerance=0.5 * interval) is False
     # What the slack DOES buy: a fitted name a few milliseconds below its frame still finds that frame.
     assert frame_at_or_after(name, name + 0.008, tolerance=0.5 * interval) is True
+
+
+def _decoder_with(frames, *, position=1.0, fps=24.0, origin=0.0):
+    """A decoder whose stream is a list of fake frames: the routing rules, without PyAV or a file."""
+    decoder = VideoDecoder()
+    decoder._interval = 1.0 / fps
+    decoder._origin = origin
+    decoder._decode_pts = position
+    decoder._at_eof = False
+    decoder._held = None
+    remaining = list(frames)
+
+    def take():
+        return remaining.pop(0) if remaining else None
+
+    decoder._take = take
+    published = []
+    decoder.frame_ready.connect(published.append)
+    return decoder, published
+
+
+def test_a_forward_compare_step_decodes_in_sequence_instead_of_rewinding():
+    """The measured difference: 40.6 ms per frame decoded forward against 176 ms per keyframe rewind (1440p source).
+
+    `request_frame(..., seek=False)` is the compare's forward step, and it must reach `_step_and_publish`; a request
+    without the flag keeps the old rewind. A wrong-way jump is handled inside `_step_and_publish` (it rewinds), so the
+    routing itself only has to keep the cheap path cheap.
+    """
+    decoder = VideoDecoder()
+    decoder._container = object()          # `_pump` refuses to route anything without one
+    calls = []
+    decoder._seek_and_publish = lambda target, **kw: calls.append(("seek", round(target, 3)))
+    decoder._step_and_publish = lambda target, **kw: calls.append(("step", round(target, 3)))
+    decoder._start_time = 0.0
+
+    decoder._request = (2.0, True, False)
+    decoder._pump()
+    assert calls == [("step", 2.0)], "a forward compare step must not pay a keyframe rewind"
+
+    calls.clear()
+    decoder._request = (2.0, True, True)
+    decoder._pump()
+    assert calls == [("seek", 2.0)], "an ordinary request keeps the rewind (a press, a scrub)"
+
+
+class _Frame:
+    """A `FrameRef` stand-in: the step only reads `pts` and re-emits the frame."""
+
+    def __init__(self, pts: float) -> None:
+        self.pts = pts
+
+
+def test_a_forward_step_publishes_the_first_frame_at_or_after_an_exact_target():
+    decoder, published = _decoder_with([_Frame(1.0), _Frame(1.0417), _Frame(1.0833), _Frame(1.125)],
+                                       position=1.0)
+    rewinds = []
+    decoder._seek_and_publish = lambda target, **kw: rewinds.append(target)
+
+    decoder._step_and_publish(1.09, exact=True)
+
+    assert [round(frame.pts, 3) for frame in published] == [1.125], (
+        "an exact compare request names the frame at or AFTER its timestamp - the render's own ceil rule")
+    assert rewinds == [], "forward motion is decoded in sequence, never rewound"
+
+
+def test_a_target_behind_the_read_position_falls_back_to_the_rewind():
+    """A scrub back, or a press on an earlier frame: the cheap path has no answer there, and must not pretend."""
+    decoder, published = _decoder_with([_Frame(5.0)], position=5.0)
+    rewinds = []
+    decoder._seek_and_publish = lambda target, **kw: rewinds.append(target)
+
+    decoder._step_and_publish(1.0, exact=True)
+
+    assert rewinds == [1.0], "a wrong-way jump keeps the keyframe rewind"
+    assert published == [], "and it publishes nothing itself"

@@ -2488,8 +2488,11 @@ class ProcessTab:
         from PySide6.QtGui import QImage
 
         path_started = time.perf_counter()
-        image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
-                       QImage.Format.Format_RGB888).copy()
+        # ONE copy, not two: `bytes()` already owns a private buffer, so the QImage is built over it and only the CROP
+        # (or the whole frame when there is no crop) is copied. The first cut copied the full 1440p frame and then
+        # copied the crop out of it - 12 MB of memcpy per source frame at 24 fps for nothing.
+        raw = bytes(frame.buffer)
+        image = QImage(raw, frame.width, frame.height, frame.stride, QImage.Format.Format_RGB888)
         pane = self.page_handles.proc.previewLabel
         if hasattr(pane, "set_frame"):
             pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
@@ -3054,8 +3057,17 @@ class ProcessTab:
                     log(f"source decoder: cannot open {path}")
                     return
                 self._source_decoder = decoder
+            # A step FORWARD from the frame already on screen is decoded in sequence (median 40.6 ms measured on this
+            # 1440p source); a jump pays a keyframe rewind (median 176 ms, p95 321). The compare asks once per playhead
+            # step, and at the rewind price the pair ran at a quarter of real time with the halves arriving apart
+            # (owner, 2026-11-26: "прям видно как сначала один рисуется, а затем другой"). Forward motion is the one
+            # case that can be cheap, so only it skips the seek; a scrub backwards still rewinds.
+            landed = getattr(self, "_second_surface_pts", None)
+            step_forward = (landed is not None
+                            and 0.0 <= float(seconds) - float(landed) <= 0.6)
             decoder.request_frame(max(0.0, float(seconds)),
-                                  exact=not bool(getattr(self, "_shown_name_is_fitted", False)))
+                                  exact=not bool(getattr(self, "_shown_name_is_fitted", False)),
+                                  seek=not step_forward)
         except Exception as exc:
             log(f"original frame failed: {exc}")
 
@@ -3084,16 +3096,23 @@ class ProcessTab:
                     f"the render reported {box} but the source frame is {image.width()}x{image.height()}")
         else:
             image = image.copy(*region)
+        if region is None:
+            # No crop: the QImage still points into `raw`, which dies with this function - own the pixels.
+            image = image.copy()
         # What the decoder actually produced, before the crop and the scale: a compare half that ends up black is
         # either an empty decode or a viewer-side problem, and only this line can tell them apart.
-        _probe = image
-        _samples = []
-        for _fx, _fy in ((1, 1), (_probe.width() // 2, _probe.height() // 2),
-                         (max(0, _probe.width() - 2), max(0, _probe.height() - 2))):
-            _c = _probe.pixelColor(int(_fx), int(_fy))
-            _samples.append(f"{_c.red()},{_c.green()},{_c.blue()}")
-        telemetry.event("source frame", w=image.width(), h=image.height(), fmt=image.format().name,
-                        px="/".join(_samples))
+        if telemetry.level() >= 2:
+            # Three `pixelColor` reads per source frame exist for one line of evidence; at 24 fps they are 72 a second
+            # on the GUI thread for a log nobody is reading. Level 2 is the "one line per frame" mode, so ask there.
+            _samples = []
+            for _fx, _fy in ((1, 1), (image.width() // 2, image.height() // 2),
+                             (max(0, image.width() - 2), max(0, image.height() - 2))):
+                _c = image.pixelColor(int(_fx), int(_fy))
+                _samples.append(f"{_c.red()},{_c.green()},{_c.blue()}")
+            telemetry.event("source frame", w=image.width(), h=image.height(), fmt=image.format().name,
+                            px="/".join(_samples))
+        else:
+            telemetry.event("source frame", w=image.width(), h=image.height(), fmt=image.format().name)
         watched = getattr(self, "_compare_watch", None)
         self._compare_watch = None
         pts = float(getattr(frame, "pts", 0.0) or 0.0)
