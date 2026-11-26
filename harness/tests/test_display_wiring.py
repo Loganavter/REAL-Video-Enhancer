@@ -594,10 +594,10 @@ def _painters(*, preview: bool, reader) -> ProcessTab:
 def _tail_runs(tab: ProcessTab, job) -> bool:
     """The tail decision the render loop now carries (plan P2 folded `_tail_should_run` into it).
 
-    One picture, one painter, decided structurally rather than by who publishes last: a PREVIEW follows its own file;
-    an EXPORT whose block is usable does not start a tail (the feed is that pane's painter); an export whose block
-    could not be allocated keeps the tail as its fallback. The page's own answer for "is the block usable" is the
-    owner's `may_seek_any`, so the test states the rule with that one fact rather than with a deleted predicate.
+    Transcribed from `renderToPipeThread`, at the job's `Popen`: the DECISION is `owner_of(page).may_seek_any` (the
+    block feeds the pane, so an export starts no tail), and the other two facts are the job's own
+    (`_preview_enabled`, `_followable`) plus its kind. Nothing about painting is re-derived here - a test that
+    re-derived `may_seek_any` from `attached` would be the second copy this phase deletes.
     """
     from src.ui.preview.owner import owner_of
 
@@ -610,31 +610,46 @@ def _tail_runs(tab: ProcessTab, job) -> bool:
 
 def test_an_export_whose_pane_is_fed_by_the_display_starts_no_tail():
     """The invariant is not "the display wins by arriving later": this job's tail is never built."""
+    from src.ui.preview.owner import owner_of
+
     tab = _painters(preview=False, reader=_Reader())
+    assert owner_of(tab).may_seek_any is True, "the block feeds this pane, so no tail may run beside it"
     assert _tail_runs(tab, _job()) is False, (
         "an export whose pane the display block feeds must not also decode its own growing file")
 
 
 def test_a_preview_still_follows_its_own_file():
-    """The preview's tail IS the picture (and the strip's seek lives on it), so it always starts."""
+    """The preview's tail IS the picture (and the strip's seek lives on it), so it always starts.
+
+    Even with a usable block: the block is a preview's REACH (`may_seek_any`), not its painter, so the job's kind
+    alone decides this branch.
+    """
+    from src.ui.preview.owner import owner_of
+
     tab = _painters(preview=True, reader=_Reader())
+    assert owner_of(tab).may_seek_any is True, "the block only extends the reach here"
     assert _tail_runs(tab, _job(preview=True, path="/tmp/preview.mp4")) is True
 
 
 def test_an_export_without_a_usable_display_block_keeps_the_tail_as_its_fallback():
     """A pane with no block would otherwise stay black on a plain render (the reason the tail was added)."""
+    from src.ui.preview.owner import owner_of
+
     tab = _painters(preview=False, reader=None)
+    assert owner_of(tab).may_seek_any is False, "nothing can render a frame on demand for this pane"
     assert _tail_runs(tab, _job()) is True
 
 
 def test_an_export_file_the_tail_cannot_follow_starts_no_tail():
     tab = _painters(preview=False, reader=None)
-    assert _tail_runs(tab, _job(path="/tmp/out.mp4")) is False, "a growing mp4 has its index at the end"
+    assert tab._followable(_job(path="/tmp/out.mp4")) is False, "a growing mp4 has its index at the end"
+    assert _tail_runs(tab, _job(path="/tmp/out.mp4")) is False
 
 
 def test_the_preview_switch_off_starts_no_tail():
     tab = _painters(preview=False, reader=None)
     tab.settings = SimpleNamespace(settings={"preview_enabled": "False"})
+    assert tab._preview_enabled() is False
     assert _tail_runs(tab, _job()) is False
 
 
