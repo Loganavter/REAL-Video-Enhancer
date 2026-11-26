@@ -35,9 +35,9 @@
 #     and hides exactly the stale-frame bugs these rows exist for, so it is not used.
 #
 # Exit: 0 = every row observed and held; 1 = at least one MISMATCH; 2 = no mismatch, but at least one row could not be
-# observed (the table says which and why). The `playing, sbs, strip drag` row is EXPECTED to be a MISMATCH on the
-# 2026-11-27 tree (plan §P0: "at least one row observed failing on today's tree") — it is the gate for plan P1, whose
-# pair writer is what makes the last matched pair hold.
+# observed (the table says which and why). The `playing, sbs, strip drag` row was the GATE for plan P1: it was expected to
+# mismatch before `preview/pair.py` landed and must hold after it (79ea250c) - so a MISMATCH there is a regression now, not
+# the expected state.
 #
 # Artifacts (shots, crops, the extracted log window per row) go to `$RVE_MATRIX_ARTIFACTS`
 # (default /tmp/opencode/live-matrix-<stamp>); every row prints the files that back its verdict.
@@ -276,7 +276,7 @@ echo "live_matrix: clip $CLIP"
 echo "live_matrix: artifacts $ART"
 echo "live_matrix: preview log ${PREVIEW_LOG}"
 if [ -f "$PREVIEW_LOG" ]; then
-    LEVEL="$(head -1 "$PREVIEW_LOG" | sed -n 's/.*level=\([0-9]*\).*/\1/p')"
+    LEVEL="$(grep 'preview telemetry session' "$PREVIEW_LOG" | tail -1 | sed -n 's/.*level=\([0-9]*\).*/\1/p')"
     [ "${LEVEL:-0}" -ge 1 ] || echo "live_matrix: WARNING the app was booted with RVE_PREVIEW_LOG=${LEVEL:-?}: the" \
         "\`compare fill\`/\`pair_off\` rows cannot be observed. Reboot live.sh with RVE_PREVIEW_LOG=1."
 fi
@@ -291,7 +291,7 @@ ctrl "preview:$CLIP" 900 > "$ART/preview.json" &
 PREVIEW_PID=$!
 
 # A produced, painted frame in sbs is the precondition of every row below.
-wait_state 's.get("progress") and s["progress"][1] and s["progress"][0] > 0 and s.get("strip_visible")' 120 \
+wait_state 's.get("progress") and s["progress"][1] and s["progress"][0] > 0' 120 \
     || echo "live_matrix: WARNING no painted frame within 120 s; the rows below will say what they saw"
 read -r PX PY PW PH <<<"$(pane_geometry)"
 [ "${PW:-0}" -gt 8 ] || die "previewLabel has no box (state: $PX,$PY ${PW}x${PH})"
