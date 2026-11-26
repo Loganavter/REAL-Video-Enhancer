@@ -276,7 +276,8 @@ class VideoDecoder(QObject):
             self._clock.pause(now)
         self._kick()
 
-    def request_frame(self, seconds: float, *, exact: bool = False, seek: bool = True) -> None:
+    def request_frame(self, seconds: float, *, exact: bool = False, seek: bool = True,
+                      span: bool = False) -> None:
         """Decode and publish one frame at `seconds` without moving the play position.
 
         This is the LMB "show the original" path and the compare modes' second surface. `seek=False` decodes FORWARD
@@ -289,7 +290,7 @@ class VideoDecoder(QObject):
         if self._container is None:
             self.error.emit("request_frame() called before open()")
             return
-        self._request = (self._clamp(seconds), bool(exact), bool(seek))
+        self._request = (self._clamp(seconds), bool(exact), bool(seek), bool(span))
         self._kick()
 
     def is_playing(self) -> bool:
@@ -321,12 +322,12 @@ class VideoDecoder(QObject):
         # while playing has to put the play position back afterwards).
         while True:
             if self._request is not None:
-                (target, exact, seek), self._request = self._request, None
+                (target, exact, seek, span), self._request = self._request, None
                 resume_at = self._clock.position(time.monotonic())
                 if seek:
                     self._seek_and_publish(target, announce=False, exact=exact)
                 else:
-                    self._step_and_publish(target, exact=exact)
+                    self._step_and_publish(target, exact=exact, span=span)
                 if self._playing:
                     self._pending_seek = resume_at
                 continue
@@ -474,7 +475,7 @@ class VideoDecoder(QObject):
         if announce:
             self.seeked.emit(float(target))
 
-    def _step_and_publish(self, target: float, *, exact: bool = False) -> None:
+    def _step_and_publish(self, target: float, *, exact: bool = False, span: bool = False) -> None:
         """Publish the frame at `target` by decoding forward from the read position (no keyframe rewind).
 
         The cheap half of `_seek_and_publish`: the LAST frame at or before the target for a playback step, the FIRST at
@@ -486,18 +487,25 @@ class VideoDecoder(QObject):
         if self._at_eof or target < position - 0.5 * self._interval:
             self._seek_and_publish(target, announce=False, exact=exact)
             return
-        published: FrameRef | None = None
-        fallback: FrameRef | None = None
+        walked: list[FrameRef] = []
         while True:
             frame = self._take()
             if frame is None:
                 break
+            walked.append(frame)
             if frame_at_or_after(frame.pts, target, tolerance=0.0 if exact else 0.5 * self._interval):
-                published = frame
                 break
-            fallback = frame
+        if span:
+            # EVERY frame of the walk, in order: a caller that keeps a buffer of decoded pictures earns its lead in one
+            # round trip. One frame per request costs a full event-loop trip each (measured 2026-11-26: a prefetcher
+            # asking frame-by-frame topped out at ~8 frames/s against a 12.5 ms decode, because the latency, not the
+            # decode, was the limit).
+            for frame in walked:
+                self.frame_ready.emit(frame)
+            return
+        published = walked[-1] if walked else None
         if published is None:
-            published = fallback if fallback is not None else self._held
+            published = self._held
             self._held = None
         if published is not None:
             self.frame_ready.emit(published)

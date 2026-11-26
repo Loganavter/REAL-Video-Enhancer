@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import struct
 import sys
+import time
 import types
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,7 +63,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 
 from src.ui import shared_flag  # noqa: E402
-from src.ui.ProcessTab import ProcessTab  # noqa: E402
+from src.ui.ProcessTab import COMPARE_LEAD_FRAMES, COMPARE_POOL_FRAMES, ProcessTab  # noqa: E402
 from src.ui.video.channel import (  # noqa: E402
     DEFAULT_DISPLAY_BOX,
     DISPLAY_FMT_RGB888,
@@ -334,6 +335,7 @@ class _Pane:
     def __init__(self, visible: bool = True) -> None:
         self.visible = visible
         self.frames = []
+        self.originals = []
         self.progress = []
         self.mode = "single"
 
@@ -344,6 +346,9 @@ class _Pane:
                   seq: int | None = None, media_time: float | None = None,
                   generation: int | None = None) -> None:
         self.frames.append(image)
+
+    def set_original(self, image, *, media_time: float | None = None, index: int | None = None) -> None:
+        self.originals.append((image, media_time, index))
 
     def set_progress(self, **values) -> None:
         self.progress.append(values)
@@ -833,21 +838,38 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     tab.max_value = 100
     tab.currentFrame = 50
     asked = []
-    tab._on_original_requested = lambda seconds: asked.append(float(seconds))
+    tab._on_original_requested = lambda seconds, **_: asked.append(float(seconds))
 
     tab._tick_second_surface()
+    assert asked == [pytest.approx(5.0)], "an empty pool asks for the playhead"
+
     tab._tick_second_surface()
-    # An ask the decoder does not answer is RETRIED: the marker is set when a frame arrives, not when one is asked for,
-    # so a failed decode cannot silence the compare for as long as the pane is paused (measured 2026-11-26: the split
-    # divider never appeared because the source never landed and `_second_surface_pts` already claimed it had).
+    assert asked == [pytest.approx(5.0)], "one ask in flight at a time, not one per tick"
+
+    # Nothing answers: the ask is retried once its window passes, so a paused pane cannot be silenced for ever
+    # (measured 2026-11-26: the split divider never appeared because the source never landed).
+    tab._source_fill_pending = (5.0, time.monotonic() - 1.0)
+    tab._tick_second_surface()
     assert asked == [pytest.approx(5.0), pytest.approx(5.0)], "an unanswered ask must be retried"
 
-    # A landed frame at that playhead is the marker `_on_original_frame` writes; from then on the tick is quiet.
-    tab._second_surface_pts = 5.0
+    # A burst of landed frames fills the pool; the tick then asks for the FAR EDGE of the lead in one call.
+    for step in range(COMPARE_LEAD_FRAMES):
+        tab._source_pool_put(5.0 + step / 24.0, 50 + step, object())
+    tab._source_fill_pending = None
     tab._tick_second_surface()
-    assert asked == [pytest.approx(5.0), pytest.approx(5.0)], "one delivered frame per playhead, not one per tick"
+    assert asked[-1] == pytest.approx(5.0 + COMPARE_LEAD_FRAMES / 24.0), (
+        "the ask names the far edge of the lead: one round trip per lead, not one per frame")
 
+    # With the lead full nothing is asked: no decode is spent on a pane that is already served.
+    for step in range(COMPARE_LEAD_FRAMES, COMPARE_LEAD_FRAMES + 2):
+        tab._source_pool_put(5.0 + step / 24.0, 50 + step, object())
+    tab._source_fill_pending = None
+    tab._tick_second_surface()
+    assert asked[-1] == pytest.approx(5.0 + COMPARE_LEAD_FRAMES / 24.0), "a full lead costs nothing"
+
+    # A jump past the pool asks at the PLAYHEAD, not for the next frame of a sequence nobody is watching.
     tab.currentFrame = 75
+    tab._source_fill_pending = None
     tab._tick_second_surface()
     assert asked[-1] == pytest.approx(7.5)
 
@@ -855,7 +877,7 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     pane.mode = "single"
     tab.currentFrame = 90
     tab._tick_second_surface()
-    assert len(asked) == 3, "single asks nothing; the list is the two retries plus the moved playhead"
+    assert len(asked) == 4, "single asks nothing: the retry, the lead ask and the jump"
 
 
 def test_the_default_box_is_the_probe_constant():
@@ -1201,3 +1223,55 @@ def test_a_press_inside_the_band_but_past_the_tails_flushed_edge_goes_on_demand(
     tab._live_tail = SimpleNamespace(produced_seconds=2.0, seek=lambda *a, **k: None)
     tab._on_preview_seek(0.5)                                                       # 5 s: inside the band, past 2 s
     assert reader.seeks == [pytest.approx(5.0)], "the tail cannot answer 5 s; the renderer can"
+
+
+def test_the_source_half_shows_the_frame_that_belongs_to_the_playhead_not_the_newest():
+    """With a lead the newest decoded frame is in the FUTURE: showing it would put the source ahead of the result.
+
+    Owner, 2026-11-26: "нам в теории наоборот с запасом надо сделать сразу". The pool runs ahead, so the pane must pick
+    the frame for the playhead - and only once per frame, or every tick would repaint the same picture twice.
+    """
+    pane = _Pane()
+    pane.mode = "split"
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
+    tab._source_pool_put(5.000, 120, "A")
+    tab._source_pool_put(5.042, 121, "B")
+    tab._source_pool_put(5.083, 122, "C")
+
+    tab._source_show(5.042)
+    assert [entry[0] for entry in pane.originals] == ["B"], (
+        "the newest frame is ahead of the playhead; the pane gets the one AT it")
+    tab._source_show(5.042)
+    assert len(pane.originals) == 1, "the same frame is one set_original, not one per tick"
+    tab._source_show(5.050)
+    assert len(pane.originals) == 1, "half a frame of slack: still the same picture"
+    tab._source_show(5.083)
+    assert [entry[0] for entry in pane.originals] == ["B", "C"]
+
+
+def test_the_source_pool_keeps_the_history_the_decoder_has_already_passed():
+    """A playhead-based horizon emptied the pool: the decoder runs AHEAD, so a frame it passed is never re-emitted.
+
+    Measured 2026-11-26: `pool=0.292` alone while the playhead was at 0.375, four paints in a row, and the pair stayed a
+    frame apart. History is cheap (bounded by `COMPARE_POOL_FRAMES`) and it is what a small backwards step needs.
+    """
+    pane = _Pane()
+    pane.mode = "split"
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
+    for step in range(5):
+        tab._source_pool_put(0.125 + step / 24.0, 100 + step, f"F{step}")
+
+    tab._source_prune(0.334)        # the playhead is one frame past the newest entry
+
+    assert len(tab._source_pool) == 5, "nothing the decoder has passed may be dropped"
+    assert 0.125 in tab._source_pool
+
+
+def test_the_source_pool_is_bounded_even_when_nothing_prunes_it():
+    pane = _Pane()
+    pane.mode = "split"
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
+    for step in range(COMPARE_POOL_FRAMES + 5):
+        tab._source_pool_put(step / 24.0, step, f"F{step}")
+    assert len(tab._source_pool) == COMPARE_POOL_FRAMES
+    assert min(tab._source_pool) == pytest.approx(5 / 24.0), "the OLDEST go first"

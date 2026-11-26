@@ -8,7 +8,7 @@ from multiprocessing import shared_memory
 
 from PySide6 import QtGui
 from PySide6.QtGui import QPixmap, QPainter, QPainterPath, QColor
-from PySide6.QtCore import Qt, QSize, QUrl
+from PySide6.QtCore import QObject, QSize, Qt, QUrl, Slot
 
 from .RenderQueue import RenderQueue
 from ..render_jobs import short_duration
@@ -82,6 +82,42 @@ def parse_borders_line(line: object) -> tuple[int, int, int, int] | None:
     if match is None:
         return None
     return tuple(int(group) for group in match.groups())
+
+
+#: How far AHEAD of the result's playhead the compare's source half is decoded, in frames. The point is HEADROOM, not
+#: throughput: a source frame costs 12.5 ms to decode (measured on the 1440p HEVC source: 48 frames in 0.60 s, an 80 fps
+#: ceiling against a 24 fps stream), so three frames ahead cost 37 ms once and 12.5 ms per 41.7 ms after that - ~30 % of
+#: one core, and in exchange the frame the pane is about to show is already decoded when the result arrives, so both
+#: halves change in ONE repaint (owner, 2026-11-26: "нам в теории наоборот с запасом надо сделать сразу").
+COMPARE_LEAD_FRAMES = 3
+
+#: How long one source ask counts as "in flight". A span of `COMPARE_LEAD_FRAMES` costs ~40 ms of decode, so this is a
+#: retry deadline, not a throttle: an ask nothing answers is re-sent on the next tick after it, which keeps a paused
+#: pane's first frame arriving as quickly as the retry itself.
+COMPARE_FILL_WINDOW_S = 0.25
+
+#: How many decoded source frames are kept. `COMPARE_LEAD_FRAMES` + a little history for a small backwards step; every
+#: entry is a full-size QImage (6.2 MB at 1440p), so the cap is a memory budget, not a scheduling knob.
+COMPARE_POOL_FRAMES = 6
+
+
+class _FrameRelay(QObject):
+    """Deliver one decoder frame on the GUI thread.
+
+    `ProcessTab` is a plain object, not a `QObject`, so a signal connected straight to one of its methods runs IN THE
+    EMITTING THREAD. With the compare's decoder on its own `QThread` that meant `set_original` -> `update()` from a
+    worker thread: Qt's "Cannot make QOpenGLContext current in a different thread" and a dead window (measured
+    2026-11-26, the first run after the decoder was moved off the GUI thread). The relay LIVES in the GUI thread, so
+    the connection to it is queued and the callback runs where widgets may be touched.
+    """
+
+    def __init__(self, callback) -> None:
+        super().__init__()
+        self._callback = callback
+
+    @Slot(object)
+    def deliver(self, frame) -> None:
+        self._callback(frame)
 
 
 def crop_region(box, source_width: int, source_height: int) -> tuple[int, int, int, int] | None:
@@ -307,6 +343,11 @@ class ProcessTab:
         #: The playhead the standing compare (`sbs`/`split`) was last asked for: the 100 ms clock must not re-seek the
         #: source decoder for a picture that is already on screen.
         self._second_surface_pts = None
+        #: The compare's decoded source frames: `pts -> (index, QImage)`, kept AHEAD of the playhead (see
+        #: `COMPARE_LEAD_FRAMES`) so the pane never waits for a decode to draw the other half.
+        self._source_pool: dict[float, tuple[object, object]] = {}
+        #: The pts currently handed to the pane, so a repaint happens only when the PICTURE changes.
+        self._source_shown_pts: float | None = None
         #: A paused pane may still be shown ONE frame - the one a strip press asked for. While this is set the request
         #: byte stays 1 and the next published frame paints even though the transport is holding.
         self._display_seek_pending = False
@@ -1185,6 +1226,12 @@ class ProcessTab:
                 # 0.0 and Play then started the file at its beginning instead of where the render stood (measured
                 # 2026-11-25: an export at 21 % and a Play that replayed from 0.000 s).
                 self._preview_playhead = float(media_time)
+            # The pair paints together: the source for this moment is already in the pool, so it is handed over in the
+            # same repaint instead of letting the source's own arrival repaint the picture a moment later - which is the
+            # "one drawn, then the other" the owner sees (2026-11-26).
+            paint_pair = getattr(self, "_source_paint_pair", None)
+            if callable(paint_pair):
+                paint_pair()
             if pressed_at is not None and pending and media_time is not None:
                 # Close the seek here, and only here: the gate above already refused every picture that does not
                 # answer the request, so this publication IS the answer. The log names both generations as well as the
@@ -1371,18 +1418,11 @@ class ProcessTab:
         playhead = self._result_playhead()
         if playhead <= 0.0:
             return
-        previous = getattr(self, "_second_surface_pts", None)
-        if previous is not None and abs(playhead - previous) < 1e-3:
-            return
-        # No marker here: it is set when a frame ARRIVES (`_on_original_frame`), so an ask the decoder does not answer
-        # is retried on the next tick instead of being recorded as done (a paused pane has no other clock).
-        # The tick asks every 100 ms while the playhead moves: its own requests are not presses and must not
-        # fill log.txt, so the compare's one-line-per-press instrument is told which one this is.
-        self._compare_from_tick = True
-        try:
-            self._on_original_requested(playhead)
-        finally:
-            self._compare_from_tick = False
+        # Show what the pool already has for this playhead - a PAUSED pane has no other clock, and a press must land
+        # while nothing else paints - then top the lead up. Both are cheap: the show is a lookup, the fill is at most
+        # one decode, and an ask the decoder never answers is retried here (`_source_pool_newest` still lacks the frame).
+        self._source_show(self._compare_playhead())
+        self._source_fill(self._compare_playhead())
 
     def renderToPipeThread(
         self,
@@ -3010,7 +3050,7 @@ class ProcessTab:
             return 0.0
         return edge / produced
 
-    def _on_original_requested(self, seconds: float) -> None:
+    def _on_original_requested(self, seconds: float, *, span: bool = False) -> None:
         """Decode ONE source frame at the playhead for the LMB compare (the input file, never the renderer).
 
         The image is what the platform's decoder produces from the input, which is the honest comparison: the
@@ -3018,6 +3058,24 @@ class ProcessTab:
         action. It is then cropped to the box the render reported (`BORDERS`, parsed out of this job's output) - see
         `_on_original_frame`.
         """
+        if not getattr(self, "_compare_from_tick", False):
+            pane_now = self.page_handles.proc.previewLabel
+            mode_now = getattr(pane_now, "view_mode", None)
+            comparing = False
+            if callable(mode_now):
+                try:
+                    comparing = mode_now() != "single"
+                except Exception:
+                    comparing = False
+            if comparing:
+                # The pane's clock moved (a compare mode): the pool is the one that decides WHAT to decode, so this goes
+                # through the fill instead of asking for this one timestamp. A direct ask overwrote the fill's span (the
+                # decoder keeps only the last request), which left the pool permanently a frame behind - measured
+                # 2026-11-26: the pane asked 14.139 / 14.181 / 14.223 while the pool's newest stayed at 0.292.
+                playhead_now = self._compare_playhead()
+                self._source_show(playhead_now)
+                self._source_fill(playhead_now)
+                return
         if self._queue_owns_pane():
             # A queue item IS the source: there is no render to compare it against, and decoding the last render's
             # input file over it would show a picture of a different video. A FRAME gate (which picture the compare
@@ -3047,10 +3105,24 @@ class ProcessTab:
         decoder = getattr(self, "_source_decoder", None)
         try:
             if decoder is None:
+                from PySide6.QtCore import QThread
+
                 from .video.decode import VideoDecoder
 
+                # ITS OWN THREAD, which `decode.py` is written for ("the caller moves it to a QThread") and nothing did:
+                # on the GUI thread a 1440p source frame costs 12.5 ms of decode + a 6.2 MB pack, and the paint queue
+                # waits behind it. Measured 2026-11-26: split playback ran at 0.20x wall with both decoders on the GUI
+                # thread, while the same two decoders in their own event loops ran at 0.94x - the decode was never the
+                # limit, the thread was. The lead below only has capacity once this decode is off the paint thread.
                 decoder = VideoDecoder(pixel_format="rgb24")
-                decoder.frame_ready.connect(self._on_original_frame)
+                thread = QThread()
+                decoder.moveToThread(thread)
+                thread.start()
+                self._source_thread = thread
+                # Through the relay, not straight to `self`: see `_FrameRelay` (this class is not a QObject).
+                relay = _FrameRelay(self._on_original_frame)
+                self._compare_relay = relay
+                decoder.frame_ready.connect(relay.deliver)
                 decoder.error.connect(lambda message: log(f"source decoder: {message}"))
                 path = getattr(self.currentRenderOptions, "inputFile", "") or ""
                 if not decoder.open(str(path)):
@@ -3067,9 +3139,172 @@ class ProcessTab:
                             and 0.0 <= float(seconds) - float(landed) <= 0.6)
             decoder.request_frame(max(0.0, float(seconds)),
                                   exact=not bool(getattr(self, "_shown_name_is_fitted", False)),
-                                  seek=not step_forward)
+                                  seek=not step_forward,
+                                  span=bool(span))
         except Exception as exc:
             log(f"original frame failed: {exc}")
+
+    # -- the compare's source half: decoded AHEAD of the playhead, shown in step --------------------
+
+    def _compare_fps(self) -> float:
+        """The source's frame rate, with a usable fallback: the lead and the matching slack are measured in frames."""
+        try:
+            fps = float(self._source_decoder.fps) if getattr(self, "_source_decoder", None) is not None else 0.0
+        except Exception:
+            fps = 0.0
+        return fps if fps > 0.0 else 24.0
+
+    def _compare_lead(self) -> float:
+        """How far ahead of the playhead the source half is kept, in seconds (`COMPARE_LEAD_FRAMES`)."""
+        return COMPARE_LEAD_FRAMES / self._compare_fps()
+
+    def _source_pool_put(self, pts: float, index, image) -> None:
+        """Keep one decoded source frame, bounded: the oldest go first, so a long playback cannot grow the pane."""
+        pool = getattr(self, "_source_pool", None)
+        if pool is None:
+            pool = self._source_pool = {}
+        pool[float(pts)] = (index, image)
+        while len(pool) > COMPARE_POOL_FRAMES:
+            del pool[min(pool)]
+
+    def _source_pool_newest(self) -> float | None:
+        pool = getattr(self, "_source_pool", None) or {}
+        return max(pool) if pool else None
+
+    def _source_pool_for(self, playhead: float):
+        """The decoded frame that BELONGS to `playhead`: the newest one at or before it (half a frame of slack).
+
+        Not the newest decoded one: with a lead, the newest frame is ahead of the picture by construction, and showing
+        it would put the source half in the future - the same mismatch this pool exists to remove, mirrored.
+        """
+        pool = getattr(self, "_source_pool", None) or {}
+        if not pool:
+            return None
+        slack = 0.5 / self._compare_fps()
+        best = None
+        for pts in pool:
+            if pts <= playhead + slack and (best is None or pts > best):
+                best = pts
+        if best is None:
+            return None
+        index, image = pool[best]
+        return best, index, image
+
+    def _source_prune(self, playhead: float) -> None:
+        """Drop only what a long playback could never show again; the COUNT cap in `_source_pool_put` is the real bound.
+
+        A playhead-based horizon looked right and emptied the pool: the decoder runs AHEAD, so a frame it has already
+        passed is never emitted again, and dropping it (measured 2026-11-26: `pool=0.292` alone while the playhead was
+        at 0.375, four paints in a row) leaves the pair one or two frames apart for ever. History is what a small
+        backwards step needs, and it is still bounded.
+        """
+        pool = getattr(self, "_source_pool", None) or {}
+        horizon = playhead - COMPARE_POOL_FRAMES / self._compare_fps()
+        for pts in [value for value in pool if value < horizon]:
+            del pool[pts]
+
+    def _source_show(self, playhead: float) -> None:
+        """Hand the pane the source frame that matches `playhead`, and only when it is a DIFFERENT frame.
+
+        One `set_original` per new source frame means one repaint per change instead of one per arrival of either half:
+        the two halves are then painted from frames that belong to the same moment.
+        """
+        pane = self.page_handles.proc.previewLabel
+        mode = getattr(pane, "view_mode", None)
+        if callable(mode):
+            try:
+                if mode() == "single":
+                    return       # the LMB flash has its own path and its own timing
+            except Exception:
+                return
+        self._source_prune(playhead)
+        chosen = self._source_pool_for(playhead)
+        if chosen is None:
+            return
+        pts, index, image = chosen
+        if telemetry.level() >= 2:
+            # The pair's own number: how far the source half is from the result's playhead at the moment it is SHOWN.
+            # One line per changed source frame, level 2 only - the compare's "the halves disagree" claim needs it.
+            telemetry.event("pair", source=round(pts, 3), playhead=round(float(playhead), 3),
+                            delta_frames=round((pts - float(playhead)) * self._compare_fps(), 2),
+                            pool="/".join(f"{value:.3f}" for value in
+                                          sorted(getattr(self, "_source_pool", None) or {})))
+        shown_pts = getattr(self, "_source_shown_pts", None)
+        if shown_pts is not None and abs(pts - shown_pts) < 1e-6:
+            return
+        self._source_shown_pts = pts
+        setter = getattr(pane, "set_original", None)
+        if callable(setter):
+            setter(image, media_time=pts, index=index)
+
+    def _compare_playhead(self) -> float:
+        """The time of the RESULT picture on screen - ONE clock for the pair.
+
+        `_result_playhead` is the transport's notion (it follows a press's target before the answer lands), while the
+        pane names the picture it actually painted. Two clocks meant two different "now"s: the source was selected
+        against one and the result painted at the other, so the pair flipped between a frame and its neighbour - measured
+        2026-11-26, 135 source pictures in 4 s against ~96 result frames, a third of them one frame behind. The pane's own
+        time wins when it has one; the transport's is the fallback for a pane that names nothing.
+        """
+        pane = self.page_handles.proc.previewLabel
+        shown = getattr(pane, "shown_time", None)
+        if callable(shown):
+            try:
+                value = shown()
+            except Exception:
+                value = None
+            if value is not None:
+                return float(value)
+        return float(self._result_playhead())
+
+    def _source_paint_pair(self, playhead: float | None = None) -> None:
+        """One entry point for "the result has just been painted; give it its other half in the same repaint".
+
+        A minimal host (a harness that builds the tab without `__init__`) reaches the paint paths with nothing to pair,
+        which is why the call sites look it up instead of calling it.
+        """
+        self._source_show(self._compare_playhead() if playhead is None else float(playhead))
+
+    def _source_fill(self, playhead: float) -> None:
+        """Top the pool up to `COMPARE_LEAD_FRAMES` ahead of the playhead, one frame per call.
+
+        One frame per call, and the next call comes from the frame's ARRIVAL (`_on_original_frame`): the decoder then
+        runs flat out until the lead is full and stops, instead of being polled at a timer's rate - a 10 Hz poll cannot
+        feed a 24 fps stream, so the lead would drain exactly when it is needed.
+        """
+        newest = self._source_pool_newest()
+        interval = 1.0 / self._compare_fps()
+        # ONE ask in flight at a time: the arrival of each frame calls this again, and without the guard a burst would
+        # start a second span for the same moment (the decoder keeps only the last request, so the work is wasted).
+        pending = getattr(self, "_source_fill_pending", None)
+        if pending is not None:
+            aged = time.monotonic() - float(pending[1])
+            if newest is not None and newest >= float(pending[0]) - 0.5 * interval:
+                self._source_fill_pending = None
+            elif aged < COMPARE_FILL_WINDOW_S:
+                return
+            else:
+                self._source_fill_pending = None      # a request nothing answered: ask again
+        span = True
+        if newest is None:
+            target = playhead
+        elif playhead - newest > 2.0 * interval:
+            # The playhead jumped past the pool (a scrub, or a dropped tail): continuing from the pool would decode a
+            # burst of frames nobody will see. Ask at the playhead - the ask itself decides seek vs step.
+            target = playhead
+            span = False
+        elif newest < playhead + self._compare_lead():
+            # Ask for the WHOLE lead in one call and take every frame of the walk: one round trip per lead, not one per
+            # frame (a frame-by-frame ask is latency-bound at ~8 frames/s; the decode itself runs at 80).
+            target = playhead + self._compare_lead()
+        else:
+            return
+        self._source_fill_pending = (float(target), time.monotonic())
+        self._compare_from_tick = True
+        try:
+            self._on_original_requested(max(0.0, target), span=span)
+        finally:
+            self._compare_from_tick = False
 
     def _on_original_frame(self, frame) -> None:
         """The source frame from the decoder, cropped to the box THE RENDER used, then handed to the pane.
@@ -3143,8 +3378,25 @@ class ProcessTab:
                 f" -> gap {pts - float(result_time):+.3f}s ({(pts - float(result_time)) * fps:+.1f} frames)")
             log(f"compare: the source frame is {pts:.3f}s idx={index} for an ask of {watched:.3f}s "
                 f"(delta {pts - watched:+.3f}s, {abs(pts - watched) * fps:.1f} frames at {fps:.2f} fps{gap})")
-        if hasattr(pane, "set_original"):
-            pane.set_original(image, media_time=pts, index=index)
+        # Into the pool, then: `single` shows it at once (the LMB flash is one picture, nothing to pair); a compare mode
+        # shows the frame that belongs to the RESULT's playhead - usually this one, because the pool runs AHEAD of it -
+        # and asks for the next frame so the lead stays full.
+        self._source_pool_put(pts, index, image)
+        mode = getattr(pane, "view_mode", None)
+        single = True
+        if callable(mode):
+            try:
+                single = mode() == "single"
+            except Exception:
+                single = True
+        if single:
+            if hasattr(pane, "set_original"):
+                self._source_shown_pts = pts
+                pane.set_original(image, media_time=pts, index=index)
+        else:
+            playhead = self._compare_playhead()
+            self._source_show(playhead)
+            self._source_fill(playhead)
 
     def _log_source_crop_unknown(self, reason: str) -> None:
         """One line per job when the compare cannot crop: the preview then shows the uncropped source."""
@@ -3154,8 +3406,24 @@ class ProcessTab:
         log(f"source crop: unknown ({reason}); the LMB compare shows the uncropped source")
 
     def _stop_source_decoder(self) -> None:
+        # The pool belongs to that decoder: keeping pictures from it after it is closed would show a frame of a file
+        # that is no longer being compared.
+        self._source_pool.clear()
+        self._source_shown_pts = None
+        self._source_fill_pending = None
+        thread = getattr(self, "_source_thread", None)
+        if thread is not None:
+            # Stop the loop FIRST: `close()` under a running pump would pull the container out from under a decode.
+            thread.quit()
+            thread.wait(2000)
+            self._source_thread = None
         decoder = getattr(self, "_source_decoder", None)
         if decoder is not None:
+            try:
+                decoder.frame_ready.disconnect()
+            except Exception:
+                pass
+            self._compare_relay = None
             try:
                 decoder.close()
             except Exception:
@@ -3218,6 +3486,10 @@ class ProcessTab:
                 pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
                                index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
+            # Both halves in one paint: the source frame for this moment is already decoded (the pool runs ahead).
+            paint_pair = getattr(self, "_source_paint_pair", None)
+            if callable(paint_pair):
+                paint_pair()          # the pane's own time: the picture that has just been painted
             # The press is CLOSED by the session (plan P4), not here: `observe(Painted)` decides whether this picture
             # is the one that was asked for (two frames' slack) and calls the page's formatter for the owner's landing
             # line. The page's `_seek_watch` timeout no longer decides anything - a press nothing answers is abandoned

@@ -176,12 +176,12 @@ def test_a_forward_compare_step_decodes_in_sequence_instead_of_rewinding():
     decoder._step_and_publish = lambda target, **kw: calls.append(("step", round(target, 3)))
     decoder._start_time = 0.0
 
-    decoder._request = (2.0, True, False)
+    decoder._request = (2.0, True, False, False)
     decoder._pump()
     assert calls == [("step", 2.0)], "a forward compare step must not pay a keyframe rewind"
 
     calls.clear()
-    decoder._request = (2.0, True, True)
+    decoder._request = (2.0, True, True, False)
     decoder._pump()
     assert calls == [("seek", 2.0)], "an ordinary request keeps the rewind (a press, a scrub)"
 
