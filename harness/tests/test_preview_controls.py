@@ -48,6 +48,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager  # noqa: E402
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px  # noqa: E402
 from sli_ui_toolkit.widgets import Button  # noqa: E402
 
 from src.ui.preview.actions import ACTIONS, actions_for, build_button, enabled_for  # noqa: E402
@@ -470,7 +471,8 @@ def test_resizing_the_pane_repositions_the_bars(controls, pane):
 
 
 def test_a_narrow_pane_collapses_the_zoom_row_into_the_overflow(controls, pane):
-    pane.resize(330, 400)
+    # 300, not 330: removing the produced pill (2026-11-26) freed ~150 design px, so the same row now fits at 330.
+    pane.resize(300, 400)
     _app().processEvents()
     assert "zoom_in" in controls.hidden_tools()
     assert controls.overflow_button.isVisible()
@@ -491,6 +493,110 @@ def test_each_group_has_its_own_capsule(controls):
         assert all(controls.button(spec_id).parent() is panel for spec_id in ids)
         assert all(controls._specs[spec_id].variant == "ghost" for spec_id in ids)
         assert panel.width() > 0 and panel.height() > 0
+
+
+# --- the owner's 2026-11-26 pass: pill removed, checked ring, nested corners -------------------------
+
+def test_the_produced_pill_is_gone_from_the_overlay(controls):
+    """The produced number stays in the transport/strip; the overlay keeps no readout and no spare surface.
+
+    A hidden widget still owns its stretch in the row, so the check is structural: the only SurfacePanels under the top
+    bar are the two group capsules, and nothing in it paints the word `produced`.
+    """
+    from sli_ui_toolkit.ui.widgets.atomic.surface_panel import SurfacePanel
+    from sli_ui_toolkit.widgets import Text as ToolkitText
+
+    top = controls.top_bar
+    assert not hasattr(controls, "produced_text")
+    assert not hasattr(controls, "pill")
+    assert not hasattr(controls, "pill_dot")
+    panels = [child for child in top.children() if isinstance(child, SurfacePanel)]
+    assert set(panels) == set(controls._group_panels.values()), "a pill panel survived in the row"
+    texts = [widget.text() for widget in top.findChildren(ToolkitText)]
+    assert all("produced" not in text for text in texts), texts
+    # `set_state` has no produced write left: the same screen with a produced number adds no text either.
+    controls.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=12.4, playhead=4.0))
+    assert all("produced" not in widget.text() for widget in top.findChildren(ToolkitText))
+
+
+def test_the_checked_mode_wears_the_accent_ring_and_the_ring_follows_the_check(controls):
+    """The ring is the toolkit's own layer, gated on the toolkit's `CHECKED` state - not a page paint.
+
+    `Button.setChecked` already writes `ButtonState.CHECKED`; the layer reads the same state set at paint time, so the
+    ring appears on exactly the current mode and leaves the previous one when `set_state` moves the mode.
+    """
+    from src.ui.preview.controls import CheckedOutlineLayer
+    from sli_ui_toolkit.ui.widgets.buttons.state import ButtonState
+
+    mode_ids = ("mode_single", "mode_sbs", "mode_split")
+    rings = {}
+    for spec_id in mode_ids:
+        button = controls.button(spec_id)
+        found = [layer for layer in button._painter.layers if isinstance(layer, CheckedOutlineLayer)]
+        assert len(found) == 1, f"{spec_id} has no checked ring layer"
+        assert found[0].scope == "widget", "the ring must paint over the region fills"
+        rings[spec_id] = found[0]
+
+    def ring_applies(spec_id: str) -> bool:
+        button = controls.button(spec_id)
+        return rings[spec_id].applies(types.SimpleNamespace(states=frozenset(button.region_states("_main"))))
+
+    assert controls.button("mode_single").isChecked()
+    assert ring_applies("mode_single") is True
+    assert ring_applies("mode_sbs") is False and ring_applies("mode_split") is False
+
+    controls.set_state(PreviewState(phase=PreviewPhase.READY, mode="sbs", duration=10.0, produced=5.0, playhead=1.0))
+    assert controls.button("mode_sbs").isChecked()
+    assert ring_applies("mode_sbs") is True
+    assert ring_applies("mode_single") is False, "the previous mode must lose the ring"
+
+    controls.set_state(PreviewState(phase=PreviewPhase.READY, mode="split", duration=10.0, produced=5.0, playhead=1.0))
+    assert ring_applies("mode_split") is True
+    assert ring_applies("mode_sbs") is False
+
+
+def test_the_group_buttons_nest_their_corners_into_the_plate(controls):
+    """First/last outer corner = plate radius - inset, so both arcs share one centre and the gutter is even."""
+    from src.ui.preview.controls import GROUP_INSET, GROUP_RADIUS, NESTED_RADIUS
+
+    plate = controls._group_panels["view_mode"]
+    inset = scaled_px(GROUP_INSET)
+    assert plate.radius() == scaled_px(GROUP_RADIUS)
+    row = plate.layout()
+    margins = row.contentsMargins()
+    assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (inset, inset, inset, inset)
+    assert row.spacing() == inset
+
+    outer = scaled_px(GROUP_RADIUS) - scaled_px(GROUP_INSET)
+    assert inset + outer == plate.radius(), "the button arc is not concentric with the plate"
+    first, middle, last = (controls.button(spec_id) for spec_id in ("mode_single", "mode_sbs", "mode_split"))
+    assert first._corner_radii_px == (outer, 0, 0, outer)
+    assert middle._corner_radii_px == (0, 0, 0, 0), "the middle button must keep its outer edge flat"
+    assert last._corner_radii_px == (0, outer, outer, 0)
+
+    # The nested radius is design px, so the toolkit rescales it with the interface: the design value is the
+    # difference of the two plate numbers, never a preset that only fits at 1.0.
+    assert first._design_corner_radii == (NESTED_RADIUS, 0, 0, NESTED_RADIUS)
+    assert last._design_corner_radii == (0, NESTED_RADIUS, NESTED_RADIUS, 0)
+    assert NESTED_RADIUS + GROUP_INSET == GROUP_RADIUS
+
+
+def test_the_zoom_group_keeps_its_controls_order_and_geometry(controls):
+    assert controls._group_specs["view_mode"] == ("mode_single", "mode_sbs", "mode_split")
+    assert controls._group_specs["zoom"] == ("zoom_out", "zoom_fit", "zoom_one", "zoom_in")
+    plate = controls._group_panels["zoom"]
+    buttons = [controls.button(spec_id) for spec_id in controls._group_specs["zoom"]]
+    assert all(button.parent() is plate for button in buttons)
+    assert [button.height() for button in buttons] == [scaled_px(30)] * 4
+    assert buttons[0].width() == scaled_px(28) and buttons[-1].width() == scaled_px(28)
+    assert controls.button("fullscreen").parentWidget() is controls.top_bar, "fullscreen stays a standalone button"
+
+    row = controls.top_bar._row
+    in_row = [row.itemAt(index).widget() for index in range(row.count()) if row.itemAt(index).widget() is not None]
+    assert in_row.index(controls._group_panels["view_mode"]) < in_row.index(plate)
+    assert in_row.index(plate) < in_row.index(controls.button("fullscreen")) < in_row.index(controls.overflow_button)
+    bottom = [controls.bottom_bar._row.itemAt(index).widget() for index in range(controls.bottom_bar._row.count())]
+    assert bottom[:3] == [controls.button("step_back"), controls.button("play"), controls.button("step_forward")]
 
 
 def test_a_mode_toggle_emits_set_mode_and_keeps_one_checked(controls):

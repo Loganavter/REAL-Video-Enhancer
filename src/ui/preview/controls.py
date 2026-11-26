@@ -1,10 +1,12 @@
 """The two preview bars: floating tools over the picture, the transport in the letterbox.
 
-Layout E (owner-approved mockup, 2026-11-25):
+Layout E (owner-approved mockup, 2026-11-25; produced pill removed 2026-11-26):
 
-* **top** - no common backing bar. A `produced 12.4 s · 60%` pill owns its own small surface; the three view modes
-  and the zoom row (`-` Fit `1:1` `+`) are each a CAPSULE (one SurfacePanel behind the group's ghost Buttons), and
-  fullscreen is a standalone Button. The compare is NOT a button: holding LMB on the picture is the gesture.
+* **top** - no common backing bar. The three view modes and the zoom row (`-` Fit `1:1` `+`) are each a CAPSULE (one
+  SurfacePanel behind the group's ghost Buttons), and fullscreen is a standalone Button. A group's first/last buttons
+  round their outer corners by the plate's radius minus its inset, so the capsule's corners share one shape; the
+  checked view mode also wears an accent ring, so the current mode reads as a ring, not only as a fill. The compare is
+  NOT a button: holding LMB on the picture is the gesture.
 * **bottom** - video transport only: play/pause, step, content time `m:ss.mmm / m:ss.mmm`, source frame
   `f 100 / 493`, and the scrubber.
 
@@ -18,13 +20,16 @@ blocked (a state write must never look like a click), updates the three readouts
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRect, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QRect, QRectF, Qt, Signal
+from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from sli_ui_toolkit.ui.widgets.atomic.surface_panel import SurfacePanel
-from sli_ui_toolkit.widgets import Button, ButtonFamily, Text
+from sli_ui_toolkit.ui.widgets.buttons.layers._base import outline_width
+from sli_ui_toolkit.ui.widgets.buttons.layers.background import rounded_rect_path
+from sli_ui_toolkit.ui.widgets.buttons.state import ButtonState
+from sli_ui_toolkit.widgets import Button, ButtonFamily, Layer, Text
 
 from .actions import ACTIONS, ActionSpec, actions_for, build_button, checked_for, enabled_for, visible_for
 from .state import PreviewCommand, PreviewState
@@ -35,9 +40,47 @@ BAR_MARGIN = 12
 BAR_GAP = 8
 TOP_HEIGHT = 32
 BOTTOM_HEIGHT = 42
-#: The pill and the two readouts keep a stable width, so a changing number cannot reflow the row.
+#: Design px: a group capsule's plate radius, and the inset that separates its buttons from the plate (the same number
+#: is the gap between the buttons). A nested button's outer corner is the difference, so its arc shares the plate's
+#: centre and the gutter stays even at the top, bottom and outer edge.
+GROUP_RADIUS = 10
+GROUP_INSET = 2
+NESTED_RADIUS = GROUP_RADIUS - GROUP_INSET
+#: The two readouts keep a stable width, so a changing number cannot reflow the row.
 TIME_MIN_WIDTH = 148
 FRAME_MIN_WIDTH = 78
+
+
+class CheckedOutlineLayer(Layer):
+    """The checked toggle's accent ring, painted through the toolkit's own layer pipeline.
+
+    `Button` paints its states through layers (`BackgroundLayer`, `BorderLayer`, ...); the toolkit's border layer is a
+    *static* override, while a mode row needs the ring to follow the check. This layer is that stroke gated on
+    `ButtonState.CHECKED` - the state `Button.setChecked` already writes - so hover/press keep the variant's fills and
+    only the current group member is ringed. The colour is the theme accent; the width honours the toolkit's
+    `borderWidth` property, exactly as `BorderLayer` reads it.
+    """
+
+    scope = "widget"
+
+    def applies(self, ctx) -> bool:
+        return ButtonState.CHECKED in ctx.states
+
+    def draw(self, ctx, tm) -> None:
+        painter = ctx.painter
+        if not isinstance(painter, QPainter):
+            return
+        width = outline_width(ctx.widget)
+        inset = width / 2.0
+        painter.save()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(tm.get_color("accent"), width))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(
+                rounded_rect_path(QRectF(ctx.rect).adjusted(inset, inset, -inset, -inset), ctx.corner_radii))
+        finally:
+            painter.restore()
 
 
 class PreviewControls(QWidget):
@@ -93,9 +136,20 @@ class PreviewControls(QWidget):
         layout.addWidget(button)
         return button
 
-    def _prepare_button(self, spec: ActionSpec, parent: QWidget) -> Button:
-        """Build + wire one catalog entry. The layout that hosts it is the caller's (a bar row or a group capsule)."""
-        button = build_button(spec, parent=parent)
+    def _prepare_button(self, spec: ActionSpec, parent: QWidget, *,
+                        corner_radii: tuple[int, int, int, int] | None = None,
+                        outline_when_checked: bool = False) -> Button:
+        """Build + wire one catalog entry. The layout that hosts it is the caller's (a bar row or a group capsule).
+
+        `corner_radii` nests the button into its capsule (design px, tl/tr/br/bl); `outline_when_checked` installs the
+        state-gated accent ring the group's current member wears.
+        """
+        extra_layers = [CheckedOutlineLayer()] if outline_when_checked else None
+        button = build_button(spec, parent=parent, corner_radii=corner_radii, extra_layers=extra_layers)
+        if outline_when_checked:
+            # The ring's weight is the toolkit's own `borderWidth` property (read by `outline_width`); 2 design px is
+            # visible over the picture without turning the control into a plate.
+            button.setProperty("borderWidth", float(scaled_px(2)))
         button.setFocusPolicy(Qt.FocusPolicy.NoFocus)   # the pane keeps its Space/arrows, see `_build_shortcuts`
         if spec.checkable:
             if spec.group:
@@ -119,19 +173,32 @@ class PreviewControls(QWidget):
         self._buttons[spec.id] = button
         return button
 
-    def _add_group(self, layout: QHBoxLayout, name: str, spec_ids: tuple[str, ...]) -> SurfacePanel:
+    def _add_group(self, layout: QHBoxLayout, name: str, spec_ids: tuple[str, ...], *,
+                   outline_checked: bool = False) -> SurfacePanel:
         """A group capsule: one toolkit surface behind ghost buttons - the backing the owner asked for.
 
         The group is ONE unit for the overflow too: a capsule with half its buttons in a menu and half on the bar is
-        not a control a person can read.
+        not a control a person can read. The first and last buttons round their OUTER corners by the plate's radius
+        minus the inset, so those arcs are concentric with the plate and the gutter reads even; the inner side stays
+        flat, which makes the row read as one capsule.
         """
-        panel = SurfacePanel(self.top_bar, background_token="flyout.background", radius=scaled_px(10))
+        panel = SurfacePanel(self.top_bar, background_token="flyout.background", radius=scaled_px(GROUP_RADIUS))
         row = QHBoxLayout(panel)
-        inset = scaled_px(2)
+        inset = scaled_px(GROUP_INSET)
         row.setContentsMargins(inset, inset, inset, inset)
         row.setSpacing(inset)
-        for spec_id in spec_ids:
-            row.addWidget(self._prepare_button(self._specs[spec_id], panel))
+        last = len(spec_ids) - 1
+        for index, spec_id in enumerate(spec_ids):
+            radii = None
+            if last > 0:
+                radii = (
+                    NESTED_RADIUS if index == 0 else 0,
+                    NESTED_RADIUS if index == last else 0,
+                    NESTED_RADIUS if index == last else 0,
+                    NESTED_RADIUS if index == 0 else 0,
+                )
+            row.addWidget(self._prepare_button(self._specs[spec_id], panel, corner_radii=radii,
+                                               outline_when_checked=outline_checked))
         self._group_panels[name] = panel
         self._group_specs[name] = tuple(spec_ids)
         layout.addWidget(panel)
@@ -146,21 +213,8 @@ class PreviewControls(QWidget):
 
     def _build_top(self) -> None:
         layout = self.top_bar._row                   # noqa: SLF001
-        # The produced pill: the ONE tool with its own non-interactive surface (a bullet + one line of text).
-        self.pill = SurfacePanel(self.top_bar, background_token="flyout.background", radius=scaled_px(10))
-        pill_row = QHBoxLayout(self.pill)
-        pill_row.setContentsMargins(scaled_px(8), 0, scaled_px(10), 0)
-        pill_row.setSpacing(scaled_px(6))
-        self.pill_dot = SurfacePanel(self.pill, background_token="accent", radius=scaled_px(4))
-        self.pill_dot.setFixedSize(scaled_px(8), scaled_px(8))
-        self.produced_text = Text("produced \u2014", variant="caption")
-        self.produced_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        pill_row.addWidget(self.pill_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        pill_row.addWidget(self.produced_text, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(self.pill)
-
         layout.addStretch(1)
-        self._add_group(layout, "view_mode", ("mode_single", "mode_sbs", "mode_split"))
+        self._add_group(layout, "view_mode", ("mode_single", "mode_sbs", "mode_split"), outline_checked=True)
         self._add_group(layout, "zoom", ("zoom_out", "zoom_fit", "zoom_one", "zoom_in"))
         self._add_button(layout, self._specs["fullscreen"])
 
@@ -313,10 +367,6 @@ class PreviewControls(QWidget):
                 if glyph is not None:
                     button.setIcon(glyph)
 
-        produced_seconds = max(0.0, float(state.produced))
-        percent = int(round(max(0.0, min(1.0, state.progress_percent())) * 100))
-        self.produced_text.setText(f"produced {produced_seconds:.1f} s \u00b7 {percent}%")
-        self.pill.setVisible(state.duration > 0.0)
         self.time_text.setText(
             f"{format_content_time(state.playhead)} / {format_content_time(state.duration)}")
         self.frame_text.setText(state.frame_ratio())

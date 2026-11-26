@@ -18,7 +18,7 @@ from typing import Callable
 from PySide6.QtGui import QIcon
 
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
-from sli_ui_toolkit.widgets import Button
+from sli_ui_toolkit.widgets import Button, Layer
 
 from .state import PreviewCommand, PreviewState
 
@@ -139,8 +139,14 @@ def actions_for(bar: str) -> tuple[ActionSpec, ...]:
     return tuple(spec for spec in ACTIONS if spec.bar == bar)
 
 
-def build_button(spec: ActionSpec, parent=None) -> Button:
-    """One toolkit Button from one spec. No QSS, no stock widget: the toolkit owns the visuals."""
+def build_button(spec: ActionSpec, parent=None, *,
+                 corner_radii: tuple[int, int, int, int] | None = None,
+                 extra_layers: list[Layer] | None = None) -> Button:
+    """One toolkit Button from one spec. No QSS, no stock widget: the toolkit owns the visuals.
+
+    `corner_radii` (design px, tl/tr/br/bl) nests the button into its group capsule; `extra_layers` are the toolkit's
+    own paint hooks, used for the checked ring.
+    """
     width, height = spec.size
     button = Button(
         icon=spec.icon,
@@ -149,6 +155,8 @@ def build_button(spec: ActionSpec, parent=None) -> Button:
         variant=spec.variant,
         icon_size=scaled_px(spec.icon_size),
         size=(scaled_px(width) if width else 0, scaled_px(height)),
+        corner_radii=corner_radii,
+        extra_layers=extra_layers,
         parent=parent,
     )
     if spec.tip:
