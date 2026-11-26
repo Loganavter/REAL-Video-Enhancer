@@ -172,15 +172,6 @@ class _HostBackend:
             return True
         return self._direct_seek(seconds)
 
-    def _seek_legacy(self, seconds: float, *, exact: bool = True) -> bool:
-        """The pre-P1 spelling (`seek(seconds, exact=True)`), kept for a caller this phase does not own: the harness's
-        own backend pins still call it. `exact` meant "never snap to the edge"; that is the only behaviour left, so it
-        is accepted and ignored. Assigned rather than declared so the port exposes exactly ONE seek method.
-        """
-        return self.seek_to(seconds)
-
-    seek = _seek_legacy
-
     def _direct_seek(self, seconds: float) -> bool:
         return False
 

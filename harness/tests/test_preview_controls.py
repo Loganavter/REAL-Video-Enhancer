@@ -837,14 +837,14 @@ def test_a_live_tail_seeks_through_the_page_so_a_press_past_the_edge_is_answerab
 
     page, tail = Page(), Tail()
     adapter = backend_for(page, PreviewBackendKind.LIVE_TAIL, tail=tail)
-    assert adapter.seek(18.958, exact=True) is True
+    assert adapter.seek_to(18.958) is True
     assert page.asked and page.asked[-1] == pytest.approx(18.958 / 20.0, abs=1e-6), page.asked
     assert tail.seeks == [], "the page routes the press; the adapter must not seek the tail behind its back"
 
     # With no clip length the page cannot map a fraction; the direct tail seek stays the honest fallback.
     page2 = types.SimpleNamespace(_clip_duration=lambda: 0.0)
     adapter2 = backend_for(page2, PreviewBackendKind.LIVE_TAIL, tail=tail)
-    assert adapter2.seek(1.0, exact=True) is True
+    assert adapter2.seek_to(1.0) is True
     assert tail.seeks == [1.0]
 
 
@@ -879,7 +879,7 @@ def test_every_owner_seeks_through_the_page_not_behind_its_back(kind):
 
     page, owner = Page(), Owner()
     adapter = backend_for(page, kind, decoder=owner)
-    assert adapter.seek(10.0, exact=True) is True
+    assert adapter.seek_to(10.0) is True
     assert page.asked == [pytest.approx(0.5)], page.asked
     assert owner.seeks == [], "the page routes the press; the adapter must not seek the owner behind its back"
 

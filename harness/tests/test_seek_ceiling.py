@@ -240,17 +240,19 @@ def _tab(*, pane: _Pane, preview: bool) -> ProcessTab:
 def test_a_usable_block_lifts_the_ceiling_for_both_job_kinds(monkeypatch):
     """(c) The page says what can serve a frame: with a usable block both panes reach the whole timeline.
 
-    A preview's *painter* is still its tail (`_display_owns_pane` stays False), but the block answers a press past the
-    produced band with one requested frame, so the strip must accept that press (see
-    `test_preview_frame_on_demand.py`).
+    A preview's *painter* is still its tail (the owner's `may_paint` stays False until a strip press asks the block
+    for one frame), but the block answers a press past the produced band with that requested frame, so the strip must
+    accept that press (see `test_preview_frame_on_demand.py`).
     """
+    from src.ui.preview.owner import owner_of
+
     module = sys.modules[ProcessTab.__module__]
     monkeypatch.setattr(module, "DisplayReader", _FakeReader)
 
     export_pane = _Pane()
     export_tab = _tab(pane=export_pane, preview=False)
     export_tab._prepare_display_state()
-    assert export_tab._display_owns_pane() is True
+    assert owner_of(export_tab).may_paint is True, "the export's feed owns its pane"
     assert export_pane.ceilings[-1] == pytest.approx(1.0), (
         "an export whose block is usable seeks the whole timeline: the feed renders any frame on demand")
 
@@ -258,7 +260,7 @@ def test_a_usable_block_lifts_the_ceiling_for_both_job_kinds(monkeypatch):
     preview_tab = _tab(pane=preview_pane, preview=True)
     preview_tab._prepare_display_state()
     assert preview_tab._display is not None, "the block is allocated for a preview too (the command carries it)"
-    assert preview_tab._display_owns_pane() is False, "the tail is still the preview's painter"
+    assert owner_of(preview_tab).may_paint is False, "the tail is still the preview's painter"
     assert preview_pane.ceilings[-1] == pytest.approx(1.0), (
         "a press past the produced band is answered by the block with that one frame, so the strip may ask")
 

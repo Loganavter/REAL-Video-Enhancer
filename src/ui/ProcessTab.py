@@ -39,6 +39,8 @@ from .video.channel import (
     format_eta,
 )
 from .video.feed import PreviewFeed
+from .preview.owner import owner_of
+from .preview.state import PreviewBackendKind
 from ..constants import (
     BACKEND_PATH,
     PYTHON_EXECUTABLE_PATH,
@@ -286,8 +288,9 @@ class ProcessTab:
         self._queue_tab_index: int | None = None
         #: The export pane's display channel (`video.channel.DisplayReader`): the block the GUI allocates before the backend
         #: starts and the renderer publishes into while `wanted` is 1. `None` when no render has run. The attachment
-        #: itself stays the reader's fact: `_display_can_seek_any_frame`/`_display_owns_pane`/`_display_paints_pane`
-        #: ask it about the block, and the seek/wanted writes reach the block through it.
+        #: itself stays the reader's fact, and it is one of the raw inputs `preview.owner.owner_of` reads: that function
+        #: is the ONE answer to "who paints, who may ask for a frame, how far may a press reach" (plan P2), and the
+        #: seek/wanted writes reach the block through this object.
         self._display = None
         #: The chain over that block (`video.feed.PreviewFeed`): the newest picture, its identity, its drop count and
         #: the seek request. Built with the reader in `_prepare_display_state`, so the two describe one block; `None`
@@ -976,68 +979,18 @@ class ProcessTab:
                 pass
             return
         try:
-            setter(1.0 if self._display_can_seek_any_frame() else None)
+            setter(1.0 if owner_of(self).may_seek_any else None)
         except Exception:
             pass
 
-    def _display_can_seek_any_frame(self) -> bool:
-        """Whether the pane's block is attached, i.e. a press anywhere on the strip can be answered with one frame.
+    def _display_pane_shown(self) -> bool:
+        """Whether the pane is on screen - the one WIDGET read that is not the owner's.
 
-        The block is what makes a seek exact: the renderer decodes the requested timestamp through the model path and
-        publishes it without writing it to the export. A preview's tail cannot do that - it only has what the file
-        already holds - so this is the strip's REACH, not the pane's painter (see `_display_paints_pane`).
+        `owner.may_want` is "the transport wants a frame"; this is "somebody is there to see it". The two are ANDed
+        where the request byte is written (`_update_display_wanted`, `_tick_display`): a hidden pane must cost the
+        renderer nothing, and a widget call may not live in a Qt-free decision.
         """
-        reader = getattr(self, "_display", None)
-        return reader is not None and bool(getattr(reader, "attached", False))
-
-    def _display_owns_pane(self) -> bool:
-        """Whether the display feed is the pane's standing painter (never during a preview: its tail owns it).
-
-        Use `_display_paints_pane` for "who paints the next frame": a preview lets the feed paint exactly the one
-        frame a strip press asked for, which this predicate deliberately does not include.
-        """
-        reader = getattr(self, "_display", None)
-        return reader is not None and reader.attached and not bool(getattr(self, "isPreview", False))
-
-    def _display_paints_pane(self) -> bool:
-        """Which painter owns the pane for the NEXT frame (one picture, one painter).
-
-        An export's feed owns it whenever the block is usable. A preview's tail owns it - except while the pane waits
-        for the one frame a strip press asked for (`_display_seek_pending`): the feed owns it for exactly that frame,
-        and `_on_display_frame` hands it back. That is the same one-frame loan an export's held pane uses; there is no
-        second mechanism.
-        """
-        reader = getattr(self, "_display", None)
-        if reader is None or not bool(getattr(reader, "attached", False)):
-            return False
-        if self._queue_owns_pane():
-            # The queue tab's item is the pane's one owner there: the feed stages nothing and its frames are dropped.
-            return False
-        if not bool(getattr(self, "isPreview", False)):
-            # An export's feed owns the pane UNLESS a tail is painting it: during playback the tail is the timeline
-            # (position, rate, seek), and the feed publishing at the same time would be the two-painter race the tail
-            # rule was written to stop. A held export has no tail, so the feed's one-frame loan is untouched.
-            if getattr(self, "_live_tail", None) is not None and not bool(getattr(self, "_preview_paused", True)):
-                return False
-            return True
-        return bool(getattr(self, "_display_seek_pending", False))
-
-    def _display_should_want(self) -> bool:
-        """`wanted` = the pane is visible AND the transport is playing AND a render is publishing into the block.
-
-        A paused picture must cost the renderer nothing: that is the one byte this whole channel exists to save. The
-        exception is the one frame a strip press asked for - for an export's held pane and for a preview alike, the
-        feed paints that frame and only that frame (`_display_paints_pane`).
-        """
-        if not self._display_paints_pane():
-            return False
-        if bool(getattr(self, "_preview_paused", True)) and not getattr(self, "_display_seek_pending", False):
-            # A held picture costs nothing - except the one frame a strip press asked for while it is held.
-            return False
-        process = getattr(self, "renderProcess", None)
-        if process is None or process.poll() is not None:
-            return False
-        pane = getattr(self.page_handles.proc, "previewLabel", None)
+        pane = getattr(getattr(getattr(self, "page_handles", None), "proc", None), "previewLabel", None)
         try:
             return bool(pane.isVisible())
         except Exception:
@@ -1052,11 +1005,15 @@ class ProcessTab:
         return getattr(self, "_feed", None) or getattr(self, "_display", None)
 
     def _update_display_wanted(self) -> None:
-        """Re-assert the request byte after anything that changes the answer (pause, job start, page hide)."""
+        """Re-assert the request byte after anything that changes the answer (pause, job start, page hide).
+
+        The answer is the owner's (`may_want`: paints, the transport is not holding, a render is alive) ANDed with the
+        one widget fact it may not carry (the pane is on screen).
+        """
         display = self._display_chain()
         if display is None or not display.attached:
             return
-        display.set_wanted(self._display_should_want())
+        display.set_wanted(owner_of(self).may_want and self._display_pane_shown())
 
     #: The phases whose word the pane takes from the render-status block. Idle/Done are the pane's own
     #: transitions (the job's completion path sets them); taking them from the slot would announce "Idle"
@@ -1129,7 +1086,7 @@ class ProcessTab:
         display = self._display_chain()
         if display is None or not display.attached:
             return
-        wanted = self._display_should_want()
+        wanted = owner_of(self).may_want and self._display_pane_shown()
         display.set_wanted(wanted)
         if not wanted:
             return
@@ -1138,11 +1095,15 @@ class ProcessTab:
     def _on_display_frame(self, image=None) -> None:
         """The renderer's composited frame for the pane (one picture, one painter).
 
-        An export's feed paints it whenever the block is usable. A preview's tail is that pane's painter, so a display
-        frame is dropped there - except the ONE frame a strip press asked for, which `_display_paints_pane` admits
-        while `_display_seek_pending` is set. While the transport holds a frame, display frames are dropped too and the
-        picture stays. The progress is republished with every fresh frame because the strip's produced band is the
-        render's own counters, not the picture's timestamp.
+        The owner decides whether the feed may paint at all (`may_paint`): an export's feed does whenever the block is
+        usable, a preview's tail is that pane's painter - except the ONE frame a strip press asked for, which the owner
+        admits while `_display_seek_pending` is set. While the transport holds a frame, display frames are dropped too
+        and the picture stays. The progress is republished with every fresh frame because the strip's produced band is
+        the render's own counters, not the picture's timestamp.
+
+        The two checks that follow are about THIS picture, not about the pane, so they stay here: a held pane paints
+        only when it asked for one frame, and a pending seek paints only the picture that ANSWERS it (its generation,
+        see `_picture_answers_seek`).
 
         `image` is passed only by a caller that already holds the picture (a test's stub reader emitting its own
         signal); the feed's `picture_changed` carries nothing, so the feed is where the picture and its identity are
@@ -1153,7 +1114,7 @@ class ProcessTab:
             image = feed.image()
         if image is None:
             return
-        if not self._display_paints_pane():
+        if not owner_of(self).may_paint:
             return
         holding = bool(getattr(self, "_preview_paused", True))
         pending = bool(getattr(self, "_display_seek_pending", False))
@@ -1232,6 +1193,17 @@ class ProcessTab:
                     telemetry.note_seek(turnaround_ms, **fields)
                 self._seek_pressed_at = None
                 self._seek_generation = None
+            if media_time is not None:
+                # The painter reports the picture to the pane's press session (plan P2), AFTER this slot's own settle
+                # block has run: the press telemetry keeps its order and its one line per press, and the session then
+                # records the picture that stands (or answers) as the pane's position. A display picture's identity is
+                # the channel's `seq`, not a frame index, so no index is claimed here; the producers that number
+                # frames report theirs in `_on_preview_frame`.
+                from .preview.session import Painted
+
+                session_of = getattr(self, "_preview_session", None)
+                if callable(session_of):
+                    session_of().observe(Painted(media_time=media_time))
             if hasattr(pane, "set_progress"):
                 pane.set_progress(
                     rendered=self.currentFrame,
@@ -1479,10 +1451,13 @@ class ProcessTab:
                 command,
                 **kwargs,
             )
-            if self._tail_should_run(renderOptions):
+            owner = owner_of(self)
+            if (self._preview_enabled() and self._followable(renderOptions)
+                    and (bool(getattr(renderOptions, "isPreview", False)) or not owner.may_seek_any)):
                 # A PREVIEW follows its own file: the tail decodes what the renderer has written so far, which is the
-                # pane's only painter there. An export with a usable display block does NOT start it - see
-                # `_tail_should_run` (measured 2026-11-24: two painters, one surface).
+                # pane's only painter there. An EXPORT whose pane the display block feeds does NOT start one (measured
+                # 2026-11-24: two painters, one surface); one whose block could not be allocated keeps the tail as its
+                # fallback, which is what stopped the pane going black on a plain render.
                 self._start_live_tail(renderOptions.outputPath)
             else:
                 # One picture, one painter: this job's pane is fed by the display block (or by nothing), and a tail
@@ -1684,16 +1659,15 @@ class ProcessTab:
         whatever the renderer had produced at the moment of the pause - and a seek could not reach what had been
         produced since. The playhead must not move: only the two produced counters are refreshed.
 
-        An EXPORT's pane has no tail (its painter is the display feed, see `_tail_should_run`), so "a tail is running"
-        is not the condition: the condition is that a painter owns the pane and left a progress snapshot to refresh.
+        An EXPORT's pane has no tail (its painter is the display feed, see the owner's `kind`), so "a tail is running"
+        is not the condition: the condition is that the feed owns the pane and left a progress snapshot to refresh.
         """
         if not getattr(self, "_preview_paused", False):
             return
         if self._queue_owns_pane():
             # The queue item's progress is its own file's; the render's counters must not repaint over it.
             return
-        if (getattr(self, "_live_tail", None) is None
-                and not self._display_owns_pane()):
+        if getattr(self, "_live_tail", None) is None and owner_of(self).kind is not PreviewBackendKind.DISPLAY_FEED:
             return
         pane = self.page_handles.proc.previewLabel
         progress = getattr(pane, "_progress", None)
@@ -1722,25 +1696,6 @@ class ProcessTab:
             return True
         extension = os.path.splitext(str(getattr(renderOptions, "outputPath", "") or ""))[1].lower()
         return extension not in (".mp4", ".mov", ".m4v")
-
-    def _tail_should_run(self, renderOptions) -> bool:
-        """Whether THIS job's pane follows the job's own output file with a tail - decided before it starts.
-
-        One picture, one painter, decided structurally rather than by who publishes last (measured 2026-11-24, a
-        495-frame 1440x1080 mkv export: the display feed and a tail both painted the pane, so its playhead jumped
-        between the composited frame at 18.9 s and the tail's cluster at 8.97 s):
-
-        * a PREVIEW follows its own file - the tail is the picture there and the strip's seek lives on it;
-        * an EXPORT whose pane the display block feeds does not start a tail at all - the feed is that pane's painter;
-        * an EXPORT whose block could not be allocated keeps the tail as its fallback: that is what stopped the pane
-          going black on a plain render when the thumbnail channel was deleted (owner, 2026-11-24: "видео куда-то
-          пропало"), and it cannot race the feed because there is no feed.
-        """
-        if not self._preview_enabled() or not self._followable(renderOptions):
-            return False
-        if getattr(renderOptions, "isPreview", False):
-            return True
-        return not self._display_owns_pane()
 
     def _preview_enabled(self) -> bool:
         """The user's "Preview Enabled" switch (`Settings -> GUI Options`).
@@ -2038,32 +1993,20 @@ class ProcessTab:
         """
         self._on_preview_pause_toggled(bool(paused))
 
-    def _preview_backend_kind(self):
-        """Who answers the transport right now: a finished file, a live tail, the export's feed, or nobody."""
-        from .preview.state import PreviewBackendKind
-
-        if self._queue_owns_pane():
-            return PreviewBackendKind.NONE
-        if getattr(self, "_preview_decoder", None) is not None:
-            return PreviewBackendKind.FINISHED_FILE
-        if getattr(self, "_live_tail", None) is not None:
-            return PreviewBackendKind.LIVE_TAIL
-        if self._display_can_seek_any_frame() and not bool(getattr(self, "isPreview", False)):
-            return PreviewBackendKind.DISPLAY_FEED
-        return PreviewBackendKind.NONE
-
-    def _preview_seek_ceiling(self, kind, duration: float) -> float | None:
+    def _preview_seek_ceiling(self, owner, duration: float) -> float | None:
         """The furthest content time the transport may ask for, in seconds (`preview.facts.reach_seconds`).
 
         A finished file and a feed that renders any frame on demand reach the whole clip; a growing file's tail only
         has what the renderer has written, so it reaches the produced edge. Mirrors what the pane's own strip is told in
-        `_apply_seek_ceiling`.
+        `_apply_seek_ceiling`: while a queue item owns the pane, the preview's own clip is not the timeline on screen,
+        so the block may not extend this reach (the queue branch of `_apply_seek_ceiling` states the same thing).
         """
         from .preview.facts import reach_seconds
 
-        produced = self._produced_for_band(kind, duration, fraction=self._live_produced_fraction(), rendering=True)
-        return reach_seconds(kind, duration=duration, produced=produced,
-                             any_frame=self._display_can_seek_any_frame() and not self._queue_owns_pane())
+        produced = self._produced_for_band(owner.kind, duration, fraction=self._live_produced_fraction(),
+                                           rendering=True)
+        return reach_seconds(owner.kind, duration=duration, produced=produced,
+                             any_frame=owner.may_seek_any and not self._queue_owns_pane())
 
     def _produced_for_band(self, kind, duration: float, *, fraction: float, rendering: bool) -> float:
         """What the strip's BLUE means: seconds the upscaler has produced (`preview.facts` is the one derivation).
@@ -2079,16 +2022,22 @@ class ProcessTab:
         return produced_seconds(kind, fraction=fraction, duration=duration, rendering=rendering)
 
     def _push_preview_state(self) -> None:
-        """Feed the controller the facts it cannot see: the pane's numbers, its owners, the probe's frame counts."""
+        """Feed the controller the facts it cannot see: the pane's numbers, its owners, the probe's frame counts.
+
+        ONE owner per snapshot: `preview.owner.owner_of` is read once here, at the top, and every decision this push
+        makes (the backend kind, the produced band, the reach) reads that one object. The frame branches that run on
+        their own signals build their own read, at their own frame - a cached owner would go stale exactly where a
+        one-frame loan lives.
+        """
         controller = getattr(self, "_preview_controller", None)
         if controller is None:
             return
         from .preview.backends import backend_for
-        from .preview.state import PreviewBackendKind
 
         pane = getattr(getattr(self.page_handles, "proc", None), "previewLabel", None)
         if pane is None:
             return
+        owner = owner_of(self)
         options = getattr(self, "currentRenderOptions", None)
         duration = float(self._clip_duration() or 0.0)
         source_frames = int(getattr(options, "videoFrameCount", 0) or 0)
@@ -2107,7 +2056,7 @@ class ProcessTab:
                 fps = float(getattr(self, "fps", 0) or 0)
             except (TypeError, ValueError):
                 fps = 0.0
-        kind = self._preview_backend_kind()
+        kind = owner.kind
         produced_fraction = self._live_produced_fraction()
         process = getattr(self, "renderProcess", None)
         rendering = process is not None and process.poll() is None
@@ -2171,7 +2120,7 @@ class ProcessTab:
             frames_done=frames_done,
             output_frames=output_frames,
             fps=fps,
-            seek_ceiling=self._preview_seek_ceiling(kind, duration),
+            seek_ceiling=self._preview_seek_ceiling(owner, duration),
             mode=mode,
             zoom=zoom,
             zoom_fit=bool(getattr(self, "_preview_zoom_fit", True)),
@@ -2642,7 +2591,7 @@ class ProcessTab:
         past_tail = (live is not None and target_s is not None and tail_edge > 0.0
                      and float(target_s) > tail_edge + tail_tolerance)
         if (bool(getattr(self, "isPreview", False))
-                and self._display_can_seek_any_frame()
+                and owner_of(self).may_seek_any
                 and (live is None or fraction > produced + 1e-6 or past_tail)):
             # The renderer can render this frame even though the tail cannot: the same block an export uses. Inside
             # the produced band the tail stays the answer (exact, and it costs the renderer nothing); past it the
@@ -2924,21 +2873,20 @@ class ProcessTab:
         picture, one painter - the display feed wins and the tail's frame is dropped here. That is the rule the deleted
         640x360 channel broke: two writers raced for the same surface, so the pane flickered between a thumbnail and a
         decoded frame and neither could be trusted. A preview keeps its tail as the only painter (`wanted` stays 0) -
-        except while the pane waits for the one frame a strip press asked the block for: `_display_paints_pane` admits
-        the feed for exactly that frame, so a tail frame arriving in the meantime is dropped here, not painted over it.
+        except while the pane waits for the one frame a strip press asked the block for: the owner admits the feed for
+        exactly that frame (`may_paint`), so a tail frame arriving in the meantime is dropped here, not painted over it.
 
         `frame_ready` is delivered queued, so a tail stopped at the job's end can still deliver a frame it emitted
-        before the stop. Such a frame has no current owner (the tail is gone, and playback of a finished file installs
-        its own decoder) and is dropped: a zombie painter is the same rule violation as an early one.
+        before the stop. Such a frame has no current owner (the owner's `kind` is `NONE`: the tail is gone, and
+        playback of a finished file installs its own decoder) and is dropped: a zombie painter is the same rule
+        violation as an early one.
         """
         from PySide6.QtGui import QImage
 
-        if self._display_paints_pane():
+        owner = owner_of(self)
+        if owner.may_paint:
             return
-        if self._queue_owns_pane():
-            return
-        if (getattr(self, "_live_tail", None) is None
-                and getattr(self, "_preview_decoder", None) is None):
+        if owner.kind is PreviewBackendKind.NONE:
             return
         path_started = time.perf_counter()
         # The file's own clock, once: the writer's `make_zero` muxes a content-zero frame at the encoder's B-frame
@@ -3000,6 +2948,16 @@ class ProcessTab:
                 verdict = "" if matched else ", NOT the asked frame (gave up)"
                 log(f"seek: press wanted {watched:.3f}s, the picture landed at {landed:.3f}s "
                     f"(delta {landed - watched:+.3f}s{timing}{verdict})")
+            # The painter reports the picture to the pane's press session (plan P2), AFTER this slot's own settle block
+            # has run: the press telemetry keeps its order and its one line per press, and the session then records the
+            # picture that stands (or answers). The frame's own index travels with it - the tail numbers frames, so the
+            # session can name the picture the same way the producer does.
+            from .preview.session import Painted
+
+            session_of = getattr(self, "_preview_session", None)
+            if callable(session_of):
+                session_of().observe(Painted(media_time=float(getattr(frame, "pts", 0.0) or 0.0),
+                                             index=getattr(frame, "index", None)))
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
             live_tail = getattr(self, "_live_tail", None)
             running = self.renderProcess is not None and self.renderProcess.poll() is None

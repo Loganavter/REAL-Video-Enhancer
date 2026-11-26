@@ -581,7 +581,7 @@ def test_a_tail_frame_is_dropped_while_the_exports_display_feed_owns_the_pane():
 
 
 def _job(*, preview: bool = False, path: str = "/tmp/out.mkv"):
-    """The shape `_tail_should_run` reads from a queued job (the same fields `_followable` uses)."""
+    """The shape the render loop's tail decision reads from a queued job (the fields `_followable` uses)."""
     return SimpleNamespace(isPreview=bool(preview), outputPath=path)
 
 
@@ -591,34 +591,51 @@ def _painters(*, preview: bool, reader) -> ProcessTab:
     return tab
 
 
+def _tail_runs(tab: ProcessTab, job) -> bool:
+    """The tail decision the render loop now carries (plan P2 folded `_tail_should_run` into it).
+
+    One picture, one painter, decided structurally rather than by who publishes last: a PREVIEW follows its own file;
+    an EXPORT whose block is usable does not start a tail (the feed is that pane's painter); an export whose block
+    could not be allocated keeps the tail as its fallback. The page's own answer for "is the block usable" is the
+    owner's `may_seek_any`, so the test states the rule with that one fact rather than with a deleted predicate.
+    """
+    from src.ui.preview.owner import owner_of
+
+    if not tab._preview_enabled() or not tab._followable(job):
+        return False
+    if bool(getattr(job, "isPreview", False)):
+        return True
+    return not owner_of(tab).may_seek_any
+
+
 def test_an_export_whose_pane_is_fed_by_the_display_starts_no_tail():
     """The invariant is not "the display wins by arriving later": this job's tail is never built."""
     tab = _painters(preview=False, reader=_Reader())
-    assert tab._tail_should_run(_job()) is False, (
+    assert _tail_runs(tab, _job()) is False, (
         "an export whose pane the display block feeds must not also decode its own growing file")
 
 
 def test_a_preview_still_follows_its_own_file():
     """The preview's tail IS the picture (and the strip's seek lives on it), so it always starts."""
     tab = _painters(preview=True, reader=_Reader())
-    assert tab._tail_should_run(_job(preview=True, path="/tmp/preview.mp4")) is True
+    assert _tail_runs(tab, _job(preview=True, path="/tmp/preview.mp4")) is True
 
 
 def test_an_export_without_a_usable_display_block_keeps_the_tail_as_its_fallback():
     """A pane with no block would otherwise stay black on a plain render (the reason the tail was added)."""
     tab = _painters(preview=False, reader=None)
-    assert tab._tail_should_run(_job()) is True
+    assert _tail_runs(tab, _job()) is True
 
 
 def test_an_export_file_the_tail_cannot_follow_starts_no_tail():
     tab = _painters(preview=False, reader=None)
-    assert tab._tail_should_run(_job(path="/tmp/out.mp4")) is False, "a growing mp4 has its index at the end"
+    assert _tail_runs(tab, _job(path="/tmp/out.mp4")) is False, "a growing mp4 has its index at the end"
 
 
 def test_the_preview_switch_off_starts_no_tail():
     tab = _painters(preview=False, reader=None)
     tab.settings = SimpleNamespace(settings={"preview_enabled": "False"})
-    assert tab._tail_should_run(_job()) is False
+    assert _tail_runs(tab, _job()) is False
 
 
 def test_a_tail_frame_from_a_tail_that_is_gone_does_not_reach_the_surface():
@@ -926,6 +943,9 @@ def _seek_tab(media_time, seek_answer=_NO_FIELD, seek_generation=None, target_s=
             return getattr(self, "_shown_time", None)
 
     class _Reader:
+        #: The block is usable: the owner reads this raw input to answer "which painter owns the pane" (plan P2).
+        attached = True
+
         def __init__(self, stamp, answer=_NO_FIELD):
             self._stamp = stamp
             self.seq = 196
@@ -942,7 +962,7 @@ def _seek_tab(media_time, seek_answer=_NO_FIELD, seek_generation=None, target_s=
         _display=_Reader(media_time, seek_answer), _seek_generation=seek_generation,
         _display_seek_pending=True, _seek_pressed_at=0.0,
         _seek_target_frame=27, _seek_target_s=target_s,
-        _preview_paused=False, _display_paints_pane=lambda: True,
+        _preview_paused=False,
         _result_playhead=lambda: 0.0, _clip_duration=lambda: 20.646,
     )
     # The seek rules themselves, bound to the fake tab: stubbing them would pin the call, not the rule. `getattr`
@@ -1114,8 +1134,6 @@ def test_a_planes_frame_goes_to_the_pane_as_planes_and_an_rgb_frame_as_an_image(
 
     tab = SimpleNamespace(
         page_handles=SimpleNamespace(proc=SimpleNamespace(previewLabel=_Pane())),
-        _display_paints_pane=lambda: False,
-        _queue_owns_pane=lambda: False,
         _live_tail=None,
         _preview_decoder=SimpleNamespace(),
         _preview_playhead=0.0,

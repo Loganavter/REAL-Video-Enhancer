@@ -361,7 +361,6 @@ def test_the_panes_frame_handler_takes_the_picture_and_identity_from_the_feed():
         _feed=feed,
         _display=reader,
         page_handles=types.SimpleNamespace(proc=types.SimpleNamespace(previewLabel=pane)),
-        _display_paints_pane=lambda: True,
         _preview_paused=False,
         _display_seek_pending=False,
         _seek_pressed_at=None,
