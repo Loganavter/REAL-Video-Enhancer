@@ -1342,14 +1342,11 @@ def install(window) -> None:
             # A pane's two time bases: (rendered, total, playhead, duration). "A seek holds while the renderer
             # advances" is a claim about `playhead` versus `rendered`, so the answer must carry both.
             report["progress"] = list(progress)
-            report["strip_visible"] = bool(getattr(target, "_strip_visible", False))
-            strip_rect = getattr(target, "_strip_rect", None)
-            if callable(strip_rect):
-                try:
-                    rect = strip_rect()
-                    report["strip"] = [round(rect.x()), round(rect.y()), round(rect.width()), round(rect.height())]
-                except Exception:
-                    pass
+            # `strip_visible` / `strip` used to be reported here from the pane's own painted strip. That strip is gone
+            # (2026-11-27, plan P3): the scrubber the window ships is the bar's `preview_timeline`, and the pane's bottom
+            # band is a compare gesture, not a seek. Reporting a field that cannot be true - or one whose rectangle is
+            # always absent - is the dead-state class the audit's §6.10 names, so the channel no longer advertises it;
+            # a caller that wants the scrubber's box asks `state:preview_timeline`, which is the control that exists.
         # `toolTip` is here because a tooltip is text the channel could not read: proving a translated tooltip needs
         # the string, and hovering under Xvfb does not reliably pop one (measured 2026-11-24).
         # `playhead_fraction` / `played_fraction` are the scrubber's two facts (thumb and fill): a seek's bounce and its
