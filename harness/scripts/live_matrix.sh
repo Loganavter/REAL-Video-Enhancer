@@ -307,8 +307,17 @@ wait_state 's.get("progress") and s["progress"][1] and s["progress"][0] > 0' 120
     || echo "live_matrix: WARNING no painted frame within 120 s; the rows below will say what they saw"
 read -r PX PY PW PH <<<"$(pane_geometry)"
 [ "${PW:-0}" -gt 8 ] || die "previewLabel has no box (state: $PX,$PY ${PW}x${PH})"
-HALF_W=$((PW / 2))
-echo "live_matrix: pane at ${PX},${PY} ${PW}x${PH} (halves ${HALF_W} px)"
+# Crop the PICTURE, not the pane box: the top bar and the transport live inside it, and their pixels made a genuinely
+# empty pane read stddev 0.027 ("still showing a picture"). The newest draw line's `rect=` is the picture itself.
+PIC="$(picture_rect "$PREVIEW_LOG")"
+if [ -n "$PIC" ]; then
+    read -r CROP_X CROP_Y CROP_W CROP_H <<<"$PIC"
+    echo "live_matrix: picture at ${CROP_X},${CROP_Y} ${CROP_W}x${CROP_H} (from the draw line; pane ${PW}x${PH})"
+else
+    CROP_X=$PX; CROP_Y=$PY; CROP_W=$PW; CROP_H=$PH
+    echo "live_matrix: picture = pane box ${PX},${PY} ${PW}x${PH} (no draw line yet)"
+fi
+HALF_W=$((CROP_W / 2))
 
 # The visible scrubber's own box: `drag:` takes WIDGET-local points, and the strip is a small widget in the bottom
 # bar - reading the pane's box for it would put every "drag" outside the control and the row would read as "the
@@ -335,10 +344,10 @@ wait_state 's["progress"][0] > 0' 60 || true
 sleep 1
 RIGHT_BEFORE="$(shot row1-pair)"
 if [ -n "$RIGHT_BEFORE" ]; then
-    L1="$(crop_stat "$RIGHT_BEFORE" "$PX" "$PY" "$HALF_W" "$PH" standard_deviation)"
-    R1="$(crop_stat "$RIGHT_BEFORE" "$PX" $((PX + HALF_W)) "$HALF_W" "$PH" standard_deviation)"
-    crop_out "$RIGHT_BEFORE" row1-left "$PX" "$PY" "$HALF_W" "$PH" >/dev/null
-    crop_out "$RIGHT_BEFORE" row1-right "$PX" $((PX + HALF_W)) "$HALF_W" "$PH" >/dev/null
+    L1="$(crop_stat "$RIGHT_BEFORE" "$CROP_X" "$CROP_Y" "$HALF_W" "$CROP_H" standard_deviation)"
+    R1="$(crop_stat "$RIGHT_BEFORE" "$CROP_X" $((CROP_X + HALF_W)) "$HALF_W" "$CROP_H" standard_deviation)"
+    crop_out "$RIGHT_BEFORE" row1-left "$CROP_X" "$CROP_Y" "$HALF_W" "$CROP_H" >/dev/null
+    crop_out "$RIGHT_BEFORE" row1-right "$CROP_X" $((CROP_X + HALF_W)) "$HALF_W" "$CROP_H" >/dev/null
 fi
 QUIET_MARK=$(log_mark)
 sleep 2
@@ -381,13 +390,13 @@ SEEN=0
 LONE=0
 WORST="$ART"
 SIG_BEFORE=""
-[ -n "${RIGHT_BEFORE:-}" ] && SIG_BEFORE="$(crop_sig "$RIGHT_BEFORE" "$PX" $((PX + HALF_W)) "$HALF_W" "$PH")"
+[ -n "${RIGHT_BEFORE:-}" ] && SIG_BEFORE="$(crop_sig "$RIGHT_BEFORE" "$CROP_X" $((CROP_X + HALF_W)) "$HALF_W" "$CROP_H")"
 for step in $(seq 1 12); do
     SHOT="$(shot "row2-$step")"
     [ -n "$SHOT" ] || continue
     SEEN=$((SEEN + 1))
-    L="$(crop_stat "$SHOT" "$PX" "$PY" "$HALF_W" "$PH" standard_deviation)"
-    SIG="$(crop_sig "$SHOT" "$PX" $((PX + HALF_W)) "$HALF_W" "$PH")"
+    L="$(crop_stat "$SHOT" "$CROP_X" "$CROP_Y" "$HALF_W" "$CROP_H" standard_deviation)"
+    SIG="$(crop_sig "$SHOT" "$CROP_X" $((CROP_X + HALF_W)) "$HALF_W" "$CROP_H")"
     if [ -n "${L:-}" ] && python3 -c "import sys; sys.exit(0 if $L <= 0.02 else 1)"; then
         if [ -n "$SIG_BEFORE" ] && [ -n "$SIG" ] && [ "$SIG" != "$SIG_BEFORE" ]; then
             LONE=$((LONE + 1))
@@ -560,7 +569,7 @@ for pair in "0.5s:$SHOT7A" "2s:$SHOT7B" "10s:$SHOT7C"; do
     label="${pair%%:*}"; file="${pair#*:}"
     [ -n "$file" ] || continue
     TOTAL7=$((TOTAL7 + 1))
-    L="$(crop_stat "$file" "$PX" "$PY" "$HALF_W" "$PH" standard_deviation)"
+    L="$(crop_stat "$file" "$CROP_X" "$CROP_Y" "$HALF_W" "$CROP_H" standard_deviation)"
     R="$(crop_stat "$file" "$PX" $((PX + HALF_W)) "$HALF_W" "$PH" standard_deviation)"
     if python3 -c "import sys; sys.exit(0 if float('${L:-0}') <= 0.02 and float('${R:-0}') <= 0.02 else 1)"; then
         CLEAN=$((CLEAN + 1))
@@ -600,7 +609,15 @@ PAIRS9="$(printf '%s\n' "$WINDOW9" | pair_lines | wc -l)"
 SHOT9="$(shot row9-export-sbs)"
 # Wait for the job to end through the transport glyph (`checked` is the running state), then read the pool again: the
 # block's pictures belong to the render pass, so `_close_display_state` must have dropped them.
+# Did a render actually run? The block's own pool is the evidence that survived: `start:render` may answer only when the
+# job ENDS (the preview verb does), in which case the transport glyph is already back to idle and polling it for `checked`
+# reads "never started" about a render that finished. A `held_block` above zero in the window proves it ran.
 STARTED=0
+case "${HELD_BLOCK_LIVE}" in
+    ''|'-'|*[!0-9]*) : ;;
+    *) [ "$HELD_BLOCK_LIVE" -gt 0 ] && STARTED=1 ;;
+esac
+[ "$PAIRS9" -gt 0 ] && STARTED=1
 WAITED=0
 while [ "$WAITED" -lt 300 ]; do
     CHECKED="$(json_get "$(ctrl state:startRenderButton 8)" checked "")"
