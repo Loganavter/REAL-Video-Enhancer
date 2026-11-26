@@ -1266,6 +1266,38 @@ def test_the_source_pool_keeps_the_history_the_decoder_has_already_passed():
     assert len(tab._source_pool) == 5, "nothing the decoder has passed may be dropped"
     assert 0.125 in tab._source_pool
 
+    # The other direction is not history: a frame a second in the FUTURE belongs to a playhead that has been left.
+    tab._source_pool_put(7.5, 999, "far")
+    tab._source_prune(0.334)
+    assert 7.5 not in tab._source_pool, "a stale future would make the lead look full for ever"
+
+
+def test_a_backward_seek_re_asks_the_source_instead_of_freezing_on_the_old_frame():
+    """Owner, 2026-11-26: "в original застрял на одном кадре и не следит за сиком".
+
+    The log said it exactly: `the source frame is 14.264s ... result 6.215s -> gap +8.049s (+193.2 frames)`, and after
+    that `frames=0 up=0 mb=0.0` for as long as the pane ran. A jump BACK leaves the whole pool in the FUTURE of the new
+    playhead, so the fill read the newest entry as "the lead is already full" and never asked again.
+    """
+    pane = _Pane()
+    pane.mode = "split"
+    pane.frames.append(QImage(2, 2, QImage.Format.Format_RGB888))
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)
+    tab.max_value = 100
+    tab.currentFrame = 50
+    asked = []
+    tab._on_original_requested = lambda seconds, **_: asked.append(float(seconds))
+    tab._compare_playhead = lambda: 6.215
+    for step in range(5):
+        tab._source_pool_put(14.0 + step / 24.0, 300 + step, object())
+
+    tab._tick_second_surface()
+
+    assert asked == [pytest.approx(6.215)], "the pool is in the future: ask at the playhead"
+    assert 14.0 not in tab._source_pool, "the stale future is dropped, or the lead can never refill"
+    assert pane.originals == [], "nothing is shown for a moment that is not in the pool"
+
 
 def test_the_source_pool_is_bounded_even_when_nothing_prunes_it():
     pane = _Pane()

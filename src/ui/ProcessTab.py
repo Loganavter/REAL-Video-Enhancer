@@ -3199,8 +3199,12 @@ class ProcessTab:
         backwards step needs, and it is still bounded.
         """
         pool = getattr(self, "_source_pool", None) or {}
-        horizon = playhead - COMPARE_POOL_FRAMES / self._compare_fps()
-        for pts in [value for value in pool if value < horizon]:
+        span = COMPARE_POOL_FRAMES / self._compare_fps()
+        # BOTH directions: a seek dose not only leave OLD frames behind, it leaves the whole pool in the FUTURE of the
+        # new playhead. Those frames made `_source_pool_newest` report a position eight seconds ahead, so the fill
+        # decided the lead was already full and never asked again - the source half froze on the old picture
+        # (measured 2026-11-26: `gap +8.049s (+193.2 frames)`, then `frames=0 up=0 mb=0.0` for as long as the pane ran).
+        for pts in [value for value in pool if value < playhead - span or value > playhead + span]:
             del pool[pts]
 
     def _source_show(self, playhead: float) -> None:
@@ -3272,8 +3276,10 @@ class ProcessTab:
         runs flat out until the lead is full and stops, instead of being polled at a timer's rate - a 10 Hz poll cannot
         feed a 24 fps stream, so the lead would drain exactly when it is needed.
         """
-        newest = self._source_pool_newest()
+        playhead = float(playhead)
         interval = 1.0 / self._compare_fps()
+        self._source_prune(playhead)
+        newest = self._source_pool_newest()
         # ONE ask in flight at a time: the arrival of each frame calls this again, and without the guard a burst would
         # start a second span for the same moment (the decoder keeps only the last request, so the work is wasted).
         pending = getattr(self, "_source_fill_pending", None)
@@ -3286,7 +3292,12 @@ class ProcessTab:
             else:
                 self._source_fill_pending = None      # a request nothing answered: ask again
         span = True
-        if newest is None:
+        if self._source_pool_for(playhead) is None:
+            # Nothing in the pool answers for THIS playhead (an empty pool, a seek, a jump back): ask at it. The ask
+            # itself decides seek vs step, and a jump is far from what the decoder already decoded, so it seeks.
+            target = playhead
+            span = False
+        elif newest is None:
             target = playhead
         elif playhead - newest > 2.0 * interval:
             # The playhead jumped past the pool (a scrub, or a dropped tail): continuing from the pool would decode a
