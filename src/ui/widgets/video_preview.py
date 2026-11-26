@@ -601,6 +601,9 @@ class VideoPreviewSurface(QRhiWidget):
         """True when the two halves are the same picture (or there is only one picture to show)."""
         if self._view_mode == "single" or self._original is None:
             return True
+        # TIME, not frame numbers: the tail's index and the source decoder's index do not share a base even with both on
+        # content time (measured 2026-11-26: every paint refused when the gate compared indices), while the timestamps
+        # agree to within the drift the slack below covers.
         result = getattr(self, "_shown_time", None)
         source = getattr(self, "_original_time", None)
         if result is None or source is None:

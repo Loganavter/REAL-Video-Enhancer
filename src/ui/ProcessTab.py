@@ -98,9 +98,11 @@ COMPARE_LEAD_FRAMES = 3
 #: result and every pair timed out (measured 2026-11-26, split during inference).
 COMPARE_FILL_WINDOW_S = 0.08
 
-#: How many decoded source frames are kept. `COMPARE_LEAD_FRAMES` + a little history for a small backwards step; every
-#: entry is a full-size QImage (6.2 MB at 1440p), so the cap is a memory budget, not a scheduling knob.
-COMPARE_POOL_FRAMES = 6
+#: How many decoded source frames are kept. One second at 24 fps: a live tail's pictures are SPARSE (its lateness rule
+#: skips frames, so consecutive ones can be six frames apart) and the pool is pruned to this window, so a six-frame jump
+#: against a 0.25 s window emptied it on every skip and no pair ever closed (measured 2026-11-26). The frames are decoded
+#: at the pane's box (1.5 MB), so a second of them is 36 MB - the cap is a memory budget, not a scheduling knob.
+COMPARE_POOL_FRAMES = 24
 
 
 class _FrameRelay(QObject):
@@ -1185,7 +1187,8 @@ class ProcessTab:
         if pool:
             newest = round(max(pool), 3)
         telemetry.event("compare fill", asks=stats["asks"], arrivals=stats["arrivals"], pool=len(pool),
-                        playhead=ph, newest=newest)
+                        playhead=ph, newest=newest, target=stats.get("target"), span=stats.get("span"),
+                        pool_min=None if not pool else round(min(pool), 3))
         stats["asks"] = 0
         stats["arrivals"] = 0
 
@@ -3172,7 +3175,13 @@ class ProcessTab:
                 # over whole costs a 6.2 MB copy, a GUI-thread scale down to the result's size, a 6.2 MB upload and a
                 # 1440p mip chain per frame - to show 504x378. The fit happens in swscale inside the decode thread, and
                 # the two halves then arrive at the SAME size, so the pane scales nothing.
-                decoder = VideoDecoder(pixel_format="rgb24", max_size=self._pane_display_box())
+                # CONTENT time, like both of the pane's other painters (the tail subtracts the output's start, the
+                # finished-file decoder does the same): the compare names its halves by timestamp and, before this, the
+                # source's own file times sat a fraction of a frame off the tail's derived ones, so the pair gate saw
+                # two moments for stretches and painted on its timeout (measured 2026-11-26: `pair_off` 1-9 of 15-22
+                # paints during inference, while the halves were the same picture). The decoder seeks by adding the
+                # origin back (`_rewind`), so an ask in content time still lands on the right frame.
+                decoder = VideoDecoder(pixel_format="rgb24", max_size=self._pane_display_box(), content_time=True)
                 thread = QThread()
                 decoder.moveToThread(thread)
                 thread.start()
@@ -3373,17 +3382,23 @@ class ProcessTab:
                 self._source_fill_pending = None      # a request nothing answered: ask again
         span = True
         if self._source_pool_for(playhead) is None:
-            # Nothing in the pool answers for THIS playhead (an empty pool, a seek, a jump back): ask at it. The ask
-            # itself decides seek vs step, and a jump is far from what the decoder already decoded, so it seeks.
+            # Nothing in the pool answers for THIS playhead (an empty pool, a seek, a jump back): ask at it, and take the
+            # single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder stands.
             target = playhead
             span = False
         elif newest is None:
             target = playhead
-        elif playhead - newest > 2.0 * interval:
-            # The playhead jumped past the pool (a scrub, or a dropped tail): continuing from the pool would decode a
-            # burst of frames nobody will see. Ask at the playhead - the ask itself decides seek vs step.
-            target = playhead
             span = False
+        elif playhead - newest > 2.0 * interval:
+            # The pool is BEHIND the playhead - a scrub, or a SPARSE tail (its lateness rule skips pictures, so two
+            # consecutive ones can be six frames apart). One frame per call cannot close a gap the playhead reopens on
+            # every picture: measured 2026-11-26, `pool=1` for ever and every pair a timeout. Ask for the far edge of the
+            # lead and take the whole walk - the burst IS the point.
+            # The burst is decoded FORWARD, not rewound: measured 2026-11-26, forcing a rewind on a gap over 0.3 s made
+            # every paint a timeout in ten consecutive seconds - the tail's sparse times are not on the source's frame
+            # grid, so the rewind's ceil landed a frame off while the forward walk lands on the frame itself.
+            target = playhead + self._compare_lead()
+            span = True
         elif newest < playhead + self._compare_lead():
             # Ask for the WHOLE lead in one call and take every frame of the walk: one round trip per lead, not one per
             # frame (a frame-by-frame ask is latency-bound at ~8 frames/s; the decode itself runs at 80).
@@ -3394,6 +3409,9 @@ class ProcessTab:
         stats = getattr(self, "_compare_fill_stats", None)
         if stats is not None:
             stats["asks"] += 1
+            stats["target"] = round(float(target), 3)
+            stats["span"] = int(bool(span))
+            stats["newest"] = None if newest is None else round(float(newest), 3)
         self._compare_from_tick = True
         try:
             self._on_original_requested(max(0.0, target), span=span)
@@ -3490,6 +3508,8 @@ class ProcessTab:
         # shows the frame that belongs to the RESULT's playhead - usually this one, because the pool runs AHEAD of it -
         # and asks for the next frame so the lead stays full.
         self._source_pool_put(pts, index, image)
+        if telemetry.level() >= 2:
+            telemetry.event("compare put", pts=round(float(pts), 3), pool=len(getattr(self, "_source_pool", None) or {}))
         mode = getattr(pane, "view_mode", None)
         single = True
         if callable(mode):
