@@ -26,9 +26,12 @@ Since the phase-0 seam of `plan-rve-preview-controls-frame-path-2026-11-25` the 
 pass; this class owns the widget API, the zoom/pan/mvp geometry, the frame/state bookkeeping, the strip and its child
 widgets. It hands the renderer one `PreviewScene` per paint and receives what was drawn back through `on_draw`.
 
-The pane accepts a picture in two shapes: `set_frame(image, ...)` (RGBA8888, the fallback and the compare's source
-path, unchanged) and `set_frame_planes(planes, strides, w, h, ...)` (YUV420 planes, the playback path's cheap one - no
-QImage, no `to_ndarray`, the colour conversion in the fragment shader). Both feed the same geometry, HUD and log.
+The pane accepts a RESULT through one guarded API, `set_result(ResultPicture(moment, picture, generation))`: the
+generation must not be older than the picture on screen, its moment must not go backwards within one generation, and a
+compare mode refuses a picture that names no moment (it must not inherit the previous clock). `set_frame` and
+`set_frame_planes` remain as thin compatibility adapters that pass through the same guards - the planes path is the
+YUV playback path's cheap one (no QImage, no `to_ndarray`, colour conversion in the fragment shader). The SOURCE half
+has its own guarded API, `set_source(SourcePicture)`, and only the page's one synchroniser calls it.
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager
 from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
 
 from src.ui.video import telemetry
+from src.ui.preview.source_register import ResultPicture, SourcePicture
 from src.ui.widgets.playback_strip import (
     PlaybackTimeReadout,
     playhead_halo_radius,
@@ -145,6 +149,12 @@ PAIR_JUMP_WAIT_S = 1.0
 #: `gst_aggregator_check_pads_ready`, `gst_aggregator_wait_and_check`, `gst_aggregator_pad_skip_buffers`).
 PAIR_QUEUE_MAX = 8
 
+#: Half a frame at the scene's 24 fps: the pane REFUSES a source snapshot further than this from the result's own
+#: moment. The register already answers with a bounded match, so this is the second, independent guard - and it is why
+#: `set_source` can fail CLOSED (a gap) instead of drawing a neighbour when a caller gets the moment wrong. Half of
+#: `PAIR_SYNC_SLACK_S / 3` (= one frame at 24 fps) rather than a second hand-picked number.
+SOURCE_HALF_FRAME_S = PAIR_SYNC_SLACK_S / 3.0
+
 #: The divider fades out this long after the pointer leaves it (owner, 2026-11-26: "фейд до 1 секунды срезать"), and the grip that stays is this visible: a rule at zero
 #: alpha would leave nothing to aim at, and a rule at full alpha would sit over the picture for ever (owner, 2026-11-26:
 #: "после того как курсор ушел - фейдом пропадало в течение 2 секунд (только ручка была видна с альфой 20%)").
@@ -221,6 +231,16 @@ class VideoPreviewSurface(QRhiWidget):
         #: behind" at the seam (owner, 2026-11-26).
         self._result_queue: dict[int, tuple] = {}
         self._source_queue: dict[int, tuple] = {}
+        #: The generation of the result on screen. A new render/file/seek starts the next one; a result from an older
+        #: generation is REFUSED (keep the last picture) instead of painting over the new one.
+        self._result_generation = 0
+        #: The moment of the result on screen, and the cadence the pane learned from consecutive results. The source
+        #: tolerance is half of THIS interval (the pane's own fps), not a module constant.
+        self._result_moment: float | None = None
+        self._result_frame_seconds = 2.0 * SOURCE_HALF_FRAME_S
+        #: True when a result was refused: the half is a GAP. The last picture stays on screen, but nothing may pair
+        #: across the refusal.
+        self._result_gap = False
         #: The time of the pair the RENDERER holds - not of the newest halves. A repaint can come from anywhere (the
         #: compositor, a HUD fade, a resize); those must draw the last pair that belonged together, not a half-updated
         #: one, or the very flicker the gate exists to remove comes back through the side door.
@@ -229,8 +249,6 @@ class VideoPreviewSurface(QRhiWidget):
         #: The fade needs repaints, and a paused pane has no other clock. 30 ms is smooth at this size and stops as soon
         #: as the rule reaches its rest alpha.
         self._divider_timer = None
-        #: the playhead the standing original was last asked for, so playback refreshes it once per move
-        self._original_requested_at: float | None = None
         #: The identity of the source picture the host handed over (`("frame", n)`, its media time) and the moment the
         #: pane asked for it. The compare's "last step" is the DRAW, and a draw that cannot name both halves cannot
         #: answer "what was on screen when the offset happened" (owner, 2026-11-25).
@@ -311,52 +329,146 @@ class VideoPreviewSurface(QRhiWidget):
 
     # -- data ------------------------------------------------------------
 
-    def set_frame(self, image: QImage | None, *, gui_ms: float | None = None,
-                  index: int | None = None, seq: int | None = None,
-                  media_time: float | None = None, generation: int | None = None) -> None:
-        """Show this picture. A `None` clears the pane (no frame yet).
+    def set_result(self, result: ResultPicture | None) -> None:
+        """The pane's ONLY result API: accept `result`, or REFUSE it and keep the last picture.
 
-        The pixels go to the renderer as a `PreviewFrame` (`format="rgba8"`, the converted image); the widget keeps the
-        same image for its geometry, its fingerprints and the draw log. Signatures here are the public API and do not
-        change - a producer that speaks planes will hand the renderer a `PreviewFrame` directly (the YUV lane).
+        The result owns the pane's clock, so it cannot be checked against "its own" moment; what is checked is identity:
+
+        * a generation OLDER than the one on screen is refused - a new render/file/seek resets the generation, and the
+          previous job's frame must not paint over the new one;
+        * within a generation, a moment OLDER than the picture on screen is refused - a late frame arriving after its
+          successor;
+        * a picture with NO moment while a compare mode requires a pair is refused - it must not inherit the previous
+          pane moment and be paired with a stale source.
+
+        A refusal keeps the last picture and marks the half as a GAP; nothing is queued for it, so no pair can form
+        across it. The refusal is visible in the log with the register's own numbers.
         """
-        if image is None and media_time is not None:
-            # A display feed can publish an EMPTY slot while still naming a moment (`_on_display_frame(None, ...)`): that
-            # is "nothing to show this time", not "clear the pane". Queued, it became a result entry with no image AND no
-            # planes, and `_commit_pair` then called `set_frame(None)` - the empty RIGHT half of sbs after a finished
-            # render (owner, 2026-11-26: "оба видео сделают между собой огромный пустой промежуток"). The picture stays;
-            # an explicit clear (a `None` with no name) still clears below.
+        if result is None:
+            self._accept_result(None, None, int(self._result_generation))
             return
-        self._frame = None if image is None else image.convertToFormat(QImage.Format.Format_RGBA8888)
-        # An image frame replaces any standing planes picture: the geometry reads `_planes_size` when there is no
-        # image, and the two shapes must never both claim the same frame.
-        self._planes_size = None
-        self._pending_frame_obj = None
-        # NOT handed to the renderer here: `_request_frame_paint` commits the PAIR (see `_commit_pair`).
+        moment = None if result.moment is None else float(result.moment)
+        generation = int(result.generation)
+        if result.picture is None and moment is not None:
+            # An EMPTY publication that still names a moment: "nothing this tick", not "clear" (the empty right half of
+            # sbs after a finished render was exactly this shape).
+            return
+        if result.picture is None:
+            self._accept_result(None, None, generation)
+            return
+        reason = self._result_refusal(moment, generation)
+        if reason is not None:
+            self._refuse_result(moment, generation, reason)
+            return
+        self._accept_result(moment, result.picture, generation)
+
+    def _result_refusal(self, moment: float | None, generation: int) -> str | None:
+        """Why this result must not paint, or `None` when it is the next picture of this generation."""
+        if generation < self._result_generation:
+            return "older generation"
+        if moment is None and self._view_mode != "single":
+            return "no moment while a pair is required"
+        if (generation == self._result_generation and self._result_moment is not None
+                and moment is not None
+                and moment < self._result_moment - self.source_half_frame_s()):
+            return "older than the picture on screen"
+        return None
+
+    def source_half_frame_s(self) -> float:
+        """Half the pane's own result cadence: the largest source distance that is still the same picture."""
+        return 0.5 * max(1e-3, float(self._result_frame_seconds))
+
+    def _refuse_result(self, moment: float | None, generation: int, reason: str) -> None:
+        """Keep the last picture, mark the half as a GAP, and say why. Nothing is queued for a refused result."""
+        self._result_gap = True
+        if telemetry.level() >= 1:
+            telemetry.event("result refused", why=reason,
+                            moment="-" if moment is None else f"{float(moment):.3f}",
+                            generation=int(generation), held_generation=int(self._result_generation),
+                            held_moment="-" if self._result_moment is None else f"{self._result_moment:.3f}")
+        self.update()
+
+    def _accept_result(self, moment: float | None, image: QImage | None, generation: int, *,
+                       planes_frame: PreviewFrame | None = None, index: int | None = None,
+                       seq: int | None = None, gui_ms: float | None = None) -> None:
+        """Store an accepted result and hand the renderer its pair. The one place the pane's clock is written."""
+        if image is None and planes_frame is None:
+            self._frame = None
+            self._planes_size = None
+            self._pending_frame_obj = None
+        elif planes_frame is not None:
+            self._frame = None
+            self._planes_size = (int(planes_frame.width), int(planes_frame.height))
+            self._pending_frame_obj = planes_frame
+        else:
+            self._frame = image.convertToFormat(QImage.Format.Format_RGBA8888)
+            # An image frame replaces any standing planes picture: the geometry reads `_planes_size` when there is no
+            # image, and the two shapes must never both claim the same frame.
+            self._planes_size = None
+            self._pending_frame_obj = None
         self._cleared_empty = False
+        if int(generation) > self._result_generation:
+            # A new render/file/seek: the cadence and the "older than" baseline belong to the previous generation.
+            self._result_generation = int(generation)
+            self._result_moment = None
+            self._result_frame_seconds = 2.0 * SOURCE_HALF_FRAME_S
+        previous = self._result_moment
+        if moment is not None and previous is not None and int(generation) == self._result_generation:
+            delta = float(moment) - float(previous)
+            if 0.0 < delta <= 0.5:
+                # The pane's own cadence, learned from consecutive results: the source tolerance is half of it.
+                self._result_frame_seconds = delta
+        self._result_moment = None if moment is None else float(moment)
+        self._result_gap = False
         self._refresh_readout()
         # The name and the time FIRST: the gate reads the time, and the draw log must carry THIS picture.
         if index is not None:
             self._shown = ("frame", int(index))
         elif seq is not None:
             self._shown = ("seq", int(seq))
-        self._shown_time = None if media_time is None else float(media_time)
-        self._enqueue(self._result_queue, media_time,
-                      (self._frame, getattr(self, "_shown", None), media_time, index))
+        self._shown_time = None if moment is None else float(moment)
+        # NOT handed to the renderer here: `_request_frame_paint` commits the PAIR (see `_commit_pair`).
+        self._enqueue(self._result_queue, moment,
+                      (self._frame, getattr(self, "_shown", None), moment, index,
+                       self._pending_frame_obj))
         self._request_frame_paint()
-        telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=media_time, generation=generation)
+        telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=moment,
+                             generation=int(generation))
+
+    def set_frame(self, image: QImage | None, *, gui_ms: float | None = None,
+                  index: int | None = None, seq: int | None = None,
+                  media_time: float | None = None, generation: int | None = None) -> None:
+        """Compatibility adapter: translate `(image, media_time)` into the result guards, keeping the identity fields.
+
+        `generation` here is the historical seek-answer generation, NOT the result identity; identity defaults to the
+        pane's current generation. A producer that knows the render/file/seek identity uses `set_result`.
+        """
+        del generation
+        current = int(self._result_generation)
+        if image is None and media_time is not None:
+            return
+        if image is None:
+            self._accept_result(None, None, current)
+            return
+        reason = self._result_refusal(media_time, current)
+        if reason is not None:
+            self._refuse_result(media_time, current, reason)
+            return
+        self._accept_result(media_time, image, current, index=index, seq=seq, gui_ms=gui_ms)
 
     def set_frame_planes(self, planes, strides, width: int, height: int, *, index: int | None = None,
                          pts: float | None = None, format: str = "yuv420p10le",
                          color_space: str | None = None, color_range: str | None = None,
-                         gui_ms: float | None = None, seq: int | None = None) -> None:
+                         gui_ms: float | None = None, seq: int | None = None,
+                         result_generation: int | None = None) -> None:
         """Show a picture that arrives as YUV planes: (Y, U, V) bytes, their strides, and the picture's size.
 
-        ADDITIVE to `set_frame(image, ...)`, which is unchanged: the RGBA path is the fallback, this is the one the
-        playback host can choose, and it is driven directly by tests and by the RHI proof. `format` is
-        `"yuv420p10le"` (10-bit, R16 textures) or `"yuv420p"` (8-bit, R8); `color_space`/`color_range` are the file's
-        own tags (`"bt709"`/`"tv"`) and the shader's matrix is built from them - a `None` here means "not declared",
-        and the renderer uses this app's writer's tags (bt709/tv) rather than guessing per file.
+        The YUV path keeps its own thin adapter, but goes through the SAME result guards as `set_result`: a planes
+        frame from an older generation, or one that arrives after its successor, cannot paint either.
+
+        `format` is `"yuv420p10le"` (10-bit, R16 textures) or `"yuv420p"` (8-bit, R8); `color_space`/`color_range` are
+        the file's own tags (`"bt709"`/`"tv"`) and the shader's matrix is built from them - a `None` here means "not
+        declared", and the renderer uses this app's writer's tags (bt709/tv) rather than guessing per file.
 
         No QImage, no `to_ndarray`, no `tobytes`: the planes are the producer's bytes and the renderer uploads them as
         they are (`PreviewRenderer.set_frame(PreviewFrame(...))`). The geometry (zoom/pan/fit), the HUD and the compare
@@ -373,19 +485,13 @@ class VideoPreviewSurface(QRhiWidget):
             color_space=color_space,
             color_range=color_range,
         )
-        self._frame = None
-        self._planes_size = (int(width), int(height))
-        self._pending_frame_obj = frame
-        self._cleared_empty = False
-        self._refresh_readout()
-        if index is not None:
-            self._shown = ("frame", int(index))
-        elif seq is not None:
-            self._shown = ("seq", int(seq))
-        self._shown_time = None if pts is None else float(pts)
-        self._enqueue(self._result_queue, pts, (None, getattr(self, "_shown", None), pts, index, frame))
-        self._request_frame_paint()
-        telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=pts)
+        generation = int(self._result_generation if result_generation is None else result_generation)
+        reason = self._result_refusal(pts, generation)
+        if reason is not None:
+            self._refuse_result(pts, generation, reason)
+            return
+        self._accept_result(pts, None, generation, planes_frame=frame,
+                            index=index, seq=seq, gui_ms=gui_ms)
 
     def has_frame(self) -> bool:
         return self._frame is not None or self._planes_size is not None
@@ -487,6 +593,10 @@ class VideoPreviewSurface(QRhiWidget):
         mode = self._view_mode
         fields: dict[str, object] = {"mode": mode, "half": half}
         fields.update(self._identity_fields(original=(half == "original")))
+        # The result's identity comes from the pane's register, never inferred from `_frame`: what the last accepted
+        # result NAMED, and which render/file/seek it belonged to.
+        fields["result_moment"] = "-" if self._result_moment is None else f"{self._result_moment:.3f}"
+        fields["generation"] = int(self._result_generation)
         fields["fp"] = "-" if picture is None or picture.isNull() else self._fingerprint(picture)
         if half == "original" and mode == "single":
             other = self._identity_fields(original=False)
@@ -513,6 +623,8 @@ class VideoPreviewSurface(QRhiWidget):
             return
         fields: dict[str, object] = {"mode": self._view_mode, "half": "pair"}
         fields.update({f"result_{k}": v for k, v in self._identity_fields(original=False).items()})
+        fields["result_moment"] = "-" if self._result_moment is None else f"{self._result_moment:.3f}"
+        fields["generation"] = int(self._result_generation)
         fields["result_fp"] = "-" if result is None or result.isNull() else self._fingerprint(result)
         # GEOMETRY, because "one half is smaller during the render and full after it" is a number, not an impression
         # (owner, 2026-11-26: "во время рендера почему-то оба видео меньше, а после - целиком заполняют"). The pane fits
@@ -531,9 +643,54 @@ class VideoPreviewSurface(QRhiWidget):
         fields["wall"] = telemetry.wall()
         telemetry.event("draw", **fields)
 
+    def set_source(self, snapshot: SourcePicture | None) -> None:
+        """The pane's ONLY source API: show `snapshot`, or a gap when it is not this pane's moment.
+
+        A snapshot is accepted only when it belongs to the SAME generation as the result on screen AND its moment is
+        the result's own moment within half a frame (the pane's cadence, not a module constant). Outside that it is
+        REFUSED and the pane keeps a gap - never the previous picture, which would be a neighbour of the moment the
+        result is showing. That refusal is the compare's identity rule at its last line: a producer cannot hand over a
+        picture it merely believes belongs here.
+        """
+        if snapshot is not None:
+            moment = self.shown_moment()
+            same_generation = int(snapshot.generation) == int(self._result_generation)
+            if not same_generation:
+                snapshot = None
+            elif moment is not None and abs(float(snapshot.moment) - float(moment)) > self.source_half_frame_s():
+                snapshot = None
+        self._apply_source_picture(snapshot)
+
     def set_original(self, image: QImage | None, *, media_time: float | None = None,
                      index: int | None = None) -> None:
-        """The source frame for the compare: the LMB flash in `single`, a standing pane in the compare modes.
+        """Compatibility adapter for a host that still speaks the old two-argument form.
+
+        It routes through the SAME guard `set_source` applies, so it is not a bypass: there is one source path, and
+        this only translates `(image, media_time)` into a `SourcePicture` of the pane's current generation.
+        """
+        if image is None:
+            self._apply_source_picture(None)
+            return
+        shown = self.shown_moment()
+        moment = float(media_time) if media_time is not None else (0.0 if shown is None else float(shown))
+        snapshot = SourcePicture(moment=moment, picture=image, origin="decoder",
+                                 generation=int(self._result_generation))
+        if shown is not None and abs(moment - float(shown)) > self.source_half_frame_s():
+            self._apply_source_picture(None)
+            return
+        self._apply_source_picture(snapshot, index=index)
+
+    def shown_moment(self) -> float | None:
+        """The moment the RESULT picture is showing, or `None` before a publisher named one.
+
+        Public because the page's one synchroniser asks THIS for the moment to look up. It is the pane's own state, not
+        a tab clock, so no flag elsewhere can disagree with what is on screen.
+        """
+        moment = getattr(self, "_shown_time", None)
+        return None if moment is None else float(moment)
+
+    def _apply_source_picture(self, snapshot: SourcePicture | None, *, index: int | None = None) -> None:
+        """Store the accepted picture and hand the renderer the pair it belongs to.
 
         The source is **stretched up to the rendered frame's size with nearest-neighbour** (`FastTransformation`): the
         cheapest interpolation there is, and the only one that adds no information. The comparison then shows two
@@ -542,58 +699,69 @@ class VideoPreviewSurface(QRhiWidget):
         (owner, 2026-11-23). In `sbs` that same step is what makes the half-width original the same size as the
         result, i.e. the same apparent scale with no second zoom to keep in sync.
         """
-        if image is None:
+        if snapshot is None:
+            if self._original is None and not self._source_queue:
+                return
             self._original = None
             self._original_shown = None
             self._original_time = None
             self._original_changed = False
-            # The ask-ticket goes with the picture: left behind, `_request_standing_original` would suppress the next ask
-            # for the same playhead and the half would wait for the playhead to MOVE to come back (the same latch shape
-            # as `_source_shown_pts`, in this file; audit 2026-11-26).
-            self._original_requested_at = None
-        else:
-            # The source half of a compare mode: a picture the pane accepted, counted in the window's `frames`.
-            telemetry.note_frame()
-            self._original_shown = ("frame", int(index)) if index is not None else None
-            self._original_time = None if media_time is None else float(media_time)
-            self._original_changed = True
-            picture = image.convertToFormat(QImage.Format.Format_RGBA8888)
-            # The target is the RESULT's picture size: its QImage, or the planes descriptor when the playback path
-            # carries YUV. A planes result has no `_frame`; without this the source half kept its native 1440x1080 and
-            # the two halves were at different scales (measured live 2026-11-25: single held fine, sbs's source did
-            # not match the result).
-            target_size = None if self._frame is None else self._frame.size()
-            if target_size is None and getattr(self, "_planes_size", None) is not None:
-                target_size = QSize(int(self._planes_size[0]), int(self._planes_size[1]))
-            if target_size is not None and picture.size() != target_size:
-                target = target_size
-                # TWO cases, and the difference is measurable. The channel's payload box rounds each side to an even
-                # number independently (`fit_box`), so a 4:3 source in a 421x512 pane becomes a 420x314 payload whose
-                # aspect is 0.32 % wide; scaling the source into it with `KeepAspectRatio` gave 418x314 and the draw
-                # then stretched that back to 420 - a further 0.48 %. The original therefore sat on a DIFFERENT pixel
-                # grid than the result, which reads as "the frame is a bit wider" (owner, 2026-11-25). Within rounding
-                # noise the source is scaled to the frame EXACTLY: same grid, honest compare, no invented geometry.
-                source_aspect = picture.width() / float(picture.height())
-                frame_aspect = target.width() / float(target.height())
-                relative = abs(source_aspect - frame_aspect) / frame_aspect
-                if relative <= 0.01:
-                    picture = picture.scaled(target, Qt.AspectRatioMode.IgnoreAspectRatio,
-                                             Qt.TransformationMode.FastTransformation)
-                else:
-                    # A REAL difference (border crop, an odd scale): stretching would show a straight line where the
-                    # picture has a curve. Keep the proportions and say so once - a silent deformation is worse than
-                    # either.
-                    picture = picture.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
-                                             Qt.TransformationMode.FastTransformation)
-                    if getattr(self, "_compare_aspect_noted", None) != (picture.size(), target):
-                        self._compare_aspect_noted = (picture.size(), target)
-                        telemetry.event("compare aspect", source=f"{image.width()}x{image.height()}",
-                                        fitted=f"{picture.width()}x{picture.height()}",
-                                        frame=f"{target.width()}x{target.height()}",
-                                        diff_pct=f"{relative * 100.0:.2f}")
-            self._original = picture
-        if image is not None and self._original is not None:
-            self._enqueue(self._source_queue, media_time, (self._original, media_time, index))
+            # FAIL CLOSED: a source that does not answer for the pane's moment must not be paired with a new result by
+            # the hold's valve later either. The gap is the honest picture; the old one is a neighbour's.
+            self._source_queue.clear()
+            self._request_frame_paint()
+            return
+        moment = float(snapshot.moment)
+        if (self._original is not None and self._original_time is not None
+                and abs(float(self._original_time) - moment) < 1e-6):
+            # The pane already holds this moment's picture: one handover per picture, not one per producer arrival.
+            return
+        telemetry.note_frame()
+        self._original_shown = ("frame", int(index)) if index is not None else None
+        self._original_time = moment
+        self._original_changed = True
+        image = snapshot.picture
+        picture = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        # The target is the RESULT's picture size: its QImage, or the planes descriptor when the playback path
+        # carries YUV. A planes result has no `_frame`; without this the source half kept its native 1440x1080 and
+        # the two halves were at different scales (measured live 2026-11-25: single held fine, sbs's source did
+        # not match the result).
+        target_size = None if self._frame is None else self._frame.size()
+        if target_size is None and getattr(self, "_planes_size", None) is not None:
+            target_size = QSize(int(self._planes_size[0]), int(self._planes_size[1]))
+        if target_size is not None and picture.size() != target_size:
+            target = target_size
+            # TWO cases, and the difference is measurable. The channel's payload box rounds each side to an even
+            # number independently (`fit_box`), so a 4:3 source in a 421x512 pane becomes a 420x314 payload whose
+            # aspect is 0.32 % wide; scaling the source into it with `KeepAspectRatio` gave 418x314 and the draw
+            # then stretched that back to 420 - a further 0.48 %. The original therefore sat on a DIFFERENT pixel
+            # grid than the result, which reads as "the frame is a bit wider" (owner, 2026-11-25). Within rounding
+            # noise the source is scaled to the frame EXACTLY: same grid, honest compare, no invented geometry.
+            source_aspect = picture.width() / float(picture.height())
+            frame_aspect = target.width() / float(target.height())
+            relative = abs(source_aspect - frame_aspect) / frame_aspect
+            if relative <= 0.01:
+                picture = picture.scaled(target, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                         Qt.TransformationMode.FastTransformation)
+            else:
+                # A REAL difference (border crop, an odd scale): stretching would show a straight line where the
+                # picture has a curve. Keep the proportions and say so once - a silent deformation is worse than
+                # either.
+                picture = picture.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
+                                         Qt.TransformationMode.FastTransformation)
+                if getattr(self, "_compare_aspect_noted", None) != (picture.size(), target):
+                    self._compare_aspect_noted = (picture.size(), target)
+                    telemetry.event("compare aspect", source=f"{image.width()}x{image.height()}",
+                                    fitted=f"{picture.width()}x{picture.height()}",
+                                    frame=f"{target.width()}x{target.height()}",
+                                    diff_pct=f"{relative * 100.0:.2f}")
+        self._original = picture
+        # The pair queue is keyed by the moment the pane is STANDING ON, not by the producer's own name: the snapshot
+        # has already been accepted as that moment's picture (within half a frame), so the result waiting for it must
+        # find it. The picture's own moment still travels in the payload, so the draw line stays honest.
+        key = self.shown_moment()
+        key = moment if key is None else key
+        self._enqueue(self._source_queue, key, (self._original, moment, index))
         self._request_frame_paint()
 
     def set_view_mode(self, mode: str) -> None:
@@ -947,13 +1115,14 @@ class VideoPreviewSurface(QRhiWidget):
         # оригинал"). The source is the one picture that CAN be shown; ask for it at the playhead the pane stands on.
         _, _, playhead, _ = self._progress
         playhead = float(playhead)
-        # Suppress only when the pane HOLDS the moment it asked for: the ask recorded below is a request, not a picture,
-        # and `set_original(None)` used not to clear it - the fourth latch of the same shape (seam audit, 2026-11-26).
+        # Suppress only when the pane HOLDS the moment it is standing on: the picture is the fact, not a remembered
+        # request. `_original_requested_at` used to be that memory and it outlived the picture (a mode change or a clear
+        # left it behind, and a PAUSED pane then never asked again - the fourth latch of the same shape, seam audit
+        # 2026-11-26). The pane names its own source time, so ask THAT.
         pane_time = self.original_shown_time()
-        if (self._original is not None and playhead == self._original_requested_at
-                and pane_time is not None and abs(float(pane_time) - float(playhead)) <= 0.1):
+        if (self._original is not None and pane_time is not None
+                and abs(float(pane_time) - playhead) <= self.source_half_frame_s()):
             return
-        self._original_requested_at = playhead
         self._note_original_ask(playhead)
         self.originalRequested.emit(playhead)
 

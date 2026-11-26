@@ -42,6 +42,7 @@ from .video.channel import (
 from .video.feed import PreviewFeed
 from .preview.owner import owner_of
 from .preview.session import SEEK_WATCH_TIMEOUT_S as SESSION_SEEK_WATCH_TIMEOUT_S
+from .preview.source_register import ResultPicture, SourceRegister
 from .preview.state import PreviewBackendKind
 from ..constants import (
     BACKEND_PATH,
@@ -197,7 +198,7 @@ class _PreviewSurfacePort:
     """The page's picture verbs for `PreviewController` (view mode, zoom, compare, fullscreen).
 
     The controller owns the state and the commands; this object is the only place the state reaches the pane/widgets,
-    and it uses the pane's PUBLIC API (`set_view_mode`, `set_zoom`, `reset_view`, `set_original`) - the internals of
+    and it uses the pane's PUBLIC API (`set_view_mode`, `set_zoom`, `reset_view`, `set_source`) - the internals of
     `video_preview.py` belong to another lane.
     """
 
@@ -243,10 +244,17 @@ class _PreviewSurfacePort:
             except Exception as exc:
                 log(f"preview: compare source decode failed ({exc})")
             return
-        setter = getattr(pane, "set_original", None)
+        setter = getattr(pane, "set_source", None)
         if callable(setter):
             try:
                 setter(None)
+            except Exception:
+                pass
+            return
+        legacy = getattr(pane, "set_original", None)
+        if callable(legacy):
+            try:
+                legacy(None)
             except Exception:
                 pass
 
@@ -263,6 +271,42 @@ class _PreviewSurfacePort:
                 window.showNormal()
         except Exception as exc:
             log(f"preview: fullscreen {fullscreen} failed ({exc})")
+
+
+def _pane_result(page, pane, moment, image, *, index: int | None = None,
+                 seq: int | None = None, gui_ms: float | None = None) -> None:
+    """Hand one RESULT picture to the pane, stamped with the page's generation.
+
+    Module-level because `_on_display_frame`/`_on_preview_frame` are also driven through minimal harness tabs
+    (`types.SimpleNamespace`) that have the page's FIELDS but not its methods - exactly the shape a bound helper would
+    break. The pane's `set_result` enforces the generation/moment rules; a double that predates the API gets the old
+    `set_frame` call with the same numbers (it is not the shipped pane, so there is no identity to defend there).
+    """
+    generation = int(getattr(page, "_result_generation", 0))
+    setter = getattr(pane, "set_result", None)
+    if callable(setter):
+        setter(ResultPicture(moment=moment, picture=image, generation=generation))
+        return
+    legacy = getattr(pane, "set_frame", None)
+    if callable(legacy):
+        legacy(image, gui_ms=gui_ms, index=index, seq=seq, media_time=moment, generation=generation)
+
+
+def _pane_result_planes(page, pane, planes, strides, width, height, *, index=None, pts=None,
+                        format="yuv420p10le", color_space=None, color_range=None, gui_ms=None) -> None:
+    """Hand one YUV result to the pane, stamped with the page's generation (the pane shares the guards)."""
+    setter = getattr(pane, "set_frame_planes", None)
+    if not callable(setter):
+        return
+    generation = int(getattr(page, "_result_generation", 0))
+    try:
+        setter(planes, strides, width, height, index=index, pts=pts, format=format,
+               color_space=color_space, color_range=color_range, gui_ms=gui_ms,
+               result_generation=generation)
+    except TypeError:
+        # A harness double from before the generation argument: the real pane always takes it.
+        setter(planes, strides, width, height, index=index, pts=pts, format=format,
+               color_space=color_space, color_range=color_range, gui_ms=gui_ms)
 
 
 class ProcessTab:
@@ -348,14 +392,13 @@ class ProcessTab:
         #: an unchanged one must not repaint the pane - and must not overwrite a status the pane itself set
         #: after it (Paused, Failed) with a stale "Rendering".
         self._status_generation = None
-        #: The playhead the standing compare (`sbs`/`split`) was last asked for: the 100 ms clock must not re-seek the
-        #: source decoder for a picture that is already on screen.
-        self._second_surface_pts = None
-        #: The compare's decoded source frames: `pts -> (index, QImage)`, kept AHEAD of the playhead (see
-        #: `COMPARE_LEAD_FRAMES`) so the pane never waits for a decode to draw the other half.
-        self._source_pool: dict[float, tuple[object, object]] = {}
-        #: The pts currently handed to the pane, so a repaint happens only when the PICTURE changes.
-        self._source_shown_pts: float | None = None
+        #: THE compare's source half: both producers OFFER their pictures here, named by the moment they belong to, and
+        #: `_sync_compare_source` is the only thing that hands one to the pane. The register is the pool: bounded, and a
+        #: lookup outside the tolerance answers None instead of a neighbour.
+        self._source_register = SourceRegister(COMPARE_POOL_FRAMES)
+        #: The generation of the pane's current result: a new render/file/seek starts the next one, and both pictures
+        #: must belong to it. The pane enforces the rule; the page is the one that knows when the world changed.
+        self._result_generation = 0
         #: A paused pane may still be shown ONE frame - the one a strip press asked for. While this is set the request
         #: byte stays 1 and the next published frame paints even though the transport is holding.
         self._display_seek_pending = False
@@ -988,7 +1031,6 @@ class ProcessTab:
         #: `split` need no second decode of the input. Allocated with the display block (same box, same lifetime), and an
         #: unattached one is simply absent - every reader then falls back to its own decoder.
         self._source_feed = None
-        self._source_feed_alive_at = None
         try:
             source_feed = DisplayReader(SOURCE_STATE_SHARED_MEMORY_ID, box=box)
             if source_feed.attached:
@@ -1064,7 +1106,10 @@ class ProcessTab:
         """Release the frame, seek, announced-box and compare blocks; safe twice, and safe when nothing was prepared."""
         source_feed = getattr(self, "_source_feed", None)
         self._source_feed = None
-        self._source_feed_alive_at = None
+        register = getattr(self, "_source_register", None)
+        if register is not None:
+            # The block's pictures belong to this render pass: once it closes they are not answers for anything.
+            register.drop_origin("block")
         if source_feed is not None:
             try:
                 source_feed.release()
@@ -1258,17 +1303,19 @@ class ProcessTab:
         if now - float(stats["at"]) < 1.0:
             return
         stats["at"] = now
-        pool = getattr(self, "_source_pool", None) or {}
+        register = getattr(self, "_source_register", None)
+        held = len(register) if register is not None else 0
         try:
             ph = round(float(self._compare_playhead()), 3)
         except Exception:
             ph = "-"
         newest = None
-        if pool:
-            newest = round(max(pool), 3)
-        telemetry.event("compare fill", asks=stats["asks"], arrivals=stats["arrivals"], pool=len(pool),
+        if register is not None:
+            newest = register.newest_moment(generation=int(getattr(self, "_result_generation", 0)))
+            newest = None if newest is None else round(float(newest), 3)
+        telemetry.event("compare fill", asks=stats["asks"], arrivals=stats["arrivals"], pool=held,
                         playhead=ph, newest=newest, target=stats.get("target"), span=stats.get("span"),
-                        pool_min=None if not pool else round(min(pool), 3))
+                        pool_min=None)
         stats["asks"] = 0
         stats["arrivals"] = 0
 
@@ -1300,50 +1347,36 @@ class ProcessTab:
             feed.poll()
 
     def _on_source_feed_frame(self, image) -> None:
-        """The renderer's own source picture for the composited frame it just published."""
+        """The renderer's own source picture for the composited frame it just published: OFFER, never write the pane.
+
+        The block names the picture with the RENDERER's media time (the input frame's own PTS), while the pane's clock
+        is the TAIL's content time (the output file's start subtracted). The source is moved onto the pane's clock here,
+        with the same origin the tail subtracts, so both producers name the same moments.
+
+        Whether this picture is the PANE's own moment is no longer decided here. The register answers it by identity:
+        a picture of the render head is held and answerable, but `picture_for(pane moment)` will not return it - and an
+        old block offer cannot make the decoder stand down either (`owner_of` is derived from what is held, not from a
+        timestamp).
+        """
         feed = getattr(self, "_source_feed", None)
         if feed is None or image is None:
             return
-        pane = self.page_handles.proc.previewLabel
         named = getattr(feed, "media_time", None)
-        if named is not None:
-            # The block names the picture with the RENDERER's media time (the input frame's own PTS), while the pane's
-            # clock is the TAIL's content time (the output file's start subtracted). The pair compares them, so the source
-            # is moved onto the pane's clock here - the same origin the tail subtracts, taken from the tail itself. Without
-            # this the halves sit the encoder's B-frame delay apart and every paint is a mismatch (measured 2026-11-26,
-            # with the block already supplying the picture: `asks=0`, `pair_off` equal to the paint count).
-            tail = getattr(self, "_live_tail", None)
-            origin = getattr(tail, "media_origin", None) if tail is not None else None
-            try:
-                if origin is not None:
-                    named = float(named) - float(origin)
-            except Exception:
-                pass
-        if named is not None:
-            # The block carries the source of the frame the RENDERER is compositing - the head. While the pane plays a
-            # WRITTEN part of the file the head is seconds away, and taking this picture would compare two different
-            # moments (measured 2026-11-26: `result=0.125 source=9.635`, 228 frames apart, because the pane was replaying
-            # from 0.125 while the render stood at 9.6). Only a picture of the pane's OWN moment is taken; otherwise the
-            # comparison decoder supplies the half, as it must for any rewind.
-            try:
-                here = float(self._compare_playhead())
-            except Exception:
-                here = None
-            if here is not None and abs(float(named) - here) > 0.25:
-                return
-        # ALIVE only when a picture is actually TAKEN. Marking it before the moment check froze the source half: a
-        # renderer publishing its head while the pane stood (or replayed) elsewhere made every picture be refused AND the
-        # comparison decoder stand down, so the half kept one frame and never followed a seek (owner, 2026-11-26: "снова
-        # левый экран застыл на одном кадре"; the log showed `asks=0 arrivals=0` with a paused "thumbnail" owner).
-        self._source_feed_alive_at = time.monotonic()
-        setter = getattr(pane, "set_original", None)
-        if callable(setter):
-            setter(image, media_time=named)
-
-    def _source_feed_is_live(self) -> bool:
-        """True while the renderer has handed the compare a picture in the last second."""
-        stamp = getattr(self, "_source_feed_alive_at", None)
-        return stamp is not None and (time.monotonic() - float(stamp)) < 1.0
+        if named is None:
+            return
+        tail = getattr(self, "_live_tail", None)
+        origin = getattr(tail, "media_origin", None) if tail is not None else None
+        try:
+            if origin is not None:
+                named = float(named) - float(origin)
+        except Exception:
+            pass
+        register = getattr(self, "_source_register", None)
+        if register is None:
+            return
+        register.offer(float(named), image, "block",
+                       generation=int(getattr(self, "_result_generation", 0)))
+        self._sync_compare_source()
 
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
@@ -1424,13 +1457,7 @@ class ProcessTab:
                 reader = getattr(self, "_display", None)
                 seq = getattr(reader, "seq", None)
                 media_time = getattr(reader, "media_time", None)
-            answer_of = getattr(self, "_picture_seek_answer", None)
-            answer = answer_of() if callable(answer_of) else None
-            # A seek answer is named by the reader's FITTED grid (a few milliseconds off the container); a streaming
-            # picture is named by the frame's own PTS. The compare needs to know which, because a fitted name needs the
-            # half-frame slack and an exact one must have none.
-            self._shown_name_is_fitted = answer is not None
-            pane.set_frame(image, seq=seq, media_time=media_time, generation=answer)
+            _pane_result(self, pane, media_time, image, seq=seq)
             if media_time is not None:
                 # The picture's own time IS the pane's position. Without this the feed's pane left the position at
                 # 0.0 and Play then started the file at its beginning instead of where the render stood (measured
@@ -1596,20 +1623,90 @@ class ProcessTab:
         return playhead
 
     def _tick_second_surface(self) -> None:
-        """Feed the standing original in `sbs`/`split` from the source decoder, on the pane's own 100 ms clock.
+        """The pane's compare clock: PRESENT what the register holds, then SUPPLY the lead.
 
-        The surface also asks by itself when its playhead moves (`set_progress` -> `originalRequested`); this tick is
-        what keeps the left picture at the result's playhead when the result is a render (whose display frames carry no
-        timestamp), and `_second_surface_pts` makes the two routes ask for one decode, not two. `single` is untouched:
-        there the source appears only while LMB is held.
+        Two steps, each answering one question. `_sync_compare_source` presents: the pane's own moment, the register's
+        bounded answer, `set_source` - no mode, picture or queue branch. `_supply_compare_source` decodes: warm the
+        decoder and ask for the lead only while nobody holds the moment it would ask for.
+
+        The old body selected the picture here with `_source_shown_pts`/`_second_surface_pts` and a pool keyed by "the
+        newest decoded frame"; both were flags asserting a conclusion about a picture, and neither survives.
         """
-        pane = getattr(self.page_handles.proc, "previewLabel", None)
+        self._sync_compare_source()
+        self._supply_compare_source()
+
+    def _next_result_generation(self) -> int:
+        """Start a new result generation: a render/file/seek changed, so the previous pictures are not answers.
+
+        Returning it lets every producer in this generation stamp its offers with the same number; the pane refuses
+        anything older than what it holds, and the register is emptied because a stale source is exactly as wrong as a
+        stale result.
+        """
+        self._result_generation = int(getattr(self, "_result_generation", 0)) + 1
+        register = getattr(self, "_source_register", None)
+        if register is not None:
+            register.clear()
+        return self._result_generation
+
+    def _sync_compare_source(self) -> None:
+        """Hand the pane the register's picture FOR THE MOMENT IT IS SHOWING, or nothing.
+
+        The only presentation path for the compare's source half. `shown_moment()` is the result's own moment (the
+        pane's state, not a tab clock), `picture_for` is a BOUNDED match, and `set_source` is the pane's only source API.
+        A moment with no picture is handed over as `None`: a gap is the honest answer, a neighbour's picture is not.
+        There is deliberately no mode/picture/queue branch here - each of those was a place where a flag could disagree
+        with what the pane actually held, which is the whole defect class this wave removes.
+        """
+        pane = getattr(getattr(getattr(self, "page_handles", None), "proc", None), "previewLabel", None)
+        if pane is None:
+            return
+        moment_of = getattr(pane, "shown_moment", None)
+        moment = None
+        if callable(moment_of):
+            try:
+                moment = moment_of()
+            except Exception:
+                moment = None
+        if moment is None:
+            # An unnamed result (a queue item, a compare opened before the first frame) still has a playhead; the
+            # register can answer for it, so the source half is not forced to wait for a result that does not exist.
+            try:
+                moment = float(self._compare_playhead())
+            except Exception:
+                moment = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        register = getattr(self, "_source_register", None)
+        snapshot = None
+        if register is not None:
+            snapshot = register.picture_for(moment, self._source_tolerance(),
+                                            generation=int(getattr(self, "_result_generation", 0)))
+        setter = getattr(pane, "set_source", None)
+        if callable(setter):
+            setter(snapshot)
+            return
+        # A pane from before the register API (an old harness double): one compatibility call, through the same moment
+        # check the pane's `set_source` applies.
+        legacy = getattr(pane, "set_original", None)
+        if callable(legacy):
+            if snapshot is None:
+                legacy(None)
+            else:
+                legacy(snapshot.picture, media_time=snapshot.moment)
+
+    def _source_tolerance(self) -> float:
+        """Half a frame: the largest distance at which two moments are still the same picture."""
+        return 0.5 / max(1.0, self._compare_fps())
+
+    def _supply_compare_source(self) -> None:
+        """Warm the compare decoder and ask for the lead while the register does not hold what it would ask for.
+
+        `single` keeps the LMB flash (one picture on demand, no standing fill); a queue item IS the source and has no
+        second surface. Those are SUPPLY decisions, not presentation ones - `_sync_compare_source` above needs none.
+        """
+        pane = getattr(getattr(getattr(self, "page_handles", None), "proc", None), "previewLabel", None)
         view_mode = getattr(pane, "view_mode", None)
         if view_mode is None:
             return
         if owner_of(self).kind is PreviewBackendKind.QUEUE_FILE:
-            # A queue item is the SOURCE, not a render: there is no second surface to compare it against.
-            self._second_surface_pts = None
             return
         try:
             mode = view_mode()
@@ -1620,25 +1717,14 @@ class ProcessTab:
             # `single` - a warm-up below this return never ran, which is how the decoder ended up opening on the switch
             # itself (~0.8 s of the owner's wait).
             self._warm_source_decoder()
-            self._second_surface_pts = None
             return
         self._warm_source_decoder()
-        # NO `has_frame()` GATE. It was the same latch as the pane's own ask: on an EMPTY pane (a render whose first
-        # frame has not landed, a queue item with nothing produced, a stopped tick) the tick refused to ask, and the pane
-        # asked once at the mode switch - before the decoder could answer - so the source half waited for a picture
-        # nobody had requested (owner, 2026-11-26: "очень долго ждем оригинал на side by side"). What the tick needs is a
-        # FILE to decode, not a picture on screen: without one there is nothing to ask for, and asking would only log a
-        # failed open every 100 ms.
         options = getattr(self, "currentRenderOptions", None)
         if not (getattr(options, "inputFile", "") or ""):
             return
         playhead = self._result_playhead()
         if playhead <= 0.0:
             return
-        # Show what the pool already has for this playhead - a PAUSED pane has no other clock, and a press must land
-        # while nothing else paints - then top the lead up. Both are cheap: the show is a lookup, the fill is at most
-        # one decode, and an ask the decoder never answers is retried here (`_source_pool_newest` still lacks the frame).
-        self._source_show(self._compare_playhead())
         self._source_fill(self._compare_supply_playhead())
 
     def renderToPipeThread(
@@ -1659,7 +1745,8 @@ class ProcessTab:
             # start from this job's first picture rather than from a stale second.
             self._preview_playhead = 0.0
             self._preview_duration = 0.0
-            self._second_surface_pts = None
+            # A new job is a new input file: the previous file's source pictures are not answers for this one.
+            self._next_result_generation()
             # A new job means a new input file: the next tick warms its own compare decoder.
             self._source_warm_tried = False
             self._display_seek_pending = False
@@ -1822,7 +1909,6 @@ class ProcessTab:
         # The job is over: no backend publishes any more, so the block and the seek request are released here (the
         # GUI thread) rather than left for a tick that may never come - and whoever followed the job's file stops
         # with it (see `_end_job_painters`). The pane's own clear below follows.
-        self._second_surface_pts = None
         self._display_seek_pending = False
         self._end_job_painters()
         # The pane KEEPS the last picture at the end of a job. It used to be cleared here unconditionally, which left
@@ -2526,6 +2612,8 @@ class ProcessTab:
 
         try:
             self._stop_preview_playback()
+            # A finished preview file is a new source: its frames are a new generation.
+            self._next_result_generation()
             # CONTENT time: this decoder reads the render's OWN output, whose container timeline starts at the
             # encoder's B-frame delay (0.083 s on the owner's clip) while its first frame is the source's first.
             # Without this the pane's times, its strip and the LMB compare are all two frames late.
@@ -2723,6 +2811,8 @@ class ProcessTab:
                 return
             self._queue_pane_decoder = decoder
             self._queue_pane_decoder_path = path
+            # A queue item is a different file: its frames are a new result generation.
+            self._next_result_generation()
         decoder = self._queue_pane_decoder
         try:
             decoder.pause()
@@ -2774,9 +2864,10 @@ class ProcessTab:
         raw = bytes(frame.buffer)
         image = QImage(raw, frame.width, frame.height, frame.stride, QImage.Format.Format_RGB888)
         pane = self.page_handles.proc.previewLabel
-        if hasattr(pane, "set_frame"):
-            pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
-                           index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
+        if hasattr(pane, "set_frame") or hasattr(pane, "set_result"):
+            _pane_result(self, pane, getattr(frame, "pts", None), image,
+                              index=getattr(frame, "index", None),
+                              gui_ms=(time.perf_counter() - path_started) * 1000.0)
         elif hasattr(pane, "setPixmap"):
             pane.setPixmap(self.getRoundedPixmap(QtGui.QPixmap.fromImage(image), corner_radius=10))
         pts = float(getattr(frame, "pts", 0.0) or 0.0)
@@ -3064,6 +3155,9 @@ class ProcessTab:
         asks for the ticket for the press it is routing and fills in the route facts only the page knows.
         """
         fraction = float(fraction)
+        # A SEEK starts a new result generation: the frame the pane held belongs to the previous position, and no
+        # late answer to the old request may paint over the new moment.
+        self._next_result_generation()
         self._seek_pressed_at = time.perf_counter()
         # The press names the FRAME it points at, not only the share: a turnaround in milliseconds says nothing about
         # whether the picture is the one asked for (owner, 2026-11-24: "write where the seek went and what is shown").
@@ -3387,13 +3481,12 @@ class ProcessTab:
                 except Exception:
                     comparing = False
             if comparing:
-                # The pane's clock moved (a compare mode): the pool is the one that decides WHAT to decode, so this goes
-                # through the fill instead of asking for this one timestamp. A direct ask overwrote the fill's span (the
-                # decoder keeps only the last request), which left the pool permanently a frame behind - measured
-                # 2026-11-26: the pane asked 14.139 / 14.181 / 14.223 while the pool's newest stayed at 0.292.
-                playhead_now = self._compare_playhead()
-                self._source_show(playhead_now)
-                self._source_fill(playhead_now)
+                # The pane's clock moved (a compare mode): the register is the one that decides WHAT to show, and the
+                # fill decides what still needs decoding. A direct ask here overwrote the fill's span (the decoder keeps
+                # only the last request), which left the source permanently a frame behind - measured 2026-11-26: the
+                # pane asked 14.139 / 14.181 / 14.223 while the lead's newest stayed at 0.292.
+                self._sync_compare_source()
+                self._source_fill(self._compare_playhead())
                 return
         if self._queue_owns_pane():
             # A queue item IS the source: there is no render to compare it against, and decoding the last render's
@@ -3424,21 +3517,22 @@ class ProcessTab:
             return
         decoder = self._source_decoder
         try:
-            # A step FORWARD from the frame already on screen is one decode (12.5 ms measured on this 1440p source, an
-            # 80 fps ceiling); a jump pays a keyframe rewind (median 176 ms, p95 321). The compare asks once per playhead
-            # step, and at the rewind price the pair ran at a quarter of real time with the halves arriving apart
-            # (owner, 2026-11-26: "прям видно как сначала один рисуется, а затем другой"). Forward motion is the one
-            # case that can be cheap, so only it skips the seek; a scrub backwards still rewinds.
-            landed = getattr(self, "_second_surface_pts", None)
+            # A step FORWARD from the latest picture the register holds is one decode (12.5 ms measured on this 1440p
+            # source, an 80 fps ceiling); a jump pays a keyframe rewind (median 176 ms, p95 321). The compare asks once
+            # per playhead step, and at the rewind price the pair ran at a quarter of real time with the halves arriving
+            # apart (owner, 2026-11-26: "прям видно как сначала один рисуется, а затем другой"). Forward motion is the
+            # one case that can be cheap, so only it skips the seek; a scrub backwards still rewinds.
+            register = getattr(self, "_source_register", None)
+            landed = (register.newest_moment(generation=int(getattr(self, "_result_generation", 0)))
+                      if register is not None else None)
             step_forward = (landed is not None
                             and 0.0 <= float(seconds) - float(landed) <= 0.6)
             # EXACT only for a press: its target is a frame's own name, and "the frame before it" is the desync the
-            # exactness rule was written for. The POOL's asks walk a live grid (the tail's content times are derived, not
-            # the source's stored PTS), and a target a fraction of a frame off the grid made the walk miss, run to the end
-            # of the source and disable the decoder for the rest of the session - measured 2026-11-26: `arrivals=57` for
-            # two seconds, then `arrivals=0 pool=0` while the asks kept coming. Half a frame of slack picks the same frame.
-            exact = (not bool(getattr(self, "_compare_from_tick", False))
-                     and not bool(getattr(self, "_shown_name_is_fitted", False)))
+            # exactness rule was written for. The register's asks walk a live grid (the tail's content times are derived,
+            # not the source's stored PTS), and a target a fraction of a frame off the grid made the walk miss, run to the
+            # end of the source and disable the decoder for the rest of the session - measured 2026-11-26: `arrivals=57`
+            # for two seconds, then `arrivals=0` while the asks kept coming. Half a frame of slack picks the same frame.
+            exact = not bool(getattr(self, "_compare_from_tick", False))
             decoder.request_frame(max(0.0, float(seconds)), exact=exact,
                                   seek=not step_forward,
                                   span=bool(span))
@@ -3458,154 +3552,6 @@ class ProcessTab:
     def _compare_lead(self) -> float:
         """How far ahead of the playhead the source half is kept, in seconds (`COMPARE_LEAD_FRAMES`)."""
         return COMPARE_LEAD_FRAMES / self._compare_fps()
-
-    def _source_pool_put(self, pts: float, index, image) -> None:
-        """Keep one decoded source frame, bounded: the oldest go first, so a long playback cannot grow the pane."""
-        pool = getattr(self, "_source_pool", None)
-        if pool is None:
-            pool = self._source_pool = {}
-        pool[float(pts)] = (index, image)
-        while len(pool) > COMPARE_POOL_FRAMES:
-            del pool[min(pool)]
-
-    def _source_pool_newest(self) -> float | None:
-        pool = getattr(self, "_source_pool", None) or {}
-        return max(pool) if pool else None
-
-    def _source_pool_for(self, playhead: float):
-        """The decoded frame that BELONGS to `playhead`: the newest one at or before it (half a frame of slack).
-
-        Not the newest decoded one: with a lead, the newest frame is ahead of the picture by construction, and showing
-        it would put the source half in the future - the same mismatch this pool exists to remove, mirrored.
-        """
-        pool = getattr(self, "_source_pool", None) or {}
-        if not pool:
-            return None
-        # NEAREST, not "the newest at or before": a live tail's names sit a fraction of a frame off the source's grid, so
-        # "at or before" alternated between the frame on either side of the playhead as that fraction drifted - which is
-        # exactly the "one frame ahead, one frame behind" the owner sees (2026-11-26). The nearest frame is the same
-        # choice for a given offset, so the pick cannot flip while the offset holds.
-        best = None
-        best_distance = None
-        for pts in pool:
-            distance = abs(float(pts) - float(playhead))
-            if best_distance is None or distance < best_distance or (distance == best_distance and pts < best):
-                best, best_distance = pts, distance
-        if best is None:
-            return None
-        # ...and being NEAREST is not answering: the prune keeps +-0.5 s (8-12 frames at 24 fps), so a pool whose whole
-        # content sits behind a seek still had a "nearest" frame, and the half then stayed up to a dozen frames off while
-        # every flag read fine (the seam audit of 9c2c837c, 2026-11-26: "не следит за сиком" without any freeze). Nothing
-        # beyond a frame and a half answers for this playhead; the fill then asks at it, which is the only way a gap closes.
-        if best_distance is not None and best_distance > (1.5 / max(1.0, self._compare_fps())):
-            return None
-        index, image = pool[best]
-        return best, index, image
-
-    def _source_prune(self, playhead: float) -> None:
-        """Drop only what a long playback could never show again; the COUNT cap in `_source_pool_put` is the real bound.
-
-        A playhead-based horizon looked right and emptied the pool: the decoder runs AHEAD, so a frame it has already
-        passed is never emitted again, and dropping it (measured 2026-11-26: `pool=0.292` alone while the playhead was
-        at 0.375, four paints in a row) leaves the pair one or two frames apart for ever. History is what a small
-        backwards step needs, and it is still bounded.
-        """
-        pool = getattr(self, "_source_pool", None) or {}
-        # Half the pool of history, not a fixed second: the pane can sit a second behind the newest result, and a tight
-        # window evicted the frame that was on screen (see `_compare_display_playhead`).
-        span = 0.5 * COMPARE_POOL_FRAMES / self._compare_fps()
-        # BOTH directions: a seek dose not only leave OLD frames behind, it leaves the whole pool in the FUTURE of the
-        # new playhead. Those frames made `_source_pool_newest` report a position eight seconds ahead, so the fill
-        # decided the lead was already full and never asked again - the source half froze on the old picture
-        # (measured 2026-11-26: `gap +8.049s (+193.2 frames)`, then `frames=0 up=0 mb=0.0` for as long as the pane ran).
-        for pts in [value for value in pool if value < playhead - span or value > playhead + span]:
-            del pool[pts]
-
-    def _block_supplies_the_pane(self, playhead: float) -> bool:
-        """True while the render block is publishing the SOURCE FOR THIS MOMENT - a fact about the pane, not a clock.
-
-        `_source_feed_is_live` is a one-second timestamp: on a stopped render it outlives the last picture, and the compare
-        decoder stands down for that whole second while the source half sits empty (owner's log, 2026-11-26: after a switch
-        six sbs paints across 1.24 s with `original_t=None` and `compare fill asks=0`, then the block's picture appeared).
-        A live block that does not hold the pane's moment is not supplying anything.
-        """
-        if not self._source_feed_is_live():
-            return False
-        pane = self.page_handles.proc.previewLabel
-        shown = getattr(pane, "original_shown_time", None)
-        if not callable(shown):
-            return True
-        try:
-            moment = shown()
-        except Exception:
-            return True
-        if moment is None:
-            return False
-        return abs(float(moment) - float(playhead)) <= (1.5 / max(1.0, self._compare_fps()))
-
-    def _source_show(self, playhead: float) -> None:
-        """Hand the pane the source frame that matches `playhead`, and only when it is a DIFFERENT frame.
-
-        One `set_original` per new source frame means one repaint per change instead of one per arrival of either half:
-        the two halves are then painted from frames that belong to the same moment.
-        """
-        pane = self.page_handles.proc.previewLabel
-        mode = getattr(pane, "view_mode", None)
-        if callable(mode):
-            try:
-                if mode() == "single":
-                    return       # the LMB flash has its own path and its own timing
-            except Exception:
-                return
-        if self._block_supplies_the_pane(playhead):
-            # The block holds the pane's moment: handing it the decoder's picture as well is the double work the channel
-            # exists to remove. A block that is merely RECENT but does not hold this moment supplies nothing (see the
-            # helper), so the decoder below is free to answer.
-            return
-        self._source_prune(playhead)
-        chosen = self._source_pool_for(playhead)
-        if chosen is None:
-            return
-        pts, index, image = chosen
-        stats = getattr(self, "_compare_fill_stats", None)
-        if stats is not None:
-            stats["arrivals"] += 1
-        if telemetry.level() >= 2:
-            # The pair's own number: how far the source half is from the result's playhead at the moment it is SHOWN.
-            # One line per changed source frame, level 2 only - the compare's "the halves disagree" claim needs it.
-            telemetry.event("pair", source=round(pts, 3), playhead=round(float(playhead), 3),
-                            delta_frames=round((pts - float(playhead)) * self._compare_fps(), 2),
-                            pool="/".join(f"{value:.3f}" for value in
-                                          sorted(getattr(self, "_source_pool", None) or {})))
-        shown_pts = getattr(self, "_source_shown_pts", None)
-        # THE MEMO IS A HINT; THE PANE IS THE STATE. `_source_shown_pts` used to be reset only by `_stop_source_decoder`,
-        # so a pane that lost its picture without the decoder closing (a mode change hands `set_original(None)` when
-        # nothing stood, a completion clears the half) left the memo saying "already shown" - and on a PAUSED pane the
-        # playhead never moves, so the handover was suppressed for as long as the pane stayed paused. That is the third
-        # appearance of one freeze: `83f8212e` (the pool in the FUTURE, so the fill read "lead full"), `95b3c7bc` (the
-        # render block marked alive before its picture was accepted, so the decoder stood down) and this one - each a
-        # flag asserting "already supplied" with no test against what the pane actually holds.
-        # ...and "already shown" has to mean THE MOMENT, not merely "something is there": the render block's side
-        # channel calls `set_original` directly, so a pane can hold a picture this tab never handed over - possibly of a
-        # different playhead. The pane names its own source time (`original_shown_time`), so ask it. While the block is
-        # live it is the legitimate supplier and the tab must not fight it.
-        pane_time = None
-        shown_time = getattr(pane, "original_shown_time", None)
-        if callable(shown_time):
-            try:
-                pane_time = shown_time()
-            except Exception:
-                pane_time = None
-        stale = (pane_time is not None
-                 and abs(float(pane_time) - float(pts)) > 1.5 / max(1.0, self._compare_fps()))
-        if getattr(pane, "_original", None) is None or (stale and not self._source_feed_is_live()):
-            shown_pts = self._source_shown_pts = None
-        if shown_pts is not None and abs(pts - shown_pts) < 1e-6:
-            return
-        self._source_shown_pts = pts
-        setter = getattr(pane, "set_original", None)
-        if callable(setter):
-            setter(image, media_time=pts, index=index)
 
     def _compare_playhead(self) -> float:
         """The time of the RESULT picture on screen - ONE clock for the pair.
@@ -3676,25 +3622,31 @@ class ProcessTab:
         """One entry point for "the result has just been painted; give it its other half in the same repaint".
 
         A minimal host (a harness that builds the tab without `__init__`) reaches the paint paths with nothing to pair,
-        which is why the call sites look it up instead of calling it.
+        which is why the call sites look it up instead of calling it. The presentation rule itself is the pane's: the
+        frame it now shows, the register's bounded answer, `set_source`. A caller that wants to force one moment can
+        still name it, but the moment is only ever used to READ the register - never to assert a picture exists.
         """
-        self._source_show(self._compare_playhead() if playhead is None else float(playhead))
+        self._sync_compare_source()
 
     def _source_fill(self, playhead: float) -> None:
-        """Top the pool up to `COMPARE_LEAD_FRAMES` ahead of the playhead, one frame per call.
+        """Top the register up to `COMPARE_LEAD_FRAMES` ahead of the playhead, one ask per call.
 
-        One frame per call, and the next call comes from the frame's ARRIVAL (`_on_original_frame`): the decoder then
-        runs flat out until the lead is full and stops, instead of being polled at a timer's rate - a 10 Hz poll cannot
-        feed a 24 fps stream, so the lead would drain exactly when it is needed.
+        The next call comes from the frame's ARRIVAL (`_on_original_frame`): the decoder then runs flat out until the
+        lead is full and stops, instead of being polled at a timer's rate - a 10 Hz poll cannot feed a 24 fps stream, so
+        the lead would drain exactly when it is needed. The register is the pool; there is no separate prune, no "newest
+        decoded" flag, and no clock deciding who owns a moment.
         """
-        if self._block_supplies_the_pane(float(playhead)):
-            # The renderer is publishing THIS moment's source: decoding the same file a second time is exactly the cost
-            # this block exists to remove.
-            return
         playhead = float(playhead)
+        register = getattr(self, "_source_register", None)
+        if register is None:
+            return
         interval = 1.0 / self._compare_fps()
-        self._source_prune(playhead)
-        newest = self._source_pool_newest()
+        generation = int(getattr(self, "_result_generation", 0))
+        if register.owner_of(playhead, generation=generation) == "block":
+            # The renderer is publishing THIS moment's source: decoding the same file a second time is exactly the cost
+            # this block exists to remove. An older block offer owns nothing, so it cannot suppress the decoder.
+            return
+        newest = register.newest_moment(generation=generation)
         # ONE ask in flight at a time: the arrival of each frame calls this again, and without the guard a burst would
         # start a second span for the same moment (the decoder keeps only the last request, so the work is wasted).
         pending = getattr(self, "_source_fill_pending", None)
@@ -3707,22 +3659,21 @@ class ProcessTab:
             else:
                 self._source_fill_pending = None      # a request nothing answered: ask again
         span = True
-        if self._source_pool_for(playhead) is None:
-            # Nothing in the pool answers for THIS playhead (an empty pool, a seek, a jump back): ask at it, and take the
-            # single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder stands.
+        if register.picture_for(playhead, 1.5 * interval, generation=generation) is None:
+            # Nothing in the register answers for THIS playhead (an empty register, a seek, a jump back): ask at it, and
+            # take the single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder
+            # stands.
             target = playhead
             span = False
         elif newest is None:
             target = playhead
             span = False
         elif playhead - newest > 2.0 * interval:
-            # The pool is BEHIND the playhead - a scrub, or a SPARSE tail (its lateness rule skips pictures, so two
+            # The register is BEHIND the playhead - a scrub, or a SPARSE tail (its lateness rule skips pictures, so two
             # consecutive ones can be six frames apart). One frame per call cannot close a gap the playhead reopens on
             # every picture: measured 2026-11-26, `pool=1` for ever and every pair a timeout. Ask for the far edge of the
-            # lead and take the whole walk - the burst IS the point.
-            # The burst is decoded FORWARD, not rewound: measured 2026-11-26, forcing a rewind on a gap over 0.3 s made
-            # every paint a timeout in ten consecutive seconds - the tail's sparse times are not on the source's frame
-            # grid, so the rewind's ceil landed a frame off while the forward walk lands on the frame itself.
+            # lead and take the whole walk - the burst IS the point. It is decoded FORWARD, not rewound: a rewind's ceil
+            # landed a frame off the tail's sparse grid while the forward walk lands on the frame itself.
             target = playhead + self._compare_lead()
             span = True
         elif newest < playhead + self._compare_lead():
@@ -3730,6 +3681,10 @@ class ProcessTab:
             # frame (a frame-by-frame ask is latency-bound at ~8 frames/s; the decode itself runs at 80).
             target = playhead + self._compare_lead()
         else:
+            return
+        if register.owner_of(target, generation=generation) is not None:
+            # Somebody already holds the very moment this ask would fetch. Asking again would decode the same picture a
+            # second time - and "somebody holds it" is the whole answer, whoever the owner is.
             return
         self._source_fill_pending = (float(target), time.monotonic())
         stats = getattr(self, "_compare_fill_stats", None)
@@ -3803,9 +3758,6 @@ class ProcessTab:
         watched = getattr(self, "_compare_watch", None)
         self._compare_watch = None
         pts = float(getattr(frame, "pts", 0.0) or 0.0)
-        # The ONE-decode-per-playhead marker: a LANDED frame, so a request the decoder never answered does not silence
-        # the retry (`_tick_second_surface` compares the playhead against this).
-        self._second_surface_pts = pts
         index = getattr(frame, "index", None)
         pane = self.page_handles.proc.previewLabel
         # The LAST step's other half: what the pane was showing when the press asked for this source frame. The labels
@@ -3830,12 +3782,24 @@ class ProcessTab:
                 f" -> gap {pts - float(result_time):+.3f}s ({(pts - float(result_time)) * fps:+.1f} frames)")
             log(f"compare: the source frame is {pts:.3f}s idx={index} for an ask of {watched:.3f}s "
                 f"(delta {pts - watched:+.3f}s, {abs(pts - watched) * fps:.1f} frames at {fps:.2f} fps{gap})")
-        # Into the pool, then: `single` shows it at once (the LMB flash is one picture, nothing to pair); a compare mode
-        # shows the frame that belongs to the RESULT's playhead - usually this one, because the pool runs AHEAD of it -
-        # and asks for the next frame so the lead stays full.
-        self._source_pool_put(pts, index, image)
+        # OFFER, never write the pane: the frame is one candidate for the moment it names, and `_sync_compare_source`
+        # decides which candidate the pane's own moment gets. A producer that wrote directly could bypass the pane's
+        # half-frame refusal; this one cannot.
+        register = getattr(self, "_source_register", None)
+        if register is not None:
+            register.offer(pts, image, "decoder",
+                           generation=int(getattr(self, "_result_generation", 0)))
         if telemetry.level() >= 2:
-            telemetry.event("compare put", pts=round(float(pts), 3), pool=len(getattr(self, "_source_pool", None) or {}))
+            telemetry.event("compare put", pts=round(float(pts), 3),
+                            pool=len(register) if register is not None else 0)
+        if not callable(getattr(pane, "set_source", None)):
+            # A pane from before the register API (an old harness double) still gets the picture here; the real pane
+            # only ever receives `set_source` from `_sync_compare_source`.
+            legacy = getattr(pane, "set_original", None)
+            if callable(legacy):
+                pane.set_original(image, media_time=pts, index=index)
+            return
+        self._sync_compare_source()
         mode = getattr(pane, "view_mode", None)
         single = True
         if callable(mode):
@@ -3843,13 +3807,7 @@ class ProcessTab:
                 single = mode() == "single"
             except Exception:
                 single = True
-        if single:
-            if hasattr(pane, "set_original"):
-                self._source_shown_pts = pts
-                pane.set_original(image, media_time=pts, index=index)
-        else:
-            playhead = self._compare_playhead()
-            self._source_show(playhead)
+        if not single:
             self._source_fill(self._compare_supply_playhead())
 
     def _log_source_crop_unknown(self, reason: str) -> None:
@@ -3860,10 +3818,11 @@ class ProcessTab:
         log(f"source crop: unknown ({reason}); the LMB compare shows the uncropped source")
 
     def _stop_source_decoder(self) -> None:
-        # The pool belongs to that decoder: keeping pictures from it after it is closed would show a frame of a file
+        # The register belongs to that decoder: keeping pictures from it after it is closed would show a frame of a file
         # that is no longer being compared.
-        self._source_pool.clear()
-        self._source_shown_pts = None
+        register = getattr(self, "_source_register", None)
+        if register is not None:
+            register.clear()
         self._source_fill_pending = None
         thread = getattr(self, "_source_thread", None)
         if thread is not None:
@@ -3885,6 +3844,8 @@ class ProcessTab:
             self._source_decoder = None
 
     def _on_preview_opened(self, duration: float, fps: float, frames_total: float) -> None:
+        # A new file opened: the pane's previous pictures (and the compare's register) belong to the previous one.
+        self._next_result_generation()
         self._preview_duration = float(duration) or 0.0
         # The compare's decoder is opened HERE, in the quiet moment after a file opens, so the first switch to
         # side-by-side costs one seek instead of an open plus a seek (owner, 2026-11-26: "в первый раз при переключении на
@@ -3950,12 +3911,12 @@ class ProcessTab:
                     f"(this one is {named:.3f}s = {named + float(origin):.3f}s in the file)")
         pane = self.page_handles.proc.previewLabel
         planes_frame = str(getattr(frame, "format", "") or "") in ("yuv420p10le", "yuv420p")
-        if hasattr(pane, "set_frame"):
+        if hasattr(pane, "set_frame") or hasattr(pane, "set_result"):
             if planes_frame and hasattr(pane, "set_frame_planes"):
                 # The playback path: the producer's YUV planes go to the GPU as they are, the shader converts.
                 # No QImage, no `to_ndarray`/`tobytes`, no RGBA conversion - the short path of direction 2.
-                pane.set_frame_planes(
-                    frame.planes, frame.strides, frame.width, frame.height,
+                _pane_result_planes(
+                    self, pane, frame.planes, frame.strides, frame.width, frame.height,
                     index=getattr(frame, "index", None), pts=getattr(frame, "pts", None),
                     format=str(frame.format),
                     color_space=getattr(frame, "color_space", None),
@@ -3964,8 +3925,9 @@ class ProcessTab:
             else:
                 image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
                                QImage.Format.Format_RGB888).copy()
-                pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
-                               index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
+                _pane_result(self, pane, getattr(frame, "pts", None), image,
+                                  index=getattr(frame, "index", None),
+                                  gui_ms=(time.perf_counter() - path_started) * 1000.0)
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
             if stats is not None:
                 stats["painted"] += 1

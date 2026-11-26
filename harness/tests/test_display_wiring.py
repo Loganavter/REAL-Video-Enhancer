@@ -65,6 +65,7 @@ from PySide6.QtGui import QColor, QImage  # noqa: E402
 
 from src.ui import shared_flag  # noqa: E402
 from src.ui.ProcessTab import COMPARE_LEAD_FRAMES, COMPARE_POOL_FRAMES, ProcessTab  # noqa: E402
+from src.ui.preview.source_register import SourcePicture, SourceRegister  # noqa: E402
 from src.ui.video.channel import (  # noqa: E402
     DEFAULT_DISPLAY_BOX,
     DISPLAY_FMT_RGB888,
@@ -347,16 +348,24 @@ def test_the_reader_follows_the_wanted_byte_it_is_given():
 # --- the page's side -------------------------------------------------------------------------------
 
 class _Pane:
-    """The pane's two-surface API, without a window."""
+    """The pane's two-surface API, without a window.
+
+    The source half speaks the shipped contract: `set_source(snapshot)` is the only writer, `shown_moment()` is the
+    result's own moment, and a `None` snapshot is a GAP. The old two-argument `set_original` is kept as the adapter the
+    real widget also keeps, so the flash path and the legacy tests exercise the same entry point.
+    """
 
     def __init__(self, visible: bool = True) -> None:
         self.visible = visible
         self.frames = []
         self.originals = []
+        self.sources = []
+        self.source_gaps = 0
         self.progress = []
         self.mode = "single"
-        #: The PANE's own picture, like the real widget's: `set_original(None)` clears it, and the tab now reads it to
-        #: decide whether its "already shown" memo still describes the pane (see `_source_show`).
+        #: The moment the RESULT picture names (`set_frame(..., media_time=...)`), or None before one does.
+        self._shown_time = None
+        #: The PANE's own source picture, like the real widget's: a gap clears it, and the tab reads its time.
         self._original = None
         self._original_time = None
 
@@ -366,7 +375,38 @@ class _Pane:
     def set_frame(self, image, *, gui_ms: float | None = None, index: int | None = None,
                   seq: int | None = None, media_time: float | None = None,
                   generation: int | None = None) -> None:
+        if image is None and media_time is not None:
+            return
         self.frames.append(image)
+        self._shown_time = None if media_time is None else float(media_time)
+
+    def set_result(self, result) -> None:
+        """The shipped result API: the page stamps each picture with its generation."""
+        if result is None:
+            return
+        if result.picture is None and result.moment is not None:
+            return
+        if result.picture is None:
+            self.frames.append(None)
+            self._shown_time = None
+            return
+        self.frames.append(result.picture)
+        self._shown_time = None if result.moment is None else float(result.moment)
+        self._result_generation = int(result.generation)
+
+    def shown_moment(self) -> float | None:
+        """The moment the result picture is showing - what the page's one synchroniser looks up."""
+        return self._shown_time
+
+    def set_source(self, snapshot) -> None:
+        if snapshot is None:
+            self.source_gaps += 1
+            self._original = None
+            self._original_time = None
+            return
+        self._original = snapshot.picture
+        self._original_time = float(snapshot.moment)
+        self.sources.append((float(snapshot.moment), snapshot.picture, snapshot.origin))
 
     def set_original(self, image, *, media_time: float | None = None, index: int | None = None) -> None:
         self._original = image
@@ -374,7 +414,7 @@ class _Pane:
         self.originals.append((image, media_time, index))
 
     def original_shown_time(self) -> float | None:
-        """The moment the pane's SOURCE half carries - the tab now checks it, not just "is there a picture"."""
+        """The moment the pane's SOURCE half carries, straight from what it was handed."""
         return self._original_time
 
     def set_progress(self, **values) -> None:
@@ -436,7 +476,9 @@ def _tab(*, pane=None, preview=False, paused=False, alive=True, reader=None) -> 
     tab.currentRenderOptions = None
     tab._live_tail = None
     tab._preview_decoder = None
-    tab._second_surface_pts = None
+    tab._source_register = SourceRegister(COMPARE_POOL_FRAMES)
+    tab._source_fill_pending = None
+    tab._result_generation = 0
     return tab
 
 
@@ -880,9 +922,9 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     tab._tick_second_surface()
     assert asked == [pytest.approx(5.0), pytest.approx(5.0)], "an unanswered ask must be retried"
 
-    # A burst of landed frames fills the pool; the tick then asks for the FAR EDGE of the lead in one call.
+    # A burst of landed frames fills the register; the tick then asks for the FAR EDGE of the lead in one call.
     for step in range(COMPARE_LEAD_FRAMES):
-        tab._source_pool_put(5.0 + step / 24.0, 50 + step, object())
+        tab._source_register.offer(5.0 + step / 24.0, object(), "decoder")
     tab._source_fill_pending = None
     tab._tick_second_surface()
     assert asked[-1] == pytest.approx(5.0 + COMPARE_LEAD_FRAMES / 24.0), (
@@ -890,7 +932,7 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
 
     # With the lead full nothing is asked: no decode is spent on a pane that is already served.
     for step in range(COMPARE_LEAD_FRAMES, COMPARE_LEAD_FRAMES + 2):
-        tab._source_pool_put(5.0 + step / 24.0, 50 + step, object())
+        tab._source_register.offer(5.0 + step / 24.0, object(), "decoder")
     tab._source_fill_pending = None
     tab._tick_second_surface()
     assert asked[-1] == pytest.approx(5.0 + COMPARE_LEAD_FRAMES / 24.0), "a full lead costs nothing"
@@ -969,82 +1011,109 @@ def test_the_compare_decoder_is_really_opened_and_then_asked(monkeypatch):
     assert asked[-1][3] is False, "a single answered frame is a seek, not a span"
 
 
-def test_a_pane_that_lost_its_picture_is_supplied_again_even_on_a_paused_playhead():
-    """The third appearance of one freeze: a memo saying "already shown" while the pane holds nothing.
+def test_the_register_answers_only_within_the_tolerance_never_the_nearest():
+    """A picture more than half a frame away is a picture of a DIFFERENT moment: answer None, never a neighbour."""
+    register = SourceRegister(COMPARE_POOL_FRAMES)
+    frame = 1.0 / 24.0
+    for moment in (5.083, 5.000, 5.042):                 # offered OUT OF ORDER on purpose
+        register.offer(moment, f"P{moment}", "decoder")
 
-    `_source_shown_pts` was reset only by `_stop_source_decoder`, so a mode change that handed the pane `set_original(None)`
-    (or a completion that cleared the half) left the memo suppressing the handover - and a PAUSED pane never moves its
-    playhead, so the source half stayed empty for as long as the pane stood still. Owner's report, three times over:
-    "снова левый экран застыл на одном кадре". The pool has the picture; the pane is the state; the memo is a hint.
-    """
+    assert register.picture_for(5.042, 0.5 * frame).picture == "P5.042"
+    assert register.picture_for(5.050, frame).picture == "P5.042", "within half a frame is still one picture"
+    assert register.picture_for(5.300, 1.5 * frame) is None, "a neighbour a dozen frames away is not an answer"
+    assert register.picture_for(9.000, 1.5 * frame) is None, "outside the tolerance: nothing, not the nearest"
+
+    # A hole stays a hole until the picture actually arrives; then the SAME lookup answers.
+    assert register.picture_for(5.125, 0.5 * frame) is None
+    register.offer(5.125, "P5.125", "decoder")
+    assert register.picture_for(5.125, 0.5 * frame).picture == "P5.125"
+
+
+def test_two_producers_hold_one_picture_and_the_owner_is_what_is_held():
+    """Same moment, two offers: one entry, and `owner_of` names the producer that last answered - not a timestamp."""
+    register = SourceRegister()
+    register.offer(5.0, "block-pic", "block")
+    assert register.owner_of(5.0) == "block"
+    assert register.picture_for(5.0, 0.02).picture == "block-pic"
+
+    register.offer(5.0, "decoder-pic", "decoder")
+    assert len(register) == 1, "the same moment is one picture, whichever producer answered last"
+    assert register.owner_of(5.0) == "decoder"
+    assert register.picture_for(5.0, 0.02).picture == "decoder-pic"
+
+    # A stale BLOCK offer (an older moment) owns nothing at the pane's moment, so it cannot suppress the decoder.
+    register.offer(4.9, "stale-block", "block")
+    assert register.owner_of(5.0) == "decoder", "the decoder still owns the moment it answered"
+    register.drop_origin("decoder")
+    assert register.owner_of(5.0) is None, "a stale block offer is not an owner"
+
+
+def test_no_clock_decides_the_owner():
+    """A block offer five seconds old holds its OWN moment and nothing else: age is not an ownership fact."""
+    register = SourceRegister()
+    register.offer(1.0, "old-block-pic", "block")
+    assert register.owner_of(1.0) == "block"
+    assert register.owner_of(6.0) is None, "a timestamp would call this 'recent enough'; the register does not"
+    assert register.picture_for(6.0, 1.5 / 24.0) is None
+
+
+def test_the_register_is_bounded_and_drops_the_oldest_moments():
+    register = SourceRegister(COMPARE_POOL_FRAMES)
+    for step in range(COMPARE_POOL_FRAMES + 5):
+        register.offer(step / 24.0, f"F{step}", "decoder")
+    assert len(register) == COMPARE_POOL_FRAMES
+    assert register.owner_of(0.0) is None, "the OLDEST go first"
+    assert register.newest_moment() == pytest.approx((COMPARE_POOL_FRAMES + 4) / 24.0)
+
+
+def test_the_page_syncs_the_pane_to_its_own_moment_with_no_flag_between():
+    """The one presentation path: pane's moment -> register -> `set_source`, exact picture or a gap."""
     pane = _Pane()
-    pane.mode = "sbs"
-    tab = _tab(pane=pane, preview=False, paused=True, alive=False, reader=_Reader())
-    tab._source_pool_put(0.25, 6, "picture")
-    tab._source_shown_pts = 0.25                       # the memo believes the pane already has this moment
-    assert getattr(pane, "_original", None) is None, "the stub starts with no picture, like a pane after a mode change"
+    pane.mode = "split"
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
+    for moment in (5.083, 5.000, 5.042):
+        tab._source_register.offer(moment, f"P{moment}", "decoder")
 
-    tab._source_show(0.25)
+    for moment in (5.000, 5.042, 5.083):
+        pane.set_frame(object(), media_time=moment)
+        tab._sync_compare_source()
+        assert pane._original == f"P{moment}", "payload(moment) IS picture(moment), never a neighbour"
 
-    assert pane.originals and pane.originals[-1][1] == pytest.approx(0.25), (
-        "a pane with no picture must be handed the one the pool holds, memo or not")
+    # A moment the register has no picture for is a GAP, not the previous picture.
+    gaps = pane.source_gaps
+    pane.set_frame(object(), media_time=6.0)
+    tab._sync_compare_source()
+    assert pane.source_gaps == gaps + 1
+    assert pane._original is None
 
-    # And with the picture in place the memo still saves a repaint: no second handover of the SAME moment.
-    before = len(pane.originals)
-    tab._source_show(0.25)
-    assert len(pane.originals) == before, "the same moment is not handed over twice while the pane already shows it"
+    # A late arrival for a moment that was a hole answers it - the register has no "already shown" memo.
+    tab._source_register.offer(6.0, "P6.0", "decoder")
+    tab._sync_compare_source()
+    assert pane._original == "P6.0"
 
 
-def test_a_source_picture_of_a_DIFFERENT_moment_is_replaced_unless_the_block_is_supplying():
-    """The pane can be moved by the render block's side channel, so "holds a picture" is not "holds THIS moment".
-
-    The first memo fix only tested `is None`, and the audit found the hole: a pane holding a picture of another playhead
-    satisfied it and the decoder never corrected it. The pane names its own source time, so the check asks for the
-    moment - and stands down while the block is live, because then the block is the legitimate supplier.
-    """
+def test_the_fill_asks_the_decoder_only_when_nobody_holds_the_moment():
     pane = _Pane()
-    pane.mode = "sbs"
-    pane.set_original("block picture", media_time=9.5)          # something else put a picture here
-    tab = _tab(pane=pane, preview=False, paused=True, alive=False, reader=_Reader())
-    tab._source_pool_put(0.25, 6, "pool picture")
-    tab._source_shown_pts = 0.25                                # and the memo believes it already shipped this moment
-
-    tab._source_feed_alive_at = None                            # the block is NOT supplying
-    tab._source_show(0.25)
-
-    assert pane.originals[-1][1] == pytest.approx(0.25), "a stale source picture is replaced by the pool's moment"
-    assert pane.originals[-1][0] == "pool picture"
-
-    # While the block holds THE PANE'S MOMENT it owns the half: the tab must not overwrite it. A live block that holds a
-    # different moment (the case above, 9.5 vs 0.25) supplies nothing - a one-second timestamp is not a fact about the
-    # pane, and trusting it is what left the source half empty for 1.24 s in the owner's log.
-    pane.set_original("block picture", media_time=0.25)
-    tab._source_shown_pts = None
-    tab._source_feed_alive_at = time.monotonic()
-    tab._source_show(0.25)
-    assert pane.originals[-1][0] == "block picture", "the block holds this moment: the decoder stands down"
-
-
-def test_a_pool_frame_far_off_the_playhead_does_not_answer_for_it():
-    """Nearest is not answering: the prune keeps +-0.5 s, so a pool left behind a seek still had a "nearest" frame.
-
-    The half then sat up to a dozen frames off while every flag read fine - the owner's "не следит за сиком" without a
-    freeze (seam audit of `9c2c837c`). Nothing beyond a frame and a half answers; the fill asks at the playhead instead,
-    which is the only way the gap closes.
-    """
-    pane = _Pane()
-    pane.mode = "sbs"
-    tab = _tab(pane=pane, preview=False, paused=True, alive=False, reader=_Reader())
+    pane.mode = "split"
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
     tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=24, inputFile="/tmp/clip.mkv")
+    asked = []
+    tab._on_original_requested = lambda seconds, **_: asked.append(float(seconds))
 
-    tab._source_pool_put(0.10, 3, "twelve frames behind")
+    tab._source_register.offer(5.0, "block-pic", "block")
+    tab._source_fill(5.0)
+    assert asked == [], "the block holds THIS moment: decoding it again is the cost the block removes"
 
-    assert tab._source_pool_for(0.50) is None, "12 frames away is not this playhead's partner"
+    # The same register entry does not answer for another moment - and its age is irrelevant.
+    tab._source_fill(6.0)
+    assert asked == [pytest.approx(6.0)], "the block's old picture is not an owner at 6.0"
 
-    tab._source_pool_put(0.48, 12, "within a frame and a half")
-
-    chosen = tab._source_pool_for(0.50)
-    assert chosen is not None and chosen[0] == pytest.approx(0.48), "half a frame off still answers"
+    # A decoder offer owns it too: the fill does not ask twice for the moment it already holds - only for the lead.
+    tab._source_fill_pending = None
+    tab._source_register.offer(6.0, "decoder-pic", "decoder")
+    tab._source_fill(6.0)
+    assert asked == [pytest.approx(6.0), pytest.approx(6.0 + COMPARE_LEAD_FRAMES / 24.0)], (
+        "the held moment is never re-asked; the lead AHEAD of it still is")
 
 
 def test_the_default_box_is_the_probe_constant():
@@ -1392,96 +1461,36 @@ def test_a_press_inside_the_band_but_past_the_tails_flushed_edge_goes_on_demand(
     assert reader.seeks == [pytest.approx(5.0)], "the tail cannot answer 5 s; the renderer can"
 
 
-def test_the_source_half_shows_the_frame_that_belongs_to_the_playhead_not_the_newest():
-    """With a lead the newest decoded frame is in the FUTURE: showing it would put the source ahead of the result.
-
-    Owner, 2026-11-26: "нам в теории наоборот с запасом надо сделать сразу". The pool runs ahead, so the pane must pick
-    the frame for the playhead - and only once per frame, or every tick would repaint the same picture twice.
-    """
-    pane = _Pane()
-    pane.mode = "split"
-    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
-    tab._source_pool_put(5.000, 120, "A")
-    tab._source_pool_put(5.042, 121, "B")
-    tab._source_pool_put(5.083, 122, "C")
-
-    tab._source_show(5.042)
-    assert [entry[0] for entry in pane.originals] == ["B"], (
-        "the newest frame is ahead of the playhead; the pane gets the one AT it")
-    tab._source_show(5.042)
-    assert len(pane.originals) == 1, "the same frame is one set_original, not one per tick"
-    tab._source_show(5.050)
-    assert len(pane.originals) == 1, "half a frame of slack: still the same picture"
-    tab._source_show(5.083)
-    assert [entry[0] for entry in pane.originals] == ["B", "C"]
-
-
-def test_the_source_pool_keeps_the_history_the_decoder_has_already_passed():
-    """A playhead-based horizon emptied the pool: the decoder runs AHEAD, so a frame it passed is never re-emitted.
-
-    Measured 2026-11-26: `pool=0.292` alone while the playhead was at 0.375, four paints in a row, and the pair stayed a
-    frame apart. History is cheap (bounded by `COMPARE_POOL_FRAMES`) and it is what a small backwards step needs.
-    """
-    pane = _Pane()
-    pane.mode = "split"
-    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
-    for step in range(5):
-        tab._source_pool_put(0.125 + step / 24.0, 100 + step, f"F{step}")
-
-    tab._source_prune(0.334)        # the playhead is one frame past the newest entry
-
-    assert len(tab._source_pool) == 5, "nothing the decoder has passed may be dropped"
-    assert 0.125 in tab._source_pool
-
-    # The other direction is not history: a frame a second in the FUTURE belongs to a playhead that has been left.
-    tab._source_pool_put(7.5, 999, "far")
-    tab._source_prune(0.334)
-    assert 7.5 not in tab._source_pool, "a stale future would make the lead look full for ever"
-
-
-def test_a_backward_seek_re_asks_the_source_instead_of_freezing_on_the_old_frame():
+def test_a_backward_seek_shows_a_gap_instead_of_the_frame_it_left():
     """Owner, 2026-11-26: "в original застрял на одном кадре и не следит за сиком".
 
-    The log said it exactly: `the source frame is 14.264s ... result 6.215s -> gap +8.049s (+193.2 frames)`, and after
-    that `frames=0 up=0 mb=0.0` for as long as the pane ran. A jump BACK leaves the whole pool in the FUTURE of the new
-    playhead, so the fill read the newest entry as "the lead is already full" and never asked again.
+    The old pool stayed in the FUTURE of the new playhead and the fill read its newest entry as "the lead is full"; the
+    pane then held the old picture. Here the register is a set of moments: a playhead it does not hold is a gap, and the
+    fill asks at that playhead because `owner_of` is None there.
     """
     pane = _Pane()
     pane.mode = "split"
-    pane.frames.append(QImage(2, 2, QImage.Format.Format_RGB888))
     tab = _tab(pane=pane, preview=False, paused=False, alive=True)
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")
-    tab.max_value = 100
-    tab.currentFrame = 50
-    asked = []
-    tab._on_original_requested = lambda seconds, **_: asked.append(float(seconds))
-    tab._compare_playhead = lambda: 6.215
     for step in range(5):
-        tab._source_pool_put(14.0 + step / 24.0, 300 + step, object())
+        tab._source_register.offer(14.0 + step / 24.0, f"future-{step}", "decoder")
+    pane.set_frame(object(), media_time=6.215)
 
-    tab._tick_second_surface()
+    tab._sync_compare_source()
 
-    assert asked == [pytest.approx(6.215)], "the pool is in the future: ask at the playhead"
-    assert 14.0 not in tab._source_pool, "the stale future is dropped, or the lead can never refill"
-    assert pane.originals == [], "nothing is shown for a moment that is not in the pool"
+    assert pane._original is None, "a moment the register does not hold is a GAP, not the picture it left"
+    assert tab._source_register.owner_of(6.215) is None, "the stale future owns nothing at the new playhead"
 
-
-def test_the_source_pool_is_bounded_even_when_nothing_prunes_it():
-    pane = _Pane()
-    pane.mode = "split"
-    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
-    for step in range(COMPARE_POOL_FRAMES + 5):
-        tab._source_pool_put(step / 24.0, step, f"F{step}")
-    assert len(tab._source_pool) == COMPARE_POOL_FRAMES
-    assert min(tab._source_pool) == pytest.approx(5 / 24.0), "the OLDEST go first"
+    tab._source_register.offer(6.215, "seek-picture", "decoder")
+    tab._sync_compare_source()
+    assert pane._original == "seek-picture"
 
 
-def test_the_renderers_compare_block_is_taken_only_for_the_panes_own_moment():
+def test_the_renderers_block_picture_is_held_but_only_the_panes_moment_is_shown():
     """The block carries the HEAD's source; a rewind must keep the decoder's picture.
 
     Measured 2026-11-26: taking it unconditionally compared `result=0.125` with `source=9.635` (228 frames), because the
-    pane was replaying the written file while the render stood at its head. A picture of the pane's own moment is taken;
-    anything else falls back to the comparison decoder, which is what any rewind needs.
+    pane was replaying the written file while the render stood at its head. The block's picture is an OFFER: it is held
+    for its own moment, and only `picture_for(pane moment)` decides whether the pane ever sees it.
     """
     from src.ui.ProcessTab import ProcessTab
 
@@ -1493,16 +1502,35 @@ def test_the_renderers_compare_block_is_taken_only_for_the_panes_own_moment():
     pane.mode = "split"
     tab = _tab(pane=pane, preview=False, paused=False, alive=True)
     tab._source_feed = _Feed()
-    tab._compare_playhead = lambda: 0.125
+    pane.set_frame(object(), media_time=0.125)
     image = QImage(4, 4, QImage.Format.Format_RGB888)
 
     ProcessTab._on_source_feed_frame(tab, image)
-    assert pane.originals == [], "the head's picture is a different moment: it must be refused"
-    assert ProcessTab._source_feed_is_live(tab) is False, (
-        "a refused picture must NOT count as the block supplying the half, or the comparison decoder stands down and "
-        "the source half freezes on one frame (measured 2026-11-26: the owner's 'левый экран застыл')")
 
-    tab._compare_playhead = lambda: 9.65
-    ProcessTab._on_source_feed_frame(tab, image)
-    assert [entry[1] for entry in pane.originals] == [pytest.approx(9.635)], (
-        "the pane's own moment is taken, with the block's own media time")
+    assert tab._source_register.owner_of(9.635) == "block", "the headline picture is held for ITS moment"
+    assert pane._original is None, "the head's picture is a different moment: the pane gets a gap"
+    assert pane.source_gaps >= 1
+
+    pane.set_frame(object(), media_time=9.65)
+    tab._sync_compare_source()
+    assert pane._original is image, "the pane's own moment is answered by the block's picture"
+    assert pane._original_time == pytest.approx(9.635), "the picture keeps the block's own media time"
+
+
+def test_a_new_generation_clears_the_register_and_stamps_results():
+    """A render/file/seek bump is the page's one fact; every producer's picture carries that number to the pane."""
+    from src.ui.ProcessTab import _pane_result
+
+    pane = _Pane()
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
+    tab._source_register.offer(1.0, "old-generation", "decoder")
+    assert len(tab._source_register) == 1
+
+    generation = tab._next_result_generation()
+
+    assert generation == 1, "the next render/file/seek is the next generation"
+    assert len(tab._source_register) == 0, "the previous generation's source pictures are not answers any more"
+
+    _pane_result(tab, pane, 2.0, "picture")
+    assert pane._result_generation == generation, "the result reaches the pane stamped with the SAME generation"
+    assert pane._shown_time == pytest.approx(2.0)
