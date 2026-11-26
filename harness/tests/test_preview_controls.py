@@ -348,7 +348,11 @@ def test_every_command_is_covered():
                | {spec.release_command for spec in ACTIONS if spec.release_command is not None}
                | {PreviewCommand.SEEK_TO, PreviewCommand.SEEK_FRACTION,
                   PreviewCommand.COMPARE_DOWN, PreviewCommand.COMPARE_UP})
-    assert covered == set(PreviewCommand)
+    # `TOGGLE_FULLSCREEN` is WINDOW-owned now: the preview bar carries no control for it (owner, 2026-11-26: "саму кнопку
+    # фуллскрина лучше потом убрать ибо она делает глупую работу по управлению окном"), and the window's own entry point
+    # (`--fullscreen`, the WM) is outside this catalog. Named here so the gap stays a decision, not an oversight.
+    window_owned = {PreviewCommand.TOGGLE_FULLSCREEN}
+    assert covered | window_owned == set(PreviewCommand)
 
 
 def test_the_bars_are_split_by_function():
@@ -356,7 +360,7 @@ def test_the_bars_are_split_by_function():
     bottom = {spec.id for spec in actions_for("bottom")}
     assert "play" in bottom and "step_back" in bottom and "step_forward" in bottom
     assert "play" not in top and "compare" not in top
-    assert {"mode_single", "mode_sbs", "mode_split", "zoom_fit", "fullscreen"} <= top
+    assert {"mode_single", "mode_sbs", "mode_split", "zoom_fit"} <= top
 
 
 def test_enabled_predicates_read_the_state():
@@ -473,12 +477,25 @@ def test_resizing_the_pane_repositions_the_bars(controls, pane):
 
 
 def test_a_narrow_pane_collapses_the_zoom_row_into_the_overflow(controls, pane):
-    # 300, not 330: removing the produced pill (2026-11-26) freed ~150 design px, so the same row now fits at 330.
-    pane.resize(300, 400)
-    _app().processEvents()
-    assert "zoom_in" in controls.hidden_tools()
-    assert controls.overflow_button.isVisible()
-    assert controls._group_panels["zoom"].isHidden(), "a group leaves as one capsule, not half a row"
+    """The zoom row leaves as ONE capsule when the width cannot hold it; the modes leave last.
+
+    The width is MEASURED, not pinned: this threshold has moved twice (the produced pill removed ~150 design px, then the
+    fullscreen button left the bar), so a magic number in the test would be a third place to update. What must hold is the
+    ORDER and the unit: zoom collapses before the modes, and a group goes as a whole capsule, never half a row.
+    """
+    collapsed_at = None
+    for width in range(400, 120, -10):
+        pane.resize(width, 400)
+        _app().processEvents()
+        if controls._group_panels["zoom"].isHidden():
+            collapsed_at = width
+            break
+        assert controls._group_panels["view_mode"].isVisible(), "the modes must survive every width the zoom survives"
+    assert collapsed_at is not None, "the zoom row never collapses: the overflow is dead"
+    assert controls.overflow_button.isVisible(), "a collapsed control needs its affordance"
+    assert "zoom_in" in controls.hidden_tools() and "zoom_fit" in controls.hidden_tools(), (
+        "the whole capsule moves, not a button at a time")
+    assert controls._group_panels["view_mode"].isVisible(), "the modes leave LAST"
 
 
 def test_each_group_has_its_own_capsule(controls):
@@ -519,6 +536,29 @@ def test_the_produced_pill_is_gone_from_the_overlay(controls):
     # `set_state` has no produced write left: the same screen with a produced number adds no text either.
     controls.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=12.4, playhead=4.0))
     assert all("produced" not in widget.text() for widget in top.findChildren(ToolkitText))
+
+
+def test_the_ring_is_suppressed_while_the_pane_has_nothing_to_show(controls):
+    """Owner, 2026-11-26: "убирать обводку на выбранной кнопки когда и показывать в превью ещё нечего".
+
+    A checked ring on a mode that cannot act (no picture, so no mode) is a promise. The gate is ONE property on the
+    button, written by `set_state` from `state.has_picture()` and read by the layer at paint time.
+    """
+    from src.ui.preview.controls import CheckedOutlineLayer
+    from types import SimpleNamespace
+
+    mode = controls.button("mode_single")
+    ring = next(layer for layer in mode._painter.layers if isinstance(layer, CheckedOutlineLayer))
+
+    assert controls.set_state(PreviewState()) is None
+    assert mode.property("outlineAllowed") is False
+    assert ring.applies(SimpleNamespace(states=frozenset(mode.region_states("_main")), widget=mode)) is False, (
+        "an empty pane must not claim a mode")
+
+    controls.set_state(PreviewState(phase=PreviewPhase.READY, mode="single", duration=10.0, produced=5.0, playhead=1.0,
+                                    source_frames=100, output_frames=100))
+    assert mode.property("outlineAllowed") is True
+    assert ring.applies(SimpleNamespace(states=frozenset(mode.region_states("_main")), widget=mode)) is True
 
 
 def test_the_checked_mode_wears_the_accent_ring_and_the_ring_follows_the_check(controls):
@@ -591,12 +631,14 @@ def test_the_zoom_group_keeps_its_controls_order_and_geometry(controls):
     assert all(button.parent() is plate for button in buttons)
     assert [button.height() for button in buttons] == [scaled_px(30)] * 4
     assert buttons[0].width() == scaled_px(28) and buttons[-1].width() == scaled_px(28)
-    assert controls.button("fullscreen").parentWidget() is controls.top_bar, "fullscreen stays a standalone button"
+    # The fullscreen BUTTON is gone (owner, 2026-11-26: "саму кнопку фуллскрина лучше потом убрать ибо она делает
+    # глупую работу по управлению окном"): the window owns that, and the bar keeps only pane controls.
+    assert "fullscreen" not in controls._buttons
 
     row = controls.top_bar._row
     in_row = [row.itemAt(index).widget() for index in range(row.count()) if row.itemAt(index).widget() is not None]
     assert in_row.index(controls._group_panels["view_mode"]) < in_row.index(plate)
-    assert in_row.index(plate) < in_row.index(controls.button("fullscreen")) < in_row.index(controls.overflow_button)
+    assert in_row.index(plate) < in_row.index(controls.overflow_button)
     bottom = [controls.bottom_bar._row.itemAt(index).widget() for index in range(controls.bottom_bar._row.count())]
     assert bottom[:3] == [controls.button("step_back"), controls.button("play"), controls.button("step_forward")]
 

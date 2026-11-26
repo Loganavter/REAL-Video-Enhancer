@@ -63,6 +63,12 @@ class CheckedOutlineLayer(Layer):
     scope = "widget"
 
     def applies(self, ctx) -> bool:
+        # A checked ring on a control that has nothing to act on is a promise: an empty pane has no mode, no zoom, so the
+        # ring is suppressed while `outlineAllowed` is false (owner, 2026-11-26: "убирать обводку на выбранной кнопки когда
+        # и показывать в превью ещё нечего").
+        widget = getattr(ctx, "widget", None)
+        if widget is not None and widget.property("outlineAllowed") is False:
+            return False
         return ButtonState.CHECKED in ctx.states
 
     def draw(self, ctx, tm) -> None:
@@ -99,6 +105,8 @@ class PreviewControls(QWidget):
         self._specs: dict[str, ActionSpec] = {spec.id: spec for spec in ACTIONS}
         self._hidden_top: list[ActionSpec] = []
         self._groups: dict[str, ButtonFamily] = {}
+        #: The buttons that wear the checked ring; `set_state` gates it on `state.has_picture()`.
+        self._outline_buttons: list[Button] = []
         #: The visual capsules: one SurfacePanel per group, with the specs it holds (hidden together when it empties).
         self._group_panels: dict[str, SurfacePanel] = {}
         self._group_specs: dict[str, tuple[str, ...]] = {}
@@ -146,6 +154,9 @@ class PreviewControls(QWidget):
         extra_layers = [CheckedOutlineLayer()] if outline_when_checked else None
         button = build_button(spec, parent=parent, corner_radii=corner_radii, extra_layers=extra_layers)
         if outline_when_checked:
+            # The ring follows the STATE, through one property the painter reads: `set_state` is its only writer.
+            button.setProperty("outlineAllowed", False)
+            self._outline_buttons.append(button)
             # The ring's weight is the toolkit's own `borderWidth` property (read by `outline_width`); 2 design px is
             # visible over the picture without turning the control into a plate.
             button.setProperty("borderWidth", float(scaled_px(2)))
@@ -181,7 +192,14 @@ class PreviewControls(QWidget):
         minus the inset, so those arcs are concentric with the plate and the gutter reads even; the inner side stays
         flat, which makes the row read as one capsule.
         """
-        panel = SurfacePanel(self.top_bar, background_token="flyout.background", radius=scaled_px(GROUP_RADIUS))
+        # The plate wears the STANDALONE surface button's own fill and stroke (the fullscreen button's variant), not the
+        # flyout colour: the modes and the zoom row are the same kind of control as the button beside them, and the owner
+        # read the difference as two visual languages in one bar (2026-11-26: "2 группы контролов сверху нужно перекрасить
+        # подложку в стиль кнопки fullscreen"). The tokens are the toolkit's, so a theme change moves both together.
+        panel = SurfacePanel(self.top_bar,
+                             background_token="button.dialog.default.background",
+                             border_token="button.dialog.default.border",
+                             radius=scaled_px(GROUP_RADIUS))
         row = QHBoxLayout(panel)
         inset = scaled_px(GROUP_INSET)
         row.setContentsMargins(inset, inset, inset, inset)
@@ -215,7 +233,6 @@ class PreviewControls(QWidget):
         layout.addStretch(1)
         self._add_group(layout, "view_mode", ("mode_single", "mode_sbs", "mode_split"), outline_checked=True)
         self._add_group(layout, "zoom", ("zoom_out", "zoom_fit", "zoom_one", "zoom_in"))
-        self._add_button(layout, self._specs["fullscreen"])
 
         # The overflow affordance for a narrow pane: the lowest-priority tools collapse here instead of shrinking.
         self.overflow_button = Button(text="\u2026", variant="surface", size=(scaled_px(30), scaled_px(30)),
@@ -343,6 +360,10 @@ class PreviewControls(QWidget):
     def set_state(self, state: PreviewState) -> None:
         """Apply the state to every widget in ONE pass; signals blocked while `checked` is written."""
         self._state = state
+        # The ring is a claim about the CURRENT mode; with nothing on the pane there is no mode to claim. One property
+        # write per pass, read by `CheckedOutlineLayer.applies` (the painter's own gate).
+        for outlined in self._outline_buttons:
+            outlined.setProperty("outlineAllowed", bool(state.has_picture()))
         for spec in ACTIONS:
             button = self._buttons.get(spec.id)
             if button is None:

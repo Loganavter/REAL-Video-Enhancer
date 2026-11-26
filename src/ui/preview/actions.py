@@ -113,11 +113,6 @@ ACTIONS: tuple[ActionSpec, ...] = (
         enabled_when=_picture,
     ),
     ActionSpec(
-        id="fullscreen", command=PreviewCommand.TOGGLE_FULLSCREEN, tip="Fullscreen", icon=icon("maximize"),
-        checkable=True, group=None, bar=TOP, size=(30, 30), priority=60,
-        checked_when=lambda s: s.fullscreen,
-    ),
-    ActionSpec(
         id="step_back", command=PreviewCommand.STEP_BACK, tip="One frame back", icon=icon("skip-back"),
         variant="ghost", bar=BOTTOM, size=(28, 32), priority=50, enabled_when=_timeline, shortcut="Left",
     ),
