@@ -312,6 +312,36 @@ def drain_requests(root: str, dispatch, *, state: dict | None = None, now: float
     return served
 
 
+def wheel_spec(spec: str) -> tuple[str, tuple[int, int] | None, int, str | None]:
+    """Parse `wheel:<objectName>@x,y[:<angleDelta>]` into `(target, point, delta, error)`.
+
+    A wheel is the one gesture the control surface had no verb for, so every live check of a zoom was hand-driven through
+    `xdotool click 4` at screen coordinates - unreadable in a report and unrepeatable in a different window. The answer
+    carries `accepted`, which is the number that matters: the widget either consumed the notch (its `wheelEvent` ran) or
+    it did not.
+
+    `delta` is Qt's own `angleDelta().y()`: 120 per notch, the sign is the direction. No argument means one notch up.
+    """
+    target, _, rest = spec.partition("@")
+    target = target.strip()
+    if not target:
+        return "", None, 120, "expected wheel:<objectName>@x,y[:delta]"
+    point_text, _, delta_text = rest.partition(":")
+    if "," not in point_text:
+        return target, None, 120, "expected x,y after the widget name"
+    try:
+        x, y = (int(value) for value in point_text.split(",", 1))
+    except ValueError:
+        return target, None, 120, "point is not x,y"
+    try:
+        delta = int(delta_text) if delta_text.strip() else 120
+    except ValueError:
+        return target, None, 120, "delta is not an integer"
+    if delta == 0:
+        return target, (x, y), 0, "a zero delta is not a notch"
+    return target, (x, y), delta, None
+
+
 def validate_input_path(path: str) -> tuple[str | None, str | None]:
     """``(error, resolved)`` for an `input:` request - pure, so a test needs no window.
 
@@ -999,6 +1029,42 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: release at ({point.x()},{point.y()})", flush=True)
 
+    def wheel(spec: str) -> None:
+        """Turn the wheel over a widget point: `wheel:<objectName>@x,y[:delta]` (see `wheel_spec`).
+
+        Delivered as a real `QWheelEvent` to the widget, the same object a physical notch produces, so the pane's own
+        handler runs and its answer is observable: `accepted` says whether the gesture was consumed (a zoom) or dropped
+        (the half that used to ignore the wheel).
+        """
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QWheelEvent
+        from PySide6.QtWidgets import QWidget
+
+        target, point, delta, error = wheel_spec(spec)
+        report = {"stamp": _stamp(), "kind": "wheel", "target": target, "error": error,
+                  "point": None if point is None else [point[0], point[1]], "delta": delta}
+        widget = window.findChild(QWidget, target) if target else None
+        if widget is None:
+            report["error"] = report["error"] or "widget not found"
+            _finish(report)
+            print(f"capture-server: wheel {target!r} -> {report['error']}", flush=True)
+            return
+        if point is None:
+            _finish(report)
+            return
+        local = QPointF(float(point[0]), float(point[1]))
+        event = QWheelEvent(local, QPointF(widget.mapToGlobal(QPoint(point[0], point[1]))),
+                            QPoint(0, 0), QPoint(0, delta),
+                            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                            Qt.ScrollPhase.NoScrollPhase, False)
+        QApplication.sendEvent(widget, event)
+        for _ in range(4):
+            QApplication.processEvents()
+        report["accepted"] = bool(event.isAccepted())
+        _finish(report)
+        print(f"capture-server: wheel {target}@({point[0]},{point[1]}) delta={delta} "
+              f"accepted={report['accepted']}", flush=True)
+
     def drag(spec: str) -> None:
         """A real drag through the window: `drag:<objectName>@x1,y1>dydx...` - `x1,y1:x2,y2`.
 
@@ -1377,17 +1443,30 @@ def install(window) -> None:
             # is `grabFrame()`, which is also what the RHI pixel gate uses.
             grab_frame = getattr(subject, "grabFrame", None)
             if callable(grab_frame) and widget_name:
-                image = grab_frame()
-                saved = image is not None and image.save(target)
-                size = [image.width(), image.height()] if image is not None else [0, 0]
+                # REFUSED, not attempted: `grabFrame()` WAITS for a paint, and this handler runs on the very GUI thread
+                # that would have to paint - a paused pane therefore deadlocks the whole channel (measured 2026-11-26:
+                # `grab:...@previewLabel` answered nothing for 40 s; the wheel request that followed answered normally,
+                # so it was a nested wait, not a slow render). Nudging with `update()` does not help: the wait is inside
+                # the Qt call. The two honest instruments are the framebuffer (`window_screenshot`) and the pane's own
+                # telemetry (`preview: draw ... px= rect= scale=`, which is what the geometry defects were measured
+                # with).
+                _finish({"stamp": _stamp(), "kind": "grab", "path": target, "saved": False,
+                         "widget": widget_name.strip(),
+                         "error": "a QRhiWidget's frame cannot be grabbed from this channel: grabFrame() waits for a "
+                                  "paint on the thread serving the request, so a paused pane deadlocks it. Use "
+                                  "window_screenshot for screen truth, or the pane's draw telemetry for geometry."})
+                print(f"capture-server: grab {widget_name.strip()} -> refused (QRhiWidget)", flush=True)
+                return
             else:
                 pixmap = subject.grab()
                 saved = pixmap.save(target)
                 size = [pixmap.width(), pixmap.height()]
             _finish({"stamp": _stamp(), "kind": "grab", "path": target, "saved": bool(saved),
                      "widget": widget_name.strip() or None, "size": size})
+            # `pixmap` does not exist on the `grabFrame` branch (a NameError after `_finish` killed the poll loop's
+            # handler on every RHI grab - measured 2026-11-26). The answer's own size is the one to print.
             print(f"capture-server: grab {widget_name.strip() or 'window'} -> {target} "
-                  f"({pixmap.width()}x{pixmap.height()})", flush=True)
+                  f"({size[0]}x{size[1]})", flush=True)
             return
         if wanted.startswith("probe_at:"):
             from PySide6.QtCore import QPoint
@@ -1483,6 +1562,9 @@ def install(window) -> None:
             return
         if wanted.startswith("drag:"):
             drag(wanted[len("drag:"):])
+            return
+        if wanted.startswith("wheel:"):
+            wheel(wanted[len("wheel:"):])
             return
         if wanted.startswith("hold:"):
             hold(wanted[len("hold:"):])

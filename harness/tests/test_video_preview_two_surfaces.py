@@ -240,21 +240,61 @@ def test_split_clips_the_original_to_the_left_of_the_divider(surface):
         "split fits the result into the whole pane, unlike sbs")
 
 
-def test_the_wheel_ignores_the_original_half_and_zooms_the_result(surface):
-    """The invariant: the original has no zoom of its own, it is drawn at the result's scale. So a wheel over its
-    half must do nothing at all, and a wheel over the result must move both pictures together."""
+def test_the_wheel_zooms_from_either_half_and_moves_both_pictures(surface):
+    """REVISED, owner 2026-11-26: "в режиме side by side по оригиналу не работает зумирование, почему-то можно только
+    на upscale".
+
+    The invariant the old rule protected still holds - the original has no zoom of ITS OWN, it is drawn at the result's
+    scale - and that is the reason the wheel should work over it: one scale means one gesture. Its anchor is mirrored
+    into the result's half, so the same wheel over the mirrored points ends with the same zoom AND the same pan.
+    """
     surface.set_original(_picture(*FRAME_SIZE))
     surface.set_view_mode("sbs")
     surface.reset_view()
     before = surface.zoom()
 
     _wheel(surface, QPointF(PANE_SIZE[0] * 0.25, PANE_SIZE[1] / 3.0))
-    assert surface.zoom() == before, "the original's zoom is derived from the result; it has none to change"
-
-    _wheel(surface, QPointF(PANE_SIZE[0] * 0.75, PANE_SIZE[1] / 3.0))
-    assert surface.zoom() > before, "the wheel over the result still zooms the result"
+    stepped = surface.zoom()
+    pan = list(surface._pan)
+    assert stepped > before, "a wheel over the original zooms, exactly like one over the result"
     assert surface._original_rect().width() == pytest.approx(surface._frame_rect().width()), (
         "and the original follows at the same apparent scale")
+
+    surface.reset_view()
+    _wheel(surface, QPointF(PANE_SIZE[0] * 0.75, PANE_SIZE[1] / 3.0))
+    assert surface.zoom() == pytest.approx(stepped), "the mirrored point is the SAME gesture, not a second one"
+    assert surface._pan == pytest.approx(pan), "and it leaves the shared pan where the first one left it"
+
+def test_a_zoom_writes_a_draw_line_at_the_default_telemetry_level(surface, monkeypatch):
+    """A gesture that changes the BOX leaves a line even at level 0: the pictures are the same, the geometry is not.
+
+    Measured 2026-11-26: the wheel over the original answered `accepted`, the pane repainted, and no `draw` line followed -
+    because the line followed the PICTURES only. "The gesture did nothing" and "the widget consumed it but the log follows
+    pictures" were therefore indistinguishable at a normal telemetry level, which is how this very defect was reported.
+    """
+    from src.ui.video import telemetry
+    from src.ui.widgets.preview_renderer import PreviewDrawn
+
+    events = []
+    monkeypatch.setattr(telemetry, "level", lambda: 0)
+    monkeypatch.setattr(telemetry, "event", lambda name, **fields: events.append((name, fields)))
+
+    surface.set_original(_picture(*FRAME_SIZE, colour="#402060"))
+    surface.set_view_mode("sbs")
+    painted = PreviewDrawn(mode="sbs", half="pair", drew_original=True)
+    draws = lambda: [fields for name, fields in events if name == "draw"]  # noqa: E731 - a filter, not a helper
+
+    surface._on_rhi_draw(painted)                                  # the opening box
+    assert len(draws()) == 1
+
+    surface._on_rhi_draw(painted)                                  # same pictures, same box
+    assert len(draws()) == 1, "an unchanged box is not a new trace"
+
+    _wheel(surface, QPointF(PANE_SIZE[0] * 0.2, PANE_SIZE[1] / 3.0))
+    surface._on_rhi_draw(painted)
+
+    assert len(draws()) == 2, "the zoom moved the box: it must be visible without level 2"
+    assert draws()[-1]["scale"] != draws()[0]["scale"]
 
 
 def test_the_lmb_compare_asks_the_shown_pictures_time_not_the_stale_marker(surface):
@@ -293,6 +333,34 @@ def test_a_middle_drag_pans_the_result_in_sbs_even_from_the_original_half(surfac
     assert surface._frame_rect().left() == pytest.approx(before_result - 40.0)
     assert surface._original_rect().left() == pytest.approx(before_original - 40.0), (
         "the same drag moves the original by the same amount")
+
+
+def test_an_lmb_drag_pans_a_compare_mode_and_shows_a_hand(surface):
+    """Owner, 2026-11-26: "во всех режимах сравнения должна быть одинаковая политика взаимодействия - лкм - оригинал
+    (если один кадр), лкм+зажатие - панарамирование со сменой курсора на руку". In `sbs` the source already stands, so
+    the LMB is the drag: no flash to consume, and the hand says so while it runs."""
+    surface.set_original(_picture(*FRAME_SIZE, colour="#402060"))
+    surface.set_view_mode("sbs")
+    surface.set_zoom(0.5)                                               # above the half's fit: room to pan
+    start = QPointF(PANE_SIZE[0] * 0.25, PANE_SIZE[1] / 3.0)            # the ORIGINAL half
+    before = surface._frame_rect().left()
+
+    QApplication.sendEvent(surface, QMouseEvent(
+        QEvent.Type.MouseMove, start, start, Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+    assert surface.cursor().shape() != Qt.CursorShape.OpenHandCursor, (
+        "no hover cursor on the picture: the hand is the DRAG's, not a promise made before it (owner, 2026-11-26)")
+
+    _press(surface, start)
+    assert surface.cursor().shape() == Qt.CursorShape.ClosedHandCursor, "the drag shows the hand"
+    moved = QPointF(start.x() - 40.0, start.y())
+    QApplication.sendEvent(surface, QMouseEvent(
+        QEvent.Type.MouseMove, moved, moved, Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+    _release(surface, moved)
+
+    assert surface._frame_rect().left() == pytest.approx(before - 40.0), "an LMB drag pans, from either half"
+    assert surface.cursor().shape() != Qt.CursorShape.ClosedHandCursor, "the release gives the pointer back"
 
 
 def test_a_compare_mode_keeps_the_original_on_the_playhead(surface):

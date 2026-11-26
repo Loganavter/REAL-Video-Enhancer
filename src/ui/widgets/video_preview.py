@@ -1001,12 +1001,17 @@ class VideoPreviewSurface(QRhiWidget):
         if factor is None:
             event.accept()
             return                      # a zero delta is not a zoom; a pixel-only device answers `zoom raw` above
-        # In `sbs` the original is placed from the result's scale, so a wheel over that half has nothing of its own
-        # to change: doing nothing there (instead of silently moving the far picture) is what keeps the two surfaces
-        # comparable one gesture at a time.
-        if self._view_mode == "sbs" and self._original_view_rect().contains(event.position()):
-            event.accept()
-            return
+        # ONE scale for both halves, so the wheel means the same thing wherever it is turned (owner, 2026-11-26: "в
+        # режиме side by side по оригиналу не работает зумирование, почему-то можно только на upscale"). In `sbs` the
+        # anchor is MIRRORED into the result's half: the pan is shared, so anchoring where the pointer is on the left
+        # would slide the result's content out from under a pointer that is not on it - and the mirrored point keeps
+        # the source pixel under the cursor put, which is exactly what the gesture promises.
+        anchor = QPointF(event.position())
+        if self._view_mode == "sbs":
+            left, right = self._half_rects()
+            if left.contains(event.position()):
+                anchor = QPointF(float(right.left()) + (event.position().x() - float(left.left())),
+                                 float(event.position().y()))
         # FROM THE SCALE THE PICTURE IS DRAWN AT, not from the stored factor: on a 1920x1440 payload in a 504-wide pane
         # `fit` is 0.26 while the stored factor starts at 1.0, so the FIRST notch - or one 16-unit nudge from a trackpad -
         # jumped straight to ~1.0, i.e. a 4x crop that reads as "zoomed twice" and stays until Fit is pressed (owner,
@@ -1014,7 +1019,7 @@ class VideoPreviewSurface(QRhiWidget):
         # fitted view is now a notch FROM the fitted view.
         base = self._fit_scale() if self._zoom_is_fit else getattr(self, "_zoom_target", self._zoom)
         target = base * factor
-        self.set_zoom(target, around=QRectF(event.position(), QSize(1, 1)))
+        self.set_zoom(target, around=QRectF(anchor, QSize(1, 1)))
         self.zoomChanged.emit(self._zoom)
         event.accept()
 
@@ -1047,9 +1052,15 @@ class VideoPreviewSurface(QRhiWidget):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
                 event.accept()
                 return
-            # In a compare mode the source is already on screen: there is nothing to flash, and the picture is not a
-            # control. The press is consumed so it cannot turn into a flash the user did not ask for.
+            # A compare mode has nothing to "flash" - the source already stands beside the result - and there the
+            # picture IS a draggable surface: ONE policy in every compare mode (owner, 2026-11-26: "во всех режимах
+            # сравнения должна быть одинаковая политика взаимодействия - лкм - оригинал (если один кадр), лкм+зажатие -
+            # панарамирование со сменой курсора на руку"). The middle button keeps working everywhere for the habit it
+            # already built, and the divider (above) stays the one control that takes a press before the picture does.
             if self._view_mode != "single":
+                self._panning = True
+                self._pan_anchor = position
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 event.accept()
                 return
             # LMB = "show the original": the surface asks the host for the source frame at the playhead and draws it as
@@ -1076,9 +1087,10 @@ class VideoPreviewSurface(QRhiWidget):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         position = event.position()
-        if not self._dragging_split:
+        if not self._dragging_split and not self._panning and self._left_press is None:
             # The divider's own hover: full alpha while the pointer is on it, a fade once it leaves. The cursor says
-            # "this can be dragged" before the press does.
+            # "this can be dragged" before the press does. Skipped while a drag runs: the drag's own cursor is the truth
+            # then, and re-deriving it from the pointer's position cleared the hand mid-pan.
             if self._divider_hovered(position):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
             elif self._view_mode == "split":
@@ -1098,6 +1110,7 @@ class VideoPreviewSurface(QRhiWidget):
             event.accept()
             return
         if self._panning:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
             delta = position - self._pan_anchor
             self._pan_anchor = position
             self.pan_by(delta.x(), delta.y())
@@ -1112,6 +1125,7 @@ class VideoPreviewSurface(QRhiWidget):
                 # geometry is shared, so the result appears where the drag left the picture.
                 self._left_press = None
                 self._panning = True
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 self._pan_anchor = position
                 # The distance already travelled counts: without this the first move of every drag was a dead zone,
                 # which reads as "the picture sticks for a moment before it follows".
@@ -1124,7 +1138,12 @@ class VideoPreviewSurface(QRhiWidget):
         super().mouseMoveEvent(event)
 
     def _update_hover(self, position) -> None:
-        """Hover feedback on the strip: a marker where the pointer is, and a forbidden cursor past the produced edge."""
+        """Hover feedback on the strip: a marker where the pointer is, and a forbidden cursor past the produced edge.
+
+        The picture gets no hover cursor of its own: the drag shows the hand while it runs, and nothing before it (owner,
+        2026-11-26: "так «эту поверхность можно тащить» видно до нажатия" - "нет, убери"). An open hand over the whole
+        compare picture was also a promise over areas where a pan is clamped to nothing (a picture that fits the half).
+        """
         strip = self._strip_rect()
         if strip.isEmpty() or not strip.contains(position):
             if self._hover_fraction is not None:
@@ -1156,6 +1175,7 @@ class VideoPreviewSurface(QRhiWidget):
         if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.LeftButton) and self._panning:
             self._panning = False
             self._left_press = None
+            self.unsetCursor()
             if self._showing_original:
                 # The drag KEEPS the compare on (it inspects the original), so the release is what ends it. Without
                 # this the pane stayed on the original for ever: `_panning` took the early return above, and the only
@@ -1525,22 +1545,41 @@ class VideoPreviewSurface(QRhiWidget):
         times, the fingerprints and the telemetry level all live here, so the lines are exactly the ones the old
         in-render logging wrote.
         """
+        # GEOMETRY counts as a change: a zoom or a pan repaints the same pictures at a different box, and without this
+        # line a gesture left no trace at the default telemetry level - so "the wheel did nothing over the original" and
+        # "the picture moved" could not be told apart from the log at all (measured 2026-11-26: the wheel answered
+        # `accepted`, the pane repainted, and no `draw` line followed because the PICTURES were the same).
+        geometry = self._geometry_signature()
+        geometry_changed = geometry != getattr(self, "_logged_geometry", None)
         if drawn.mode == "single":
             picture = self._original if drawn.half == "original" else self._frame
             present = self._has_picture() if drawn.half == "result" else picture is not None
-            if drawn.half == "original" and (self._original_changed or telemetry.level() >= 2):
+            if drawn.half == "original" and (self._original_changed or geometry_changed or telemetry.level() >= 2):
                 self._log_draw(half="original", picture=picture)
                 self._original_changed = False
-            elif drawn.half == "result" and telemetry.level() >= 2:
+                self._logged_geometry = geometry
+            elif drawn.half == "result" and (geometry_changed or telemetry.level() >= 2):
                 self._log_draw(half="result", picture=picture, present=present)
+                self._logged_geometry = geometry
             return
-        # Both halves in one pass: one line names both pictures (a new original always, every paint at level 2).
+        # Both halves in one pass: one line names both pictures (a new original, a new box, or every paint at level 2).
         original = self._original if drawn.drew_original else None
-        if drawn.drew_original and (self._original_changed or telemetry.level() >= 2):
+        if drawn.drew_original and (self._original_changed or geometry_changed or telemetry.level() >= 2):
             self._log_draw_two(self._frame, original)
             self._original_changed = False
-        elif telemetry.level() >= 2:
+            self._logged_geometry = geometry
+        elif geometry_changed or telemetry.level() >= 2:
+            # The box is the RESULT's, and a zoom/pan moves it whether or not the source half has arrived: a paused pane
+            # with no source would otherwise leave a gesture with no trace at all (measured 2026-11-26).
             self._log_draw_two(self._frame, None, present=self._has_picture())
+            self._logged_geometry = geometry
+
+    def _geometry_signature(self) -> str:
+        """What a zoom or a pan changes: the picture's pixel size and the box it is drawn into."""
+        width, height = self._image_size()
+        box = self._frame_rect()
+        return (f"{width}x{height}|{box.left():.1f},{box.top():.1f},"
+                f"{box.width():.1f},{box.height():.1f}|{self._result_scale():.4f}")
 
     def _has_picture(self) -> bool:
         """Whether the RESULT half carries a picture at all - an image, or the planes of a YUV frame."""

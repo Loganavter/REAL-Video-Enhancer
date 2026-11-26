@@ -34,11 +34,82 @@ INSTRUCTIONS = (
     "stale-frame bugs. Stop the instance with instance_stop when done."
 )
 
-#: The app verbs that only read state (safe to drive through `control_read`).
-READ_VERBS = ("where:", "state:", "probe:", "probe_at:", "audit:", "grab:")
+#: What each channel verb prefix IS, for the read/write split. The SET of verbs is no longer written here: it is read from
+#: the app's own dispatch table (see `channel_verbs`). A hardcoded copy lags `src/ui/capture_server.py`, and then a probe
+#: cannot drive a verb the app answers - measured 2026-11-26, `preview:` refused with "is not a write verb" while
+#: `hold:`/`release:`/`wheel:` were unreachable, which is what pushed live checks of the preview's gestures into
+#: hand-driven `xdotool`. A verb this table does not classify is exposed by BOTH lists (reachable, never silently lost),
+#: and `harness/tests/test_control_wheel_verb.py` fails until it is classified here.
+VERB_KINDS = {
+    "where": "read", "state": "read", "probe": "read", "probe_at": "read", "audit": "read", "grab": "read",
+    "tail": "read", "stack": "read",
+    "repaint": "write", "click": "write", "drag": "write", "wheel": "write", "hold": "write", "release": "write",
+    "queue": "write", "select": "write", "move": "write", "job": "write", "render": "write", "rhi": "write",
+    "preview": "write", "input": "write", "scale": "write", "tab": "write", "start": "write", "page": "write",
+}
 
-#: The app verbs that change the window (driven through `control_write`).
-WRITE_VERBS = ("repaint:", "click:", "drag:", "queue:", "select:", "move:", "job:", "render:", "rhi:")
+#: The channel source, relative to the checkout.
+CHANNEL_SOURCE = ("src", "ui", "capture_server.py")
+
+_verb_cache: dict[str, object] = {"mtime": None, "verbs": ()}
+
+
+def _repo_root():
+    import os
+    import pathlib
+
+    declared = os.environ.get("RVE_REPO_ROOT")
+    if declared:
+        return pathlib.Path(declared)
+    return pathlib.Path(__file__).resolve().parents[3]
+
+
+def channel_verbs() -> tuple[str, ...]:
+    """Every verb prefix `capture_server` dispatches, read from its source and cached until that file changes.
+
+    A regex over the module, not an import: the server must not pull Qt into its own process to learn a list of words.
+    The cache is keyed on mtime because the alternative - reading once at startup - is exactly how the server ended up
+    refusing verbs the app answered, with "reopen the session" as its only remedy. An unreadable source answers the
+    empty tuple, so a checkout without the app falls back to `VERB_KINDS` instead of failing at import.
+    """
+    import re
+
+    path = _repo_root().joinpath(*CHANNEL_SOURCE)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return ()
+    if _verb_cache["mtime"] == mtime:
+        return tuple(_verb_cache["verbs"])
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError:
+        return ()
+    verbs = tuple(sorted(set(re.findall(r'wanted\.startswith\("([a-z_]+):"\)', source))))
+    _verb_cache.update({"mtime": mtime, "verbs": verbs})
+    return verbs
+
+
+def _verbs(kind: str) -> tuple[str, ...]:
+    known = set(channel_verbs()) or set(VERB_KINDS)
+    chosen = {verb for verb in known if VERB_KINDS.get(verb, kind) == kind}
+    chosen |= {verb for verb in known if verb not in VERB_KINDS}
+    return tuple(f"{verb}:" for verb in sorted(chosen))
+
+
+def read_verbs() -> tuple[str, ...]:
+    """The app's READ verbs, as the channel states them now."""
+    return _verbs("read")
+
+
+def write_verbs() -> tuple[str, ...]:
+    """The app's WRITE verbs, as the channel states them now."""
+    return _verbs("write")
+
+
+#: Import-time snapshots, kept for callers that only print them. Anything that GATES a request calls the functions.
+READ_VERBS = read_verbs()
+WRITE_VERBS = write_verbs()
 
 _ANNOTATIONS_READ = {
     "readOnlyHint": True,

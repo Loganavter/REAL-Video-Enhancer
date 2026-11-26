@@ -21,9 +21,13 @@ harness/scripts/live.sh down          # stop the app and the Xvfb it started (by
 ## Control-channel verbs (`ask "…"`)
 
 `where:` (which build/toolkit is loaded), `state:` (render/queue state), `probe:` (static control inventory),
-`probe_at:X,Y` (what is under a point, rendered colour + widget chain), `grab:[path]` (re-rendered window PNG — not
-screen truth), `repaint:` (force a full repaint, the way a window resize would), `click:X,Y`, `drag:…`, `queue:…`,
-`select:…`, `move:…`, `job:…`, `audit:…`, and `rhi:[hold_ms]` — the QRhi probe described below.
+`probe_at:X,Y` (what is under a point, rendered colour + widget chain), `grab:[path]` or `grab:<path>@<objectName>`
+(one widget's own picture — for the preview pane that is `grabFrame()`, the pane's framebuffer, so a zoom or a pan can be
+measured without cropping the window), `repaint:` (force a full repaint, the way a window resize would), `click:X,Y`,
+`drag:<objectName>@x1,y1:x2,y2` (a real press/move/release through Qt), `wheel:<objectName>@x,y[:delta]` (one or more
+notches, default 120; the answer's `accepted` says whether the widget consumed it), `hold:`/`release:` (a button kept
+down, for the LMB compare), `queue:…`, `select:…`, `move:…`, `job:…`, `audit:…`, and `rhi:[hold_ms]` — the QRhi probe
+described below.
 
 Answers are JSON files written under the control directory (`/tmp/opencode/.rve-control` by default), so two clients never
 eat each other's reply.
@@ -176,8 +180,11 @@ Wiring (opencode config — the key is `mcp`, not BlinkTable's doc's `mcpServers
 Measured against the real client: opencode sends `params._meta` with trace fields and **no** `protocolVersion` on every
 call. Treating any `_meta` as the modern stateless envelope rejected every tool with "missing the required envelope
 key(s)" while `tools/list` worked — a connected-looking server whose every call failed. The transport now detects the
-envelope by `protocolVersion`, and `test_mcp_server.py` pins that case. A running server does not reload code: after an
-edit, the session must be reopened (the catalog is cached at start).
+envelope by `protocolVersion`, and `test_mcp_server.py` pins that case. A running server does not reload the TOOLS: after an
+edit to a tool's schema or description, the session must be reopened. The app's verb SETS are no longer cached that
+way - `catalog.py` re-reads them from `src/ui/capture_server.py` by mtime on the first call after a change, so a verb
+added to the channel is drivable immediately (`wheel:` was added exactly because a missing one pushed a live check into
+hand-driven `xdotool`; `tests/test_control_wheel_verb.py` fails if the channel grows a verb the catalog cannot drive).
 
 ### Capturing the 13 pages (A/A and regression tables)
 

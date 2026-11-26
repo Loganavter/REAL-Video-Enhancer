@@ -302,15 +302,19 @@ class RveBackend:
     def control_read(self, *, verb: str, timeout_s: float | None = None) -> dict:
         from . import catalog
 
-        if not any(verb.startswith(prefix) for prefix in catalog.READ_VERBS):
+        # The CURRENT set, re-derived from the app's channel (cached by mtime): a long-running server must not answer from
+        # a list that was true when it started.
+        allowed = catalog.read_verbs()
+        if not any(verb.startswith(prefix) for prefix in allowed):
             raise ToolError(f"{verb.split(':')[0]!r} is not a read verb",
-                            f"read verbs: {', '.join(catalog.READ_VERBS)}; use control_write for the rest")
+                            f"read verbs: {', '.join(allowed)}; use control_write for the rest")
         return {"verb": verb, "answer": self._request(verb, timeout=timeout_s)}
 
     def control_write(self, *, verb: str, timeout_s: float | None = None) -> dict:
         from . import catalog
 
-        if not any(verb.startswith(prefix) for prefix in catalog.WRITE_VERBS):
+        allowed = catalog.write_verbs()
+        if not any(verb.startswith(prefix) for prefix in allowed):
             raise ToolError(f"{verb.split(':')[0]!r} is not a write verb",
-                            f"write verbs: {', '.join(catalog.WRITE_VERBS)}; use control_read for the rest")
+                            f"write verbs: {', '.join(allowed)}; use control_read for the rest")
         return {"verb": verb, "answer": self._request(verb, timeout=timeout_s)}
