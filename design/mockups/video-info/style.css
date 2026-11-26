@@ -1,0 +1,230 @@
+/* The app's own tokens, as values: surface.page / surface.list / text.primary / text.secondary / accent.
+   Everything below names them, so a retune is one edit. */
+:root {
+  --page: #1b1b1b;
+  --plate: #242424;
+  --plate-border: #2f2f2f;
+  --row-hair: #2a2a2a;
+  --text: #d8d8d8;
+  --muted: #8e8e8e;
+  --dim: #6f6f6f;
+  --accent: #4c9df5;
+  --accent-soft: rgba(76, 157, 245, 0.14);
+  --ok: #6cc070;
+  --warn: #e0b24c;
+  --font: "Adwaita Sans", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", "Adwaita Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 18px;
+  background: var(--page);
+  color: var(--text);
+  font: 12px/1.45 var(--font);
+}
+
+.panel { width: 460px; }
+
+/* ---------- current look, recreated so the delta is visible ---------- */
+
+.legacy-plate {
+  background: var(--plate);
+  border: 1px solid var(--plate-border);
+  border-radius: 4px;
+  padding: 10px;
+  font: 12px/1.45 var(--font);
+  color: var(--text);
+  white-space: pre;
+}
+.legacy-plate b { font-weight: 400; color: var(--text); }
+.legacy-status { margin-top: 10px; }
+.legacy-status p { margin: 0; }
+.legacy-status .k { color: var(--text); }
+
+/* ---------- shared bits for the proposals ---------- */
+
+.card {
+  background: var(--plate);
+  border: 1px solid var(--plate-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.card + .card { margin-top: 8px; }
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 9px 12px 8px;
+  border-bottom: 1px solid var(--row-hair);
+}
+
+.card-head .title {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tag {
+  font: 10px/1 var(--mono);
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tag.neutral { background: #2c2c2c; color: var(--muted); }
+
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.dim { color: var(--dim); }
+.muted { color: var(--muted); }
+
+/* ---------- A: transition card ---------- */
+
+.transition {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.transition .side { min-width: 0; }
+
+.transition .size {
+  font: 600 17px/1.1 var(--mono);
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.transition .under {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.arrow {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 15px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--row-hair);
+}
+
+.cell {
+  background: var(--plate);
+  padding: 7px 12px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cell .k { color: var(--muted); font-size: 11px; }
+.cell .v { font-family: var(--mono); color: var(--text); font-size: 11px; text-align: right; }
+
+/* ---------- B: spec sheet ---------- */
+
+.group { border-top: 1px solid var(--row-hair); }
+.group:first-of-type { border-top: 0; }
+
+.group-name {
+  padding: 7px 12px 3px;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 12px;
+}
+
+.row .k { color: var(--muted); }
+.row .dots { flex: 1 1 auto; border-bottom: 1px dotted #333; transform: translateY(-3px); }
+.row .v { font-family: var(--mono); color: var(--text); }
+
+/* ---------- progress, shared by A and B ---------- */
+
+.progress-body { padding: 10px 12px 11px; }
+
+.line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.line .left { font-family: var(--mono); font-size: 11px; color: var(--text); }
+.line .right { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #313131;
+  overflow: hidden;
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  width: 9%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.foot {
+  margin-top: 7px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pill {
+  font: 10px/1 var(--mono);
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ---------- C: chips ---------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 11px 12px; }
+
+.chip {
+  font: 11px/1 var(--mono);
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: #2b2b2b;
+  color: var(--text);
+}
+
+.chip .u { color: var(--muted); }
+.chip.strong { background: var(--accent-soft); color: var(--accent); }
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--row-hair);
+}
+
+.transport .bar { flex: 1 1 auto; }
+.transport .num { font-size: 11px; color: var(--muted); }

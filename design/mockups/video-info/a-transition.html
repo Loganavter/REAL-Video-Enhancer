@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Video info — A: transition card</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="panel">
+
+  <!-- The one fact the panel exists for: what comes out of what, and by how much. -->
+  <div class="card">
+    <div class="transition">
+      <div class="side">
+        <div class="size num">1440×1080</div>
+        <div class="under">24 fps · 493 frames</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="side">
+        <div class="size num">2880×2160</div>
+        <div class="under">24 fps · 493 frames</div>
+      </div>
+      <div style="margin-left:auto"><span class="tag">2× upscale</span></div>
+    </div>
+
+    <div class="grid">
+      <div class="cell"><span class="k">Encoder</span><span class="v">libx264</span></div>
+      <div class="cell"><span class="k">Container</span><span class="v">mkv</span></div>
+      <div class="cell"><span class="k">Colour</span><span class="v">bt709</span></div>
+      <div class="cell"><span class="k">Pixel format</span><span class="v">yuv420p10le</span></div>
+      <div class="cell"><span class="k">Bit depth</span><span class="v">10 bit</span></div>
+      <div class="cell"><span class="k">HDR</span><span class="v dim">no</span></div>
+    </div>
+  </div>
+
+  <!-- The numbers of the run belong to the bar they describe. -->
+  <div class="card">
+    <div class="progress-body">
+      <div class="line">
+        <span class="left">frame 44 / 493</span>
+        <span class="right">9% · 23 s left</span>
+      </div>
+      <div class="bar"><i></i></div>
+      <div class="foot">
+        <span class="pill">19 fps</span>
+        <span>Rendering</span>
+        <span class="dim" style="margin-left:auto">0:00:08 elapsed</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

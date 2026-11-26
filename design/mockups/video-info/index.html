@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Video info — mockups</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { padding: 22px; }
+  h1 { font: 600 18px/1.2 var(--font); margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 18px; max-width: 980px; }
+  .board { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  .slot { width: 478px; }
+  .slot h2 { font: 600 12px/1.2 var(--font); margin: 0 0 2px; }
+  .slot .why { color: var(--muted); font-size: 11px; margin: 0 0 8px; min-height: 30px; }
+  .slot iframe {
+    width: 478px; height: 470px; border: 1px solid #333; border-radius: 6px; background: var(--page);
+  }
+  .notes { margin-top: 22px; max-width: 980px; }
+  .notes ul { margin: 6px 0 0 18px; padding: 0; color: var(--muted); }
+  .notes li { margin: 3px 0; }
+  .notes b { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>Video info — how it could read</h1>
+<p class="lede">Four panels at the panel's real width (460 px), same data as the running render:
+   1440×1080 → 2880×2160, 24 fps, 493 frames, libx264/mkv, 10-bit bt709; frame 44/493, 9 %, ETA 0:00:23, 19 fps.</p>
+
+<div class="board">
+  <div class="slot">
+    <h2>Now</h2>
+    <p class="why">Two text dumps: a nine-line list in a plate, and three loose lines under the bar.</p>
+    <iframe src="current.html" title="current"></iframe>
+  </div>
+
+  <div class="slot">
+    <h2>A · Transition card</h2>
+    <p class="why">The one fact the panel exists for — what comes out of what — gets the top; the rest is a grid.</p>
+    <iframe src="a-transition.html" title="A"></iframe>
+  </div>
+
+  <div class="slot">
+    <h2>B · Spec sheet</h2>
+    <p class="why">Grouped by source/output, values right-aligned on dotted leaders: a column you scan, not a paragraph.</p>
+    <iframe src="b-spec.html" title="B"></iframe>
+  </div>
+
+  <div class="slot">
+    <h2>C · Chips</h2>
+    <p class="why">The most compact: one row of facts, the run folded into the transport line. B stays one click away.</p>
+    <iframe src="c-chips.html" title="C"></iframe>
+  </div>
+</div>
+
+<div class="notes">
+  <p><b>What is wrong with the current one</b></p>
+  <ul>
+    <li>Every row has the same weight, so <span class="num">1440×1080 → 2880×2160</span> — the reason the panel is
+        there — reads exactly like <span class="num">Container: mkv → mkv</span>.</li>
+    <li><span class="num">→</span> is doing three jobs at once: "input → output" (a real change), "same on both sides"
+        (noise: <span class="num">mkv → mkv</span>, <span class="num">bt709 → bt709</span>, <span class="num">False →
+        False</span>) and a separator between label and value.</li>
+    <li>The run's numbers (ETA, fps, status) live in a second dump, away from the progress bar they describe; fps is
+        printed twice.</li>
+    <li>Nine rows of prose for six facts: unchanged pairs could collapse to one value, and "HDR: False" is a no-op
+        unless it is true.</li>
+  </ul>
+
+  <p><b>What each variant does about it</b></p>
+  <ul>
+    <li><b>A</b> promotes the resolution change to a headline with the upscale factor as a tag, keeps the technical
+        facts in a two-column grid (label muted, value mono, right-aligned), and moves the run into a card with the bar.</li>
+    <li><b>B</b> keeps every row but groups them (Source / Output) and aligns the values on leaders; identical values are
+        stated once (<span class="num">bt709 · 10 bit</span> in Source, no second arrow).</li>
+    <li><b>C</b> is the glanceable reading: chips for the facts, the run on the transport line itself. It assumes a
+        details popover for the rest.</li>
+    <li>A and B both put <b>fps, ETA and status with the bar</b>, and both drop the duplicate fps.</li>
+  </ul>
+
+  <p><b>Notes for whoever implements it</b></p>
+  <ul>
+    <li>Values stay <span class="num">ui-monospace</span> with tabular figures: the numbers then line up and stop
+        jittering while the render counts.</li>
+    <li>Every label goes through the catalogue (<span class="num">src/ui/i18n.py</span>) — these mockups are English
+        because the running UI is, and a language switch must rewrite them all.</li>
+    <li>Nothing here needs a new widget: A is a grid of toolkit <span class="num">Text</span> rows + the existing
+        progress bar; B is the same rows with leaders; C is a wrapping row of plates. The 460 px width is the column the
+        page already has.</li>
+    <li>"HDR: no" and "10 bit" are the only rows whose absence would be a lie if dropped — say "off" only when it is
+        a choice, and keep bit depth in the same phrase as the pixel format.</li>
+  </ul>
+</div>
+</body>
+</html>
