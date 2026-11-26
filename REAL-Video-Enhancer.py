@@ -436,20 +436,24 @@ class MainWindow(QMainWindow):
             interpolateTimes = self.getInterpolationMultiplier(interpolateModelName)
             scale = self.getUpscaleModelScale(upscaleModelName)
             new_bitrate = 8 if "10" not in self.settingsTab.in_pix_fmt else 10
-            inputText = (
-                f"FPS: {round(self.videoFps, 0)} -> {round(self.videoFps * interpolateTimes, 0) if not self.page_handles.general.sloMoModeCheckBox.isChecked() else round(self.videoFps, 0)}\n"
-                + f"Resolution: {self.videoWidth}x{self.videoHeight} -> {self.videoWidth * scale}x{self.videoHeight * scale}\n"
-                + f"Frame Count: {self.videoFrameCount} -> {int(round(self.videoFrameCount * interpolateTimes, 0))}\n"
-                + f"Encoder: {self.videoEncoder} -> {self.settings.settings['encoder']}\n"
-                + f"Container: {self.videoContainer} -> {self.settings.settings['video_container']}\n"
-                + f"Color Space: {self.colorSpace} -> {self.colorSpace}\n"
-                + f"Pixel Format: {self.settingsTab.in_pix_fmt} -> {self.settingsTab.out_pixel_fmt}\n"
-                + f"HDR: {self.videoHDR} -> {self.videoHDR if self.settings.settings['auto_hdr_mode'] == 'True' else 'False'}\n"
-                + f"Bit Depth: {self.videoBitDepth} bit -> {new_bitrate if self.settings.settings['auto_hdr_mode'] == 'True' else 8} bit\n"
-            )
-            
-            self.page_handles.general.inputVideoInfoTextEdit.setFontPointSize(10)
-            self.page_handles.general.inputVideoInfoTextEdit.setText(inputText)
+            slo_mo = self.page_handles.general.sloMoModeCheckBox.isChecked()
+            auto_hdr = self.settings.settings['auto_hdr_mode'] == 'True'
+            # The pane owns the layout; this method owns the VALUES (and their formatting, unchanged). Keyed by the
+            # catalogue names the pane lists in `INFO_LABELS`, each pair is (input, output).
+            self.shell.procPage_page.generalSettings_page.set_video_info({
+                "FPS:": (f"{round(self.videoFps, 0)}",
+                         f"{round(self.videoFps, 0) if slo_mo else round(self.videoFps * interpolateTimes, 0)}"),
+                "Resolution:": (f"{self.videoWidth}x{self.videoHeight}",
+                                f"{self.videoWidth * scale}x{self.videoHeight * scale}"),
+                "Frame Count:": (f"{self.videoFrameCount}",
+                                 f"{int(round(self.videoFrameCount * interpolateTimes, 0))}"),
+                "Encoder:": (f"{self.videoEncoder}", f"{self.settings.settings['encoder']}"),
+                "Container:": (f"{self.videoContainer}", f"{self.settings.settings['video_container']}"),
+                "Color Space:": (f"{self.colorSpace}", f"{self.colorSpace}"),
+                "Pixel Format:": (f"{self.settingsTab.in_pix_fmt}", f"{self.settingsTab.out_pixel_fmt}"),
+                "Is HDR:": (f"{self.videoHDR}", f"{self.videoHDR if auto_hdr else 'False'}"),
+                "Bit Depth:": (f"{self.videoBitDepth} bit", f"{new_bitrate if auto_hdr else 8} bit"),
+            })
 
     def getInterpolationMultiplier(self, interpolateModelName):
         if interpolateModelName == "None" or not self.page_handles.general.interpolateCheckBox.isChecked():

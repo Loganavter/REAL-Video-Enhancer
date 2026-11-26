@@ -12,25 +12,19 @@ from __future__ import annotations
 from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractScrollArea, QHBoxLayout, QSizePolicy,
-    QSpacerItem, QTextEdit, QVBoxLayout, QWidget)
-import resources_rc
+    QSpacerItem, QVBoxLayout, QWidget)
 import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CustomLineEdit` for a
 # `QLineEdit`, `Button` for a `QPushButton`, `CheckBox` for a `QCheckBox`, `ComboBox` for a `QComboBox` and
 # `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
-from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
-from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, RichTextView,
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
+from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, ProgressBar,
     SurfacePanel, SurfaceScrollArea, Text)
 from src.ui.widgets.combo_width import cap_combo_to_row
-from src.ui.typography import apply, BODY_PT
+from src.ui.typography import apply, BODY_PT, CAPTION_PT, GROUP_TITLE_PT
 from src.ui.pages.handles import GeneralSettingsHandles
 from src.ui.scale_follower import ScaleFollower
 from src.ui import i18n
-
-#: RVE's control text is 12 PIXELS (the Designer's sizing). The info pane's stock editor was 12 px, and
-#: `setFontPointSize` would convert through the screen DPI and render 16 px - the value used to come from the
-#: compatibility layer (`RVE_CONTROL_FONT_PX`), which this page no longer imports.
-RVE_CONTROL_FONT_PX = 12
 
 #: RVE's window QSS scrollbar (`QScrollBar:vertical{width:8}`). A scroll area that RESERVES a bar must reserve this,
 #: not the toolkit's default 10: measured on these settings rows, the 2 px difference narrowed every row.
@@ -67,16 +61,29 @@ OUTPUT_PATH_MAX_WIDTH_PX = 10000
 #: The render-queue action icon's design px.
 ACTION_ICON_PX = 32
 
-#: The General tab's information pane, in DESIGN points: the Designer's 11 pt body and 10 pt spans. Qt's rich-text
-#: engine treats an inline `font-size` as ABSOLUTE, so the page must state these at DESIGN x factor itself - leaving
-#: `10pt` in the markup kept the body at 10 pt at every factor (measured: 172 px of ink at 1.0, 1.5 and 2.0).
-INFO_BODY_PT = 11
-INFO_TEXT_PT = 10
-
-#: The pane's nine rows, in the Designer's order. These are catalogue KEYS, not the text on screen: the document is
-#: painted from `i18n.translate(key)` at the language in force, so a switch rewrites the names and nothing else.
+#: The pane's nine rows, in the Designer's order. These are catalogue KEYS, not the text on screen: every name is
+#: painted from `i18n.translate(key)` at build and retranslate time, and the VALUES are stored beside them, so a
+#: language switch rebuilds the block from the data instead of rewriting painted lines.
 INFO_LABELS = ("FPS:", "Resolution:", "Frame Count:", "Encoder:", "Container:", "Color Space:",
                "Pixel Format:", "Is HDR:", "Bit Depth:")
+
+#: The pane's values are aligned digits that must not jitter while a run counts, so they keep one monospace face.
+INFO_MONO_FAMILY = "Fira Mono"
+
+#: The pane's own DESIGN geometry (the chosen mockup, variant A). The column's WIDTH is the page's (never stated
+#: here); these are only the insets the three blocks breathe with.
+INFO_CARD_RADIUS_PX = 6
+INFO_BLOCK_GAP_PX = 8
+INFO_CARD_INSET_PX = 12
+INFO_CELL_INSET_PX = 7
+INFO_HAIRLINE_PX = 1
+INFO_COLUMN_GAP_PX = 12
+INFO_RUN_GAP_PX = 7
+INFO_TAG_RADIUS_PX = 3
+INFO_TAG_INSET_X_PX = 6
+INFO_TAG_INSET_Y_PX = 3
+INFO_PILL_RADIUS_PX = 9
+INFO_BAR_HEIGHT_PX = 6
 
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
@@ -107,68 +114,34 @@ def _row_checkbox(parent) -> CheckBox:
     return box
 
 
-def _design_pt(design_pt: float, factor: float) -> str:
-    """A design point size at the factor in force, as the CSS string Qt's rich-text engine wants.
+def _as_int(text: str) -> int:
+    """``text`` as a frame count, or 0 when it is not one (the pane never trusts a formatted string to be a number)."""
+    try:
+        return max(0, int(float(str(text).strip())))
+    except (TypeError, ValueError):
+        return 0
 
-    ``:g`` keeps 1.0's ``10pt``/``11pt`` byte-identical to the Designer's markup, and writes ``15pt``/``16.5pt`` at 1.5
-    without a trailing ``.0``.
+
+def _upscale_tag(resolution_in: str, resolution_out: str) -> int | None:
+    """The whole upscale factor between two ``WxH`` strings, or ``None`` when they do not state one.
+
+    The tag is the one fact the headline adds: the resolution is the panel's reason to exist, and "2x upscale" is the
+    multiplier the output size carries. A non-integer ratio (or a source size that is not one) states no tag rather
+    than a rounded lie.
     """
-    return f"{design_pt * factor:g}pt"
-
-
-def _info_html(factor: float, language: str | None = None) -> str:
-    """The General tab's information body at ``factor``, its nine row names in ``language``.
-
-    Every size is stated as DESIGN x factor. The alternative - removing the inline sizes and letting the document font
-    rule - would use `RichTextView`'s 12 px body at 1.0, while the visible text today is the spans' 10 pt (13.3 px):
-    that is a 1.0 change, and 1.0 is this wave's identity gate. Building the markup keeps the Designer's pixel at 1.0
-    and makes the body grow with the factor instead of standing still on an absolute 10 pt.
-
-    The names go through the catalogue (`src/ui/i18n.py`, keyed by the English source string) rather than being baked
-    in: this document is the pane's whole content, so its own text is the only thing a language switch can rewrite.
-    ``language=None`` is the language in force, which is what the first paint uses.
-    """
-    span_pt = _design_pt(INFO_TEXT_PT, factor)
-    body_pt = _design_pt(INFO_BODY_PT, factor)
-    rows = "\n".join(
-        '<p style=" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; '
-        f'text-indent:0px;"><span style=" font-family:\'Sans Serif\'; font-size:{span_pt};">'
-        f'{i18n.translate(label, language)}</span></p>'
-        for label in INFO_LABELS
-    )
-    return (
-        '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">\n'
-        '<html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">\n'
-        'p, li { white-space: pre-wrap; }\n'
-        'hr { height: 1px; border-width: 0; }\n'
-        'li.unchecked::marker { content: "\\2610"; }\n'
-        'li.checked::marker { content: "\\2612"; }\n'
-        f'</style></head><body style=" font-family:\'Adwaita Sans\'; font-size:{body_pt}; font-weight:400; '
-        f'font-style:normal;">\n{rows}</body></html>'
-    )
-
-
-def _info_name_variants(label: str) -> tuple[str, ...]:
-    """Every spelling a row name can carry on screen: the English key plus each language's translation.
-
-    A second switch has to recognise the spelling the first one painted, so the rewrite reads the catalogue rather
-    than assuming the pane is still in English.
-    """
-    variants = [label]
-    for table in i18n.TRANSLATIONS.values():
-        translated = table.get(label)
-        if translated and translated not in variants:
-            variants.append(translated)
-    return tuple(variants)
-
-
-def _relabel_info_line(line: str, language: str | None) -> str:
-    """``line`` with its leading row name in ``language``; everything after the name is returned unchanged."""
-    for label in INFO_LABELS:
-        for variant in _info_name_variants(label):
-            if line.startswith(variant):
-                return i18n.translate(label, language) + line[len(variant):]
-    return line
+    try:
+        in_w, in_h = (int(part) for part in str(resolution_in).lower().split("x", 1))
+        out_w, out_h = (int(part) for part in str(resolution_out).lower().split("x", 1))
+    except (TypeError, ValueError):
+        return None
+    if in_w <= 0 or in_h <= 0 or out_w <= 0 or out_h <= 0:
+        return None
+    if out_w % in_w or out_h % in_h:
+        return None
+    width_ratio, height_ratio = out_w // in_w, out_h // in_h
+    if width_ratio != height_ratio or width_ratio <= 1:
+        return None
+    return width_ratio
 
 
 class GeneralSettingsPage:
@@ -687,51 +660,14 @@ class GeneralSettingsPage:
         self.widget_26.setObjectName(u"widget_26")
         sizePolicy5.setHeightForWidth(self.widget_26.sizePolicy().hasHeightForWidth())
         self.widget_26.setSizePolicy(sizePolicy5)
-        # No vertical ceiling: the Designer's 200 px cap sat ABOVE the panel's 190 px floor, so the panel could never
-        # grow into its own content - at 2.0 the video-info body needs 228 px and the last field line ended up under
-        # the scroll area's edge fade (owner, 2026-11-24: "the fade is aggressive, the text fits"). The height is the
-        # content's now (`RichTextView(fit_content=True)`), and the panel's own 190 px floor still keeps an empty one
-        # from collapsing.
+        # The video-info pane: three stacked toolkit blocks (transition headline, facts grid, run card) that size
+        # themselves. No ceiling and no floor here - the pane's vertical policy is Fixed, so its height is the content's
+        # (the old 190 px floor made a short body always reach the same position; owner, 2026-11-26).
         self.horizontalLayout_22 = QHBoxLayout(self.widget_26)
         self.horizontalLayout_22.setObjectName(u"horizontalLayout_22")
-        # A read-only rich-text panel: the toolkit's `RichTextView` takes the host's `setText`/`setFontPointSize` calls
-        # and scrolls its own content (the plate is `surface.list`, the colour the deleted page rule carried).
-        # `fit_content`: this pane's body is a record of fields, so it asks for the height that shows all of them
-        # instead of sitting on the 190 px floor below. Measured 2026-11-24: at 2.0 the body needed 208 px, the floor
-        # kept 190, and the last field line was hidden under the scroll area's edge fade (owner: "the fade is
-        # aggressive, the text fits"). The floor still keeps an EMPTY panel from collapsing.
-        self.inputVideoInfoTextEdit = RichTextView(self.widget_26, padding=(10, 5, 10, 5), fit_content=True)
-        # The stock editor's text is 12 PIXELS (the Designer's sizing); `setFontPointSize` would convert through the
-        # screen DPI and render 16 px, which grew every line of this panel.
-        self.inputVideoInfoTextEdit.setTextPixelSize(RVE_CONTROL_FONT_PX)
-        self.inputVideoInfoTextEdit.setObjectName(u"inputVideoInfoTextEdit")
-        self.inputVideoInfoTextEdit.setEnabled(False)
-        # HEIGHT FROM THE CONTENT, not from the column's slack. `sizePolicy3` is vertical EXPANDING, so the layout handed
-        # this pane every spare pixel and it always ended at the bottom of the column whatever the body needed (owner,
-        # 2026-11-26: "почему-то фиксированная высота, то ли пол - типа он всегда достигает какой-то позиции, а не
-        # понимает сколько ему реально нужно"). Its own hint is already the body's height (`RichTextView(fit_content=
-        # True)`), so the vertical policy is Fixed - a fresh policy, because `sizePolicy3` is shared with other rows.
-        info_policy = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
-        info_policy.setHeightForWidth(False)
-        self.inputVideoInfoTextEdit.setSizePolicy(info_policy)
-        # The Designer had a 190 px MINIMUM under a 180 px MAXIMUM here: Qt clamps to the maximum, the content needed
-        # 2 px more than it had, and the toolkit drew its 'there is more below' fade over text that already fitted
-        # (owner, 2026-11-24: 'the text fits but the fade is there'). The contradictory ceiling is gone - the default
-        # maximum applies and the floor keeps the Designer's 190 so an empty panel does not collapse. The fade itself
-        # now also requires a ramp's worth of remaining scroll, so a 2 px rounding can never advertise more text.
-        # The Designer's 190 px floor is gone with the fixed policy: it WAS the "always reaches some position" the owner
-        # sees on a short body (an empty video-info pane is 9 labels shorter than 190). The pane is its content now, and
-        # an empty one is the padding, which is what "as much as it really needs" means.
-        self.inputVideoInfoTextEdit.setMinimumSize(QSize(0, 0))
-        self.inputVideoInfoTextEdit.setAccessibleDescription(u"")
-        # No stylesheet: the pane paints its own text and plate; the deleted rule only forced white on a disabled
-        # editor, which is the colour this pane's token already gives it.
-        self.inputVideoInfoTextEdit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.inputVideoInfoTextEdit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.inputVideoInfoTextEdit.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
-        self.inputVideoInfoTextEdit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        self.inputVideoInfoTextEdit.setReadOnly(True)
-        self.horizontalLayout_22.addWidget(self.inputVideoInfoTextEdit)
+        self.horizontalLayout_22.setContentsMargins(0, 0, 0, 0)
+        self._build_video_info_pane()
+        self.horizontalLayout_22.addWidget(self.videoInfoPane)
         self.verticalLayout_32.addWidget(self.widget_26)
         # The list is a column of fixed rows; the layout's leftover height is NOT theirs to share. Without a spacer the
         # box layout hands the slack to the rows (each `QWidget` defaults to a Preferred vertical policy, which grows),
@@ -773,7 +709,6 @@ class GeneralSettingsPage:
             celReuse=self.celReuse,
             addToRenderQueueButton=self.addToRenderQueueButton,
             generalSettings=self.generalSettings,
-            inputVideoInfoTextEdit=self.inputVideoInfoTextEdit,
             widget_5=self.widget_5,
             scrollArea_4=self.scrollArea_4,
             scrollAreaWidgetContents_4=self.scrollAreaWidgetContents_4,
@@ -795,29 +730,353 @@ class GeneralSettingsPage:
         self._scale = ScaleFollower(self.generalSettings, self._apply_scale)
         return self.generalSettings
 
-    def _render_info_pane(self, language: str | None = None) -> None:
-        """Paint the pane's nine-row placeholder at the factor and language in force."""
-        self.inputVideoInfoTextEdit.setHtml(_info_html(UiScale.get_instance().factor(), language))
-        # What the placeholder reads as, so a switch can tell it apart from a loaded video's rows (below).
-        self._info_placeholder_text = self.inputVideoInfoTextEdit.text()
+    # -- video-info pane (variant A: transition headline, facts grid, run card) ----------------------
 
-    def _retranslate_info_pane(self, language: str | None = None) -> None:
-        """Repaint the pane's nine row names in ``language``, keeping a loaded video's values.
+    def _build_video_info_pane(self) -> None:
+        """Build the pane's two states once: the nine-row placeholder and the three filled blocks.
 
-        The pane has two writers: this page paints the nine-row placeholder, and `MainWindow.updateVideoGUIText`
-        replaces it with the loaded file's values - the same nine names, each followed by its values. A switch is
-        therefore one of two rewrites. The placeholder is rebuilt from the catalogue (one document, same spans, same
-        factor). A loaded body is relabelled line by line, because re-rendering the placeholder over it would erase
-        the video's numbers - the regression this method exists to avoid.
+        Everything here is a toolkit control (`SurfacePanel`, `Text`, `ProgressBar`) in plain box layouts - no QSS, no
+        custom paint, no hand-drawn rectangle. The states are built together and toggled by `set_video_info`, so a
+        language switch or a scale change only re-states text and design numbers, never rebuilds the tree.
         """
-        pane = self.inputVideoInfoTextEdit
-        current = pane.text()
-        if not current or current == getattr(self, "_info_placeholder_text", None):
-            self._render_info_pane(language)
+        self._video_values: dict[str, tuple[str, str]] | None = None
+        self._run_frame = 0
+        self._run_total = 0
+        self._run_percent = 0.0
+        self._run_eta = ""
+        self._run_fps = ""
+        self._run_state = "Idle"
+        self._run_elapsed = "0:00:00"
+
+        # The pane host paints nothing: the cards below carry the plates, and the page already paints `surface.page`.
+        self.videoInfoPane = SurfacePanel(self.widget_26, background_token=None)
+        self.videoInfoPane.setObjectName("videoInfoPane")
+        self.videoInfoPane.setAccessibleDescription(u"")
+        info_policy = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
+        info_policy.setHeightForWidth(False)
+        self.videoInfoPane.setSizePolicy(info_policy)
+        self.videoInfoLayout = QVBoxLayout(self.videoInfoPane)
+        self.videoInfoLayout.setContentsMargins(0, 0, 0, 0)
+        self.videoInfoLayout.setSpacing(scaled_px(INFO_BLOCK_GAP_PX))
+
+        # -- the empty state: the nine row names, one per line (this is what `None` restores) ---------
+        self.infoPlaceholder = SurfacePanel(self.videoInfoPane, background_token="surface.list",
+                                            radius=scaled_px(INFO_CARD_RADIUS_PX))
+        self.infoPlaceholder.setObjectName("videoInfoPlaceholder")
+        self.infoPlaceholderLayout = QVBoxLayout(self.infoPlaceholder)
+        self.infoPlaceholderLayout.setSpacing(0)
+        self.infoPlaceholderLabels: list[Text] = []
+        for _label in INFO_LABELS:
+            row_label = Text(parent=self.infoPlaceholder, color_token="label.text.muted")
+            apply(row_label, CAPTION_PT)
+            self.infoPlaceholderLayout.addWidget(row_label)
+            self.infoPlaceholderLabels.append(row_label)
+        self.videoInfoLayout.addWidget(self.infoPlaceholder)
+
+        # -- the filled state: three stacked blocks -------------------------------------------------
+        self.infoFilled = QWidget(self.videoInfoPane)
+        self.infoFilled.setObjectName("videoInfoFilled")
+        filled_layout = QVBoxLayout(self.infoFilled)
+        filled_layout.setContentsMargins(0, 0, 0, 0)
+        filled_layout.setSpacing(scaled_px(INFO_BLOCK_GAP_PX))
+
+        # Block 1 + 2 share one card: the headline, a hairline, then two columns x three rows of facts.
+        self.infoFactsCard = SurfacePanel(self.infoFilled, background_token="surface.list",
+                                          radius=scaled_px(INFO_CARD_RADIUS_PX))
+        self.infoFactsCard.setObjectName("videoInfoFactsCard")
+        facts_card_layout = QVBoxLayout(self.infoFactsCard)
+        facts_card_layout.setContentsMargins(0, 0, 0, 0)
+        facts_card_layout.setSpacing(0)
+
+        transition = QWidget(self.infoFactsCard)
+        self.infoTransitionLayout = QHBoxLayout(transition)
+        self.infoTransitionLayout.setSpacing(scaled_px(INFO_COLUMN_GAP_PX))
+        self.infoTransitionLayout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.infoSizeIn = Text(parent=transition)
+        apply(self.infoSizeIn, GROUP_TITLE_PT, bold=True, family=INFO_MONO_FAMILY)
+        self.infoSizeOut = Text(parent=transition)
+        apply(self.infoSizeOut, GROUP_TITLE_PT, bold=True, family=INFO_MONO_FAMILY)
+        self.infoMetaIn = Text(parent=transition, color_token="label.text.muted")
+        apply(self.infoMetaIn, CAPTION_PT)
+        self.infoMetaOut = Text(parent=transition, color_token="label.text.muted")
+        apply(self.infoMetaOut, CAPTION_PT)
+        # Each side is its own column (size over its meta line); `addStretch` inside the column is not needed because
+        # both sides take an equal share of the row and the tag is pushed to the right by the second share.
+        for size_label, meta_label in ((self.infoSizeIn, self.infoMetaIn), (self.infoSizeOut, self.infoMetaOut)):
+            side = QWidget(transition)
+            side_layout = QVBoxLayout(side)
+            side_layout.setContentsMargins(0, 0, 0, 0)
+            side_layout.setSpacing(1)
+            side_layout.addWidget(size_label)
+            side_layout.addWidget(meta_label)
+            self.infoTransitionLayout.addWidget(side, 1)
+            if size_label is self.infoSizeIn:
+                self.infoArrow = Text(parent=transition, text=u"\u2192", color_token="label.text.muted")
+                apply(self.infoArrow, GROUP_TITLE_PT, family=INFO_MONO_FAMILY)
+                self.infoTransitionLayout.addWidget(self.infoArrow, 0,
+                                                    Qt.AlignmentFlag.AlignVCenter)
+        self.infoTagPlate = SurfacePanel(transition, background_token="list_item.background.focused",
+                                         radius=scaled_px(INFO_TAG_RADIUS_PX))
+        self.infoTagPlate.setObjectName("videoInfoTagPlate")
+        self.infoTagLayout = QHBoxLayout(self.infoTagPlate)
+        self.infoTagLayout.setSpacing(0)
+        self.infoTag = Text(parent=self.infoTagPlate, color_token="accent")
+        apply(self.infoTag, CAPTION_PT, family=INFO_MONO_FAMILY)
+        self.infoTagLayout.addWidget(self.infoTag)
+        self.infoTransitionLayout.addWidget(self.infoTagPlate, 0, Qt.AlignmentFlag.AlignVCenter)
+        facts_card_layout.addWidget(transition)
+
+        self.infoHairlines: list[SurfacePanel] = []
+        self.infoColumnHairlines: list[SurfacePanel] = []
+        self.infoCellLayouts: list[QHBoxLayout] = []
+        self.infoFactLabels: dict[str, Text] = {}
+        self.infoFactValues: dict[str, Text] = {}
+
+        def add_hairline() -> None:
+            hairline = SurfacePanel(self.infoFactsCard, background_token="separator.color")
+            hairline.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            facts_card_layout.addWidget(hairline)
+            self.infoHairlines.append(hairline)
+
+        add_hairline()
+        fact_pairs = (("Encoder:", "Container:"), ("Color Space:", "Pixel Format:"),
+                      ("Bit Depth:", "Is HDR:"))
+        for index, pair in enumerate(fact_pairs):
+            fact_row = QWidget(self.infoFactsCard)
+            fact_row_layout = QHBoxLayout(fact_row)
+            fact_row_layout.setContentsMargins(0, 0, 0, 0)
+            fact_row_layout.setSpacing(0)
+            for column, key in enumerate(pair):
+                if column:
+                    column_hairline = SurfacePanel(fact_row, background_token="separator.color")
+                    column_hairline.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+                    fact_row_layout.addWidget(column_hairline)
+                    self.infoColumnHairlines.append(column_hairline)
+                cell = QWidget(fact_row)
+                cell_layout = QHBoxLayout(cell)
+                cell_layout.setSpacing(8)
+                label = Text(parent=cell, color_token="label.text.muted")
+                apply(label, CAPTION_PT)
+                value = Text(parent=cell, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                apply(value, CAPTION_PT, family=INFO_MONO_FAMILY)
+                cell_layout.addWidget(label)
+                cell_layout.addStretch(1)
+                cell_layout.addWidget(value)
+                self.infoCellLayouts.append(cell_layout)
+                self.infoFactLabels[key] = label
+                self.infoFactValues[key] = value
+                fact_row_layout.addWidget(cell, 1)
+            facts_card_layout.addWidget(fact_row)
+            if index < len(fact_pairs) - 1:
+                add_hairline()
+        filled_layout.addWidget(self.infoFactsCard)
+
+        # Block 3: the run card - the counters, the toolkit bar, then fps/status/elapsed.
+        self.infoRunCard = SurfacePanel(self.infoFilled, background_token="surface.list",
+                                        radius=scaled_px(INFO_CARD_RADIUS_PX))
+        self.infoRunCard.setObjectName("videoInfoRunCard")
+        self.infoRunLayout = QVBoxLayout(self.infoRunCard)
+        self.infoRunLayout.setSpacing(scaled_px(INFO_RUN_GAP_PX))
+
+        run_line = QWidget(self.infoRunCard)
+        run_line_layout = QHBoxLayout(run_line)
+        run_line_layout.setContentsMargins(0, 0, 0, 0)
+        run_line_layout.setSpacing(10)
+        self.infoFrameLine = Text(parent=run_line)
+        apply(self.infoFrameLine, CAPTION_PT, family=INFO_MONO_FAMILY)
+        self.infoRemainingLine = Text(parent=run_line, color_token="label.text.muted",
+                                      alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        apply(self.infoRemainingLine, CAPTION_PT, family=INFO_MONO_FAMILY)
+        run_line_layout.addWidget(self.infoFrameLine)
+        run_line_layout.addStretch(1)
+        run_line_layout.addWidget(self.infoRemainingLine)
+        self.infoRunLayout.addWidget(run_line)
+
+        self.infoProgress = ProgressBar(self.infoRunCard, height=INFO_BAR_HEIGHT_PX)
+        self.infoProgress.setObjectName("videoInfoProgress")
+        self.infoRunLayout.addWidget(self.infoProgress)
+
+        run_foot = QWidget(self.infoRunCard)
+        run_foot_layout = QHBoxLayout(run_foot)
+        run_foot_layout.setContentsMargins(0, 0, 0, 0)
+        run_foot_layout.setSpacing(10)
+        self.infoFpsPlate = SurfacePanel(run_foot, background_token="list_item.background.focused",
+                                         radius=scaled_px(INFO_PILL_RADIUS_PX))
+        self.infoFpsPlate.setObjectName("videoInfoFpsPlate")
+        self.infoFpsLayout = QHBoxLayout(self.infoFpsPlate)
+        self.infoFpsLayout.setSpacing(0)
+        self.infoFps = Text(parent=self.infoFpsPlate, color_token="accent")
+        apply(self.infoFps, CAPTION_PT, family=INFO_MONO_FAMILY)
+        self.infoFpsLayout.addWidget(self.infoFps)
+        self.infoStatus = Text(parent=run_foot, color_token="label.text.muted")
+        apply(self.infoStatus, CAPTION_PT)
+        self.infoElapsed = Text(parent=run_foot, color_token="label.text.muted",
+                                alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        apply(self.infoElapsed, CAPTION_PT, family=INFO_MONO_FAMILY)
+        run_foot_layout.addWidget(self.infoFpsPlate)
+        run_foot_layout.addWidget(self.infoStatus)
+        run_foot_layout.addStretch(1)
+        run_foot_layout.addWidget(self.infoElapsed)
+        self.infoRunLayout.addWidget(run_foot)
+        filled_layout.addWidget(self.infoRunCard)
+
+        self.videoInfoLayout.addWidget(self.infoFilled)
+
+    def set_video_info(self, values: dict[str, tuple[str, str]] | None) -> None:
+        """Fill the pane. `values` is keyed by the `INFO_LABELS` keys ("FPS:", "Resolution:", ...) and each value is
+        (input, output); None restores the nine-row placeholder. A language switch re-renders from the stored values."""
+        previous = self._video_values
+        if values is None:
+            self._video_values = None
+            self._reset_run_status()
+        else:
+            self._video_values = {
+                key: (str(pair[0]), str(pair[1])) if isinstance(pair, (tuple, list)) and len(pair) >= 2
+                else (str(pair), "")
+                for key, pair in values.items()
+            }
+            total = _as_int(self._video_values.get("Frame Count:", ("", ""))[1])
+            if previous is None or total != self._run_total:
+                self._run_total = total
+                self._run_frame = 0
+                self._run_percent = 0.0
+        self._render_video_info()
+
+    def video_info_text(self) -> str:
+        """The nine rows as the plain text the control probe reads ("FPS: 24.0 -> 24.0" per line), or "" when empty."""
+        if self._video_values is None:
+            return ""
+        lines = []
+        for key in INFO_LABELS:
+            value_in, value_out = self._video_values.get(key, ("", ""))
+            lines.append(f"{key} {value_in} -> {value_out}".rstrip())
+        return "\n".join(lines)
+
+    def set_run_status(self, *, frame: int | None = None, total: int | None = None,
+                       percent: float | None = None, eta: str | None = None, fps: str | None = None,
+                       status: str | None = None, elapsed: str | None = None) -> None:
+        """State the run card's counters (`frame`, `total`, `percent`, `eta`, `fps`, `status`, `elapsed`).
+
+        The pane is the block's owner; the process tick that knows these numbers is outside this page, so it hands
+        them over here and the pane paints what it was given. Omitted arguments keep their current value.
+        """
+        if frame is not None:
+            self._run_frame = max(0, int(frame))
+        if total is not None:
+            self._run_total = max(0, int(total))
+        if percent is not None:
+            self._run_percent = float(percent)
+        if eta is not None:
+            self._run_eta = str(eta)
+        if fps is not None:
+            self._run_fps = str(fps)
+        if status is not None:
+            self._run_state = str(status)
+        if elapsed is not None:
+            self._run_elapsed = str(elapsed)
+        self._render_video_info()
+
+    def _reset_run_status(self) -> None:
+        self._run_frame = 0
+        self._run_total = 0
+        self._run_percent = 0.0
+        self._run_eta = ""
+        self._run_fps = ""
+        self._run_state = "Idle"
+        self._run_elapsed = "0:00:00"
+
+    @staticmethod
+    def _fact_name(key: str, language: str | None) -> str:
+        """A facts-grid name from the catalogue, without the row's trailing colon (the mockup's cell labels)."""
+        return i18n.translate(key, language).rstrip(":").strip()
+
+    @staticmethod
+    def _meta_line(fps: str, frames: str, language: str | None) -> str:
+        """`24 fps · 493 frames` under one side of the headline, from that side's own values."""
+        parts = []
+        if fps:
+            parts.append(f"{fps} {i18n.translate('fps', language)}")
+        if frames:
+            parts.append(f"{frames} {i18n.translate('frames', language)}")
+        return " · ".join(parts)
+
+    def _render_video_info(self, language: str | None = None) -> None:
+        """Repaint the pane from the STORED values at ``language`` - the placeholder when there are none.
+
+        This is the only writer of the pane's text. A language switch calls it again, so the row names follow the
+        catalogue while every value stays byte-identical (the regression the old line-rewriting relabel guarded).
+        """
+        if self._video_values is None:
+            self.infoFilled.setVisible(False)
+            self.infoPlaceholder.setVisible(True)
+            for label, widget in zip(INFO_LABELS, self.infoPlaceholderLabels):
+                widget.setText(i18n.translate(label, language))
             return
-        relabelled = "\n".join(_relabel_info_line(line, language) for line in current.split("\n"))
-        if relabelled != current:
-            pane.setText(relabelled)
+
+        self.infoPlaceholder.setVisible(False)
+        self.infoFilled.setVisible(True)
+        get = self._video_values.get
+        resolution_in, resolution_out = get("Resolution:", ("", ""))
+        fps_in, fps_out = get("FPS:", ("", ""))
+        frames_in, frames_out = get("Frame Count:", ("", ""))
+        self.infoSizeIn.setText(resolution_in or u"\u2014")
+        self.infoSizeOut.setText(resolution_out or u"\u2014")
+        self.infoMetaIn.setText(self._meta_line(fps_in, frames_in, language))
+        self.infoMetaOut.setText(self._meta_line(fps_out, frames_out, language))
+        for key, widget in self.infoFactLabels.items():
+            widget.setText(self._fact_name(key, language))
+        for key, widget in self.infoFactValues.items():
+            widget.setText(get(key, ("", ""))[1] or u"\u2014")
+
+        factor = _upscale_tag(resolution_in, resolution_out)
+        self.infoTag.setText(f"{factor}x {i18n.translate('upscale', language)}" if factor else "")
+        self.infoTagPlate.setVisible(bool(factor))
+        self._render_run_status(language)
+
+    def _render_run_status(self, language: str | None = None) -> None:
+        """Paint the run card: frame counter and ETA on one line, the bar, then fps/status/elapsed."""
+        total = self._run_total or _as_int(self._video_values.get("Frame Count:", ("", ""))[1]
+                                           if self._video_values else "")
+        frame = min(self._run_frame, total) if total else self._run_frame
+        total_text = str(total) if total else u"\u2014"
+        self.infoFrameLine.setText(i18n.translate("frame ", language) + f"{frame} / {total_text}")
+        eta = self._run_eta or u"\u2014"
+        self.infoRemainingLine.setText(f"{self._run_percent:g}% · {eta}" + i18n.translate(" left", language))
+        self.infoProgress.setRange(0, max(1, total))
+        self.infoProgress.setValue(frame if total else 0)
+        fps = self._run_fps or u"\u2014"
+        self.infoFps.setText(f"{fps} {i18n.translate('fps', language)}")
+        self.infoStatus.setText(i18n.translate(self._run_state, language))
+        self.infoElapsed.setText(self._run_elapsed + i18n.translate(" elapsed", language))
+
+    def _apply_info_scale(self) -> None:
+        """Resolve the pane's design geometry at the factor in force (called from `_apply_scale`)."""
+        gap = scaled_px(INFO_BLOCK_GAP_PX)
+        inset = scaled_px(INFO_CARD_INSET_PX)
+        cell_inset = scaled_px(INFO_CELL_INSET_PX)
+        hairline = max(1, scaled_px(INFO_HAIRLINE_PX))
+        radius = scaled_px(INFO_CARD_RADIUS_PX)
+        tag_x = scaled_px(INFO_TAG_INSET_X_PX)
+        tag_y = scaled_px(INFO_TAG_INSET_Y_PX)
+
+        self.videoInfoLayout.setSpacing(gap)
+        for card in (self.infoFactsCard, self.infoRunCard, self.infoPlaceholder):
+            card.set_radius(radius)
+        self.infoPlaceholderLayout.setContentsMargins(inset, inset, inset, inset)
+        self.infoTransitionLayout.setContentsMargins(inset, inset, inset, inset)
+        self.infoTransitionLayout.setSpacing(scaled_px(INFO_COLUMN_GAP_PX))
+        self.infoTagLayout.setContentsMargins(tag_x, tag_y, tag_x, tag_y)
+        self.infoTagPlate.set_radius(scaled_px(INFO_TAG_RADIUS_PX))
+        self.infoFpsLayout.setContentsMargins(tag_x, tag_y, tag_x, tag_y)
+        self.infoFpsPlate.set_radius(scaled_px(INFO_PILL_RADIUS_PX))
+        for cell_layout in self.infoCellLayouts:
+            cell_layout.setContentsMargins(inset, cell_inset, inset, cell_inset)
+        for line in self.infoHairlines:
+            line.setFixedHeight(hairline)
+        for line in self.infoColumnHairlines:
+            line.setFixedWidth(hairline)
+        self.infoRunLayout.setContentsMargins(inset, inset, inset, inset)
+        self.infoRunLayout.setSpacing(scaled_px(INFO_RUN_GAP_PX))
 
     def _apply_scale(self) -> None:
         """Resolve this page's design numbers at the factor in force now.
@@ -860,7 +1119,10 @@ class GeneralSettingsPage:
         self.verticalLayout_39.setContentsMargins(inset, inset, inset, inset)
         self.horizontalLayout_50.setSpacing(section_gap)
 
-        self._render_info_pane(i18n.current_language())
+        self._apply_info_scale()
+        # Re-state the pane at the factor just resolved: the texts are unchanged, but the fragments (units, frames,
+        # elapsed) are rebuilt so nothing is left frozen from the previous language/scale pass.
+        self._render_video_info(i18n.current_language())
 
     def retranslate(self, language: str | None = None) -> None:
         self.inputFileSelectButton.setText(QCoreApplication.translate("MainWindow", u"Select Input File", None))
@@ -896,6 +1158,6 @@ class GeneralSettingsPage:
         self.frameReuse.setText(QCoreApplication.translate("MainWindow", u"Reuse unchanged frames", None))
         self.celReuse.setText(QCoreApplication.translate("MainWindow", u"By cel (ignore grain, dust and scan wobble)", None))
         self.addToRenderQueueButton.setText(QCoreApplication.translate("MainWindow", u" Add to Render Queue", None))
-        # Last, and through the pane's own two-writer rule: a language switch must repaint the nine names without
-        # erasing the values `updateVideoGUIText` puts after them.
-        self._retranslate_info_pane(language)
+        # Last: the pane re-renders from its STORED values, so the nine row names follow the catalogue while the
+        # values a loaded video put there stay byte-identical.
+        self._render_video_info(language)

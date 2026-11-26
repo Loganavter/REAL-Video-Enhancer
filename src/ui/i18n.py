@@ -87,6 +87,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         " elapsed": " прошло",
         " left": " осталось",
         "frame ": "кадр ",
+        # --- The video-info pane's units (`src/ui/pages/general_settings.py::_meta_line` / tag / fps pill) ---------
+        # Fragments written after a number, like the progress-detail ones above. `upscale` is the headline tag's word
+        # (`2x upscale`); `fps` and `frames` are the headline's muted second line and the run card's pill.
+        "fps": "к/с",
+        "frames": "кадров",
+        "upscale": "увеличение",
         # The five inner tab labels of the process page (`processSettingsContainer`).
         "General": "Общие",
         "Encoder Options": "Параметры кодирования",
@@ -257,7 +263,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Expand the preview band": "Развернуть полосу превью",
         "Paused: the preview holds this frame. Press to follow the render.": "Пауза: превью держит этот кадр. Нажмите, чтобы следовать за рендером.",
         "Your PC does not have enough storage for PyTorch/TensorRT. Please free up at least 15gb.": "Недостаточно места для PyTorch/TensorRT. Освободите хотя бы 15 ГБ.",
-        # --- The General tab's video-info pane (`src/ui/pages/general_settings.py::_info_html`) --------------
+        # --- The General tab's video-info pane (`src/ui/pages/general_settings.py`, variant A blocks) ---------
         # The pane's nine row names. The values written after them (`MainWindow.updateVideoGUIText`) are not
         # translated: they are file facts. `FPS:` is above, already the process page's key.
         "Resolution:": "Разрешение:",
