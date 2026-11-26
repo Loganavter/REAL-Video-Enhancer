@@ -3,14 +3,15 @@
 The track is a timeline, not a progress bar, and it carries three facts at once:
 
 * the whole clip (the unfilled groove, the theme's dark track),
-* the band the renderer has actually produced - the same blue as the played fill at `PRODUCED_ALPHA`, so a fully
-  produced clip reads as "the whole bar is tinted" and the render head is its right edge,
-* the played fill up to the playhead, in full-strength blue, with the thumb standing where the playhead is.
+* the band the renderer has actually produced, in the theme's blue - ONE bar, no second fill, and the render head is
+  its right edge,
+* the thumb, standing where the playhead is.
 
-Colours follow the approved layout-E mockup (`~/Загрузки/rve-preview-mockups/shared.css`): `--track: #2a303c`,
-`.produced { background: rgba(91,157,255,.28) }`, `.fill { #4f8df0 -> #74adff }`. The code used to paint the played
-fill with `accent`, which this app's theme maps to WHITE, and the produced band in solid blue - i.e. both roles swapped
-against the design (owner, 2026-11-26: "у меня produced - всё, если ты смотрел на комментарий").
+Why one bar and not a "produced" tint plus a brighter "played" fill: the boundary between those two colours sat exactly
+under the thumb, so every seek looked like the bar was split by the hand, and at produced=100 % the right half was a
+dull tint (owner, 2026-11-26, two annotated screenshots: "сейчас так" = bright to the thumb then muted, "должно быть
+так" = the same bright blue to the end). The played position is carried by the thumb and by the time readout; the
+played FILL number survives in `scrub_report()` for diagnosis, it is simply not painted.
 
 The widget is a `sli_ui_toolkit` `Slider`, so the track/thumb geometry, the keyboard edit mode (`Enter`) and the
 theme repaint are the toolkit's; only the band painting is ours (`setTrackPainter`). A press or drag emits
@@ -53,15 +54,18 @@ SNAP_BACK_WINDOW_S = 3.0
 #: `rgba(255,255,255,.5)`). `accent` must never be the PLAYED fill: this app's theme resolves it to white, which is
 #: why the bar used to show a white "played" bar and a solid blue band - both roles swapped against the design.
 TIMELINE_TOKENS = {
-    "track": "slider.track.background",
+    # GREY is "not upscaled yet", blue is "produced": the pointer plays no part in either (owner, 2026-11-26). The
+    # track token is the theme's own unfilled groove, not the darker background, so the unproduced part reads as grey
+    # next to the blue instead of disappearing into the panel.
+    "track": "slider.track.unfilled",
     "produced": "slider.track.filled",
     "played": "slider.track.filled",
     "marker": "accent",
 }
 
-#: The produced band's opacity: the mockup's `.produced` is `rgba(91,157,255,.28)`. One colour, two roles - the band is
-#: the same blue as the played fill, only muted, so "produced but not played" reads as a tint rather than a second fill.
-PRODUCED_ALPHA = 0.28
+#: The bar's opacity. 1.0 on purpose: the band IS the progress, and a tinted band put a second colour boundary under
+#: the thumb (see the module docstring). Kept as a named constant so the decision is visible, not buried in a literal.
+PRODUCED_ALPHA = 1.0
 
 
 def format_content_time(seconds: float | None) -> str:
@@ -196,6 +200,7 @@ class PreviewTimeline(Slider):
             why = self._state_fill_source or "unknown"
         return {
             "width_px": round(float(self.width()), 1),
+            "one_bar": True,
             "duration": round(float(self._duration), 3),
             "finished": bool(self._state_finished),
             "rects": list(self._last_paint),
@@ -285,8 +290,18 @@ class PreviewTimeline(Slider):
         self._last_emitted = int(raw)
         seconds = max(0.0, min(1.0, raw / float(TRACK_STEPS))) * self._duration
         self._asked = (float(seconds), time.monotonic())
+        # The press is the ONE moment the split is certain: the thumb goes to the asked position while the picture is
+        # still where it was. Without the fill in this line the log showed a clean "apply" afterwards and nothing about
+        # the 1.9 s in between (owner's log, 2026-11-26: press 15.3 %, landed after 1856 ms, no line said the picture
+        # was still at 99.6 % while the thumb stood at 15.3 %).
+        asked_fraction = max(0.0, min(1.0, raw / float(TRACK_STEPS)))
+        fill_now = float(self._played_fraction)
         self._note("ask", value=int(raw), seconds=round(float(seconds), 3),
-                   produced=round(float(self._produced_fraction), 4), scrubbing=int(bool(self._scrubbing)))
+                   thumb=round(asked_fraction, 4), fill=round(fill_now, 4),
+                   glued=int(abs(fill_now - asked_fraction) <= 1.0 / float(TRACK_STEPS)),
+                   gap_s=round(abs(fill_now - asked_fraction) * float(self._duration), 3),
+                   produced=round(float(self._produced_fraction), 4),
+                   finished=int(bool(self._state_finished)), scrubbing=int(bool(self._scrubbing)))
         self.seekRequested.emit(float(seconds))
 
     def _set_silent_value(self, value: int) -> None:
@@ -339,19 +354,9 @@ class PreviewTimeline(Slider):
             painter.drawRect(span)
             record("produced", produced, span, band, "produced / duration")
 
-        # The fill cannot run past the produced band: nothing exists beyond the edge the band marks, and a frame the
-        # display route decoded ahead of it is one picture, not a stretch of played timeline.
-        played = max(0.0, min(1.0, self._played_fraction))
-        clamped = bool(produced > 0.0 and played > produced)
-        if produced > 0.0:
-            played = min(played, produced)
-        if played > 0.0:
-            fill = _token("played", "#0078d4")
-            span = QRectF(rect.left(), rect.top(), rect.width() * played, rect.height())
-            painter.setBrush(QBrush(fill))
-            painter.drawRect(span)
-            record("played", played, span, fill,
-                   "played / duration" + (" (clamped to the band)" if clamped else ""))
+        # NO second fill on purpose: the played fraction is a diagnostic number (it tells "the picture is behind the
+        # request"), not a colour. Painting it put the only visible boundary of the bar under the thumb, which is the
+        # seam the owner read as "someone glued the colours to the seeker".
 
         if produced > 0.0:
             # The render head is the produced band's right edge: a 1 px light rule reads as "the renderer is here"

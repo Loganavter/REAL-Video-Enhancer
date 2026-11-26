@@ -884,98 +884,52 @@ def test_every_owner_seeks_through_the_page_not_behind_its_back(kind):
     assert owner.seeks == [], "the page routes the press; the adapter must not seek the owner behind its back"
 
 
-def test_the_strip_paints_played_in_blue_and_produced_as_the_same_blue_tinted(controls):
-    """The colours are the approved mockup's (`shared.css`): track dark, band `rgba(91,157,255,.28)`, played the bright
-    blue, head white at 50 %.
+def test_the_strip_is_one_bar_blue_for_produced_grey_for_not(controls):
+    """Blue = upscaled. Grey = not upscaled yet. The pointer does not decide either (owner, 2026-11-26).
 
-    This app's theme resolves `accent` to WHITE, and the widget used `accent` for the played fill while painting the
-    produced band in solid blue - so a fully produced clip showed a short white bar and a blue band, i.e. both roles
-    swapped (owner, 2026-11-26: "у меня produced - всё, если ты смотрел на комментарий").
-    """
-    from PySide6.QtCore import QRectF
-    from src.ui.preview.timeline import PRODUCED_ALPHA
-    from src.ui.preview.state import PreviewPhase
-
-    timeline = controls.timeline
-    timeline.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=20.0,
-                                    playhead=3.0, played=3.0, fps=24.0))
-
-    class _Painter:
-        def __init__(self) -> None:
-            self.rects: list[tuple[int, int, int, int]] = []
-            self.brushes: list = []
-            self.pens: list = []
-
-        def save(self): pass
-        def restore(self): pass
-        def setPen(self, pen): self.pens.append(pen)
-        def setBrush(self, brush): self.brushes.append(brush)
-        def drawRect(self, rect): self.rects.append((rect.x(), round(brush_alpha(self.brushes[-1]), 3),
-                                                     round(rect.width(), 3), 0))
-        def drawLine(self, *args): self.rects.append(("head",))
-
-    def brush_alpha(brush):
-        return brush.color().alphaF()
-
-    painter = _Painter()
-    timeline._paint_track(painter, QRectF(0, 0, 100, 4))
-
-    # track, band (28 %), played (100 %), head
-    assert len(painter.rects) == 4, painter.rects
-    track, band, played, head = painter.rects
-    assert band[1] == pytest.approx(PRODUCED_ALPHA, abs=0.01), "the produced band must be the tinted blue"
-    assert band[2] == pytest.approx(100.0), "produced=100% must tint the whole bar"
-    assert played[1] == pytest.approx(1.0), "the played fill is full strength"
-    assert played[2] == pytest.approx(15.0), "played=3 s of 20 s"
-    assert head[0] == "head"
-    played_colour = painter.brushes[2].color().name()
-    assert played_colour != "#ffffff", "the played fill must not be the theme's white accent"
-    assert painter.pens[-1].color().alphaF() == pytest.approx(0.5, abs=0.01), "the head is white at 50 %"
-
-
-def test_the_report_says_where_each_rect_is_drawn_and_from_which_number(controls):
-    """The owner's ask: "улучши отладку чтобы было видно и завершено ли видео и где что отрисовывается и почему".
-
-    The painter records every rect as it draws it, so the report answers with numbers: which rect, its px span, its
-    fraction, the colour AND alpha used, and the state number it came from; `finished` says whether the clip is fully
-    produced; `glued`/`why_not_glued` say whether the fill is literally the thumb and, if not, the page's reason.
+    Two annotated screenshots settled it: with produced=100 % the bar must be one blue line to the end, and while the
+    clip is still being upscaled the rest is grey - not a tint, not a second "played" colour whose boundary sits under
+    the thumb.
     """
     from PySide6.QtCore import QRectF
     from src.ui.preview.state import PreviewPhase
 
     timeline = controls.timeline
     timeline.resize(400, 20)
+
+    class _Painter:
+        def __init__(self) -> None:
+            self.brushes = []
+            self.rects = []
+
+        def save(self): pass
+        def restore(self): pass
+        def setPen(self, _pen): pass
+        def setBrush(self, brush): self.brushes.append(brush)
+        def drawRect(self, rect): self.rects.append((round(rect.x(), 1), round(rect.width(), 1)))
+        def drawLine(self, *args): self.rects.append(("head",))
+
+    # Half produced, playback in the middle: the band must stop at the produced edge regardless of the thumb.
+    timeline.set_state(PreviewState(phase=PreviewPhase.PLAYING, duration=20.0, produced=10.0,
+                                    playhead=5.0, played=5.0, fps=24.0))
+    painter = _Painter()
+    timeline._paint_track(painter, QRectF(0, 0, 100, 4))
+    assert painter.rects[0] == (0.0, 100.0), "the whole groove is painted first (grey)"
+    assert painter.rects[1] == (0.0, 50.0), "blue ends at 50 % produced, not at the thumb"
+    assert painter.rects[2] == ("head",)
+    colours = [brush.color() for brush in painter.brushes]
+    r, g, b = colours[0].red(), colours[0].green(), colours[0].blue()
+    assert max(r, g, b) - min(r, g, b) <= 8, f"not-yet-upscaled must be a grey, got {colours[0].name()}"
+    r, g, b = colours[1].red(), colours[1].green(), colours[1].blue()
+    assert b > r + 60 and b > g + 30, f"produced must be a blue, got {colours[1].name()}"
+    assert painter.brushes[1].color().alphaF() == pytest.approx(1.0), "the bar is opaque, not a tint"
+
+    # Finished: the blue covers the whole groove, and the pointer still changes nothing about it.
     timeline.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=20.0,
-                                    playhead=3.0, played=3.0, fps=24.0, fill_source="shown"))
-    timeline._paint_track(_RecordingPainter(), QRectF(10, 0, 380, 4))
-    report = timeline.scrub_report()
-    paint = report["paint"]
-
-    assert paint["finished"] is True, "produced == duration is the finished file"
-    roles = [rect["role"] for rect in paint["rects"]]
-    assert roles == ["track", "produced", "played", "head"], roles
-    band = paint["rects"][1]
-    assert band["fraction"] == pytest.approx(1.0) and band["w"] == pytest.approx(380.0)
-    assert band["from"] == "produced / duration" and band["alpha"] == pytest.approx(0.28, abs=0.01)
-    fill = paint["rects"][2]
-    assert fill["fraction"] == pytest.approx(0.15) and fill["alpha"] == pytest.approx(1.0)
-    assert fill["from"] == "played / duration"
-    assert paint["glued"] is True and paint["why_not_glued"] is None
-
-    # A press in flight: the thumb is the request, the fill is the picture, and the report says so in the page's words.
-    timeline.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=20.0,
-                                    playhead=10.0, played=3.0, fps=24.0, fill_source="press-open"))
-    paint = timeline.scrub_report()["paint"]
-    assert paint["glued"] is False
-    assert paint["why_not_glued"] == "press-open"
-    assert paint["state"]["thumb_fraction"] == pytest.approx(0.5)
-    assert paint["state"]["fill_fraction"] == pytest.approx(0.15)
-
-
-class _RecordingPainter:
-    def save(self): pass
-    def restore(self): pass
-    def setPen(self, _pen): pass
-    def setBrush(self, _brush): pass
-    def drawRect(self, _rect): pass
-    def drawLine(self, *args): pass
+                                    playhead=3.0, played=3.0, fps=24.0))
+    painter = _Painter()
+    timeline._paint_track(painter, QRectF(0, 0, 100, 4))
+    assert painter.rects[1] == (0.0, 100.0), "produced=100 % paints the whole bar blue"
+    report = timeline.scrub_report()["paint"]
+    assert [rect["role"] for rect in report["rects"]] == ["track", "produced", "head"]
+    assert report["state"]["fill_fraction"] == pytest.approx(0.15), "the played number survives in the report"
