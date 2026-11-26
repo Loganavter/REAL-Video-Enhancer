@@ -40,6 +40,7 @@ file.
 
 from __future__ import annotations
 
+import threading
 import time
 
 import os
@@ -577,6 +578,11 @@ class LiveTailThread(QThread):
         self._reader: TailReader | None = None
         #: (seconds, attempt_past_edge): the flag is True when the ask may be ahead of what this reader
         #: has published (a held press, or a resume that jumps to the renderer's head).
+        #: The seek slot is written by the GUI thread (`seek`) and taken by the loop's own thread. The take must be
+        #: atomic with the clear: `ask, self._pending_seek = self._pending_seek, None` reads, then stores `None`, and a
+        #: `seek()` landing between the two stores was silently lost - the tail kept its old position and the press
+        #: timed out (audit 2026-11-27 §6.9). The lock makes "take what is there and leave nothing" one step.
+        self._seek_lock = threading.Lock()
         self._pending_seek: tuple[float, bool] | None = None
         self._stop_requested = False
         #: A preview stands still until its transport is pressed (the owner's default), so `paused` starts True: the
@@ -614,7 +620,8 @@ class LiveTailThread(QThread):
         Without it the ask is clamped to the published edge, which is right for an implicit follow and wrong for both of
         those (measured live 2026-11-24: a resume aimed at 2.544 s landed on 0.334 s because the edge still said 0.1).
         """
-        self._pending_seek = (max(0.0, float(seconds)), bool(attempt_past_edge))
+        with self._seek_lock:
+            self._pending_seek = (max(0.0, float(seconds)), bool(attempt_past_edge))
         # A new position re-anchors the media clock: the next frame is due NOW, not where the old position was.
         self._present_anchor = None
 
@@ -716,7 +723,9 @@ class LiveTailThread(QThread):
         reported_at = 0.0
         try:
             while not self._stop_requested:
-                ask, self._pending_seek = self._pending_seek, None
+                with self._seek_lock:
+                    ask = self._pending_seek
+                    self._pending_seek = None
                 pending, ask_past_edge = ask if ask is not None else (None, False)
                 #: A seek on a HELD pane publishes its target and nothing else: the pane stands on one frame,
                 #: so the poll that applies the press is capped at one frame. Without the cap it read a whole
