@@ -705,3 +705,70 @@ def test_media_time_is_content_time_not_the_file_timeline(qapp, scratch_dir, mon
     harness.reader.poll()
     assert harness.containers[-1].seeks[-1][0] == 133000, "the container was asked for FILE time"
     assert round(harness.frames[before].pts, 3) == 0.1, "and the picture that came back is content 0.1 s"
+
+
+def _presenter(*, paused=False, edge=None, interval=1.0 / 24.0):
+    """A `LiveTailThread` driven by a fake clock, with a fake reader whose newest written frame is `edge`."""
+    from src.ui.video.frames import FrameRef
+    from src.ui.video.tail import LiveTailThread
+
+    class _Clock:
+        now = 100.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = _Clock()
+    tail = LiveTailThread("unused.mkv", paused=paused, clock=clock, sleep=lambda _s: None)
+    tail._frame_interval = interval
+    tail._reader = types.SimpleNamespace(_edge_pts=edge)
+    emitted = []
+    tail.frame_ready.connect(lambda frame: emitted.append(float(frame.pts)))
+
+    def frame(pts):
+        # `_present` reads the timestamp and forwards the object: the pacing is the thing under test, not the pixels.
+        return FrameRef(buffer=b"\0" * 12, width=2, height=2, format="rgb24", stride=6, pts=pts, index=0)
+
+    return tail, clock, emitted, frame
+
+
+def test_a_render_slower_than_realtime_still_reaches_the_pane():
+    """Owner, 2026-11-26: "во время инференса ... частота воспроизведения обычно довольно ниже".
+
+    Under inference the file grows at ~13 fps against a 24 fps media clock, so EVERY frame is "late" against it and the
+    lateness rule dropped all of them (measured live: `frames=12..16 dropped_late=12..15` and not one picture). At the
+    live edge the pace of the picture must be the pace of the file.
+    """
+    tail, clock, emitted, frame = _presenter(edge=1.0)
+    for step in range(6):
+        tail._present(frame(0.5 + step / 24.0))
+    assert len(emitted) == 6, "at the edge every written frame is shown: no pacing, no drops"
+    assert tail._dropped_late == 0
+
+
+def test_a_backlog_still_plays_the_timeline_and_skips_what_it_cannot_show():
+    """A resume (or a scrub back) has a backlog: the media clock owns it, and a slow decode must not slow the timeline."""
+    from src.ui.video.tail import LiveTailThread
+
+    tail, clock, emitted, frame = _presenter(edge=10.0)
+    tail._present(frame(1.0))                 # anchors the clock at 1.0 s of media, 100.0 s of wall
+    assert emitted == [pytest.approx(1.0)], "the anchor frame is the one that sets the clock"
+    clock.now += 0.2                          # 0.2 s of wall passed; a frame at 1.05 s is 0.15 s late
+    tail._present(frame(1.05))
+    assert len(emitted) == 1, "a frame more than a frame and a half behind the media clock is skipped"
+
+    # ...but skipping may not go on for ever: after MAX_LATE_STREAK the clock re-anchors and the picture advances,
+    # because a source that can never keep up is a slow source, not a broken clock.
+    for step in range(LiveTailThread.MAX_LATE_STREAK - 2):
+        clock.now += 0.2
+        tail._present(frame(1.05 + step / 24.0))
+    assert len(emitted) == 1, "the streak is not over yet"
+    clock.now += 0.2
+    tail._present(frame(1.05 + LiveTailThread.MAX_LATE_STREAK / 24.0))
+    assert len(emitted) == 2, "a bounded streak keeps a slow source on screen"
+
+
+def test_a_held_pane_publishes_its_one_frame_without_pacing():
+    tail, clock, emitted, frame = _presenter(paused=True, edge=10.0)
+    tail._present(frame(3.0))
+    assert emitted == [pytest.approx(3.0)], "a held pane shows the frame it was given, whatever the clock says"

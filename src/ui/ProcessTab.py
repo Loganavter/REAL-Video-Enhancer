@@ -3468,6 +3468,21 @@ class ProcessTab:
     def _on_preview_opened(self, duration: float, fps: float, frames_total: float) -> None:
         self._preview_duration = float(duration) or 0.0
 
+    def _pane_frame_report(self, stats) -> None:
+        """One line per second: what the tail/decoder handed the pane and where it stopped.
+
+        A frame that arrives and paints nothing has three possible reasons (the feed owns the pane, the owner kind
+        refuses it, the pane is not there) and no number existed for any of them - "play does nothing during a render"
+        could only be read as a stall.
+        """
+        now = time.monotonic()
+        if now - float(stats.get("at") or 0.0) < 1.0:
+            return
+        stats["at"] = now
+        telemetry.event("pane frames", got=stats["got"], dropped_feed=stats["may"],
+                        dropped_kind=stats["kind"], painted=stats["painted"])
+        stats.update(got=0, may=0, kind=0, painted=0)
+
     def _on_preview_frame(self, frame) -> None:
         """One decoded frame from a preview's live tail (or a finished file): RGB24 bytes -> QImage -> the pane.
 
@@ -3486,9 +3501,17 @@ class ProcessTab:
         from PySide6.QtGui import QImage
 
         owner = owner_of(self)
+        stats = getattr(self, "_pane_frame_stats", None)
+        if stats is None:
+            stats = self._pane_frame_stats = {"got": 0, "may": 0, "kind": 0, "painted": 0, "at": time.monotonic()}
+        stats["got"] += 1
         if owner.may_paint:
+            stats["may"] += 1
+            self._pane_frame_report(stats)
             return
         if owner.kind in (PreviewBackendKind.NONE, PreviewBackendKind.QUEUE_FILE):
+            stats["kind"] += 1
+            self._pane_frame_report(stats)
             # `QUEUE_FILE`: the queue item's own decoder is the pane's one painter while its tab is current; a render
             # frame arriving here is the second painter the owner's kind exists to rule out.
             return
@@ -3521,6 +3544,8 @@ class ProcessTab:
                 pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
                                index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
+            if stats is not None:
+                stats["painted"] += 1
             # Both halves in one paint: the source frame for this moment is already decoded (the pool runs ahead).
             paint_pair = getattr(self, "_source_paint_pair", None)
             if callable(paint_pair):

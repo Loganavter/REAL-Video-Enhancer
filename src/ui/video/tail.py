@@ -47,6 +47,7 @@ import os
 from PySide6.QtCore import QObject, QThread, Signal
 
 from .frames import FORMATS, frame_pts, pack_frame, stream_color_tags
+from . import telemetry
 
 _MICROS = 1_000_000
 
@@ -533,7 +534,16 @@ class LiveTailThread(QThread):
     #: thread on a stale estimate - the picture catches up instead of freezing.
     MAX_PRESENT_WAIT_S = 0.5
 
-    def __init__(self, path: str, parent: QObject | None = None, *, interval_ms: int = 120,
+    #: How many frames in a row may be dropped for being late before the media clock re-anchors to the newest one. At 24
+    #: fps this is ~0.25 s of lag: long enough that a normal catch-up still plays the timeline, short enough that a source
+    #: slower than realtime (a render in progress) still puts pictures on screen.
+    MAX_LATE_STREAK = 6
+
+    #: How close to the newest written frame counts as "following the render". Within this the picture takes the writer's
+    #: pace (no pacing, no drops); beyond it there is a backlog and the media clock owns the timeline.
+    LIVE_EDGE_S = 0.25
+
+    def __init__(self, path: str, parent: QObject | None = None, *, interval_ms: int = 33,
                  paused: bool = True, clock=None, sleep=None, target_size=None,
                  pixel_format: str = "rgb24", color_space: str | None = None,
                  color_range: str | None = None, **reader_kwargs) -> None:
@@ -559,6 +569,8 @@ class LiveTailThread(QThread):
         self._frame_interval = 1.0 / 24.0
         #: Frames skipped because they were already behind the media clock (evidence for the log, not a cost).
         self._dropped_late = 0
+        #: Consecutive frames dropped by the lateness rule (see `_present`): reset by any emitted frame.
+        self._late_streak = 0
         self._path = str(path)
         self._interval_ms = max(20, int(interval_ms))
         self._reader_kwargs = reader_kwargs
@@ -645,6 +657,17 @@ class LiveTailThread(QThread):
             return
         pts = float(getattr(frame, "pts", 0.0) or 0.0)
         now = float(self._clock())
+        edge = getattr(getattr(self, "_reader", None), "_edge_pts", None)
+        if edge is not None and (float(edge) - pts) <= self.LIVE_EDGE_S:
+            # AT THE LIVE EDGE: the renderer is still writing, so the pace of the picture IS the pace of the file. Pacing
+            # against the media clock here makes every frame "late" whenever the render runs slower than realtime (the
+            # normal case under inference: 13 fps written against a 24 fps clock), and the lateness rule below then drops
+            # all of them - measured 2026-11-26: `frames=12..16 dropped_late=12..15`, not one picture on the pane. A
+            # BACKLOG (a resume, a scrub back) is still a backlog: it plays at the media rate below.
+            self._present_anchor = (pts, now)
+            self._late_streak = 0
+            self.frame_ready.emit(frame)
+            return
         anchor = self._present_anchor
         if anchor is None or pts < anchor[0]:
             anchor = (pts, now)
@@ -658,7 +681,19 @@ class LiveTailThread(QThread):
             # not every frame. Emitting this one would make the picture advance at the decode rate - the reported "play
             # runs at some other speed than the file's fps" (owner, 2026-11-25). The next frame is closer to `due`.
             self._dropped_late += 1
+            self._late_streak += 1
+            if self._late_streak < self.MAX_LATE_STREAK:
+                return
+            # ...but a source that can NEVER keep up must not empty the pane. A render slower than realtime writes a
+            # frame every ~75 ms while the media clock runs at 1x, so EVERY frame is "late" and the rule above drops all
+            # of them, for ever (measured 2026-11-26: `frames=12..16 dropped_late=12..15` and not one picture painted
+            # during inference). The clock is what is wrong there, not the frames: re-anchor to the newest one and show
+            # it, so the preview follows the pace the render actually produces at.
+            self._present_anchor = (pts, now)
+            self._late_streak = 0
+            self.frame_ready.emit(frame)
             return
+        self._late_streak = 0
         self.frame_ready.emit(frame)
 
     # -- the loop ------------------------------------------------------------------------------------
@@ -673,6 +708,12 @@ class LiveTailThread(QThread):
         reader.seek_unavailable.connect(self.seek_unavailable)
         self._reader = reader
         opened = False
+        #: One line per second of what the LOOP did - the tail had no number at all, so "play did nothing" could only be
+        #: answered by reading the code. `frames` is what the reader emitted in that second, `edge` the newest PTS it has
+        #: published, `size` the bytes the writer had grown to.
+        produced_since = 0
+        late_seen = 0
+        reported_at = 0.0
         try:
             while not self._stop_requested:
                 ask, self._pending_seek = self._pending_seek, None
@@ -702,12 +743,25 @@ class LiveTailThread(QThread):
                             pass
                 elif not self._stop_requested:
                     produced = reader.poll(1 if held_seek else None)
+                    produced_since += int(produced or 0)
                     if not produced:
                         # Nothing was written for a poll or more: the media clock must not keep running through a stall,
                         # or the next frames arrive "late" and the drop rule would throw them away (measured: a paused
                         # write made a growing file's next two frames 0.9 s behind and the tail skipped both). A stall
                         # re-anchors; a burst of frames keeps the clock, which is what makes the drop rule work.
                         self._present_anchor = None
+                now = time.monotonic()
+                if now - reported_at >= 1.0:
+                    reported_at = now
+                    dropped = int(getattr(self, "_dropped_late", 0)) - late_seen
+                    late_seen += dropped
+                    anchor = getattr(self, "_present_anchor", None)
+                    telemetry.event("tail", paused=int(self._paused), opened=int(bool(opened)),
+                                    frames=produced_since, dropped_late=dropped,
+                                    anchor=round(float(anchor[0]), 3) if anchor else "-",
+                                    edge=round(float(getattr(reader, "_edge_pts", 0.0) or 0.0), 3),
+                                    size=int(getattr(reader, "_size", 0) or 0))
+                    produced_since = 0
                 if not self._stop_requested:
                     self.msleep(self._interval_ms)
         finally:
