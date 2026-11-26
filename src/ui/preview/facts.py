@@ -29,8 +29,8 @@ def clip_duration(options, decoder=None, queue_duration: float = 0.0) -> float:
 
     `decoder` is whatever holds the OPENED file's duration (the decoder's `opened` signal is where the page's copy of
     this number comes from), so an object with a `duration` reading is enough. `queue_duration` is the queue pane's
-    length when it is known; the page passes it once the queue owns its own bar (plan P3) and 0.0 until then, which
-    keeps today's numbers exactly.
+    length, passed by the page while the queue's `QUEUE_FILE` owner is the pane's clock; 0.0 otherwise, which keeps
+    the preview and export numbers exactly.
 
     Returns 0.0 when nothing knows the length: the caller then has no axis to place a marker on.
     """
@@ -51,7 +51,8 @@ def produced_seconds(kind: PreviewBackendKind, *, fraction: float, duration: flo
                      rendering: bool) -> float:
     """What the strip's BLUE means: seconds the upscaler has produced.
 
-    A finished file is fully produced. Everything else is a live render and the band is its progress - including an
+    A finished file is fully produced - and so is a queue item, which is a finished file the queue owns (its whole
+    length exists the moment it opens). Everything else is a live render and the band is its progress - including an
     EXPORT whose pane follows the display feed: that pane used to report the whole clip as produced, so a render at
     14 % showed the whole bar blue and the grey "not upscaled yet" half never appeared (owner, 2026-11-26, screenshot
     of an export at frame 67/493 with a fully blue strip). The feed can seek anywhere on demand, but that is the
@@ -59,7 +60,7 @@ def produced_seconds(kind: PreviewBackendKind, *, fraction: float, duration: flo
     """
     if duration <= 0.0:
         return 0.0
-    if kind is PreviewBackendKind.FINISHED_FILE:
+    if kind in (PreviewBackendKind.FINISHED_FILE, PreviewBackendKind.QUEUE_FILE):
         return duration
     if kind is PreviewBackendKind.DISPLAY_FEED and not rendering:
         # The render is over and the feed is showing the finished file: there is nothing left to produce.
@@ -71,16 +72,18 @@ def reach_seconds(kind: PreviewBackendKind, *, duration: float, produced: float,
                   any_frame: bool) -> float:
     """The furthest content time a press may ask for.
 
-    A finished file and a feed reach the whole clip. So does a preview whose block is usable (`any_frame`): the host
-    renders ANY timeline frame on demand, past the produced band. A growing file's tail has only what the renderer has
-    written, so it reaches the produced edge - and `produced` is that edge, in seconds, from `produced_seconds` (or the
-    tail's own flushed reading), never a second definition of the band.
+    A finished file (and a queue item, which is one the queue owns) and a feed reach the whole clip. So does a
+    preview whose block is usable (`any_frame`): the host renders ANY timeline frame on demand, past the produced
+    band. A growing file's tail has only what the renderer has written, so it reaches the produced edge - and
+    `produced` is that edge, in seconds, from `produced_seconds` (or the tail's own flushed reading), never a second
+    definition of the band.
 
     0.0 when the length is unknown: there is nothing honest to seek to.
     """
     if duration <= 0.0:
         return 0.0
-    if kind in (PreviewBackendKind.FINISHED_FILE, PreviewBackendKind.DISPLAY_FEED):
+    if kind in (PreviewBackendKind.FINISHED_FILE, PreviewBackendKind.QUEUE_FILE,
+                PreviewBackendKind.DISPLAY_FEED):
         return float(duration)
     if any_frame:
         return float(duration)

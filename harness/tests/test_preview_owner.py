@@ -34,7 +34,7 @@ import pytest
 
 from src.ui.preview.owner import Owner, owner_of
 from src.ui.preview.session import Painted
-from src.ui.preview.state import PreviewBackendKind
+from src.ui.preview.state import PreviewBackendKind, PreviewState
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -103,10 +103,10 @@ def _owner(**fields) -> Owner:
 # (shape name, page fields, kind, may_paint, may_want, may_seek_any)
 TABLE = (
     (
-        "the queue tab owns the pane (f17cbfff): no render painter, its own decoder, even with a block attached",
+        "the queue tab owns the pane (f17cbfff): its own finished file and clock, the feed stages nothing",
         dict(_queue_pane_owns=True, _queue_pane_decoder=object(), _live_tail=object(), _display=_Reader(),
              isPreview=True, _preview_paused=False, renderProcess=_Process(alive=True)),
-        PreviewBackendKind.NONE,
+        PreviewBackendKind.QUEUE_FILE,
         False, False, True,
     ),
     (
@@ -192,12 +192,29 @@ def test_the_surface_is_the_pane_exactly_when_the_feed_paints_it():
     assert owner_of(page).surface is None
 
 
+def test_the_queue_items_decoder_is_its_clock_and_its_pane_is_the_surface():
+    """The queue pane is its own owner: the item's decoder answers the transport and paints the pane there."""
+    pane, decoder = object(), object()
+    page = _page(_queue_pane_owns=True, _queue_pane_decoder=decoder,
+                 page_handles=SimpleNamespace(proc=SimpleNamespace(previewLabel=pane)))
+    owner = owner_of(page)
+    assert owner.kind is PreviewBackendKind.QUEUE_FILE
+    assert owner.clock is decoder, "the object that answers the queue item's transport is its own decoder"
+    assert owner.surface is pane, "the queue item paints the pane through that decoder"
+    assert owner.may_paint is False, "`may_paint` is the display feed's permission, and the feed paints nothing here"
+    assert owner.may_want is False, "the renderer stages nothing for a queue item"
+    assert owner.may_seek_any is True, "every frame of a finished item is reachable, even without the block"
+    assert owner_of(_page(_queue_pane_owns=True)).clock is None, "an empty field has no clock but still owns the pane"
+
+
 def test_the_clock_is_the_object_that_answers_the_transport():
     """`clock` is the transport's own object for the kind it named - not a second adapter built here."""
     tail, decoder, reader = object(), object(), _Reader()
+    queue_spool = object()
     assert owner_of(_page(_live_tail=tail, isPreview=True)).clock is tail
     assert owner_of(_page(_preview_decoder=decoder, isPreview=True)).clock is decoder
     assert owner_of(_page(_display=reader, _preview_paused=False)).clock is reader
+    assert owner_of(_page(_queue_pane_owns=True, _queue_pane_decoder=queue_spool)).clock is queue_spool
     assert owner_of(_page()).clock is None, "nobody answers the transport, so there is no clock"
 
 
@@ -311,6 +328,54 @@ def test_the_page_builds_exactly_one_owner_per_snapshot(monkeypatch):
     assert controller.observed is not None
     assert controller.observed["seek_ceiling"] == pytest.approx(0.5), (
         "the reach is the owner's `may_seek_any`, not a second reader of the block")
+
+
+# --- the queue item's own numbers (plan P3) ---------------------------------------------------------
+
+
+def test_the_page_clip_duration_is_the_queue_items_own_length():
+    """The page's one duration derivation reads the queue item's length while its tab owns the pane."""
+    tab = _snapshot_tab(_RecordingController())
+    tab._queue_pane_owns = True
+    tab._queue_pane_duration = 42.0
+    tab._queue_pane_decoder = SimpleNamespace(duration=42.0)
+    assert tab._clip_duration() == pytest.approx(42.0)
+
+    tab._queue_pane_owns = False
+    assert tab._clip_duration() == pytest.approx(5.0), "the probe's 120 frames / 24 fps once the queue lets go"
+
+
+def test_a_queue_file_snapshot_reports_its_own_length_and_the_previews_is_untouched():
+    """Two shapes on one page: the queue item's snapshot is its own finished file; the preview keeps its numbers."""
+    controller = _RecordingController()
+    tab = _snapshot_tab(controller)
+    tab._queue_pane_owns = True
+    tab._queue_pane_decoder = SimpleNamespace(duration=12.5)
+    tab._queue_pane_duration = 12.5
+    tab._queue_pane_position = 3.0
+
+    tab._push_preview_state()
+
+    assert controller.observed["duration"] == pytest.approx(12.5), "the queue item's own length is the bar's axis"
+    assert controller.observed["produced"] == pytest.approx(12.5), "a finished queue item is fully produced"
+    assert controller.observed["seek_ceiling"] == pytest.approx(12.5), "every frame of it is reachable"
+    assert controller.observed["playhead"] == pytest.approx(3.0), "the thumb is the queue item's picture time"
+    queue_state = PreviewState(backend=PreviewBackendKind.QUEUE_FILE,
+                               duration=controller.observed["duration"],
+                               produced=controller.observed["produced"])
+    assert queue_state.finished() is True, "a queue item's band is its whole file, so it is finished"
+
+    # The PREVIEW's own shape on the same page: letting the queue go must not leave its numbers behind.
+    tab._queue_pane_owns = False
+    tab._queue_pane_duration = 0.0
+    tab._preview_playhead = 0.5
+    tab._push_preview_state()
+
+    assert controller.observed["duration"] == pytest.approx(5.0), "the probe's 120 frames / 24 fps, not 12.5"
+    assert controller.observed["produced"] == pytest.approx(0.5), "frame 12 of 120 = 10 % of 5 s"
+    preview_state = PreviewState(duration=controller.observed["duration"],
+                                 produced=controller.observed["produced"])
+    assert preview_state.finished() is False, "a render at 10 % is not finished, whatever the queue item was"
 
 
 def test_no_gate_method_survives_in_the_page():

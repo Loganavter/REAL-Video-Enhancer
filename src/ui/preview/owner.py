@@ -45,8 +45,8 @@ class Owner:
     transport adapter: the page still wraps it in a `ports.Clock` (`backends.backend_for`) this phase, and P4 binds the
     session's clock from it.
 
-    `surface` is the pane itself when it may paint (`None` otherwise), so a caller that wants to hand the picture
-    somewhere has the one object that is allowed to take it.
+    `surface` is the pane itself when this owner paints it (the queue item's decoder, an export's feed, or a preview's
+    one-frame loan), so a caller that wants to hand the picture somewhere has the one object that is allowed to take it.
     """
 
     kind: PreviewBackendKind
@@ -63,6 +63,7 @@ def owner_of(page) -> Owner:
     The raw inputs, and nothing else (no widget is called, nothing is written):
 
     * `_queue_pane_owns` - the queue tab is showing one of its own items on the pane;
+    * `_queue_pane_decoder` - the queue item's own player (its transport, and the pane's painter there);
     * `_live_tail` - the file-following thread of the current job, if one was started;
     * `_preview_decoder` - the finished preview file's own player;
     * `_display.attached` - the renderer's frame-on-demand block is usable;
@@ -72,20 +73,25 @@ def owner_of(page) -> Owner:
 
     The answers, in the rules the deleted gates each held:
 
-    * **kind** - the queue item is not the preview's clock (`NONE`); a finished file's decoder is; a live tail is; an
-      export whose block is usable is the display feed; otherwise nobody.
+    * **kind** - the queue item is its OWN clock (`QUEUE_FILE`: a finished file the queue owns, whose own length is
+      the axis); a finished file's decoder is; a live tail is; an export whose block is usable is the display feed;
+      otherwise nobody.
     * **may_paint** - the display feed paints an export whenever the block is usable, UNLESS a playing tail is the
       timeline (the two-painter race: the feed publishing at the same time as a tail is the 18.9 s ↔ 8.97 s playhead).
-      A preview's pane belongs to its tail, except for the ONE frame a strip press asked the block for.
+      A preview's pane belongs to its tail, except for the ONE frame a strip press asked the block for. A queue item
+      is painted by its own decoder, so the feed may NOT paint there (`may_paint` is the feed's permission).
     * **may_want** - paints, the transport is not holding (or it asked for one frame), and the renderer is alive: a
-      held picture costs the renderer nothing, which is the whole reason the request byte exists.
+      held picture costs the renderer nothing, which is the whole reason the request byte exists. The queue feed
+      stages nothing.
     * **may_seek_any** - the block is attached, i.e. the renderer can render ANY timeline frame on demand. This is the
       strip's REACH, not the band: what has been produced is `facts.produced_seconds`, and they are different facts.
+      A queue item is a finished file, so every one of its frames is reachable without the block.
 
-    The queue item's own decoder is not an input: `_queue_pane_owns` is its only producer (the decoder is built when the
-    tab enters and released when it leaves), so reading it twice would be the second copy of that predicate.
+    The queue item's own decoder IS an input now: it is the object that answers that pane's transport (`clock`), and
+    `_queue_pane_owns` stays the only producer of "the queue is the pane's owner".
     """
     queue_owns = bool(getattr(page, "_queue_pane_owns", False))
+    queue_decoder = getattr(page, "_queue_pane_decoder", None)
     tail = getattr(page, "_live_tail", None)
     decoder = getattr(page, "_preview_decoder", None)
     reader = getattr(page, "_display", None)
@@ -98,7 +104,7 @@ def owner_of(page) -> Owner:
 
     if queue_owns:
         # The queue item is the pane's one owner there: the feed stages nothing, the tail's frames are dropped.
-        kind = PreviewBackendKind.NONE
+        kind = PreviewBackendKind.QUEUE_FILE
     elif decoder is not None:
         kind = PreviewBackendKind.FINISHED_FILE
     elif tail is not None:
@@ -108,21 +114,29 @@ def owner_of(page) -> Owner:
     else:
         kind = PreviewBackendKind.NONE
 
-    if not attached or queue_owns:
-        # No block, nothing to show through it; a queue item is not the render's picture even when a block exists.
+    if kind is PreviewBackendKind.QUEUE_FILE:
+        # The queue item's own decoder paints: the feed may not (`may_paint` is the feed's permission), and it never
+        # stages anything. Every frame of a finished file is reachable without the renderer's block.
         may_paint = False
-    elif not preview:
-        # An export: the feed owns the pane unless a PLAYING tail is the timeline. A held export has no tail, so the
-        # one-frame loan is untouched.
-        may_paint = not (tail is not None and not paused)
+        may_want = False
+        may_seek_any = True
     else:
-        # A preview: the tail is the painter, except for exactly the frame a strip press asked the block for.
-        may_paint = pending
+        if not attached:
+            # No block, nothing to show through it.
+            may_paint = False
+        elif not preview:
+            # An export: the feed owns the pane unless a PLAYING tail is the timeline. A held export has no tail, so the
+            # one-frame loan is untouched.
+            may_paint = not (tail is not None and not paused)
+        else:
+            # A preview: the tail is the painter, except for exactly the frame a strip press asked the block for.
+            may_paint = pending
+        may_want = bool(may_paint and (not paused or pending) and rendering)
+        may_seek_any = bool(attached)
 
-    may_want = bool(may_paint and (not paused or pending) and rendering)
-    may_seek_any = bool(attached)
-
-    if kind is PreviewBackendKind.LIVE_TAIL:
+    if kind is PreviewBackendKind.QUEUE_FILE:
+        clock = queue_decoder
+    elif kind is PreviewBackendKind.LIVE_TAIL:
         clock = tail
     elif kind is PreviewBackendKind.FINISHED_FILE:
         clock = decoder
@@ -132,7 +146,8 @@ def owner_of(page) -> Owner:
         clock = None
 
     surface = None
-    if may_paint:
+    if kind is PreviewBackendKind.QUEUE_FILE or may_paint:
+        # The queue item paints the pane through its own decoder; the display paints it through the feed.
         surface = getattr(getattr(getattr(page, "page_handles", None), "proc", None), "previewLabel", None)
 
     return Owner(kind=kind, clock=clock, surface=surface, may_paint=bool(may_paint),

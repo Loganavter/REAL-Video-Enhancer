@@ -28,11 +28,19 @@ class PreviewPhase(Enum):
 
 
 class PreviewBackendKind(Enum):
-    """Who answers transport commands: a growing file's tail, a finished file's decoder, the export's display feed."""
+    """Who answers transport commands: a growing file's tail, a finished file's decoder, the export's display feed,
+    or the Render Queue tab's own item.
+
+    `QUEUE_FILE` is a finished file owned by the QUEUE, and its OWN length is the axis: the pane shows the queue item
+    while its tab is current, so the bar's duration, band, reach and playhead must be the item's - not the render's
+    numbers behind it (the defect this kind removes: the queue's bar showed the render's duration and produced band
+    over the queue item's picture).
+    """
     NONE = "none"
     LIVE_TAIL = "live_tail"
     FINISHED_FILE = "finished_file"
     DISPLAY_FEED = "display_feed"
+    QUEUE_FILE = "queue_file"
 
 
 class PreviewCommand(Enum):

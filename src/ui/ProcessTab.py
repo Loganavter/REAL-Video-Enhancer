@@ -970,16 +970,14 @@ class ProcessTab:
         setter = getattr(pane, "set_seek_ceiling", None)
         if setter is None:
             return
-        if self._queue_owns_pane():
+        owner = owner_of(self)
+        if owner.kind is PreviewBackendKind.QUEUE_FILE:
             # The queue item is a finished file: every frame of it can be decoded, so the strip may address all of it.
             reach = 1.0 if float(getattr(self, "_queue_pane_duration", 0.0) or 0.0) > 0.0 else None
-            try:
-                setter(reach)
-            except Exception:
-                pass
-            return
+        else:
+            reach = 1.0 if owner.may_seek_any else None
         try:
-            setter(1.0 if owner_of(self).may_seek_any else None)
+            setter(reach)
         except Exception:
             pass
 
@@ -1263,18 +1261,27 @@ class ProcessTab:
         except (TypeError, ValueError):
             return True
 
-    def _clip_duration(self) -> float:
+    def _clip_duration(self, owner=None) -> float:
         """The clip's length in seconds (`preview.facts.clip_duration` is the one derivation; the page names inputs).
 
         The decoder holds the opened file's length - it is what its `opened` signal copied into `_preview_duration` - so
-        a decoder that can answer is passed as-is, and that same opened length stands in when there is none. The queue
-        pane's own length is not passed yet: plan P3 owns that switch, and until then the queue's bar keeps today's
-        numbers.
+        a decoder that can answer is passed as-is, and that same opened length stands in when there is none. While the
+        pane's owner is `QUEUE_FILE` the queue item's own length is the ONE axis (its bar, band, reach and thumb are
+        shares of it); every other owner passes 0.0 and keeps the preview/export numbers exactly.
+
+        `owner` is the snapshot's one decision when the caller already has it (`_push_preview_state`); a caller without
+        one gets a fresh read of the same pure function.
         """
         from types import SimpleNamespace
 
         from .preview.facts import clip_duration
 
+        owner = owner_of(self) if owner is None else owner
+        if owner.kind is PreviewBackendKind.QUEUE_FILE:
+            # The queue item's own length IS the axis - including 0.0 while its field is empty. Falling back to the
+            # render's clip here is the defect this kind removes: the bar drew the render's duration over the queue
+            # item's picture.
+            return clip_duration(None, None, queue_duration=float(getattr(self, "_queue_pane_duration", 0.0) or 0.0))
         decoder = getattr(self, "_preview_decoder", None)
         if decoder is None or float(getattr(decoder, "duration", 0.0) or 0.0) <= 0.0:
             decoder = SimpleNamespace(duration=float(getattr(self, "_preview_duration", 0.0) or 0.0))
@@ -1322,7 +1329,7 @@ class ProcessTab:
                 fps = 0.0
         return max(0.05, 2.0 / fps) if fps > 0.0 else 0.1
 
-    def _result_playhead(self) -> float:
+    def _result_playhead(self, owner=None) -> float:
         """Where the RESULT's playhead is: the tail's or file decoder's PTS, else the render's produced share.
 
         While a press has no answer yet the marker stands on the REQUESTED time. It used to be recomputed from
@@ -1349,7 +1356,7 @@ class ProcessTab:
         total = float(self.max_value or 0)
         if total > 0.0:
             produced = max(0.0, min(1.0, float(self.currentFrame or 0) / total))
-            return produced * self._clip_duration()
+            return produced * self._clip_duration(owner)
         return playhead
 
     def _tick_second_surface(self) -> None:
@@ -1364,7 +1371,7 @@ class ProcessTab:
         view_mode = getattr(pane, "view_mode", None)
         if view_mode is None:
             return
-        if self._queue_owns_pane():
+        if owner_of(self).kind is PreviewBackendKind.QUEUE_FILE:
             # A queue item is the SOURCE, not a render: there is no second surface to compare it against.
             self._second_surface_pts = None
             return
@@ -1660,14 +1667,15 @@ class ProcessTab:
         produced since. The playhead must not move: only the two produced counters are refreshed.
 
         An EXPORT's pane has no tail (its painter is the display feed, see the owner's `kind`), so "a tail is running"
-        is not the condition: the condition is that the feed owns the pane and left a progress snapshot to refresh.
+        is not the condition: the condition is that the feed owns the pane and left a progress snapshot to refresh. A
+        QUEUE item owns its own readout (`QUEUE_FILE`): the render's counters must not repaint over it.
         """
         if not getattr(self, "_preview_paused", False):
             return
-        if self._queue_owns_pane():
-            # The queue item's progress is its own file's; the render's counters must not repaint over it.
+        owner = owner_of(self)
+        if owner.kind is PreviewBackendKind.QUEUE_FILE:
             return
-        if getattr(self, "_live_tail", None) is None and owner_of(self).kind is not PreviewBackendKind.DISPLAY_FEED:
+        if getattr(self, "_live_tail", None) is None and owner.kind is not PreviewBackendKind.DISPLAY_FEED:
             return
         pane = self.page_handles.proc.previewLabel
         progress = getattr(pane, "_progress", None)
@@ -1682,6 +1690,32 @@ class ProcessTab:
             return
         playhead, duration = float(progress[2]), float(progress[3])
         pane.set_progress(rendered=produced[0], total=produced[1], playhead=playhead, duration=duration)
+
+    def _publish_pane_progress(self, duration: float, produced: float, playhead: float) -> None:
+        """Feed the pane's own (hidden) strip from the SNAPSHOT's numbers, never from a queue-specific derivation.
+
+        The visible bar reads `PreviewState`; this only keeps the pane's painted strip - hidden while the control bars
+        are installed, but still the widget a legacy A/B shows - on the same numbers, without a second call site that
+        could publish a different duration. `set_progress` repaints unconditionally (it is the strip's only
+        notification), so an unchanged quartet is not published at all: that guard is what keeps a held pane from
+        repainting ten times a second.
+        """
+        pane = getattr(getattr(self, "page_handles", None), "proc", None)
+        pane = getattr(pane, "previewLabel", None)
+        setter = getattr(pane, "set_progress", None)
+        if not callable(setter):
+            return
+        values = (float(produced), float(duration), float(playhead), float(duration))
+        previous = getattr(pane, "_progress", None)
+        try:
+            if previous is not None and tuple(float(part) for part in previous) == values:
+                return
+        except (TypeError, ValueError):
+            pass
+        try:
+            setter(rendered=values[0], total=values[1], playhead=values[2], duration=values[3])
+        except Exception:
+            pass
 
     @staticmethod
     def _followable(renderOptions) -> bool:
@@ -1817,7 +1851,7 @@ class ProcessTab:
         holding = bool(self._preview_paused)
         # ONE producer at a time: while the queue tab owns the pane, pressing play starts the QUEUE item, not the
         # render's tail/decoder behind it - a decoder playing under a picture nobody shows is pure cost.
-        queue_owns = self._queue_owns_pane()
+        queue_owns = owner_of(self).kind is PreviewBackendKind.QUEUE_FILE
         if holding and getattr(self, "_playback_tail", False):
             # The tail this PLAY created exists only while the transport plays; pausing drops it and the feed's cheap
             # path (the renderer's own composited frame) takes the pane back. A PREVIEW's tail and a tail somebody else
@@ -1996,17 +2030,17 @@ class ProcessTab:
     def _preview_seek_ceiling(self, owner, duration: float) -> float | None:
         """The furthest content time the transport may ask for, in seconds (`preview.facts.reach_seconds`).
 
-        A finished file and a feed that renders any frame on demand reach the whole clip; a growing file's tail only
-        has what the renderer has written, so it reaches the produced edge. Mirrors what the pane's own strip is told in
-        `_apply_seek_ceiling`: while a queue item owns the pane, the preview's own clip is not the timeline on screen,
-        so the block may not extend this reach (the queue branch of `_apply_seek_ceiling` states the same thing).
+        A finished file - the queue item and the preview's own file alike - and a feed that renders any frame on demand
+        reach the whole clip; a growing file's tail only has what the renderer has written, so it reaches the produced
+        edge. `owner.may_seek_any` already carries the queue's own rule (a finished item is fully reachable and the
+        feed stages nothing there), so no second read of the ownership flag is needed here.
         """
         from .preview.facts import reach_seconds
 
         produced = self._produced_for_band(owner.kind, duration, fraction=self._live_produced_fraction(),
                                            rendering=True)
         return reach_seconds(owner.kind, duration=duration, produced=produced,
-                             any_frame=owner.may_seek_any and not self._queue_owns_pane())
+                             any_frame=owner.may_seek_any)
 
     def _produced_for_band(self, kind, duration: float, *, fraction: float, rendering: bool) -> float:
         """What the strip's BLUE means: seconds the upscaler has produced (`preview.facts` is the one derivation).
@@ -2030,16 +2064,43 @@ class ProcessTab:
         one-frame loan lives.
         """
         controller = getattr(self, "_preview_controller", None)
+        pane = getattr(getattr(self, "page_handles", None), "proc", None)
+        pane = getattr(pane, "previewLabel", None)
+        if pane is None:
+            return
+        owner = owner_of(self)
+        kind = owner.kind
+        duration = float(self._clip_duration(owner) or 0.0)
+        produced_fraction = self._live_produced_fraction()
+        process = getattr(self, "renderProcess", None)
+        rendering = process is not None and process.poll() is None
+        produced = self._produced_for_band(kind, duration, fraction=produced_fraction, rendering=rendering)
+        queue_owns = kind is PreviewBackendKind.QUEUE_FILE
+        if queue_owns:
+            # The queue item's own file is the axis: its playhead, its length - never the render's numbers behind it.
+            playhead = self._queue_pane_playhead()
+        else:
+            try:
+                playhead = float(self._result_playhead(owner))
+            except Exception:
+                playhead = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        try:
+            shown = pane.shown_time() if callable(getattr(pane, "shown_time", None)) else None
+        except Exception:
+            shown = None
+        if shown is not None:
+            played = float(shown)
+        else:
+            played = playhead if queue_owns else float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        if queue_owns:
+            # The pane's own (hidden) strip is fed from THIS snapshot, not from a queue-specific `set_progress`: one
+            # derivation per number, and the preview's `_progress` is never overwritten by the queue's numbers.
+            self._publish_pane_progress(duration, produced, playhead)
         if controller is None:
             return
         from .preview.backends import backend_for
 
-        pane = getattr(getattr(self.page_handles, "proc", None), "previewLabel", None)
-        if pane is None:
-            return
-        owner = owner_of(self)
         options = getattr(self, "currentRenderOptions", None)
-        duration = float(self._clip_duration() or 0.0)
         source_frames = int(getattr(options, "videoFrameCount", 0) or 0)
         factor = max(1, int(getattr(options, "interpolateTimes", 1) or 1))
         output_frames = int(getattr(self, "max_value", 0) or 0) or source_frames * factor
@@ -2056,11 +2117,6 @@ class ProcessTab:
                 fps = float(getattr(self, "fps", 0) or 0)
             except (TypeError, ValueError):
                 fps = 0.0
-        kind = owner.kind
-        produced_fraction = self._live_produced_fraction()
-        process = getattr(self, "renderProcess", None)
-        rendering = process is not None and process.poll() is None
-        produced = self._produced_for_band(kind, duration, fraction=produced_fraction, rendering=rendering)
         owners = (getattr(self, "_live_tail", None) is not None
                   or getattr(self, "_preview_decoder", None) is not None
                   or getattr(self, "_queue_pane_decoder", None) is not None)
@@ -2089,15 +2145,6 @@ class ProcessTab:
         controller.register_backend(
             kind, backend_for(self, kind, tail=tail, decoder=decoder, host_playable=bool(has_picture)))
         controller.set_backend(kind)
-        try:
-            playhead = float(self._result_playhead())
-        except Exception:
-            playhead = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
-        try:
-            shown = pane.shown_time() if callable(getattr(pane, "shown_time", None)) else None
-        except Exception:
-            shown = None
-        played = float(shown) if shown is not None else float(getattr(self, "_preview_playhead", 0.0) or 0.0)
         # Why the fill and the thumb can differ, in words the report can print: an open press is the only case where the
         # thumb is a REQUEST and the fill is the picture. Without this the report could only say "they differ", which is
         # what a screenshot already says.
@@ -2213,9 +2260,28 @@ class ProcessTab:
 
         The one predicate every painter asks. The pane has ONE owner: while its tab is current the queue item paints
         (the render's feed and tail drop their frames at the door), and after the hand-back the queue decoder's own
-        queued frames are dropped the same way.
+        queued frames are dropped the same way. Painting decisions read the owner's `QUEUE_FILE` kind now; the raw
+        flag stays for the queue's own bookkeeping (entering/leaving, row selection) and for the frame gate below.
         """
         return bool(getattr(self, "_queue_pane_owns", False))
+
+    def _queue_pane_playhead(self) -> float:
+        """Where the QUEUE ITEM's picture stands, in ITS file's time - the playhead its bar must show.
+
+        The picture's own name when the pane kept it (`shown_time`: `_on_queue_pane_frame` hands the decoder's PTS),
+        else the position the frame path remembered. This never reads `_preview_playhead`: that is the RENDER's
+        position, and the hand-back must still find the render standing where it stood.
+        """
+        pane = getattr(getattr(self, "page_handles", None), "proc", None)
+        shown_time = getattr(getattr(pane, "previewLabel", None), "shown_time", None)
+        if callable(shown_time):
+            try:
+                named = shown_time()
+            except Exception:
+                named = None
+            if named is not None:
+                return max(0.0, float(named))
+        return max(0.0, float(getattr(self, "_queue_pane_position", 0.0) or 0.0))
 
     def _on_inner_tab_changed(self, index: int) -> None:
         """One inner-tab switch: hold the picture, then hand the pane over if the queue tab is involved.
@@ -2373,6 +2439,8 @@ class ProcessTab:
 
         `frame_ready` is delivered queued, so a decoder closed by a tab switch can deliver a frame it emitted before
         the close. That frame has no owner any more and is dropped: the hand-back is the rule, not the delivery order.
+        The raw ownership flag is the right read HERE and only here: this is a FRAME gate (does the picture that just
+        arrived still have a painter), while every decision about the pane reads the owner's `QUEUE_FILE` kind.
         """
         if not self._queue_owns_pane():
             return
@@ -2394,13 +2462,11 @@ class ProcessTab:
         path = getattr(self, "_queue_pane_path", None)
         if path:
             self._queue_pane_positions[path] = pts
-        duration = float(getattr(self, "_queue_pane_duration", 0.0) or 0.0)
-        try:
-            if hasattr(pane, "set_progress"):
-                # A finished, fully decodable file: everything exists, so the whole strip is produced.
-                pane.set_progress(rendered=duration, total=duration, playhead=pts, duration=duration)
-        except Exception:
-            pass
+        # The queue's numbers reach the bar through the SNAPSHOT (one derivation: its own length is the axis and a
+        # finished item is fully produced). The pane's hidden strip is fed from that same snapshot inside
+        # `_push_preview_state`, so there is no queue-specific `set_progress` left to overwrite the preview's
+        # `_progress` on the pane the next owner paints.
+        self._push_preview_state()
 
     def _remember_queue_position(self) -> None:
         path = getattr(self, "_queue_pane_path", None)
@@ -2546,7 +2612,8 @@ class ProcessTab:
         if total > 0:
             produced = max(0.0, min(1.0, float(getattr(self, "currentFrame", 0) or 0) / total))
         target_s = None
-        duration_s = float(self._clip_duration() or 0.0)
+        owner = owner_of(self)
+        duration_s = float(self._clip_duration(owner) or 0.0)
         if duration_s > 0.0:
             target_s = fraction * duration_s
         self._seek_target_s = target_s
@@ -2562,7 +2629,7 @@ class ProcessTab:
         ticket = self._preview_session().press(
             target_s=target_s, target_frame=target_frame, produced=produced, edge_s=edge_s)
         self._press = ticket
-        if self._queue_owns_pane():
+        if owner.kind is PreviewBackendKind.QUEUE_FILE:
             decoder = getattr(self, "_queue_pane_decoder", None)
             duration = float(getattr(decoder, "duration", 0.0) or 0.0)
             if decoder is not None and duration > 0.0:
@@ -2591,7 +2658,7 @@ class ProcessTab:
         past_tail = (live is not None and target_s is not None and tail_edge > 0.0
                      and float(target_s) > tail_edge + tail_tolerance)
         if (bool(getattr(self, "isPreview", False))
-                and owner_of(self).may_seek_any
+                and owner.may_seek_any
                 and (live is None or fraction > produced + 1e-6 or past_tail)):
             # The renderer can render this frame even though the tail cannot: the same block an export uses. Inside
             # the produced band the tail stays the answer (exact, and it costs the renderer nothing); past it the
@@ -2755,7 +2822,8 @@ class ProcessTab:
         """
         if self._queue_owns_pane():
             # A queue item IS the source: there is no render to compare it against, and decoding the last render's
-            # input file over it would show a picture of a different video.
+            # input file over it would show a picture of a different video. A FRAME gate (which picture the compare
+            # would decode), hence the raw flag; pane decisions read the owner's `QUEUE_FILE` kind.
             return
         # The pane's own `originalRequested` (a compare mode's playhead moved) and the 100 ms tick both arrive here;
         # recording what was asked keeps one moved playhead to one source decode.
@@ -2886,7 +2954,9 @@ class ProcessTab:
         owner = owner_of(self)
         if owner.may_paint:
             return
-        if owner.kind is PreviewBackendKind.NONE:
+        if owner.kind in (PreviewBackendKind.NONE, PreviewBackendKind.QUEUE_FILE):
+            # `QUEUE_FILE`: the queue item's own decoder is the pane's one painter while its tab is current; a render
+            # frame arriving here is the second painter the owner's kind exists to rule out.
             return
         path_started = time.perf_counter()
         # The file's own clock, once: the writer's `make_zero` muxes a content-zero frame at the encoder's B-frame
