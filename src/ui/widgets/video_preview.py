@@ -920,7 +920,13 @@ class VideoPreviewSurface(QRhiWidget):
         if self._view_mode == "sbs" and self._original_view_rect().contains(event.position()):
             event.accept()
             return
-        target = getattr(self, "_zoom_target", self._zoom) * factor
+        # FROM THE SCALE THE PICTURE IS DRAWN AT, not from the stored factor: on a 1920x1440 payload in a 504-wide pane
+        # `fit` is 0.26 while the stored factor starts at 1.0, so the FIRST notch - or one 16-unit nudge from a trackpad -
+        # jumped straight to ~1.0, i.e. a 4x crop that reads as "zoomed twice" and stays until Fit is pressed (owner,
+        # 2026-11-26: "картинка то ли кропается, то ли зумится в 2 раза и затем это невозможно убрать"). A notch from the
+        # fitted view is now a notch FROM the fitted view.
+        base = self._fit_scale() if self._zoom_is_fit else getattr(self, "_zoom_target", self._zoom)
+        target = base * factor
         self.set_zoom(target, around=QRectF(event.position(), QSize(1, 1)))
         self.zoomChanged.emit(self._zoom)
         event.accept()
@@ -1181,6 +1187,10 @@ class VideoPreviewSurface(QRhiWidget):
         """
         scale = self._fit_scale() if self._zoom_is_fit else float(self._zoom)
         return samples_nearest_for(scale)
+
+    def zoom_is_fit(self) -> bool:
+        """Whether the view is the FITTED one - the host mirrors this instead of assuming the last wheel left the fit."""
+        return bool(self._zoom_is_fit)
 
     def zoom(self) -> float:
         """The scale the picture is DRAWN at: `_fit_scale()` while the view is fitted, else the stored factor.

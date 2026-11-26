@@ -511,3 +511,34 @@ def test_a_compare_mode_paints_only_when_the_two_halves_are_one_moment(surface):
     assert surface.pair_paint_ready(now=blocked + PAIR_SYNC_HOLD_S + 0.001), "the hold window is the way out"
     assert frame_seconds < PAIR_SYNC_SLACK_S < 2 * frame_seconds, (
         "the slack is a fraction over ONE frame (the timestamps' own drift) and under two (a different moment)")
+
+
+def test_one_wheel_nudge_steps_from_the_fitted_scale_not_from_one_to_one(surface):
+    """Owner, 2026-11-26: "включить режим разделения линией и затем плей - картинка то ли кропается, то ли зумится в 2 раза".
+
+    The first wheel step multiplied the STORED factor (1.0) instead of the scale the picture is drawn at: a 1920x1440
+    payload in a 504-wide pane is fitted at ~0.26, so ONE 16-unit nudge from a trackpad - 1.3 % of a notch - jumped the
+    view to ~1.0, i.e. a ~4x crop, and it stayed there. A notch must step FROM what is on screen.
+    """
+    from PySide6.QtCore import QPoint, QPointF
+    from PySide6.QtGui import QWheelEvent
+
+    picture = QImage(1920, 1440, QImage.Format.Format_RGBA8888)
+    picture.fill(QColor("#204060"))
+    surface.set_frame(picture, media_time=1.0)
+    surface.set_view_mode("split")
+    fitted = surface.zoom()
+    assert fitted < 0.5, f"a 1920-wide picture in a {surface.width()}-wide pane is fitted well below 1: {fitted}"
+
+    event = QWheelEvent(QPointF(100.0, 200.0), QPointF(100.0, 200.0), QPoint(0, 0), QPoint(0, 16),
+                        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                        Qt.ScrollPhase.NoScrollPhase, False)
+    surface.wheelEvent(event)
+
+    stepped = surface.zoom()
+    assert stepped == pytest.approx(fitted * 1.1 ** (16 / 120.0), rel=0.03), (
+        f"a 16-unit nudge must be ~1% from the fitted scale, got {stepped} from {fitted}")
+    assert stepped < 1.0, f"a nudge must not jump to 1:1 (the 4x crop): {stepped}"
+
+    surface.reset_view()
+    assert surface.zoom() == pytest.approx(fitted, rel=0.01), "Fit restores the fitted view"

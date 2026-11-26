@@ -2209,10 +2209,21 @@ class ProcessTab:
             self._preview_zoom = float(zoom)
         except (TypeError, ValueError):
             return
-        self._preview_zoom_fit = False
+        # The PANE says whether it is still fitted: a 16-unit nudge from a trackpad steps by ~1% and leaves the picture
+        # where it was, so reporting "not fitted" on every wheel event latched the view out of Fit for a change nobody
+        # could see - and at the payload's 1:1 that is a crop, not a zoom (owner, 2026-11-26).
+        pane = self.page_handles.proc.previewLabel
+        ask = getattr(pane, "zoom_is_fit", None)
+        fitted = False
+        if callable(ask):
+            try:
+                fitted = bool(ask())
+            except Exception:
+                fitted = False
+        self._preview_zoom_fit = fitted
         controller = getattr(self, "_preview_controller", None)
         if controller is not None:
-            controller.observe(zoom=self._preview_zoom, zoom_fit=False)
+            controller.observe(zoom=self._preview_zoom, zoom_fit=self._preview_zoom_fit)
 
     def _set_preview_paused(self, paused: bool) -> None:
         """The controller's play/pause entry: the shipped handler, which selects and moves the pane's owner.
