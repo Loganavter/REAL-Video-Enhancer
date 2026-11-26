@@ -1831,6 +1831,12 @@ class ProcessTab:
         self.parent.enableProcessPage()
         self._render_started_mono = None
         self.setProgressDetail("")
+        # The run card goes back to its placeholder HERE. The 100 ms tick is the card's normal feeder, but the tick ends
+        # WITH the job (`UpdateGUIThread.finished` is this method), so a card that was counting when the render finished
+        # kept `493 / 493 · 100 % · Rendering` on screen for ever - measured live 2026-11-26, the one thing the offscreen
+        # wiring test could not see because it clears the flag itself. `_update_run_card` reads the flag that was just
+        # cleared and calls the page's `reset_run_status()`.
+        self._update_run_card()
         finished_ok = all(code == 0 or code == 3221225477 for code in self.return_codes) or self.userKilled
         self.setStatus("Idle" if finished_ok else "Failed")
         # The failure line has to be ON SCREEN, not only in the list: the pane is fed by the update
