@@ -63,6 +63,9 @@ class SourceRegister:
         self._capacity = max(1, int(capacity))
         self._held: dict[int, SourcePicture] = {}
         self.generation = 0
+        # The moment somebody last ASKED for (the pane's own, via `picture_for`). Eviction is measured from here, not
+        # from "newest": see `offer`.
+        self._anchor: float | None = None
 
     # -- writing ---------------------------------------------------------
 
@@ -72,8 +75,16 @@ class SourceRegister:
 
         A picture without a moment or without pixels cannot be matched to anything, so it is refused rather than
         stored under a lie. Re-offering the same moment replaces the picture (the last answer wins) and bumps the
-        generation; the oldest moments are dropped once the register is full. `generation` names the render/seek/file
-        that produced the picture, so a later lookup can refuse an answer from a previous one.
+        generation; once the register is full the moment FARTHEST FROM THE ONE THAT WAS ASKED FOR is dropped.
+        `generation` names the render/seek/file that produced the picture, so a later lookup can refuse an answer from
+        a previous one.
+
+        Eviction is measured from the last `picture_for` call, not from "newest wins". The old rule was wrong in the
+        one case a comparison actually spends its life in: a PAUSED pane asks for one moment over and over while the
+        fill keeps a decode lead ahead of it, so every lead frame made the pane's own picture the oldest entry and it
+        was evicted by the next walk - the half went blank, then reappeared, then blanked again (owner, 2026-11-27:
+        "теперь оригинал умеет пару раз померцать даже без запуска плей"). A cache must never drop the answer it is
+        being asked for.
         """
         if moment is None or picture is None:
             return None
@@ -82,16 +93,43 @@ class SourceRegister:
             return None
         held = SourcePicture(float(moment), picture, str(origin), int(generation))
         self._held[key] = held
-        while len(self._held) > self._capacity:
-            del self._held[min(self._held)]
+        self._prune()
         self.generation += 1
         return held
+
+    def _prune(self) -> None:
+        """Drop the entries farthest from the anchored moment until the register fits its capacity.
+
+        Without an anchor (nobody has asked yet) this is the previous behaviour, oldest first. With one, the entry
+        that answers the anchor is the LAST thing to go: ties go to the older entry, so a walk in one direction
+        cannot pin a stale neighbour just because its distance is equal.
+        """
+        while len(self._held) > self._capacity:
+            anchor = self._anchor
+            if anchor is None:
+                del self._held[min(self._held)]
+                continue
+            victim = max(
+                self._held,
+                key=lambda key: (abs(self._held[key].moment - anchor), key),
+            )
+            del self._held[victim]
+
 
     def clear(self) -> None:
         """Forget every picture (a decoder/file change must not leave the previous file's frames answerable)."""
         if self._held:
             self._held.clear()
             self.generation += 1
+        # A new file/generation has its own moments: the previous anchor names a place in a timeline that is gone.
+        self._anchor = None
+
+    def counts(self) -> dict[str, int]:
+        """How many pictures each producer holds, by origin - so a full `pool=` cannot be read as "the source is here"."""
+        counts: dict[str, int] = {}
+        for held in self._held.values():
+            counts[held.origin] = counts.get(held.origin, 0) + 1
+        return counts
 
     def drop_origin(self, origin: str) -> None:
         """Forget the pictures one producer supplied (its block/decoder closed; its frames are not answers any more)."""
@@ -120,6 +158,9 @@ class SourceRegister:
             tolerance = max(0.0, float(tolerance_s))
         except (TypeError, ValueError):
             return None
+        # The ask IS the anchor: this is the moment the register must be able to answer next time, so eviction is
+        # measured from it (see `offer`).
+        self._anchor = moment
         wanted_generation = None if generation is None else int(generation)
         best: SourcePicture | None = None
         best_distance: float | None = None

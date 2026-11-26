@@ -1062,8 +1062,76 @@ def test_the_register_is_bounded_and_drops_the_oldest_moments():
     for step in range(COMPARE_POOL_FRAMES + 5):
         register.offer(step / 24.0, f"F{step}", "decoder")
     assert len(register) == COMPARE_POOL_FRAMES
-    assert register.owner_of(0.0) is None, "the OLDEST go first"
+    assert register.owner_of(0.0) is None, "with nobody asking yet, the OLDEST go first"
     assert register.newest_moment() == pytest.approx((COMPARE_POOL_FRAMES + 4) / 24.0)
+
+
+def test_the_register_never_drops_the_moment_the_pane_is_asking_for():
+    """A full register must still answer the moment that was last ASKED for - that is what eviction is measured from.
+
+    Owner's report, 2026-11-27: "теперь оригинал умеет пару раз померцать даже без запуска плей". A paused pane asks
+    for one moment on every tick while the fill keeps a decode lead ahead of it; with "drop the oldest" the lead frames
+    made the pane's own picture the oldest entry, so the next walk evicted exactly the answer the pane needed - the half
+    blanked, came back, blanked again. The register is a cache; it may not evict what it is being asked for.
+    """
+    register = SourceRegister(COMPARE_POOL_FRAMES)
+    anchor = 1.126
+    register.offer(anchor, "the-pane's-picture", "decoder")
+    assert register.picture_for(anchor, 0.5 / 24.0) is not None, "the ask anchors the register here"
+
+    for step in range(COMPARE_POOL_FRAMES + 8):                  # the fill's own forward walk
+        register.offer(2.0 + step / 24.0, f"lead-{step}", "decoder")
+
+    assert len(register) == COMPARE_POOL_FRAMES, "still bounded"
+    held = register.picture_for(anchor, 0.5 / 24.0)
+    assert held is not None and held.picture == "the-pane's-picture", (
+        "the anchored moment survives a walk past capacity")
+    assert register.newest_moment() < 2.0 + (COMPARE_POOL_FRAMES + 8) / 24.0, (
+        "the FAR side of the walk is what gets dropped, not the pane's moment")
+
+
+def test_a_paused_pane_is_never_asked_for_a_decode_lead():
+    """A still playhead is asked for one picture at its moment, never for a lead nobody will watch."""
+    pane = _Pane()
+    pane.mode = "split"
+    tab = _tab(pane=pane, preview=False, paused=True, alive=True)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=24, inputFile="/tmp/clip.mkv")
+    asked = []
+    tab._on_original_requested = lambda seconds, **kwargs: asked.append((float(seconds), kwargs.get("span")))
+
+    tab._source_register.offer(5.0, "decoder-pic", "decoder")
+    tab._source_fill(5.0)
+    assert asked == [], "a paused pane holds the moment it shows: nothing to ask for"
+
+    tab._source_fill_pending = None
+    tab._source_fill(6.0)                                        # a jump while paused
+    assert asked == [(pytest.approx(6.0), False)], (
+        "one frame at the new moment, not a lead from wherever the decoder stands")
+
+
+def test_every_frame_the_decoder_offers_is_counted_as_an_arrival():
+    """The fill line's `arrivals` must be written where a picture arrives, or every run reads as a frozen pool.
+
+    Deleted in the compare-seam refactor while the line kept printing it: `compare fill asks=11 arrivals=0` looked
+    exactly like the 2026-11-26 bug in a run whose source half was painting (owner's log, 2026-11-27). The counter's
+    own behaviour is asserted here, and the decoder's arrival path is pinned to it by source - building a real decoder
+    frame would put a `QImage` over a Python buffer in a test that is about a counter.
+    """
+    import inspect
+
+    pane = _Pane()
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
+    tab._compare_fill_note_arrival()
+    tab._compare_fill_note_arrival()
+    assert tab._compare_fill_stats["arrivals"] == 2, "an arrival is counted where the picture comes back"
+
+    tab._compare_fill_stats["asks"] = 4
+    assert tab._compare_fill_stats["arrivals"] == 2, "asks and arrivals are separate facts"
+
+    source = inspect.getsource(ProcessTab._on_original_frame)
+    assert "_compare_fill_note_arrival" in source, (
+        "the decoder's own offer site must count the arrival; without it the line can only ever print 0")
+
 
 
 def test_the_page_syncs_the_pane_to_its_own_moment_with_no_flag_between():

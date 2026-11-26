@@ -1305,6 +1305,7 @@ class ProcessTab:
         stats["at"] = now
         register = getattr(self, "_source_register", None)
         held = len(register) if register is not None else 0
+        by_origin = register.counts() if register is not None else {}
         try:
             ph = round(float(self._compare_playhead()), 3)
         except Exception:
@@ -1314,10 +1315,24 @@ class ProcessTab:
             newest = register.newest_moment(generation=int(getattr(self, "_result_generation", 0)))
             newest = None if newest is None else round(float(newest), 3)
         telemetry.event("compare fill", asks=stats["asks"], arrivals=stats["arrivals"], pool=held,
+                        held_block=by_origin.get("block", 0), held_decoder=by_origin.get("decoder", 0),
                         playhead=ph, newest=newest, target=stats.get("target"), span=stats.get("span"),
                         pool_min=None)
         stats["asks"] = 0
         stats["arrivals"] = 0
+
+    def _compare_fill_note_arrival(self) -> None:
+        """Count one decoder picture that came back.
+
+        The fill line exists to tell "never asked" from "asked and never answered", so the counter must be written
+        where a picture actually arrives. It was deleted in the compare-seam refactor while the line kept printing it,
+        and every run then read as a frozen pool (`asks` climbing, `arrivals` a permanent 0) - including runs where the
+        source half was painting correctly (owner's log, 2026-11-27). A counter nobody writes is worse than none.
+        """
+        stats = getattr(self, "_compare_fill_stats", None)
+        if stats is None:
+            stats = self._compare_fill_stats = {"asks": 0, "arrivals": 0, "at": time.monotonic()}
+        stats["arrivals"] = int(stats.get("arrivals", 0)) + 1
 
     def _tick_source_feed(self) -> None:
         """Ask the renderer for the compare's picture, but only in a compare mode with the pane on screen.
@@ -3659,12 +3674,21 @@ class ProcessTab:
             else:
                 self._source_fill_pending = None      # a request nothing answered: ask again
         span = True
+        # A PAUSED pane asks for one picture at its moment and never for a lead. The lead is a playback cost (the
+        # decoder's ~8 frames/s latency is hidden only when the playhead is moving); with a still playhead it decodes
+        # frames nobody will see - and, because the oldest entry went first, every lead walk used to evict the very
+        # picture the pane was showing (owner, 2026-11-27: the original blinked a couple of times with playback never
+        # started). The register's own anchor rule now protects that picture; this one stops the waste at the ask.
+        paused = bool(getattr(self, "_preview_paused", False))
         if register.picture_for(playhead, 1.5 * interval, generation=generation) is None:
             # Nothing in the register answers for THIS playhead (an empty register, a seek, a jump back): ask at it, and
             # take the single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder
             # stands.
             target = playhead
             span = False
+        elif paused:
+            # The pane holds the moment it is showing and is not moving: there is nothing to ask for.
+            return
         elif newest is None:
             target = playhead
             span = False
@@ -3787,8 +3811,10 @@ class ProcessTab:
         # half-frame refusal; this one cannot.
         register = getattr(self, "_source_register", None)
         if register is not None:
-            register.offer(pts, image, "decoder",
-                           generation=int(getattr(self, "_result_generation", 0)))
+            arrived = register.offer(pts, image, "decoder",
+                                     generation=int(getattr(self, "_result_generation", 0)))
+            if arrived is not None:
+                self._compare_fill_note_arrival()
         if telemetry.level() >= 2:
             telemetry.event("compare put", pts=round(float(pts), 3),
                             pool=len(register) if register is not None else 0)
