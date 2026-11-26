@@ -182,18 +182,29 @@ class PreviewTimeline(Slider):
         which is the difference between "the picture lags the request" and "the two are literally one number".
         """
         played = float(self._played_fraction)
-        thumb = float(self._playhead_fraction)
+        # The thumb the user SEES is the widget's value, not the last state's playhead: while the mouse is down the
+        # widget owns it and a state cannot move it. Comparing the fill to the state's playhead would report "glued"
+        # for a picture that is visibly apart from the thumb under the pointer.
+        painted_thumb = max(0.0, min(1.0, float(self.value()) / float(TRACK_STEPS)))
         tolerance = 1.0 / float(TRACK_STEPS)
-        glued = abs(played - thumb) <= tolerance
+        glued = abs(played - painted_thumb) <= tolerance
+        if glued:
+            why = None
+        elif self._scrubbing:
+            why = "scrubbing (the mouse owns the thumb)"
+        else:
+            why = self._state_fill_source or "unknown"
         return {
             "width_px": round(float(self.width()), 1),
             "duration": round(float(self._duration), 3),
             "finished": bool(self._state_finished),
             "rects": list(self._last_paint),
             "glued": bool(glued),
-            "why_not_glued": None if glued else (self._state_fill_source or "unknown"),
+            "why_not_glued": why,
             "state": {
-                "thumb_fraction": round(thumb, 4),
+                "thumb_value": int(self.value()),
+                "thumb_fraction": round(painted_thumb, 4),
+                "state_playhead_fraction": round(float(self._playhead_fraction), 4),
                 "fill_fraction": round(played, 4),
                 "produced_fraction": round(float(self._produced_fraction), 4),
             },
