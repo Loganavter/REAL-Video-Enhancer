@@ -2960,10 +2960,11 @@ class ProcessTab:
             live_tail = getattr(self, "_live_tail", None)
             running = self.renderProcess is not None and self.renderProcess.poll() is None
             if live_tail is not None or running:
-                # Live: the white part is what the RENDERER has produced (`currentFrame/max_value`), the playhead is
-                # where the tail stands - which lags the edge after a seek, so the strip must show it. The duration is
-                # the estimate the produced share implies; without it the strip would draw no playhead at all and a
-                # seek would be invisible until the renderer caught up with the target.
+                # Live: the TINTED BAND is what the RENDERER has produced (`currentFrame/max_value`; it is the played
+                # blue at PRODUCED_ALPHA, not a second colour - see `PreviewTimeline`), and the playhead is where the
+                # tail stands, which lags the edge after a seek, so the strip must show it. The duration is the
+                # estimate the produced share implies; without it the strip would draw no playhead at all and a seek
+                # would be invisible until the renderer caught up with the target.
                 pane.set_progress(rendered=self.currentFrame, total=self.max_value,
                                   playhead=frame.pts, duration=self._live_duration_estimate())
             else:

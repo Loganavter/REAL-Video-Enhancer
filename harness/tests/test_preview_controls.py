@@ -882,3 +882,52 @@ def test_every_owner_seeks_through_the_page_not_behind_its_back(kind):
     assert adapter.seek(10.0, exact=True) is True
     assert page.asked == [pytest.approx(0.5)], page.asked
     assert owner.seeks == [], "the page routes the press; the adapter must not seek the owner behind its back"
+
+
+def test_the_strip_paints_played_in_blue_and_produced_as_the_same_blue_tinted(controls):
+    """The colours are the approved mockup's (`shared.css`): track dark, band `rgba(91,157,255,.28)`, played the bright
+    blue, head white at 50 %.
+
+    This app's theme resolves `accent` to WHITE, and the widget used `accent` for the played fill while painting the
+    produced band in solid blue - so a fully produced clip showed a short white bar and a blue band, i.e. both roles
+    swapped (owner, 2026-11-26: "у меня produced - всё, если ты смотрел на комментарий").
+    """
+    from PySide6.QtCore import QRectF
+    from src.ui.preview.timeline import PRODUCED_ALPHA
+    from src.ui.preview.state import PreviewPhase
+
+    timeline = controls.timeline
+    timeline.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=20.0,
+                                    playhead=3.0, played=3.0, fps=24.0))
+
+    class _Painter:
+        def __init__(self) -> None:
+            self.rects: list[tuple[int, int, int, int]] = []
+            self.brushes: list = []
+            self.pens: list = []
+
+        def save(self): pass
+        def restore(self): pass
+        def setPen(self, pen): self.pens.append(pen)
+        def setBrush(self, brush): self.brushes.append(brush)
+        def drawRect(self, rect): self.rects.append((rect.x(), round(brush_alpha(self.brushes[-1]), 3),
+                                                     round(rect.width(), 3), 0))
+        def drawLine(self, *args): self.rects.append(("head",))
+
+    def brush_alpha(brush):
+        return brush.color().alphaF()
+
+    painter = _Painter()
+    timeline._paint_track(painter, QRectF(0, 0, 100, 4))
+
+    # track, band (28 %), played (100 %), head
+    assert len(painter.rects) == 4, painter.rects
+    track, band, played, head = painter.rects
+    assert band[1] == pytest.approx(PRODUCED_ALPHA, abs=0.01), "the produced band must be the tinted blue"
+    assert band[2] == pytest.approx(100.0), "produced=100% must tint the whole bar"
+    assert played[1] == pytest.approx(1.0), "the played fill is full strength"
+    assert played[2] == pytest.approx(15.0), "played=3 s of 20 s"
+    assert head[0] == "head"
+    played_colour = painter.brushes[2].color().name()
+    assert played_colour != "#ffffff", "the played fill must not be the theme's white accent"
+    assert painter.pens[-1].color().alphaF() == pytest.approx(0.5, abs=0.01), "the head is white at 50 %"

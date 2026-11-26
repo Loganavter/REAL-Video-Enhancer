@@ -2,9 +2,15 @@
 
 The track is a timeline, not a progress bar, and it carries three facts at once:
 
-* the whole clip (the unfilled groove),
-* the band the renderer has actually produced (`toast.progress.fill`, the render head is its right edge),
-* the played fill up to the playhead (the accent), with the thumb standing where the playhead is.
+* the whole clip (the unfilled groove, the theme's dark track),
+* the band the renderer has actually produced - the same blue as the played fill at `PRODUCED_ALPHA`, so a fully
+  produced clip reads as "the whole bar is tinted" and the render head is its right edge,
+* the played fill up to the playhead, in full-strength blue, with the thumb standing where the playhead is.
+
+Colours follow the approved layout-E mockup (`~/Загрузки/rve-preview-mockups/shared.css`): `--track: #2a303c`,
+`.produced { background: rgba(91,157,255,.28) }`, `.fill { #4f8df0 -> #74adff }`. The code used to paint the played
+fill with `accent`, which this app's theme maps to WHITE, and the produced band in solid blue - i.e. both roles swapped
+against the design (owner, 2026-11-26: "у меня produced - всё, если ты смотрел на комментарий").
 
 The widget is a `sli_ui_toolkit` `Slider`, so the track/thumb geometry, the keyboard edit mode (`Enter`) and the
 theme repaint are the toolkit's; only the band painting is ours (`setTrackPainter`). A press or drag emits
@@ -28,8 +34,10 @@ from .state import PreviewState
 
 #: The toolbar's slider range: a 0..1000 integer track is finer than a millisecond at any realistic clip length.
 TRACK_STEPS = 1000
-#: Rounded ends and a 2 px marker keep the band's edge legible without competing with the thumb.
-MARKER_WIDTH = 2
+#: The render head: the mockup's `.ceiling` is a 1 px line at `rgba(255,255,255,.5)`, standing above and below the
+#: groove. A dark rule on the finished band was invisible, which made "produced" look like nothing at all.
+MARKER_WIDTH = 1
+MARKER_ALPHA = 0.5
 
 #: How many recent scrub actions the widget keeps for the control surface (`state:preview_timeline` -> `scrub`).
 #: The preview's own telemetry is `preview-log.txt`; this is the same session's answer for THIS control, in memory, so a
@@ -40,12 +48,20 @@ RECENT_SCRUB_ACTIONS = 16
 SNAP_BACK_WINDOW_S = 3.0
 
 #: The colours the scrubber paints, by role. Nothing here is a literal RGBA; a missing token falls back neutral.
+#: `played` is the theme's ACTIVE blue (the mockup's `#4f8df0 -> #74adff`); `produced` is the same blue at
+#: `PRODUCED_ALPHA` (the mockup's `rgba(91,157,255,.28)`); the head is `accent` at `MARKER_ALPHA` (the mockup's
+#: `rgba(255,255,255,.5)`). `accent` must never be the PLAYED fill: this app's theme resolves it to white, which is
+#: why the bar used to show a white "played" bar and a solid blue band - both roles swapped against the design.
 TIMELINE_TOKENS = {
-    "track": "slider.track.unfilled",
-    "produced": "toast.progress.fill",
-    "played": "accent",
-    "marker": "slider.track.background",
+    "track": "slider.track.background",
+    "produced": "slider.track.filled",
+    "played": "slider.track.filled",
+    "marker": "accent",
 }
+
+#: The produced band's opacity: the mockup's `.produced` is `rgba(91,157,255,.28)`. One colour, two roles - the band is
+#: the same blue as the played fill, only muted, so "produced but not played" reads as a tint rather than a second fill.
+PRODUCED_ALPHA = 0.28
 
 
 def format_content_time(seconds: float | None) -> str:
@@ -246,7 +262,11 @@ class PreviewTimeline(Slider):
 
         produced = max(0.0, min(1.0, self._produced_fraction))
         if produced > 0.0:
-            painter.setBrush(QBrush(_token("produced", "#2f6f4f")))
+            # One blue, two roles: the band is the played colour at 28 %, exactly the mockup's `rgba(91,157,255,.28)`.
+            # A fully produced clip therefore tints the WHOLE bar and the played fill is the bright part of it.
+            band = _token("produced", "#0096ff")
+            band.setAlphaF(PRODUCED_ALPHA)
+            painter.setBrush(QBrush(band))
             painter.drawRect(QRectF(rect.left(), rect.top(), rect.width() * produced, rect.height()))
 
         # The fill cannot run past the produced band: nothing exists beyond the edge the band marks, and a frame the
@@ -262,6 +282,8 @@ class PreviewTimeline(Slider):
             # The render head is the produced band's right edge: a 2 px vertical rule reads as "the renderer is here"
             # without a second marker colour competing with the thumb.
             x = rect.left() + rect.width() * produced
-            painter.setPen(QPen(_token("marker", "#1f232a"), MARKER_WIDTH))
+            head = _token("marker", "#ffffff")
+            head.setAlphaF(MARKER_ALPHA)
+            painter.setPen(QPen(head, MARKER_WIDTH))
             painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
         painter.restore()
