@@ -355,6 +355,9 @@ class _Pane:
         self.originals = []
         self.progress = []
         self.mode = "single"
+        #: The PANE's own picture, like the real widget's: `set_original(None)` clears it, and the tab now reads it to
+        #: decide whether its "already shown" memo still describes the pane (see `_source_show`).
+        self._original = None
 
     def isVisible(self) -> bool:  # noqa: N802 - Qt spelling
         return bool(self.visible)
@@ -365,6 +368,7 @@ class _Pane:
         self.frames.append(image)
 
     def set_original(self, image, *, media_time: float | None = None, index: int | None = None) -> None:
+        self._original = image
         self.originals.append((image, media_time, index))
 
     def set_progress(self, **values) -> None:
@@ -954,6 +958,32 @@ def test_the_compare_decoder_is_really_opened_and_then_asked(monkeypatch):
     assert asked, "the pane's ask never reached the decoder"
     assert asked[-1][0] == pytest.approx(2.5)
     assert asked[-1][3] is False, "a single answered frame is a seek, not a span"
+
+
+def test_a_pane_that_lost_its_picture_is_supplied_again_even_on_a_paused_playhead():
+    """The third appearance of one freeze: a memo saying "already shown" while the pane holds nothing.
+
+    `_source_shown_pts` was reset only by `_stop_source_decoder`, so a mode change that handed the pane `set_original(None)`
+    (or a completion that cleared the half) left the memo suppressing the handover - and a PAUSED pane never moves its
+    playhead, so the source half stayed empty for as long as the pane stood still. Owner's report, three times over:
+    "снова левый экран застыл на одном кадре". The pool has the picture; the pane is the state; the memo is a hint.
+    """
+    pane = _Pane()
+    pane.mode = "sbs"
+    tab = _tab(pane=pane, preview=False, paused=True, alive=False, reader=_Reader())
+    tab._source_pool_put(0.25, 6, "picture")
+    tab._source_shown_pts = 0.25                       # the memo believes the pane already has this moment
+    assert getattr(pane, "_original", None) is None, "the stub starts with no picture, like a pane after a mode change"
+
+    tab._source_show(0.25)
+
+    assert pane.originals and pane.originals[-1][1] == pytest.approx(0.25), (
+        "a pane with no picture must be handed the one the pool holds, memo or not")
+
+    # And with the picture in place the memo still saves a repaint: no second handover of the SAME moment.
+    before = len(pane.originals)
+    tab._source_show(0.25)
+    assert len(pane.originals) == before, "the same moment is not handed over twice while the pane already shows it"
 
 
 def test_the_default_box_is_the_probe_constant():

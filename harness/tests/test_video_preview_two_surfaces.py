@@ -296,6 +296,15 @@ def test_a_zoom_writes_a_draw_line_at_the_default_telemetry_level(surface, monke
     assert len(draws()) == 2, "the zoom moved the box: it must be visible without level 2"
     assert draws()[-1]["scale"] != draws()[0]["scale"]
 
+    # A PLANES result has no QImage, and the line used to infer "is there a picture" from `_frame`: every paint with a
+    # source on the live YUV path wrote nothing (that is the state the compare actually runs in).
+    planes = object()
+    surface.set_frame_planes([b"\x00" * 8], [4], 2, 2, index=1, pts=0.5)
+    surface._original = _picture(2, 2)
+    surface._on_rhi_draw(painted)
+    assert len(draws()) == 3, "a planes result with a source is a picture too"
+    assert draws()[-1]["result_fp"] == "-", "the fingerprint says planes, and the line still has to exist"
+
 
 def test_the_lmb_compare_asks_the_shown_pictures_time_not_the_stale_marker(surface):
     """`_progress` moves only when a frame paints, so a strip press leaves it behind; the picture names itself.

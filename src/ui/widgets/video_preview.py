@@ -1565,7 +1565,11 @@ class VideoPreviewSurface(QRhiWidget):
         # Both halves in one pass: one line names both pictures (a new original, a new box, or every paint at level 2).
         original = self._original if drawn.drew_original else None
         if drawn.drew_original and (self._original_changed or geometry_changed or telemetry.level() >= 2):
-            self._log_draw_two(self._frame, original)
+            # `present` from the WIDGET, not inferred from `_frame`: a planes (YUV) result has no QImage, so the
+            # inference in `_log_draw_two` answered "no picture" and EVERY paint with a source on the live path wrote
+            # nothing - the draw log was blind exactly where the compare runs (measured 2026-11-26: the fit paint, with
+            # no source yet, was logged; the same paint with a source was not, which is what made a zoom look untraceable).
+            self._log_draw_two(self._frame, original, present=self._has_picture())
             self._original_changed = False
             self._logged_geometry = geometry
         elif geometry_changed or telemetry.level() >= 2:

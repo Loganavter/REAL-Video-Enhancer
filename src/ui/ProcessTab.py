@@ -3514,6 +3514,15 @@ class ProcessTab:
                             pool="/".join(f"{value:.3f}" for value in
                                           sorted(getattr(self, "_source_pool", None) or {})))
         shown_pts = getattr(self, "_source_shown_pts", None)
+        # THE MEMO IS A HINT; THE PANE IS THE STATE. `_source_shown_pts` used to be reset only by `_stop_source_decoder`,
+        # so a pane that lost its picture without the decoder closing (a mode change hands `set_original(None)` when
+        # nothing stood, a completion clears the half) left the memo saying "already shown" - and on a PAUSED pane the
+        # playhead never moves, so the handover was suppressed for as long as the pane stayed paused. That is the third
+        # appearance of one freeze: `83f8212e` (the pool in the FUTURE, so the fill read "lead full"), `95b3c7bc` (the
+        # render block marked alive before its picture was accepted, so the decoder stood down) and this one - each a
+        # flag asserting "already supplied" with no test against what the pane actually holds.
+        if getattr(pane, "_original", None) is None:
+            shown_pts = self._source_shown_pts = None
         if shown_pts is not None and abs(pts - shown_pts) < 1e-6:
             return
         self._source_shown_pts = pts
