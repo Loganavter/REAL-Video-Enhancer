@@ -586,3 +586,29 @@ def test_a_seek_flushes_the_pair_and_never_pairs_across_the_jump(surface):
         "the seek's own moment is painted once its source lands")
     assert surface._committed_source_time == pytest.approx(13.0)
     assert PAIR_JUMP_WAIT_S > PAIR_SYNC_HOLD_S, "the valve's stand-down must exceed one hold window"
+
+
+def test_an_empty_publication_does_not_clear_the_result_half(surface):
+    """`_on_display_frame(None, media_time=...)` means "nothing this tick", not "clear" - it used to empty sbs's right half.
+
+    The null picture was queued as a RESULT entry with no image and no planes, and `_commit_pair` then handed the
+    renderer `set_frame(None)`: the job's finished picture disappeared from the result half while the source half stayed
+    (owner, 2026-11-26, sbs after a finished render). A clear is a `None` WITHOUT a name.
+    """
+    picture = QImage(320, 180, QImage.Format.Format_RGBA8888)
+    picture.fill(QColor("#204060"))
+    surface.set_original(picture, media_time=1.0)
+    surface.set_frame(picture, media_time=1.0)
+    surface.set_view_mode("sbs")
+    assert surface._commit_pair(), "a sane pair paints"
+
+    before = surface._frame
+
+    # An empty publication that still names a moment: nothing is enqueued, the picture stays.
+    surface.set_frame(None, media_time=1.25)
+    assert surface._frame is before, "an unnamed picture must not replace the result"
+    assert not surface._result_queue, "and nothing may be queued for it"
+
+    # An explicit clear (no name) still clears.
+    surface.set_frame(None)
+    assert surface._frame is None

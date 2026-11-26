@@ -320,6 +320,13 @@ class VideoPreviewSurface(QRhiWidget):
         same image for its geometry, its fingerprints and the draw log. Signatures here are the public API and do not
         change - a producer that speaks planes will hand the renderer a `PreviewFrame` directly (the YUV lane).
         """
+        if image is None and media_time is not None:
+            # A display feed can publish an EMPTY slot while still naming a moment (`_on_display_frame(None, ...)`): that
+            # is "nothing to show this time", not "clear the pane". Queued, it became a result entry with no image AND no
+            # planes, and `_commit_pair` then called `set_frame(None)` - the empty RIGHT half of sbs after a finished
+            # render (owner, 2026-11-26: "оба видео сделают между собой огромный пустой промежуток"). The picture stays;
+            # an explicit clear (a `None` with no name) still clears below.
+            return
         self._frame = None if image is None else image.convertToFormat(QImage.Format.Format_RGBA8888)
         # An image frame replaces any standing planes picture: the geometry reads `_planes_size` when there is no
         # image, and the two shapes must never both claim the same frame.
@@ -752,7 +759,11 @@ class VideoPreviewSurface(QRhiWidget):
         elif planes is not None:
             self._renderer.set_frame(planes)
         else:
-            self._renderer.set_frame(None)
+            # Defensive: an entry with neither an image nor planes carries no picture at all. Dropping it is right - the
+            # renderer keeps the last result - while `set_frame(None)` cleared the half (see `set_frame`).
+            del self._result_queue[result_key]
+            del self._source_queue[source_key]
+            return False
         self._renderer.set_original(self._preview_frame(picture, index=source_index, pts=source_time))
         self._committed_result_time = None if result_time is None else float(result_time)
         self._committed_source_time = None if source_time is None else float(source_time)
