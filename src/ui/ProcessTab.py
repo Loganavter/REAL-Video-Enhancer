@@ -3515,6 +3515,28 @@ class ProcessTab:
         for pts in [value for value in pool if value < playhead - span or value > playhead + span]:
             del pool[pts]
 
+    def _block_supplies_the_pane(self, playhead: float) -> bool:
+        """True while the render block is publishing the SOURCE FOR THIS MOMENT - a fact about the pane, not a clock.
+
+        `_source_feed_is_live` is a one-second timestamp: on a stopped render it outlives the last picture, and the compare
+        decoder stands down for that whole second while the source half sits empty (owner's log, 2026-11-26: after a switch
+        six sbs paints across 1.24 s with `original_t=None` and `compare fill asks=0`, then the block's picture appeared).
+        A live block that does not hold the pane's moment is not supplying anything.
+        """
+        if not self._source_feed_is_live():
+            return False
+        pane = self.page_handles.proc.previewLabel
+        shown = getattr(pane, "original_shown_time", None)
+        if not callable(shown):
+            return True
+        try:
+            moment = shown()
+        except Exception:
+            return True
+        if moment is None:
+            return False
+        return abs(float(moment) - float(playhead)) <= (1.5 / max(1.0, self._compare_fps()))
+
     def _source_show(self, playhead: float) -> None:
         """Hand the pane the source frame that matches `playhead`, and only when it is a DIFFERENT frame.
 
@@ -3529,10 +3551,10 @@ class ProcessTab:
                     return       # the LMB flash has its own path and its own timing
             except Exception:
                 return
-        if self._source_feed_is_live():
-            # The render block is publishing this moment's source itself: handing the pane the decoder's picture as well
-            # is the double work that block exists to remove, and it can only make the two halves disagree (the same
-            # reason `_source_fill` stands down). The pane follows the block while it is live.
+        if self._block_supplies_the_pane(playhead):
+            # The block holds the pane's moment: handing it the decoder's picture as well is the double work the channel
+            # exists to remove. A block that is merely RECENT but does not hold this moment supplies nothing (see the
+            # helper), so the decoder below is free to answer.
             return
         self._source_prune(playhead)
         chosen = self._source_pool_for(playhead)
@@ -3659,9 +3681,9 @@ class ProcessTab:
         runs flat out until the lead is full and stops, instead of being polled at a timer's rate - a 10 Hz poll cannot
         feed a 24 fps stream, so the lead would drain exactly when it is needed.
         """
-        if self._source_feed_is_live():
-            # The renderer is publishing the source of every composited frame: decoding the same file a second time is
-            # exactly the cost this block exists to remove.
+        if self._block_supplies_the_pane(float(playhead)):
+            # The renderer is publishing THIS moment's source: decoding the same file a second time is exactly the cost
+            # this block exists to remove.
             return
         playhead = float(playhead)
         interval = 1.0 / self._compare_fps()

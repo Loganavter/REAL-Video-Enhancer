@@ -1015,12 +1015,14 @@ def test_a_source_picture_of_a_DIFFERENT_moment_is_replaced_unless_the_block_is_
     assert pane.originals[-1][1] == pytest.approx(0.25), "a stale source picture is replaced by the pool's moment"
     assert pane.originals[-1][0] == "pool picture"
 
-    # While the block is live it owns the half: the tab must not overwrite it.
-    pane.set_original("block picture", media_time=9.5)
+    # While the block holds THE PANE'S MOMENT it owns the half: the tab must not overwrite it. A live block that holds a
+    # different moment (the case above, 9.5 vs 0.25) supplies nothing - a one-second timestamp is not a fact about the
+    # pane, and trusting it is what left the source half empty for 1.24 s in the owner's log.
+    pane.set_original("block picture", media_time=0.25)
     tab._source_shown_pts = None
     tab._source_feed_alive_at = time.monotonic()
     tab._source_show(0.25)
-    assert pane.originals[-1][0] == "block picture", "the live block is the supplier; the decoder stands down"
+    assert pane.originals[-1][0] == "block picture", "the block holds this moment: the decoder stands down"
 
 
 def test_a_pool_frame_far_off_the_playhead_does_not_answer_for_it():
