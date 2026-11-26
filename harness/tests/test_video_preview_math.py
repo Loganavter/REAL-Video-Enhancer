@@ -377,3 +377,59 @@ def test_the_divider_only_exists_in_split(surface):
     assert surface._split_divider_x() is None
     surface.set_view_mode("single")
     assert surface._split_divider_x() is None
+
+
+def test_the_divider_fades_over_two_seconds_and_leaves_the_grip_at_twenty_percent(surface):
+    """Owner, 2026-11-26: a rule that follows the pointer, then a 2 s fade that ends with only the grip at 20 %.
+
+    The curve is a pure function of a timestamp (`divider_alpha(now)`), so the test drives it without a timer.
+    """
+    import time as _time
+
+    from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
+
+    from src.ui.widgets.video_preview import DIVIDER_FADE_S, DIVIDER_REST_ALPHA
+
+    source = QImage(640, 360, QImage.Format.Format_RGBA8888)
+    source.fill(QColor("#204060"))
+    surface.set_original(source)
+    surface.set_view_mode("split")
+    now = _time.monotonic()
+    assert surface.divider_alpha(now) == pytest.approx(1.0), "the pointer is on it until it leaves"
+    surface._divider_left_at = now
+    assert surface.divider_alpha(now + DIVIDER_FADE_S / 2.0) == pytest.approx(0.5)
+    assert surface.divider_alpha(now + DIVIDER_FADE_S + 0.01) == 0.0
+
+    # At rest the rule is gone and the grip is still there at 20 %: one rect at the divider with that alpha.
+    surface._divider_left_at = now - DIVIDER_FADE_S - 1.0
+    floats = surface._hud_vertices()
+    divider_x = surface._split_divider_x()
+    near = [(floats[i], floats[i + 5]) for i in range(0, len(floats), 6)
+            if abs(floats[i] - (divider_x if divider_x is not None else 0.0)) <= float(scaled_px(12))]
+    assert near, "the divider left nothing at all"
+    assert max(alpha for _x, alpha in near) == pytest.approx(DIVIDER_REST_ALPHA, abs=0.01), (
+        f"the resting divider must be the grip at {DIVIDER_REST_ALPHA:.0%}, got {sorted({round(a, 2) for _x, a in near})}")
+    assert float(scaled_px(9)) >= 9.0 - 0.01, "the grab radius is in toolkit pixels"
+
+
+def test_the_fade_stops_repainting_once_it_reaches_the_rest_alpha(surface):
+    """The 30 ms timer exists only while the rule is fading: a paused pane must not repaint for ever."""
+    import time as _time
+
+    source = QImage(640, 360, QImage.Format.Format_RGBA8888)
+    source.fill(QColor("#204060"))
+    surface.set_original(source)
+    surface.set_view_mode("split")
+
+    surface._start_divider_fade()
+    assert surface._divider_timer is not None, "the fade needs a clock (a paused pane has none)"
+    assert surface.divider_alpha() == pytest.approx(1.0, abs=0.05)
+    surface._divider_left_at = _time.monotonic() - 3.0
+    surface._tick_divider_fade()
+    assert surface.divider_alpha() == 0.0
+    assert not surface._divider_timer.isActive(), "the timer must stop when the rule is gone"
+
+    # A hover cancels the fade and brings the rule back to full alpha.
+    surface._on_hover_restore = None
+    surface._divider_left_at = None
+    assert surface.divider_alpha() == pytest.approx(1.0)

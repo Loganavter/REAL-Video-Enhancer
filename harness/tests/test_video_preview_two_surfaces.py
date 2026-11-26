@@ -230,9 +230,11 @@ def test_split_clips_the_original_to_the_left_of_the_divider(surface):
     divider_floats = [v for v in surface._hud_vertices()]
     divider_x = surface._split_divider_x()
     assert divider_x is not None
+    from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
+    rule = 2.0 * float(scaled_px(1)) + float(scaled_px(2))      # 1 px light, 2 px core, 1 px light
     xs = [divider_floats[i] for i in range(0, len(divider_floats), 6)]   # [x, y, r, g, b, a] per corner
-    assert any(abs(x - (divider_x - 3.5)) < 0.6 for x in xs), "the divider's outline is not in the HUD"
-    assert any(abs(x - (divider_x + 3.5)) < 0.6 for x in xs), "the divider's outline must end at x+3.5"
+    assert any(abs(x - (divider_x - rule / 2.0)) < 0.6 for x in xs), "the divider's left edge is not in the HUD"
+    assert any(abs(x - (divider_x + rule / 2.0)) < 0.6 for x in xs), "the divider's right edge is not in the HUD"
     assert xs[0] < divider_x, "the strip is painted before the divider (one pass, strip first)"
     assert surface._view_rect() == QRectF(0.0, 0.0, float(PANE_SIZE[0]), float(PANE_SIZE[1])), (
         "split fits the result into the whole pane, unlike sbs")

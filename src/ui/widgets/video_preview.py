@@ -109,9 +109,15 @@ MIN_ZOOM = 1.0
 #: the API (`set_view_mode`), not a UI label - the host may put them on whichever control it likes.
 VIEW_MODES = ("single", "sbs", "split")
 
-#: How close to the `split` divider a press counts as grabbing it, in logical px. Wide enough for a mouse, narrow
-#: enough that a press meant for the picture (pan/compare) stays one.
+#: How close to the `split` divider a press counts as grabbing it, in TOOLKIT pixels (`scaled_px`): wide enough for a
+#: mouse, narrow enough that a press meant for the picture (pan/compare) stays one.
 SPLIT_GRAB_PX = 9
+
+#: The divider fades out this long after the pointer leaves it, and the grip that stays is this visible: a rule at zero
+#: alpha would leave nothing to aim at, and a rule at full alpha would sit over the picture for ever (owner, 2026-11-26:
+#: "после того как курсор ушел - фейдом пропадало в течение 2 секунд (только ручка была видна с альфой 20%)").
+DIVIDER_FADE_S = 2.0
+DIVIDER_REST_ALPHA = 0.2
 
 #: The shortest share of the picture each side keeps: a divider pushed to the very edge would hide one picture
 #: completely, which is what `single` is for.
@@ -172,6 +178,11 @@ class VideoPreviewSurface(QRhiWidget):
         #: A drag in flight on the `split` divider: the only gesture that moves it, and it must never fall through to
         #: the picture's own press handling (which consumes compare presses).
         self._dragging_split = False
+        #: When the pointer last left the divider (monotonic), or None while it is on/near it: the fade's clock.
+        self._divider_left_at: float | None = None
+        #: The fade needs repaints, and a paused pane has no other clock. 30 ms is smooth at this size and stops as soon
+        #: as the rule reaches its rest alpha.
+        self._divider_timer = None
         #: the playhead the standing original was last asked for, so playback refreshes it once per move
         self._original_requested_at: float | None = None
         #: The identity of the source picture the host handed over (`("frame", n)`, its media time) and the moment the
@@ -517,6 +528,8 @@ class VideoPreviewSurface(QRhiWidget):
             return
         self._view_mode = mode
         telemetry.event("view", mode=self._view_mode)
+        # No divider outside `split`: drop the fade's clock and its timer instead of repainting for nothing.
+        self._stop_divider_fade(reset=True)
         # Leaving "single" ends a flash: the source becomes the standing pane instead of a held picture.
         self._showing_original = False
         self._hud_dirty = True
@@ -556,7 +569,51 @@ class VideoPreviewSurface(QRhiWidget):
         picture = self._frame_rect()
         if not (picture.top() <= position.y() <= picture.bottom()):
             return False
-        return abs(position.x() - x) <= SPLIT_GRAB_PX
+        return abs(position.x() - x) <= float(scaled_px(SPLIT_GRAB_PX))
+
+    def divider_alpha(self, now: float | None = None) -> float:
+        """The divider's alpha right now: 1 while the pointer is on it, 0 after `DIVIDER_FADE_S` away from it."""
+        left = self._divider_left_at
+        if left is None:
+            return 1.0
+        moment = time.monotonic() if now is None else float(now)
+        return max(0.0, min(1.0, 1.0 - (moment - left) / DIVIDER_FADE_S))
+
+    def _divider_hovered(self, position) -> bool:
+        if not self._grabs_split(position):
+            return False
+        # The pointer is on the divider: it is fully visible and the fade is cancelled.
+        self._divider_left_at = None
+        self._stop_divider_fade()
+        return True
+
+    def _start_divider_fade(self) -> None:
+        """Begin (or keep) the fade after the pointer leaves the divider; repaints until the rest alpha is reached."""
+        if self._view_mode != "split" or self._divider_left_at is not None:
+            return
+        self._divider_left_at = time.monotonic()
+        if self._divider_timer is None:
+            from PySide6.QtCore import QTimer
+
+            self._divider_timer = QTimer(self)
+            self._divider_timer.setInterval(30)
+            self._divider_timer.timeout.connect(self._tick_divider_fade)
+        # START it: creating a timer does not make it tick, and without the ticks there is no repaint, so the rule
+        # stayed at full alpha for ever in the first cut (measured live 2026-11-26: identical pixels at T+0.4 s and T+3 s).
+        if not self._divider_timer.isActive():
+            self._divider_timer.start()
+
+    def _tick_divider_fade(self) -> None:
+        self.update()
+        if self._divider_left_at is not None and self.divider_alpha() <= 0.0:
+            self._stop_divider_fade()
+
+    def _stop_divider_fade(self, *, reset: bool = False) -> None:
+        timer = self._divider_timer
+        if timer is not None:
+            timer.stop()
+        if reset:
+            self._divider_left_at = None
 
     def view_mode(self) -> str:
         """Which surfaces the pane shows: "single", "sbs" or "split"."""
@@ -693,7 +750,7 @@ class VideoPreviewSurface(QRhiWidget):
             # The `split` divider is a CONTROL and the only thing in a compare mode that takes a press: grabbing it must
             # happen before the compare consumption below, or the divider can never be moved (owner, 2026-11-26:
             # "было бы неплохо добавить видимый сплитер который передвигать можно").
-            if self._grabs_split(position):
+            if self._divider_hovered(position):
                 self._dragging_split = True
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
                 event.accept()
@@ -727,6 +784,14 @@ class VideoPreviewSurface(QRhiWidget):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         position = event.position()
+        if not self._dragging_split:
+            # The divider's own hover: full alpha while the pointer is on it, a fade once it leaves. The cursor says
+            # "this can be dragged" before the press does.
+            if self._divider_hovered(position):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif self._view_mode == "split":
+                self.unsetCursor()
+                self._start_divider_fade()
         if self._dragging_split:
             picture = self._frame_rect()
             if not picture.isEmpty() and picture.width() > 0.0:
@@ -782,6 +847,13 @@ class VideoPreviewSurface(QRhiWidget):
             self._hover_blocked = blocked
             self.setCursor(Qt.CursorShape.ForbiddenCursor if blocked else Qt.CursorShape.PointingHandCursor)
             self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        """The pointer left the widget: the divider starts its fade (it was not "still hovered" any more)."""
+        if not self._dragging_split:
+            self.unsetCursor()
+            self._start_divider_fade()
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         if event.button() == Qt.MouseButton.LeftButton and self._dragging_split:
@@ -1315,21 +1387,31 @@ class VideoPreviewSurface(QRhiWidget):
             bottom = min(strip_top, picture.bottom())
             if bottom > top:
                 x = picture.left() + picture.width() * self._split_fraction
-                # An OUTLINED rule, not a solid bright one (owner, 2026-11-26: "а может лучше обводку сделать?"): a
-                # light stroke with a dark core reads over a bright sky AND over a dark tree, which one flat colour
-                # cannot do, and it does not glare. The grip is the same two-tone pill, so the divider is visibly a
-                # control (it can be dragged) without a tooltip.
-                rects.append((x - 3.5, top, 7.0, bottom - top, rgba(colours["divider"], 0.90)))
-                rects.append((x - 2.0, top, 4.0, bottom - top, rgba(colours["divider_outline"], 0.90)))
-                grip_h = min(44.0, max(24.0, (bottom - top) * 0.12))
-                grip_w = 16.0
+                # An OUTLINED rule in TOOLKIT pixels: 1 px light, 2 px dark core, 1 px light. Narrower than the first
+                # cut (7/4 read heavy), scaled by `scaled_px` so a HiDPI window gets the same physical weight (owner,
+                # 2026-11-26). It fades out after the pointer leaves and leaves only the grip at 20 %, so the picture is
+                # never permanently divided by a line the owner is not using.
+                alpha = self.divider_alpha()
+                side = float(scaled_px(1))
+                core = float(scaled_px(2))
+                rule = side + core + side
+                if alpha > 0.0:
+                    rects.append((x - rule / 2.0, top, side, bottom - top, rgba(colours["divider"], 0.90 * alpha)))
+                    rects.append((x - core / 2.0, top, core, bottom - top,
+                                  rgba(colours["divider_outline"], 0.90 * alpha)))
+                    rects.append((x + core / 2.0, top, side, bottom - top, rgba(colours["divider"], 0.90 * alpha)))
+                grip_alpha = max(DIVIDER_REST_ALPHA, alpha)
+                grip_h = min(float(scaled_px(36)), max(float(scaled_px(24)), (bottom - top) * 0.12))
+                grip_w = float(scaled_px(14))
                 grip_top = top + (bottom - top - grip_h) / 2.0
-                rects.append((x - grip_w / 2.0, grip_top, grip_w, grip_h, rgba(colours["divider"], 0.95)))
-                rects.append((x - grip_w / 2.0 + 1.5, grip_top + 1.5, grip_w - 3.0, grip_h - 3.0,
-                              rgba(colours["divider_outline"], 0.92)))
-                for offset in (-4.0, 0.0, 4.0):
-                    rects.append((x - 0.5, grip_top + grip_h / 2.0 + offset - 0.5, 1.0, 1.0,
-                                  rgba(colours["divider"], 0.95)))
+                outline = float(scaled_px(1))
+                rects.append((x - grip_w / 2.0, grip_top, grip_w, grip_h, rgba(colours["divider"], grip_alpha)))
+                rects.append((x - grip_w / 2.0 + outline, grip_top + outline, grip_w - 2 * outline, grip_h - 2 * outline,
+                              rgba(colours["divider_outline"], grip_alpha * 0.95)))
+                chevron = max(1.0, outline)
+                for offset in (-float(scaled_px(4)), 0.0, float(scaled_px(4))):
+                    rects.append((x - chevron / 2.0, grip_top + grip_h / 2.0 + offset - chevron / 2.0,
+                                  chevron, chevron, rgba(colours["divider"], grip_alpha)))
 
     def grabFrame(self) -> QImage:  # noqa: N802 - Qt spelling is `grabFramebuffer`, this is the plan's name
         return self.grabFramebuffer()
