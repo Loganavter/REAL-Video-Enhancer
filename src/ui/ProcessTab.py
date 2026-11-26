@@ -1737,7 +1737,12 @@ class ProcessTab:
         options = getattr(self, "currentRenderOptions", None)
         if not (getattr(options, "inputFile", "") or ""):
             return
-        playhead = self._result_playhead()
+        # The SAME clock presentation uses: the pane's own moment. `_result_playhead` prefers the transport while a tail
+        # or a file decoder exists, and after a render hands over the finished file it reads 0.0 while the pane already
+        # paints its first frame - so this guard returned before asking, and the source half never arrived (found live
+        # 2026-11-27 with the pair gate in place: `compare fill asks=0 newest=0.0 playhead=0.167` for a whole run, the
+        # left half blank with the upscale painted beside it).
+        playhead = self._compare_playhead()
         if playhead <= 0.0:
             return
         self._source_fill(self._compare_supply_playhead())
@@ -3170,9 +3175,18 @@ class ProcessTab:
         asks for the ticket for the press it is routing and fills in the route facts only the page knows.
         """
         fraction = float(fraction)
-        # A SEEK starts a new result generation: the frame the pane held belongs to the previous position, and no
-        # late answer to the old request may paint over the new moment.
-        self._next_result_generation()
+        # A SEEK starts a new result generation - but only a seek that is actually ASKED FOR. The bump used to run here,
+        # before any route was chosen, so a press the pane could not serve invalidated the picture identity and cleared
+        # the compare register while nothing on screen moved (audit 2026-11-27 §6.3, probe B: a refused press took
+        # generation 7 -> 8 and the register 3 -> 0, and every source offer was refused as the wrong generation until
+        # the next result arrived - the owner's blank left half after a press). Every route below bumps when it asks.
+        bumped = False
+
+        def bump_generation() -> None:
+            nonlocal bumped
+            if not bumped:
+                bumped = True
+                self._next_result_generation()
         self._seek_pressed_at = time.perf_counter()
         # The press names the FRAME it points at, not only the share: a turnaround in milliseconds says nothing about
         # whether the picture is the one asked for (owner, 2026-11-24: "write where the seek went and what is shown").
@@ -3249,6 +3263,7 @@ class ProcessTab:
             # the produced band the tail stays the answer (exact, and it costs the renderer nothing); past it the
             # press is one request and a hold on the picture it yields.
             if self._request_display_seek(fraction, hold=True):
+                bump_generation()
                 return
             ticket.refused("no-process-or-unknown-length")
             log("seek: refused - the running render cannot answer that press (no process, or the clip length is unknown)")
@@ -3263,6 +3278,7 @@ class ProcessTab:
             target = fraction * self._live_timeline(edge)
             # The tail maps a strip share onto ITS timeline (the clip length, or the flushed edge when it is unknown),
             # so the asked time it must be judged against is this one, not the ticket's whole-clip target.
+            bump_generation()
             self._press_session().watch(target)
             live.seek(target)
             ticket.decide(route="tail", answerable=True)
@@ -3274,6 +3290,7 @@ class ProcessTab:
             ticket.decide(route="decoder", answerable=True)
             # The same landing instrument as the tail's: the session watches the time the decoder was asked for, and
             # the frame it publishes closes the press - not the page's timeout.
+            bump_generation()
             self._press_session().watch(fraction * duration)
             decoder.seek(fraction * duration)
             log(f"seek: decoder asked for {fraction * duration:.3f}s")
@@ -3290,7 +3307,9 @@ class ProcessTab:
         # the owner saw: the newest upscaled frame painted over his request and the marker dragged to the produced edge,
         # pause notwithstanding (2026-11-24). A press on a PAUSED pane parks on the requested picture; while playing it
         # stays a live follow, and the answer is one publication in the stream.
-        if not self._request_display_seek(fraction, hold=bool(getattr(self, "_preview_paused", False))):
+        if self._request_display_seek(fraction, hold=bool(getattr(self, "_preview_paused", False))):
+            bump_generation()
+        else:
             # Nobody will answer: the render has finished (or never started), and an export has no file decoder behind
             # the pane. Refusing keeps the pane honest - it also clears the pending flag, because a parked pane that
             # waits forever for a picture is the "video became unavailable after the render" the owner reported
