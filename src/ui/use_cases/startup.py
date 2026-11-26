@@ -23,10 +23,15 @@ from typing import Callable, Iterable, Sequence
 
 @dataclass(frozen=True)
 class BackendReport:
-    """What the backend's `--list_backends` answer said about the machine."""
+    """What the backend's `--list_backends` answer said about the machine.
 
-    ncnn_gpus: int
-    pytorch_gpus: int
+    The two GPU fields are COUNTS - how many devices of that backend exist - not the highest id. The settings
+    field they feed is a maximum id, so the page derives `count - 1` itself; keeping a count here means "no GPU of
+    this backend" (0) and "the only GPU" (1) can never collapse into the same number again.
+    """
+
+    ncnn_gpu_count: int
+    pytorch_gpu_count: int
     half_precision: bool
 
 
@@ -82,25 +87,29 @@ def available_backends(handler) -> tuple[list[str], str]:
 
 
 def parse_backend_report(full_output: str) -> BackendReport:
-    """Count the GPUs and read the fp16 flag out of the probe's own text.
+    """Count the devices and read the fp16 flag out of the probe's own text.
 
-    The backend prints `Half precision support: True/False` and one `NCNN GPU n` / `Pytorch GPU n` line per device.
+    The backend prints `Half precision support: True/False` and one `NCNN GPU n: name` / `PyTorch GPU n: name` line
+    per device, so the number of matching lines IS the device count. Each counter starts at 0: the old loop started
+    at -1 and clamped, which read one `PyTorch GPU 0` line as 0 - a count pretending to be a maximum id. That is
+    exactly what made the GPU-id steppers inert on a one-GPU machine (the field's range became `0..0`).
+
     Anything else - an empty report, a backend that failed before printing, a line from another module - counts as
-    zero, which is the old counting loop's answer too (it started at -1 and clamped).
+    zero devices.
     """
-    total_ncnn_gpus = -1
-    total_pytorch_gpus = -1
+    ncnn_gpu_count = 0
+    pytorch_gpu_count = 0
     half_precision = False
     for line in str(full_output).lower().split("\n"):
         if "half precision support:" in line:
             half_precision = "true" in line
-        if "ncnn gpu " in line:  # this is to grab every line with "GPU "
-            total_ncnn_gpus += 1
+        if "ncnn gpu " in line:  # this grabs every device line, whatever its index
+            ncnn_gpu_count += 1
         if "pytorch gpu " in line:
-            total_pytorch_gpus += 1
+            pytorch_gpu_count += 1
     return BackendReport(
-        ncnn_gpus=max(0, total_ncnn_gpus),
-        pytorch_gpus=max(0, total_pytorch_gpus),
+        ncnn_gpu_count=ncnn_gpu_count,
+        pytorch_gpu_count=pytorch_gpu_count,
         half_precision=half_precision,
     )
 

@@ -313,8 +313,8 @@ class MainWindow(QMainWindow):
         # process the output
         report = startup_io.parse_backend_report(self.fullOutput)
         halfPrecisionSupport = report.half_precision
-        total_ncnn_gpus = report.ncnn_gpus
-        total_pytorch_gpus = report.pytorch_gpus
+        ncnn_gpu_count = report.ncnn_gpu_count
+        pytorch_gpu_count = report.pytorch_gpu_count
 
         if self.anyBackendsInstalled:
             self.processTab = ProcessTab(
@@ -326,8 +326,8 @@ class MainWindow(QMainWindow):
         self.settingsTab = SettingsTab(
             parent=self,
             halfPrecisionSupport=halfPrecisionSupport,
-            total_ncnn_gpus=total_ncnn_gpus,
-            total_pytorch_gpus=total_pytorch_gpus,
+            ncnn_gpu_count=ncnn_gpu_count,
+            pytorch_gpu_count=pytorch_gpu_count,
         )
         downloadDeps = DownloadDependencies(False)
         self.downloadTab.hideUninstallButtons()

@@ -227,6 +227,48 @@ class Tab3Page:
         self._scale = ScaleFollower(self.tab_3, self._apply_scale)
         return self.tab_3
 
+    def apply_gpu_counts(self, *, ncnn_gpu_count: int, pytorch_gpu_count: int) -> None:
+        """State each GPU-id row's honest control from the backend's device COUNT.
+
+        The report carries counts (see `src/ui/use_cases/startup.py`), and this page owns what a count means for its
+        own rows - the glue passes numbers, never widgets:
+
+        * ``0`` devices -> the whole row (label and stepper) is disabled, and the tooltip names the backend. An
+          enabled arrow over the old empty range is exactly the "dead stepper" the owner reported, and a live field
+          would invite an id the backend cannot use.
+        * ``1`` device -> the id is fixed at ``0``: the stepper is disabled but still shows the value, so it reads
+          as "the only GPU", not as an arrow that cannot move.
+        * ``2+`` -> the stepper is live over ``0 .. count - 1``, which is what the field actually is (a MAXIMUM id).
+
+        Called again after a settings reset keeps the same statement; `setValue` clamps to the range, so a stale
+        stored id cannot survive on a machine with fewer devices.
+        """
+        self._apply_gpu_row(self.label_45, self.ncnn_gpu_id, "NCNN", ncnn_gpu_count)
+        self._apply_gpu_row(self.label_43, self.pytorch_gpu_id, "PyTorch", pytorch_gpu_count)
+
+    @staticmethod
+    def _apply_gpu_row(label, stepper, backend: str, count: int) -> None:
+        """One row's answer for one backend: the control state, its range and the reason in its tooltip."""
+        count = max(0, int(count))
+        label.setEnabled(count > 0)
+        stepper.setEnabled(count > 1)
+        stepper.setMaximum(max(0, count - 1))
+        title = f"{backend} GPU ID -"
+        if count == 0:
+            tooltip = i18n.tooltip(
+                title,
+                f"This backend reports no GPU: {backend} was not detected, so there is no id to choose.",
+            )
+        elif count == 1:
+            tooltip = i18n.tooltip(
+                title,
+                f"This backend reports one GPU (id 0): there is nothing to choose.",
+            )
+        else:
+            tooltip = i18n.tooltip(title, f"Sets what GPU is used for {backend}")
+        label.setToolTip(tooltip)
+        stepper.setToolTip(tooltip)
+
     def _apply_scale(self) -> None:
         """Resolve this page's design gap at the factor in force now (never at import)."""
         gap = scaled_px(ROW_GAP_PX)

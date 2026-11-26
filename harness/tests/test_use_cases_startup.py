@@ -142,11 +142,11 @@ def test_a_probe_that_fails_propagates():
 
 
 def test_the_report_counts_gpus_and_reads_the_half_precision_flag():
-    """Counts as the pre-move loop counted: the counter starts at -1 and is clamped at zero.
+    """N device lines are N devices.
 
-    That sentinel is kept verbatim (P3 moves code, it does not fix it): with one matching line per device, N lines
-    read as N-1. The test states it so the number the settings page uses is a known quantity rather than a surprise -
-    fixing it is a separate, measured change to the GPU-id ranges.
+    The loop used to start each counter at -1 and clamp, so one line per device read as N-1: a one-GPU machine
+    reported 0 and the settings page gave the stepper the range 0..0 (the owner's dead "GPU ID" arrows, 2026-11-26).
+    The report carries counts now, and a count of 1 means "one device", never "no devices".
     """
     report = startup.parse_backend_report(
         "System Information:\n"
@@ -157,7 +157,15 @@ def test_the_report_counts_gpus_and_reads_the_half_precision_flag():
         "Pytorch GPU 0\n"
         "Pytorch GPU 1\n"
     )
-    assert report == startup.BackendReport(ncnn_gpus=2, pytorch_gpus=1, half_precision=True)
+    assert report == startup.BackendReport(ncnn_gpu_count=3, pytorch_gpu_count=2, half_precision=True)
+
+
+def test_one_device_line_is_one_device():
+    """The regression: `PyTorch GPU 0: NVIDIA GeForce RTX 4060 Ti` is one device, not zero."""
+    report = startup.parse_backend_report(
+        "PyTorch GPU 0: NVIDIA GeForce RTX 4060 Ti\nHalf precision support: True\n"
+    )
+    assert report == startup.BackendReport(ncnn_gpu_count=0, pytorch_gpu_count=1, half_precision=True)
 
 
 def test_an_empty_report_is_zero_devices_and_no_half_precision():
@@ -166,12 +174,13 @@ def test_an_empty_report_is_zero_devices_and_no_half_precision():
 
 
 def test_unrelated_lines_are_not_gpus():
+    """Only the probe's own device lines count; the match is case-insensitive like the backend's own output."""
     report = startup.parse_backend_report(
         "Half precision support: False\n"
         "pytorch gpu 0\n"
         "something else entirely\n"
     )
-    assert report == startup.BackendReport(ncnn_gpus=0, pytorch_gpus=0, half_precision=False)
+    assert report == startup.BackendReport(ncnn_gpu_count=0, pytorch_gpu_count=1, half_precision=False)
 
 
 # --- the model download -----------------------------------------------------------------------------------
