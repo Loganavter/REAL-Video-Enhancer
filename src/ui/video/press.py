@@ -130,6 +130,11 @@ class PressTicket:
         if not self.open:
             return False
         self._outcome = outcome
+        # The reason belongs to the TICKET, not only to the log line: a caller (or a test) that asks "why could this
+        # press not be served" read `ticket.reason` and got None, because `refused(reason)` passed it straight to
+        # telemetry and `_finish` ignored it. Found twice - audit 2026-11-27 and again by the P3 deletion's own test.
+        if "reason" in fields:
+            self.reason = str(fields["reason"])
         telemetry.event(f"seek {outcome}", ts=telemetry.wall(), press=self.id, route=self.route,
                         target_s=_seconds(self.target_s), **fields)
         return True
