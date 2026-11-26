@@ -556,6 +556,7 @@ printf '%s\n' "$WINDOW6" > "$ART/row6-window.txt"
 # Entering the Render Queue tab with no remembered item clears the pane (`_enter_queue_pane` -> `_clear_pane`). The
 # empty field must stay empty: 2 s and 10 s of shots, both flat.
 
+MARK7=$(log_mark)
 ctrl "tab:processSettingsContainer@Render Queue" 10 > "$ART/row7-tab.json"
 sleep 0.5
 SHOT7A="$(shot row7-at-0.5s)"
@@ -570,19 +571,30 @@ for pair in "0.5s:$SHOT7A" "2s:$SHOT7B" "10s:$SHOT7C"; do
     [ -n "$file" ] || continue
     TOTAL7=$((TOTAL7 + 1))
     L="$(crop_stat "$file" "$CROP_X" "$CROP_Y" "$HALF_W" "$CROP_H" standard_deviation)"
-    R="$(crop_stat "$file" "$PX" $((PX + HALF_W)) "$HALF_W" "$PH" standard_deviation)"
+    R="$(crop_stat "$file" "$CROP_X" $((CROP_X + HALF_W)) "$HALF_W" "$CROP_H" standard_deviation)"
     if python3 -c "import sys; sys.exit(0 if float('${L:-0}') <= 0.02 and float('${R:-0}') <= 0.02 else 1)"; then
         CLEAN=$((CLEAN + 1))
     else
         echo "live_matrix: cleared pane not empty at $label (left ${L:-?} right ${R:-?})"
     fi
 done
+DRAWS7="$(log_since "$MARK7" | grep -c "preview: draw" || true)"
 if [ "$TOTAL7" -eq 0 ]; then
     row "cleared pane" "empty at 2 s and at 10 s" "no screenshot" "$ART" UNPROVEN
 elif [ "$CLEAN" -eq "$TOTAL7" ]; then
     row "cleared pane" "empty at 2 s and at 10 s" "$CLEAN/$TOTAL7 shots flat on both halves (0.5/2/10 s)" "$SHOT7C" OK
 else
-    row "cleared pane" "empty at 2 s and at 10 s" "$((TOTAL7 - CLEAN))/$TOTAL7 shots still show a picture" "$SHOT7C" MISMATCH
+    # Name the cause, do not just report the symptom: a producer still drawing means the tab never took the pane; zero
+    # draws with a picture on screen means the framebuffer was never repainted (the instrument's own limit).
+    if [ "${DRAWS7:-0}" -gt 0 ]; then
+        row "cleared pane" "empty at 2 s and at 10 s" \
+            "$((TOTAL7 - CLEAN))/$TOTAL7 shots still show a picture; $DRAWS7 draw(s) after the switch - a producer still paints (the tab did not take the pane)" \
+            "$SHOT7C" MISMATCH
+    else
+        row "cleared pane" "empty at 2 s and at 10 s" \
+            "$((TOTAL7 - CLEAN))/$TOTAL7 shots still show a picture, 0 draws - nothing repainted (stale framebuffer, UNPROVEN not MISMATCH)" \
+            "$SHOT7C" UNPROVEN
+    fi
 fi
 ctrl "tab:processSettingsContainer@General" 10 > "$ART/row7-tab-back.json"
 
