@@ -1135,6 +1135,30 @@ class ProcessTab:
         self._announced_box = box
         log(f"display: pane box {box[0]}x{box[1]} announced (generation {generation})")
 
+    #: The picture clock, in ms. `updateProcessTab` is the page's 100 ms READOUT tick; the export pane's feed used to ride
+    #: it, which capped the preview at 10 pictures a second during a render no matter how fast the model was (measured
+    #: 2026-11-26: paints at exactly 100 ms while the render produced ~29 fps of content). The picture path is cheap - one
+    #: `poll` that takes at most one new picture, plus a pool lookup - so it gets a clock of its own. 33 ms is ~30 Hz: the
+    #: panel cannot show more, and the reader keeps only the newest picture anyway.
+    PICTURE_TICK_MS = 33
+
+    def _ensure_picture_timer(self) -> None:
+        """Create the picture clock once, on the GUI thread (`updateProcessTab` runs there - see `startGUIUpdate`)."""
+        if getattr(self, "_picture_timer", None) is not None:
+            return
+        from PySide6.QtCore import QTimer
+
+        timer = QTimer()
+        timer.setInterval(self.PICTURE_TICK_MS)
+        timer.timeout.connect(self._picture_tick)
+        timer.start()
+        self._picture_timer = timer
+
+    def _picture_tick(self) -> None:
+        """The PICTURE path's own clock: the export's feed and the compare's standing original."""
+        self._tick_display()
+        self._tick_second_surface()
+
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
         self._announce_pane_box()
@@ -3675,10 +3699,10 @@ class ProcessTab:
         # nothing). The tick is the only clock a paused pane has, and `Controller._emit` drops an unchanged state, so
         # this costs nothing until a number actually moves.
         self._push_preview_state()
-        # The export pane's feed and the standing original both run on this same clock: the reader takes at most one
-        # new `seq` per tick, and the compare's source decode is coalesced to the playhead the result just reached.
-        self._tick_display()
-        self._tick_second_surface()
+        # The PICTURE path has its own clock (`_picture_tick`): this one is the readout tick at 100 ms, and running the
+        # feed and the compare on it capped the preview at 10 pictures a second during a render, whatever the model did
+        # (measured 2026-11-26: paints at exactly 100 ms while the render produced ~29 fps).
+        self._ensure_picture_timer()
 
 
         if self.renderTextOutputList is not None:
