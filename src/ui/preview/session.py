@@ -15,24 +15,32 @@ it knows and uses the session's ticket; the session owns the record and the epoc
 No Qt here on purpose: the numbers and the FSM are testable with a fake clock and a fake painted event - no window, no
 renderer, no PySide6. `PreviewCommand` (Enum) and `PressTicket` (telemetry + plain fields) are Qt-free by construction.
 
-What is NOT here yet: the deadline that closes a press nothing answers. `abandon()` is the method P4 wires (it already
-ends a ticket on a job change, which is the one closure this phase needs). The landing timeout stays where it is in the
-page (`ProcessTab.SEEK_WATCH_TIMEOUT_S`) until P4 moves it.
+The lifecycle is closed HERE (plan P4): a ticket ends on the picture that answers it (`observe(Painted)`), on the
+deadline a tick reports (`check_deadline`, `SEEK_WATCH_TIMEOUT_S`) or on a job change (`observe(JobChanged)`) - in every
+case `abandon()` is the session's own call, never the page's. The page supplies one callback (`set_settle`) and only
+formats the line the owner reads; `ProcessTab._seek_watch` no longer decides whether a press was answered.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 from ..video.press import PressTicket
 from .state import PreviewCommand
 
-__all__ = ["JobChanged", "Painted", "PreviewSession", "SEEK_SLACK"]
+__all__ = ["JobChanged", "Painted", "PreviewSession", "SEEK_SLACK", "SEEK_WATCH_TIMEOUT_S", "Settled"]
 
 #: A target this far past the reachable ceiling is a refusal, not a round-off (half a millisecond). The controller's
 #: phase derivation reads the same tolerance (`state.produced < state.duration - SEEK_SLACK`), so there is one number.
 SEEK_SLACK = 5e-4
+
+#: How long a press may stand unanswered before the session gives up on it. ONE definition (plan P4): the page's
+#: `ProcessTab.SEEK_WATCH_TIMEOUT_S` is an alias of this name, and the 100 ms tick reports the elapsed time to
+#: `check_deadline`, which closes the ticket. Without it a frame that never arrives parks the marker on the requested
+#: time forever (`PressTicket.abandoned()` had no production caller).
+SEEK_WATCH_TIMEOUT_S = 1.5
 
 
 @dataclass(frozen=True)
@@ -46,6 +54,23 @@ class Painted:
 @dataclass(frozen=True)
 class JobChanged:
     """The page opened a different job: a press that outlived its job cannot be answered."""
+
+
+@dataclass(frozen=True)
+class Settled:
+    """What the page formats when a ticket ends on a picture or on its deadline (never a second press record).
+
+    `asked` is the time the ROUTE was given (the tail maps a strip share onto its own timeline, so it can differ from
+    the ticket's `target_s`); `landed` is the picture's own media time; `matched` is the session's answer to "is this
+    the frame that was asked for"; `gave_up` says the deadline closed it. The page's landing line is a projection of
+    these fields and nothing more.
+    """
+
+    asked: float | None
+    landed: float | None
+    matched: bool
+    gave_up: bool
+    turnaround_ms: float | None
 
 
 def _clock_seek(clock, seconds: float) -> bool:
@@ -79,7 +104,8 @@ def _clock_seek(clock, seconds: float) -> bool:
 class PreviewSession:
     """The press record and the one seek clamp. One instance per preview pane (the controller owns it)."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, settle: Callable[[Settled], None] | None = None,
+                 deadline_s: float | None = None) -> None:
         self._clock = None
         self._duration = 0.0
         self._reach = 0.0
@@ -88,9 +114,25 @@ class PreviewSession:
         self._ticket: PressTicket | None = None
         self._pending = False            # the open ticket was opened by seek_to and the page has not claimed it yet
         self._landed: float | None = None
+        self._last_painted: float | None = None
+        self._watch_s: float | None = None
         self._opened_at: float | None = None
         self._refusal: str | None = None
         self._refusal_was_reach = False
+        #: The page's one formatter for the landing line (P4): the session owns the closure, the page owns the words.
+        self._settle = settle
+        self._deadline_s = SEEK_WATCH_TIMEOUT_S if deadline_s is None else max(0.0, float(deadline_s))
+
+    # -- the page's callback ----------------------------------------------------------------------
+
+    def set_settle(self, settle: Callable[[Settled], None] | None) -> None:
+        """Point the landing line at the page's formatter (idempotent; the page sets it on every access)."""
+        self._settle = settle
+
+    @property
+    def deadline_s(self) -> float:
+        """Seconds a press may stand unanswered before `check_deadline` abandons it."""
+        return float(self._deadline_s)
 
     # -- inputs ------------------------------------------------------------------------------------
 
@@ -118,6 +160,27 @@ class PreviewSession:
         """The time the current ticket asked for, in seconds."""
         ticket = self._ticket
         return None if ticket is None or ticket.target_s is None else float(ticket.target_s)
+
+    @property
+    def playhead(self) -> float | None:
+        """Where the marker may stand: the requested time while a press is open, else the last painted picture.
+
+        This is the session's half of "the marker follows the picture": once the deadline (or a job change) closes the
+        ticket, the request stops being a place and the picture's own time takes over - never `target_s` again.
+        """
+        ticket = self._ticket
+        if ticket is not None and ticket.open and ticket.target_s is not None:
+            return float(ticket.target_s)
+        return self._last_painted
+
+    def watch(self, seconds: float | None) -> None:
+        """Record the time the press actually asked the OWNER for.
+
+        The tail maps a strip share onto its own timeline (the flushed edge when the clip length is unknown), so the
+        asked time can differ from the ticket's `target_s`. The closure compares the painted picture with THIS number;
+        the page passes it in the route that knows it.
+        """
+        self._watch_s = None if seconds is None else float(seconds)
 
     def refusal(self) -> str | None:
         """Why the last press was refused, in words that can be printed as-is (the ONE status line's tail)."""
@@ -203,8 +266,6 @@ class PreviewSession:
             return False
         self._refusal = None
         self._refusal_was_reach = False
-        self._landed = None
-        self._opened_at = time.perf_counter()
         return True
 
     # -- the page's half ----------------------------------------------------------------------------
@@ -225,6 +286,9 @@ class PreviewSession:
             ticket.target_frame = target_frame
             ticket.produced = produced
             ticket.edge_s = edge_s
+            # The route has not armed a watch yet; the ticket's own target is what it asks for until `watch()` says
+            # otherwise (the tail's share -> edge mapping is the one route that differs).
+            self._watch_s = ticket.target_s
             return ticket
         ticket = self._begin(target_s=target_s, target_frame=target_frame, produced=produced, edge_s=edge_s)
         self._pending = False
@@ -237,13 +301,39 @@ class PreviewSession:
         if isinstance(event, Painted):
             self._note_painted(event)
         elif isinstance(event, JobChanged):
+            # A press cannot outlive its job: this is the session's own call, not the page's.
             self.abandon("job-changed")
 
-    def abandon(self, reason: str) -> bool:
-        """End the open ticket without an answer. P4 wires the deadline; the job change already calls it.
+    def check_deadline(self, now: float | None = None) -> bool:
+        """Close the open ticket when the bound deadline elapsed (the page calls this from its 100 ms tick).
 
-        `JobChanged` uses it today (a press cannot outlive its job). P4 adds the timeout that calls it for a press
-        nothing answered, which is why the method is here and not in the page.
+        `now` is a `time.perf_counter()` reading; omitted, the current one is used. The ticket is abandoned through the
+        same `abandon()` a job change uses - the only difference is that the page is told the picture it stood on, so
+        the owner's landing line can say the seek gave up. True when this call closed a ticket.
+        """
+        ticket = self._ticket
+        if ticket is None or not ticket.open:
+            return False
+        opened = self._opened_at
+        if opened is None:
+            return False
+        moment = time.perf_counter() if now is None else float(now)
+        if (moment - opened) < self._deadline_s:
+            return False
+        asked = self._asked()
+        landed = self._last_painted
+        if not self.abandon("watch-timeout"):
+            return False
+        self._notify(asked=asked, landed=landed, matched=False, gave_up=True,
+                     turnaround_ms=max(0.0, (moment - opened) * 1000.0))
+        return True
+
+    def abandon(self, reason: str) -> bool:
+        """End the open ticket without an answer: the deadline and a job change are both the session's call.
+
+        `JobChanged` uses it for a press that outlived its job; `check_deadline` uses it for a press nothing answered.
+        An abandonment is not a refusal: it says the answer never came, which is a different fact from "this route
+        cannot show the time" (`refused`).
         """
         ticket = self._ticket
         self._pending = False
@@ -263,22 +353,41 @@ class PreviewSession:
             previous.superseded(ticket.id)
         self._ticket = ticket
         self._landed = None
+        self._watch_s = target_s
+        self._opened_at = time.perf_counter()
         return ticket
 
+    def _asked(self) -> float | None:
+        """The time the open press asked its owner for: the route's watch, else the ticket's own target."""
+        if self._watch_s is not None:
+            return float(self._watch_s)
+        ticket = self._ticket
+        if ticket is None or ticket.target_s is None:
+            return None
+        return float(ticket.target_s)
+
     def _note_painted(self, painted: Painted) -> None:
-        """Close the open ticket on the picture that ANSWERS it; two frames' worth of slack, at least 50 ms."""
+        """Close the open ticket on the picture that ANSWERS it; two frames' worth of slack, at least 50 ms.
+
+        This method IS the closure (plan P4): a painted frame inside the tolerance closes the ticket and reports the
+        landing through the page's callback; a frame outside it is not the answer and only records where the picture
+        stands. Once the ticket is closed - by this frame, by the deadline, by a job change - a later frame updates the
+        picture and nothing else, so a late answer cannot resurrect a press that already gave up.
+        """
         try:
             media_time = float(painted.media_time)
         except (TypeError, ValueError):
             return
+        self._last_painted = media_time
         ticket = self._ticket
         if ticket is None or not ticket.open:
             self._landed = media_time
             return
-        if ticket.target_s is None:
+        asked = self._asked()
+        if asked is None:
             return
         tolerance = max(0.05, 2.0 * self._frame_interval)
-        if abs(media_time - float(ticket.target_s)) > tolerance:
+        if abs(media_time - asked) > tolerance:
             return
         opened = self._opened_at
         turnaround_ms = 0.0 if opened is None else max(0.0, (time.perf_counter() - opened) * 1000.0)
@@ -289,6 +398,21 @@ class PreviewSession:
                           turnaround_ms=turnaround_ms, landed_gen=None):
             self._pending = False
             self._landed = media_time
+            self._notify(asked=asked, landed=media_time, matched=True, gave_up=False,
+                         turnaround_ms=turnaround_ms)
+
+    def _notify(self, *, asked: float | None, landed: float | None, matched: bool, gave_up: bool,
+                turnaround_ms: float | None) -> None:
+        """Tell the page a ticket ended on a picture or on its deadline; the page only formats the line."""
+        callback = self._settle
+        if callback is None:
+            return
+        try:
+            callback(Settled(asked=asked, landed=landed, matched=bool(matched), gave_up=bool(gave_up),
+                             turnaround_ms=turnaround_ms))
+        except Exception:
+            # The closure must not depend on the formatter: a page without a working log still closes its ticket.
+            pass
 
     def _refuse(self, reason: str, *, past_reach: bool) -> None:
         self._refusal = str(reason)

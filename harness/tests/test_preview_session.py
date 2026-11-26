@@ -11,7 +11,9 @@ Pinned here, in numbers:
 * a seek past the reach returns False, opens NOTHING and names the reach (never a silent clamp);
 * a negative seek is 0 (the strip's left edge, not a refusal);
 * a painted frame within two frames (floor 50 ms) of the target CLOSES the ticket; one outside it does not;
-* a JobChanged clears it (P4 adds the deadline that calls the same `abandon()`);
+* a press nothing answers is abandoned at `SEEK_WATCH_TIMEOUT_S` (P4's deadline) and the marker then follows the
+  picture, never the requested time; a late frame cannot resurrect it;
+* a JobChanged clears it through the same `abandon()`;
 * two seeks in a row: the newest ticket wins, and only the newest target can close it;
 * snapshot/dump carry the epoch and the target for the debug layer (P5 serves `dump()`).
 
@@ -22,11 +24,12 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import time
 
 import pytest
 
 import src.ui.preview.session as session_module
-from src.ui.preview.session import JobChanged, Painted, PreviewSession
+from src.ui.preview.session import JobChanged, Painted, PreviewSession, SEEK_WATCH_TIMEOUT_S, Settled
 from src.ui.preview.state import PreviewCommand
 
 CLIP_S = 20.0
@@ -257,3 +260,94 @@ def test_the_session_module_carries_no_qt():
     source = pathlib.Path(session_module.__file__).read_text(encoding="utf-8")
     for pattern in ("import PySide6", "from PySide6", "QtCore", "QtWidgets"):
         assert pattern not in source, f"the press session must import on an interpreter without PySide6 ({pattern})"
+
+
+# --- P4: the deadline is the session's, and the marker follows the picture ---------------------------------
+
+
+def test_a_press_no_frame_answers_ends_at_the_deadline_and_the_marker_follows_the_picture():
+    session = _session()
+    assert session.seek_to(5.0) is True
+    ticket = session.ticket
+    assert session.playhead == pytest.approx(5.0), "while the press is open the marker is the request"
+
+    closed = session.check_deadline(time.perf_counter() + SEEK_WATCH_TIMEOUT_S + 0.01)
+
+    assert closed is True, "a press nothing answers must end, not stand on the requested time forever"
+    assert ticket is not None and ticket.open is False, "the deadline is an outcome, not open silence"
+    session.observe(Painted(media_time=4.0, index=96))
+    assert session.playhead == pytest.approx(4.0), (
+        "after the closure the marker follows the PICTURE; returning target_s is the defect this phase removes")
+    assert session.snapshot()["landed"] == pytest.approx(4.0)
+
+
+def test_the_deadline_reports_gave_up_through_the_page_callback():
+    seen: list[Settled] = []
+    session = PreviewSession(settle=seen.append)
+    session.bind(clock=FakeClock(), duration=CLIP_S, reach=REACH_S, frame_interval=FRAME_S)
+    assert session.seek_to(5.0) is True
+
+    assert session.check_deadline(time.perf_counter() + SEEK_WATCH_TIMEOUT_S + 0.01) is True
+
+    settle = seen[-1]
+    assert isinstance(settle, Settled)
+    assert settle.asked == pytest.approx(5.0)
+    assert settle.matched is False and settle.gave_up is True, (
+        "the page's landing line must be able to say the seek gave up, and name the time it asked for")
+    assert settle.turnaround_ms is not None and settle.turnaround_ms >= SEEK_WATCH_TIMEOUT_S * 1000.0
+
+
+def test_a_late_frame_after_the_deadline_does_not_resurrect_the_ticket():
+    session = _session()
+    assert session.seek_to(5.0) is True
+    ticket = session.ticket
+    assert session.check_deadline(time.perf_counter() + SEEK_WATCH_TIMEOUT_S + 0.01) is True
+
+    session.observe(Painted(media_time=5.0, index=121))     # the asked frame - one deadline too late
+
+    assert ticket is not None and ticket.open is False, "an abandoned press has exactly one outcome"
+    assert session.epoch == 1
+    assert session.snapshot()["open"] is False
+    assert session.snapshot()["landed"] == pytest.approx(5.0), "the late picture is where the pane stands now"
+
+
+def test_two_presses_and_a_job_change_leave_at_most_one_open_ticket(monkeypatch):
+    session = _session()
+    made = _spy_tickets(monkeypatch)
+
+    assert session.seek_to(4.0) is True
+    assert session.seek_to(9.0) is True
+    assert sum(1 for ticket in made if ticket.open) == 1, "one press slot, newest wins"
+
+    session.observe(JobChanged())
+
+    assert sum(1 for ticket in made if ticket.open) == 0, "a job change ends the record it cannot answer"
+    assert session.ticket is made[-1] and made[-1].open is False
+
+
+def test_a_painted_answer_reports_the_landing_through_the_page_callback():
+    seen: list[Settled] = []
+    session = PreviewSession(settle=seen.append)
+    session.bind(clock=FakeClock(), duration=CLIP_S, reach=REACH_S, frame_interval=FRAME_S)
+    assert session.seek_to(5.0) is True
+
+    session.observe(Painted(media_time=5.0 + FRAME_S / 2.0, index=121))
+
+    settle = seen[-1]
+    assert settle.asked == pytest.approx(5.0)
+    assert settle.landed == pytest.approx(5.0 + FRAME_S / 2.0)
+    assert settle.matched is True and settle.gave_up is False
+    assert settle.turnaround_ms is not None and settle.turnaround_ms >= 0.0
+
+
+def test_the_route_can_arm_the_time_it_really_asked_the_owner_for():
+    """The tail maps a strip share onto its own timeline, so the closure must judge the route's seconds."""
+    session = _session()
+    assert session.seek_to(5.0) is True
+    session.watch(3.0)
+    ticket = session.ticket
+
+    session.observe(Painted(media_time=3.0, index=72))
+
+    assert ticket is not None and ticket.open is False, "the frame at the asked time answers, even off target_s"
+    assert session.snapshot()["landed"] == pytest.approx(3.0)

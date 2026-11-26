@@ -40,6 +40,7 @@ from .video.channel import (
 )
 from .video.feed import PreviewFeed
 from .preview.owner import owner_of
+from .preview.session import SEEK_WATCH_TIMEOUT_S as SESSION_SEEK_WATCH_TIMEOUT_S
 from .preview.state import PreviewBackendKind
 from ..constants import (
     BACKEND_PATH,
@@ -1199,7 +1200,7 @@ class ProcessTab:
                 # frames report theirs in `_on_preview_frame`.
                 from .preview.session import Painted
 
-                session_of = getattr(self, "_preview_session", None)
+                session_of = getattr(self, "_press_session", None)
                 if callable(session_of):
                     session_of().observe(Painted(media_time=media_time))
             if hasattr(pane, "set_progress"):
@@ -1288,11 +1289,17 @@ class ProcessTab:
         return clip_duration(getattr(self, "currentRenderOptions", None), decoder)
 
     #: A press whose frame never lands (a decode that died, a target the tail cannot reach) must still close, or the
-    #: thumb stands on the requested time forever. The delta in the settle line says the picture did not get there.
-    SEEK_WATCH_TIMEOUT_S = 1.5
+    #: thumb stands on the requested time forever. The deadline itself lives in `preview.session` (ONE definition,
+    #: plan P4); this name is the page's alias because `_frame_answers_watch` - the old page-side rule, kept only for
+    #: its pin and no longer called in production - reads it.
+    SEEK_WATCH_TIMEOUT_S = SESSION_SEEK_WATCH_TIMEOUT_S
 
     def _frame_answers_watch(self, watched: float) -> bool:
         """Whether the frame just painted is the ANSWER to the press, not one that was already in flight.
+
+        NO production caller since plan P4: the session's `observe(Painted)` / `check_deadline` decide now, and the
+        page only formats the landing line. Kept because the pin that described the old rule
+        (`test_preview_state_tick.py`) still reads it; deleting it is a separate, test-owned change.
 
         A frame that was decoded before the press arrives after it; closing the press on such a frame moved the marker
         back to the old position for a few frames and then forward again (owner, 2026-11-26: "скачет назад-вперёд пару
@@ -1468,7 +1475,9 @@ class ProcessTab:
                 self._start_live_tail(renderOptions.outputPath)
             else:
                 # One picture, one painter: this job's pane is fed by the display block (or by nothing), and a tail
-                # left over from the previous job in the same pass would paint on top of it.
+                # left over from the previous job in the same pass would paint on top of it. The previous job's press
+                # cannot outlive the hand-over either (plan P4).
+                self._reset_press_for_job()
                 self._stop_live_tail()
             textOutput = []
             self._log_filter = RenderLogFilter()
@@ -1638,7 +1647,11 @@ class ProcessTab:
         the tail, still running, painted its own lagging cluster at 8.97 s over it. The tail goes FIRST: the block is
         what a still-live tail's frames would have been painted over, and `_on_preview_frame` refuses frames once no
         owner is current, so a frame already queued by the stopped tail is not painted either.
+
+        The job's press is closed here too (plan P4): nothing that has not answered by the end of its job can answer
+        after it, and the marker must fall back to the picture rather than the request.
         """
+        self._reset_press_for_job()
         self._stop_live_tail()
         self._close_display_state()
 
@@ -1648,6 +1661,9 @@ class ProcessTab:
         This is the live preview: the renderer pays nothing for it (it writes the file anyway), the pane decodes what
         has been produced so far, and the strip's render head tracks the produced range.
 
+        The call is a JOB change (or the user pressing Play, which supersedes a press as well): an open ticket from the
+        previous picture is closed here, so `_result_playhead` can never answer with the old job's `target_s`.
+
         It is called from the render's worker (`threading.Thread`, ProcessTab.py:429) - a thread with no Qt event
         loop. A `QTimer` built here never fires, and a signal connected here is queued to a thread that never runs
         its queue: both mistakes were live at once (measured 2026-11-23: the pane showed the 640x360 thumbnail for a
@@ -1655,6 +1671,7 @@ class ProcessTab:
         present in the code). So this only records the request; `_ensure_live_tail` runs on the GUI thread from
         `updateProcessTab`, which is the pane's 100 ms clock.
         """
+        self._reset_press_for_job()
         self._stop_live_tail()
         self._live_tail_path = str(path)
         self._live_tail_wanted = True
@@ -2315,6 +2332,7 @@ class ProcessTab:
 
     def _enter_queue_pane(self) -> None:
         """The queue tab now owns the pane: the remembered item at its playhead, or an EMPTY field."""
+        self._reset_press_for_job()
         self._queue_pane_owns = True
         # The strip's signals are wired by the render owners (`_prepare_display_state`, the tail, the finished-file
         # playback), so on an instance that has not rendered yet the queue item's strip was deaf: a press was accepted by
@@ -2331,6 +2349,7 @@ class ProcessTab:
 
     def _leave_queue_pane(self) -> None:
         """Give the pane back to the render owner at ITS position, and stop the queue decoder entirely."""
+        self._reset_press_for_job()
         self._remember_queue_position()
         self._queue_pane_owns = False
         self._stop_queue_decoder()
@@ -2379,8 +2398,12 @@ class ProcessTab:
         path = str(path or "")
         if not path:
             self._queue_pane_path = None
+            self._reset_press_for_job()
             self._clear_pane()
             return
+        if path != getattr(self, "_queue_pane_path", None):
+            # Another item on the pane is another job: a press that was open on the previous file cannot answer here.
+            self._reset_press_for_job()
         self._queue_pane_path = path
         position = float(self._queue_pane_positions.get(path, 0.0) or 0.0)
         if self._queue_pane_decoder is None or self._queue_pane_decoder_path != path:
@@ -2462,6 +2485,16 @@ class ProcessTab:
         path = getattr(self, "_queue_pane_path", None)
         if path:
             self._queue_pane_positions[path] = pts
+        # A press on the queue item is answered by the frame its decoder publishes: the session closes the ticket on
+        # the picture, the same closure the tail and the finished file use (plan P4).
+        session_of = getattr(self, "_press_session", None)
+        if callable(session_of):
+            from .preview.session import Painted
+
+            try:
+                session_of().observe(Painted(media_time=pts, index=getattr(frame, "index", None)))
+            except Exception:
+                pass
         # The queue's numbers reach the bar through the SNAPSHOT (one derivation: its own length is the axis and a
         # finished item is fully produced). The pane's hidden strip is fed from that same snapshot inside
         # `_push_preview_state`, so there is no queue-specific `set_progress` left to overwrite the preview's
@@ -2575,6 +2608,85 @@ class ProcessTab:
             self._preview_session_local = session
         return session
 
+    def _press_session(self):
+        """The pane's session with THIS page's landing-line formatter attached (plan P4).
+
+        The session owns the closure (a painted answer, the deadline, a job change); the page only formats the one line
+        the owner reads. Idempotent: `set_settle` is a plain assignment, so every access re-points it at the same bound
+        method of this page.
+        """
+        session = self._preview_session()
+        setter = getattr(session, "set_settle", None)
+        if callable(setter):
+            setter(self._on_preview_settled)
+        return session
+
+    def _on_preview_settled(self, settle) -> None:
+        """Format the owner's landing line for a ticket the SESSION closed - the page decides nothing here.
+
+        `asked` / `landed` / the turnaround come from the session (the picture's own time and the moment the ticket
+        ended); the text below is the same line, with the same numbers, the owner has read since 2026-11-24. A deadline
+        that closed the press says so with the same `NOT the asked frame (gave up)` tail.
+        """
+        asked = getattr(settle, "asked", None)
+        if asked is None:
+            return
+        landed = getattr(settle, "landed", None)
+        if landed is None:
+            landed = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        asked = float(asked)
+        landed = float(landed)
+        turnaround_ms = getattr(settle, "turnaround_ms", None)
+        timing = "" if turnaround_ms is None else f", {float(turnaround_ms):.0f} ms"
+        verdict = "" if bool(getattr(settle, "matched", False)) else ", NOT the asked frame (gave up)"
+        log(f"seek: press wanted {asked:.3f}s, the picture landed at {landed:.3f}s "
+            f"(delta {landed - asked:+.3f}s{timing}{verdict})")
+        # The press is answered (or gave up): the next picture is an ordinary one, not the answer to this press.
+        self._seek_watch = None
+        self._seek_pressed_at = None
+        self._seek_generation = None
+
+    def _tick_press_deadline(self) -> None:
+        """Report the tick's monotonically increasing time to the press session (the 100 ms clock, plan P4).
+
+        The deadline lives in the session; this is the page's only job in it - tell it that time passed, so a press
+        whose frame never lands cannot hold the marker on the requested time forever.
+        """
+        session_of = getattr(self, "_press_session", None)
+        if not callable(session_of):
+            return
+        try:
+            session = session_of()
+        except Exception:
+            return
+        check = getattr(session, "check_deadline", None)
+        if callable(check):
+            try:
+                check()
+            except Exception:
+                pass
+
+    def _reset_press_for_job(self) -> None:
+        """Close the pane's open ticket because the JOB changed: a press cannot outlive it.
+
+        A job change is a new tail (`_start_live_tail`), the end of the painters (`_end_job_painters`) or the queue
+        hand-over (entering/leaving the queue tab, selecting another item). The session closes its own ticket on the
+        `JobChanged` event; the page drops its reference so `_result_playhead` can never answer with the old job's
+        `target_s` - the marker falls back to the picture (`shown_time`) immediately.
+        """
+        session_of = getattr(self, "_press_session", None)
+        if callable(session_of):
+            from .preview.session import JobChanged
+
+            try:
+                session_of().observe(JobChanged())
+            except Exception:
+                pass
+        self._press = None
+        self._seek_watch = None
+        self._seek_pressed_at = None
+        self._seek_generation = None
+
     def _on_preview_seek(self, fraction: float) -> None:
         """A press or drag on the strip seeks whoever owns the picture - the ROUTE is all that is decided here.
 
@@ -2626,7 +2738,7 @@ class ProcessTab:
         # The record lives in the pane's press session now (plan P1): a press that came through the controller already
         # owns one, and `press()` hands that back instead of opening a second; a direct press opens its own.
         edge_s = produced * duration_s if duration_s > 0.0 else None
-        ticket = self._preview_session().press(
+        ticket = self._press_session().press(
             target_s=target_s, target_frame=target_frame, produced=produced, edge_s=edge_s)
         self._press = ticket
         if owner.kind is PreviewBackendKind.QUEUE_FILE:
@@ -2634,6 +2746,9 @@ class ProcessTab:
             duration = float(getattr(decoder, "duration", 0.0) or 0.0)
             if decoder is not None and duration > 0.0:
                 ticket.decide(route="queue", answerable=True)
+                # The queue item is a finished file: the frame that lands answers the press, so the session watches
+                # the same seconds the decoder is asked for (plan P4).
+                self._press_session().watch(fraction * duration)
                 try:
                     decoder.seek(fraction * duration)
                 except Exception as exc:
@@ -2676,7 +2791,9 @@ class ProcessTab:
                 log("seek: refused - nothing is written yet")
                 return                      # nothing is written yet, so there is nothing to seek to
             target = fraction * self._live_timeline(edge)
-            self._seek_watch = target
+            # The tail maps a strip share onto ITS timeline (the clip length, or the flushed edge when it is unknown),
+            # so the asked time it must be judged against is this one, not the ticket's whole-clip target.
+            self._press_session().watch(target)
             live.seek(target)
             ticket.decide(route="tail", answerable=True)
             log(f"seek: tail asked for {target:.3f}s (published edge {edge:.3f}s)")
@@ -2685,9 +2802,9 @@ class ProcessTab:
         duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
         if decoder is not None and duration > 0:
             ticket.decide(route="decoder", answerable=True)
-            # The same landing instrument as the tail's: without it the press stayed open on the timestamp alone (the
-            # marker on the requested time with nothing to close it) and the next press could settle on this one.
-            self._seek_watch = fraction * duration
+            # The same landing instrument as the tail's: the session watches the time the decoder was asked for, and
+            # the frame it publishes closes the press - not the page's timeout.
+            self._press_session().watch(fraction * duration)
             decoder.seek(fraction * duration)
             log(f"seek: decoder asked for {fraction * duration:.3f}s")
             return
@@ -2987,44 +3104,15 @@ class ProcessTab:
                 pane.set_frame(image, gui_ms=(time.perf_counter() - path_started) * 1000.0,
                                index=getattr(frame, "index", None), media_time=getattr(frame, "pts", None))
             self._preview_playhead = float(getattr(frame, "pts", 0.0) or 0.0)
-            watched = getattr(self, "_seek_watch", None)
-            if watched is not None and self._frame_answers_watch(watched):
-                # The seek instrument the owner asked for: one line per PRESS (not per frame), naming where the press
-                # asked to go and where the picture actually landed. Without it a press and the frame it produced were
-                # two separate facts and "it still does not work" could not be argued either way.
-                self._seek_watch = None
-                pressed_at = getattr(self, "_seek_pressed_at", None)
-                landed = float(self._preview_playhead)
-                # "Late" must mean "the frame that answered is not the one asked for", never "the answer took longer
-                # than the timeout": a 4K 10-bit file with sparse keyframes needs 1-2 s to reach a target, and the
-                # line used to call that a timeout even though the picture was exactly the requested one (the owner's
-                # own log, 2026-11-26: `landed at 3.170 (delta -0.038s, watch timed out)`).
-                matched = abs(landed - float(watched)) <= self._seek_landing_tolerance()
-                turnaround_ms = None if pressed_at is None else (time.perf_counter() - pressed_at) * 1000.0
-                if pressed_at is not None:
-                    shown = getattr(pane, "shown", None)
-                    spot = getattr(self, "_press", None)
-                    if spot is not None and spot.open:
-                        spot.settled(landed=shown() if callable(shown) else None,
-                                     landed_time=landed,
-                                     turnaround_ms=turnaround_ms, landed_gen=None)
-                    else:
-                        telemetry.note_seek(turnaround_ms, target=getattr(self, "_seek_target_frame", None),
-                                            landed=shown() if callable(shown) else None)
-                    self._seek_pressed_at = None
-                    # The request is answered, by this path or not at all: a later press must not call it superseded.
-                    self._seek_generation = None
-                timing = "" if turnaround_ms is None else f", {turnaround_ms:.0f} ms"
-                verdict = "" if matched else ", NOT the asked frame (gave up)"
-                log(f"seek: press wanted {watched:.3f}s, the picture landed at {landed:.3f}s "
-                    f"(delta {landed - watched:+.3f}s{timing}{verdict})")
-            # The painter reports the picture to the pane's press session (plan P2), AFTER this slot's own settle block
-            # has run: the press telemetry keeps its order and its one line per press, and the session then records the
-            # picture that stands (or answers). The frame's own index travels with it - the tail numbers frames, so the
+            # The press is CLOSED by the session (plan P4), not here: `observe(Painted)` decides whether this picture
+            # is the one that was asked for (two frames' slack) and calls the page's formatter for the owner's landing
+            # line. The page's `_seek_watch` timeout no longer decides anything - a press nothing answers is abandoned
+            # by the session's deadline (`check_deadline`, called from the 100 ms tick), and a late frame then only
+            # updates the picture. The frame's own index travels with the event - the tail numbers frames, so the
             # session can name the picture the same way the producer does.
             from .preview.session import Painted
 
-            session_of = getattr(self, "_preview_session", None)
+            session_of = getattr(self, "_press_session", None)
             if callable(session_of):
                 session_of().observe(Painted(media_time=float(getattr(frame, "pts", 0.0) or 0.0),
                                              index=getattr(frame, "index", None)))
@@ -3169,6 +3257,9 @@ class ProcessTab:
         # The pane's 100 ms clock is also the live tail's start point: it is the only GUI-thread tick during a
         # render, and the tail must be built and wired there (see `_start_live_tail`).
         self._ensure_live_tail()
+        # The pane's one press session gets the tick's time: a press whose frame never arrives is abandoned at its
+        # deadline (plan P4), and the marker falls back to the picture instead of standing on the request forever.
+        self._tick_press_deadline()
         # The block is allocated once per pass, before the job's own `isPreview` is known (the worker sets it), so the
         # pane's seek reach is re-asserted here, on the GUI thread, once the owner is unambiguous.
         self._apply_seek_ceiling()

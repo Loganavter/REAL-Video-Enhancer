@@ -397,7 +397,7 @@ def test_no_gate_method_survives_in_the_page():
 
 
 def _frame_slot_tab(pts: float, index: int, order: list[str]):
-    """The page `_on_preview_frame` needs, with the press settle and the session both recording."""
+    """The page `_on_preview_frame` needs, with the session recording the picture (the page no longer settles)."""
     ProcessTab = _import_process_tab()
     painted: list[tuple] = []
 
@@ -444,12 +444,12 @@ def _frame_slot_tab(pts: float, index: int, order: list[str]):
     return tab, painted
 
 
-def test_a_painted_frame_settles_the_page_line_first_and_the_session_second(monkeypatch):
-    """The one ordering that matters: the press line is the page's, the session's record comes after it.
+def test_a_painted_frame_is_closed_by_the_session_and_not_by_the_page(monkeypatch):
+    """The closure moved into the session (plan P4): the page reports the picture and settles nothing.
 
-    The page's settle block (`seek: press wanted ... landed at ...`) already carries the press's identity, its
-    generation and its turnaround; feeding the session BEFORE it would let the session close the ticket first and the
-    page's line would then be a second, thinner record of the same press (P1's "one line per press").
+    Before P4 the page ran its own settle block here (`_seek_watch` + `_frame_answers_watch`, the timeout included),
+    then fed the session. That is the second owner the plan removes: `observe(Painted)` is now the only thing that
+    decides whether this picture answers the press, and the page's landing line is a callback the session invokes.
     """
     pytest.importorskip("PySide6")
     order: list[str] = []
@@ -459,7 +459,9 @@ def test_a_painted_frame_settles_the_page_line_first_and_the_session_second(monk
 
     tab._on_preview_frame(frame)
 
-    assert order == ["page", "session"], f"the page's press line must settle first (got {order})"
+    assert order == ["session"], (
+        "the session closes the press and the page only formats: a 'page' entry means the old page-side settle "
+        f"survived (got {order})")
     assert len(painted) == 1, "the painter reports the picture exactly once per painted frame"
     assert isinstance(painted[0], Painted)
     assert painted[0].media_time == pytest.approx(1.5)
