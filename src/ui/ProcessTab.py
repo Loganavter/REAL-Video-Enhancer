@@ -706,7 +706,22 @@ class ProcessTab:
         self._set_render_controls("running")
 
     def startGUIUpdate(self):
-        
+        """Start the page's 100 ms clock - a GUI-thread clock, which is not obvious from the connection (plan P6).
+
+        `ProcessTab` is not a `QObject`, so `tick.connect(self.updateProcessTab)` binds a plain callable: there is no
+        receiver object whose thread affinity Qt could read from the page, so the connection is resolved by the proxy
+        PySide builds for that callable - and that proxy's delivery lands on the thread that owns the `QApplication`,
+        never on the emitting thread and not on the connecting one (measured both ways). Measured on this host, PySide6
+        6.12.0 / Qt 6.12.0, in this repo's own shape (`UpdateGUIThread` emitting from its `run()`, a thread with no event
+        loop of its own): no call happens at emit time, and every call lands on the GUI thread at `TICK_SECONDS`. So the
+        whole body (labels, console, the two painters, `_tick_press_deadline`) already runs on the GUI thread, and a slow
+        tick starves the GUI event loop rather than the tick thread (that is the 2026-11-22 freeze `syncRenderConsole`
+        was written for).
+
+        The contract is pinned by `harness/tests/test_preview_state_tick.py::test_the_tick_body_runs_on_the_gui_thread`
+        (real thread, real `updateProcessTab`, both hooks recording `threading.get_ident()`). It is why the page may touch
+        widgets from `updateProcessTab` at all; re-measure it before moving the tick, since P6 lands last behind it.
+        """
         self.workerThread = UpdateGUIThread(parent=self)
         self.workerThread.tick.connect(self.updateProcessTab)
         self.workerThread.finished.connect(self.guiChangesOnRenderCompletion)
@@ -1897,6 +1912,13 @@ class ProcessTab:
         if QThread.currentThread() != button.thread():
             # `_stop_live_tail` runs in the render's worker thread, which has no event loop to paint from: hand the
             # widget work to the button's own thread instead of writing to a widget cross-thread.
+            #
+            # This branch is NOT about the tick: the 100 ms tick already arrives on the GUI thread (its plain-callable
+            # connection is queued there - see `startGUIUpdate`, plan P6), so `updateProcessTab` never takes it. It is
+            # for the other callers of this method: `renderToPipeThread` starts the job's tail from a plain `Thread`
+            # (`_start_live_tail` -> `_stop_live_tail` -> here, ProcessTab.py:781/1432), and a widget write from there
+            # is a cross-thread write whatever the tick does. The three-argument `singleShot` is the sanctioned form:
+            # `button` is the CONTEXT object, so the retry lands on the button's thread and not on the caller's.
             QTimer.singleShot(0, button, self._sync_preview_transport)
             return
         paused = bool(getattr(self, "_preview_paused", True))
@@ -2702,6 +2724,10 @@ class ProcessTab:
 
         The deadline lives in the session; this is the page's only job in it - tell it that time passed, so a press
         whose frame never lands cannot hold the marker on the requested time forever.
+
+        It runs on the tick's clock, which is the GUI thread (`updateProcessTab` is queued there - measured, see
+        `startGUIUpdate` and `test_preview_state_tick.py::test_the_tick_body_runs_on_the_gui_thread`), so the session's
+        deadline and the playhead it releases are read and written on one thread.
         """
         session_of = getattr(self, "_press_session", None)
         if not callable(session_of):
@@ -3299,6 +3325,11 @@ class ProcessTab:
 
     def updateProcessTab(self):
         """The panel's 100 ms tick: progress, log, FPS/ETA/status - and the pane's owners.
+
+        It runs ON THE GUI THREAD: the tick is a plain-callable connection (the page is not a `QObject`), and PySide
+        queues such a delivery to the thread that owns the `QApplication` - measured, and pinned by
+        `harness/tests/test_preview_state_tick.py::test_the_tick_body_runs_on_the_gui_thread`. That is the licence for
+        the widget writes below, and `_tick_press_deadline` (plan P4) rides the same clock.
 
         It used to be called with a 640x360 thumbnail from shared memory. The picture now has two routes, both starting
         here: a preview's live tail decodes the file it follows (`_ensure_live_tail`), an export's display channel reads
