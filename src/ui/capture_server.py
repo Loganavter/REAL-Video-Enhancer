@@ -330,6 +330,112 @@ def _preview_exit_code(child) -> int | None:
         return None
 
 
+# --- the preview pane's whole state, in one read (plan P5) -------------------------------------------
+
+
+def _preview_session(window):
+    """The pane's press session if this window has one - a read, never a creation.
+
+    Prefers the controller's session (the pane's one record); a tab wired by hand keeps its own on the page. A window
+    without either is answered as "no session", not as an exception.
+    """
+    tab = getattr(window, "processTab", None)
+    if tab is None:
+        return None
+    controller = getattr(tab, "_preview_controller", None)
+    getter = getattr(controller, "session", None)
+    session = getter() if callable(getter) else None
+    if session is not None:
+        return session
+    return getattr(tab, "_preview_session_local", None)
+
+
+def _preview_scrubber_paint(window):
+    """The scrubber's own last paint record (`scrub_report()["paint"]`), or None when this pane has no scrubber.
+
+    Read from the named widget, the same report the per-widget state answer serves, so the dump does not need a second
+    copy of "what was drawn where".
+    """
+    finder = getattr(window, "findChild", None)
+    if not callable(finder):
+        return None
+    try:
+        from PySide6.QtWidgets import QWidget
+
+        widget = finder(QWidget, "preview_timeline")
+    except Exception:
+        return None
+    report = getattr(widget, "scrub_report", None)
+    if not callable(report):
+        return None
+    try:
+        return report().get("paint")
+    except Exception:
+        return None
+
+
+def _preview_owner_answer(window):
+    """The one painter decision as data (kind + its three permissions + whether a clock/surface exist), or None."""
+    tab = getattr(window, "processTab", None)
+    if tab is None:
+        return None
+    try:
+        from src.ui.preview.owner import owner_of
+
+        owner = owner_of(tab)
+    except Exception:
+        return None
+    return {
+        "kind": owner.kind.value,
+        "may_paint": bool(owner.may_paint),
+        "may_want": bool(owner.may_want),
+        "may_seek_any": bool(owner.may_seek_any),
+        "has_clock": owner.clock is not None,
+        "has_surface": owner.surface is not None,
+    }
+
+
+def preview_state_answer(window) -> dict:
+    """The whole preview state in ONE answer: `{snapshot, ticket, epoch, paint, owner}` (plan P5).
+
+    Why one answer: the pane is described by four things that lived in four places - the state's numbers (in the bar's
+    widgets), the press record (in the session), what the scrubber painted (in this widget's report) and who owns the
+    pane (a page predicate). Read separately they describe four instants, which is exactly how "the band says 20.6 s
+    while the picture is at 8.9 s" becomes an argument.
+
+    `snapshot` is the session's `dump()["snapshot"]` (epoch/ticket facts plus the state numbers the page feeds);
+    `ticket` the press record's detail; `epoch` the sweep generation; `paint` the scrubber's last rects; `owner` the
+    kind and its flags. A page without a preview session answers the five keys as None with an `error` line - a
+    documented answer, not an exception. Nothing here writes: the verb is a READ of the pane.
+    """
+    report = {"stamp": _stamp(), "kind": "preview", "error": None,
+              "snapshot": None, "ticket": None, "epoch": None, "paint": None, "owner": None}
+    tab = getattr(window, "processTab", None)
+    if tab is None:
+        report["error"] = "no process tab"
+        return report
+    session = _preview_session(window)
+    if session is None:
+        report["error"] = "no preview session on this page"
+        return report
+    dump = getattr(session, "dump", None)
+    if not callable(dump):
+        report["error"] = "the preview session has no dump()"
+        return report
+    try:
+        answer = dump() or {}
+    except Exception as exc:  # a broken dump is a fact about the pane, not a broken channel
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        return report
+    for key in ("snapshot", "ticket", "epoch", "paint", "owner"):
+        report[key] = answer.get(key)
+    if report["paint"] is None:
+        report["paint"] = _preview_scrubber_paint(window)
+    if report["owner"] is None:
+        report["owner"] = _preview_owner_answer(window)
+    return report
+
+
 @dataclass
 class PreviewWatch:
     """The `preview:` verb's completion rule: the BACKEND CHILD's exit, never the button's look.
@@ -1268,6 +1374,13 @@ def install(window) -> None:
             getattr(window, call)()
             QApplication.processEvents()
             _finish({"stamp": _stamp(), "kind": "page", "page": name, "shown": True})
+            return
+        if wanted.strip() == "state:preview":
+            # The whole preview state in one read (plan P5). Its own branch, never a widget lookup: a widget named
+            # `preview` would answer geometry where the diagnosis needs the session, the paint and the owner.
+            report = preview_state_answer(window)
+            _finish(report)
+            print(f"capture-server: state preview -> {report.get('error') or 'ok'}", flush=True)
             return
         if wanted.startswith("state:"):
             widget_state(wanted[len("state:"):])

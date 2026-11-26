@@ -102,7 +102,7 @@ def test_a_seek_past_the_reach_is_refused_opens_nothing_and_names_the_reach(monk
     refusal = session.refusal() or ""
     assert f"{REACH_S:.3f}" in refusal, f"the reason names the reach, got {refusal!r}"
     assert session.refused_for_reach() is True
-    assert session.dump()["refusal"] == refusal, "P5 serves the same reason from dump()"
+    assert session.dump()["snapshot"]["refusal"] == refusal, "P5 serves the same reason from dump()"
     assert session.epoch == 0
 
 
@@ -153,7 +153,7 @@ def test_a_job_change_clears_the_ticket():
 
     assert ticket is not None and ticket.open is False, "a press cannot outlive its job"
     assert session.snapshot()["open"] is False
-    assert session.dump()["refusal"] is None, "an abandonment is not a refusal"
+    assert session.dump()["snapshot"]["refusal"] is None, "an abandonment is not a refusal"
 
 
 def test_two_seeks_in_a_row_replace_the_ticket_and_only_the_newest_target_closes_it():
@@ -186,10 +186,16 @@ def test_snapshot_and_dump_carry_the_epoch_and_the_target():
     dump = session.dump()
 
     assert snapshot["epoch"] == 1 and dump["epoch"] == 1
-    assert snapshot["target"] == pytest.approx(6.0) and dump["target"] == pytest.approx(6.0)
-    assert snapshot["open"] is True
-    assert dump["refusal"] is None
-    assert set(dump) == set(snapshot) | {"refusal"}, "dump() is the snapshot plus the reason, not a second shape"
+    assert snapshot["target"] == pytest.approx(6.0)
+    assert dump["snapshot"]["target"] == pytest.approx(6.0)
+    assert snapshot["open"] is True and dump["ticket"]["open"] is True
+    assert dump["snapshot"]["refusal"] is None
+    # P5's shape: one dump for the whole pane, with the session's snapshot nested under `snapshot`.
+    assert set(dump) == {"snapshot", "ticket", "epoch", "paint", "owner"}
+    assert set(dump["snapshot"]) == set(snapshot) | {"refusal", "kind", "duration", "produced", "played",
+                                                    "playhead", "finished"}, (
+        "the dump's snapshot is the session's snapshot plus the state numbers the page feeds, not a second shape")
+
 
 
 # --- the command route and the clock's own answer -------------------------------------------------------

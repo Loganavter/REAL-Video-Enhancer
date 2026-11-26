@@ -222,3 +222,72 @@ def test_nothing_reaches_the_app_log(monkeypatch, tmp_path):
     telemetry.event("zoom", zoom="1.500", fit=0)
     assert "preview: zoom" in (tmp_path / "preview.log").read_text(encoding="utf-8")
     assert not calls, "the module wrote into the app log"
+
+
+# --- P5: the preview STATE as one aggregate line per second -------------------------------------------------------
+
+#: The keys the dump's snapshot and this line share: one vocabulary for the pane and the file.
+_SNAPSHOT_KEYS = ("kind", "duration", "produced", "played", "playhead", "finished", "ticket.open", "epoch")
+
+
+def _snapshot_fields(**overrides):
+    fields = {"kind": "queue_file", "duration": 12.5, "produced": 12.5, "played": 3.0,
+              "playhead": 3.0, "finished": True, "ticket.open": False, "epoch": 2}
+    fields.update(overrides)
+    return fields
+
+
+def test_one_aggregate_snapshot_line_per_second_with_the_dumps_keys(monkeypatch, fresh):
+    """The state's own reading, once a second: the four widget numbers and the session's ticket, in one line."""
+    lines, now = fresh
+    _level(monkeypatch, "1")
+
+    assert telemetry.note_snapshot(**_snapshot_fields()) is False, "the first call only starts the window"
+    now["t"] += 0.4
+    assert telemetry.note_snapshot(**_snapshot_fields()) is False, "0.4 s must not flush"
+    now["t"] += 0.7
+    assert telemetry.note_snapshot(**_snapshot_fields()) is True
+
+    line, which = lines[-1]
+    assert which == "info"
+    assert line.startswith("preview: snapshot kind=queue_file duration=12.500 "), line
+    for key, value in (("produced", "12.500"), ("played", "3.000"), ("playhead", "3.000"),
+                       ("finished", "1"), ("ticket.open", "0"), ("epoch", "2")):
+        assert f"{key}={value}" in line, line
+    assert [key for key in _SNAPSHOT_KEYS if f"{key}=" not in line] == [], line
+
+    now["t"] += 0.5
+    assert telemetry.note_snapshot(**_snapshot_fields()) is False, "one line per second, not one per call"
+
+
+def test_the_snapshot_line_is_silent_at_level_zero(monkeypatch, fresh):
+    """Level 0 is the owner's file: events only. The state's aggregate is a level-1 instrument."""
+    lines, now = fresh
+    _level(monkeypatch, None)
+    assert telemetry.note_snapshot(**_snapshot_fields()) is False
+    now["t"] += 5.0
+    assert telemetry.note_snapshot(**_snapshot_fields()) is False
+    assert not any("preview: snapshot" in line for line, _ in lines), lines
+
+
+def test_the_snapshot_line_prints_an_unknown_value_and_a_false_flag(monkeypatch, fresh):
+    """`played` can be unknown and `finished` can be false: both must be readable, not blank."""
+    lines, now = fresh
+    _level(monkeypatch, "1")
+    telemetry.note_snapshot(**_snapshot_fields(played=None, finished=False, **{"ticket.open": True}))
+    now["t"] += 1.5
+    assert telemetry.note_snapshot(**_snapshot_fields(played=None, finished=False, **{"ticket.open": True})) is True
+    line = lines[-1][0]
+    assert "played=-" in line and "finished=0" in line and "ticket.open=1" in line, line
+
+
+def test_a_new_session_restarts_the_snapshot_window(monkeypatch, fresh):
+    """A reset drops the anchor with the counters, so the next run's first line is not a window of the old clock."""
+    lines, now = fresh
+    _level(monkeypatch, "1")
+    now["t"] = 500.0
+    assert telemetry.note_snapshot(**_snapshot_fields()) is False
+    telemetry._reset(session=True)
+    assert telemetry.note_snapshot(**_snapshot_fields()) is False, "the new session's first call starts its own window"
+    now["t"] += 1.2
+    assert telemetry.note_snapshot(**_snapshot_fields()) is True

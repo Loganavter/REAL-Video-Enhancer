@@ -19,6 +19,11 @@ The lifecycle is closed HERE (plan P4): a ticket ends on the picture that answer
 deadline a tick reports (`check_deadline`, `SEEK_WATCH_TIMEOUT_S`) or on a job change (`observe(JobChanged)`) - in every
 case `abandon()` is the session's own call, never the page's. The page supplies one callback (`set_settle`) and only
 formats the line the owner reads; `ProcessTab._seek_watch` no longer decides whether a press was answered.
+
+`dump()` is the debug layer's ONE read of the pane (plan P5): the snapshot (this session's facts plus the state numbers
+the page feeds through `set_dump_source`), the ticket, the epoch, the scrubber's last paint and the owner decision. The
+control channel serves it as the preview verb and `preview-log.txt` writes the same state numbers once a second; a dump
+never writes the session, the ticket or a widget.
 """
 
 from __future__ import annotations
@@ -31,6 +36,10 @@ from ..video.press import PressTicket
 from .state import PreviewCommand
 
 __all__ = ["JobChanged", "Painted", "PreviewSession", "SEEK_SLACK", "SEEK_WATCH_TIMEOUT_S", "Settled"]
+
+#: The state numbers the page feeds into `dump()` (plan P5). Same names as the aggregate log line's keys, so the debug
+#: channel and `preview-log.txt` cannot describe the pane in two different vocabularies.
+DUMP_STATE_KEYS = ("kind", "duration", "produced", "played", "playhead", "finished")
 
 #: A target this far past the reachable ceiling is a refusal, not a round-off (half a millisecond). The controller's
 #: phase derivation reads the same tolerance (`state.produced < state.duration - SEEK_SLACK`), so there is one number.
@@ -119,6 +128,8 @@ class PreviewSession:
         self._opened_at: float | None = None
         self._refusal: str | None = None
         self._refusal_was_reach = False
+        #: The page's one read of what the session cannot see (P5): the state's numbers, the scrubber's paint, the owner.
+        self._dump_source: Callable[[], dict] | None = None
         #: The page's one formatter for the landing line (P4): the session owns the closure, the page owns the words.
         self._settle = settle
         self._deadline_s = SEEK_WATCH_TIMEOUT_S if deadline_s is None else max(0.0, float(deadline_s))
@@ -128,6 +139,15 @@ class PreviewSession:
     def set_settle(self, settle: Callable[[Settled], None] | None) -> None:
         """Point the landing line at the page's formatter (idempotent; the page sets it on every access)."""
         self._settle = settle
+
+    def set_dump_source(self, source: Callable[[], dict] | None) -> None:
+        """Point `dump()` at the page's one read of the state's numbers, the scrubber's paint and the owner.
+
+        Idempotent, and a plain assignment on purpose: the page re-points it on every session access, so a tab wired by
+        hand and a tab with a controller both answer with their own page's facts. The source is only CALLED by `dump()`;
+        it must read, never write - the dump is the channel's view of the pane, not an action on it.
+        """
+        self._dump_source = source
 
     @property
     def deadline_s(self) -> float:
@@ -203,10 +223,56 @@ class PreviewSession:
         }
 
     def dump(self) -> dict:
-        """`snapshot()` plus the last refusal reason - what the debug channel serves (plan P5)."""
-        state = self.snapshot()
-        state["refusal"] = self._refusal
-        return state
+        """The whole preview state as data, in ONE read: `{snapshot, ticket, epoch, paint, owner}` (plan P5).
+
+        * `snapshot` - this session's `snapshot()` (epoch, open, press, route, target, landed, refusal) merged with the
+          state numbers only the page can read (kind, duration, produced, played, playhead, finished). One snapshot for
+          the whole pane, so the control channel and the aggregate log line carry the same keys;
+        * `ticket` - the press record's own detail (id, route, target, generation, outcome), `None` before a press;
+        * `epoch` - the sweep generation (`snapshot()["epoch"]`, repeated at the top for the dump's own shape);
+        * `paint` - the scrubber's last painted rects (`scrub_report()["paint"]`), `None` without a scrubber;
+        * `owner` - the one painter decision: the kind, its three permissions and whether a clock/surface exist.
+
+        A READ: nothing here writes the session, the ticket or a widget. The page's source is only called.
+        """
+        extra: dict = {}
+        source = self._dump_source
+        if callable(source):
+            try:
+                extra = dict(source() or {})
+            except Exception:
+                # A page that cannot answer must not take the debug channel down: the session's own half still answers.
+                extra = {}
+        snapshot = self.snapshot()
+        snapshot["refusal"] = self._refusal
+        for key in DUMP_STATE_KEYS:
+            snapshot[key] = extra.get(key)
+        return {
+            "snapshot": snapshot,
+            "ticket": self._ticket_dump(),
+            "epoch": int(self._epoch),
+            "paint": extra.get("paint"),
+            "owner": extra.get("owner"),
+        }
+
+    def _ticket_dump(self) -> dict | None:
+        """The current record as data (`None` before the first press): what was asked, where it went, how it ended."""
+        ticket = self._ticket
+        if ticket is None:
+            return None
+        produced = ticket.produced
+        return {
+            "id": int(ticket.id),
+            "open": bool(ticket.open),
+            "route": ticket.route,
+            "target_s": None if ticket.target_s is None else float(ticket.target_s),
+            "target_frame": ticket.target_frame,
+            "produced": None if produced is None else float(produced),
+            "edge_s": None if ticket.edge_s is None else float(ticket.edge_s),
+            "generation": ticket.generation,
+            "reason": ticket.reason,
+            "outcome": getattr(ticket, "_outcome", None),
+        }
 
     # -- the command --------------------------------------------------------------------------------
 

@@ -9,7 +9,9 @@ Levels (`RVE_PREVIEW_LOG`):
 * unset / `0` - **events only**: one line per action (a press, a seek, a mode change, an RHI re-init). Cheap enough
   to leave on; `log(..., level="info")` keeps them in `log.txt` beside the rest of the app's record.
 * `1` - events **+ one aggregate line per second**: frame/paint/upload counts, per-stage milliseconds, the interval
-  between paints, drops, and the seek turnaround.
+  between paints, drops, and the seek turnaround - plus ONE `snapshot` line per second carrying the preview state's own
+  numbers (`kind, duration, produced, played, playhead, finished, ticket.open, epoch`), the same keys the control
+  channel's preview dump serves. The state line is `note_snapshot`; the counters are `maybe_stats`.
 * `2` - everything above **+ one line per frame**. Use it for a short session only; at 24-60 fps it is a lot of text.
 
 The lines go to the pane's OWN file - `preview-log.txt` next to the app's `log.txt` (or `RVE_PREVIEW_LOG_FILE`) -
@@ -46,6 +48,10 @@ FILE_NAME = "preview-log.txt"
 
 #: How often the aggregate line may be written, seconds.
 STATS_PERIOD_S = 1.0
+
+#: How often the preview STATE's aggregate (`note_snapshot`) may be written, seconds - its own window, separate from
+#: the frame counters: one `snapshot` line per second regardless of which counter has a sample.
+SNAPSHOT_PERIOD_S = 1.0
 
 _writer: Callable[[str, str], None] | None = None
 _clock: Callable[[], float] = time.monotonic
@@ -160,6 +166,9 @@ _shown: tuple[str, int] | None = None
 _seek_ms: list[float] = []
 #: the last written snapshot, for a control verb or a test to read without waiting for the next second
 _last_snapshot: dict[str, object] = {}
+#: The state aggregate's own window (`note_snapshot`): its first call starts it, so a monotonic clock is never printed.
+_snapshot_started = False
+_last_snapshot_at = 0.0
 
 
 def note_frame(*, gui_ms: float | None = None, pts: float | None = None, index: int | None = None,
@@ -312,6 +321,7 @@ def _reset(*, session: bool = False) -> None:
     the session's first and skip a window.
     """
     global _frames, _paints, _uploads, _bytes, _drops, _last_snapshot, _started, _last_stats, _shown
+    global _snapshot_started, _last_snapshot_at
     _frames = _paints = _uploads = _bytes = _drops = 0
     if session:
         # `shown` is a property of the PANE (what it is painting right now), not a per-window counter: clearing it on
@@ -319,6 +329,8 @@ def _reset(*, session: bool = False) -> None:
         _shown = None
         _started = False
         _last_stats = 0.0
+        _snapshot_started = False
+        _last_snapshot_at = 0.0
     _gui.clear()
     _upload.clear()
     _intervals.clear()
@@ -331,6 +343,42 @@ def session_start(**fields) -> None:
     """One line once per started pane: where the file is and what the pane was at that moment."""
     _write(f"preview: session file={log_path()} " + " ".join(f"{k}={v}" for k, v in fields.items()),
            "info")
+
+
+def note_snapshot(**fields) -> bool:
+    """The preview STATE as ONE aggregate line per second (plan P5); True when it wrote one.
+
+    The pane's file had no per-second reading of the state itself: the scrubber's lines are EVENTS (a press, a refusal)
+    and every derived number lived only in a widget, so "the band says 20.6 s while the picture is at 8.9 s" could only
+    be argued from a screenshot. This line carries the same keys the debug dump serves (`kind, duration, produced,
+    played, playhead, finished, ticket.open, epoch`), so the file and the control channel describe one pane one way.
+
+    Written at level >= 1 and at most once per `SNAPSHOT_PERIOD_S`; the level-0 file keeps the event lines the owner
+    reads (a press, a seek) and gains nothing. The first call only starts the window (a monotonic clock is arbitrary),
+    and a boolean prints as `1`/`0`, an unknown value as `-`, a float with three decimals.
+    """
+    global _snapshot_started, _last_snapshot_at
+    now = _clock()
+    if not _snapshot_started:
+        _snapshot_started = True
+        _last_snapshot_at = now
+        return False
+    if level() < 1 or now - _last_snapshot_at < SNAPSHOT_PERIOD_S:
+        return False
+    _last_snapshot_at = now
+    parts = []
+    for key, value in fields.items():
+        if value is None:
+            text = "-"
+        elif isinstance(value, bool):
+            text = "1" if value else "0"
+        elif isinstance(value, float):
+            text = f"{value:.3f}"
+        else:
+            text = str(value)
+        parts.append(f"{key}={text}")
+    _write("preview: snapshot " + " ".join(parts), "info")
+    return True
 
 
 def maybe_stats(now: float | None = None, *, force: bool = False) -> bool:

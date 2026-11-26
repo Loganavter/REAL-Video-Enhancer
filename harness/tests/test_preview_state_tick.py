@@ -87,38 +87,6 @@ def test_the_tick_publishes_after_the_held_progress_so_both_agree():
     assert order == ["held", "state"]
 
 
-def test_a_frame_already_in_flight_does_not_answer_the_press():
-    """The press closes on the frame that ANSWERS it, not on the first one that arrives.
-
-    A tail emits frames decoded before the press; closing on such a frame moved the marker back to the old position
-    for a few frames and then forward again (owner, 2026-11-26: "скачет назад-вперёд пару раз несколько кадров
-    подряд"). The timeout is the escape hatch: a seek that cannot land still settles, with the delta in the log.
-    """
-    import time as _time
-
-    tab = _tab()
-    tab.currentRenderOptions = SimpleNamespace(videoFps=24.0)
-    tab._preview_playhead = 1.5          # a frame from before the press
-    tab._seek_pressed_at = _time.perf_counter()
-    assert tab._frame_answers_watch(10.28) is False, "a stale frame must not close the press"
-
-    tab._preview_playhead = 10.28        # the frame the press asked for
-    assert tab._frame_answers_watch(10.28) is True
-
-    tab._preview_playhead = 1.5          # a seek that never lands must still settle eventually
-    tab._seek_pressed_at = _time.perf_counter() - (tab.SEEK_WATCH_TIMEOUT_S + 0.01)
-    assert tab._frame_answers_watch(10.28) is True
-
-
-def test_the_landing_tolerance_is_two_frames_with_a_floor():
-    tab = _tab()
-    tab.currentRenderOptions = SimpleNamespace(videoFps=24.0)
-    assert tab._seek_landing_tolerance() == pytest.approx(2.0 / 24.0)
-    tab.currentRenderOptions = SimpleNamespace(videoFps=0.0)
-    tab.fps = 0
-    assert tab._seek_landing_tolerance() == pytest.approx(0.1)
-
-
 def test_a_live_export_band_shows_progress_not_the_whole_clip():
     """The blue half of the strip is "upscaled", so a live export at 14 % must be 14 % blue, not all of it.
 

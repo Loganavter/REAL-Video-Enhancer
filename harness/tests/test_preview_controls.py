@@ -933,3 +933,201 @@ def test_the_strip_is_one_bar_blue_for_produced_grey_for_not(controls):
     report = timeline.scrub_report()["paint"]
     assert [rect["role"] for rect in report["rects"]] == ["track", "produced", "head"]
     assert report["state"]["fill_fraction"] == pytest.approx(0.15), "the played number survives in the report"
+
+
+# --- P5: the queue item is its own clock, the dump feeds on the state, the line carries it -----------------
+
+class _QueueDecoder:
+    """The queue pane's decoder as the adapter reads it: its own length, its own seek, its own play state."""
+
+    def __init__(self, duration: float = 12.0) -> None:
+        self.duration = float(duration)
+        self.seeks: list[float] = []
+        self._playing = False
+
+    def seek(self, seconds: float) -> None:
+        self.seeks.append(float(seconds))
+
+    def is_playing(self) -> bool:
+        return self._playing
+
+
+class _AliveProcess:
+    """A render child that is still running (`poll()` is None until it exits)."""
+
+    def poll(self):
+        return None
+
+
+def controls_parent():
+    """A bare QWidget to stand in for the pane (the file's other page tests build one the same way)."""
+    _app()
+    return QWidget()
+
+
+def _timeline_widget():
+    _app()
+    timeline = PreviewTimeline()
+    timeline.resize(400, 24)
+    return timeline
+
+
+def test_a_queue_item_is_its_own_clock_not_the_host():
+    """P3's note, closed in P5: a press on the queue tab binds the QUEUE's adapter, not the host one.
+
+    The host adapter reads `_preview_playhead` - the RENDER's position behind the tab - so a press there was judged
+    against a different file's timeline. The queue adapter reads the item's own position and its own length, and still
+    routes the press through the page (which is what asks the queue decoder and records the route).
+    """
+    controller = PreviewController(FakeSurface())
+    page = _fake_page(controls_parent(), controller)
+    decoder = _QueueDecoder()
+    page._queue_pane_owns = True
+    page._queue_pane_decoder = decoder
+    page._queue_pane_duration = 12.0
+    page._queue_pane_position = 4.0
+    asked: list[float] = []
+    page._on_preview_seek = lambda fraction: asked.append(float(fraction))
+
+    page._push_preview_state()
+
+    assert controller.state().backend is PreviewBackendKind.QUEUE_FILE
+    assert controller.backend().kind is PreviewBackendKind.QUEUE_FILE
+    assert controller.state().duration == pytest.approx(12.0)
+    assert controller.state().produced == pytest.approx(12.0), "a queue item's whole length exists"
+    assert controller.backend().position == pytest.approx(4.0), "the item's playhead, not the render's 10.0 s"
+
+    controller.dispatch(PreviewCommand.SEEK_TO, 3.0)
+
+    assert asked and asked[-1] == pytest.approx(0.25), "the press reaches the page's queue route, in queue seconds"
+    assert decoder.seeks == [], "the adapter must not seek the decoder behind the page's back"
+
+
+@pytest.fixture()
+def preview_lines(monkeypatch):
+    """Capture `preview-log.txt` lines with a controllable clock (the aggregate is a per-second instrument)."""
+    from src.ui.video import telemetry
+
+    lines: list[tuple[str, str]] = []
+    now = {"t": 1000.0}
+    monkeypatch.setenv(telemetry.ENV_NAME, "1")
+    previous_writer, previous_clock = telemetry._writer, telemetry._clock
+    telemetry.set_writer(lambda line, which: lines.append((which, line)))
+    telemetry.set_clock(lambda: now["t"])
+    telemetry._reset(session=True)
+    try:
+        yield lines, now
+    finally:
+        telemetry.set_writer(previous_writer)
+        telemetry.set_clock(previous_clock)
+        telemetry._reset(session=True)
+
+
+def _snapshot_lines(lines) -> list[str]:
+    return [line for _which, line in lines if line.startswith("preview: snapshot ")]
+
+
+def _page_for(controller):
+    return _fake_page(controls_parent(), controller)
+
+
+def test_the_aggregate_line_says_finished_for_a_queue_item(preview_lines):
+    """One line a second, and a queue item's band IS its whole file: `finished=1`."""
+    lines, now = preview_lines
+    controller = PreviewController(FakeSurface())
+    page = _page_for(controller)
+    page._queue_pane_owns = True
+    page._queue_pane_decoder = _QueueDecoder()
+    page._queue_pane_duration = 12.0
+
+    page._push_preview_state()          # starts the line's window
+    now["t"] += 1.2
+    page._push_preview_state()
+
+    snapshot = _snapshot_lines(lines)
+    assert len(snapshot) == 1, snapshot
+    assert "kind=queue_file" in snapshot[0], snapshot[0]
+    assert "duration=12.000" in snapshot[0] and "finished=1" in snapshot[0], snapshot[0]
+    now["t"] += 0.4
+    page._push_preview_state()
+    assert len(_snapshot_lines(lines)) == 1, "one line per second, not one per tick"
+
+
+def test_the_aggregate_line_says_not_finished_while_a_render_runs(preview_lines):
+    """An export at 14 % is not a finished file: the line must carry the band's own `finished`, not a second rule."""
+    lines, now = preview_lines
+    controller = PreviewController(FakeSurface())
+    page = _page_for(controller)
+    page.currentFrame, page.max_value = 67, 493
+    page._display = types.SimpleNamespace(attached=True)
+    page.renderProcess = _AliveProcess()
+    page.isPreview = False
+
+    page._push_preview_state()
+    now["t"] += 1.2
+    page._push_preview_state()
+
+    snapshot = _snapshot_lines(lines)
+    assert len(snapshot) == 1, snapshot
+    assert "kind=display_feed" in snapshot[0], snapshot[0]
+    assert "finished=0" in snapshot[0], snapshot[0]
+    assert "produced=" in snapshot[0] and "played=" in snapshot[0] and "playhead=" in snapshot[0], snapshot[0]
+
+
+def test_the_page_feeds_the_dump_the_state_it_paints():
+    """`state:preview` must answer the numbers the BARS paint: the dump reads the controller's state, not a copy."""
+    controller = PreviewController(FakeSurface())
+    page = _page_for(controller)
+    page._preview_controls = types.SimpleNamespace(timeline=None)
+    page._push_preview_state()
+
+    dump = page._preview_session().dump()
+
+    state = controller.state()
+    assert dump["snapshot"]["duration"] == pytest.approx(state.duration)
+    assert dump["snapshot"]["produced"] == pytest.approx(state.produced)
+    assert dump["snapshot"]["played"] == pytest.approx(state.played)
+    assert dump["snapshot"]["playhead"] == pytest.approx(state.playhead)
+    assert dump["snapshot"]["finished"] is state.finished()
+    assert dump["snapshot"]["kind"] == state.backend.value
+    assert dump["owner"]["kind"] == state.backend.value
+    assert set(dump["owner"]) == {"kind", "may_paint", "may_want", "may_seek_any", "has_clock", "has_surface"}
+
+
+def test_the_dump_reads_the_scrubbers_paint_without_touching_anything():
+    """A `state:preview` read must not move the session, the state or the control: it is a diagnosis, not an action."""
+    controller = PreviewController(FakeSurface())
+    page = _page_for(controller)
+    page._preview_controls = types.SimpleNamespace(timeline=_timeline_widget())
+    page._push_preview_state()
+    session = page._preview_session()
+
+    before_state = controller.state()
+    before_recent = list(page._preview_controls.timeline._recent)
+    budget = (controller, session.ticket)
+
+    dump = session.dump()
+
+    assert dump["paint"] is not None and "rects" in dump["paint"], dump["paint"]
+    assert controller.state() == before_state, "the dump moved the state"
+    assert page._preview_controls.timeline._recent == before_recent, "the dump touched the scrubber"
+    assert (controller, session.ticket) == budget and session.ticket is None, "the dump opened or moved a ticket"
+
+
+def test_the_widget_state_scrub_block_keeps_its_keys_and_types():
+    """The per-widget answer is byte-compatible: the pane-wide dump must not replace or reshape its `scrub` block."""
+    timeline = _timeline_widget()
+    timeline.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, playhead=3.0, played=2.0,
+                                    produced=8.0, fps=24.0))
+    report = timeline.scrub_report()
+
+    assert set(report) == {"duration", "value", "thumb", "fill", "produced", "scrubbing", "asked",
+                           "finished", "paint", "recent"}
+    assert isinstance(report["duration"], float) and isinstance(report["value"], int)
+    assert isinstance(report["scrubbing"], bool) and isinstance(report["finished"], bool)
+    for key in ("thumb", "fill", "produced"):
+        assert set(report[key]) == {"fraction", "seconds"}, report[key]
+        assert isinstance(report[key]["fraction"], float) and isinstance(report[key]["seconds"], float)
+    assert isinstance(report["recent"], list) and isinstance(report["paint"], dict)
+
+

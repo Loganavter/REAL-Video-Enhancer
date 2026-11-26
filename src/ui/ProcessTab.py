@@ -1290,51 +1290,8 @@ class ProcessTab:
 
     #: A press whose frame never lands (a decode that died, a target the tail cannot reach) must still close, or the
     #: thumb stands on the requested time forever. The deadline itself lives in `preview.session` (ONE definition,
-    #: plan P4); this name is the page's alias because `_frame_answers_watch` - the old page-side rule, kept only for
-    #: its pin and no longer called in production - reads it.
+    #: plan P4); this name is the page's alias for the reader who looks for the deadline on the tab.
     SEEK_WATCH_TIMEOUT_S = SESSION_SEEK_WATCH_TIMEOUT_S
-
-    def _frame_answers_watch(self, watched: float) -> bool:
-        """Whether the frame just painted is the ANSWER to the press, not one that was already in flight.
-
-        NO production caller since plan P4: the session's `observe(Painted)` / `check_deadline` decide now, and the
-        page only formats the landing line. Kept because the pin that described the old rule
-        (`test_preview_state_tick.py`) still reads it; deleting it is a separate, test-owned change.
-
-        A frame that was decoded before the press arrives after it; closing the press on such a frame moved the marker
-        back to the old position for a few frames and then forward again (owner, 2026-11-26: "скачет назад-вперёд пару
-        раз несколько кадров подряд"). The timeout is the escape hatch, so a seek that cannot land still settles.
-        """
-        landed = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
-        if abs(landed - float(watched)) <= self._seek_landing_tolerance():
-            return True
-        pressed_at = getattr(self, "_seek_pressed_at", None)
-        return pressed_at is not None and (time.perf_counter() - pressed_at) >= self.SEEK_WATCH_TIMEOUT_S
-
-    def _seek_landing_tolerance(self) -> float:
-        """How close a painted frame must be to the asked time to count as ITS answer.
-
-        Two frame intervals with a floor of 50 ms: the tail seeks to a timestamp and lands on the frame containing it,
-        so exact equality is not the contract - but a frame from BEFORE the press must never close the press, which is
-        what made the marker jump back to the old position for a few frames and then forward again (owner, 2026-11-26).
-        """
-        fps = 0.0
-        options = getattr(self, "currentRenderOptions", None)
-        try:
-            fps = float(getattr(options, "videoFps", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            fps = 0.0
-        if fps <= 0.0:
-            try:
-                fps = float(getattr(getattr(self, "_preview_decoder", None), "fps", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                fps = 0.0
-        if fps <= 0.0:
-            try:
-                fps = float(getattr(self, "fps", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                fps = 0.0
-        return max(0.05, 2.0 / fps) if fps > 0.0 else 0.1
 
     def _result_playhead(self, owner=None) -> float:
         """Where the RESULT's playhead is: the tail's or file decoder's PTS, else the render's produced share.
@@ -1997,6 +1954,9 @@ class ProcessTab:
         self._preview_surface = _PreviewSurfacePort(self)
         controller.set_surface(self._preview_surface)
         self._preview_controller = controller
+        # The debug layer's dump reads through THIS page (plan P5): point it now, so a pane that has never pressed a
+        # strip still answers `state:preview` with its state numbers, its paint and its owner.
+        self._attach_dump_source(controller.session())
         # The pane's wheel moves the zoom without the controller: mirror it so the Fit / 1:1 buttons stay honest.
         zoom_changed = getattr(pane, "zoomChanged", None)
         if zoom_changed is not None and hasattr(zoom_changed, "connect"):
@@ -2159,6 +2119,10 @@ class ProcessTab:
                 pass
         tail = getattr(self, "_live_tail", None)
         decoder = getattr(self, "_preview_decoder", None)
+        if kind is PreviewBackendKind.QUEUE_FILE:
+            # A queue item is its OWN clock (P3's note, closed in P5): the adapter the session binds must be the
+            # queue's, or a press there is judged against the render's position behind the tab.
+            decoder = getattr(self, "_queue_pane_decoder", None)
         controller.register_backend(
             kind, backend_for(self, kind, tail=tail, decoder=decoder, host_playable=bool(has_picture)))
         controller.set_backend(kind)
@@ -2189,6 +2153,35 @@ class ProcessTab:
             zoom=zoom,
             zoom_fit=bool(getattr(self, "_preview_zoom_fit", True)),
         )
+        # The state is now this tick's truth, and it is the ONE reading the per-second line prints (plan P5): the same
+        # numbers the bars paint, so the file cannot describe a pane the user is not looking at.
+        state_now = getattr(controller, "state", None)
+        state_now = state_now() if callable(state_now) else None
+        if state_now is not None:
+            self._note_state_snapshot(state_now)
+
+    def _note_state_snapshot(self, state) -> None:
+        """One aggregate `snapshot` line per second (plan P5): the dump's keys, read from the state the bars paint.
+
+        The file used to have no per-second reading of the STATE at all - the scrubber's own lines are events (a press,
+        a refusal) and every derived number lived only in a widget. This line names the owner, the clip's length, what
+        is produced, where the picture is and whether a press ticket is open, so "the band says 20.6 s while the picture
+        stands at 8.9 s" is a number in the log instead of an argument over a screenshot. Events are untouched: they are
+        the owner's evidence, and telemetry writes them at level 0.
+        """
+        session = self._preview_session_existing()
+        ticket = getattr(session, "ticket", None) if session is not None else None
+        epoch = getattr(session, "epoch", None) if session is not None else None
+        telemetry.note_snapshot(**{
+            "kind": state.backend.value,
+            "duration": float(state.duration),
+            "produced": float(state.produced),
+            "played": None if state.played is None else float(state.played),
+            "playhead": float(state.playhead),
+            "finished": bool(state.finished()),
+            "ticket.open": bool(getattr(ticket, "open", False)) if ticket is not None else False,
+            "epoch": None if epoch is None else int(epoch),
+        })
 
     def _wire_preview_strip(self) -> None:
         """Connect the pane's strip signals once, whoever owns the picture (live tail or finished file).
@@ -2593,20 +2586,78 @@ class ProcessTab:
 
         The page does not create press records itself any more (plan P1): the session owns the ticket and the epoch.
         A tab built without a controller (the harness's `object.__new__` style, the pane's own legacy strip signal)
-        still gets a session, so the routing below has one code path.
+        still gets a session, so the routing below has one code path. Every access re-points the session's `dump()`
+        at THIS page's read (plan P5), so the debug channel never describes a pane with another page's facts.
+        """
+        session = self._preview_session_existing()
+        if session is None:
+            from .preview.session import PreviewSession
+
+            session = PreviewSession()
+            self._preview_session_local = session
+        self._attach_dump_source(session)
+        return session
+
+    def _preview_session_existing(self):
+        """The pane's session if one ALREADY exists, else None - a read that never creates one.
+
+        The debug dump and the aggregate log line must be able to say "no session" instead of conjuring one: reading
+        the pane is not the same act as pressing it.
         """
         controller = getattr(self, "_preview_controller", None)
         getter = getattr(controller, "session", None)
         session = getter() if callable(getter) else None
         if session is not None:
             return session
-        session = getattr(self, "_preview_session_local", None)
-        if session is None:
-            from .preview.session import PreviewSession
+        return getattr(self, "_preview_session_local", None)
 
-            session = PreviewSession()
-            self._preview_session_local = session
-        return session
+    def _attach_dump_source(self, session) -> None:
+        """Point `session.dump()` at this page's one read (plan P5); idempotent, and the dump itself writes nothing."""
+        setter = getattr(session, "set_dump_source", None)
+        if callable(setter):
+            setter(self._preview_dump_facts)
+
+    def _preview_dump_facts(self) -> dict:
+        """The page's half of `PreviewSession.dump()` (plan P5): ONE read of what the session cannot see.
+
+        Reads the one owner decision, the controller's state and the scrubber's own last paint, and writes nothing: no
+        widget is asked to paint, no ticket is moved, no state is pushed. The numbers are the state's - the same object
+        the bars are painted from - so the dump cannot disagree with what the user sees.
+        """
+        from .preview.owner import owner_of
+
+        owner = owner_of(self)
+        controller = getattr(self, "_preview_controller", None)
+        getter = getattr(controller, "state", None)
+        state = getter() if callable(getter) else None
+        return {
+            "kind": owner.kind.value,
+            "duration": float(getattr(state, "duration", 0.0) or 0.0),
+            "produced": float(getattr(state, "produced", 0.0) or 0.0),
+            "played": None if getattr(state, "played", None) is None else float(state.played),
+            "playhead": float(getattr(state, "playhead", 0.0) or 0.0),
+            "finished": bool(state.finished()) if state is not None else None,
+            "paint": self._preview_paint_record(),
+            "owner": {
+                "kind": owner.kind.value,
+                "may_paint": bool(owner.may_paint),
+                "may_want": bool(owner.may_want),
+                "may_seek_any": bool(owner.may_seek_any),
+                "has_clock": owner.clock is not None,
+                "has_surface": owner.surface is not None,
+            },
+        }
+
+    def _preview_paint_record(self):
+        """What the scrubber last painted (`scrub_report()["paint"]`), or None when this pane has no scrubber."""
+        timeline = getattr(getattr(self, "_preview_controls", None), "timeline", None)
+        report = getattr(timeline, "scrub_report", None)
+        if not callable(report):
+            return None
+        try:
+            return report().get("paint")
+        except Exception:
+            return None
 
     def _press_session(self):
         """The pane's session with THIS page's landing-line formatter attached (plan P4).

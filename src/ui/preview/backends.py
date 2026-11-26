@@ -4,7 +4,9 @@ The shape is a `PlaybackBackend`: whoever answers play/pause/seek/step for the p
 own the pane and each has its own protocol already - the live tail of a file still being written (`LiveTailThread`), the
 finished file's decoder (`VideoDecoder`), and the export's display feed (one frame on demand through the shared block).
 This module wraps those three as strategies so the controller can select one instead of branching inside a handler,
-and so a fourth kind (no picture at all) refuses instead of crashing.
+and so a fourth kind (no picture at all) refuses instead of crashing. The queue tab's own item is a fourth clock
+(`QueueFileBackend`, plan P3/P5): a finished file whose decoder the QUEUE owns, so its own length and playhead are the
+pane's axis there while the render behind it keeps its position for the hand-back.
 
 The rules this module keeps, unchanged from the handlers they replace:
 
@@ -297,6 +299,78 @@ class FinishedFileBackend(_HostBackend):
         return super().is_playing
 
 
+class QueueFileBackend(_HostBackend):
+    """The Render Queue tab's own item: a finished file the QUEUE owns, and its own decoder is the pane's clock.
+
+    Why this adapter exists (plan P3's note, closed in P5): `owner_of` names the queue item as the pane's one owner and
+    hands the queue's decoder as `Owner.clock`, but `backend_for` had no `QUEUE_FILE` branch - so the session bound the
+    HOST adapter and a press was judged against the render's position (`_preview_playhead`), not the item's. The seek
+    itself still goes through the page's own press route (`_on_preview_seek`, whose queue branch opens the ticket's
+    route facts and asks the decoder), because that route is what knows the queue's geometry; what changes here is
+    that the clock the session sees is the queue's, and its readings are the item's file.
+    """
+
+    kind = PreviewBackendKind.QUEUE_FILE
+
+    def __init__(self, host: Any, decoder: Any) -> None:
+        super().__init__(host)
+        self._decoder = decoder
+
+    # `seek_to` is inherited: the page's press route is the only one that seeks the queue decoder AND records the
+    # press (`ticket.decide(route="queue")`, `session.watch(seconds)`), so a direct decoder seek here would be the
+    # second seek semantics plan P1 removes.
+
+    def _direct_seek(self, seconds: float) -> bool:
+        if self._decoder is None:
+            return False
+        try:
+            self._decoder.seek(max(0.0, float(seconds)))
+        except Exception:
+            return False
+        return True
+
+    @property
+    def position(self) -> float:
+        """The ITEM's own playhead: the pane's shown time, else the queue path's remembered position.
+
+        Never `_preview_playhead`: that is the RENDER's position behind the queue tab, and the hand-back must still
+        find the render standing where it stood.
+        """
+        getter = getattr(self._host, "_queue_pane_playhead", None)
+        if callable(getter):
+            try:
+                return max(0.0, float(getter() or 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+        return super().position
+
+    @property
+    def duration(self) -> float:
+        if self._decoder is not None:
+            try:
+                value = float(getattr(self._decoder, "duration", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                value = 0.0
+            if value > 0.0:
+                return value
+        return super().duration
+
+    @property
+    def produced(self) -> float:
+        # A queue item is a finished file the queue owns: its whole length exists the moment it opens.
+        return self.duration
+
+    @property
+    def is_playing(self) -> bool:
+        is_playing = getattr(self._decoder, "is_playing", None)
+        if callable(is_playing):
+            try:
+                return bool(is_playing())
+            except Exception:
+                pass
+        return super().is_playing
+
+
 class DisplayFeedBackend(_HostBackend):
     """The export's feed: it can render ANY timeline frame on demand, so the whole clip is seekable."""
 
@@ -332,6 +406,8 @@ def backend_for(host: Any, kind: PreviewBackendKind, *, tail: Any = None, decode
     """
     if kind is PreviewBackendKind.LIVE_TAIL and tail is not None:
         return LiveTailBackend(host, tail)
+    if kind is PreviewBackendKind.QUEUE_FILE and decoder is not None:
+        return QueueFileBackend(host, decoder)
     if kind is PreviewBackendKind.FINISHED_FILE and decoder is not None:
         return FinishedFileBackend(host, decoder)
     if kind is PreviewBackendKind.DISPLAY_FEED:

@@ -22,6 +22,8 @@ from __future__ import annotations
 import inspect
 from types import SimpleNamespace
 
+import pytest
+
 from src.ui import capture_server
 
 
@@ -214,3 +216,114 @@ def test_the_preview_verb_applies_the_tested_rule():
     assert "PreviewWatch(" in source
     assert "watch.tick(window)" in source, (
         "the verdict that answers the request must come from PreviewWatch, not from a second copy of the rule")
+
+
+# --- P5: the preview pane's whole state in ONE answer ------------------------------------------------
+
+from src.ui.preview.session import PreviewSession  # noqa: E402  (after the module under test, as the file's style)
+
+
+class _Clock:
+    """The session's clock as it needs it: `seek_to(seconds) -> bool`."""
+
+    def __init__(self, accepts: bool = True) -> None:
+        self.calls: list[float] = []
+        self.accepts = bool(accepts)
+
+    def seek_to(self, seconds: float) -> bool:
+        self.calls.append(float(seconds))
+        return self.accepts
+
+
+def _preview_window(session=None, *, with_controller: bool = True):
+    """Only the attribute paths the preview verb reads: a controller's `session()` and the tab it lives on."""
+    tab = SimpleNamespace(_preview_controller=None)
+    if with_controller:
+        tab._preview_controller = SimpleNamespace(session=lambda: session)
+    elif session is not None:
+        tab._preview_session_local = session
+    return SimpleNamespace(processTab=tab)
+
+
+def _state_source(**overrides):
+    facts = {
+        "kind": "queue_file",
+        "duration": 12.0,
+        "produced": 12.0,
+        "played": 3.0,
+        "playhead": 3.0,
+        "finished": True,
+        "paint": {"width_px": 400.0, "one_bar": True, "rects": []},
+        "owner": {"kind": "queue_file", "may_paint": False, "may_want": False, "may_seek_any": True,
+                  "has_clock": True, "has_surface": True},
+    }
+    facts.update(overrides)
+    return facts
+
+
+def _bound_session(**facts) -> PreviewSession:
+    session = PreviewSession()
+    session.bind(clock=_Clock(), duration=20.0, reach=20.0, frame_interval=1.0 / 24.0)
+    session.set_dump_source(lambda: _state_source(**facts))
+    return session
+
+
+_DUMP_KEYS = ("snapshot", "ticket", "epoch", "paint", "owner")
+
+
+def test_the_preview_verb_answers_the_five_keys_for_a_tab_with_a_controller():
+    session = _bound_session()
+    answer = capture_server.preview_state_answer(_preview_window(session))
+
+    assert answer["kind"] == "preview" and answer["error"] is None, answer
+    assert all(key in answer for key in _DUMP_KEYS), answer
+    assert answer["snapshot"]["kind"] == "queue_file"
+    assert answer["snapshot"]["duration"] == pytest.approx(12.0)
+    assert answer["snapshot"]["produced"] == pytest.approx(12.0)
+    assert answer["snapshot"]["played"] == pytest.approx(3.0)
+    assert answer["snapshot"]["playhead"] == pytest.approx(3.0)
+    assert answer["snapshot"]["finished"] is True
+    assert answer["paint"]["width_px"] == pytest.approx(400.0)
+    assert answer["owner"]["kind"] == "queue_file" and answer["owner"]["may_seek_any"] is True
+    assert answer["epoch"] == 0 and answer["ticket"] is None, "no press yet: nothing to settle"
+
+
+def test_the_preview_verb_without_a_session_is_a_documented_error_not_an_exception():
+    """A tab that never got a controller still answers in the verb's shape: five keys, one reason."""
+    answer = capture_server.preview_state_answer(_preview_window(None, with_controller=False))
+    assert all(key in answer for key in _DUMP_KEYS), answer
+    assert answer["error"] == "no preview session on this page", answer
+    assert all(answer[key] is None for key in _DUMP_KEYS), answer
+
+    bare = capture_server.preview_state_answer(SimpleNamespace(processTab=None))
+    assert bare["error"] == "no process tab"
+    assert all(key in bare for key in _DUMP_KEYS)
+
+
+def test_a_dump_taken_mid_press_reports_the_open_ticket_and_the_press_epoch():
+    """The verb's whole point: one read that says a press is still open, on the epoch the press opened."""
+    session = _bound_session()
+    assert session.seek_to(6.0) is True
+    assert session.epoch == 1
+
+    answer = capture_server.preview_state_answer(_preview_window(session))
+
+    assert answer["ticket"]["open"] is True
+    assert answer["ticket"]["target_s"] == pytest.approx(6.0)
+    assert answer["epoch"] == 1
+    assert answer["snapshot"]["epoch"] == 1, "the snapshot and the top-level epoch are the same generation"
+    assert answer["snapshot"]["open"] is True
+
+
+def test_the_widget_state_answer_still_serves_the_scrub_block():
+    """The per-widget answer is not removed by the pane-wide one: its `scrub` block stays where it was."""
+    source = inspect.getsource(capture_server.install)
+    assert "scrub_report" in source and 'report["scrub"] = scrub_report()' in source
+
+
+def test_the_preview_verb_is_its_own_branch_before_the_widget_lookup():
+    """A widget lookup would answer geometry for a widget named `preview`; the pane's state needs the session."""
+    source = inspect.getsource(capture_server.install)
+    branch = source.index('wanted.strip() == "state:preview"')
+    widget = source.index('wanted.startswith("state:")')
+    assert branch < widget, "the pane's own verb must be answered before the per-widget branch"
