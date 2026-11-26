@@ -170,7 +170,49 @@ def page_request_error(wanted: str, known_pages) -> str | None:
     if any(name in known_pages for name in names):
         return None
     return (f"unknown request {wanted!r}: expected 'all', a page name ({', '.join(known_pages)}) "
-            f"or a verb such as state:, click:, preview:, render:")
+            f"or a verb such as state:, click:, preview:, render:, queue:, start:")
+
+
+def start_render_job(window) -> dict:
+    """Start the queue's render the way the user's button does, and answer what happened.
+
+    Why this exists: the queue's live proof (2026-11-26) could add a row and select it, but nothing could START a job -
+    the transport button lives on another tab and a synthetic click does not satisfy its hit test, so `state:preview` on
+    a queue item could only ever read `kind=none`. The verb drives the SAME control the user presses
+    (`startRenderButton.click()`, the entry the preview verb already uses), never a second start path, and refuses when
+    the render is not idle - the button is a play/pause/resume toggle, so a click while running would silently PAUSE.
+    """
+    report = {"stamp": None, "kind": "job", "started": False, "method": None, "render_state": None,
+              "queue_rows": None, "output": None, "error": None}
+    tab = getattr(window, "processTab", None)
+    if tab is None:
+        report["error"] = "no process tab"
+        return report
+    state = str(getattr(tab, "_render_state", "idle") or "idle")
+    report["render_state"] = state
+    queue = getattr(window, "renderQueue", None)
+    try:
+        report["queue_rows"] = len(queue.getQueue()) if queue is not None else None
+    except Exception:
+        report["queue_rows"] = None
+    if state != "idle":
+        report["error"] = f"the render is {state!r}; start:render starts an idle queue (pause/resume are the button)"
+        return report
+    proc = getattr(getattr(window, "page_handles", None), "proc", None)
+    button = getattr(proc, "startRenderButton", None)
+    if button is None:
+        report["error"] = "no startRenderButton on this page"
+        return report
+    button.click()
+    report["started"] = True
+    report["method"] = "startRenderButton"
+    report["render_state"] = str(getattr(tab, "_render_state", state) or state)
+    try:
+        options = getattr(tab, "currentRenderOptions", None)
+        report["output"] = str(getattr(options, "outputPath", "") or "") or None
+    except Exception:
+        report["output"] = None
+    return report
 
 
 def drain_requests(root: str, dispatch, *, state: dict | None = None, now: float | None = None,
@@ -1022,6 +1064,24 @@ def install(window) -> None:
 
         QTimer.singleShot(100, add)
 
+    def start_job(action: str) -> None:
+        """`start:render` - start the render queue through the user's own start control.
+
+        Answers immediately with what the click did (`started`, `method`, `render_state`, `queue_rows`, `output`); the
+        caller then polls `state:preview` for the pane and `state:preview_timeline` for the bar. `job:pause` and
+        `job:resume` are deliberately absent: those are the same toggle in other states, and a probe that needs them can
+        say so instead of guessing which way a click will flip this time.
+        """
+        wanted = (action or "render").strip() or "render"
+        if wanted not in ("render", "start"):
+            _finish({"stamp": _stamp(), "kind": "job", "started": False, "method": None,
+                     "render_state": None, "queue_rows": None, "output": None,
+                     "error": f"unknown start action {wanted!r} (expected 'render')"})
+            return
+        report = start_render_job(window)
+        report["stamp"] = _stamp()
+        _finish(report)
+
     def select(spec: str) -> None:
         """Select rows by index: `select:renderQueueListWidget@0,1,2`."""
         from PySide6.QtWidgets import QWidget
@@ -1411,6 +1471,9 @@ def install(window) -> None:
             return
         if wanted.startswith("queue:"):
             queue(wanted[len("queue:"):])
+            return
+        if wanted.startswith("start:"):
+            start_job(wanted[len("start:"):].strip())
             return
         if wanted.startswith("select:"):
             select(wanted[len("select:"):])
