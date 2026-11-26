@@ -2933,10 +2933,14 @@ class ProcessTab:
                 self._seek_watch = None
                 pressed_at = getattr(self, "_seek_pressed_at", None)
                 landed = float(self._preview_playhead)
-                late = pressed_at is not None and (time.perf_counter() - pressed_at) >= self.SEEK_WATCH_TIMEOUT_S
+                # "Late" must mean "the frame that answered is not the one asked for", never "the answer took longer
+                # than the timeout": a 4K 10-bit file with sparse keyframes needs 1-2 s to reach a target, and the
+                # line used to call that a timeout even though the picture was exactly the requested one (the owner's
+                # own log, 2026-11-26: `landed at 3.170 (delta -0.038s, watch timed out)`).
+                matched = abs(landed - float(watched)) <= self._seek_landing_tolerance()
+                turnaround_ms = None if pressed_at is None else (time.perf_counter() - pressed_at) * 1000.0
                 if pressed_at is not None:
                     shown = getattr(pane, "shown", None)
-                    turnaround_ms = (time.perf_counter() - pressed_at) * 1000.0
                     spot = getattr(self, "_press", None)
                     if spot is not None and spot.open:
                         spot.settled(landed=shown() if callable(shown) else None,
@@ -2948,8 +2952,10 @@ class ProcessTab:
                     self._seek_pressed_at = None
                     # The request is answered, by this path or not at all: a later press must not call it superseded.
                     self._seek_generation = None
+                timing = "" if turnaround_ms is None else f", {turnaround_ms:.0f} ms"
+                verdict = "" if matched else ", NOT the asked frame (gave up)"
                 log(f"seek: press wanted {watched:.3f}s, the picture landed at {landed:.3f}s "
-                    f"(delta {landed - watched:+.3f}s{', watch timed out' if late else ''})")
+                    f"(delta {landed - watched:+.3f}s{timing}{verdict})")
             duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
             live_tail = getattr(self, "_live_tail", None)
             running = self.renderProcess is not None and self.renderProcess.poll() is None
