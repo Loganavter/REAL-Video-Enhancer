@@ -13,6 +13,8 @@ this file has been so far.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -304,6 +306,73 @@ def test_a_zoom_writes_a_draw_line_at_the_default_telemetry_level(surface, monke
     surface._on_rhi_draw(painted)
     assert len(draws()) == 3, "a planes result with a source is a picture too"
     assert draws()[-1]["result_fp"] == "-", "the fingerprint says planes, and the line still has to exist"
+
+
+def test_a_compare_opened_on_an_EMPTY_pane_still_asks_for_the_source_and_fits_it(surface):
+    """The owner's log, 2026-11-26: `transport paused=1`, `produced=0.0000`, `hold on playhead=0.000`, then `view mode=sbs`
+    and NOT ONE `compare:` line - the source half waited for a picture nobody had asked for.
+
+    Two faults, both here: the ask required a result frame (`not self._has_picture()`), and with no result `_image_size`
+    was (0, 0) so the fit had no box. The source is the one picture that CAN be shown.
+    """
+    asked: list[float] = []
+    surface.originalRequested.connect(asked.append)
+    surface.set_frame(None)                                    # an empty pane (a queue item, a stopped tick)
+    assert not surface._has_picture()
+
+    surface.set_view_mode("sbs")
+
+    assert asked, "a compare mode asks for the source even before a result exists"
+    source = _picture(*FRAME_SIZE, colour="#402060")
+    surface.set_original(source, media_time=0.0)
+
+    box = surface._frame_rect()
+    half = surface._half_rects()[1]
+    assert not box.isEmpty(), "the source defines the box while there is no result"
+    assert half.contains(box) or abs(box.width() - half.width()) < 1.5, (
+        f"the source is FITTED into its half, not drawn at native size: box {box}, half {half}")
+
+
+def test_a_compare_with_no_result_paints_the_source_alone(surface):
+    """The gate hands the renderer the source when there is no result, and `render()` must choose the source-only pass.
+
+    The pair rule is not weakened: it still owns every paint where both halves exist. This is the third state - the one
+    the owner's log hit (`transport paused=1`, `produced=0.0000`, `view mode=sbs`, no `compare:` line at all), where the
+    pair could never form and the pane therefore painted NOTHING while a decoded source sat in hand.
+    """
+    surface.set_frame(None)
+    surface.set_view_mode("sbs")
+    surface.set_original(_picture(*FRAME_SIZE, colour="#402060"), media_time=0.0)
+
+    assert surface._pair_blocked_at is None, "no result is not a blocked pair: the source is committed instead"
+    assert surface._renderer._original is not None, "the renderer got the source half"
+
+    calls: list[str] = []
+    surface._renderer._render_original_only = lambda *args, **_kwargs: calls.append("source-only")
+    # The offscreen platform has no RHI, so `render()` bails on a missing scene/target before the branch: hand it a scene
+    # whose target exists and let the patched pass record the routing (no command buffer is touched).
+    surface._renderer._scene = SimpleNamespace(target=object(), clear=None)
+    surface._renderer.render(object())
+    assert calls == ["source-only"], "with no result the renderer draws the source alone"
+
+
+def test_a_compare_with_a_result_still_paints_the_pair(surface):
+    """The other direction, so the source-only branch cannot quietly take over the normal case.
+
+    Asserted on the state the passes read (a result in the renderer, no source-only commit) rather than by calling
+    `render()`: the offscreen platform has no RHI, so a real pass cannot run here and a patched one would only prove the
+    patch.
+    """
+    surface.set_frame(_picture(*FRAME_SIZE), media_time=1.0)
+    surface.set_original(_picture(*FRAME_SIZE, colour="#402060"), media_time=1.0)
+    surface.set_view_mode("sbs")
+    surface._commit_newest()
+
+    assert surface._has_picture()
+    assert surface._renderer._frame is not None, "the pair path keeps the RESULT in the renderer"
+    assert surface._renderer._original is not None, "and the source beside it"
+    assert surface._pair_blocked_at is None
+    assert surface._view_mode == "sbs" and surface._renderer._mode == "sbs"
 
 
 def test_the_lmb_compare_asks_the_shown_pictures_time_not_the_stale_marker(surface):

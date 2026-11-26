@@ -550,7 +550,6 @@ class ProcessTab:
             return
         if wanted < 2:
             return
-            return
         for index in range(combo.count()):
             match = re.match(r"\s*(\d+)x", combo.itemText(index))
             if match and int(match.group(1)) == wanted:
@@ -1619,13 +1618,15 @@ class ProcessTab:
         if mode == "single":
             self._second_surface_pts = None
             return
-        has_frame = getattr(pane, "has_frame", None)
-        if callable(has_frame):
-            try:
-                if not has_frame():
-                    return
-            except Exception:
-                return
+        # NO `has_frame()` GATE. It was the same latch as the pane's own ask: on an EMPTY pane (a render whose first
+        # frame has not landed, a queue item with nothing produced, a stopped tick) the tick refused to ask, and the pane
+        # asked once at the mode switch - before the decoder could answer - so the source half waited for a picture
+        # nobody had requested (owner, 2026-11-26: "очень долго ждем оригинал на side by side"). What the tick needs is a
+        # FILE to decode, not a picture on screen: without one there is nothing to ask for, and asking would only log a
+        # failed open every 100 ms.
+        options = getattr(self, "currentRenderOptions", None)
+        if not (getattr(options, "inputFile", "") or ""):
+            return
         playhead = self._result_playhead()
         if playhead <= 0.0:
             return

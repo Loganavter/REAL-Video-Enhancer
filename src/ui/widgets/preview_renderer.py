@@ -463,6 +463,12 @@ class PreviewRenderer:
             return
         target = scene.target
         if self._frame is None:
+            # A compare mode with NO result yet still has its other half: the source is the one picture there is, and the
+            # pair gate used to hold it until a result arrived (owner, 2026-11-26: "почему мы не можем отобразить
+            # одновременно два кадра, а очень долго ждем оригинал на side by side"). Draw what exists.
+            if self._original is not None and self._mode != "single" and not _null_picture(self._original):
+                self._render_original_only(command_buffer, target, scene)
+                return
             # Nothing to show yet: an OPAQUE clear on EVERY render, so the pane reads as an empty plate rather than a
             # hole. It used to clear once (`_cleared_empty`) - a latch that is false on the next paint, which leaves the
             # region undrawn after any repaint and shows the window behind it (the "transparent at any sneeze" half).
@@ -556,6 +562,67 @@ class PreviewRenderer:
         # The LAST step, named: a press is one line (the original it put on screen, plus the result it stands over);
         # level 2 additionally names every result picture, so a shift is visible frame by frame.
         self._note_draw(PreviewDrawn(mode="single", half="original" if showing_original else "result"))
+        telemetry.maybe_stats()
+
+    def _render_original_only(self, command_buffer, target, scene: PreviewScene) -> None:
+        """The source half alone: a compare mode before its first result exists.
+
+        Same resources, same clip, same HUD as the pair pass - one draw instead of two. It exists because the pair gate
+        (correctly) never paints an unmatched pair, which on an empty pane meant painting NOTHING: the source was decoded,
+        handed over, and then held behind a result that had not been produced yet.
+        """
+        original = self._original
+        if original is None or _null_picture(original):
+            return
+        if original.format in YUV_FORMATS:
+            self._ensure_plane_textures(original, original=True)
+        else:
+            self._ensure_original_texture(self._frame_size(original))
+        if self._pipeline_for(original) is None and self._build_pipeline_for(original) is None:
+            return
+        updates = self._rhi.nextResourceUpdateBatch()
+        if self._original_dirty:
+            if original.format in YUV_FORMATS:
+                self._upload_planes(updates, original, self._original_plane_textures)
+            else:
+                updates.uploadTexture(self._original_texture, original.image)
+                if mip_minify_enabled():
+                    updates.generateMips(self._original_texture)
+            self._original_dirty = False
+        tint = list(scene.tint)
+        if original.format in YUV_FORMATS:
+            updates.updateDynamicBuffer(self._original_yuv_uniforms, 0, YUV_UNIFORM_BYTES,
+                                        self._yuv_uniform_block(original, scene.original_mvp, tint))
+        else:
+            updates.updateDynamicBuffer(self._original_uniforms, 0, 64, _floats(scene.original_mvp))
+            updates.updateDynamicBuffer(self._original_uniforms, 64, 16, _floats(tint))
+        hud_vertices = list(scene.hud_vertices)
+        if hud_vertices and self._hud_pipeline is not None:
+            updates.updateDynamicBuffer(self._hud_uniforms, 0, 16,
+                                        _floats([float(scene.viewport[0]), float(scene.viewport[1]),
+                                                 float(scene.dpr), 0.0]))
+            updates.updateDynamicBuffer(self._hud_buffer, 0, len(hud_vertices) * 4, _floats(hud_vertices))
+        pass_started = time.perf_counter()
+        command_buffer.beginPass(target, scene.clear, QRhiDepthStencilClearValue(1.0, 0), updates)
+        command_buffer.setViewport(QRhiViewport(0, 0, target.pixelSize().width(), target.pixelSize().height()))
+        bindings = self._bindings_for(original, original=True, nearest=scene.nearest)
+        clip = scene.original_clip
+        if bindings is not None and not clip.isEmpty() and scene.original_mvp is not None:
+            command_buffer.setGraphicsPipeline(self._pipeline_for(original))
+            command_buffer.setShaderResources(bindings)
+            command_buffer.setVertexInput(0, [(self._vertices, 0)])
+            self._scissor(command_buffer, clip, target, scene.dpr)
+            command_buffer.draw(6)
+        command_buffer.setScissor(
+            QRhiScissor(0, 0, target.pixelSize().width(), target.pixelSize().height()))
+        if hud_vertices and self._hud_pipeline is not None:
+            command_buffer.setGraphicsPipeline(self._hud_pipeline)
+            command_buffer.setShaderResources(self._hud_bindings)
+            command_buffer.setVertexInput(0, [(self._hud_buffer, 0)])
+            command_buffer.draw(len(hud_vertices) // 6)
+        command_buffer.endPass()
+        telemetry.note_paint(pass_ms=(time.perf_counter() - pass_started) * 1000.0)
+        self._note_draw(PreviewDrawn(mode=self._mode, half="original", drew_original=True))
         telemetry.maybe_stats()
 
     def _render_two_surfaces(self, command_buffer, target, scene: PreviewScene) -> None:

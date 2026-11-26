@@ -733,7 +733,7 @@ class GeneralSettingsPage:
     # -- video-info pane (variant A: transition headline, facts grid, run card) ----------------------
 
     def _build_video_info_pane(self) -> None:
-        """Build the pane's two states once: the nine-row placeholder and the three filled blocks.
+        """Build the pane once: the three filled blocks, hidden until a video is chosen.
 
         Everything here is a toolkit control (`SurfacePanel`, `Text`, `ProgressBar`) in plain box layouts - no QSS, no
         custom paint, no hand-drawn rectangle. The states are built together and toggled by `set_video_info`, so a
@@ -758,20 +758,6 @@ class GeneralSettingsPage:
         self.videoInfoLayout = QVBoxLayout(self.videoInfoPane)
         self.videoInfoLayout.setContentsMargins(0, 0, 0, 0)
         self.videoInfoLayout.setSpacing(scaled_px(INFO_BLOCK_GAP_PX))
-
-        # -- the empty state: the nine row names, one per line (this is what `None` restores) ---------
-        self.infoPlaceholder = SurfacePanel(self.videoInfoPane, background_token="surface.list",
-                                            radius=scaled_px(INFO_CARD_RADIUS_PX))
-        self.infoPlaceholder.setObjectName("videoInfoPlaceholder")
-        self.infoPlaceholderLayout = QVBoxLayout(self.infoPlaceholder)
-        self.infoPlaceholderLayout.setSpacing(0)
-        self.infoPlaceholderLabels: list[Text] = []
-        for _label in INFO_LABELS:
-            row_label = Text(parent=self.infoPlaceholder, color_token="label.text.muted")
-            apply(row_label, CAPTION_PT)
-            self.infoPlaceholderLayout.addWidget(row_label)
-            self.infoPlaceholderLabels.append(row_label)
-        self.videoInfoLayout.addWidget(self.infoPlaceholder)
 
         # -- the filled state: three stacked blocks -------------------------------------------------
         self.infoFilled = QWidget(self.videoInfoPane)
@@ -1018,13 +1004,12 @@ class GeneralSettingsPage:
         catalogue while every value stays byte-identical (the regression the old line-rewriting relabel guarded).
         """
         if self._video_values is None:
+            # Nothing to describe: the pane is invisible rather than a labelled skeleton (owner, 2026-11-26: "зачем мы
+            # это рисуем пока не выбрано ни одно видео? Какой-то рудимент"). The host paints nothing of its own, so a
+            # hidden card collapses the block completely.
             self.infoFilled.setVisible(False)
-            self.infoPlaceholder.setVisible(True)
-            for label, widget in zip(INFO_LABELS, self.infoPlaceholderLabels):
-                widget.setText(i18n.translate(label, language))
             return
 
-        self.infoPlaceholder.setVisible(False)
         self.infoFilled.setVisible(True)
         get = self._video_values.get
         resolution_in, resolution_out = get("Resolution:", ("", ""))
@@ -1071,9 +1056,8 @@ class GeneralSettingsPage:
         tag_y = scaled_px(INFO_TAG_INSET_Y_PX)
 
         self.videoInfoLayout.setSpacing(gap)
-        for card in (self.infoFactsCard, self.infoRunCard, self.infoPlaceholder):
+        for card in (self.infoFactsCard, self.infoRunCard):
             card.set_radius(radius)
-        self.infoPlaceholderLayout.setContentsMargins(inset, inset, inset, inset)
         self.infoTransitionLayout.setContentsMargins(inset, inset, inset, inset)
         self.infoTransitionLayout.setSpacing(scaled_px(INFO_COLUMN_GAP_PX))
         self.infoTagLayout.setContentsMargins(tag_x, tag_y, tag_x, tag_y)

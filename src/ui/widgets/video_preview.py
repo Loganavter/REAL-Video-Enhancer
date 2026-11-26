@@ -758,6 +758,17 @@ class VideoPreviewSurface(QRhiWidget):
         self._pair_release_count = 0
         self.update()
 
+    def _commit_source_only(self) -> None:
+        """Hand the renderer the SOURCE half alone, for a compare mode whose result does not exist yet."""
+        index = None
+        self._renderer.set_frame(None)
+        if self._original is not None:
+            self._renderer.set_original(self._preview_frame(self._original, index=index, pts=self._original_time))
+        self._committed_result_time = None
+        self._committed_source_time = None if self._original_time is None else float(self._original_time)
+        self._pair_blocked_at = None
+        self.update()
+
     def _commit_pair(self) -> bool:
         """Hand the renderer a RESULT and a SOURCE of the same moment; False when one of them has not arrived yet.
 
@@ -817,6 +828,12 @@ class VideoPreviewSurface(QRhiWidget):
         """
         if self._view_mode == "single" or self._original is None:
             self._commit_newest()
+            return
+        if not self._has_picture():
+            # No result at all (a queue item with nothing produced, a preview whose tick stopped): the pair gate would
+            # wait for a half that cannot arrive, and the pane would stay blank while the source sat decoded in hand
+            # (owner, 2026-11-26: "очень долго ждем оригинал на side by side"). Show the source.
+            self._commit_source_only()
             return
         if self._commit_pair():
             return
@@ -921,8 +938,13 @@ class VideoPreviewSurface(QRhiWidget):
         # so keying this guard on `_frame` meant the compare modes never asked for the source there - the standing
         # original was simply never fetched and sbs/split painted the result half with nothing beside it (owner's
         # screenshot, 2026-11-26: "ещё side by side почему-то мертв").
-        if self._view_mode == "single" or not self._has_picture():
+        if self._view_mode == "single":
             return
+        # NO `_has_picture()` GUARD. It used to require a result frame, so a compare opened on an EMPTY pane (a queue item
+        # with `produced=0`, a finished render whose tick has stopped, a preview that never played) asked nobody: the
+        # owner's log shows the mode switch and then not one `compare:` line, and the source half waited for a picture
+        # that would never come (2026-11-26: "почему мы не можем отобразить одновременно два кадра, а очень долго ждем
+        # оригинал"). The source is the one picture that CAN be shown; ask for it at the playhead the pane stands on.
         _, _, playhead, _ = self._progress
         playhead = float(playhead)
         # Suppress only when the pane HOLDS the moment it asked for: the ask recorded below is a request, not a picture,
@@ -1378,7 +1400,14 @@ class VideoPreviewSurface(QRhiWidget):
             # A planes frame carries no image: its size is the descriptor's, and it is the same number the RGBA path
             # would have produced for the same picture.
             planes_size = getattr(self, "_planes_size", None)
-            return (0, 0) if planes_size is None else (int(planes_size[0]), int(planes_size[1]))
+            if planes_size is not None:
+                return (int(planes_size[0]), int(planes_size[1]))
+            # BEFORE THE FIRST RESULT the source is the only picture: let it define the box, or the fit has no size to
+            # work with (scale 1.0) and a 1440-wide source is drawn at native size, clipped to a corner of the half.
+            source = self._original
+            if source is not None and not source.isNull():
+                return (source.width(), source.height())
+            return (0, 0)
         return (image.width(), image.height())
 
     def _fit_scale(self) -> float:
@@ -1577,7 +1606,7 @@ class VideoPreviewSurface(QRhiWidget):
             # inference in `_log_draw_two` answered "no picture" and EVERY paint with a source on the live path wrote
             # nothing - the draw log was blind exactly where the compare runs (measured 2026-11-26: the fit paint, with
             # no source yet, was logged; the same paint with a source was not, which is what made a zoom look untraceable).
-            self._log_draw_two(self._frame, original, present=self._has_picture())
+            self._log_draw_two(self._frame, original, present=bool(original) or self._has_picture())
             self._original_changed = False
             self._logged_geometry = geometry
         elif geometry_changed or telemetry.level() >= 2:

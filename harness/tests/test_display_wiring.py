@@ -384,7 +384,10 @@ class _Pane:
         return self.mode
 
     def has_frame(self) -> bool:
-        return bool(self.frames)
+        # The REAL widget answers "is there a picture NOW" (`_frame is not None or _planes_size is not None`), so an
+        # explicit `set_frame(None)` clears it. `bool(self.frames)` said True after a clear - the stub was the inverse of
+        # the contract in exactly the case `e79404a6` fixed, and every gate reading `has_frame()` ran against the lie.
+        return bool(self.frames) and self.frames[-1] is not None
 
 
 class _Process:
@@ -473,7 +476,7 @@ def test_a_strip_press_during_an_export_asks_for_the_next_generation():
         struct.pack_into("<dI", reader._seek_shm.buf, 0, 0.0, 5)
         tab = _tab(preview=False, paused=False, alive=True)
         tab._display = reader
-        tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)  # 10 s clip
+        tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")  # 10 s clip
 
         tab._on_preview_seek(0.5)
 
@@ -501,7 +504,7 @@ def test_a_press_that_replaces_an_unanswered_one_says_so(monkeypatch):
     monkeypatch.setattr("src.ui.video.telemetry.event", lambda kind, **kw: events.append((kind, kw)))
     reader = _Reader()
     tab = _tab(preview=False, paused=True, alive=True, reader=reader)
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)  # 10 s clip
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")  # 10 s clip
 
     tab._on_preview_seek(0.25)
     first = tab._press
@@ -530,7 +533,7 @@ def test_four_presses_leave_four_records_and_no_silence(monkeypatch):
     monkeypatch.setattr("src.ui.video.telemetry.event", lambda kind, **kw: events.append((kind, kw)))
     reader = _Reader()
     tab = _tab(preview=False, paused=True, alive=True, reader=reader)
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)  # 10 s clip
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")  # 10 s clip
 
     tickets = []
     for fraction in (0.5, 0.9, 0.5, 0.5):
@@ -554,7 +557,7 @@ def test_a_seek_while_paused_buys_exactly_that_one_frame():
     pane = _Pane()
     reader = _Reader()
     tab = _tab(pane=pane, paused=True, reader=reader)
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")
     tab.max_value = 100
     tab.currentFrame = 50
 
@@ -578,7 +581,7 @@ def test_a_preview_without_a_usable_block_never_writes_the_renderer_seek_block()
     reader = _Reader()
     tab = _tab(preview=True, paused=False, alive=True, reader=reader)
     reader.attached = False
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")
     tab._on_preview_seek(0.5)
     assert reader.seeks == []
 
@@ -859,7 +862,7 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     pane.frames.append(QImage(2, 2, QImage.Format.Format_RGB888))       # a result exists
     reader = _Reader()
     tab = _tab(pane=pane, preview=False, paused=False, alive=True, reader=reader)
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)  # 10 s
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")  # 10 s
     tab.max_value = 100
     tab.currentFrame = 50
     asked = []
@@ -1030,7 +1033,7 @@ def test_a_pool_frame_far_off_the_playhead_does_not_answer_for_it():
     pane = _Pane()
     pane.mode = "sbs"
     tab = _tab(pane=pane, preview=False, paused=True, alive=False, reader=_Reader())
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=24)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=24, inputFile="/tmp/clip.mkv")
 
     tab._source_pool_put(0.10, 3, "twelve frames behind")
 
@@ -1379,7 +1382,7 @@ def test_a_press_inside_the_band_but_past_the_tails_flushed_edge_goes_on_demand(
     """
     reader = _Reader()
     tab = _tab(preview=True, paused=False, alive=True, reader=reader)
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)   # a 10 s clip
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")   # a 10 s clip
     tab.currentFrame, tab.max_value = 60, 100                                       # the renderer says 60%
     tab.fps = 10
     tab._live_tail = SimpleNamespace(produced_seconds=2.0, seek=lambda *a, **k: None)
@@ -1445,7 +1448,7 @@ def test_a_backward_seek_re_asks_the_source_instead_of_freezing_on_the_old_frame
     pane.mode = "split"
     pane.frames.append(QImage(2, 2, QImage.Format.Format_RGB888))
     tab = _tab(pane=pane, preview=False, paused=False, alive=True)
-    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10)
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")
     tab.max_value = 100
     tab.currentFrame = 50
     asked = []

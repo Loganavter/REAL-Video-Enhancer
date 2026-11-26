@@ -111,14 +111,16 @@ def _settle(qapp, rounds: int = 8) -> None:
 # --- 1. the values, and the placeholder they replace ----------------------------------------------
 
 
-def test_set_video_info_fills_every_block_and_none_restores_the_placeholder(language, qapp):
+def test_set_video_info_fills_every_block_and_none_empties_the_pane(language, qapp):
+    """No video selected -> NO pane at all. A labelled skeleton with no values was a leftover (owner, 2026-11-26:
+    "зачем мы это рисуем пока не выбрано ни одно видео? Какой-то рудимент")."""
     page = _page(qapp)
-    assert page.infoPlaceholder.isVisible() and not page.infoFilled.isVisible()
+    assert not page.infoFilled.isVisible(), "an empty pane must not be painted"
 
     page.set_video_info(VALUES)
     _settle(qapp)
 
-    assert page.infoFilled.isVisible() and not page.infoPlaceholder.isVisible()
+    assert page.infoFilled.isVisible()
     # transition headline: both sizes, each with its own muted fps/frames line, and the upscale tag
     assert page.infoSizeIn.text() == "1440x1080"
     assert page.infoSizeOut.text() == "2880x2160"
@@ -142,8 +144,7 @@ def test_set_video_info_fills_every_block_and_none_restores_the_placeholder(lang
 
     page.set_video_info(None)
     _settle(qapp)
-    assert page.infoPlaceholder.isVisible() and not page.infoFilled.isVisible()
-    assert [widget.text() for widget in page.infoPlaceholderLabels] == list(INFO_LABELS)
+    assert not page.infoFilled.isVisible(), "the pane goes away with the video"
 
 
 # --- 2. the text the capture probe reads ----------------------------------------------------------
@@ -192,12 +193,11 @@ def test_a_language_switch_changes_row_names_but_keeps_values(language, qapp):
     assert page.infoFactLabels["Encoder:"].text() == "Encoder"
     assert page.infoFactValues["Encoder:"].text() == "libx264"
 
-    # the placeholder follows the catalogue too
+    # with no video the pane is gone, and a language switch must not resurrect it
     page.set_video_info(None)
     language.emit_language_changed("ru")
     _settle(qapp)
-    assert page.infoPlaceholderLabels[0].text() == "К/с:"
-    assert page.infoPlaceholderLabels[3].text() == "Кодировщик:"
+    assert not page.infoFilled.isVisible(), "a language switch does not bring an empty pane back"
 
 
 # --- 4. the height is the content's ---------------------------------------------------------------
