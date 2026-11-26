@@ -14,7 +14,6 @@ from .RenderQueue import RenderQueue
 from ..render_jobs import short_duration
 from .render_log import LogLine, RenderLogFilter
 from .video import telemetry
-from .video.press import PressTicket
 from . import shared_flag
 from . import i18n
 
@@ -2541,8 +2540,28 @@ class ProcessTab:
         except Exception:
             pass
 
+    def _preview_session(self):
+        """The pane's press session: the controller's one, or a page-local one for a tab wired by hand.
+
+        The page does not create press records itself any more (plan P1): the session owns the ticket and the epoch.
+        A tab built without a controller (the harness's `object.__new__` style, the pane's own legacy strip signal)
+        still gets a session, so the routing below has one code path.
+        """
+        controller = getattr(self, "_preview_controller", None)
+        getter = getattr(controller, "session", None)
+        session = getter() if callable(getter) else None
+        if session is not None:
+            return session
+        session = getattr(self, "_preview_session_local", None)
+        if session is None:
+            from .preview.session import PreviewSession
+
+            session = PreviewSession()
+            self._preview_session_local = session
+        return session
+
     def _on_preview_seek(self, fraction: float) -> None:
-        """A press or drag on the strip seeks whoever owns the picture.
+        """A press or drag on the strip seeks whoever owns the picture - the ROUTE is all that is decided here.
 
         Live, that is the tail: it repositions inside what the renderer has already written, and the next poll
         (120 ms) shows the target. A press PAST the produced band is different only while the pane's block is usable:
@@ -2551,8 +2570,12 @@ class ProcessTab:
         seeks its own decoder. The strip reports a share of the WHOLE timeline, so while the timeline length is
         unknown the produced share stands in for it - which is the same assumption the strip itself makes when it
         fills its white band.
+
+        The REACH is not checked here: `PreviewSession.seek_to` has already refused a target past it before this
+        method is called (plan P1 - the clamp lives in one place). The press record is the session's too: this method
+        asks for the ticket for the press it is routing and fills in the route facts only the page knows.
         """
-        fraction = max(0.0, min(1.0, float(fraction)))
+        fraction = float(fraction)
         self._seek_pressed_at = time.perf_counter()
         # The press names the FRAME it points at, not only the share: a turnaround in milliseconds says nothing about
         # whether the picture is the one asked for (owner, 2026-11-24: "write where the seek went and what is shown").
@@ -2584,11 +2607,11 @@ class ProcessTab:
         # One record per press, created BEFORE a route is chosen: the intent, the route it took, whether that route
         # can answer it, and (from whichever painter answers) the picture. Without this a press could end in silence -
         # the owner's three sessions pressed four times each and left no line about the result at all (2026-11-24).
+        # The record lives in the pane's press session now (plan P1): a press that came through the controller already
+        # owns one, and `press()` hands that back instead of opening a second; a direct press opens its own.
         edge_s = produced * duration_s if duration_s > 0.0 else None
-        ticket = PressTicket(target_s=target_s, target_frame=target_frame, produced=produced, edge_s=edge_s)
-        previous = getattr(self, "_press", None)
-        if previous is not None and previous.open:
-            previous.superseded(ticket.id)
+        ticket = self._preview_session().press(
+            target_s=target_s, target_frame=target_frame, produced=produced, edge_s=edge_s)
         self._press = ticket
         if self._queue_owns_pane():
             decoder = getattr(self, "_queue_pane_decoder", None)

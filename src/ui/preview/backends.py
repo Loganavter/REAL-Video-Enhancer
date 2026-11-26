@@ -11,8 +11,10 @@ The rules this module keeps, unchanged from the handlers they replace:
 * **Play is the page's one entry** (`ProcessTab._on_preview_pause_toggled`): it is what starts a tail for a job that
   has none, stops a playback tail, holds the feed's `wanted` byte and repaints the button. The adapters therefore call
   it rather than re-implementing the owner selection - this is the "do not rewrite the tail/decoder logic" line.
-* **Seek is clamped by the state.** The controller refuses a target past `seekable_ceiling()` with one status line;
-  an adapter that is asked anyway answers `False` instead of silently snapping somewhere else.
+* **Seek is clamped ONCE, in `PreviewSession`.** The controller hands the session the reach and the session refuses a
+  target past it before any owner is asked; the adapters carry no ceiling of their own (a second clamp here is exactly
+  the drift plan P1 removes). An adapter converts a time to the page's share and answers False when the page cannot
+  take the press - it never snaps the target somewhere else.
 * **Position/produced/duration are readings**, not cached state: the tail publishes its own edge, the decoder its own
   duration, and the page knows the clip's length.
 """
@@ -34,7 +36,7 @@ class PlaybackBackend(Protocol):
 
     def pause(self) -> None: ...
 
-    def seek(self, seconds: float, *, exact: bool) -> bool: ...
+    def seek_to(self, seconds: float) -> bool: ...
 
     def step(self, frames: int) -> bool: ...
 
@@ -62,7 +64,7 @@ class NoBackend:
     def pause(self) -> None:
         pass
 
-    def seek(self, seconds: float, *, exact: bool) -> bool:
+    def seek_to(self, seconds: float) -> bool:
         return False
 
     def step(self, frames: int) -> bool:
@@ -150,14 +152,15 @@ class _HostBackend:
         """Move by whole frames on the pane's own clock (the arrow keys' contract)."""
         if not frames:
             return False
-        return self.seek(self.position + int(frames) * self._frame_interval(), exact=True)
+        return self.seek_to(self.position + int(frames) * self._frame_interval())
 
-    def seek(self, seconds: float, *, exact: bool) -> bool:
+    def seek_to(self, seconds: float) -> bool:
         """Seek through the page's existing press route, so one press keeps one instrument.
 
-        `_on_preview_seek` is the handler the strip has always used: it clamps into the produced band, turns a press
-        past it into the renderer's one-frame request when the block can serve it, records the press ticket and pauses
-        a held pane. Re-implementing that here would be the second seek semantics the plan forbids.
+        `_on_preview_seek` is the handler the strip has always used: it picks the route (queue / on-demand / tail /
+        decoder / export display), records the press and pauses a held pane. Re-implementing that here would be the
+        second seek semantics the plan forbids. The REACH is not decided here: `PreviewSession` has already refused a
+        target past it, so this only maps seconds to the page's share of the clip.
         """
         duration = self.duration
         handler = getattr(self._host, "_on_preview_seek", None)
@@ -168,6 +171,15 @@ class _HostBackend:
                 return False
             return True
         return self._direct_seek(seconds)
+
+    def _seek_legacy(self, seconds: float, *, exact: bool = True) -> bool:
+        """The pre-P1 spelling (`seek(seconds, exact=True)`), kept for a caller this phase does not own: the harness's
+        own backend pins still call it. `exact` meant "never snap to the edge"; that is the only behaviour left, so it
+        is accepted and ignored. Assigned rather than declared so the port exposes exactly ONE seek method.
+        """
+        return self.seek_to(seconds)
+
+    seek = _seek_legacy
 
     def _direct_seek(self, seconds: float) -> bool:
         return False
@@ -206,8 +218,8 @@ class LiveTailBackend(_HostBackend):
         super().__init__(host)
         self._tail = tail
 
-    # `seek` is NOT overridden: a live tail is exactly the case `_HostBackend.seek` describes - the page decides, and
-    # it is the only place that can tell "inside the produced band" (the tail repositions) from "past it" (the
+    # `seek_to` is NOT overridden: a live tail is exactly the case `_HostBackend.seek_to` describes - the page decides,
+    # and it is the only place that can tell "inside the produced band" (the tail repositions) from "past it" (the
     # renderer's one on-demand frame, or a visible refusal). Seeking `self._tail` directly skipped the press ticket,
     # the landing watch and the on-demand route: a press past the edge then failed inside the tail and the marker
     # snapped back with no line saying why (found 2026-11-26 with the scrubber's own `scrub snapback` report).
@@ -254,7 +266,7 @@ class FinishedFileBackend(_HostBackend):
         super().__init__(host)
         self._decoder = decoder
 
-    # `seek` is not overridden (see `LiveTailBackend`): the page's press route is the only one that opens a press
+    # `seek_to` is not overridden (see `LiveTailBackend`): the page's press route is the only one that opens a press
     # ticket, and the open ticket is what keeps the marker on the REQUESTED time until the frame that answers it is
     # painted. Seeking the decoder directly left the marker on the old frame for ~150 ms after every press, i.e. the
     # thumb jumped back and forth on a finished file too (found in the owner's log, 2026-11-26).
@@ -299,7 +311,7 @@ class DisplayFeedBackend(_HostBackend):
 
     kind = PreviewBackendKind.DISPLAY_FEED
 
-    # `seek` is not overridden: the page decides between "the renderer answers one frame" and "nothing can answer".
+    # `seek_to` is not overridden: the page decides between "the renderer answers one frame" and "nothing can answer".
 
     def _direct_seek(self, seconds: float) -> bool:
         duration = self.duration

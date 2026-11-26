@@ -10,6 +10,12 @@ the probe's source-frame count, whether a painter owns the pane). The controller
 phase (`PLAYING -> BUFFERING` when a live tail reaches the produced edge, back when new frames land). Both entry points
 end in the same single `stateChanged`.
 
+A seek is the exception to "the controller decides": `PreviewSession` owns the press record, the epoch and the ONE
+clamp against the reach. The controller supplies the session's inputs (the selected backend as its clock, the state's
+duration, reach and frame interval) and turns the session's refusal into the one status line; it never compares a
+target against the ceiling itself. That is plan P1's whole point - a press used to be clamped here and again in the
+page, and the two numbers drifted.
+
 Every dispatch writes one line (`preview command id=... value=... phase=...`) so "the button did nothing" can be
 answered from log.txt alone.
 """
@@ -21,6 +27,7 @@ import logging
 from PySide6.QtCore import QObject, Signal
 
 from .backends import NoBackend, PlaybackBackend
+from .session import SEEK_SLACK, PreviewSession
 from .state import (
     MAX_ZOOM,
     MIN_ZOOM,
@@ -35,8 +42,6 @@ logger = logging.getLogger(__name__)
 
 #: One wheel/keyboard step of the zoom buttons (the wheel's own step is the pane's rule, not the buttons').
 ZOOM_STEP = 1.25
-#: A target this far past the reachable ceiling is a refusal, not a round-off (half a millisecond).
-SEEK_SLACK = 5e-4
 
 
 class PreviewSurfacePort:
@@ -73,6 +78,8 @@ class PreviewController(QObject):
         self._has_picture = False
         self._logger = logger.info
         self._last_emitted: PreviewState | None = None
+        #: ONE press record for this pane: the clamp, the ticket and the epoch live there (plan P1).
+        self._session = PreviewSession()
 
     # -- wiring ---------------------------------------------------------------------------------
 
@@ -97,6 +104,10 @@ class PreviewController(QObject):
 
     def backend(self) -> PlaybackBackend:
         return self._backend
+
+    def session(self) -> PreviewSession:
+        """The pane's one press session (the page reads/settles its ticket; P5 serves its `dump()`)."""
+        return self._session
 
     def state(self) -> PreviewState:
         return self._state
@@ -201,19 +212,29 @@ class PreviewController(QObject):
         self._seek(state, max(0.0, min(1.0, fraction)) * state.duration)
 
     def _seek(self, state: PreviewState, target: float) -> None:
-        target = max(0.0, float(target))
-        ceiling = state.seekable_ceiling()
-        if target > ceiling + SEEK_SLACK:
-            # ONE line, naming both numbers: a press past the produced edge is the refusal the owner must be able to
-            # read back ("it did nothing" and "it clamped somewhere else" are otherwise the same silence).
-            self.status.emit(
-                f"seek {target:.3f} s refused: the pane can show up to {ceiling:.3f} s "
-                f"({state.produced:.1%} produced)")
+        """Hand the press to the session, which is the only place a target is clamped.
+
+        The session gets the four inputs it cannot see (the selected backend as its clock, the clip's length, the
+        reach, one frame's interval) and answers with the accepted target or one refusal reason. A refusal past the
+        reach is the owner's line - both numbers, so "it did nothing" and "it clamped somewhere else" are not the same
+        silence; a clock that cannot show the time keeps the controller's own refusal wording unchanged.
+        """
+        reach = max(0.0, state.seekable_ceiling())
+        self._session.bind(clock=self._backend, duration=state.duration,
+                           reach=reach, frame_interval=state.frame_interval())
+        if not self._session.seek_to(target):
+            asked = max(0.0, float(target))
+            reason = self._session.refusal() or f"nothing can show {asked:.3f} s"
+            if self._session.refused_for_reach():
+                # The owner's line, byte for byte as before: both numbers, so "it did nothing" and "it clamped
+                # somewhere else" are not the same silence. The produced share is the state's fact; the reach is the
+                # session's decision - neither is recomputed here.
+                self.status.emit(f"seek {asked:.3f} s refused: {reason} ({state.produced:.1%} produced)")
+            else:
+                self._refuse(PreviewCommand.SEEK_TO, reason)
             return
-        if isinstance(self._backend, NoBackend) or not self._backend.seek(target, exact=True):
-            self._refuse(PreviewCommand.SEEK_TO, f"nothing can show {target:.3f} s")
-            return
-        self._state = self._state.with_(playhead=min(target, ceiling))
+        accepted = self._session.target
+        self._state = self._state.with_(playhead=min(accepted if accepted is not None else 0.0, reach))
         self.refresh()
 
     def _on_set_mode(self, state: PreviewState, value: object) -> None:
