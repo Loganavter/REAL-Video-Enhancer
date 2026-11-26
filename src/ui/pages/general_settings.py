@@ -976,6 +976,17 @@ class GeneralSettingsPage:
             self._run_elapsed = str(elapsed)
         self._render_video_info()
 
+    def reset_run_status(self) -> None:
+        """Return the run card to its idle state - the tick's "no render is live" branch.
+
+        `_reset_run_status` clears the stored counters; without a repaint the last job's numbers would stay frozen on
+        screen after the render ends. Nothing is painted while the video-info placeholder is up (there is no card to
+        paint), which also keeps an idle page from re-stating a hidden tree on every tick.
+        """
+        self._reset_run_status()
+        if self._video_values is not None:
+            self._render_run_status()
+
     def _reset_run_status(self) -> None:
         self._run_frame = 0
         self._run_total = 0

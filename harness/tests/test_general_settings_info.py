@@ -21,7 +21,9 @@ Runs offscreen only. The look at 1.5/2.0 and the live language switch on a real 
 from __future__ import annotations
 
 import sys
+import time
 import types
+from pathlib import Path
 
 import pytest
 
@@ -30,6 +32,20 @@ pytest.importorskip("sli_ui_toolkit")
 
 if "resources_rc" not in sys.modules:
     sys.modules["resources_rc"] = types.ModuleType("resources_rc")
+
+#: The app checkout root: `ProcessTab` pulls `src.constants`, and the suite's conftest puts the backend's `src`
+#: first (the same seam `test_preview_state_tick.py` resolves). The app's optional runtime imports are stubbed only
+#: when this interpreter lacks them.
+_ROOT = str(Path(__file__).resolve().parents[2])
+for _name, _attrs in (("cpuinfo", {"get_cpu_info": lambda *a, **k: {}}),
+                      ("pypresence", {"Presence": object})):
+    try:  # pragma: no cover - the branch depends on the interpreter
+        __import__(_name)
+    except ModuleNotFoundError:  # pragma: no cover
+        _module = types.ModuleType(_name)
+        for _attr, _value in _attrs.items():
+            setattr(_module, _attr, _value)
+        sys.modules[_name] = _module
 
 from src.ui import i18n  # noqa: E402
 from src.ui.pages.general_settings import INFO_LABELS, GeneralSettingsPage  # noqa: E402
@@ -205,3 +221,79 @@ def test_the_pane_height_is_its_content(language, qapp):
         f"the filled pane ({filled_height} px) is not taller than the placeholder ({empty_height} px)")
     assert empty_height != 190 and filled_height != 190, (
         "the retired 190 px floor is back: the pane is always that tall whatever its content")
+
+
+# --- 5. the process tick feeds the card, and idle returns it to the placeholder --------------------
+
+
+def test_the_tick_feeds_the_run_card_and_idle_returns_it_to_the_placeholder(language, qapp):
+    """The seam is the real 100 ms tick (`updateProcessTab`), not a hand-picked setter.
+
+    The tick's other seven calls own live feeds, press deadlines and the picture clock - none of that exists without
+    a window, so they are no-ops here; `_update_run_card` (the tick's last line) is left real, which is what pins the
+    wiring: the page's card carries exactly the numbers the tab already holds, and a tick with no live render returns
+    it to its idle state instead of freezing the last job's numbers.
+    """
+    # `ProcessTab` needs the APP's `src.constants`; the suite's conftest puts the backend's `src` first (the same
+    # dance `test_preview_state_tick.py` does), and the ordering is restored so later modules are untouched.
+    _path_before = list(sys.path)
+    if _ROOT in sys.path:
+        sys.path.remove(_ROOT)
+    sys.path.insert(0, _ROOT)
+    sys.modules.pop("src.constants", None)
+    try:
+        from src.ui.ProcessTab import ProcessTab
+    finally:
+        sys.path[:] = _path_before
+
+    page = _page(qapp)
+    page.set_video_info(VALUES)
+
+    tab = object.__new__(ProcessTab)
+    tab.parent = types.SimpleNamespace(shell=types.SimpleNamespace(
+        procPage_page=types.SimpleNamespace(generalSettings_page=page)))
+    for name in ("_ensure_live_tail", "_tick_press_deadline", "_apply_seek_ceiling",
+                 "_sync_preview_transport", "_refresh_held_progress", "_push_preview_state",
+                 "_ensure_picture_timer"):
+        setattr(tab, name, lambda: None)
+    tab.renderTextOutputList = None
+
+    tab.currentFrame = 44
+    tab.max_value = 493
+    tab.fps = 19
+    tab.eta = "0:00:23"
+    tab.status = "Rendering"
+    tab._render_started_mono = time.monotonic() - 8.2
+
+    tab.updateProcessTab()
+    _settle(qapp)
+
+    assert page.infoFrameLine.text() == "frame 44 / 493"
+    assert page.infoRemainingLine.text() == "9% · 0:00:23 left"
+    assert (page.infoProgress.minimum(), page.infoProgress.maximum()) == (0, 493)
+    assert page.infoProgress.value() == 44
+    assert page.infoFps.text() == "19 fps"
+    assert page.infoStatus.text() == "Rendering"
+    assert page.infoElapsed.text() == "0:00:08 elapsed"
+
+    # the change gate: a second tick with the same numbers paints nothing ...
+    calls = []
+    page.set_run_status = lambda **kwargs: calls.append(kwargs)
+    tab.updateProcessTab()
+    assert calls == [], f"an unchanged card was repainted: {calls}"
+
+    # ... and a moved number repaints with the new value
+    tab.currentFrame = 45
+    tab.updateProcessTab()
+    assert calls and calls[-1]["frame"] == 45
+
+    # idle: no render is live -> the card is the placeholder again, not the last job's numbers
+    tab._render_started_mono = None
+    tab.updateProcessTab()
+    _settle(qapp)
+    assert page.infoFrameLine.text() == "frame 0 / 986"
+    assert page.infoRemainingLine.text() == "0% · \u2014 left"
+    assert page.infoProgress.value() == 0
+    assert page.infoFps.text() == "\u2014 fps"
+    assert page.infoStatus.text() == "Idle"
+    assert page.infoElapsed.text() == "0:00:00 elapsed"
