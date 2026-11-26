@@ -803,8 +803,6 @@ def _completion_tab(*, preview: bool, reader, tail) -> ProcessTab:
     proc = tab.page_handles.proc
     proc.onRenderButtonsContiainer = object()
     proc.startRenderButton = _Button()
-    proc.FPS = _Text()
-    proc.ETA = _Text()
     tab.page_handles.general = SimpleNamespace(outputFileText=_Text(), inputFileText=_Text())
     return tab
 

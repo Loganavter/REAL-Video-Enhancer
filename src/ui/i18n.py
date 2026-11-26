@@ -67,18 +67,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Start Time (seconds)": "Начало (секунды)",
         "End Time (seconds)": "Конец (секунды)",
         "Render Preview": "Предпросмотр рендера",
-        # Trailing space is the source literal's own: the value is read out next to the number.
-        "ETA: ": "Осталось: ",
-        "FPS:": "К/с:",
-        "STATUS:": "СТАТУС:",
-        # --- The per-tick readouts (`src/ui/ProcessTab.py::updateProcessTab` / `::setStatus`) ----------------
-        # These are different keys from the chrome above, on purpose: the tick writes `FPS: <n>`, `ETA: <t>`,
-        # `Status: <phase>`, so its prefix literals carry a trailing space and `Status: ` is not `STATUS:`. Renaming
-        # either side would put a value-less chrome label or a raw key on screen; a missing key here falls back to
-        # the English prefix (the honest, supported state). `ETA: ` above is already this tick's key - the chrome
-        # reuses it - so only the two new spellings are added.
-        "FPS: ": "К/с: ",
-        "Status: ": "Статус: ",
         # --- The progress-detail line (`src/ui/ProcessTab.py::progressDetailText`) ---------------------------
         # Also rebuilt on every tick, so also keyed at the write site. These are FRAGMENTS: the writer appends the
         # number first and the fragment after it, so the space belongs to the key (`" elapsed"`, `" left"`) and the
@@ -265,7 +253,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Your PC does not have enough storage for PyTorch/TensorRT. Please free up at least 15gb.": "Недостаточно места для PyTorch/TensorRT. Освободите хотя бы 15 ГБ.",
         # --- The General tab's video-info pane (`src/ui/pages/general_settings.py`, variant A blocks) ---------
         # The pane's nine row names. The values written after them (`MainWindow.updateVideoGUIText`) are not
-        # translated: they are file facts. `FPS:` is above, already the process page's key.
+        # translated: they are file facts.
+        "FPS:": "К/с:",
         "Resolution:": "Разрешение:",
         "Frame Count:": "Количество кадров:",
         "Encoder:": "Кодировщик:",

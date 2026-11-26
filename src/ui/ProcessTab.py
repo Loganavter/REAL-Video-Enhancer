@@ -408,17 +408,12 @@ class ProcessTab:
         log(f"layout: process page {mode} at {column} px (preview band {band})")
 
     def setStatus(self, text: str) -> None:
-        """The one place that decides what `STATUS:` says - never leave a stale phase on screen.
+        """The one place that decides what the run card's status says - never leave a stale phase on screen.
 
-        The prefix is a catalogue key (`i18n.tr`, keyed by the English source string), not a literal: this label is
-        written outside the 100 ms tick as well, so a switch while idle would otherwise wait for the next job to read
-        Russian. The phase itself (`Idle`, `Rendering`, …) is state, not chrome - it is not translated.
+        The card reads this field (`_run_card_values`), so a phase written outside the 100 ms tick (pause/resume, the
+        job's end) still reaches the pane on the next tick `_update_run_card` call.
         """
         self.status = str(text)
-        try:
-            self.page_handles.proc.STATUS.setText(i18n.tr("Status: ") + self.status)
-        except Exception:
-            pass
 
     def setProgressDetail(self, text: str) -> None:
         try:
@@ -1847,8 +1842,6 @@ class ProcessTab:
             self.syncRenderConsole()
         except Exception:
             pass
-        self.page_handles.proc.FPS.setText(i18n.tr("FPS: "))
-        self.page_handles.proc.ETA.setText(i18n.tr("ETA: "))
 
         self._restoreQueueAfterPreview()
         if self.currentRenderOptions.isPreview:
@@ -4039,7 +4032,7 @@ class ProcessTab:
 
 
         if self.renderTextOutputList is not None:
-            # The numbers the labels below show come from the render-status slot (the backend writes them
+            # The numbers the run card shows come from the render-status slot (the backend writes them
             # beside its log lines); nothing here parses the backend's stdout for them any more.
             self._sync_render_status()
             self.page_handles.proc.progressBar.setRange(
@@ -4057,26 +4050,12 @@ class ProcessTab:
                 pass
             self.page_handles.proc.progressBar.setValue(self.currentFrame)
             self.setProgressDetail(self.progressDetailText())
-            # The three readouts are rebuilt here EVERY tick, so their labels go through the catalogue (`i18n.tr`,
-            # keyed by the English source string) rather than being literals: a literal made a switch to `ru` survive
-            # exactly until the next tick (measured 2026-11-24, this line rewrote the chrome's `К/с:` back to `FPS:`).
-            # The keys are the prefixes as written - `FPS: ` and `Status: ` are NOT the chrome's `FPS:`/`STATUS:`.
-            if self.fps != 0:
-                self.page_handles.proc.FPS.setVisible(True)
-                self.page_handles.proc.FPS.setText(i18n.tr("FPS: ") + f"{self.fps}")
-            else:
-                self.page_handles.proc.FPS.setVisible(False)
-            if self.eta != 0:
-                self.page_handles.proc.ETA.setVisible(True)
-                self.page_handles.proc.ETA.setText(i18n.tr("ETA: ") + f"{self.eta}")
-            else:
-                self.page_handles.proc.ETA.setVisible(False)
-            self.page_handles.proc.STATUS.setText(i18n.tr("Status: ") + self.status)
 
-        # The pane's run card takes the SAME numbers this tick just painted, and is repainted only when one moved (see
-        # `_update_run_card`). It stands OUTSIDE the console guard above on purpose: `renderTextOutputList` survives the
-        # end of a job, so it cannot tell "rendering" from "finished"; the render clock can, and that is what returns
-        # the card to its idle state instead of freezing the last job's numbers on screen.
+        # The pane's run card takes the numbers `_sync_render_status` just wrote (`currentFrame`/`max_value`/`fps`/
+        # `eta`/`status`), and is repainted only when one moved (see `_update_run_card`). It stands OUTSIDE the console
+        # guard above on purpose: `renderTextOutputList` survives the end of a job, so it cannot tell "rendering" from
+        # "finished"; the render clock can, and that is what returns the card to its idle state instead of freezing the
+        # last job's numbers on screen.
         self._update_run_card()
 
     def build_command(self, renderOptions: RenderOptions):

@@ -43,7 +43,7 @@ KNOWN_GENERATED_NAMES: dict[str, int] = {
     "general_settings.py": 55,
     "home_page.py": 10,
     "more_page.py": 1,
-    "proc_page.py": 20,
+    "proc_page.py": 19,
     "render_queue_tab.py": 3,
     "settings_page.py": 4,
     "tab_2.py": 19,

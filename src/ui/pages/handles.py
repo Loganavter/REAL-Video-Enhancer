@@ -149,9 +149,6 @@ class ProcPageHandles:
     renderQueueTab: "QWidget"
     progressBar: "ToastProgressBar"
     progressDetail: "Text"
-    FPS: "Text"
-    ETA: "Text"
-    STATUS: "Text"
     # The preview pane and its controls, and the two time fields plus the scrubber the window feeds the video length
     # into. `VideoPreview` is the GPU surface page, not a control the glue configures.
     VideoPreview: "QWidget"

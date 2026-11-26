@@ -7,15 +7,15 @@ Layout E (owner-approved mockup, 2026-11-25; produced pill removed 2026-11-26):
   round their outer corners by the plate's radius minus its inset, so the capsule's corners share one shape; the
   checked view mode also wears an accent ring, so the current mode reads as a ring, not only as a fill. The compare is
   NOT a button: holding LMB on the picture is the gesture.
-* **bottom** - video transport only: play/pause, step, content time `m:ss.mmm / m:ss.mmm`, source frame
-  `f 100 / 493`, and the scrubber.
+* **bottom** - video transport only: play/pause, step, content time `m:ss.mmm / m:ss.mmm`, and the scrubber. The
+  run's own numbers (frame, percent, ETA, fps, status, elapsed) are the video-info pane's run card, not a repeat here.
 
 Both bars are normal child widgets of the pane (the toolkit's time readout precedent: children of a `QRhiWidget`
 composite above it). They sit in the pane's top/bottom inset and never in the middle. The overlay spans the pane but is
 MASKED to the two bars, so the buttons take their presses and the picture's middle stays the pane's compare/pan.
 
 `set_state(state)` is the ONE paint pass: it walks the catalog, applies `visible`/`enabled`/`checked` with signals
-blocked (a state write must never look like a click), updates the three readouts and hands the timeline its numbers.
+blocked (a state write must never look like a click), updates the time readout and hands the timeline its numbers.
 """
 
 from __future__ import annotations
@@ -46,9 +46,8 @@ BOTTOM_HEIGHT = 42
 GROUP_RADIUS = 10
 GROUP_INSET = 2
 NESTED_RADIUS = GROUP_RADIUS - GROUP_INSET
-#: The two readouts keep a stable width, so a changing number cannot reflow the row.
+#: The time readout keeps a stable width, so a changing number cannot reflow the row.
 TIME_MIN_WIDTH = 148
-FRAME_MIN_WIDTH = 78
 
 
 class CheckedOutlineLayer(Layer):
@@ -237,10 +236,6 @@ class PreviewControls(QWidget):
         self.time_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.time_text, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self.frame_text = Text("f \u2014", variant="caption", minimum_width=scaled_px(FRAME_MIN_WIDTH))
-        self.frame_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(self.frame_text, 0, Qt.AlignmentFlag.AlignVCenter)
-
         self.timeline = PreviewTimeline(self.bottom_bar)
         #: Named for the control surface: a strip is a custom-painted widget, so a probe can only reach it by name and
         #: a point (`click:preview_timeline@x,y`) - and a seek is exactly the gesture that must be provable live, not
@@ -369,9 +364,6 @@ class PreviewControls(QWidget):
 
         self.time_text.setText(
             f"{format_content_time(state.playhead)} / {format_content_time(state.duration)}")
-        self.frame_text.setText(state.frame_ratio())
-        self.frame_text.setToolTip(
-            f"output {int(state.output_frames)} frames (CFR)" if state.output_frames else "")
         self.timeline.set_state(state)
         # Visibility changes above can widen the row; re-run the collapse so the bars keep their place in the pane.
         self._place()
