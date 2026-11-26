@@ -3129,8 +3129,8 @@ class ProcessTab:
                     log(f"source decoder: cannot open {path}")
                     return
                 self._source_decoder = decoder
-            # A step FORWARD from the frame already on screen is decoded in sequence (median 40.6 ms measured on this
-            # 1440p source); a jump pays a keyframe rewind (median 176 ms, p95 321). The compare asks once per playhead
+            # A step FORWARD from the frame already on screen is one decode (12.5 ms measured on this 1440p source, an
+            # 80 fps ceiling); a jump pays a keyframe rewind (median 176 ms, p95 321). The compare asks once per playhead
             # step, and at the rewind price the pair ran at a quarter of real time with the halves arriving apart
             # (owner, 2026-11-26: "прям видно как сначала один рисуется, а затем другой"). Forward motion is the one
             # case that can be cheap, so only it skips the seek; a scrub backwards still rewinds.

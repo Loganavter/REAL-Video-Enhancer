@@ -282,10 +282,11 @@ class VideoDecoder(QObject):
 
         This is the LMB "show the original" path and the compare modes' second surface. `seek=False` decodes FORWARD
         from the current read position instead of rewinding to a keyframe - the difference is measured, not stylistic:
-        on a 1440p HEVC source one exact request costs a median of 176 ms (p95 321) with the rewind and 40.6 ms decoded
-        in sequence, and a compare asks once per playhead step. At the old price the pair ran at a quarter of real time
-        and arrived in two halves (owner, 2026-11-26: "прям видно как сначала один рисуется, а затем другой - при
-        воспроизведении ещё хуже"). A target BEHIND the read position still rewinds, so a press/scrub is unchanged.
+        on a 1440p HEVC source an exact request with the rewind costs a median of 176 ms (p95 321) against 12.5 ms for
+        one frame decoded in sequence (48 frames in 0.60 s, an 80 fps ceiling), and a compare asks once per playhead
+        step. At the old price the pair ran at a quarter of real time and arrived in two halves (owner, 2026-11-26:
+        "прям видно как сначала один рисуется, а затем другой - при воспроизведении ещё хуже"). A target BEHIND the read
+        position still rewinds, so a press/scrub is unchanged.
         """
         if self._container is None:
             self.error.emit("request_frame() called before open()")
