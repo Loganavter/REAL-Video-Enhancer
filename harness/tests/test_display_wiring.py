@@ -837,7 +837,15 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
 
     tab._tick_second_surface()
     tab._tick_second_surface()
-    assert asked == [pytest.approx(5.0)], "the same playhead is one decode, not one per tick"
+    # An ask the decoder does not answer is RETRIED: the marker is set when a frame arrives, not when one is asked for,
+    # so a failed decode cannot silence the compare for as long as the pane is paused (measured 2026-11-26: the split
+    # divider never appeared because the source never landed and `_second_surface_pts` already claimed it had).
+    assert asked == [pytest.approx(5.0), pytest.approx(5.0)], "an unanswered ask must be retried"
+
+    # A landed frame at that playhead is the marker `_on_original_frame` writes; from then on the tick is quiet.
+    tab._second_surface_pts = 5.0
+    tab._tick_second_surface()
+    assert asked == [pytest.approx(5.0), pytest.approx(5.0)], "one delivered frame per playhead, not one per tick"
 
     tab.currentFrame = 75
     tab._tick_second_surface()
@@ -847,7 +855,7 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     pane.mode = "single"
     tab.currentFrame = 90
     tab._tick_second_surface()
-    assert len(asked) == 2
+    assert len(asked) == 3, "single asks nothing; the list is the two retries plus the moved playhead"
 
 
 def test_the_default_box_is_the_probe_constant():

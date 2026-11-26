@@ -54,8 +54,14 @@ STRIP_TOKENS = {
     "hover": "slider.thumb.outer",
     # the blocked marker (past the produced edge) - Qt's `BrightText` is the palette's red in both themes
     "blocked": "BrightText",
-    # the compare modes' divider - a separator, not part of the strip's bands
-    "divider": "separator.color",
+    # the compare modes' divider - a separator, not part of the strip's bands. BRIGHT on purpose: the split rule and
+    # its grip are the one control in a compare mode, and the theme's `separator.color` is dark - a dark rule on a dark
+    # picture is exactly the "invisible splitter" the owner reported (2026-11-26). The 1 px `divider_outline` behind it
+    # keeps it readable over a bright picture.
+    "divider": "accent",
+    # the divider's 1 px backdrop (and the split grip's edge): the groove's dark token, the same trick the playhead
+    # uses so a bright rule stays readable over a bright picture
+    "divider_outline": "slider.track.background",
 }
 
 

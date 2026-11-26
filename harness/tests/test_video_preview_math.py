@@ -332,3 +332,48 @@ def test_sbs_asks_for_the_source_on_the_yuv_path(surface):
     surface.set_view_mode("sbs")
     assert seen, "sbs never asked for the source on a planes picture"
     assert seen[-1] == pytest.approx(2.0)
+
+
+def _split_at(surface, fraction: float) -> float:
+    surface.set_view_mode("split")
+    surface.set_split_fraction(fraction)
+    x = surface._split_divider_x()
+    assert x is not None, "split must have a divider"
+    return float(x)
+
+
+def test_the_split_divider_drags_and_does_not_pan_the_picture(surface):
+    """The divider is the one control inside a compare mode: pressing it must move it, not pan (owner, 2026-11-26)."""
+    x = _split_at(surface, 0.5)
+    picture = surface._frame_rect()
+    y = picture.top() + picture.height() / 2.0
+    before_pan = list(surface._pan)
+    _send(surface, QEvent.Type.MouseButtonPress, QPointF(x, y), held=Qt.MouseButton.LeftButton)
+    _send(surface, QEvent.Type.MouseMove, QPointF(x + picture.width() * 0.25, y), held=Qt.MouseButton.LeftButton)
+    _send(surface, QEvent.Type.MouseButtonRelease, QPointF(x + picture.width() * 0.25, y), held=Qt.MouseButton.LeftButton)
+    assert surface.split_fraction() == pytest.approx(0.75, abs=0.02)
+    assert surface._pan == before_pan, "dragging the divider must not pan the picture"
+
+
+def test_a_press_away_from_the_divider_does_not_move_it(surface):
+    x = _split_at(surface, 0.5)
+    picture = surface._frame_rect()
+    y = picture.top() + picture.height() / 2.0
+    _send(surface, QEvent.Type.MouseButtonPress, QPointF(x - picture.width() * 0.3, y), held=Qt.MouseButton.LeftButton)
+    _send(surface, QEvent.Type.MouseButtonRelease, QPointF(x - picture.width() * 0.3, y), held=Qt.MouseButton.LeftButton)
+    assert surface.split_fraction() == pytest.approx(0.5)
+
+
+def test_the_divider_is_clamped_so_neither_picture_disappears(surface):
+    _split_at(surface, 0.5)
+    assert surface.set_split_fraction(0.0) is None
+    assert surface.split_fraction() == pytest.approx(0.05)
+    surface.set_split_fraction(1.0)
+    assert surface.split_fraction() == pytest.approx(0.95)
+
+
+def test_the_divider_only_exists_in_split(surface):
+    surface.set_view_mode("sbs")
+    assert surface._split_divider_x() is None
+    surface.set_view_mode("single")
+    assert surface._split_divider_x() is None

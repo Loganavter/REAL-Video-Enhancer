@@ -109,6 +109,15 @@ MIN_ZOOM = 1.0
 #: the API (`set_view_mode`), not a UI label - the host may put them on whichever control it likes.
 VIEW_MODES = ("single", "sbs", "split")
 
+#: How close to the `split` divider a press counts as grabbing it, in logical px. Wide enough for a mouse, narrow
+#: enough that a press meant for the picture (pan/compare) stays one.
+SPLIT_GRAB_PX = 9
+
+#: The shortest share of the picture each side keeps: a divider pushed to the very edge would hide one picture
+#: completely, which is what `single` is for.
+SPLIT_MIN_FRACTION = 0.05
+SPLIT_MAX_FRACTION = 0.95
+
 
 @dataclass(frozen=True)
 class Frame:
@@ -160,6 +169,9 @@ class VideoPreviewSurface(QRhiWidget):
         self._view_mode = "single"
         #: where the split divider sits, as a share of the picture's width; the pane's rule, not a per-frame value
         self._split_fraction = 0.5
+        #: A drag in flight on the `split` divider: the only gesture that moves it, and it must never fall through to
+        #: the picture's own press handling (which consumes compare presses).
+        self._dragging_split = False
         #: the playhead the standing original was last asked for, so playback refreshes it once per move
         self._original_requested_at: float | None = None
         #: The identity of the source picture the host handed over (`("frame", n)`, its media time) and the moment the
@@ -516,6 +528,36 @@ class VideoPreviewSurface(QRhiWidget):
             self._request_standing_original()
         self.update()
 
+    def split_fraction(self) -> float:
+        """Where the `split` divider sits, as a share of the picture's width (0..1)."""
+        return float(self._split_fraction)
+
+    def set_split_fraction(self, fraction: float) -> None:
+        """Move the `split` divider; clamped so neither picture is hidden (that is what `single` is for)."""
+        value = max(SPLIT_MIN_FRACTION, min(SPLIT_MAX_FRACTION, float(fraction)))
+        if value == self._split_fraction:
+            return
+        self._split_fraction = value
+        self.update()
+
+    def _split_divider_x(self) -> float | None:
+        """The divider's x in widget coordinates, or None when there is no divider to grab."""
+        if self._view_mode != "split":
+            return None
+        picture = self._frame_rect()
+        if picture.isEmpty():
+            return None
+        return picture.left() + picture.width() * self._split_fraction
+
+    def _grabs_split(self, position) -> bool:
+        x = self._split_divider_x()
+        if x is None:
+            return False
+        picture = self._frame_rect()
+        if not (picture.top() <= position.y() <= picture.bottom()):
+            return False
+        return abs(position.x() - x) <= SPLIT_GRAB_PX
+
     def view_mode(self) -> str:
         """Which surfaces the pane shows: "single", "sbs" or "split"."""
         return self._view_mode
@@ -648,6 +690,14 @@ class VideoPreviewSurface(QRhiWidget):
                 self.seekRequested.emit(fraction)
                 event.accept()
                 return
+            # The `split` divider is a CONTROL and the only thing in a compare mode that takes a press: grabbing it must
+            # happen before the compare consumption below, or the divider can never be moved (owner, 2026-11-26:
+            # "было бы неплохо добавить видимый сплитер который передвигать можно").
+            if self._grabs_split(position):
+                self._dragging_split = True
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+                event.accept()
+                return
             # In a compare mode the source is already on screen: there is nothing to flash, and the picture is not a
             # control. The press is consumed so it cannot turn into a flash the user did not ask for.
             if self._view_mode != "single":
@@ -677,6 +727,12 @@ class VideoPreviewSurface(QRhiWidget):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         position = event.position()
+        if self._dragging_split:
+            picture = self._frame_rect()
+            if not picture.isEmpty() and picture.width() > 0.0:
+                self.set_split_fraction((position.x() - picture.left()) / picture.width())
+            event.accept()
+            return
         if self._scrubbing:
             fraction = self._fraction_at(position.x())
             # A drag is clamped at the seek's own edge instead of jumping into the dark part: the playhead never
@@ -728,6 +784,11 @@ class VideoPreviewSurface(QRhiWidget):
             self.update()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging_split:
+            self._dragging_split = False
+            self.unsetCursor()
+            event.accept()
+            return
         if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.LeftButton) and self._panning:
             self._panning = False
             self._left_press = None
@@ -1172,58 +1233,81 @@ class VideoPreviewSurface(QRhiWidget):
         return colour
 
     def _hud_vertices(self) -> list[float]:
-        """Rectangles for the strip, in widget pixels: track, produced band, playhead, handle, hover marker.
+        """Rectangles for the HUD pass, in widget pixels: the strip (when the pane paints its own) and the compare
+        modes' ONE boundary.
 
-        The design language's numbers and colours, not this file's: the track is the toolkit slider's track height,
-        the handle is its thumb radius (inside the timeline's playhead handle), and every colour is resolved from
-        ``STRIP_TOKENS`` through `ThemeManager` at paint time. The strip is a *timeline* - it keeps its produced band,
-        hover marker and blocked marker - but it borrows the slider's groove/thumb language so it reads as the same
-        control family. The HUD is a rect-only pass, which is why the time text lives in a widget above it instead.
+        The strip is a *timeline* - produced band, playhead handle, hover and blocked markers - borrowing the toolkit
+        slider's groove/thumb language, and every colour comes from ``STRIP_TOKENS`` through `ThemeManager` at paint
+        time. The HUD is a rect-only pass, which is why the time text lives in a widget above it instead.
+
+        The compare boundary is NOT conditional on the strip: the host's controls bar hides the pane's own strip
+        (`set_strip_visible(False)`), and an early return on an empty strip rect meant the `split` divider and the `sbs`
+        seam were never drawn in the real window - the "invisible splitter" (owner, 2026-11-26). The divider is a control
+        of the PICTURE.
         """
+        rects: list[tuple[float, float, float, float, tuple[float, float, float, float]]] = []
         strip = self._strip_rect()
-        if strip.isEmpty():
-            return []
-        rendered, total, playhead, duration = self._progress
+        if not strip.isEmpty():
+            rendered, total, playhead, duration = self._progress
+            colours = strip_colours()
+            track = rgba(colours["track"])
+            produced = rgba(colours["produced"])
+            playhead_fill = rgba(colours["playhead"])
+            outline = rgba(colours["playhead_outline"], 0.70)
+            divider = rgba(colours["divider"], 0.35)
+            hover = rgba(colours["hover"], 0.65)
+            blocked = rgba(colours["blocked"], 0.55)
+            # The DARK band is what the renderer has not produced yet, the ACCENT part is what it has. No extra tick on the
+            # fill's edge: the edge itself is the render head.
+            rects.append((strip.left(), strip.top(), strip.width(), strip.height(), track))
+            if total > 0:
+                filled = max(0.0, min(1.0, rendered / total))
+                if filled > 0:
+                    rects.append((strip.left(), strip.top(), strip.width() * filled, strip.height(), produced))
+            if duration > 0:
+                fraction = max(0.0, min(1.0, playhead / duration))
+                x = strip.left() + strip.width() * fraction
+                handle = self._handle_radius
+                halo = self._playhead_halo_radius
+                # A backdrop behind the line and the handle: the thumb is white in light mode and dark in dark mode, so a
+                # token-coloured plate (not a fixed black or white) is what stays legible in both themes.
+                rects.append((x - 2.5, strip.top() - 6.0, 5.0, strip.height() + 12.0, outline))
+                rects.append((x - 1.0, strip.top() - 5.0, 2.0, strip.height() + 10.0, produced))
+                rects.append((x - halo, strip.top() - 6.0 - halo, halo * 2.0, halo * 2.0, outline))
+                # The handle is the slider's thumb, from the toolkit's own thumb token.
+                rects.append((x - handle, strip.top() - 6.0 - handle, handle * 2.0, handle * 2.0, playhead_fill))
+            if self._hover_fraction is not None and not self._scrubbing:
+                x = strip.left() + strip.width() * self._hover_fraction
+                colour = blocked if self._hover_blocked else hover
+                rects.append((x - 0.5, strip.top() - 3.0, 1.0, strip.height() + 6.0, colour))
+            strip_top = float(strip.top())
+        else:
+            strip_top = float(self.height())
+        self._compare_boundary_rects(rects, strip_top=strip_top)
+        vertices: list[float] = []
+        for x, y, w, h, colour in rects:
+            corners = [(x, y), (x + w, y), (x, y + h), (x + w, y), (x + w, y + h), (x, y + h)]
+            for cx, cy in corners:
+                vertices.extend([cx, cy, *colour])
+        return vertices
+
+    def _compare_boundary_rects(self, rects, *, strip_top: float) -> None:
+        """Append the compare modes' boundary: the `sbs` seam, or the `split` divider with its drag grip.
+
+        `strip_top` is where the pane's own strip begins (the pane's height when it paints none), so a boundary never
+        runs under the strip's controls when the strip is visible.
+        """
         colours = strip_colours()
-        track = rgba(colours["track"])
-        produced = rgba(colours["produced"])
-        playhead_fill = rgba(colours["playhead"])
-        outline = rgba(colours["playhead_outline"], 0.70)
         divider = rgba(colours["divider"], 0.35)
-        hover = rgba(colours["hover"], 0.65)
-        blocked = rgba(colours["blocked"], 0.55)
-        # The DARK band is what the renderer has not produced yet, the ACCENT part is what it has. No extra tick on the
-        # fill's edge: the edge itself is the render head.
-        rects: list[tuple[float, float, float, float, tuple[float, float, float, float]]] = [
-            (strip.left(), strip.top(), strip.width(), strip.height(), track),
-        ]
-        if total > 0:
-            filled = max(0.0, min(1.0, rendered / total))
-            if filled > 0:
-                rects.append((strip.left(), strip.top(), strip.width() * filled, strip.height(), produced))
-        if duration > 0:
-            fraction = max(0.0, min(1.0, playhead / duration))
-            x = strip.left() + strip.width() * fraction
-            handle = self._handle_radius
-            halo = self._playhead_halo_radius
-            # A backdrop behind the line and the handle: the thumb is white in light mode and dark in dark mode, so a
-            # token-coloured plate (not a fixed black or white) is what stays legible in both themes.
-            rects.append((x - 2.5, strip.top() - 6.0, 5.0, strip.height() + 12.0, outline))
-            rects.append((x - 1.0, strip.top() - 5.0, 2.0, strip.height() + 10.0, produced))
-            rects.append((x - halo, strip.top() - 6.0 - halo, halo * 2.0, halo * 2.0, outline))
-            # The handle is the slider's thumb, from the toolkit's own thumb token.
-            rects.append((x - handle, strip.top() - 6.0 - handle, handle * 2.0, handle * 2.0, playhead_fill))
-        if self._hover_fraction is not None and not self._scrubbing:
-            x = strip.left() + strip.width() * self._hover_fraction
-            colour = blocked if self._hover_blocked else hover
-            rects.append((x - 0.5, strip.top() - 3.0, 1.0, strip.height() + 6.0, colour))
-        # The two-surface modes draw ONE boundary, not a second HUD: a faint line between the halves in `sbs`, and
-        # the divider itself in `split`. Both stop above the strip so the playhead stays readable across the width.
-        strip_top = strip.top()
         if self._view_mode == "sbs":
             middle = self.width() / 2.0
-            if strip_top > 0:
-                rects.append((middle - 0.5, 0.0, 1.0, strip_top, divider))
+            picture = self._frame_rect()
+            # A seam belongs to a PICTURE: an empty pane draws nothing at all (its own pin asserts exactly that).
+            if strip_top > 0 and not picture.isEmpty():
+                top = max(0.0, picture.top())
+                bottom = min(strip_top, picture.bottom())
+                if bottom > top:
+                    rects.append((middle - 0.5, top, 1.0, bottom - top, divider))
         elif (self._view_mode == "split" and self._original is not None
               and not self._original.isNull()):
             picture = self._frame_rect()
@@ -1231,13 +1315,21 @@ class VideoPreviewSurface(QRhiWidget):
             bottom = min(strip_top, picture.bottom())
             if bottom > top:
                 x = picture.left() + picture.width() * self._split_fraction
-                rects.append((x - 1.0, top, 2.0, bottom - top, rgba(colours["divider"], 0.85)))
-        vertices: list[float] = []
-        for x, y, w, h, colour in rects:
-            corners = [(x, y), (x + w, y), (x, y + h), (x + w, y), (x + w, y + h), (x, y + h)]
-            for cx, cy in corners:
-                vertices.extend([cx, cy, *colour])
-        return vertices
+                # An OUTLINED rule, not a solid bright one (owner, 2026-11-26: "а может лучше обводку сделать?"): a
+                # light stroke with a dark core reads over a bright sky AND over a dark tree, which one flat colour
+                # cannot do, and it does not glare. The grip is the same two-tone pill, so the divider is visibly a
+                # control (it can be dragged) without a tooltip.
+                rects.append((x - 3.5, top, 7.0, bottom - top, rgba(colours["divider"], 0.90)))
+                rects.append((x - 2.0, top, 4.0, bottom - top, rgba(colours["divider_outline"], 0.90)))
+                grip_h = min(44.0, max(24.0, (bottom - top) * 0.12))
+                grip_w = 16.0
+                grip_top = top + (bottom - top - grip_h) / 2.0
+                rects.append((x - grip_w / 2.0, grip_top, grip_w, grip_h, rgba(colours["divider"], 0.95)))
+                rects.append((x - grip_w / 2.0 + 1.5, grip_top + 1.5, grip_w - 3.0, grip_h - 3.0,
+                              rgba(colours["divider_outline"], 0.92)))
+                for offset in (-4.0, 0.0, 4.0):
+                    rects.append((x - 0.5, grip_top + grip_h / 2.0 + offset - 0.5, 1.0, 1.0,
+                                  rgba(colours["divider"], 0.95)))
 
     def grabFrame(self) -> QImage:  # noqa: N802 - Qt spelling is `grabFramebuffer`, this is the plan's name
         return self.grabFramebuffer()

@@ -225,7 +225,15 @@ def test_split_clips_the_original_to_the_left_of_the_divider(surface):
     assert clip.width() == pytest.approx(picture.width() / 2.0), "the divider sits in the middle of the picture"
     assert clip.top() == pytest.approx(picture.top())
     assert clip.height() == pytest.approx(picture.height())
-    assert len(surface._hud_vertices()) == 2 * 6 * 6, "the track and the divider - the strip is not duplicated"
+    # The strip paints once and the divider is a CONTROL now (an outlined rule plus a grip, so it is visible over any
+    # picture and can be dragged): count the DIVIDER, not a total that any grip detail would break.
+    divider_floats = [v for v in surface._hud_vertices()]
+    divider_x = surface._split_divider_x()
+    assert divider_x is not None
+    xs = [divider_floats[i] for i in range(0, len(divider_floats), 6)]   # [x, y, r, g, b, a] per corner
+    assert any(abs(x - (divider_x - 3.5)) < 0.6 for x in xs), "the divider's outline is not in the HUD"
+    assert any(abs(x - (divider_x + 3.5)) < 0.6 for x in xs), "the divider's outline must end at x+3.5"
+    assert xs[0] < divider_x, "the strip is painted before the divider (one pass, strip first)"
     assert surface._view_rect() == QRectF(0.0, 0.0, float(PANE_SIZE[0]), float(PANE_SIZE[1])), (
         "split fits the result into the whole pane, unlike sbs")
 

@@ -1374,7 +1374,8 @@ class ProcessTab:
         previous = getattr(self, "_second_surface_pts", None)
         if previous is not None and abs(playhead - previous) < 1e-3:
             return
-        self._second_surface_pts = playhead
+        # No marker here: it is set when a frame ARRIVES (`_on_original_frame`), so an ask the decoder does not answer
+        # is retried on the next tick instead of being recorded as done (a paused pane has no other clock).
         # The tick asks every 100 ms while the playhead moves: its own requests are not presses and must not
         # fill log.txt, so the compare's one-line-per-press instrument is told which one this is.
         self._compare_from_tick = True
@@ -3019,9 +3020,13 @@ class ProcessTab:
             # input file over it would show a picture of a different video. A FRAME gate (which picture the compare
             # would decode), hence the raw flag; pane decisions read the owner's `QUEUE_FILE` kind.
             return
-        # The pane's own `originalRequested` (a compare mode's playhead moved) and the 100 ms tick both arrive here;
-        # recording what was asked keeps one moved playhead to one source decode.
-        self._second_surface_pts = float(seconds)
+        # The pane's own `originalRequested` (a compare mode's playhead moved) and the 100 ms tick both arrive here.
+        # The one-decode-per-playhead marker is recorded when a frame ARRIVES (`_on_original_frame`), not here: an ask
+        # that never lands (the decoder still opening, a dropped request) used to leave the marker on the asked time, so
+        # the tick saw "already asked for this playhead" and never retried - the half stayed empty for as long as the
+        # pane was paused (measured 2026-11-26: `compare: asked for the source at 0.125s ... mode split` with no
+        # "source frame" line after it, and no divider, because the divider is drawn only when the source exists).
+        self._compare_watch = float(seconds)
         # The compare's own instrument: what was asked, and (in `_on_original_frame`) what came back. The owner's
         # report was "a couple of frames after the right one" and neither number existed anywhere before this line.
         self._compare_watch = float(seconds)
@@ -3092,6 +3097,9 @@ class ProcessTab:
         watched = getattr(self, "_compare_watch", None)
         self._compare_watch = None
         pts = float(getattr(frame, "pts", 0.0) or 0.0)
+        # The ONE-decode-per-playhead marker: a LANDED frame, so a request the decoder never answered does not silence
+        # the retry (`_tick_second_surface` compares the playhead against this).
+        self._second_surface_pts = pts
         index = getattr(frame, "index", None)
         pane = self.page_handles.proc.previewLabel
         # The LAST step's other half: what the pane was showing when the press asked for this source frame. The labels
