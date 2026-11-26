@@ -132,6 +132,15 @@ def display_state_id(pid: int | None = None) -> str:
     return "/image_display" + str(os.getpid() if pid is None else int(pid))
 
 
+def source_state_id(pid: int | None = None) -> str:
+    """The COMPARE's block: the source picture of each composited frame, same process-scoped convention.
+
+    A separate segment on purpose: the display block's header offsets are a pinned pixel contract (`HEADER_SIZE` moves
+    every payload), so a second picture travels in its own block exactly like the render status does.
+    """
+    return "/image_source" + str(os.getpid() if pid is None else int(pid))
+
+
 def seek_state_id(pid: int | None = None) -> str:
     """The seek request block's name: same process-scoped convention."""
     return "/seek_state" + str(os.getpid() if pid is None else int(pid))
@@ -241,6 +250,7 @@ def format_eta(seconds: float | None) -> str:
 DISPLAY_STATE_SHARED_MEMORY_ID = display_state_id()
 DISPLAY_BOX_SHARED_MEMORY_ID = display_box_id()
 SEEK_STATE_SHARED_MEMORY_ID = seek_state_id()
+SOURCE_STATE_SHARED_MEMORY_ID = source_state_id()
 STATUS_STATE_SHARED_MEMORY_ID = status_state_id()
 
 

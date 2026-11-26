@@ -188,6 +188,22 @@ def test_the_pane_flags_are_absent_when_the_paths_model_no_pane():
     assert "--seek_state_id" not in command
 
 
+def test_the_command_carries_the_compare_block_when_the_paths_name_one():
+    """`--source_state_id` is the compare's own block: the renderer publishes the source of each composited frame there.
+
+    Its own flag, not part of the display trio: a paths object that models no pane must still produce the command it
+    always had (the golden above), and a job without the block falls back to the pane's own decoder.
+    """
+    paths = _paths(display_state_id="/image_display77", display_size="640x360", seek_state_id="/seek_state77",
+                   source_state_id="/image_source77")
+    command = _command(is_preview=True, paths=paths)
+    assert _flag_value(command, "--source_state_id") == "/image_source77"
+
+    without = _command(is_preview=True, paths=_paths(display_state_id="/image_display77", display_size="640x360",
+                                                     seek_state_id="/seek_state77"))
+    assert "--source_state_id" not in without
+
+
 def test_the_process_tab_points_the_command_at_its_own_block():
     tab = object.__new__(ProcessTab)
     tab._display_box = (1280, 720)
@@ -1307,3 +1323,32 @@ def test_the_source_pool_is_bounded_even_when_nothing_prunes_it():
         tab._source_pool_put(step / 24.0, step, f"F{step}")
     assert len(tab._source_pool) == COMPARE_POOL_FRAMES
     assert min(tab._source_pool) == pytest.approx(5 / 24.0), "the OLDEST go first"
+
+
+def test_the_renderers_compare_block_is_taken_only_for_the_panes_own_moment():
+    """The block carries the HEAD's source; a rewind must keep the decoder's picture.
+
+    Measured 2026-11-26: taking it unconditionally compared `result=0.125` with `source=9.635` (228 frames), because the
+    pane was replaying the written file while the render stood at its head. A picture of the pane's own moment is taken;
+    anything else falls back to the comparison decoder, which is what any rewind needs.
+    """
+    from src.ui.ProcessTab import ProcessTab
+
+    class _Feed:
+        media_time = 9.635
+        attached = True
+
+    pane = _Pane()
+    pane.mode = "split"
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True)
+    tab._source_feed = _Feed()
+    tab._compare_playhead = lambda: 0.125
+    image = QImage(4, 4, QImage.Format.Format_RGB888)
+
+    ProcessTab._on_source_feed_frame(tab, image)
+    assert pane.originals == [], "the head's picture is a different moment: it must be refused"
+
+    tab._compare_playhead = lambda: 9.65
+    ProcessTab._on_source_feed_frame(tab, image)
+    assert [entry[1] for entry in pane.originals] == [pytest.approx(9.635)], (
+        "the pane's own moment is taken, with the block's own media time")

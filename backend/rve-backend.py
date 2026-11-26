@@ -217,6 +217,7 @@ class HandleApplication:
             display_state_id=self.args.display_state_id,
             display_size=self.args.display_size,
             display_box_id=self.args.display_box_id,
+            source_state_id=self.args.source_state_id,
             seek_state_id=self.args.seek_state_id,
             status_state_id=self.args.status_state_id,
             sceneDetectMethod=self.args.scene_detect_method,
@@ -725,6 +726,14 @@ class HandleApplication:
         parser.add_argument(
             "--pause_shared_memory_id",
             help="File to store paused state (True means paused, False means unpaused)",
+            type=str,
+            default=None,
+        )
+        parser.add_argument(
+            "--source_state_id",
+            help="Shared-memory block the pane reads the COMPARE's source half from: the renderer publishes the source "
+                 "picture of every composited frame beside the display block, with the same media time, so the pane needs "
+                 "no second decode of the input (layout: backend/src/utils/DisplayChannel.py).",
             type=str,
             default=None,
         )

@@ -34,6 +34,7 @@ from .video.channel import (
     PHASE_PREPARING,
     PHASE_RENDERING,
     SEEK_STATE_SHARED_MEMORY_ID,
+    SOURCE_STATE_SHARED_MEMORY_ID,
     STATUS_STATE_SHARED_MEMORY_ID,
     DisplayReader,
     format_eta,
@@ -928,6 +929,21 @@ class ProcessTab:
         self._display_box = box
         # A new pass starts at generation 0 of a fresh record, whatever the last render left in the readouts.
         self._status_generation = None
+        #: The COMPARE's block: the renderer publishes the source picture of each composited frame into it, so `sbs` and
+        #: `split` need no second decode of the input. Allocated with the display block (same box, same lifetime), and an
+        #: unattached one is simply absent - every reader then falls back to its own decoder.
+        self._source_feed = None
+        self._source_feed_alive_at = None
+        try:
+            source_feed = DisplayReader(SOURCE_STATE_SHARED_MEMORY_ID, box=box)
+            if source_feed.attached:
+                source_feed.display_frame.connect(self._on_source_feed_frame)
+                self._source_feed = source_feed
+            else:
+                source_feed.release()
+        except Exception as exc:
+            log(f"source: the compare's block is not usable ({exc}); compare modes decode their own half")
+            self._source_feed = None
         try:
             reader = DisplayReader(
                 DISPLAY_STATE_SHARED_MEMORY_ID,
@@ -990,7 +1006,15 @@ class ProcessTab:
             f"seek {SEEK_STATE_SHARED_MEMORY_ID}, status {STATUS_STATE_SHARED_MEMORY_ID}")
 
     def _close_display_state(self) -> None:
-        """Release the frame, seek and announced-box blocks; safe twice, and safe when nothing was prepared."""
+        """Release the frame, seek, announced-box and compare blocks; safe twice, and safe when nothing was prepared."""
+        source_feed = getattr(self, "_source_feed", None)
+        self._source_feed = None
+        self._source_feed_alive_at = None
+        if source_feed is not None:
+            try:
+                source_feed.release()
+            except Exception:
+                pass
         announcer = getattr(self, "_display_box_writer", None)
         self._display_box_writer = None
         self._announced_box = None
@@ -1161,6 +1185,7 @@ class ProcessTab:
     def _picture_tick(self) -> None:
         """The PICTURE path's own clock: the export's feed and the compare's standing original."""
         self._tick_display()
+        self._tick_source_feed()
         self._tick_second_surface()
         self._compare_fill_report()
 
@@ -1191,6 +1216,75 @@ class ProcessTab:
                         pool_min=None if not pool else round(min(pool), 3))
         stats["asks"] = 0
         stats["arrivals"] = 0
+
+    def _tick_source_feed(self) -> None:
+        """Ask the renderer for the compare's picture, but only in a compare mode with the pane on screen.
+
+        One byte of request and one `poll` per picture tick while `sbs`/`split` is up; nothing at all otherwise, which is
+        the whole cost of the block when nobody compares. The picture arrives with the renderer's own media time, i.e.
+        the SAME time as the composited frame it belongs to - the two halves are one moment by construction.
+        """
+        feed = getattr(self, "_source_feed", None)
+        if feed is None or not getattr(feed, "attached", False):
+            return
+        pane = getattr(getattr(getattr(self, "page_handles", None), "proc", None), "previewLabel", None)
+        mode = getattr(pane, "view_mode", None)
+        comparing = False
+        if callable(mode):
+            try:
+                comparing = mode() in ("sbs", "split")
+            except Exception:
+                comparing = False
+        try:
+            visible = bool(pane.isVisible()) if pane is not None else False
+        except Exception:
+            visible = True
+        wanted = bool(comparing and visible)
+        feed.set_wanted(wanted)
+        if wanted:
+            feed.poll()
+
+    def _on_source_feed_frame(self, image) -> None:
+        """The renderer's own source picture for the composited frame it just published."""
+        feed = getattr(self, "_source_feed", None)
+        if feed is None or image is None:
+            return
+        self._source_feed_alive_at = time.monotonic()
+        pane = self.page_handles.proc.previewLabel
+        named = getattr(feed, "media_time", None)
+        if named is not None:
+            # The block names the picture with the RENDERER's media time (the input frame's own PTS), while the pane's
+            # clock is the TAIL's content time (the output file's start subtracted). The pair compares them, so the source
+            # is moved onto the pane's clock here - the same origin the tail subtracts, taken from the tail itself. Without
+            # this the halves sit the encoder's B-frame delay apart and every paint is a mismatch (measured 2026-11-26,
+            # with the block already supplying the picture: `asks=0`, `pair_off` equal to the paint count).
+            tail = getattr(self, "_live_tail", None)
+            origin = getattr(tail, "media_origin", None) if tail is not None else None
+            try:
+                if origin is not None:
+                    named = float(named) - float(origin)
+            except Exception:
+                pass
+        if named is not None:
+            # The block carries the source of the frame the RENDERER is compositing - the head. While the pane plays a
+            # WRITTEN part of the file the head is seconds away, and taking this picture would compare two different
+            # moments (measured 2026-11-26: `result=0.125 source=9.635`, 228 frames apart, because the pane was replaying
+            # from 0.125 while the render stood at 9.6). Only a picture of the pane's OWN moment is taken; otherwise the
+            # comparison decoder supplies the half, as it must for any rewind.
+            try:
+                here = float(self._compare_playhead())
+            except Exception:
+                here = None
+            if here is not None and abs(float(named) - here) > 0.25:
+                return
+        setter = getattr(pane, "set_original", None)
+        if callable(setter):
+            setter(image, media_time=named)
+
+    def _source_feed_is_live(self) -> bool:
+        """True while the renderer has handed the compare a picture in the last second."""
+        stamp = getattr(self, "_source_feed_alive_at", None)
+        return stamp is not None and (time.monotonic() - float(stamp)) < 1.0
 
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
@@ -3365,6 +3459,10 @@ class ProcessTab:
         runs flat out until the lead is full and stops, instead of being polled at a timer's rate - a 10 Hz poll cannot
         feed a 24 fps stream, so the lead would drain exactly when it is needed.
         """
+        if self._source_feed_is_live():
+            # The renderer is publishing the source of every composited frame: decoding the same file a second time is
+            # exactly the cost this block exists to remove.
+            return
         playhead = float(playhead)
         interval = 1.0 / self._compare_fps()
         self._source_prune(playhead)
@@ -3892,4 +3990,7 @@ class ProcessTab:
             seek_state_id=SEEK_STATE_SHARED_MEMORY_ID,
             display_box_id=DISPLAY_BOX_SHARED_MEMORY_ID,
             status_state_id=STATUS_STATE_SHARED_MEMORY_ID,
+            #: The compare's own block, allocated with the pane's so the renderer can publish the source picture of each
+            #: composited frame beside the display one (`--source_state_id`).
+            source_state_id=SOURCE_STATE_SHARED_MEMORY_ID,
         )

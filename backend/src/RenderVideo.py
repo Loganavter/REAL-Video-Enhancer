@@ -167,6 +167,7 @@ class Render:
         display_size: tuple[int, int] | None = None,
         seek_state_id: str | None = None,
         display_box_id: str | None = None,
+        source_state_id: str | None = None,
         #: The render-status record (see utils/DisplayChannel.py), a GUI-owned pid-scoped segment.
         status_state_id: str | None = None,
         sceneDetectMethod: str = "pyscenedetect",
@@ -579,6 +580,26 @@ class Render:
                 log(f"display: channel setup failed ({_display_exc}); the render runs without it")
                 self.displayChannel = None
                 self.displayStager = None
+        #: The compare's OWN half: the source picture of the frame just composited, published beside the display block
+        #: with the same media time. The pane's `sbs`/`split` then needs no second decode of the input file - the frame
+        #: this loop already holds IS the source, and one decode instead of two is the whole point (owner, 2026-11-26:
+        #: "особенно когда два видео разом проигрываются"). Its own segment, same block contract; the pane allocates it
+        #: and the renderer only attaches, so a run with no viewer pays one byte read per frame.
+        self.sourceChannel = None
+        if source_state_id:
+            try:
+                from .utils.DisplayChannel import DisplayChannel
+
+                box = tuple(display_size) if display_size else (640, 360)
+                self.sourceChannel = DisplayChannel(source_state_id, box=box)
+                if not self.sourceChannel.attached:
+                    self.sourceChannel = None
+                    log(f"source: block '{source_state_id}' is not usable; the pane decodes its own half")
+                else:
+                    log(f"source: publishing the compare's half to '{source_state_id}', box {box[0]}x{box[1]}")
+            except Exception as _source_exc:   # a pane must never cost the export
+                log(f"source: channel setup failed ({_source_exc}); the pane decodes its own half")
+                self.sourceChannel = None
         # Newest-wins seek request. One slot: a newer request overwrites an older one, and an iteration
         # that finds nothing pays a 12-byte read before it blocks on the reader.
         self.seekState = None
@@ -1281,6 +1302,39 @@ class Render:
             stager.submit(frame, getattr(frame, "width", None), getattr(frame, "height", None), time_s=time_s)
         return published
 
+    def _publish_source(self, frame, time_s: float | None) -> None:
+        """Offer this frame's SOURCE picture to the compare half; never touches the export's own path.
+
+        RGB888 fitted into the pane's box (the block's contract is one picture, and the pane draws both halves at the
+        result's scale). The conversion is the one the model path already does - a tensor resized on the device - so the
+        renderer pays a small interpolate plus a ~1.5 MB copy-back per published frame, and only while the pane asks. Any
+        failure falls back to the pane's own decoder: a courtesy must never break a render.
+        """
+        channel = getattr(self, "sourceChannel", None)
+        if channel is None or not channel.attached or not channel.wanted():
+            return
+        try:
+            import torch
+            from .utils.DisplayStager import fit_box
+
+            tensor = frame.get_frame_tensor()
+            if tensor is None or getattr(tensor, "dim", None) is None or tensor.dim() != 4:
+                return
+            plane = tensor[0]
+            if int(plane.shape[0]) != 3:
+                return
+            height, width = int(plane.shape[1]), int(plane.shape[2])
+            box_w, box_h = fit_box(width, height, channel.box[0], channel.box[1])
+            small = torch.nn.functional.interpolate(plane.unsqueeze(0), size=(box_h, box_w),
+                                                    mode="bilinear", align_corners=False)[0]
+            rgb = (small.clamp(0.0, 1.0) * 255.0).round().to(torch.uint8).permute(1, 2, 0).contiguous()
+            channel.publish(rgb.cpu().numpy().tobytes(), box_w, box_h, time_s=time_s)
+        except Exception as exc:
+            if not getattr(self, "_sourcePublishWarned", False):
+                self._sourcePublishWarned = True
+                log(f"source: the compare's picture could not be published ({exc}); the pane decodes its own half")
+            self.sourceChannel = None
+
     def _apply_announced_box(self) -> None:
         """Fit the next frames into the box the pane last announced. A frame boundary, never mid-frame.
 
@@ -1476,6 +1530,8 @@ class Render:
                     continue
                 _t_read = _perf_counter()
                 frame = self.readBuffer.get()
+                #: The SOURCE of this output frame, captured before any model touches `frame` (see `_publish_source`).
+                source_frame = frame
                 _read_ms = (_perf_counter() - _t_read) * 1000.0
                 #self.write_bytes_to_cv2_frame_debug(frame)
                 if frame is None:
@@ -1605,6 +1661,8 @@ class Render:
                     log(f"display: drew source frame {frames_rendered} named {named:.3f}s"
                         f"{'' if source_pts is None else f' (pts {source_pts:.3f}s)'}")
                 self._publish_display(frame, time_s=named)
+                if source_frame is not None:
+                    self._publish_source(source_frame, named)
 
                 if self.override_upscale_scale:
                     # Source geometry comes from the frame the upscaler returned, never from
@@ -1733,7 +1791,8 @@ class Render:
         self.writeBuffer.writeQueue.put(None)
         # Detach the GUI-owned blocks: closing never unlinks a segment we did not create. A block the
         # backend created as a fallback (the window had not attached yet) is removed by close().
-        for _block in (self.displayChannel, self.seekState, getattr(self, "statusChannel", None)):
+        for _block in (self.displayChannel, self.seekState, getattr(self, "statusChannel", None),
+                       getattr(self, "sourceChannel", None)):
             if _block is not None:
                 try:
                     _block.close()
