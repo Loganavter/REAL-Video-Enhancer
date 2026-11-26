@@ -60,6 +60,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QObject, QThread, Signal  # noqa: E402
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 
 from src.ui import shared_flag  # noqa: E402
@@ -892,6 +893,67 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     tab.currentFrame = 90
     tab._tick_second_surface()
     assert len(asked) == 4, "single asks nothing: the retry, the lead ask and the jump"
+
+
+def test_the_compare_decoder_is_really_opened_and_then_asked(monkeypatch):
+    """The compare's supply: opening must CREATE the decoder, and the pane's ask must reach it.
+
+    Both halves of this were broken by one refactor (live 2026-11-26: `compare fill asks=11 arrivals=0` in sbs, with the
+    result half painted and the source half empty). `_open_source_decoder` was split out of `_on_original_requested`
+    but its body was left indented under the new `return True`, so the method answered "ready" without opening
+    anything - `_source_decoder` stayed None, the pool stayed empty, and no source frame was ever requested. A green
+    suite did not notice, because nothing exercised this path: the test below is that path.
+    """
+    asked = []
+
+    class _FakeDecoder(QObject):
+        frame_ready = Signal(object)
+        error = Signal(str)
+        fps = 24.0
+
+        def __init__(self, **kwargs) -> None:
+            super().__init__()
+            self.kwargs = kwargs
+            self.path = None
+            self.pauses = 0
+
+        def open(self, path) -> bool:
+            self.path = path
+            return True
+
+        def pause(self) -> None:
+            self.pauses += 1
+
+        def request_frame(self, seconds, *, exact=True, seek=True, span=False) -> None:
+            asked.append((round(float(seconds), 3), bool(exact), bool(seek), bool(span)))
+
+    class _FakeThread(QThread):
+        """A real QThread (a decoder can only be moved onto one) whose loop never starts."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = False
+
+        def start(self) -> None:
+            self.started = True
+
+    pane = _Pane()
+    pane.mode = "sbs"
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True, reader=_Reader())
+    tab.currentRenderOptions = SimpleNamespace(inputFile="/tmp/clip.mkv")
+    tab._compare_from_tick = True                     # the pane's own ask, not the 100 ms tick's reroute
+    monkeypatch.setattr("PySide6.QtCore.QThread", _FakeThread)
+    monkeypatch.setattr("src.ui.video.decode.VideoDecoder", _FakeDecoder)
+
+    assert tab._open_source_decoder() is True
+    assert isinstance(tab._source_decoder, _FakeDecoder), (
+        "the opening body must not sit behind the early return")
+    assert tab._source_decoder.path == "/tmp/clip.mkv", "the compare decodes the INPUT file"
+
+    tab._on_original_requested(2.5)
+    assert asked, "the pane's ask never reached the decoder"
+    assert asked[-1][0] == pytest.approx(2.5)
+    assert asked[-1][3] is False, "a single answered frame is a seek, not a span"
 
 
 def test_the_default_box_is_the_probe_constant():

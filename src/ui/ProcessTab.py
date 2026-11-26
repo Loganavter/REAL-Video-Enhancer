@@ -3276,6 +3276,68 @@ class ProcessTab:
             return 0.0
         return edge / produced
 
+    def _open_source_decoder(self) -> bool:
+        """Open the compare's source decoder (own thread, pane-boxed, content time). True when one is ready.
+
+        Factored out of `_on_original_requested` so the FIRST switch to a compare mode does not pay for it: opening a
+        1440p file costs a few hundred milliseconds on top of the first seek, which the owner felt as "пролаг больше
+        секунды" when switching to side by side (2026-11-26). `_warm_source_decoder` opens it while the preview settles.
+
+        The body must stay OUTSIDE the early-return guard. The first cut of this split left it indented under
+        `return True`, so the method answered "ready" without ever creating a decoder: `_source_decoder` stayed None, the
+        pool stayed empty and sbs/split painted the result half with nothing beside it (`compare fill asks=11
+        arrivals=0`, live 2026-11-26).
+        """
+        if getattr(self, "_source_decoder", None) is not None:
+            return True
+        from PySide6.QtCore import QThread
+
+        from .video.decode import VideoDecoder
+
+        # ITS OWN THREAD, which `decode.py` is written for ("the caller moves it to a QThread") and nothing did:
+        # on the GUI thread a 1440p source frame costs 12.5 ms of decode + a 6.2 MB pack, and the paint queue
+        # waits behind it. Measured 2026-11-26: split playback ran at 0.20x wall with both decoders on the GUI
+        # thread, while the same two decoders in their own event loops ran at 0.94x - the decode was never the
+        # limit, the thread was. The lead below only has capacity once this decode is off the paint thread.
+        # AT THE PANE'S BOX, like the result's own decoder (`_start_preview_playback`): a 1440p source handed
+        # over whole costs a 6.2 MB copy, a GUI-thread scale down to the result's size, a 6.2 MB upload and a
+        # 1440p mip chain per frame - to show 504x378. The fit happens in swscale inside the decode thread, and
+        # the two halves then arrive at the SAME size, so the pane scales nothing.
+        # CONTENT time, like both of the pane's other painters (the tail subtracts the output's start, the
+        # finished-file decoder does the same): the compare names its halves by timestamp and, before this, the
+        # source's own file times sat a fraction of a frame off the tail's derived ones, so the pair gate saw
+        # two moments for stretches and painted on its timeout (measured 2026-11-26: `pair_off` 1-9 of 15-22
+        # paints during inference, while the halves were the same picture). The decoder seeks by adding the
+        # origin back (`_rewind`), so an ask in content time still lands on the right frame.
+        decoder = VideoDecoder(pixel_format="rgb24", max_size=self._pane_display_box(), content_time=True)
+        thread = QThread()
+        decoder.moveToThread(thread)
+        thread.start()
+        self._source_thread = thread
+        # Through the relay, not straight to `self`: see `_FrameRelay` (this class is not a QObject).
+        relay = _FrameRelay(self._on_original_frame)
+        self._compare_relay = relay
+        decoder.frame_ready.connect(relay.deliver)
+        decoder.error.connect(lambda message: log(f"source decoder: {message}"))
+        path = getattr(self.currentRenderOptions, "inputFile", "") or ""
+        if not decoder.open(str(path)):
+            log(f"source decoder: cannot open {path}")
+            return False
+        log(f"source decoder: opened {path}")
+        self._source_decoder = decoder
+        return True
+
+    def _warm_source_decoder(self) -> None:
+        """Open the source decoder during a quiet moment of a preview, so the first compare is just a seek."""
+        if getattr(self, "_source_decoder", None) is not None:
+            return
+        options = getattr(self, "currentRenderOptions", None)
+        if not (getattr(options, "inputFile", "") or ""):
+            return
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(700, self._open_source_decoder)
+
     def _on_original_requested(self, seconds: float, *, span: bool = False) -> None:
         """Decode ONE source frame at the playhead for the LMB compare (the input file, never the renderer).
 
@@ -3316,7 +3378,6 @@ class ProcessTab:
         self._compare_watch = float(seconds)
         # The compare's own instrument: what was asked, and (in `_on_original_frame`) what came back. The owner's
         # report was "a couple of frames after the right one" and neither number existed anywhere before this line.
-        self._compare_watch = float(seconds)
         if not getattr(self, "_compare_from_tick", False):
             pane = self.page_handles.proc.previewLabel
             showing = "-"
@@ -3328,67 +3389,10 @@ class ProcessTab:
             log(f"compare: asked for the source at {seconds:.3f}s (pane playhead "
                 f"{float(getattr(self, '_preview_playhead', 0.0)):.3f}s, showing {showing}s, "
                 f"mode {getattr(pane, '_view_mode', '?')})")
-    def _open_source_decoder(self) -> bool:
-        """Open the compare's source decoder (own thread, pane-boxed, content time). True when one is ready.
-
-        Split out of `_on_original_requested` so the FIRST switch to a compare mode does not pay for it: opening a 1440p
-        file costs a few hundred milliseconds on top of the first seek, which the owner felt as "пролаг больше секунды"
-        when switching to side by side (2026-11-26). `_warm_source_decoder` opens it while the preview is settling.
-        """
-        if getattr(self, "_source_decoder", None) is not None:
-            return True
-            from PySide6.QtCore import QThread
-
-            from .video.decode import VideoDecoder
-
-            # ITS OWN THREAD, which `decode.py` is written for ("the caller moves it to a QThread") and nothing did:
-            # on the GUI thread a 1440p source frame costs 12.5 ms of decode + a 6.2 MB pack, and the paint queue
-            # waits behind it. Measured 2026-11-26: split playback ran at 0.20x wall with both decoders on the GUI
-            # thread, while the same two decoders in their own event loops ran at 0.94x - the decode was never the
-            # limit, the thread was. The lead below only has capacity once this decode is off the paint thread.
-            # AT THE PANE'S BOX, like the result's own decoder (`_start_preview_playback`): a 1440p source handed
-            # over whole costs a 6.2 MB copy, a GUI-thread scale down to the result's size, a 6.2 MB upload and a
-            # 1440p mip chain per frame - to show 504x378. The fit happens in swscale inside the decode thread, and
-            # the two halves then arrive at the SAME size, so the pane scales nothing.
-            # CONTENT time, like both of the pane's other painters (the tail subtracts the output's start, the
-            # finished-file decoder does the same): the compare names its halves by timestamp and, before this, the
-            # source's own file times sat a fraction of a frame off the tail's derived ones, so the pair gate saw
-            # two moments for stretches and painted on its timeout (measured 2026-11-26: `pair_off` 1-9 of 15-22
-            # paints during inference, while the halves were the same picture). The decoder seeks by adding the
-            # origin back (`_rewind`), so an ask in content time still lands on the right frame.
-            decoder = VideoDecoder(pixel_format="rgb24", max_size=self._pane_display_box(), content_time=True)
-            thread = QThread()
-            decoder.moveToThread(thread)
-            thread.start()
-            self._source_thread = thread
-            # Through the relay, not straight to `self`: see `_FrameRelay` (this class is not a QObject).
-            relay = _FrameRelay(self._on_original_frame)
-            self._compare_relay = relay
-            decoder.frame_ready.connect(relay.deliver)
-            decoder.error.connect(lambda message: log(f"source decoder: {message}"))
-            path = getattr(self.currentRenderOptions, "inputFile", "") or ""
-            if not decoder.open(str(path)):
-                log(f"source decoder: cannot open {path}")
-                return
-            log(f"source decoder: opened {path}")
-        return True
-
-    def _warm_source_decoder(self) -> None:
-        """Open the source decoder during a quiet moment of a preview, so the first compare is just a seek."""
-        if getattr(self, "_source_decoder", None) is not None:
+        if getattr(self, "_source_decoder", None) is None and not self._open_source_decoder():
             return
-        options = getattr(self, "currentRenderOptions", None)
-        if not (getattr(options, "inputFile", "") or ""):
-            return
-        from PySide6.QtCore import QTimer
-
-        QTimer.singleShot(700, self._open_source_decoder)
-
-        decoder = getattr(self, "_source_decoder", None)
+        decoder = self._source_decoder
         try:
-            if decoder is None and not self._open_source_decoder():
-                return
-            decoder = self._source_decoder
             # A step FORWARD from the frame already on screen is one decode (12.5 ms measured on this 1440p source, an
             # 80 fps ceiling); a jump pays a keyframe rewind (median 176 ms, p95 321). The compare asks once per playhead
             # step, and at the rewind price the pair ran at a quarter of real time with the halves arriving apart
