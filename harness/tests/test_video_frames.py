@@ -193,3 +193,58 @@ def test_yuv420p_packing_stacks_luma_then_both_chroma_planes():
 def test_an_unknown_format_is_refused_loudly():
     with pytest.raises(ValueError):
         pack_frame(_StubFrame(1, 1, 0.0, b""), index=0, pixel_format="nv12")
+
+
+class _ResizingFrame:
+    """A decoded frame that records the geometry `reformat` was asked for."""
+
+    def __init__(self, width: int, height: int) -> None:
+        self.width, self.height, self.time = width, height, 1.0
+        self.resized: tuple[int, int] | None = None
+
+    def reformat(self, *, width: int, height: int):
+        self.resized = (width, height)
+        self.width, self.height = width, height
+        return self
+
+    def to_ndarray(self, format: str):  # noqa: A002 - PyAV's keyword
+        return _Plane(bytes(self.width * self.height * 3))
+
+
+def test_a_pane_box_never_stretches_the_picture():
+    """`size` is the PANE's shape, not the video's: a 4:3 frame must letterbox inside a 1260x896 box, not be squashed.
+
+    Live 2026-11-26: the squashed 1260x896 result made sbs draw both halves smaller during a render (the fit used the
+    box's 1.406 aspect) while the finished file's 4:3 frames filled them - the owner's "во время рендера почему-то оба
+    видео меньше, а после - целиком заполняют".
+    """
+    frame = _ResizingFrame(2880, 2160)
+
+    packed = pack_frame(frame, index=0, size=(1260, 896))
+
+    assert frame.resized == (1194, 896), "4:3 fitted into 1260x896, rounded to even sides"
+    assert (packed.width, packed.height) == (1194, 896), "the packed picture is what the decoder produced"
+
+
+def test_a_frame_smaller_than_the_box_is_left_alone():
+    frame = _ResizingFrame(640, 480)
+
+    pack_frame(frame, index=0, size=(1260, 896))
+
+    assert frame.resized is None, "the box is a ceiling, not a target: no upscale"
+
+
+def test_the_aspect_fit_also_applies_to_a_planar_request():
+    numpy = pytest.importorskip("numpy")
+    frame = _ResizingFrame(1440, 1080)
+    plane = numpy.zeros((frame.height * 3 // 2, frame.width), dtype=numpy.uint8)
+
+    def to_ndarray(format: str):  # noqa: A002 - PyAV's keyword
+        return numpy.zeros((frame.height * 3 // 2, frame.width), dtype=numpy.uint8)
+
+    frame.to_ndarray = to_ndarray
+
+    packed = pack_frame(frame, index=0, pixel_format="yuv420p", size=(504, 896))
+
+    assert frame.resized == (504, 378), "a 4:3 source fits the narrow box by width"
+    assert (packed.width, packed.height) == (504, 378)

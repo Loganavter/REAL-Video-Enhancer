@@ -114,9 +114,26 @@ def pack_frame(frame, index: int, pixel_format: str = "rgb24",
         # RGB24 picture of a 2880x2160 upscale is 24.9 MB per frame, and the pane draws about 504x378 of it - the
         # packing and the QImage in the pane moved 43x more bytes than the screen can use (owner, 2026-11-25: the
         # playback path should be the cheap one). Never upscales: a frame already smaller than `size` is left alone.
+        #
+        # THE ASPECT IS KEPT, because `size` is the PANE's box, not the video's. Handing the box straight to
+        # `reformat` squashed a 4:3 frame into the pane's 1260x896 shape (5.5 % vertically, measured live 2026-11-26),
+        # and the pane then read that squashed size as the picture's aspect - so sbs drew both halves SMALLER during a
+        # render (the result's 1260x896 became a 630x448 box and the 4:3 source letterboxed into it as 597x448) and
+        # full-size after it (the finished file's frames are 4:3: 630x474). The owner's words: "во время рендера
+        # почему-то оба видео меньше, а после - целиком заполняют необходимое пространство". `decode.py`'s fit and the
+        # backend's `DisplayStager.fit_box` already work this way - this was the one copy that stretched.
         target_w, target_h = max(1, int(size[0])), max(1, int(size[1]))
-        if target_w < int(frame.width) or target_h < int(frame.height):
-            frame = frame.reformat(width=target_w, height=target_h)
+        source_w, source_h = int(frame.width), int(frame.height)
+        scale = (min(target_w / float(source_w), target_h / float(source_h))
+                 if source_w > 0 and source_h > 0 else 1.0)
+        if scale < 1.0:
+            # Even sides: the planar formats' chroma planes are half-size, and an odd RGB row is pointless geometry.
+            # `round`, not `int`: 504/1440 is 0.35 exactly, but 1440*0.35 is 503.99999999999994, and truncating it
+            # cost the fit a whole pixel per side (`& ~1` then made it two).
+            fit_w = min(target_w, max(2, int(round(source_w * scale)))) & ~1
+            fit_h = min(target_h, max(2, int(round(source_h * scale)))) & ~1
+            if (fit_w, fit_h) != (source_w, source_h):
+                frame = frame.reformat(width=fit_w, height=fit_h)
     width, height = int(frame.width), int(frame.height)
     pts = frame_pts(frame) if pts is None else float(pts)
     if pixel_format == "rgb24":

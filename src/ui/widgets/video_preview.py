@@ -514,6 +514,17 @@ class VideoPreviewSurface(QRhiWidget):
         fields: dict[str, object] = {"mode": self._view_mode, "half": "pair"}
         fields.update({f"result_{k}": v for k, v in self._identity_fields(original=False).items()})
         fields["result_fp"] = "-" if result is None or result.isNull() else self._fingerprint(result)
+        # GEOMETRY, because "one half is smaller during the render and full after it" is a number, not an impression
+        # (owner, 2026-11-26: "во время рендера почему-то оба видео меньше, а после - целиком заполняют"). The pane fits
+        # `_image_size()` into the view rect, so the drawn size depends on the PICTURE's pixel size: a live tail frame
+        # and the finished file's frame can differ by a whole factor of two, and then the fit (and the letterbox the eye
+        # reads as "smaller") changes with the source of the picture.
+        box = self._frame_rect()
+        fields["px"] = f"{self._image_size()[0]}x{self._image_size()[1]}"
+        fields["rect"] = f"{box.left():.0f},{box.top():.0f},{box.width():.0f},{box.height():.0f}"
+        fields["scale"] = f"{self._result_scale():.4f}"
+        if original is not None and not original.isNull():
+            fields["original_px"] = f"{original.width()}x{original.height()}"
         if original is not None and not original.isNull():
             fields.update({f"original_{k}": v for k, v in self._identity_fields(original=True).items()})
             fields["original_fp"] = self._fingerprint(original)
