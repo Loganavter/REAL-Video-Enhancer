@@ -371,6 +371,12 @@ class VideoPreviewSurface(QRhiWidget):
     def has_frame(self) -> bool:
         return self._frame is not None or self._planes_size is not None
 
+    def oldest_result_time(self) -> float | None:
+        """The oldest result still waiting for a partner - the next picture the queue can paint."""
+        if not self._result_queue:
+            return None
+        return min(self._result_queue) / 1000.0
+
     def committed_time(self) -> float | None:
         """The media time of the pair the RENDERER holds - the picture actually on screen, not the newest arrival.
 
