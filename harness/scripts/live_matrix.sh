@@ -425,9 +425,11 @@ sleep 2
 WINDOW4="$(log_since "$MARK4")"
 read -r OFF4B TOTAL4B <<<"$(printf '%s\n' "$WINDOW4" | pair_off)"
 SHOT4="$(shot row4-after-drag)"
-if [ "$OFF4B" = "-" ]; then
+if ! [[ "${OFF4B:-}" =~ ^[0-9]+$ && "${OFF4A:-}" =~ ^[0-9]+$ ]]; then
+    # No `stats` line in one of the two windows: the level is too low (or the render never drew), so the row is
+    # UNPROVEN rather than a shell arithmetic error. A row that cannot be observed must say so (exit 2), never crash.
     row "playing, sbs, strip drag" "the last matched pair holds; the gap is bounded; no lone half" \
-        "no stats line (RVE_PREVIEW_LOG<1?)" "$ART/row4-window.txt" UNPROVEN
+        "no stats line in a window (RVE_PREVIEW_LOG<2?)" "$ART/row4-window.txt" UNPROVEN
 else
     GAIN=$((OFF4B - OFF4A))
     if [ "$GAIN" -le 0 ]; then
