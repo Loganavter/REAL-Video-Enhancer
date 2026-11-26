@@ -27,7 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-MARKERS = {"dead store": "# noqa: dead-store",
+MARKERS = {
+    "unreachable code": "noqa: unreachable code","dead store": "# noqa: dead-store",
            "used before assignment": "# noqa: used-before-assignment"}
 
 
@@ -169,12 +170,37 @@ def used_before_assignment(source: str, filename: str = "") -> list[Finding]:
     return sorted(findings, key=lambda f: f.first_line)
 
 
+def unreachable_code(source: str, filename: str = "") -> list[Finding]:
+    """Statements after a `return`/`raise`/`break`/`continue` in the same block: code that can never run.
+
+    Measured 2026-11-26 (`1f3878c3`): a mechanical method split left the whole decoder-opening body indented after
+    `return True`. The method then answered "ready" without creating anything, the compare's source half was never fed,
+    and 1538 tests stayed green - a dead branch reads as a working one to every test that mocks the seam. A statement
+    that cannot run is never a style question here: it is a fix that did nothing.
+    """
+    tree = ast.parse(source)
+    skip = _noqa_lines(source, "unreachable code")
+    findings: list[Finding] = []
+    for body in _blocks(tree):
+        for index, stmt in enumerate(body[:-1]):
+            if not isinstance(stmt, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+                continue
+            following = body[index + 1]
+            if following.lineno in skip or stmt.lineno in skip:
+                continue
+            findings.append(Finding("unreachable code", type(stmt).__name__.lower(), stmt.lineno, following.lineno,
+                                    filename))
+            break
+    return findings
+
+
 def check_paths(paths: Iterable[str]) -> list[Finding]:
     out: list[Finding] = []
     for p in paths:
         src = Path(p).read_text()
         out += dead_stores(src, p)
         out += used_before_assignment(src, p)
+        out += unreachable_code(src, p)
     return out
 
 

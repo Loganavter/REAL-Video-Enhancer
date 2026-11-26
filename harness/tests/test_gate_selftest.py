@@ -129,7 +129,7 @@ def test_every_ui_gate_rule_has_a_fixture() -> None:
 
 def test_every_astcheck_rule_has_a_fixture() -> None:
     covered = {verify_fixture(path)["check"] for path in _astcheck_fixtures()}
-    assert covered == {"dead store", "used before assignment"}
+    assert covered == {"dead store", "used before assignment", "unreachable code"}
 
 
 def test_the_ui_diff_ratchet_has_a_fixture() -> None:
@@ -139,6 +139,21 @@ def test_the_ui_diff_ratchet_has_a_fixture() -> None:
     sha = data["provenance"].rsplit("@ ", 1)[1]
     assert _git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0, f"{sha} is not a commit in this clone"
     assert data["rows"] and data["refused"] > 0
+
+
+def test_the_src_tree_has_no_unreachable_code() -> None:
+    """The gate over the real tree: `1f3878c3` put a whole opening body behind `return True` and 1538 tests stayed green.
+
+    Deliberately disabled bodies are marked `# noqa: unreachable code` with the reason next to them, so the exception is
+    visible at the line instead of hidden in a baseline file.
+    """
+    from harness import astcheck
+
+    findings = []
+    for path in sorted(ROOT.glob("src/ui/**/*.py")):
+        findings += astcheck.unreachable_code(path.read_text(encoding="utf-8"), str(path))
+
+    assert not findings, "\n".join(str(finding) for finding in findings)
 
 
 @pytest.mark.parametrize("fixture", PY_FIXTURES, ids=_id)

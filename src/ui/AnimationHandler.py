@@ -56,7 +56,10 @@ class AnimationHandler:
         self.animation.start()
 
     def dropDownAnimation(self, widget: QWidget, duration=200):
-        return
+        # disabled on purpose: the body below is kept for when the animation comes back. The
+        # unreachable-code gate flags the shape the 1f3878c3 split was (a body nobody can run), so the
+        # intent has to be stated instead of implied.
+        return  # noqa: unreachable code
         start_geometry = widget.geometry()
         end_geometry = QRect(
             start_geometry.x(),
@@ -76,7 +79,10 @@ class AnimationHandler:
         self.animation.start()
 
     def moveUpAnimation(self, widget: QWidget, duration=200):
-        return
+        # disabled on purpose: the body below is kept for when the animation comes back. The
+        # unreachable-code gate flags the shape the 1f3878c3 split was (a body nobody can run), so the
+        # intent has to be stated instead of implied.
+        return  # noqa: unreachable code
         widget.setVisible(True)
         start_geometry = widget.geometry()
         end_geometry = QRect(
@@ -96,7 +102,10 @@ class AnimationHandler:
         self.animation.start()
 
     def dropDownFadeInAnimation(self, widget: QWidget, duration=500):
-        return
+        # disabled on purpose: the body below is kept for when the animation comes back. The
+        # unreachable-code gate flags the shape the 1f3878c3 split was (a body nobody can run), so the
+        # intent has to be stated instead of implied.
+        return  # noqa: unreachable code
         # Ensure the widget is initially hidden
 
         # Drop-down animation
