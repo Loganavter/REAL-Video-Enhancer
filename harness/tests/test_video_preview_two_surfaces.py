@@ -649,7 +649,7 @@ def test_a_half_painted_pair_is_not_a_pair(surface):
 
 
 def test_a_cleared_pane_stays_cleared_when_a_late_source_arrives(surface):
-    """A pane told to be empty must not be repainted by a leftover source (audit 2026-11-27 §6.1b, probe G2).
+    """A pane told to be empty must not be repainted by a leftover source (CODE_PATTERNS §12: a clear is a clear).
 
     `set_result(None)` reset the picture but kept the queued results, and with `shown_moment()` None the source guard
     had nothing to compare against, so a late source re-keyed itself by its own moment and painted half a picture onto

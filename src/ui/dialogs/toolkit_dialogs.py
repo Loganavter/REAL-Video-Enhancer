@@ -2,7 +2,7 @@
 
 Why this module exists
 ----------------------
-W5 of ``projects/rve/docs/plans/plan-rve-ui-on-toolkit-2026-11-21.md``: a toolkit widget is a custom painter and never
+A toolkit widget is a custom painter and never
 receives ``WA_StyledBackground``, so the ``styleSheet()`` the old popups shared was a silent no-op once the widgets
 moved onto the toolkit. The reference host (Improve-ImgSLI) uses ``ThemedDialog``/``BaseDialog`` for windows and
 ``ToastManager``/``ToastAction`` for transient messages, and never styles either with QSS. These classes follow that

@@ -4,7 +4,7 @@ Before this module the pane held two queues (`_result_queue`/`_source_queue`), a
 (`_release_pair_paint`), a blocked-at stamp (`_pair_blocked_at`) and a predicate (`pair_in_sync`) - five data asserting
 conclusions about one picture, each able to disagree with the others. The renderer was handed the newest result alone
 whenever its source was missing, which is the normal state after every refused source and before every first source
-frame, so a compare mode painted "the upscale, then the original" (audit 2026-11-27 §6.1, probe D2/E2). The queues also
+frame, so a compare mode painted "the upscale, then the original" (CODE_PATTERNS §2/§5: one writer, one render gate). The queues also
 survived a clear, so a late source re-keyed itself by its own moment and painted half a picture onto a pane told to be
 empty (§6.1b, probe G2).
 
@@ -180,7 +180,7 @@ class PairWriter:
             return
         if self._cleared:
             # A pane whose painted picture had a moment refuses every source until a result is published again: the
-            # moment no longer exists, so a source can only be a picture of the past (audit 2026-11-27 §6.1b, f1ed720e).
+            # moment no longer exists, so a source can only be a picture of the past (CODE_PATTERNS §12: a clear is a clear).
             # A clear that found the pane already empty has no such deadline - the source is then the ONLY picture there
             # is (a compare mode opened before its first result), which is the one case a lone source is painted.
             if self._cleared_moment is not None:

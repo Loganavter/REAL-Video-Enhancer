@@ -1,6 +1,6 @@
 """The pair writer: a compare mode paints a pair or holds the last one, and one hard limit says otherwise.
 
-Why this file exists (audit 2026-11-27 §6.1/§6.1b, rules §2/§7/§9): the pane used to answer "what is on screen" with two
+Why this file exists (harness/docs/CODE_PATTERNS.md §2, §5, §7, §9, §12): the pane used to answer "what is on screen" with two
 queues, a valve timer and a predicate that could each disagree with the others, and the renderer was handed the newest
 result ALONE whenever its source was missing - which is the normal state at every refused source, so the compare flashed
 "the upscale, then the original" and the strip drag blanked the left half for ~1.3 s (31 draws in the owner's log).

@@ -141,6 +141,18 @@ crop_stat() {                  # crop_stat <png> <x> <y> <w> <h> <fx>
     "$IMAGEMAGICK" "$1" -crop "${4}x${5}+${2}+${3}" +repage -colorspace Gray -format "%[fx:$6]" info: 2>/dev/null
 }
 
+picture_rect() {               # the newest draw line's rect="x,y,w,h" - the picture itself, with no bar or transport
+    python3 - "$1" <<'PYEOF'
+import re, sys
+rect = None
+for line in open(sys.argv[1], errors="replace"):
+    m = re.search(r" rect=(\d+),(\d+),(\d+),(\d+)", line)
+    if m:
+        rect = m.groups()
+print(" ".join(rect) if rect else "")
+PYEOF
+}
+
 crop_sig() {                   # crop_sig <png> <x> <y> <w> <h> -> a hash of the region's pixels
     "$IMAGEMAGICK" "$1" -crop "${4}x${5}+${2}+${3}" +repage -colorspace Gray -format "%[signature]" info: 2>/dev/null
 }
@@ -624,8 +636,8 @@ printf '%s\n' "$WINDOW9" > "$ART/row9-window.txt"
 
 echo
 echo "live_matrix: $MISMATCHES mismatch(es), $UNPROVEN unproven row(s); artifacts in $ART"
-echo "live_matrix: the 'playing, sbs, strip drag' row is EXPECTED to mismatch on the 2026-11-27 tree (plan §P0);"
-echo "             it is the gate for plan P1's pair writer, not a flake."
+echo "live_matrix: the 'playing, sbs, strip drag' row was the gate for plan P1 (pair writer, 79ea250c)."
+echo "             Since then a MISMATCH there is a regression, not the expected state."
 if [ "$MISMATCHES" -gt 0 ]; then exit 1; fi
 if [ "$UNPROVEN" -gt 0 ]; then exit 2; fi
 exit 0

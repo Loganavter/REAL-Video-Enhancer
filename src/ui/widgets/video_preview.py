@@ -377,7 +377,7 @@ class VideoPreviewSurface(QRhiWidget):
             # A CLEAR means the pane is EMPTY: the painter drops the pair and refuses a source offered for a moment
             # from before the clear. Keeping a queue across it meant a late source re-keyed itself by its own moment
             # (`shown_moment()` is None here, so `set_source`'s guard was skipped by construction) and painted half a
-            # picture back onto a pane told to be empty (audit 2026-11-27 §6.1b, probe G2).
+            # picture back onto a pane told to be empty (CODE_PATTERNS §12: a clear is a clear).
             self._pair.clear()
             self.update()
         elif planes_frame is not None:
@@ -670,7 +670,7 @@ class VideoPreviewSurface(QRhiWidget):
             if self._pair.cleared:
                 # The pane was told to be EMPTY and nothing has been published since: a late source for a moment
                 # before the clear must not re-key itself (`shown_moment()` is None, so the check below cannot see it)
-                # and paint half a picture onto an empty pane (audit 2026-11-27 §6.1b).
+                # and paint half a picture onto an empty pane (CODE_PATTERNS §12).
                 snapshot = None
             same_generation = int(snapshot.generation) == int(self._result_generation) if snapshot is not None else False
             if snapshot is not None and not same_generation:

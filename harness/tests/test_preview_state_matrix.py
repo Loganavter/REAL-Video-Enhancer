@@ -324,7 +324,7 @@ def _frame_ref(pts: float, index: int = 0) -> FrameRef:
 def test_a_paused_sbs_pair_is_one_moment_and_asks_for_nothing():
     """`paused, sbs, pair`: both halves of ONE moment, `compare fill asks=0` over a quiet window, no gap.
 
-    Pins `PREVIEWER_RULES.md` §5 and `code-patterns.md` §6: a cache may not evict the answer it is being asked for, and a
+    Pins `harness/docs/CODE_PATTERNS.md` §5 and `code-patterns.md` §6: a cache may not evict the answer it is being asked for, and a
     paused pane is asked for one picture at its own moment, never for a decode lead. The defect it pins is the owner's
     "the original blinks a couple of times with playback never started" (`asks` climbing while the pane stands still, the
     lead walk evicting the picture on screen).
@@ -372,7 +372,7 @@ def test_a_paused_sbs_pair_is_one_moment_and_asks_for_nothing():
 def test_a_paused_sbs_pane_with_no_source_stays_empty_and_paints_no_lone_half(clock):
     """`paused, sbs, no source`: the left half stays empty and the result is never handed over alone.
 
-    Pins `PREVIEWER_RULES.md` §2 / audit §6.1: `_request_frame_paint` used to call `_commit_newest()` whenever
+    Pins `harness/docs/CODE_PATTERNS.md` §2 / the preview audit §6.1: `_request_frame_paint` used to call `_commit_newest()` whenever
     `_original is None` - the normal state before the first source frame and after every refused one - so the upscale
     was painted alone and the original followed a frame later (owner: "оригинал не отрисовывается одновременно с
     апскейлом в режиме side by side"). The compare mode must paint a PAIR or nothing; the only permitted escape is the
@@ -417,7 +417,7 @@ def test_a_paused_sbs_pane_with_no_source_stays_empty_and_paints_no_lone_half(cl
 def test_steady_sbs_playback_paints_every_pair_with_its_source_and_no_frame_delta(clock):
     """`playing, sbs, steady`: every painted pair carries the source, `delta_frames == 0`.
 
-    Pins `PREVIEWER_RULES.md` §2 and the pair queue's contract (`_pick_pair` / `_commit_pair`): the renderer gets a
+    Pins `harness/docs/CODE_PATTERNS.md` §2 and the pair queue's contract (`_pick_pair` / `_commit_pair`): the renderer gets a
     result and a source of the SAME moment, whichever half arrived first, and never a half-updated pair. The defect is
     the 40 ms window of mismatched halves the owner read as flicker: one half committed on its own arrival, the other
     on the next.
@@ -456,7 +456,7 @@ def test_steady_sbs_playback_paints_every_pair_with_its_source_and_no_frame_delt
 def test_a_strip_drag_holds_the_last_matched_pair_and_bounds_the_gap(clock):
     """`playing, sbs, strip drag`: the last matched pair holds; the gap is bounded; no lone-half flashes.
 
-    Pins audit §6.3 (a drag clears the register 10-60x/second and every source offer is then refused as the wrong
+    Pins the preview audit §6.3 (a drag clears the register 10-60x/second and every source offer is then refused as the wrong
     generation) plus the plan's P0 row. Written as the INTENDED behaviour: after the pair writer exists
     (`src/ui/preview/pair.py`, one `CommittedPair`), the committed pair is what the pane draws, so a refused neighbour
     cannot take the source half away from a picture that is still on screen.
@@ -523,7 +523,7 @@ def test_a_strip_drag_holds_the_last_matched_pair_and_bounds_the_gap(clock):
 def test_a_seek_on_a_paused_pane_gaps_then_pairs_the_new_moment():
     """`seek on a paused pane`: a gap, then the new moment; left and right are the same moment.
 
-    Pins `PREVIEWER_RULES.md` §1/§2 and `_flush_on_jump`: a press is a new moment, so the pair the pane holds belongs to
+    Pins `harness/docs/CODE_PATTERNS.md` §1/§2 and `_flush_on_jump`: a press is a new moment, so the pair the pane holds belongs to
     the moment it is leaving. The result of the seek arrives before its source (the tail re-decodes), and the pane must
     show a GAP for that first frame rather than pair the new result with the picture of the old moment - the
     `delta_frames=-80` transition the flush exists for.
@@ -670,7 +670,7 @@ def _completion_tab(pane, monkeypatch):
 def test_render_end_opens_a_new_generation_whose_first_pair_is_whole(monkeypatch):
     """`render end -> finished file`: no frame of the previous file; the first pair of the new generation is whole.
 
-    Pins `PREVIEWER_RULES.md` §3 and `ProcessTab._start_preview_playback`: the finished file is a NEW SOURCE, so its
+    Pins `harness/docs/CODE_PATTERNS.md` §3 and `ProcessTab._start_preview_playback`: the finished file is a NEW SOURCE, so its
     frames are a new generation, and the pane keeps the last painted frame until that generation has a whole pair. The
     two defects it pins are the "previous file's frame after the render ended" (a picture promoted across the handover)
     and the lone half at the seam (a new result painted beside the old file's source).
@@ -724,7 +724,7 @@ def test_render_end_opens_a_new_generation_whose_first_pair_is_whole(monkeypatch
 def test_a_cleared_pane_is_still_empty_at_two_seconds_and_at_ten(clock):
     """`cleared pane`: empty at 2 s and at 10 s.
 
-    Pins `PREVIEWER_RULES.md` §3 / audit §6.1b, probe G2: `set_result(None)` used to reset the picture but keep the pair
+    Pins `harness/docs/CODE_PATTERNS.md` §3 / CODE_PATTERNS §12: `set_result(None)` used to reset the picture but keep the pair
     queues, and with `shown_moment()` None the source guard was skipped by construction, so a late source re-keyed
     itself by its own moment and painted half a picture onto the pane that was told to be empty. The state clock is the
     pane's: the row advances a fake monotonic, never a wall clock.
@@ -777,7 +777,7 @@ def test_a_cleared_pane_is_still_empty_at_two_seconds_and_at_ten(clock):
 def test_a_refused_press_leaves_the_generation_and_the_register_untouched(monkeypatch):
     """`refused press`: the result generation and the compare register are unchanged.
 
-    Pins `PREVIEWER_RULES.md` §4 / audit §6.3, probe B: `_on_preview_seek` bumped the result generation before choosing
+    Pins `harness/docs/CODE_PATTERNS.md` §4 / CODE_PATTERNS §3: `_on_preview_seek` bumped the result generation before choosing
     a route, and every refusal returned after the bump; `_next_result_generation` also clears the register. A press the
     pane could not serve therefore took generation 7 -> 8 and the register 3 -> 0, and every source offer was refused as
     the wrong generation until the next result - the blank half after a click.
@@ -827,7 +827,7 @@ def test_a_refused_press_leaves_the_generation_and_the_register_untouched(monkey
 def test_an_export_in_sbs_takes_both_halves_from_the_block_while_the_render_is_alive(monkeypatch):
     """`export, sbs`: both halves from one owner; `held_block` only while the render is alive.
 
-    Pins `PREVIEWER_RULES.md` §6 and `code-patterns.md` §2: during an export the renderer publishes the SOURCE of each
+    Pins `harness/docs/CODE_PATTERNS.md` §6 and `code-patterns.md` §2: during an export the renderer publishes the SOURCE of each
     composited frame into its own block, so both halves come from one production at one media time - the decoder must
     not spend a second decode on the moment the block already answers. The register's pool count is split by producer
     (`held_block`/`held_decoder`) so "24 held" cannot be read as "24 source frames", and the block's pictures belong to

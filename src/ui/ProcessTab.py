@@ -3182,7 +3182,7 @@ class ProcessTab:
         fraction = float(fraction)
         # A SEEK starts a new result generation - but only a seek that is actually ASKED FOR. The bump used to run here,
         # before any route was chosen, so a press the pane could not serve invalidated the picture identity and cleared
-        # the compare register while nothing on screen moved (audit 2026-11-27 §6.3, probe B: a refused press took
+        # the compare register while nothing on screen moved (CODE_PATTERNS §3: a refused attempt must not mint a token - a refused press took
         # generation 7 -> 8 and the register 3 -> 0, and every source offer was refused as the wrong generation until
         # the next result arrived - the owner's blank left half after a press). Every route below bumps when it asks.
         bumped = False

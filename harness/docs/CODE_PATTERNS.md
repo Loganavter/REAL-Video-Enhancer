@@ -141,7 +141,15 @@ Known live cases of a datum asserting a conclusion about a picture: `_shown_time
 refused press. A new boolean that describes the picture is the defect, not the fix. If the fact is not in the pane's own
 state, add it to the pane.
 
-## 12. What not to copy from BlinkTable
+## 12. A clear is a clear
+
+Telling a pane to be empty must empty it: the picture, its queued frames, its source half, and the right to paint a
+leftover picture back. Two live defects of this shape: `set_result(None)` kept the queued results, so a late source
+re-keyed itself by its own moment (the pane's moment is None, so the moment guard had nothing to compare against) and
+painted half a picture onto an empty pane; and a theme flip reset the "told to be empty" latch. After a clear the writer's
+`painted()` answers `None` - not an object whose halves happen to be None, which a caller reads as "a picture is there".
+
+## 13. What not to copy from BlinkTable
 
 Its Store/Dispatcher/Reducer/undo runtime (~16.9k lines), the 44-member `TabContract` framework, the plugin protocol with
 startup tiers, and the QRhi tiled-pass package protocol. All of them solve problems this app does not have; adopting them
