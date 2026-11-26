@@ -59,6 +59,10 @@ renderer does, exactly one function may write it, and a test must fail when a se
 - The compare's source cache: `SourceRegister` — producers only `offer`, the presenter only asks.
 - The generation token: minted by the thing that actually changed (a job, a file, a seek that was *asked for*), never by an
   attempt that was refused.
+- The transport: `preview/controls.py` builds the one bar from `preview/actions.py` specs, and `preview/timeline.py`
+  is the one scrubber. The pane used to paint a second strip and emit its own fraction-valued `seekRequested`; both
+  were deleted (audit §6.6), so a seek has exactly one shape — the bar's `SEEK_TO` in seconds through the
+  controller.
 
 Cheap enforcement, in the spirit of BlinkTable's `test_strip_single_renderer.py` / `test_single_upload_queue.py`: grep-based
 or AST tests that fail on the second owner existing at all, not on it misbehaving.

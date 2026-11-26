@@ -559,7 +559,6 @@ def test_the_lmb_compare_asks_at_the_pts_of_the_frame_on_screen(qapp, scratch_di
         asked: list[float] = []
         pane.originalRequested.connect(asked.append)
         middle = QPointF(pane.width() / 2.0, pane.height() / 2.0)
-        assert pane._strip_rect().contains(middle) is False, "the press must miss the strip to be the LMB compare"
 
         _press(pane, middle)
         _release(pane, middle)

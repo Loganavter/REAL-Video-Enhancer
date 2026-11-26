@@ -56,9 +56,6 @@ class ActionSpec:
     checkable: bool = False
     #: exclusive visual group (the toolkit's `ButtonGroup` is a container; the exclusivity is a `QButtonGroup`).
     group: str | None = None
-    #: a HOLD control: `command` fires on press and `release_command` on release (the LMB compare).
-    hold: bool = False
-    release_command: PreviewCommand | None = None
     #: the keyboard route for the verb (the pane's `WidgetShortcut`; the slider keeps its own arrows).
     shortcut: str | None = None
     variant: str = "surface"
@@ -141,6 +138,10 @@ def build_button(spec: ActionSpec, parent=None, *,
 
     `corner_radii` (design px, tl/tr/br/bl) nests the button into its group capsule; `extra_layers` are the toolkit's
     own paint hooks, used for the checked ring.
+
+    A control emits exactly ONE verb: a toggle emits its command when it is checked (the family unchecks the rest), and
+    a plain button on release. There is no hold/press-and-release pair any more - the compare is the pane's LMB gesture
+    (`VideoPreviewSurface.mousePressEvent`), not a bar button (owner, 2026-11-25: "Зачем нужна кнопка compare?").
     """
     width, height = spec.size
     button = Button(

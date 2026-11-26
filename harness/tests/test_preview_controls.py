@@ -342,10 +342,10 @@ def test_every_command_is_covered():
 
     The compare is deliberately NOT a button (owner, 2026-11-25: "Зачем нужна кнопка compare?"): holding LMB on the
     picture is the gesture, so `COMPARE_DOWN/UP` have no catalog entry - the controller still dispatches them for the
-    surface port.
+    surface port. A spec emits ONE verb (`checkable` -> on check, else on release); the old hold/release pair was the
+    same button implementation of that gesture and is deleted (audit 2026-11-27 §6.6).
     """
     covered = ({spec.command for spec in ACTIONS}
-               | {spec.release_command for spec in ACTIONS if spec.release_command is not None}
                | {PreviewCommand.SEEK_TO, PreviewCommand.SEEK_FRACTION,
                   PreviewCommand.COMPARE_DOWN, PreviewCommand.COMPARE_UP})
     # `TOGGLE_FULLSCREEN` is WINDOW-owned now: the preview bar carries no control for it (owner, 2026-11-26: "саму кнопку
@@ -847,7 +847,10 @@ def test_the_page_reports_a_finished_file_backend(controls):
     assert controller.state().seek_ceiling == pytest.approx(20.0)
 
 
-def test_installing_the_controls_hides_the_old_strip_and_button():
+def test_installing_the_controls_retires_the_old_strip_and_hides_the_button():
+    """The install makes the bar the only transport: the page's pause button stands down, and the pane's own painted
+    strip does not exist to hide (it is deleted, audit 2026-11-27 §6.6) - only its named, inert entry point remains.
+    """
     from src.ui.ProcessTab import ProcessTab
     from src.ui.widgets.video_preview import VideoPreviewSurface
 
@@ -882,7 +885,11 @@ def test_installing_the_controls_hides_the_old_strip_and_button():
     page._install_preview_controls()
     assert legacy.isVisible() is False
     assert page._preview_controls is not None
-    assert pane._strip_visible is False          # the painted strip stands down (public set_strip_visible)
+    # The pane's own painted strip is DELETED (audit 2026-11-27 §6.6), so there is nothing to hide: the page's call
+    # is the named, inert survivor, and the bar is the only strip. What must never come back is the second organ.
+    assert not hasattr(pane, "_strip_visible") and not hasattr(pane, "seekRequested"), (
+        "the pane paints no strip and offers no seek: the transport bar is the window's only one")
+    pane.set_strip_visible(False)     # the page's call still answers, and changes nothing
     # The bars are wired to the controller: a command from the view reaches the state machine (fullscreen is the one
     # verb that works with nothing on the pane, so the wiring can be proven without a render).
     page._preview_controls.commandRequested.emit(PreviewCommand.TOGGLE_FULLSCREEN, None)

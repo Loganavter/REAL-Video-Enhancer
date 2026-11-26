@@ -6,8 +6,11 @@ first thing measured is the thing that can be wrong in the most ways (texture up
 
 The pane carries **two surfaces, one playhead** (`set_view_mode`, 2026-11-24): the render result and the source
 picture, shown as `single` (today's pane), `sbs` (result right, original left, half the width each) or `split` (one
-picture, the original left of a vertical divider). They are two draws inside the SAME RHI pass - one clear per frame -
-and the strip/HUD is painted once for the whole widget, so a seek means the same playhead in every mode.
+picture, the original left of a vertical divider). They are two draws inside the SAME RHI pass - one clear per frame.
+The pane paints NO strip and takes NO seek: `src/ui/preview/controls.py` builds the one transport bar (its scrubber is
+`PreviewTimeline`), and a seek reaches the host through the controller in seconds. The pane's own painted strip, its
+four gesture guards and its fraction-valued `seekRequested`/`seekBlocked` were the second implementation of both and
+are deleted (audit 2026-11-27 §6.6; CODE_PATTERNS §2 "one writer per fact").
 
 Decisions encoded here, each from a measurement or an owner call:
 
@@ -23,15 +26,17 @@ Decisions encoded here, each from a measurement or an owner call:
 
 Since the phase-0 seam of `plan-rve-preview-controls-frame-path-2026-11-25` the RHI side lives in
 `src/ui/widgets/preview_renderer.py`: `PreviewRenderer` owns the textures, samplers, SRBs, pipelines, uploads and the
-pass; this class owns the widget API, the zoom/pan/mvp geometry, the frame/state bookkeeping, the strip and its child
-widgets. It hands the renderer one `PreviewScene` per paint and receives what was drawn back through `on_draw`.
+pass; this class owns the widget API, the zoom/pan/mvp geometry and the frame/state bookkeeping. It hands the renderer
+one `PreviewScene` per paint and receives what was drawn back through `on_draw`.
 
 The pane accepts a RESULT through one guarded API, `set_result(ResultPicture(moment, picture, generation))`: the
 generation must not be older than the picture on screen, its moment must not go backwards within one generation, and a
 compare mode refuses a picture that names no moment (it must not inherit the previous clock). `set_frame` and
 `set_frame_planes` remain as thin compatibility adapters that pass through the same guards - the planes path is the
-YUV playback path's cheap one (no QImage, no `to_ndarray`, colour conversion in the fragment shader). The SOURCE half
-has its own guarded API, `set_source(SourcePicture)`, and only the page's one synchroniser calls it.
+YUV playback path's cheap one (no QImage, no `to_ndarray`, colour conversion in the fragment shader); `set_frame` is
+also the page's pane-shape probe (`hasattr(pane, "set_frame")` tells this surface from the raster `ImageLabel`
+fallback, `pages/proc_page.py`) and the only entry point a pre-`set_result` harness double gets. The SOURCE half has
+its own guarded API, `set_source(SourcePicture)`, and `set_original` is that same guard in the old two-argument form.
 
 What reaches the renderer is NOT decided here: `src/ui/preview/pair.py` owns the painted pair - a compare mode paints a
 pair or holds the last one, one documented hard limit is the only way a half is shown alone, and nothing else in the
@@ -50,20 +55,12 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QRhiWidget
 
 from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager
-from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
+from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 
 from src.ui.video import telemetry
 from src.ui.preview.pair import CommittedPair, Half, PairWriter
 from src.ui.preview.source_register import ResultPicture, SourcePicture
-from src.ui.widgets.playback_strip import (
-    PlaybackTimeReadout,
-    playhead_halo_radius,
-    rgba,
-    strip_colours,
-    strip_handle_radius,
-    strip_margin,
-    strip_track_height,
-)
+from src.ui.widgets.playback_strip import rgba, strip_colours
 from src.ui.widgets.preview_renderer import (
     PreviewDrawn,
     PreviewFrame,
@@ -183,12 +180,10 @@ class VideoPreviewSurface(QRhiWidget):
         self._pan = [0.0, 0.0]
         #: straight-alpha multiply tint; (1,1,1,0.55) dims a stale frame while a seek is in flight
         self._tint = (1.0, 1.0, 1.0, 1.0)
-        #: (rendered, total, playhead, duration) - the two time bases the plan keeps apart. `total`/`duration` of 0
-        #: hide their marker; the strip stays visible as long as a frame is shown.
+        #: (rendered, total, playhead, duration) - the two time bases the plan keeps apart. The pane does not paint a
+        #: strip: the transport bar (`preview/controls.py` + `preview/timeline.py`) shows these, and the pane keeps them
+        #: for the HUD-less draw log and for the standing-source ask (`_request_standing_original`).
         self._progress = (0.0, 0.0, 0.0, 0.0)
-        self._strip_visible = True
-        self._hud_dirty = True
-        self._scrubbing = False
         self._panning = False
         #: Where the LMB went down, while a drag could still turn into a pan (cleared once it does).
         self._left_press = None
@@ -235,40 +230,17 @@ class VideoPreviewSurface(QRhiWidget):
         #: Opaque clear colour for the pane. QRhiWidgets composite by OVERWRITING their rect, so a clear with alpha
         #: below 255 punches a hole (black on Wayland, white on xcb) instead of letting the page show through - the
         #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
-        #: precedents. The pane is therefore always opaque, with the page's own colour.
-        self._clear_colour = self.palette().window().color()
-        #: strip geometry in widget px, from the toolkit's own `Slider` constants through `UiScale` (see
-        #: `_apply_strip_metrics`); the HUD pass draws in widget pixels, so nothing here is a hand-picked number
-        self._strip_margin = strip_margin()
-        self._strip_height = strip_track_height()
-        self._handle_radius = strip_handle_radius()
-        self._playhead_halo_radius = playhead_halo_radius(self._handle_radius)
-        #: hovered position on the strip (fraction 0..1), and whether it is past the produced edge
-        self._hover_fraction: float | None = None
-        self._hover_blocked = False
-        #: how far the strip may seek, when the owner can render any frame on demand (an export's display feed).
-        #: `None` = follow the produced edge (the live tail's honest limit); see `set_seek_ceiling`.
-        self._seek_ceiling: float | None = None
-        #: Opaque clear colour for the pane. QRhiWidgets composite by OVERWRITING their rect, so a clear with alpha
-        #: below 255 punches a hole (black on Wayland, white on xcb) instead of letting the page show through - the
-        #: framework's `lifecycle-first-frame-signal-gating` and `painting-qrhiwidget-cannot-alpha-blend-siblings`
-        #: precedents. The pane is therefore always opaque, with the page's own colour.
+        #: precedents. The pane is therefore always opaque, with the page's own colour. (Written ONCE: the two-line
+        #: duplicate of this paragraph and assignment was audit 2026-11-27 §6.10's dead copy.)
         self._clear_colour = self.palette().window().color()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        # Hover feedback on the strip (marker + forbidden cursor over the unprocessed part) needs move events while no
-        # button is held; without tracking, `mouseMoveEvent` only arrives during a drag (measured: the cursor never
-        # changed in the hover test).
+        # The `split` divider's hover (its cursor, and the fade once the pointer leaves) needs move events while NO
+        # button is held: without tracking, `mouseMoveEvent` only arrives during a drag and the divider never shows as a
+        # control. (The strip's hover used this too, and the strip is gone; the divider is what still needs it.)
         self.setMouseTracking(True)
-        #: The time display is a real widget, NOT part of the HUD: that pass is one rect-only draw and has no glyphs.
-        #: A child of the pane composites above the RHI surface (the framework's precedent for a QRhiWidget: it
-        #: overwrites its own rect and cannot alpha-blend, while its children are composed by Qt afterwards), and the
-        #: pane owns both its text and its placement so a resize/seek keeps the two in step.
-        self._time_readout = PlaybackTimeReadout(self)
-        self._time_readout.setVisible(self._strip_visible)
-        # The strip reads the theme at paint time, so a theme flip must repaint it; the readout recolours itself.
+        # The compare's seam/divider resolve their tokens at paint time (`strip_colours` in `_compare_boundary_rects`),
+        # so a theme flip must repaint the pane.
         ThemeManager.get_instance().theme_changed.connect(self._on_theme_changed)
-        # The toolkit scale multiplies the strip's geometry; re-read the constants and re-place the caption.
-        UiScale.get_instance().scale_changed.connect(self._on_scale_changed)
 
     def setAutoFillBackground(self, enabled: bool) -> None:  # noqa: N802 - Qt spelling
         """A no-op, on purpose.
@@ -281,13 +253,11 @@ class VideoPreviewSurface(QRhiWidget):
     def showEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         """Re-post a paint after being shown: a widget that was hidden may come back with an undrawn target."""
         super().showEvent(event)
-        self._position_readout()
         self.update()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         """Ask for a repaint after a resize - `initialize()` has just been called with a new target size."""
         super().resizeEvent(event)
-        self._position_readout()
         if telemetry.level() >= 1:
             telemetry.event("resize", w=self.width(), h=self.height(),
                             dpr=round(float(self.devicePixelRatioF()), 2))
@@ -403,7 +373,6 @@ class VideoPreviewSurface(QRhiWidget):
                 self._result_frame_seconds = delta
         self._result_moment = None if moment is None else float(moment)
         self._result_gap = False
-        self._refresh_readout()
         # The name and the time FIRST: the gate reads the time, and the draw log must carry THIS picture.
         if index is not None:
             self._shown = ("frame", int(index))
@@ -792,8 +761,9 @@ class VideoPreviewSurface(QRhiWidget):
         The invariant of the compare modes, and the reason the wheel is ignored over the original's half: **both
         pictures are drawn at the RESULT's source-pixel scale**, so a feature is the same apparent size on both sides.
         The original's zoom is derived from the result - it is never stored separately - and neither picture is
-        stretched into its half: each keeps its own aspect and is letterboxed on its own. The strip is painted once for
-        the whole widget and drives the same `seekRequested`, so a seek means the same playhead in every mode.
+        stretched into its half: each keeps its own aspect and is letterboxed on its own. A seek is the TRANSPORT bar's
+        gesture (`preview/timeline.py`), outside this widget, so it means the same playhead in every mode without the
+        pane owning a second strip.
 
         Outside "single" the source picture is a STANDING pane - there is no button to hold - so opening a compare mode
         asks the host for the source at the playhead (`originalRequested`), and the request is repeated when the
@@ -809,7 +779,6 @@ class VideoPreviewSurface(QRhiWidget):
         self._stop_divider_fade(reset=True)
         # Leaving "single" ends a flash: the source becomes the standing pane instead of a held picture.
         self._showing_original = False
-        self._hud_dirty = True
         # Both textures get re-uploaded once: `single` may have left the source in the shared one, and the compare
         # modes keep the result there. Cheap (one upload) and it removes a whole class of "stale half" readings. The
         # The renderer owns those flags and the mode they depend on, so it hears the mode change before any frame
@@ -956,11 +925,11 @@ class VideoPreviewSurface(QRhiWidget):
 
     def set_progress(self, rendered: float, total: float, playhead: float = 0.0,
                      duration: float = 0.0) -> None:
-        """Two markers, two bases: how much the renderer has produced, and where playback stands.
+        """How much the renderer has produced, and where playback stands - published to the TRANSPORT bar.
 
         `rendered/total` is the render's progress (live: frames or seconds produced so far); `playhead/duration` is
-        media time. Either pair with a zero denominator hides its marker - the strip stays, the marker does not
-        pretend to be at 0%.
+        media time. The pane paints no strip of its own any more: the numbers are kept because the draw log and the
+        standing-source ask read them, and the bar reads them off `PreviewState` (the page's one push).
 
         In a compare mode this is also the clock of the standing original: a playhead that moved means the source
         pictured on the left is one frame old, so the host is asked for the new one (the same `originalRequested`
@@ -969,8 +938,6 @@ class VideoPreviewSurface(QRhiWidget):
         """
         previous_playhead = self._progress[2]
         self._progress = (float(rendered), float(total), float(playhead), float(duration))
-        self._hud_dirty = True
-        self._refresh_readout()
         self.update()
         if float(playhead) != float(previous_playhead):
             self._request_standing_original()
@@ -987,30 +954,17 @@ class VideoPreviewSurface(QRhiWidget):
         self.update()
 
     def set_strip_visible(self, visible: bool) -> None:
-        self._strip_visible = bool(visible)
-        self._hud_dirty = True
-        self._time_readout.setVisible(self._strip_visible)
-        self._position_readout()
-        self.update()
+        """RETIRED with the pane's painted strip: inert on purpose, and the only survivor of that organ.
 
-    def set_seek_ceiling(self, fraction: float | None) -> None:
-        """How far the strip may seek: `None` = the produced edge, a fraction = the owner's own reach.
-
-        The produced edge is the honest limit while the pane follows a live tail: nothing exists past it. An export's
-        display feed is different - it renders any frame of the timeline on demand - so the host lifts the edge to
-        1.0 there and restores `None` when the tail owns the pane again. The hover cursor follows, so the strip stops
-        claiming the rest of the timeline is unreachable while the feed can serve it.
+        The shipped window is the one `src/ui/preview/controls.py` builds - a transport bar with a real scrubber
+        (`PreviewTimeline`) - and it is installed by `ProcessTab._install_preview_controls`, which still makes this
+        call because that file belongs to another lane in this wave. Two RHI pixel tests also call it to keep chrome
+        out of their sampled rect. Three callers, one method: it is kept as a NAMED entry point so no caller logs a
+        failure, and it does nothing because this class paints no strip and has no readout to hide. A future caller
+        that "needs" it is asking for the second bar back (CODE_PATTERNS §2).
         """
-        ceiling = None if fraction is None else max(0.0, min(1.0, float(fraction)))
-        if ceiling == self._seek_ceiling:
-            return                      # the host re-asserts this every tick; an unchanged edge repaints nothing
-        self._seek_ceiling = ceiling
-        self._hover_fraction = None
-        self.unsetCursor()
-        self.update()
+        del visible
 
-    seekRequested = Signal(float)     # fraction 0..1 of the strip (inside the produced range, or the host's ceiling)
-    seekBlocked = Signal(float)       # a seek was asked for past the reachable edge; nothing moved
     zoomChanged = Signal(float)       # the new zoom factor
     originalRequested = Signal(float)  # playhead seconds: the host decodes the SOURCE frame at this time
 
@@ -1057,19 +1011,6 @@ class VideoPreviewSurface(QRhiWidget):
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
-            if self._strip_visible and self._strip_rect().contains(position):
-                fraction = self._fraction_at(position.x())
-                if not self._seekable(fraction):
-                    # Past the reachable edge there is nothing to seek to. Refusing is the honest answer: emitting a
-                    # seek the owner cannot satisfy would move the playhead over a picture that does not exist.
-                    self.seekBlocked.emit(fraction)
-                    event.accept()
-                    return
-                self._scrubbing = True
-                telemetry.event("strip press", fraction=f"{fraction:.4f}")
-                self.seekRequested.emit(fraction)
-                event.accept()
-                return
             # The `split` divider is a CONTROL and the only thing in a compare mode that takes a press: grabbing it must
             # happen before the compare consumption below, or the divider can never be moved (owner, 2026-11-26:
             # "было бы неплохо добавить видимый сплитер который передвигать можно").
@@ -1128,13 +1069,6 @@ class VideoPreviewSurface(QRhiWidget):
                 self.set_split_fraction((position.x() - picture.left()) / picture.width())
             event.accept()
             return
-        if self._scrubbing:
-            fraction = self._fraction_at(position.x())
-            # A drag is clamped at the seek's own edge instead of jumping into the dark part: the playhead never
-            # leaves frames the owner can actually show (the produced band, or the whole timeline on a feed).
-            self.seekRequested.emit(min(fraction, self._seek_limit()))
-            event.accept()
-            return
         if self._panning:
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             delta = position - self._pan_anchor
@@ -1160,30 +1094,7 @@ class VideoPreviewSurface(QRhiWidget):
                 return
             event.accept()
             return
-        self._update_hover(position)
         super().mouseMoveEvent(event)
-
-    def _update_hover(self, position) -> None:
-        """Hover feedback on the strip: a marker where the pointer is, and a forbidden cursor past the produced edge.
-
-        The picture gets no hover cursor of its own: the drag shows the hand while it runs, and nothing before it (owner,
-        2026-11-26: "так «эту поверхность можно тащить» видно до нажатия" - "нет, убери"). An open hand over the whole
-        compare picture was also a promise over areas where a pan is clamped to nothing (a picture that fits the half).
-        """
-        strip = self._strip_rect()
-        if strip.isEmpty() or not strip.contains(position):
-            if self._hover_fraction is not None:
-                self._hover_fraction = None
-                self.unsetCursor()
-                self.update()
-            return
-        fraction = self._fraction_at(position.x())
-        blocked = not self._seekable(fraction)
-        if fraction != self._hover_fraction or blocked != self._hover_blocked:
-            self._hover_fraction = fraction
-            self._hover_blocked = blocked
-            self.setCursor(Qt.CursorShape.ForbiddenCursor if blocked else Qt.CursorShape.PointingHandCursor)
-            self.update()
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         """The pointer left the widget: the divider starts its fade (it was not "still hovered" any more)."""
@@ -1213,9 +1124,6 @@ class VideoPreviewSurface(QRhiWidget):
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
-            if self._scrubbing:
-                telemetry.event("strip release")
-            self._scrubbing = False
             self._left_press = None
             if self._showing_original:
                 self._showing_original = False
@@ -1230,84 +1138,9 @@ class VideoPreviewSurface(QRhiWidget):
         self.zoomChanged.emit(self._zoom)
         event.accept()
 
-    # -- strip geometry ---------------------------------------------------
-
-    def _apply_strip_metrics(self) -> None:
-        """Re-read the toolkit's strip constants (the scale changed under us) and re-place the caption."""
-        self._strip_margin = strip_margin()
-        self._strip_height = strip_track_height()
-        self._handle_radius = strip_handle_radius()
-        self._playhead_halo_radius = playhead_halo_radius(self._handle_radius)
-        self._position_readout()
-        self.update()
-
-    def _on_scale_changed(self, *_args) -> None:
-        """`UiScale.scale_changed`: the strip's geometry is design px times the factor - re-read, do not freeze."""
-        self._apply_strip_metrics()
-
     def _on_theme_changed(self) -> None:
-        """The strip resolves its tokens at paint time; a light/dark switch only needs a repaint."""
+        """The compare boundary resolves its tokens at paint time; a light/dark switch only needs a repaint."""
         self.update()
-
-    def _refresh_readout(self) -> None:
-        """Feed the widget from the pane's own progress (the playhead and duration it already keeps)."""
-        if not self.has_frame():
-            self._time_readout.set_times(None, None)
-        else:
-            _, _, playhead, duration = self._progress
-            self._time_readout.set_times(playhead, duration if duration > 0 else None)
-        self._position_readout()
-
-    def _position_readout(self) -> None:
-        """Put the caption just above the strip, right-aligned to the pane's margin.
-
-        The strip occupies the bottom margin, so the caption's home is the band above it; before a frame (and
-        therefore before a strip) it still shows its em dashes, at the same bottom-right corner.
-        """
-        readout = self._time_readout
-        readout.adjustSize()
-        margin = self._strip_margin
-        strip = self._strip_rect()
-        bottom = strip.top() - scaled_px(4) if not strip.isEmpty() else self.height() - margin
-        x = max(margin, self.width() - margin - readout.width())
-        y = max(margin, int(bottom) - readout.height())
-        readout.move(x, y)
-        readout.raise_()
-
-    def _strip_rect(self) -> QRectF:
-        if not self._strip_visible or not self.has_frame():
-            return QRectF()
-        margin = self._strip_margin
-        height = self._strip_height
-        width = max(1.0, self.width() - 2 * margin)
-        top = self.height() - margin - height
-        return QRectF(margin, top, width, height)
-
-    def _produced_fraction(self) -> float:
-        """The share of the strip the renderer has produced, i.e. the seekable edge while a render is running.
-
-        `total == 0` means "this is a finished file": the whole strip is seekable. While `rendered < total` the area to
-        the right of the produced edge has no frames - seeking there can only lie to the user.
-        """
-        rendered, total, _, _ = self._progress
-        if total <= 0:
-            return 1.0
-        return max(0.0, min(1.0, rendered / total))
-
-    def _seek_limit(self) -> float:
-        """The edge the strip may seek to: the host's ceiling when it set one, else the produced share."""
-        if self._seek_ceiling is not None:
-            return self._seek_ceiling
-        return self._produced_fraction()
-
-    def _seekable(self, fraction: float) -> bool:
-        return fraction <= self._seek_limit() + 1e-6
-
-    def _fraction_at(self, x: float) -> float:
-        rect = self._strip_rect()
-        if rect.width() <= 0:
-            return 0.0
-        return max(0.0, min(1.0, (x - rect.left()) / rect.width()))
 
     # -- view ------------------------------------------------------------
 
@@ -1743,57 +1576,15 @@ class VideoPreviewSurface(QRhiWidget):
         return colour
 
     def _hud_vertices(self) -> list[float]:
-        """Rectangles for the HUD pass, in widget pixels: the strip (when the pane paints its own) and the compare
-        modes' ONE boundary.
+        """Rectangles for the HUD pass, in widget pixels: the compare modes' ONE boundary, and nothing else.
 
-        The strip is a *timeline* - produced band, playhead handle, hover and blocked markers - borrowing the toolkit
-        slider's groove/thumb language, and every colour comes from ``STRIP_TOKENS`` through `ThemeManager` at paint
-        time. The HUD is a rect-only pass, which is why the time text lives in a widget above it instead.
-
-        The compare boundary is NOT conditional on the strip: the host's controls bar hides the pane's own strip
-        (`set_strip_visible(False)`), and an early return on an empty strip rect meant the `split` divider and the `sbs`
-        seam were never drawn in the real window - the "invisible splitter" (owner, 2026-11-26). The divider is a control
-        of the PICTURE.
+        The pane used to paint its own strip here as well (produced band, playhead handle, hover and blocked markers);
+        that was the second bar implementation beside `PreviewTimeline` and it is deleted (audit 2026-11-27 §6.6). What
+        remains is a control of the PICTURE: the `sbs` seam and the `split` divider with its grip, from
+        `_compare_boundary_rects`. The HUD is a rect-only pass.
         """
         rects: list[tuple[float, float, float, float, tuple[float, float, float, float]]] = []
-        strip = self._strip_rect()
-        if not strip.isEmpty():
-            rendered, total, playhead, duration = self._progress
-            colours = strip_colours()
-            track = rgba(colours["track"])
-            produced = rgba(colours["produced"])
-            playhead_fill = rgba(colours["playhead"])
-            outline = rgba(colours["playhead_outline"], 0.70)
-            divider = rgba(colours["divider"], 0.35)
-            hover = rgba(colours["hover"], 0.65)
-            blocked = rgba(colours["blocked"], 0.55)
-            # The DARK band is what the renderer has not produced yet, the ACCENT part is what it has. No extra tick on the
-            # fill's edge: the edge itself is the render head.
-            rects.append((strip.left(), strip.top(), strip.width(), strip.height(), track))
-            if total > 0:
-                filled = max(0.0, min(1.0, rendered / total))
-                if filled > 0:
-                    rects.append((strip.left(), strip.top(), strip.width() * filled, strip.height(), produced))
-            if duration > 0:
-                fraction = max(0.0, min(1.0, playhead / duration))
-                x = strip.left() + strip.width() * fraction
-                handle = self._handle_radius
-                halo = self._playhead_halo_radius
-                # A backdrop behind the line and the handle: the thumb is white in light mode and dark in dark mode, so a
-                # token-coloured plate (not a fixed black or white) is what stays legible in both themes.
-                rects.append((x - 2.5, strip.top() - 6.0, 5.0, strip.height() + 12.0, outline))
-                rects.append((x - 1.0, strip.top() - 5.0, 2.0, strip.height() + 10.0, produced))
-                rects.append((x - halo, strip.top() - 6.0 - halo, halo * 2.0, halo * 2.0, outline))
-                # The handle is the slider's thumb, from the toolkit's own thumb token.
-                rects.append((x - handle, strip.top() - 6.0 - handle, handle * 2.0, handle * 2.0, playhead_fill))
-            if self._hover_fraction is not None and not self._scrubbing:
-                x = strip.left() + strip.width() * self._hover_fraction
-                colour = blocked if self._hover_blocked else hover
-                rects.append((x - 0.5, strip.top() - 3.0, 1.0, strip.height() + 6.0, colour))
-            strip_top = float(strip.top())
-        else:
-            strip_top = float(self.height())
-        self._compare_boundary_rects(rects, strip_top=strip_top)
+        self._compare_boundary_rects(rects, floor=float(self.height()))
         vertices: list[float] = []
         for x, y, w, h, colour in rects:
             corners = [(x, y), (x + w, y), (x, y + h), (x + w, y), (x + w, y + h), (x, y + h)]
@@ -1801,11 +1592,12 @@ class VideoPreviewSurface(QRhiWidget):
                 vertices.extend([cx, cy, *colour])
         return vertices
 
-    def _compare_boundary_rects(self, rects, *, strip_top: float) -> None:
+    def _compare_boundary_rects(self, rects, *, floor: float) -> None:
         """Append the compare modes' boundary: the `sbs` seam, or the `split` divider with its drag grip.
 
-        `strip_top` is where the pane's own strip begins (the pane's height when it paints none), so a boundary never
-        runs under the strip's controls when the strip is visible.
+        `floor` is the lowest pixel a boundary may reach: the pane's own height, because the transport bar is a SIBLING
+        widget under the picture rather than chrome this pass paints (`_hud_vertices` used to pass the strip's top here
+        when the pane painted a strip of its own).
         """
         colours = strip_colours()
         divider = rgba(colours["divider"], 0.35)
@@ -1813,15 +1605,15 @@ class VideoPreviewSurface(QRhiWidget):
             middle = self.width() / 2.0
             picture = self._frame_rect()
             # A seam belongs to a PICTURE: an empty pane draws nothing at all (its own pin asserts exactly that).
-            if strip_top > 0 and not picture.isEmpty():
+            if floor > 0 and not picture.isEmpty():
                 top = max(0.0, picture.top())
-                bottom = min(strip_top, picture.bottom())
+                bottom = min(floor, picture.bottom())
                 if bottom > top:
                     rects.append((middle - 0.5, top, 1.0, bottom - top, divider))
         elif self._view_mode == "split" and self._source_size() is not None:
             picture = self._frame_rect()
             top = max(0.0, picture.top())
-            bottom = min(strip_top, picture.bottom())
+            bottom = min(floor, picture.bottom())
             if bottom > top:
                 x = picture.left() + picture.width() * self._split_fraction
                 # An OUTLINED rule in TOOLKIT pixels: 1 px light, 2 px dark core, 1 px light. Narrower than the first

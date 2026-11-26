@@ -2,26 +2,28 @@
 
 Measured live (2026-11-24, a slow preview held at 12.5 % produced): a press at 30 % of the strip published nothing and
 the only trace was `seek: 30.0% of the strip is past the produced band; nothing to show there`. The press never
-reached `ProcessTab._on_preview_seek`, because the pane's `_seekable` compares against the produced share - and even if
-it had, `_on_preview_seek` returned early for `isPreview`. Yet the preview's render command carries the same
+reached `ProcessTab._on_preview_seek`, because a widget-side `_seekable` compared against the produced share - and even
+if it had, `_on_preview_seek` returned early for `isPreview`. (That widget-side guard is DELETED: the pane paints no
+strip and decides no reach any more, audit 2026-11-27 §6.6. A press now arrives from `preview_timeline` and the page's
+route is the only one.) Yet the preview's render command carries the same
 `--display_state_id`/`--seek_state_id` block an export uses, `RenderVideo._seek_preview` renders any requested
 timestamp, and the GUI already writes a newest-wins request for an export.
 
 What is pinned here, offscreen and without a GPU:
 
-* **the reach**: with the block usable, a preview's ceiling is 1.0 (the press is accepted), and a press past the
+* **the reach**: with the block usable, a preview's owner says "any frame is seekable", and a press past the
   produced band writes exactly one `(seconds, generation + 1)` request and sets `wanted`;
 * **one painter**: a tail frame arriving while that request is pending does not reach `set_frame`;
 * **the picture**: the frame the block publishes is painted (even though `isPreview`), carries the requested playhead,
   and the one-frame loan ends (`wanted` back to 0, pending cleared);
 * **hands back on play**: pressing play clears the hold and the next tail frame paints again;
 * **an export is unchanged**: a press still takes the export route (and a playing export is not paused by it);
-* **an unusable block**: a preview keeps the produced-edge refusal and the log says so.
+* **an unusable block**: a preview's press is refused by name (`preview-without-a-block`) and no request is written.
 
 The tab-level tests build `ProcessTab` with `object.__new__` (the house style of `test_display_wiring.py`), with a fake
-pane that records what reached the screen and a fake block reader for the request slot. Two tests drive the real
-`VideoPreviewSurface` (the refusal and the ceiling live there) against a real `DisplayReader` block, so the chain
-"press -> ceiling -> request" is pinned without fakes.
+pane that records what reached the screen and a fake block reader for the request slot. Two tests drive a real
+`VideoPreviewSurface` (the SHIPPED pane: it must survive the route it no longer decides) against a real `DisplayReader`
+block, so the chain "reach -> request -> block slot" is pinned without fakes.
 """
 
 from __future__ import annotations
@@ -61,9 +63,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QImage, QMouseEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtGui import QColor, QImage  # noqa: E402
 
 from src.ui.ProcessTab import ProcessTab  # noqa: E402
 from src.ui.video.channel import DisplayReader  # noqa: E402
@@ -94,19 +94,6 @@ def _picture(width: int, height: int, colour: str = "#204060") -> QImage:
     image = QImage(width, height, QImage.Format.Format_RGBA8888)
     image.fill(QColor(colour))
     return image
-
-
-def _strip_point(surface, fraction: float) -> QPointF:
-    strip = surface._strip_rect()
-    assert strip.width() > 0, "the strip must be laid out for this test"
-    return QPointF(strip.left() + strip.width() * fraction, strip.center().y())
-
-
-def _press(widget, point: QPointF) -> None:
-    event = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(point), QPointF(point),
-                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
-                        Qt.KeyboardModifier.NoModifier)
-    QApplication.sendEvent(widget, event)
 
 
 # --- fakes: the pane, the block reader, the tail ------------------------------------------------------
@@ -288,7 +275,16 @@ def test_a_preview_press_past_the_produced_band_asks_for_exactly_one_frame():
 
 
 def test_a_real_press_on_a_preview_strip_writes_one_request_into_the_real_block(qapp):
-    """The whole chain, no fakes: ceiling 1.0 -> the press is accepted -> one `(seconds, generation + 1)` write."""
+    """The whole page chain, no fakes: a usable block means reach 1.0 -> the press is accepted -> one
+    `(seconds, generation + 1)` write into the REAL shared-memory slot.
+
+    The GESTURE is the transport bar's now (`preview_timeline` -> `SEEK_TO` -> controller -> backend ->
+    `_on_preview_seek(fraction)`, pinned in `test_preview_controls.py`); the pane's own strip, whose press used to
+    start this test, is deleted (audit 2026-11-27 §6.6). What is pinned here is everything after the gesture: the
+    route writes exactly one request, with one generation bump, into a real `DisplayReader` block.
+    """
+    from src.ui.preview.owner import owner_of
+
     surface = VideoPreviewSurface()
     surface.resize(*PANE_SIZE)
     surface.set_frame(_picture(*FRAME_SIZE))
@@ -301,9 +297,10 @@ def test_a_real_press_on_a_preview_strip_writes_one_request_into_the_real_block(
         tab._live_tail = tail
         tab._wire_preview_strip()
         tab._apply_seek_ceiling()
-        assert surface._seek_ceiling == pytest.approx(1.0)
+        assert owner_of(tab).may_seek_any is True, (
+            "the pane's reach is the BAR's fact now (`PreviewState.seek_ceiling`); this route reads the owner")
 
-        _press(surface, _strip_point(surface, 0.30))
+        tab._on_preview_seek(0.30)
 
         seconds, generation = reader.seek_request()
         assert seconds == pytest.approx(1.5, abs=0.02)
@@ -433,26 +430,33 @@ def test_a_playing_export_is_not_paused_by_a_press():
 # --- (f) an unusable block keeps today's refusal -------------------------------------------------------
 
 
-def test_a_preview_without_a_usable_block_still_refuses_and_logs(qapp, monkeypatch):
-    module = sys.modules[ProcessTab.__module__]
-    lines: list[str] = []
-    monkeypatch.setattr(module, "log", lines.append)
+def test_a_preview_without_a_usable_block_still_refuses(qapp, monkeypatch):
+    """No block AND no tail/decoder: the press cannot be served, and the route says so by name.
+
+    (With a live tail and no block the route asks the TAIL - the tail is all there is, and it clamps to its own
+    published edge; that is a different state and `test_display_wiring.py` owns it.)
+    """
+    from src.ui.video import telemetry
+
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(telemetry, "event", lambda name, **fields: events.append((name, fields)))
 
     surface = VideoPreviewSurface()
     surface.resize(*PANE_SIZE)
     surface.set_frame(_picture(*FRAME_SIZE))
     surface.set_progress(rendered=PRODUCED_FRAMES, total=TOTAL_FRAMES)
-    tail = _FakeTail(produced_seconds=0.6)
     tab = _tab(pane=surface, preview=True, paused=True, reader=None)
-    tab._live_tail = tail
+    tab._live_tail = None
     tab._wire_preview_strip()
     tab._apply_seek_ceiling()
 
-    assert surface._seek_ceiling is None, "no block means the produced edge is still the honest reach"
+    tab._on_preview_seek(0.30)
 
-    _press(surface, _strip_point(surface, 0.30))
-
-    assert surface._scrubbing is False
-    assert tail.seeks == [], "nothing was asked, because nothing could answer"
-    assert any("past the produced band" in line for line in lines), (
-        "the refusal is legible in log.txt: a press that does nothing and one that cannot are not the same event")
+    assert tab._display_seek_pending is False, "nothing was asked, because nothing could answer"
+    ticket = getattr(tab, "_press", None)
+    assert ticket is not None and ticket.open is False, (
+        "the refusal closes the press record: a press that cannot be answered must not stay open")
+    refusals = [fields for name, fields in events if name == "seek refused"]
+    assert refusals, f"the refusal left no record: {[name for name, _fields in events]}"
+    assert refusals[-1]["reason"] == "preview-without-a-block", (
+        f"the route names why it could not serve the press, got {refusals[-1].get('reason')!r}")
