@@ -3079,6 +3079,16 @@ class ProcessTab:
                     f"the render reported {box} but the source frame is {image.width()}x{image.height()}")
         else:
             image = image.copy(*region)
+        # What the decoder actually produced, before the crop and the scale: a compare half that ends up black is
+        # either an empty decode or a viewer-side problem, and only this line can tell them apart.
+        _probe = image
+        _samples = []
+        for _fx, _fy in ((1, 1), (_probe.width() // 2, _probe.height() // 2),
+                         (max(0, _probe.width() - 2), max(0, _probe.height() - 2))):
+            _c = _probe.pixelColor(int(_fx), int(_fy))
+            _samples.append(f"{_c.red()},{_c.green()},{_c.blue()}")
+        telemetry.event("source frame", w=image.width(), h=image.height(), fmt=image.format().name,
+                        px="/".join(_samples))
         watched = getattr(self, "_compare_watch", None)
         self._compare_watch = None
         pts = float(getattr(frame, "pts", 0.0) or 0.0)

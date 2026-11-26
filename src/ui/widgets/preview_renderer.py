@@ -613,6 +613,19 @@ class PreviewRenderer:
                          and scene.original_mvp is not None)
         if draw_original:
             if self._original_dirty:
+                # The compare's other half is only as good as this upload, and "the half is black" had no number
+                # anywhere: the draw line says it was drawn, the texture exists, and the eye says black. One line per
+                # NEW original names what was handed to the GPU - size, format, and four sampled pixels - so the next
+                # reading is a value, not a screenshot (owner, 2026-11-26: "если не поможет - логгирование доделывать").
+                if original.image is not None:
+                    probe = original.image
+                    samples = []
+                    for fx, fy in ((1, 1), (probe.width() // 2, probe.height() // 2),
+                                   (max(0, probe.width() - 2), max(0, probe.height() - 2))):
+                        colour = probe.pixelColor(int(fx), int(fy))
+                        samples.append(f"{colour.red()},{colour.green()},{colour.blue()}")
+                    telemetry.event("original upload", w=probe.width(), h=probe.height(),
+                                    fmt=probe.format().name, px="/".join(samples))
                 upload_started = time.perf_counter()
                 if original.format in YUV_FORMATS:
                     self._upload_planes(updates, original, self._original_plane_textures)
@@ -968,8 +981,11 @@ class PreviewRenderer:
         is destroyed and re-created at a new size silently invalidates every binding that names it. The pipeline is
         built against a specific SRB object, so it is dropped too and rebuilt on the next render.
         """
-        if self._texture is None or self._rhi is None:
-            # The resource set is built at the first real frame; before that there is nothing to attach a texture to.
+        if self._rhi is None:
+            # Only the RHI is required. This used to demand the RESULT's RGBA texture too, and on the YUV playback
+            # path that texture never exists (the result is three planes), so the source picture of a compare mode was
+            # never given a texture: `draw_original` stayed False and the left half of sbs/split drew nothing - black
+            # (owner, 2026-11-26, after the source frame itself had arrived: "compare: ... idx=3, gap +0.000s").
             return
         texture = self._original_texture
         if texture is not None and texture.pixelSize() == size:

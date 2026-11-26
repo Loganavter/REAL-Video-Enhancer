@@ -528,7 +528,11 @@ class VideoPreviewSurface(QRhiWidget):
         its own decoder and coalesces repeated requests (last one wins), which is what keeps the two pictures on one
         playhead during playback without the pane knowing anything about decoding.
         """
-        if self._view_mode == "single" or self._frame is None:
+        # A picture, not an image: on the YUV playback path `_frame` is ALWAYS None (the pixels are the three planes),
+        # so keying this guard on `_frame` meant the compare modes never asked for the source there - the standing
+        # original was simply never fetched and sbs/split painted the result half with nothing beside it (owner's
+        # screenshot, 2026-11-26: "ещё side by side почему-то мертв").
+        if self._view_mode == "single" or not self._has_picture():
             return
         _, _, playhead, _ = self._progress
         playhead = float(playhead)

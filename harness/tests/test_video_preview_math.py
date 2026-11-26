@@ -313,3 +313,22 @@ def test_the_original_scales_to_a_planes_picture_size(surface):
     surface.set_original(source)
     assert surface._original is not None
     assert (surface._original.width(), surface._original.height()) == (width, height)
+
+
+def test_sbs_asks_for_the_source_on_the_yuv_path(surface):
+    """The compare's standing original must be requested for a PLANES picture too.
+
+    On the YUV playback path `_frame` is always None - the pixels are the three planes - and the request guard keyed on
+    `_frame is None`, so sbs/split never asked the host for the source: the result half painted and the other half
+    stayed empty (owner, 2026-11-26: "side by side мёртв"). The guard is about a PICTURE, not an image.
+    """
+    width, height = 64, 48
+    planes = (bytes(width * 2 * height), bytes((width // 2) * 2 * (height // 2)),
+              bytes((width // 2) * 2 * (height // 2)))
+    surface.set_frame_planes(planes, (width * 2, width, width), width, height)
+    surface.set_progress(rendered=5.0, total=10.0, playhead=2.0, duration=10.0)
+    seen: list[float] = []
+    surface.originalRequested.connect(seen.append)
+    surface.set_view_mode("sbs")
+    assert seen, "sbs never asked for the source on a planes picture"
+    assert seen[-1] == pytest.approx(2.0)
