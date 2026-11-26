@@ -663,9 +663,9 @@ def test_a_cleared_pane_stays_cleared_when_a_late_source_arrives(surface):
 
     surface.set_result(None)                                  # the pane is told to be empty
     assert surface._frame is None
-    painted = surface.painted_pair()
-    assert painted is not None and painted.result is None and painted.source is None, (
-        "the cleared pane keeps no half of the picture it no longer shows")
+    assert surface.painted_pair() is None, (
+        "a cleared pane has no pair on screen - an empty pair object is what let a caller read `is not None` as "
+        "'a picture is there'")
     assert surface._pair._pending_result is None, "and nothing queued for a pair"
 
     surface.set_source(SourcePicture(moment=0.5, picture=_picture(*FRAME_SIZE), origin="decoder", generation=0))

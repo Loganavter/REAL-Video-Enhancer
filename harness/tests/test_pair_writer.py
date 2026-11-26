@@ -243,7 +243,7 @@ def test_a_cleared_pane_stays_empty_and_refuses_a_late_source():
     writer.clear()
     assert (sink.result, sink.source) == (None, None), "the renderer is emptied"
     painted = writer.painted()
-    assert painted is not None and painted.result is None and painted.source is None
+    assert painted is None, "a cleared pane has no pair on screen at all - not an empty one"
 
     with _captured() as lines:
         assert _offer_source(writer, _half(0.5)) is False, "a source from before the clear may not paint"

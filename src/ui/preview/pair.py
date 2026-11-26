@@ -291,6 +291,10 @@ class PairWriter:
         self._lone_result = False
         self._hold_started = None
         self._paint(None, None, moment=None, generation=int(self._generation), force=True)
+        # `painted()` answers "what is on screen"; after a clear that is NOTHING, not a pair whose halves happen to be
+        # None. The empty object invited exactly the kind of read this module exists to remove (a caller asking
+        # `is not None` and concluding a picture is there), so the committed pair goes away with the picture.
+        self._committed = None
 
     def release(self) -> None:
         """Forget what was only WAITING (a released RHI resource invalidates no decision).
