@@ -113,6 +113,16 @@ VIEW_MODES = ("single", "sbs", "split")
 #: mouse, narrow enough that a press meant for the picture (pan/compare) stays one.
 SPLIT_GRAB_PX = 9
 
+#: A compare mode shows ONE moment, not two: a repaint is allowed only while the two halves are within this. Half a
+#: frame at 24 fps - deliberately tighter than a frame, because a pair one frame apart is exactly what reads as a flicker
+#: (owner, 2026-11-26: "сейчас ну типа прям мерцание происходит"). Either half may arrive first; the picture is
+#: presented when the second one lands, so every painted frame is a pair that belongs together.
+PAIR_SYNC_SLACK_S = 0.021
+
+#: ...but never held longer than this. A decoder that never answers, or a pair that is systematically a frame apart,
+#: must not freeze the picture: a small mismatch is better than a still image.
+PAIR_SYNC_HOLD_S = 0.25
+
 #: The divider fades out this long after the pointer leaves it (owner, 2026-11-26: "фейд до 1 секунды срезать"), and the grip that stays is this visible: a rule at zero
 #: alpha would leave nothing to aim at, and a rule at full alpha would sit over the picture for ever (owner, 2026-11-26:
 #: "после того как курсор ушел - фейдом пропадало в течение 2 секунд (только ручка была видна с альфой 20%)").
@@ -180,6 +190,13 @@ class VideoPreviewSurface(QRhiWidget):
         self._dragging_split = False
         #: When the pointer last left the divider (monotonic), or None while it is on/near it: the fade's clock.
         self._divider_left_at: float | None = None
+        #: When the pair gate started holding a paint (monotonic), or None while a paint is allowed.
+        self._pair_blocked_at: float | None = None
+        #: The time of the pair the RENDERER holds - not of the newest halves. A repaint can come from anywhere (the
+        #: compositor, a HUD fade, a resize); those must draw the last pair that belonged together, not a half-updated
+        #: one, or the very flicker the gate exists to remove comes back through the side door.
+        self._committed_result_time: float | None = None
+        self._committed_source_time: float | None = None
         #: The fade needs repaints, and a paused pane has no other clock. 30 ms is smooth at this size and stops as soon
         #: as the rule reaches its rest alpha.
         self._divider_timer = None
@@ -278,18 +295,17 @@ class VideoPreviewSurface(QRhiWidget):
         # An image frame replaces any standing planes picture: the geometry reads `_planes_size` when there is no
         # image, and the two shapes must never both claim the same frame.
         self._planes_size = None
-        self._renderer.set_frame(self._preview_frame(self._frame, index=index, pts=media_time))
+        self._pending_frame_obj = None
+        # NOT handed to the renderer here: `_request_frame_paint` commits the PAIR (see `_commit_pair`).
         self._cleared_empty = False
         self._refresh_readout()
-        self.update()
-        # The pane is the only place that knows what it PAINTS: a decoder's frame number when the producer has one,
-        # otherwise the display channel's sequence. Recorded here, read back through `shown()` - a seek's landing must
-        # be the picture on screen, not a counter that happens to sit next to it.
+        # The name and the time FIRST: the gate reads the time, and the draw log must carry THIS picture.
         if index is not None:
             self._shown = ("frame", int(index))
         elif seq is not None:
             self._shown = ("seq", int(seq))
         self._shown_time = None if media_time is None else float(media_time)
+        self._request_frame_paint()
         telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=media_time, generation=generation)
 
     def set_frame_planes(self, planes, strides, width: int, height: int, *, index: int | None = None,
@@ -321,15 +337,15 @@ class VideoPreviewSurface(QRhiWidget):
         )
         self._frame = None
         self._planes_size = (int(width), int(height))
-        self._renderer.set_frame(frame)
+        self._pending_frame_obj = frame
         self._cleared_empty = False
         self._refresh_readout()
-        self.update()
         if index is not None:
             self._shown = ("frame", int(index))
         elif seq is not None:
             self._shown = ("seq", int(seq))
         self._shown_time = None if pts is None else float(pts)
+        self._request_frame_paint()
         telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=pts)
 
     def has_frame(self) -> bool:
@@ -506,8 +522,7 @@ class VideoPreviewSurface(QRhiWidget):
                                         frame=f"{target.width()}x{target.height()}",
                                         diff_pct=f"{relative * 100.0:.2f}")
             self._original = picture
-        self._renderer.set_original(self._preview_frame(self._original, index=index, pts=media_time))
-        self.update()
+        self._request_frame_paint()
 
     def set_view_mode(self, mode: str) -> None:
         """`single` (today) | `sbs` (result right, original left) | `split` (one picture, original left of a divider).
@@ -570,6 +585,91 @@ class VideoPreviewSurface(QRhiWidget):
         if not (picture.top() <= position.y() <= picture.bottom()):
             return False
         return abs(position.x() - x) <= float(scaled_px(SPLIT_GRAB_PX))
+
+    def pair_in_sync(self) -> bool:
+        """True when the two halves name the same moment (or there is only one picture to show)."""
+        if self._view_mode == "single" or self._original is None:
+            return True
+        result = getattr(self, "_shown_time", None)
+        source = getattr(self, "_original_time", None)
+        if result is None or source is None:
+            # An unnamed picture cannot be compared, so it must not be held: the publisher decides, not the gate.
+            return True
+        return abs(float(result) - float(source)) <= PAIR_SYNC_SLACK_S
+
+    def _commit_pair(self) -> None:
+        """Hand the renderer the newest halves, now that they belong together, and ask for the repaint.
+
+        The RENDERER is what draws, so it is what must hold a matched pair: keeping `_frame`/`_original` as the newest
+        for geometry and the readout is free, but handing the renderer a half whose partner has not arrived means every
+        repaint from outside the gate (a compositor frame, the divider's fade) shows the mismatch.
+        """
+        shown = getattr(self, "_shown", None)
+        index = None if shown is None else shown[1]
+        if self._frame is not None:
+            self._renderer.set_frame(self._preview_frame(self._frame, index=index, pts=self._shown_time))
+        elif getattr(self, "_pending_frame_obj", None) is not None:
+            # The planes path: the producer's own `PreviewFrame` IS the result (no QImage exists for it).
+            self._renderer.set_frame(self._pending_frame_obj)
+        else:
+            self._renderer.set_frame(None)
+        self._renderer.set_original(self._preview_frame(self._original, index=index, pts=self._original_time))
+        self._committed_result_time = getattr(self, "_shown_time", None)
+        self._committed_source_time = getattr(self, "_original_time", None)
+        self._pair_blocked_at = None
+        self._pair_release_count = 0
+        self.update()
+
+    def pair_paint_ready(self, now: float | None = None) -> bool:
+        """Whether a repaint may happen NOW: in sync, or the hold window has run out."""
+        if self.pair_in_sync():
+            return True
+        blocked = getattr(self, "_pair_blocked_at", None)
+        if blocked is None:
+            return False
+        moment = time.monotonic() if now is None else float(now)
+        return (moment - blocked) >= PAIR_SYNC_HOLD_S
+
+    def _request_frame_paint(self) -> None:
+        """Hand the renderer a pair that belongs together, or hold until it does.
+
+        Without the gate each half repainted on its own arrival, so a fast GPU showed the result at T+1 beside the source
+        at T for one frame, then both at T+1 - a 40 ms window of mismatched halves, repeated, which is the flicker the
+        owner reports. The gate holds the newer half until its partner arrives; the timer is the way out when it never does.
+        """
+        if self.pair_paint_ready():
+            self._commit_pair()
+            return
+        if getattr(self, "_pair_blocked_at", None) is None:
+            self._pair_blocked_at = time.monotonic()
+            if telemetry.level() >= 2:
+                telemetry.event("pair hold", result=round(float(getattr(self, "_shown_time", 0.0) or 0.0), 3),
+                                source=round(float(getattr(self, "_original_time", 0.0) or 0.0), 3))
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(int(PAIR_SYNC_HOLD_S * 1000) + 1, self._release_pair_paint)
+
+    def _release_pair_paint(self) -> None:
+        """The hold window ran out: REPEAT the pair already on screen, and commit a mismatch only after a second window.
+
+        Showing the mismatched halves is the flicker itself; a picture that repeats for another 120 ms is not visible.
+        The second window is the hard stop - a decoder that never answers must not freeze the pane, and a small
+        mismatch is better than a still image.
+        """
+        if getattr(self, "_pair_blocked_at", None) is None:
+            return
+        self._pair_release_count = getattr(self, "_pair_release_count", 0) + 1
+        if self._pair_release_count < 2:
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(int(PAIR_SYNC_HOLD_S * 1000) + 1, self._release_pair_paint)
+            self.update()          # the committed pair again: no advance, and nothing to mismatch
+            return
+        self._pair_release_count = 0
+        if telemetry.level() >= 2:
+            telemetry.event("pair release", result=round(float(getattr(self, "_shown_time", 0.0) or 0.0), 3),
+                            source=round(float(getattr(self, "_original_time", 0.0) or 0.0), 3))
+        self._commit_pair()
 
     def divider_alpha(self, now: float | None = None) -> float:
         """The divider's alpha right now: 1 while the pointer is on it, 0 after `DIVIDER_FADE_S` away from it."""
@@ -1271,6 +1371,18 @@ class VideoPreviewSurface(QRhiWidget):
         target = self.renderTarget()
         if target is None or self.rhi() is None:
             return
+        if self._view_mode != "single" and self._original is not None:
+            # What this PAINT actually shows, both halves: the only number that can tell a consistent pair from a
+            # flicker. The selection log says what was chosen; this says what reached the screen together. The COUNTER
+            # is unconditional (two integer ops, and it rides the level-1 aggregate); the per-paint line is level 2.
+            result = getattr(self, "_committed_result_time", None)
+            source = getattr(self, "_committed_source_time", None)
+            if result is not None and source is not None:
+                delta_frames = (float(source) - float(result)) * 24.0
+                telemetry.note_pair(delta_frames=delta_frames)
+                if telemetry.level() >= 2:
+                    telemetry.event("painted pair", result=round(float(result), 3), source=round(float(source), 3),
+                                    delta_frames=round(delta_frames, 2))
         self._renderer.set_scene(self._preview_scene(target))
         self._renderer.render(command_buffer)
 

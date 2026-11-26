@@ -458,3 +458,49 @@ def test_the_divider_is_a_seam_not_a_highlight(surface):
     assert 0.38 in alphas, f"the light edges must be subdued at 0.38, got {sorted(alphas)}"
     assert 0.78 in alphas, f"the dark core must carry the reading at 0.78, got {sorted(alphas)}"
     assert max(alphas) <= 0.80, f"nothing on the divider may glare: {sorted(alphas)}"
+
+
+def test_a_compare_mode_paints_only_when_the_two_halves_are_one_moment(surface):
+    """Owner, 2026-11-26: "нам бы как-нибудь синхронить сик когда отображается одновременно два кадра ... прямо мерцание".
+
+    Each half used to repaint on its own arrival, so a fast GPU showed the result at T+1 beside the source at T for ~40 ms
+    and then both at T+1. The gate holds the newer half until its partner lands, with a timeout for the case where it
+    never does.
+    """
+    import time as _time
+
+    from src.ui.widgets.video_preview import PAIR_SYNC_HOLD_S, PAIR_SYNC_SLACK_S
+
+    source = QImage(640, 360, QImage.Format.Format_RGBA8888)
+    source.fill(QColor("#204060"))
+    surface.set_original(source, media_time=5.0)
+    surface.set_view_mode("split")
+    def result_image() -> QImage:
+        picture = QImage(640, 360, QImage.Format.Format_RGBA8888)
+        picture.fill(QColor("#204060"))
+        return picture
+
+    surface.set_frame(result_image(), media_time=5.0)
+
+    assert surface.pair_in_sync(), "the same moment on both sides is the normal case"
+    assert surface.pair_paint_ready()
+
+    # The result moves on one frame: the source has not caught up yet, so a paint now would show a mismatch.
+    frame_seconds = 1.0 / 24.0
+    surface.set_frame(result_image(), media_time=5.0 + frame_seconds)
+    assert not surface.pair_in_sync()
+    assert not surface.pair_paint_ready(), "a pair one frame apart is exactly the flicker: hold it"
+    assert not surface.pair_paint_ready(now=_time.monotonic() + PAIR_SYNC_HOLD_S / 2.0)
+
+    # The source lands: the pair is whole again and the paint is allowed.
+    surface.set_original(source, media_time=5.0 + frame_seconds)
+    assert surface.pair_in_sync()
+    assert surface.pair_paint_ready()
+
+    # Never held for ever: a decoder that does not answer must not freeze the picture.
+    surface.set_frame(result_image(), media_time=5.0 + 3 * frame_seconds)
+    blocked = _time.monotonic()
+    surface._pair_blocked_at = blocked
+    assert not surface.pair_paint_ready(now=blocked)
+    assert surface.pair_paint_ready(now=blocked + PAIR_SYNC_HOLD_S + 0.001), "the hold window is the way out"
+    assert PAIR_SYNC_SLACK_S < frame_seconds, "the slack is tighter than a frame, or a one-frame pair would pass"
