@@ -1616,8 +1616,13 @@ class ProcessTab:
         except Exception:
             return
         if mode == "single":
+            # Warm first: the point of warming is to be ready when the mode CHANGES, and during a render the pane is
+            # `single` - a warm-up below this return never ran, which is how the decoder ended up opening on the switch
+            # itself (~0.8 s of the owner's wait).
+            self._warm_source_decoder()
             self._second_surface_pts = None
             return
+        self._warm_source_decoder()
         # NO `has_frame()` GATE. It was the same latch as the pane's own ask: on an EMPTY pane (a render whose first
         # frame has not landed, a queue item with nothing produced, a stopped tick) the tick refused to ask, and the pane
         # asked once at the mode switch - before the decoder could answer - so the source half waited for a picture
@@ -1655,6 +1660,8 @@ class ProcessTab:
             self._preview_playhead = 0.0
             self._preview_duration = 0.0
             self._second_surface_pts = None
+            # A new job means a new input file: the next tick warms its own compare decoder.
+            self._source_warm_tried = False
             self._display_seek_pending = False
             # An EXPORT's pane follows the feed from its first published frame: its transport starts playing. A
             # PREVIEW keeps the owner's default (stands paused until the button is pressed) - that is the preview's
@@ -3329,11 +3336,28 @@ class ProcessTab:
         return True
 
     def _warm_source_decoder(self) -> None:
-        """Open the source decoder during a quiet moment of a preview, so the first compare is just a seek."""
-        if getattr(self, "_source_decoder", None) is not None:
+        """Open the source decoder while a job runs, so the first switch to a compare mode is just a seek.
+
+        Called from the GUI tick (`_tick_second_surface`), synchronously: a `QTimer` scheduled from here never fired in a
+        live run (measured 2026-11-26 - a whole render went by with no `source decoder` line and the first switch still
+        paid the open), and `renderToPipeThread` is a worker thread where a timer cannot live at all. One open per job,
+        on the thread that owns the decoder, guarded so the tick cannot retry a failing file 10 times a second.
+
+        Why it matters: the open plus the first seek is the ~0.8 s the owner measured between the result half appearing
+        and the source half ("апскейл сразу справа отобразился, а оригинал - н-ое количество времени ожидания").
+        """
+        if getattr(self, "_source_decoder", None) is not None or getattr(self, "_source_warm_tried", False):
             return
         options = getattr(self, "currentRenderOptions", None)
         if not (getattr(options, "inputFile", "") or ""):
+            return
+        self._source_warm_tried = True
+        if getattr(self, "isPreview", False):
+            # The owner's case: a preview's first switch to a compare mode paid the open. A preview is the one flow where
+            # the pane is guaranteed to be shown and the switch is a human action a second away - open ONCE, here, on the
+            # GUI thread (a `QTimer` scheduled from this tick never fired in a live run: measured 2026-11-26, a whole
+            # render went by with no `source decoder` line).
+            self._open_source_decoder()
             return
         from PySide6.QtCore import QTimer
 
