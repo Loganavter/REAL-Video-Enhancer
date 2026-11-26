@@ -86,8 +86,8 @@ class SettingsTab:
         self,
         parent: QMainWindow,
         halfPrecisionSupport,
-        total_pytorch_gpus,
-        total_ncnn_gpus,
+        pytorch_gpu_count,
+        ncnn_gpu_count,
     ):
         self.parent = parent
         #: The typed page surface (`window.page_handles`). Required dataclass fields: a page that drops a widget
@@ -122,13 +122,27 @@ class SettingsTab:
         if not halfPrecisionSupport:
             self.page_handles.render_settings.precision.removeItem(1)
 
-        # set max gpu id for combo boxs
-        self.page_handles.render_settings.pytorch_gpu_id.setMaximum(total_pytorch_gpus)
-        self.page_handles.render_settings.ncnn_gpu_id.setMaximum(total_ncnn_gpus)
+        # The probe prints one line per device, so the report carries COUNTS - a maximum id is `count - 1`, and 0
+        # means "no GPU of this backend", not "the only GPU". The Render Settings page owns its two rows and turns
+        # each count into the honest control (disabled row / fixed id / a live `0 .. count - 1` stepper); this glue
+        # passes counts and never touches a widget of that page.
+        self._render_settings_page().apply_gpu_counts(
+            ncnn_gpu_count=ncnn_gpu_count,
+            pytorch_gpu_count=pytorch_gpu_count,
+        )
         self.page_handles.app_settings.openRVEFolderBtn.clicked.connect(lambda:open_folder(currentDirectory()))
         
 
         self.updateFFMpegCommand()
+
+    def _render_settings_page(self):
+        """The Render Settings tab's owner object (`Tab3Page`), which owns the two GPU-id rows.
+
+        Pages are not on the typed widget surface (`page_handles` names controls, not pages), so the page is reached
+        through the shell exactly as `ProcessTab._general_settings_page` reaches the general page - one path for the
+        glue and the capture probes. The page, not this glue, decides what a device count means for its own row.
+        """
+        return self.parent.shell.settingsPage_page.tab_3_page
 
     def restoreEncoderCommand(self) -> None:
         """A hand-edited command line comes back after a restart; an empty stored value means "generate it"."""
