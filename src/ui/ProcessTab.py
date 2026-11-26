@@ -2140,11 +2140,22 @@ class ProcessTab:
         except Exception:
             shown = None
         played = float(shown) if shown is not None else float(getattr(self, "_preview_playhead", 0.0) or 0.0)
+        # Why the fill and the thumb can differ, in words the report can print: an open press is the only case where the
+        # thumb is a REQUEST and the fill is the picture. Without this the report could only say "they differ", which is
+        # what a screenshot already says.
+        ticket = getattr(self, "_press", None)
+        if ticket is not None and ticket.open:
+            fill_source = "press-open"
+        elif shown is not None:
+            fill_source = "shown"
+        else:
+            fill_source = "playhead"
         controller.observe(
             is_playing=playing,
             has_picture=has_picture,
             playhead=max(0.0, playhead),
             played=max(0.0, played),
+            fill_source=fill_source,
             produced=max(0.0, produced),
             duration=duration,
             source_frames=source_frames,

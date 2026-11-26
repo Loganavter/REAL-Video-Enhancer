@@ -931,3 +931,51 @@ def test_the_strip_paints_played_in_blue_and_produced_as_the_same_blue_tinted(co
     played_colour = painter.brushes[2].color().name()
     assert played_colour != "#ffffff", "the played fill must not be the theme's white accent"
     assert painter.pens[-1].color().alphaF() == pytest.approx(0.5, abs=0.01), "the head is white at 50 %"
+
+
+def test_the_report_says_where_each_rect_is_drawn_and_from_which_number(controls):
+    """The owner's ask: "улучши отладку чтобы было видно и завершено ли видео и где что отрисовывается и почему".
+
+    The painter records every rect as it draws it, so the report answers with numbers: which rect, its px span, its
+    fraction, the colour AND alpha used, and the state number it came from; `finished` says whether the clip is fully
+    produced; `glued`/`why_not_glued` say whether the fill is literally the thumb and, if not, the page's reason.
+    """
+    from PySide6.QtCore import QRectF
+    from src.ui.preview.state import PreviewPhase
+
+    timeline = controls.timeline
+    timeline.resize(400, 20)
+    timeline.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=20.0,
+                                    playhead=3.0, played=3.0, fps=24.0, fill_source="shown"))
+    timeline._paint_track(_RecordingPainter(), QRectF(10, 0, 380, 4))
+    report = timeline.scrub_report()
+    paint = report["paint"]
+
+    assert paint["finished"] is True, "produced == duration is the finished file"
+    roles = [rect["role"] for rect in paint["rects"]]
+    assert roles == ["track", "produced", "played", "head"], roles
+    band = paint["rects"][1]
+    assert band["fraction"] == pytest.approx(1.0) and band["w"] == pytest.approx(380.0)
+    assert band["from"] == "produced / duration" and band["alpha"] == pytest.approx(0.28, abs=0.01)
+    fill = paint["rects"][2]
+    assert fill["fraction"] == pytest.approx(0.15) and fill["alpha"] == pytest.approx(1.0)
+    assert fill["from"] == "played / duration"
+    assert paint["glued"] is True and paint["why_not_glued"] is None
+
+    # A press in flight: the thumb is the request, the fill is the picture, and the report says so in the page's words.
+    timeline.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=20.0,
+                                    playhead=10.0, played=3.0, fps=24.0, fill_source="press-open"))
+    paint = timeline.scrub_report()["paint"]
+    assert paint["glued"] is False
+    assert paint["why_not_glued"] == "press-open"
+    assert paint["state"]["thumb_fraction"] == pytest.approx(0.5)
+    assert paint["state"]["fill_fraction"] == pytest.approx(0.15)
+
+
+class _RecordingPainter:
+    def save(self): pass
+    def restore(self): pass
+    def setPen(self, _pen): pass
+    def setBrush(self, _brush): pass
+    def drawRect(self, _rect): pass
+    def drawLine(self, *args): pass

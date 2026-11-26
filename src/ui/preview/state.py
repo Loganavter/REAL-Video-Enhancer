@@ -69,6 +69,11 @@ class PreviewState:
     #: time while a press is unanswered); this one lags while the decoder catches up, and it is what the scrubber paints
     #: as played. `None` means "unknown", and the painter then falls back to the playhead.
     played: float | None = None
+    #: WHY the fill and the thumb can differ right now, in the page's words: `"press-open"` (a press is unanswered, so
+    #: the thumb is the request and the fill is the picture), `"shown"` (the fill IS the picture and they agree), or
+    #: `"produced-edge"` (the fill was clamped to the band). Empty when nothing can say - the report then only states
+    #: the numbers. Debug, not behaviour: nothing paints from this.
+    fill_source: str = ""
     produced: float = 0.0
     duration: float = 0.0
     source_frames: int = 0
@@ -124,6 +129,15 @@ class PreviewState:
             return 0.0
         value = self.playhead if self.played is None else self.played
         return max(0.0, min(1.0, float(value) / self.duration))
+
+    def finished(self) -> bool:
+        """Whether the whole clip exists: everything is produced, so the band is the full track.
+
+        Asked separately from `progress_percent()`, because "100 %" and "finished" are different claims: a live render
+        at 100 % still has a moving band with a picture behind it, while a finished file has one band and the picture is
+        wherever the decoder stands. The scrubber's report names this so a screenshot can be read without guessing.
+        """
+        return self.duration > 0.0 and self.produced >= self.duration - 1e-6
 
     def at_produced_edge(self, tolerance: float | None = None) -> bool:
         """Whether the playhead has reached the furthest moment this backend can show.

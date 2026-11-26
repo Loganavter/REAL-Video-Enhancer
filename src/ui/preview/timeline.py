@@ -110,8 +110,13 @@ class PreviewTimeline(Slider):
         self._applied_value: int | None = None
         self._applied_fill = 0.0
         self._applied_playhead = 0.0
+        self._state_finished = False
+        self._state_fill_source = ""
         #: A small ring of what this control did, read back through the control surface.
         self._recent: list[dict] = []
+        #: What the last `_paint_track` actually drew, role by role: the answer to "where is what drawn" without a
+        #: screenshot. Filled by the painter, read by `scrub_report()`.
+        self._last_paint: list[dict] = []
         self.setTrackPainter(self._paint_track)
         self.sliderPressed.connect(self._on_pressed)
         self.sliderReleased.connect(self._on_released)
@@ -127,6 +132,8 @@ class PreviewTimeline(Slider):
         self._produced_fraction = max(0.0, min(1.0, state.progress_percent()))
         self._played_fraction = state.played_fraction()
         self._playhead_fraction = state.playhead_fraction()
+        self._state_finished = bool(state.finished())
+        self._state_fill_source = str(getattr(state, "fill_source", "") or "")
         self.setEnabled(state.has_picture() and self._duration > 0.0)
         if not self._scrubbing:
             self._set_silent_value(round(self._playhead_fraction * TRACK_STEPS))
@@ -161,7 +168,35 @@ class PreviewTimeline(Slider):
             "produced": {"fraction": float(self._produced_fraction), "seconds": self._produced_fraction * self._duration},
             "scrubbing": bool(self._scrubbing),
             "asked": None if asked_s is None else {"seconds": asked_s, "age_ms": round(asked_age_ms or 0.0, 1)},
+            "finished": bool(self._state_finished),
+            "paint": self._paint_summary(),
             "recent": [{key: value for key, value in entry.items() if key != "_t"} for entry in self._recent],
+        }
+
+    def _paint_summary(self) -> dict:
+        """Where each thing is drawn and from which number - the report a screenshot cannot give.
+
+        Four rects in paint order (track, produced band, played fill, render head), each with its px span, its fraction,
+        the colour and the ALPHA actually used, and the state number it came from. `glued` says whether the fill and the
+        thumb are the same point, and `why_not_glued` carries the page's reason (`fill_source`) when they are not -
+        which is the difference between "the picture lags the request" and "the two are literally one number".
+        """
+        played = float(self._played_fraction)
+        thumb = float(self._playhead_fraction)
+        tolerance = 1.0 / float(TRACK_STEPS)
+        glued = abs(played - thumb) <= tolerance
+        return {
+            "width_px": round(float(self.width()), 1),
+            "duration": round(float(self._duration), 3),
+            "finished": bool(self._state_finished),
+            "rects": list(self._last_paint),
+            "glued": bool(glued),
+            "why_not_glued": None if glued else (self._state_fill_source or "unknown"),
+            "state": {
+                "thumb_fraction": round(thumb, 4),
+                "fill_fraction": round(played, 4),
+                "produced_fraction": round(float(self._produced_fraction), 4),
+            },
         }
 
     def _note(self, kind: str, **fields) -> None:
@@ -193,9 +228,11 @@ class PreviewTimeline(Slider):
         self._applied_value = after_value
         self._applied_fill = float(self._played_fraction)
         self._applied_playhead = float(self._playhead_fraction)
+        glued = abs(float(self._played_fraction) - float(self._playhead_fraction)) <= 1.0 / float(TRACK_STEPS)
         self._note("apply", value=after_value, thumb=round(self._playhead_fraction, 4),
                    fill=round(self._played_fraction, 4), produced=round(self._produced_fraction, 4),
-                   scrubbing=int(bool(self._scrubbing)))
+                   scrubbing=int(bool(self._scrubbing)), finished=int(bool(self._state_finished)),
+                   glued=int(glued))
         if self._asked is None or self._scrubbing or not moved_thumb:
             return
         asked_s, asked_at = self._asked
@@ -254,11 +291,31 @@ class PreviewTimeline(Slider):
     # -- painting --------------------------------------------------------------------------------
 
     def _paint_track(self, painter: QPainter, rect: QRectF) -> None:
-        """Whole clip, produced band, played fill, render head - in that order, inside the groove's clip."""
+        """Whole clip, produced band, played fill, render head - in that order, inside the groove's clip.
+
+        Every rect is recorded in `_last_paint` as it is drawn (role, px span, fraction, colour, alpha, source), so
+        `scrub_report()` can answer "where is what drawn, and from which number" instead of a screenshot being read by
+        eye. The paint is the only place that knows what the user actually sees.
+        """
+        drawn: list[dict] = []
+
+        def record(role: str, fraction: float, span: QRectF, colour: QColor, source: str) -> None:
+            drawn.append({
+                "role": role,
+                "x": round(float(span.left()), 1),
+                "w": round(float(span.width()), 1),
+                "fraction": round(float(fraction), 4),
+                "colour": colour.name(),
+                "alpha": round(float(colour.alphaF()), 2),
+                "from": source,
+            })
+
         painter.save()
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(_token("track", "#3a3d44")))
+        track = _token("track", "#3a3d44")
+        painter.setBrush(QBrush(track))
         painter.drawRect(rect)
+        record("track", 1.0, rect, track, "the whole clip")
 
         produced = max(0.0, min(1.0, self._produced_fraction))
         if produced > 0.0:
@@ -266,24 +323,33 @@ class PreviewTimeline(Slider):
             # A fully produced clip therefore tints the WHOLE bar and the played fill is the bright part of it.
             band = _token("produced", "#0096ff")
             band.setAlphaF(PRODUCED_ALPHA)
+            span = QRectF(rect.left(), rect.top(), rect.width() * produced, rect.height())
             painter.setBrush(QBrush(band))
-            painter.drawRect(QRectF(rect.left(), rect.top(), rect.width() * produced, rect.height()))
+            painter.drawRect(span)
+            record("produced", produced, span, band, "produced / duration")
 
         # The fill cannot run past the produced band: nothing exists beyond the edge the band marks, and a frame the
         # display route decoded ahead of it is one picture, not a stretch of played timeline.
         played = max(0.0, min(1.0, self._played_fraction))
+        clamped = bool(produced > 0.0 and played > produced)
         if produced > 0.0:
             played = min(played, produced)
         if played > 0.0:
-            painter.setBrush(QBrush(_token("played", "#0078d4")))
-            painter.drawRect(QRectF(rect.left(), rect.top(), rect.width() * played, rect.height()))
+            fill = _token("played", "#0078d4")
+            span = QRectF(rect.left(), rect.top(), rect.width() * played, rect.height())
+            painter.setBrush(QBrush(fill))
+            painter.drawRect(span)
+            record("played", played, span, fill,
+                   "played / duration" + (" (clamped to the band)" if clamped else ""))
 
         if produced > 0.0:
-            # The render head is the produced band's right edge: a 2 px vertical rule reads as "the renderer is here"
+            # The render head is the produced band's right edge: a 1 px light rule reads as "the renderer is here"
             # without a second marker colour competing with the thumb.
             x = rect.left() + rect.width() * produced
             head = _token("marker", "#ffffff")
             head.setAlphaF(MARKER_ALPHA)
             painter.setPen(QPen(head, MARKER_WIDTH))
             painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
+            record("head", produced, QRectF(x, rect.top(), 1.0, rect.height()), head, "produced / duration")
         painter.restore()
+        self._last_paint = drawn
