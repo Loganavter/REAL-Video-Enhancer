@@ -637,3 +637,28 @@ def test_pair_in_sync_refuses_to_call_half_a_picture_synced(surface):
     assert surface.pair_in_sync() is False, "one half is not a synced pair"
     surface.set_original(_picture(*FRAME_SIZE), media_time=1.0)
     assert surface.pair_in_sync() is True, "two halves of one moment are"
+
+
+def test_a_cleared_pane_stays_cleared_when_a_late_source_arrives(surface):
+    """A pane told to be empty must not be repainted by a leftover source (audit 2026-11-27 §6.1b, probe G2).
+
+    `set_result(None)` reset the picture but kept the queued results, and with `shown_moment()` None the source guard
+    had nothing to compare against, so a late source re-keyed itself by its own moment and painted half a picture onto
+    the cleared pane - the "previous file's frame after the render ended" the owner saw.
+    """
+    surface.set_view_mode("sbs")
+    surface.set_progress(0.0, 0.0, playhead=1.0, duration=10.0)
+    surface.set_result(ResultPicture(moment=1.0, picture=_picture(*FRAME_SIZE), generation=0))
+    surface.set_source(SourcePicture(moment=1.0, picture=_picture(*FRAME_SIZE), origin="decoder", generation=0))
+    assert surface._original is not None, "a pair was painted before the clear"
+
+    surface.set_result(None)                                  # the pane is told to be empty
+    assert surface._frame is None
+    assert surface._result_queue == {}, "the cleared pane keeps no queued results of the picture it no longer shows"
+
+    surface.set_source(SourcePicture(moment=0.5, picture=_picture(*FRAME_SIZE), origin="decoder", generation=0))
+    assert surface._original is None, "a late source may not paint onto a pane that is empty"
+
+    surface.set_result(ResultPicture(moment=2.0, picture=_picture(*FRAME_SIZE, "#3060a0"), generation=0))
+    surface.set_source(SourcePicture(moment=2.0, picture=_picture(*FRAME_SIZE), origin="decoder", generation=0))
+    assert surface._original is not None, "a new picture re-opens the pane, with its own source"

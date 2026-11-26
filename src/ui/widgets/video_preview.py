@@ -392,10 +392,21 @@ class VideoPreviewSurface(QRhiWidget):
                        planes_frame: PreviewFrame | None = None, index: int | None = None,
                        seq: int | None = None, gui_ms: float | None = None) -> None:
         """Store an accepted result and hand the renderer its pair. The one place the pane's clock is written."""
-        if image is None and planes_frame is None:
+        cleared = image is None and planes_frame is None
+        if cleared:
             self._frame = None
             self._planes_size = None
             self._pending_frame_obj = None
+            # A CLEAR means the pane is empty: the queued results of the picture it used to show are not answers for
+            # an empty pane, and neither is its source. Keeping them meant a late source could re-key itself by its own
+            # moment (`shown_moment()` is None here, so `set_source`'s guard is skipped by construction) and paint a
+            # half back onto a pane that was told to be empty (audit 2026-11-27 §6.1b, probe G2).
+            self._result_queue.clear()
+            self._original = None
+            self._original_shown = None
+            self._original_time = None
+            self._source_queue.clear()
+            self._cleared_empty = True
         elif planes_frame is not None:
             self._frame = None
             self._planes_size = (int(planes_frame.width), int(planes_frame.height))
@@ -406,7 +417,10 @@ class VideoPreviewSurface(QRhiWidget):
             # image, and the two shapes must never both claim the same frame.
             self._planes_size = None
             self._pending_frame_obj = None
-        self._cleared_empty = False
+        if not cleared:
+            # A picture is on the pane again: the explicit "told to be empty" state is over, and a source offer may
+            # paint again (subject to its own moment/generation guard).
+            self._cleared_empty = False
         if int(generation) > self._result_generation:
             # A new render/file/seek: the cadence and the "older than" baseline belong to the previous generation.
             self._result_generation = int(generation)
@@ -654,10 +668,15 @@ class VideoPreviewSurface(QRhiWidget):
         """
         if snapshot is not None:
             moment = self.shown_moment()
-            same_generation = int(snapshot.generation) == int(self._result_generation)
-            if not same_generation:
+            if self._cleared_empty:
+                # The pane was told to be EMPTY and nothing has been published since: a late source for a moment
+                # before the clear must not re-key itself (`shown_moment()` is None, so the check below cannot see it)
+                # and paint half a picture onto an empty pane (audit 2026-11-27 §6.1b).
                 snapshot = None
-            elif moment is not None and abs(float(snapshot.moment) - float(moment)) > self.source_half_frame_s():
+            same_generation = int(snapshot.generation) == int(self._result_generation) if snapshot is not None else False
+            if snapshot is not None and not same_generation:
+                snapshot = None
+            elif snapshot is not None and moment is not None and abs(float(snapshot.moment) - float(moment)) > self.source_half_frame_s():
                 snapshot = None
         self._apply_source_picture(snapshot)
 
