@@ -43,6 +43,7 @@ from .video.feed import PreviewFeed
 from .preview.owner import owner_of
 from .preview.session import SEEK_WATCH_TIMEOUT_S as SESSION_SEEK_WATCH_TIMEOUT_S
 from .preview.source_register import ResultPicture, SourceRegister
+from .preview.use_cases import job, present, seek, supply, transport
 from .preview.state import PreviewBackendKind
 from ..constants import (
     BACKEND_PATH,
@@ -1651,106 +1652,20 @@ class ProcessTab:
         self._supply_compare_source()
 
     def _next_result_generation(self) -> int:
-        """Start a new result generation: a render/file/seek changed, so the previous pictures are not answers.
-
-        Returning it lets every producer in this generation stamp its offers with the same number; the pane refuses
-        anything older than what it holds, and the register is emptied because a stale source is exactly as wrong as a
-        stale result.
-        """
-        self._result_generation = int(getattr(self, "_result_generation", 0)) + 1
-        register = getattr(self, "_source_register", None)
-        if register is not None:
-            register.clear()
-        return self._result_generation
+        """The ONE result token, minted where a job/file/seek actually changed. Logic: `job`."""
+        return job.next_result_generation(self)
 
     def _sync_compare_source(self) -> None:
-        """Hand the pane the register's picture FOR THE MOMENT IT IS SHOWING, or nothing.
-
-        The only presentation path for the compare's source half. `shown_moment()` is the result's own moment (the
-        pane's state, not a tab clock), `picture_for` is a BOUNDED match, and `set_source` is the pane's only source API.
-        A moment with no picture is handed over as `None`: a gap is the honest answer, a neighbour's picture is not.
-        There is deliberately no mode/picture/queue branch here - each of those was a place where a flag could disagree
-        with what the pane actually held, which is the whole defect class this wave removes.
-        """
-        pane = getattr(getattr(getattr(self, "page_handles", None), "proc", None), "previewLabel", None)
-        if pane is None:
-            return
-        moment_of = getattr(pane, "shown_moment", None)
-        moment = None
-        if callable(moment_of):
-            try:
-                moment = moment_of()
-            except Exception:
-                moment = None
-        if moment is None:
-            # An unnamed result (a queue item, a compare opened before the first frame) still has a playhead; the
-            # register can answer for it, so the source half is not forced to wait for a result that does not exist.
-            try:
-                moment = float(self._compare_playhead())
-            except Exception:
-                moment = float(getattr(self, "_preview_playhead", 0.0) or 0.0)
-        register = getattr(self, "_source_register", None)
-        snapshot = None
-        if register is not None:
-            snapshot = register.picture_for(moment, self._source_tolerance(),
-                                            generation=int(getattr(self, "_result_generation", 0)))
-        setter = getattr(pane, "set_source", None)
-        if callable(setter):
-            setter(snapshot)
-            return
-        # A pane from before the register API (an old harness double): one compatibility call, through the same moment
-        # check the pane's `set_source` applies.
-        legacy = getattr(pane, "set_original", None)
-        if callable(legacy):
-            if snapshot is None:
-                legacy(None)
-            else:
-                legacy(snapshot.picture, media_time=snapshot.moment)
+        """The pane's own moment -> the register -> `pane.set_source`. Logic: `preview.use_cases.present`."""
+        present.sync_compare_source(self)
 
     def _source_tolerance(self) -> float:
-        """Half a frame: the largest distance at which two moments are still the same picture."""
-        return 0.5 / max(1.0, self._compare_fps())
+        """Half the pane's own cadence: the largest distance that is still the same picture. Logic: `supply`."""
+        return supply.source_tolerance(self)
 
     def _supply_compare_source(self) -> None:
-        """Warm the compare decoder and ask for the lead while the register does not hold what it would ask for.
-
-        `single` keeps the LMB flash (one picture on demand, no standing fill); a queue item IS the source and has no
-        second surface. Those are SUPPLY decisions, not presentation ones - `_sync_compare_source` above needs none.
-        """
-        pane = getattr(getattr(getattr(self, "page_handles", None), "proc", None), "previewLabel", None)
-        view_mode = getattr(pane, "view_mode", None)
-        if view_mode is None:
-            return
-        if owner_of(self).kind is PreviewBackendKind.QUEUE_FILE:
-            return
-        try:
-            mode = view_mode()
-        except Exception:
-            return
-        if mode == "single":
-            # Warm first: the point of warming is to be ready when the mode CHANGES, and during a render the pane is
-            # `single` - a warm-up below this return never ran, which is how the decoder ended up opening on the switch
-            # itself (~0.8 s of the owner's wait).
-            self._warm_source_decoder()
-            return
-        self._warm_source_decoder()
-        options = getattr(self, "currentRenderOptions", None)
-        if not (getattr(options, "inputFile", "") or ""):
-            return
-        # The SAME clock presentation uses: the pane's own moment. `_result_playhead` prefers the transport while a tail
-        # or a file decoder exists, and after a render hands over the finished file it reads 0.0 while the pane already
-        # paints its first frame - so this guard returned before asking, and the source half never arrived (found live
-        # 2026-11-27 with the pair gate in place: `compare fill asks=0 newest=0.0 playhead=0.167` for a whole run, the
-        # left half blank with the upscale painted beside it).
-        playhead = self._compare_playhead()
-        if playhead <= 0.0:
-            return
-        # The fill asks at the moment PRESENTATION reads - the pane's own. It used to ask at
-        # `_compare_supply_playhead()` (the pair queue's oldest result), a third clock; the answer was then refused by
-        # the pane's moment guard and the half stayed blank while the decoder refilled a moment nobody showed (measured
-        # live 2026-11-27: `playhead=0.167 newest=1.709 target=0.0` with the register full of render-head frames, the
-        # left half empty beside the upscale). One clock: what the pane shows is what the supply fetches.
-        self._source_fill(playhead)
+        """Warm the decoder and ask for the lead only while nobody holds the moment. Logic: `supply`."""
+        supply.supply_compare_source(self)
 
     def renderToPipeThread(
         self,
@@ -1962,29 +1877,9 @@ class ProcessTab:
         except Exception:
             pass
 
-        self._restoreQueueAfterPreview()
-        if self.currentRenderOptions.isPreview:
-            self._start_preview_playback(self.currentRenderOptions.outputPath)
-        elif finished_ok:
-            # The export is done, and its pane had NO source after this point: the display feed is released, the tail
-            # was stopped, and `_request_display_seek` refuses a press because no process will answer it. That is why
-            # "the last seeks do nothing on a fully rendered file" (owner, 2026-11-25). The finished file becomes the
-            # pane's source, HELD at the position the render stood on: the strip scrubs it, Play runs it at the media
-            # rate (the decoder paces by PTS), and the picture is the real output rather than the last live frame.
-            output = str(getattr(self.currentRenderOptions, "outputPath", "") or "")
-            try:
-                import os as _os
-
-                readable = bool(output) and _os.path.exists(output) and _os.path.getsize(output) > 0
-            except Exception:
-                readable = False
-            if readable:
-                self._preview_paused = True
-                self._start_preview_playback(output)
-                self._sync_preview_transport()
-                log(f"preview: the finished file is the pane's source ({output}); the strip scrubs it")
-            else:
-                log(f"preview: no finished file to hand the pane ({output!r}); the last painted frame stays")
+        # What the finished job leaves on the pane (queue restored, playback or output file). The logic - and the
+        # success rule it re-derives - lives in `preview.use_cases.job`.
+        job.on_job_finished(self)
 
     def _end_job_painters(self) -> None:
         """Stop whoever followed the finished job's file, then release the block the renderer published into.
@@ -2196,131 +2091,12 @@ class ProcessTab:
             f"(pane {pane:.3f}s, render head {head:.3f}s = {produced:.1%} of {clip:.3f}s)")
 
     def _on_preview_pause_toggled(self, paused: bool) -> None:
-        telemetry.event("transport", paused=int(bool(paused)))
-        """Hold the preview on this frame, or let it follow the render again (the button's `toggled(bool)`).
-
-        One state for both owners of the pane: the live tail simply stops polling (no decode, no I/O, the picture
-        stands, and a strip press still repositions it), the finished-file decoder pauses on its frame. The state
-        comes IN with the signal, so the handler cannot act on a half-applied toggle.
-        """
-        self._preview_paused = bool(paused)
-        # A one-shot seek frame belongs to the state it was asked in: leaving or re-entering the hold ends it.
-        self._display_seek_pending = False
-        # One line per change, with the owner: the pane can be painted by three different things, and "the button did
-        # nothing" needs to be answerable from log.txt alone.
-        owner = "tail" if getattr(self, "_live_tail", None) is not None else (
-            "queue" if getattr(self, "_queue_pane_decoder", None) is not None else (
-                "file" if getattr(self, "_preview_decoder", None) is not None else "thumbnail"))
-        log(f"preview transport: {'paused' if self._preview_paused else 'playing'} (owner={owner})")
-        holding = bool(self._preview_paused)
-        # ONE producer at a time: while the queue tab owns the pane, pressing play starts the QUEUE item, not the
-        # render's tail/decoder behind it - a decoder playing under a picture nobody shows is pure cost.
-        queue_owns = owner_of(self).kind is PreviewBackendKind.QUEUE_FILE
-        if holding and getattr(self, "_playback_tail", False):
-            # The tail this PLAY created exists only while the transport plays; pausing drops it and the feed's cheap
-            # path (the renderer's own composited frame) takes the pane back. A PREVIEW's tail and a tail somebody else
-            # owns (the queue tab's hand-back) are NOT ours to stop - they are the picture there.
-            self._stop_live_tail()
-        tail = getattr(self, "_live_tail", None)
-        decoder = getattr(self, "_preview_decoder", None)
-        if not holding and decoder is not None and getattr(self, "_playback_tail", False):
-            # A finished file has a real player (media-rate pacing, one frame per tick, box-capped). The playback tail
-            # polls the file every 120 ms and hands a backlog burst to the GUI, which paints once per burst - measured
-            # 2026-11-25: 18 frames/s delivered, 9 painted, the drawn index stepping by 2. The tail is the player for a
-            # file still being WRITTEN; once the job is done its decoder owns the timeline.
-            self._stop_live_tail()
-            tail = None
-        if (not holding and tail is None and not queue_owns and not bool(getattr(self, "isPreview", False))
-                and decoder is None):
-            # PLAY, export, no tail and no finished-file decoder: the pane was following the renderer's newest frames,
-            # which is not playback. The output file is the timeline; start the tail here (the GUI tick builds it) at
-            # the pane's own position, and the feed stands down while it paints. Pausing drops it again, so the feed's
-            # cheap path is what a held pane uses (owner, 2026-11-25: "воспроизведение всё ещё просто переключает нас
-            # на слежение за последними апкад кадрами").
-            options = getattr(self, "currentRenderOptions", None)
-            path = str(getattr(options, "outputPath", "") or "")
-            if path:
-                self._start_live_tail(path)
-                self._ensure_live_tail()
-                self._playback_tail = getattr(self, "_live_tail", None) is not None
-                tail = getattr(self, "_live_tail", None)
-        if tail is not None:
-            if not holding and not queue_owns:
-                # Its own try: a resume that cannot work out the head must still unpause the tail (the first version
-                # put both in one block, and an AttributeError in the head arithmetic skipped `set_paused` entirely).
-                try:
-                    self._resume_tail_at_the_pane(tail)
-                except Exception as exc:
-                    log(f"preview transport: resume at the head failed ({exc})")
-            try:
-                tail.set_paused(holding or queue_owns)
-            except Exception as exc:
-                log(f"preview transport: {exc}")
-        if decoder is not None:
-            try:
-                decoder.pause() if (holding or queue_owns) else decoder.play()
-            except Exception as exc:
-                log(f"preview transport: {exc}")
-        queue_decoder = getattr(self, "_queue_pane_decoder", None)
-        if queue_decoder is not None:
-            try:
-                queue_decoder.pause() if (holding or not queue_owns) else queue_decoder.play()
-            except Exception as exc:
-                log(f"queue pane: {exc}")
-        # A held picture clears `wanted`: the renderer must stop staging frames for a pane that is not following
-        # (the whole cost of the channel when nobody watches is one byte read per frame).
-        self._update_display_wanted()
-        self._sync_preview_transport()
+        """The user held or released the picture. Logic: `transport.on_preview_pause_toggled`."""
+        transport.on_preview_pause_toggled(self, paused)
 
     def _sync_preview_transport(self) -> None:
-        """Paint the toggle's state, its tooltip and whether it can do anything at all (GUI thread only).
-
-        The glyphs are the ACTION a press performs, like a player's own button: playing shows a pause symbol, paused
-        shows a play symbol. `enabled` is honest about the idle pane - there is nothing to hold when nothing owns it.
-        """
-        button = getattr(self.page_handles.proc, "previewPauseButton", None)
-        if button is None:
-            self._push_preview_state()
-            return
-        from PySide6.QtCore import QThread, QTimer
-
-        if QThread.currentThread() != button.thread():
-            # `_stop_live_tail` runs in the render's worker thread, which has no event loop to paint from: hand the
-            # widget work to the button's own thread instead of writing to a widget cross-thread.
-            #
-            # This branch is NOT about the tick: the 100 ms tick already arrives on the GUI thread (its plain-callable
-            # connection is queued there - see `startGUIUpdate`, plan P6), so `updateProcessTab` never takes it. It is
-            # for the other callers of this method: `renderToPipeThread` starts the job's tail from a plain `Thread`
-            # (`_start_live_tail` -> `_stop_live_tail` -> here, ProcessTab.py:781/1432), and a widget write from there
-            # is a cross-thread write whatever the tick does. The three-argument `singleShot` is the sanctioned form:
-            # `button` is the CONTEXT object, so the retry lands on the button's thread and not on the caller's.
-            QTimer.singleShot(0, button, self._sync_preview_transport)
-            return
-        paused = bool(getattr(self, "_preview_paused", True))
-        try:
-            # `emit=False`: painting the state must not look like a user toggle (that would call this handler again).
-            button.setChecked(paused, emit=False)
-        except TypeError:      # a toolkit older than the keyword
-            button.blockSignals(True)
-            try:
-                button.setChecked(paused)
-            finally:
-                button.blockSignals(False)
-        button.setToolTip(
-            "Paused: the preview holds this frame. Press to follow the render."
-            if paused else "Following the render. Press to hold this frame."
-        )
-        # A render paints the pane through the thumbnail even before a tail exists, so a running render is an owner
-        # too: the transport must be able to hold THAT picture, and must not look pressable when nothing paints.
-        process = getattr(self, "renderProcess", None)
-        rendering = process is not None and process.poll() is None
-        owns_picture = (getattr(self, "_live_tail", None) is not None
-                        or getattr(self, "_preview_decoder", None) is not None
-                        or getattr(self, "_queue_pane_decoder", None) is not None
-                        or rendering)
-        button.setEnabled(bool(owns_picture))
-        # The bars read the same truth the legacy button does: one push per change, no second timer.
-        self._push_preview_state()
+        """Paint the transport toggle's state and whether it can do anything. Logic: `transport`."""
+        transport.sync_preview_transport(self)
 
     # -- the control surface (plan-rve-preview-controls-frame-path-2026-11-25) -------------------------
 
@@ -3165,216 +2941,12 @@ class ProcessTab:
         self._seek_generation = None
 
     def _on_preview_seek(self, fraction: float) -> None:
-        """A press or drag on the strip seeks whoever owns the picture - the ROUTE is all that is decided here.
-
-        Live, that is the tail: it repositions inside what the renderer has already written, and the next poll
-        (120 ms) shows the target. A press PAST the produced band is different only while the pane's block is usable:
-        the tail has nothing there, but the renderer can render that one frame on demand - so the press becomes a
-        newest-wins request (`_request_display_seek`) and the pane holds it until play hands it back. A finished file
-        seeks its own decoder. The strip reports a share of the WHOLE timeline, so while the timeline length is
-        unknown the produced share stands in for it - which is the same assumption the strip itself makes when it
-        fills its white band.
-
-        The REACH is not checked here: `PreviewSession.seek_to` has already refused a target past it before this
-        method is called (plan P1 - the clamp lives in one place). The press record is the session's too: this method
-        asks for the ticket for the press it is routing and fills in the route facts only the page knows.
-        """
-        fraction = float(fraction)
-        # A SEEK starts a new result generation - but only a seek that is actually ASKED FOR. The bump used to run here,
-        # before any route was chosen, so a press the pane could not serve invalidated the picture identity and cleared
-        # the compare register while nothing on screen moved (CODE_PATTERNS §3: a refused attempt must not mint a token - a refused press took
-        # generation 7 -> 8 and the register 3 -> 0, and every source offer was refused as the wrong generation until
-        # the next result arrived - the owner's blank left half after a press). Every route below bumps when it asks.
-        bumped = False
-
-        def bump_generation() -> None:
-            nonlocal bumped
-            if not bumped:
-                bumped = True
-                self._next_result_generation()
-        self._seek_pressed_at = time.perf_counter()
-        # The press names the FRAME it points at, not only the share: a turnaround in milliseconds says nothing about
-        # whether the picture is the one asked for (owner, 2026-11-24: "write where the seek went and what is shown").
-        total_frames = float(getattr(self, "max_value", 0) or 0)
-        if total_frames <= 0:
-            fps = float(getattr(getattr(self, "_preview_decoder", None), "fps", 0) or 0)
-            duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
-            total_frames = round(duration * fps)
-        if total_frames <= 0:
-            # The render publishes its total late; the CLIP's own frame count is known from the probe at load time and
-            # is the right denominator for a share -> frame conversion in the meantime.
-            total_frames = float(getattr(self, "videoFrameCount", 0) or 0)
-        target_frame = int(round(fraction * total_frames)) if total_frames > 0 else None
-        self._seek_target_frame = target_frame
-        # The produced share goes with the press: a press past what the renderer has written is a different event from
-        # a press inside it, and only the log can tell them apart afterwards.
-        produced = 0.0
-        total = float(getattr(self, "max_value", 0) or 0)
-        if total > 0:
-            produced = max(0.0, min(1.0, float(getattr(self, "currentFrame", 0) or 0) / total))
-        target_s = None
-        owner = owner_of(self)
-        duration_s = float(self._clip_duration(owner) or 0.0)
-        if duration_s > 0.0:
-            target_s = fraction * duration_s
-        self._seek_target_s = target_s
-        telemetry.event("seek press", fraction=f"{fraction:.4f}", produced=f"{produced:.4f}",
-                        target_s=None if target_s is None else f"{target_s:.3f}",
-                        target_frame=target_frame)
-        # One record per press, created BEFORE a route is chosen: the intent, the route it took, whether that route
-        # can answer it, and (from whichever painter answers) the picture. Without this a press could end in silence -
-        # the owner's three sessions pressed four times each and left no line about the result at all (2026-11-24).
-        # The record lives in the pane's press session now (plan P1): a press that came through the controller already
-        # owns one, and `press()` hands that back instead of opening a second; a direct press opens its own.
-        edge_s = produced * duration_s if duration_s > 0.0 else None
-        ticket = self._press_session().press(
-            target_s=target_s, target_frame=target_frame, produced=produced, edge_s=edge_s)
-        self._press = ticket
-        if owner.kind is PreviewBackendKind.QUEUE_FILE:
-            decoder = getattr(self, "_queue_pane_decoder", None)
-            duration = float(getattr(decoder, "duration", 0.0) or 0.0)
-            if decoder is not None and duration > 0.0:
-                ticket.decide(route="queue", answerable=True)
-                # The queue item is a finished file: the frame that lands answers the press, so the session watches
-                # the same seconds the decoder is asked for (plan P4).
-                self._press_session().watch(fraction * duration)
-                try:
-                    decoder.seek(fraction * duration)
-                except Exception as exc:
-                    ticket.refused(f"queue-decode-failed: {exc}")
-                    log(f"queue pane: seek failed ({exc})")
-            else:
-                ticket.refused("queue-has-no-duration")
-            return
-        live = getattr(self, "_live_tail", None)
-        produced = self._live_produced_fraction()
-        clip = self._clip_duration()
-        # The instrument: every press says what it meant, in the units the answer will be checked against. One line per
-        # press (a drag sends many), which is why the target is what is logged and not the fraction alone.
-        log(f"seek: press {fraction:.1%} of the strip (clip {clip:.3f}s, produced {produced:.1%}, "
-            f"tail={'yes' if live is not None else 'no'}, preview={bool(getattr(self, 'isPreview', False))})")
-        # Two edges, not one: the band is the RENDERER's progress (`currentFrame / max_value`) and the tail can only
-        # serve what the muxer has FLUSHED - a preview at 60% whose file holds 20% refused every press between them
-        # inside the tail ("not in the flushed file"), with the strip advertising the whole 60% as reachable (owner's
-        # log, 2026-11-26: press at 8.164 s with produced=0.603, no seek record, the thumb stayed at 4.17 s).
-        tail_edge = float(getattr(live, "produced_seconds", 0.0) or 0.0) if live is not None else 0.0
-        tail_tolerance = 0.5 / max(1.0, float(getattr(self, "fps", 0) or 0.0) or 24.0)
-        past_tail = (live is not None and target_s is not None and tail_edge > 0.0
-                     and float(target_s) > tail_edge + tail_tolerance)
-        if (bool(getattr(self, "isPreview", False))
-                and owner.may_seek_any
-                and (live is None or fraction > produced + 1e-6 or past_tail)):
-            # The renderer can render this frame even though the tail cannot: the same block an export uses. Inside
-            # the produced band the tail stays the answer (exact, and it costs the renderer nothing); past it the
-            # press is one request and a hold on the picture it yields.
-            if self._request_display_seek(fraction, hold=True):
-                bump_generation()
-                return
-            ticket.refused("no-process-or-unknown-length")
-            log("seek: refused - the running render cannot answer that press (no process, or the clip length is unknown)")
-            return
-        if live is not None:
-            edge = float(getattr(live, "produced_seconds", 0.0) or 0.0)
-            if edge <= 0.0:
-                ticket.decide(route="tail", answerable=False, why="nothing-written-yet")
-                ticket.refused("nothing-written-yet")
-                log("seek: refused - nothing is written yet")
-                return                      # nothing is written yet, so there is nothing to seek to
-            target = fraction * self._live_timeline(edge)
-            # The tail maps a strip share onto ITS timeline (the clip length, or the flushed edge when it is unknown),
-            # so the asked time it must be judged against is this one, not the ticket's whole-clip target.
-            bump_generation()
-            self._press_session().watch(target)
-            live.seek(target)
-            ticket.decide(route="tail", answerable=True)
-            log(f"seek: tail asked for {target:.3f}s (published edge {edge:.3f}s)")
-            return
-        decoder = getattr(self, "_preview_decoder", None)
-        duration = float(getattr(self, "_preview_duration", 0.0) or 0.0)
-        if decoder is not None and duration > 0:
-            ticket.decide(route="decoder", answerable=True)
-            # The same landing instrument as the tail's: the session watches the time the decoder was asked for, and
-            # the frame it publishes closes the press - not the page's timeout.
-            bump_generation()
-            self._press_session().watch(fraction * duration)
-            decoder.seek(fraction * duration)
-            log(f"seek: decoder asked for {fraction * duration:.3f}s")
-            return
-        # EXPORT, third route: no tail and no file decoder, but a renderer is alive and publishing into the pane's
-        # block. The strip's share becomes a newest-wins request - `(seconds, generation + 1)` - and the renderer
-        # decodes that one frame through the model path and publishes it without writing it to the export. A request
-        # only ever goes out while something renders; with no process the block is left alone (nothing would answer).
-        # A PREVIEW with no usable block keeps today's refusal: its tail is all there is.
-        if bool(getattr(self, "isPreview", False)):
-            ticket.refused("preview-without-a-block")
-            return
-        # An export press used to pass `hold=False` - "its feed keeps painting the moving band" - which is exactly what
-        # the owner saw: the newest upscaled frame painted over his request and the marker dragged to the produced edge,
-        # pause notwithstanding (2026-11-24). A press on a PAUSED pane parks on the requested picture; while playing it
-        # stays a live follow, and the answer is one publication in the stream.
-        if self._request_display_seek(fraction, hold=bool(getattr(self, "_preview_paused", False))):
-            bump_generation()
-        else:
-            # Nobody will answer: the render has finished (or never started), and an export has no file decoder behind
-            # the pane. Refusing keeps the pane honest - it also clears the pending flag, because a parked pane that
-            # waits forever for a picture is the "video became unavailable after the render" the owner reported
-            # (2026-11-25). Reported instead of silent: the press was logged as decided and then vanished.
-            ticket.refused("no-render-and-no-file-decoder")
-            self._display_seek_pending = False
-            self._update_display_wanted()
+        """Route a press or a drag on the strip; a REFUSED press changes nothing (no token, no register). Logic: `seek`."""
+        seek.on_preview_seek(self, fraction)
 
     def _request_display_seek(self, fraction: float, *, hold: bool) -> bool:
-        """Ask the running render for ONE frame at `fraction` of the clip; True when the request went out.
-
-        The block holds one `(seconds, generation + 1)` slot, so a drag replaces its predecessor (newest wins) and the
-        renderer decodes the requested timestamp between frames (`RenderVideo._seek_preview`), publishing it without
-        writing it to the export. `_on_display_frame` paints it.
-
-        `hold` is a PREVIEW press: its tail cannot pass a frame it has not produced, so the transport parks on the
-        requested picture (and play hands the pane back, following the produced edge as before). An export's press
-        does not park anything - its feed keeps painting the moving band.
-        """
-        reader = getattr(self, "_display", None)
-        if reader is None or not bool(getattr(reader, "attached", False)):
-            return False
-        process = getattr(self, "renderProcess", None)
-        if process is None or process.poll() is not None:
-            return False                # nothing would answer a request; the block is left alone
-        clip = self._clip_duration()
-        if clip <= 0.0:
-            return False                # the timeline length is unknown, so a share cannot become seconds
-        target = fraction * clip
-        # The seek slot belongs to the reader's block; with a feed attached the write goes through the feed, which
-        # is the object that owns "the pane asked for this generation" (newest wins, one slot).
-        chain = self._display_chain()
-        if hold and not bool(getattr(self, "_preview_paused", True)):
-            # Park the transport on the frame it asked for. A playing tail would otherwise paint its own (produced)
-            # frame over it a moment later; play resumes the follow from the produced edge, as before.
-            self._on_preview_pause_toggled(True)
-        unanswered = getattr(self, "_seek_pressed_at", None) is not None
-        previous_generation = getattr(self, "_seek_generation", None)
-        generation = chain.request_seek(target)
-        self._seek_generation = generation or None
-        spot = getattr(self, "_press", None)
-        if spot is not None and spot.open:
-            # "Can this be answered" is known now, in milliseconds: a produced frame exists or it does not. No stopwatch
-            # - `answerable=0` with `why=target-past-produced-edge` is the explanation for a press that used to leave no
-            # line at all (owner, 2026-11-24: four presses, produced=0.0000, nothing drawn, nothing logged).
-            produced_s = float(self._live_produced_fraction() or 0.0) * clip
-            ahead = target > produced_s + 1e-6
-            spot.decide(route="display", answerable=True, ahead=ahead,
-                        why="decoded-on-demand" if ahead else None, generation=generation)
-        if hold or bool(getattr(self, "_preview_paused", True)):
-            # A held pane has `wanted` 0, so the renderer would stage the requested frame and never publish it. Ask
-            # for exactly that one frame: `_on_display_frame` paints it and clears this again.
-            self._display_seek_pending = True
-            chain.set_wanted(True)
-        if hold:
-            # The marker and the compare's source clock stand on the requested frame; the produced band keeps
-            # advancing from the renderer's own counters (republished with the frame).
-            self._preview_playhead = float(target)
-        log(f"seek: requested {target:.3f}s (generation {generation}) from the running render")
-        return True
+        """Ask the running render for one frame at `fraction`; True when the request went out. Logic: `seek`."""
+        return seek.request_display_seek(self, fraction, hold=hold)
 
     def _live_timeline(self, edge: float) -> float:
         """The whole timeline a strip fraction is a share of, for the live tail.
@@ -3475,32 +3047,8 @@ class ProcessTab:
         return True
 
     def _warm_source_decoder(self) -> None:
-        """Open the source decoder while a job runs, so the first switch to a compare mode is just a seek.
-
-        Called from the GUI tick (`_tick_second_surface`), synchronously: a `QTimer` scheduled from here never fired in a
-        live run (measured 2026-11-26 - a whole render went by with no `source decoder` line and the first switch still
-        paid the open), and `renderToPipeThread` is a worker thread where a timer cannot live at all. One open per job,
-        on the thread that owns the decoder, guarded so the tick cannot retry a failing file 10 times a second.
-
-        Why it matters: the open plus the first seek is the ~0.8 s the owner measured between the result half appearing
-        and the source half ("апскейл сразу справа отобразился, а оригинал - н-ое количество времени ожидания").
-        """
-        if getattr(self, "_source_decoder", None) is not None or getattr(self, "_source_warm_tried", False):
-            return
-        options = getattr(self, "currentRenderOptions", None)
-        if not (getattr(options, "inputFile", "") or ""):
-            return
-        self._source_warm_tried = True
-        if getattr(self, "isPreview", False):
-            # The owner's case: a preview's first switch to a compare mode paid the open. A preview is the one flow where
-            # the pane is guaranteed to be shown and the switch is a human action a second away - open ONCE, here, on the
-            # GUI thread (a `QTimer` scheduled from this tick never fired in a live run: measured 2026-11-26, a whole
-            # render went by with no `source decoder` line).
-            self._open_source_decoder()
-            return
-        from PySide6.QtCore import QTimer
-
-        QTimer.singleShot(700, self._open_source_decoder)
+        """Open the compare decoder before the mode needs it. Logic: `supply.warm_source_decoder`."""
+        supply.warm_source_decoder(self)
 
     def _on_original_requested(self, seconds: float, *, span: bool = False) -> None:
         """Decode ONE source frame at the playhead for the LMB compare (the input file, never the renderer).
@@ -3658,207 +3206,16 @@ class ProcessTab:
         return self._compare_display_playhead()
 
     def _source_paint_pair(self, playhead: float | None = None) -> None:
-        """One entry point for "the result has just been painted; give it its other half in the same repaint".
-
-        A minimal host (a harness that builds the tab without `__init__`) reaches the paint paths with nothing to pair,
-        which is why the call sites look it up instead of calling it. The presentation rule itself is the pane's: the
-        frame it now shows, the register's bounded answer, `set_source`. A caller that wants to force one moment can
-        still name it, but the moment is only ever used to READ the register - never to assert a picture exists.
-        """
-        self._sync_compare_source()
+        """One entry point for "the result was just painted; give it its other half". Logic: `present.paint_pair`."""
+        present.paint_pair(self, playhead)
 
     def _source_fill(self, playhead: float) -> None:
-        """Top the register up to `COMPARE_LEAD_FRAMES` ahead of the playhead, one ask per call.
-
-        The next call comes from the frame's ARRIVAL (`_on_original_frame`): the decoder then runs flat out until the
-        lead is full and stops, instead of being polled at a timer's rate - a 10 Hz poll cannot feed a 24 fps stream, so
-        the lead would drain exactly when it is needed. The register is the pool; there is no separate prune, no "newest
-        decoded" flag, and no clock deciding who owns a moment.
-        """
-        playhead = float(playhead)
-        register = getattr(self, "_source_register", None)
-        if register is None:
-            return
-        interval = 1.0 / self._compare_fps()
-        generation = int(getattr(self, "_result_generation", 0))
-        if register.owner_of(playhead, generation=generation) == "block":
-            # The renderer is publishing THIS moment's source: decoding the same file a second time is exactly the cost
-            # this block exists to remove. An older block offer owns nothing, so it cannot suppress the decoder.
-            return
-        newest = register.newest_moment(generation=generation)
-        # ONE ask in flight at a time: the arrival of each frame calls this again, and without the guard a burst would
-        # start a second span for the same moment (the decoder keeps only the last request, so the work is wasted).
-        pending = getattr(self, "_source_fill_pending", None)
-        if pending is not None:
-            aged = time.monotonic() - float(pending[1])
-            if newest is not None and newest >= float(pending[0]) - 0.5 * interval:
-                self._source_fill_pending = None
-            elif aged < COMPARE_FILL_WINDOW_S:
-                return
-            else:
-                self._source_fill_pending = None      # a request nothing answered: ask again
-        span = True
-        # A PAUSED pane asks for one picture at its moment and never for a lead. The lead is a playback cost (the
-        # decoder's ~8 frames/s latency is hidden only when the playhead is moving); with a still playhead it decodes
-        # frames nobody will see - and, because the oldest entry went first, every lead walk used to evict the very
-        # picture the pane was showing (owner, 2026-11-27: the original blinked a couple of times with playback never
-        # started). The register's own anchor rule now protects that picture; this one stops the waste at the ask.
-        paused = bool(getattr(self, "_preview_paused", False))
-        if register.picture_for(playhead, 1.5 * interval, generation=generation) is None:
-            # Nothing in the register answers for THIS playhead (an empty register, a seek, a jump back): ask at it, and
-            # take the single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder
-            # stands.
-            target = playhead
-            span = False
-        elif paused:
-            # The pane holds the moment it is showing and is not moving: there is nothing to ask for.
-            return
-        elif newest is None:
-            target = playhead
-            span = False
-        elif playhead - newest > 2.0 * interval:
-            # The register is BEHIND the playhead - a scrub, or a SPARSE tail (its lateness rule skips pictures, so two
-            # consecutive ones can be six frames apart). One frame per call cannot close a gap the playhead reopens on
-            # every picture: measured 2026-11-26, `pool=1` for ever and every pair a timeout. Ask for the far edge of the
-            # lead and take the whole walk - the burst IS the point. It is decoded FORWARD, not rewound: a rewind's ceil
-            # landed a frame off the tail's sparse grid while the forward walk lands on the frame itself.
-            target = playhead + self._compare_lead()
-            span = True
-        elif newest < playhead + self._compare_lead():
-            # Ask for the WHOLE lead in one call and take every frame of the walk: one round trip per lead, not one per
-            # frame (a frame-by-frame ask is latency-bound at ~8 frames/s; the decode itself runs at 80).
-            target = playhead + self._compare_lead()
-        else:
-            return
-        if register.owner_of(target, generation=generation) is not None:
-            # Somebody already holds the very moment this ask would fetch. Asking again would decode the same picture a
-            # second time - and "somebody holds it" is the whole answer, whoever the owner is.
-            return
-        self._source_fill_pending = (float(target), time.monotonic())
-        stats = getattr(self, "_compare_fill_stats", None)
-        if stats is not None:
-            stats["asks"] += 1
-            stats["target"] = round(float(target), 3)
-            stats["span"] = int(bool(span))
-            stats["newest"] = None if newest is None else round(float(newest), 3)
-        self._compare_from_tick = True
-        try:
-            self._on_original_requested(max(0.0, target), span=span)
-        finally:
-            self._compare_from_tick = False
+        """One ask in flight, the lead, the pause policy, the arrival counter. Logic: `supply.source_fill`."""
+        supply.source_fill(self, playhead)
 
     def _on_original_frame(self, frame) -> None:
-        """The source frame from the decoder, cropped to the box THE RENDER used, then handed to the pane.
-
-        The crop is applied here rather than in the decoder because the decoder exposes no crop and the surface
-        (`src/ui/widgets/video_preview.py`) is another lane's file: `QImage.copy` of the same rectangle is the same
-        pixels, and the surface then scales it to the rendered frame's size - which is what makes the two pictures
-        comparable. Without the crop the compare shows the whole source (black bars included) and the eye reads the
-        letterbox as a scale difference.
-        """
-        from PySide6.QtGui import QImage
-
-        image = QImage(bytes(frame.buffer), frame.width, frame.height, frame.stride,
-                       QImage.Format.Format_RGB888).copy()
-        box = getattr(self, "_source_crop", None)
-        if box is not None:
-            # The box is written in SOURCE pixels; this decoder hands over a fitted picture, so it is scaled by the same
-            # ratio (`stream_size` is the coded size, the one the render's BORDERS line describes).
-            source_size = None
-            decoder = getattr(self, "_source_decoder", None)
-            size_of = getattr(decoder, "stream_size", None)
-            if callable(size_of):
-                try:
-                    source_size = size_of()
-                except Exception:
-                    source_size = None
-            if source_size and source_size[0] > 0 and image.width() != source_size[0]:
-                scale = image.width() / float(source_size[0])
-                box = tuple(int(round(value * scale)) for value in box)
-        region = crop_region(box, image.width(), image.height())
-        if region is None:
-            # Today's picture (the whole source) is the fallback, and the log says once why: a silent
-            # uncropped frame is indistinguishable from "crop detection found nothing".
-            if box is None:
-                self._log_source_crop_unknown("this render's output carried no readable BORDERS line")
-            else:
-                self._log_source_crop_unknown(
-                    f"the render reported {box} but the source frame is {image.width()}x{image.height()}")
-        else:
-            image = image.copy(*region)
-        if region is None:
-            # No crop: the QImage still points into `raw`, which dies with this function - own the pixels.
-            image = image.copy()
-        # What the decoder actually produced, before the crop and the scale: a compare half that ends up black is
-        # either an empty decode or a viewer-side problem, and only this line can tell them apart.
-        if telemetry.level() >= 2:
-            # Three `pixelColor` reads per source frame exist for one line of evidence; at 24 fps they are 72 a second
-            # on the GUI thread for a log nobody is reading. Level 2 is the "one line per frame" mode, so ask there.
-            _samples = []
-            for _fx, _fy in ((1, 1), (image.width() // 2, image.height() // 2),
-                             (max(0, image.width() - 2), max(0, image.height() - 2))):
-                _c = image.pixelColor(int(_fx), int(_fy))
-                _samples.append(f"{_c.red()},{_c.green()},{_c.blue()}")
-            telemetry.event("source frame", w=image.width(), h=image.height(), fmt=image.format().name,
-                            px="/".join(_samples))
-        else:
-            telemetry.event("source frame", w=image.width(), h=image.height(), fmt=image.format().name)
-        watched = getattr(self, "_compare_watch", None)
-        self._compare_watch = None
-        pts = float(getattr(frame, "pts", 0.0) or 0.0)
-        index = getattr(frame, "index", None)
-        pane = self.page_handles.proc.previewLabel
-        # The LAST step's other half: what the pane was showing when the press asked for this source frame. The labels
-        # can agree and the pictures still differ (a shifted file timeline names every frame late), so the draw line in
-        # the pane's own log carries a content fingerprint next to this one.
-        result_time = None
-        result_kind = None
-        try:
-            result_time = pane.shown_time() if hasattr(pane, "shown_time") else None
-            result_kind = pane.shown() if hasattr(pane, "shown") else None
-        except Exception:
-            pass
-        if watched is not None:
-            fps = 0.0
-            try:
-                fps = float(self._source_decoder.fps()) if getattr(self, "_source_decoder", None) is not None else 0.0
-            except Exception:
-                fps = 0.0
-            fps = fps if fps > 0.0 else 24.0
-            gap = "" if result_time is None else (
-                f", result {float(result_time):.3f}s {result_kind}"
-                f" -> gap {pts - float(result_time):+.3f}s ({(pts - float(result_time)) * fps:+.1f} frames)")
-            log(f"compare: the source frame is {pts:.3f}s idx={index} for an ask of {watched:.3f}s "
-                f"(delta {pts - watched:+.3f}s, {abs(pts - watched) * fps:.1f} frames at {fps:.2f} fps{gap})")
-        # OFFER, never write the pane: the frame is one candidate for the moment it names, and `_sync_compare_source`
-        # decides which candidate the pane's own moment gets. A producer that wrote directly could bypass the pane's
-        # half-frame refusal; this one cannot.
-        register = getattr(self, "_source_register", None)
-        if register is not None:
-            arrived = register.offer(pts, image, "decoder",
-                                     generation=int(getattr(self, "_result_generation", 0)))
-            if arrived is not None:
-                self._compare_fill_note_arrival()
-        if telemetry.level() >= 2:
-            telemetry.event("compare put", pts=round(float(pts), 3),
-                            pool=len(register) if register is not None else 0)
-        if not callable(getattr(pane, "set_source", None)):
-            # A pane from before the register API (an old harness double) still gets the picture here; the real pane
-            # only ever receives `set_source` from `_sync_compare_source`.
-            legacy = getattr(pane, "set_original", None)
-            if callable(legacy):
-                pane.set_original(image, media_time=pts, index=index)
-            return
-        self._sync_compare_source()
-        mode = getattr(pane, "view_mode", None)
-        single = True
-        if callable(mode):
-            try:
-                single = mode() == "single"
-            except Exception:
-                single = True
-        if not single:
-            self._source_fill(self._compare_supply_playhead())
+        """The decoder's source frame: OFFER it to the register, never write the pane. Logic: `transport`."""
+        transport.on_original_frame(self, frame)
 
     def _log_source_crop_unknown(self, reason: str) -> None:
         """One line per job when the compare cannot crop: the preview then shows the uncropped source."""

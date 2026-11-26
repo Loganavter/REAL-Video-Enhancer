@@ -1128,7 +1128,11 @@ def test_every_frame_the_decoder_offers_is_counted_as_an_arrival():
     tab._compare_fill_stats["asks"] = 4
     assert tab._compare_fill_stats["arrivals"] == 2, "asks and arrivals are separate facts"
 
-    source = inspect.getsource(ProcessTab._on_original_frame)
+    # The decoder's arrival path now lives in the use case (`preview/use_cases/transport.py`); the tab keeps a
+    # delegator, so the check follows the BODY, not the delegator that replaced it.
+    from src.ui.preview.use_cases import transport as transport_use_case
+
+    source = inspect.getsource(transport_use_case.on_original_frame)
     assert "_compare_fill_note_arrival" in source, (
         "the decoder's own offer site must count the arrival; without it the line can only ever print 0")
 

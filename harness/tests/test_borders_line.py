@@ -133,6 +133,15 @@ def test_the_full_frame_box_is_the_same_picture_as_today():
 # -- the two halves are wired where they must be ----------------------------
 
 
+def _usecase_method(module: str, name: str):
+    """The FunctionDef `name` from `src/ui/preview/use_cases/<module>.py` (bodies that left the tab in P2)."""
+    path = ROOT / "src" / "ui" / "preview" / "use_cases" / f"{module}.py"
+    for node in _statements(path).body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"{module}.{name} is not defined in {path}")
+
+
 def _statements(path: Path):
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
@@ -212,7 +221,9 @@ def test_the_glue_keeps_the_box_with_the_job_and_crops_the_source():
                and any(isinstance(target, ast.Attribute) and target.attr == "_source_crop"
                        for target in node.targets)
                for node in ast.walk(loop)), "the parsed box is not kept for the job"
-    frame = methods["_on_original_frame"]
+    # The frame path moved out of the tab into the use case (`preview/use_cases/transport.py`) and the tab keeps a
+    # delegator, so the assertion follows the body. The behaviour is the same; the location is not.
+    frame = _usecase_method("transport", "on_original_frame")
     assert _calls(frame, "crop_region"), "the decoded source is no longer cropped to the render's box"
     assert any(
         isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "set_original"
