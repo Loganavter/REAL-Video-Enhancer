@@ -1390,7 +1390,25 @@ class VideoPreviewSurface(QRhiWidget):
             return self._frame_rect()
         scale = self._result_scale()
         view = self._original_view_rect()
-        drawn_w, drawn_h = picture.width() * scale, picture.height() * scale
+        # THE RESULT'S SCREEN BOX, with the source's own ASPECT. `set_original` scales the source to the result when it
+        # arrives, but a picture that arrived BEFORE a result existed (or before a size change) keeps its own pixel size,
+        # and a source from the render block arrives at the block's allocation box - so the two halves were laid out at
+        # wildly different sizes, each centred in its half: the "huge empty gap" between them (owner, 2026-11-26: "оба
+        # видео сделают между собой огромный пустой промежуток места"). The invariant `set_view_mode` states is one
+        # SCALE and each picture at its own aspect, so the box is the result's drawn size and a source with a different
+        # aspect is fitted INTO that box (it letterboxes there instead of overflowing its half).
+        result = self._frame_rect()
+        box_w, box_h = result.width(), result.height()
+        if box_w <= 0.0 or box_h <= 0.0:
+            box_w, box_h = picture.width() * scale, picture.height() * scale
+        source_aspect = picture.width() / float(picture.height() or 1)
+        box_aspect = box_w / float(box_h or 1)
+        if abs(source_aspect - box_aspect) / box_aspect <= 0.01:
+            drawn_w, drawn_h = box_w, box_h
+        elif source_aspect > box_aspect:
+            drawn_w, drawn_h = box_w, box_w / source_aspect
+        else:
+            drawn_w, drawn_h = box_h * source_aspect, box_h
         left = view.left() + (view.width() - drawn_w) / 2.0 + self._pan[0]
         top = view.top() + (view.height() - drawn_h) / 2.0 + self._pan[1]
         return QRectF(left, top, drawn_w, drawn_h)
