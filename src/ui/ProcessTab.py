@@ -1179,7 +1179,14 @@ class ProcessTab:
         self._apply_seek_ceiling()
 
     def _apply_seek_ceiling(self) -> None:
-        """Tell the pane how far its strip may seek, from what can actually serve a frame there.
+        """Push the reach to a pane that still has a seek port (`set_seek_ceiling`), from what can serve a frame there.
+
+        STATUS (2026-11-27, plan P3): the SHIPPED `VideoPreviewSurface` no longer has that port - its painted strip and
+        the fraction-valued ceiling went with it - so for the window this is a no-op. It is kept because it is the seam
+        the ceiling tests drive and because a second host shape exists (audit §6.11, the raster `ImageLabel` fallback);
+        deleting it means retargeting those tests to `_preview_seek_ceiling` (which answers SECONDS, not a fraction) -
+        board row `rve-ceiling-port-retarget-2026-11-27`.
+
 
         A usable block renders ANY timeline frame on demand (`RenderVideo._seek_preview`): an export's feed paints
         continuously from it, and a PREVIEW's same block answers a press past the produced band with that one frame
@@ -2138,20 +2145,16 @@ class ProcessTab:
     def _install_preview_controls(self) -> None:
         """Build the controller, the backend adapters and the two bars over the pane.
 
-        The old painted strip and the page's one pause button stand down here: the strip is hidden with the pane's
-        PUBLIC `set_strip_visible(False)` (its signals stay wired, the transport is the new one), and the button is
-        hidden rather than removed because the page owns it. The page keeps its own LMB compare/pan: the bars are
-        children of the pane and only the controls take the mouse.
+        The page's one pause button stands down here: the transport is the bar's now, and the button is hidden rather
+        than removed because the page owns it. The pane's painted strip is gone entirely (2026-11-27, plan P3), so there
+        is nothing to switch off. The page keeps its own LMB compare/pan: the bars are children of the pane and only the
+        controls take the mouse.
         """
         pane = getattr(getattr(self.page_handles, "proc", None), "previewLabel", None)
         if pane is None or not hasattr(pane, "set_view_mode"):
             return
         from .preview.controller import PreviewController
 
-        try:
-            pane.set_strip_visible(False)
-        except Exception as exc:
-            log(f"preview: the pane's painted strip could not be hidden ({exc})")
         legacy = getattr(self.page_handles.proc, "previewPauseButton", None)
         if legacy is not None:
             # The new transport replaces it. Its `toggled` connection stays (unused while hidden) so `_sync_preview_transport`
@@ -2409,31 +2412,19 @@ class ProcessTab:
         })
 
     def _wire_preview_strip(self) -> None:
-        """Connect the pane's strip signals once, whoever owns the picture (live tail or finished file).
+        """Connect the pane's one remaining request signal once, whoever owns the picture.
 
-        Both paths need them: live, `seekRequested` must move the playhead inside what the renderer has already
-        written; finished, it seeks the file decoder. A second connection per pane would run every seek twice.
+        `originalRequested` is the LMB compare's ask for the source frame at the playhead. The pane's two
+        fraction-valued seek signals (`seekRequested` / `seekBlocked`) were deleted with the painted strip in plan P3:
+        every seek in the window is the bar's `SEEK_TO` in seconds, which reaches `_on_preview_seek` through the
+        controller. A second connection per pane would run every compare ask twice.
         """
         pane = self.page_handles.proc.previewLabel
         if getattr(self, "_preview_strip_wired_for", None) is pane:
             return
-        if hasattr(pane, "seekRequested"):
-            try:
-                pane.seekRequested.connect(self._on_preview_seek)
-            except Exception:
-                pass
         if hasattr(pane, "originalRequested"):
             try:
                 pane.originalRequested.connect(self._on_original_requested)
-            except Exception:
-                pass
-        if hasattr(pane, "seekBlocked"):
-            # The pane refuses a press past the produced band before the host ever sees it. That is the right answer
-            # while the render is still writing, but it is also the third way a press can "do nothing", so it says so.
-            try:
-                pane.seekBlocked.connect(
-                    lambda fraction: log(
-                        f"seek: {float(fraction):.1%} of the strip is past the produced band; nothing to show there"))
             except Exception:
                 pass
         self._preview_strip_wired_for = pane

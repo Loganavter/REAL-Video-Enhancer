@@ -117,9 +117,7 @@ class _FakePane:
     """The pane API the page touches, recording what reached the screen and the ceiling it was given."""
 
     def __init__(self, visible: bool = True) -> None:
-        self.seekRequested = _Signal()
         self.originalRequested = _Signal()
-        self.seekBlocked = _Signal()
         self.ceilings: list[float | None] = []
         self.frames: list = []
         self.progress: list[dict] = []
@@ -265,7 +263,7 @@ def test_a_preview_press_past_the_produced_band_asks_for_exactly_one_frame():
     assert pane.ceilings[-1] == pytest.approx(1.0), (
         "a preview whose block is usable may seek the whole timeline: the renderer can render that frame")
 
-    pane.seekRequested.emit(0.30)
+    tab._on_preview_seek(0.30)
 
     assert reader.seeks == [pytest.approx(1.5)], "30 % of the 5 s clip, written once"
     assert reader.generation == 5, "the slot carries generation + 1, never the generation it replaced"
@@ -321,7 +319,7 @@ def test_a_tail_frame_does_not_paint_over_a_pending_seek_frame():
     tab = _tab(pane=pane, preview=True, paused=True, reader=reader)
     tab._live_tail = _FakeTail(produced_seconds=0.6)
     tab._wire_preview_strip()
-    pane.seekRequested.emit(0.30)
+    tab._on_preview_seek(0.30)
     assert tab._display_seek_pending is True
 
     tab._on_preview_frame(_frame(1.4))
@@ -338,7 +336,7 @@ def test_the_published_frame_clears_the_pending_hold_and_is_painted():
     tab = _tab(pane=pane, preview=True, paused=True, reader=reader)
     tab._live_tail = _FakeTail(produced_seconds=0.6)
     tab._wire_preview_strip()
-    pane.seekRequested.emit(0.30)
+    tab._on_preview_seek(0.30)
 
     image = _picture(4, 2, "#a04020")
     reader.publish(image)
@@ -362,7 +360,7 @@ def test_pressing_play_hands_the_pane_back_to_the_tail():
     tab = _tab(pane=pane, preview=True, paused=True, reader=reader)
     tab._live_tail = tail
     tab._wire_preview_strip()
-    pane.seekRequested.emit(0.30)
+    tab._on_preview_seek(0.30)
     assert tab._display_seek_pending is True
 
     tab._on_preview_pause_toggled(False)
@@ -385,7 +383,7 @@ def test_a_press_on_a_playing_preview_holds_the_frame_it_shows():
     tab._live_tail = tail
     tab._wire_preview_strip()
 
-    pane.seekRequested.emit(0.30)
+    tab._on_preview_seek(0.30)
 
     assert tab._preview_paused is True
     assert tail.paused is True
@@ -402,7 +400,7 @@ def test_an_export_press_still_goes_through_the_export_route():
     tab = _tab(pane=pane, preview=False, paused=True, reader=reader)
     tab._wire_preview_strip()
 
-    pane.seekRequested.emit(0.50)
+    tab._on_preview_seek(0.50)
 
     assert reader.seeks == [pytest.approx(2.5)]
     assert reader.generation == 3
@@ -417,7 +415,7 @@ def test_a_playing_export_is_not_paused_by_a_press():
     tab = _tab(pane=pane, preview=False, paused=False, reader=reader)
     tab._wire_preview_strip()
 
-    pane.seekRequested.emit(0.50)
+    tab._on_preview_seek(0.50)
 
     assert reader.seeks == [pytest.approx(2.5)]
     assert tab._preview_paused is False, "an export's transport is not a preview hold"
