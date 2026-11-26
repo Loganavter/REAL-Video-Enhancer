@@ -156,7 +156,6 @@ KNOWN: dict[str, dict[tuple[str, str], int]] = {
         ('src/ui/pages/download_page.py', 'setGeometry(928, 302)'): 1,
         ('src/ui/pages/general_settings.py', 'QSize(230)'): 1,
         ('src/ui/pages/general_settings.py', 'setGeometry(470, 1040)'): 1,
-        ('src/ui/pages/general_settings.py', 'setMinimumSize(190)'): 1,
         ('src/ui/pages/proc_page.py', 'QSize(40, 45)'): 2,
         ('src/ui/pages/proc_page.py', 'setMaximumSize(59, 55)'): 2,
         ('src/ui/pages/settings_page.py', 'setGeometry(1026, 652)'): 1,

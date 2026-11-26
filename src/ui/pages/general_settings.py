@@ -706,14 +706,23 @@ class GeneralSettingsPage:
         self.inputVideoInfoTextEdit.setTextPixelSize(RVE_CONTROL_FONT_PX)
         self.inputVideoInfoTextEdit.setObjectName(u"inputVideoInfoTextEdit")
         self.inputVideoInfoTextEdit.setEnabled(False)
-        sizePolicy3.setHeightForWidth(self.inputVideoInfoTextEdit.sizePolicy().hasHeightForWidth())
-        self.inputVideoInfoTextEdit.setSizePolicy(sizePolicy3)
+        # HEIGHT FROM THE CONTENT, not from the column's slack. `sizePolicy3` is vertical EXPANDING, so the layout handed
+        # this pane every spare pixel and it always ended at the bottom of the column whatever the body needed (owner,
+        # 2026-11-26: "почему-то фиксированная высота, то ли пол - типа он всегда достигает какой-то позиции, а не
+        # понимает сколько ему реально нужно"). Its own hint is already the body's height (`RichTextView(fit_content=
+        # True)`), so the vertical policy is Fixed - a fresh policy, because `sizePolicy3` is shared with other rows.
+        info_policy = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
+        info_policy.setHeightForWidth(False)
+        self.inputVideoInfoTextEdit.setSizePolicy(info_policy)
         # The Designer had a 190 px MINIMUM under a 180 px MAXIMUM here: Qt clamps to the maximum, the content needed
         # 2 px more than it had, and the toolkit drew its 'there is more below' fade over text that already fitted
         # (owner, 2026-11-24: 'the text fits but the fade is there'). The contradictory ceiling is gone - the default
         # maximum applies and the floor keeps the Designer's 190 so an empty panel does not collapse. The fade itself
         # now also requires a ramp's worth of remaining scroll, so a 2 px rounding can never advertise more text.
-        self.inputVideoInfoTextEdit.setMinimumSize(QSize(0, 190))
+        # The Designer's 190 px floor is gone with the fixed policy: it WAS the "always reaches some position" the owner
+        # sees on a short body (an empty video-info pane is 9 labels shorter than 190). The pane is its content now, and
+        # an empty one is the padding, which is what "as much as it really needs" means.
+        self.inputVideoInfoTextEdit.setMinimumSize(QSize(0, 0))
         self.inputVideoInfoTextEdit.setAccessibleDescription(u"")
         # No stylesheet: the pane paints its own text and plate; the deleted rule only forced white on a disabled
         # editor, which is the colour this pane's token already gives it.
