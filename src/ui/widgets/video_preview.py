@@ -611,7 +611,12 @@ class VideoPreviewSurface(QRhiWidget):
         self._renderer.set_view_mode(mode)
         if mode != "single":
             self._request_standing_original()
-        self.update()
+        # RE-FEED the renderer, do not just ask for a repaint: a mode change made while the job that owned the pictures
+        # had already released its RHI resources left the result half BLACK - the pane still held the picture (and its
+        # size, which is why the rects were right) but the renderer's texture was gone and a repaint re-drew nothing
+        # (owner, 2026-11-26: in sbs the right half stayed empty until a new frame arrived). Handing the newest pair over
+        # again marks the upload dirty and rebuilds it.
+        self._commit_newest()
 
     def split_fraction(self) -> float:
         """Where the `split` divider sits, as a share of the picture's width (0..1)."""
