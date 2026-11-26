@@ -2066,6 +2066,26 @@ class ProcessTab:
             return duration
         return None
 
+    def _produced_for_band(self, kind, duration: float, *, fraction: float, rendering: bool) -> float:
+        """What the strip's BLUE means: seconds the upscaler has produced.
+
+        A finished file is fully produced. Everything else is a live render and the band is its progress - including an
+        EXPORT whose pane follows the display feed: that pane used to report `produced = duration`, so a render at 14 %
+        showed the whole bar blue and the grey "not upscaled yet" half never appeared (owner, 2026-11-26, screenshot of
+        an export at frame 67/493 with a fully blue strip). The feed can seek anywhere on demand, but that is the
+        CEILING (`_preview_seek_ceiling`), not the produced share.
+        """
+        from .preview.state import PreviewBackendKind
+
+        if duration <= 0.0:
+            return 0.0
+        if kind is PreviewBackendKind.FINISHED_FILE:
+            return duration
+        if kind is PreviewBackendKind.DISPLAY_FEED and not rendering:
+            # The render is over and the feed is showing the finished file: there is nothing left to produce.
+            return duration
+        return max(0.0, min(1.0, float(fraction))) * duration
+
     def _push_preview_state(self) -> None:
         """Feed the controller the facts it cannot see: the pane's numbers, its owners, the probe's frame counts."""
         controller = getattr(self, "_preview_controller", None)
@@ -2097,12 +2117,9 @@ class ProcessTab:
                 fps = 0.0
         kind = self._preview_backend_kind()
         produced_fraction = self._live_produced_fraction()
-        if kind in (PreviewBackendKind.FINISHED_FILE, PreviewBackendKind.DISPLAY_FEED) and duration > 0.0:
-            produced = duration
-        else:
-            produced = produced_fraction * duration if duration > 0.0 else 0.0
         process = getattr(self, "renderProcess", None)
         rendering = process is not None and process.poll() is None
+        produced = self._produced_for_band(kind, duration, fraction=produced_fraction, rendering=rendering)
         owners = (getattr(self, "_live_tail", None) is not None
                   or getattr(self, "_preview_decoder", None) is not None
                   or getattr(self, "_queue_pane_decoder", None) is not None)

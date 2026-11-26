@@ -117,3 +117,30 @@ def test_the_landing_tolerance_is_two_frames_with_a_floor():
     tab.currentRenderOptions = SimpleNamespace(videoFps=0.0)
     tab.fps = 0
     assert tab._seek_landing_tolerance() == pytest.approx(0.1)
+
+
+def test_a_live_export_band_shows_progress_not_the_whole_clip():
+    """The blue half of the strip is "upscaled", so a live export at 14 % must be 14 % blue, not all of it.
+
+    The DISPLAY_FEED pane used to report `produced = duration` unconditionally, so an export's strip was fully blue
+    from the first frame and the owner's rule ("серая - ещё не проапскейленное") never showed (2026-11-26, screenshot of
+    a render at frame 67/493).
+    """
+    from src.ui.preview.state import PreviewBackendKind
+
+    tab = _tab()
+    tab.currentFrame, tab.max_value = 67, 493
+    tab.fps = 24
+
+    # A live export: the band is the render's progress.
+    assert tab._produced_for_band(PreviewBackendKind.DISPLAY_FEED, 20.0,
+                                  fraction=67 / 493, rendering=True) == pytest.approx(20.0 * 67 / 493)
+    # The same pane after the render finished is a finished file: nothing left to produce.
+    assert tab._produced_for_band(PreviewBackendKind.DISPLAY_FEED, 20.0,
+                                  fraction=67 / 493, rendering=False) == pytest.approx(20.0)
+    # A preview's tail is always its progress.
+    assert tab._produced_for_band(PreviewBackendKind.LIVE_TAIL, 20.0,
+                                  fraction=0.25, rendering=True) == pytest.approx(5.0)
+    # A reopened finished file is fully produced.
+    assert tab._produced_for_band(PreviewBackendKind.FINISHED_FILE, 20.0,
+                                  fraction=0.0, rendering=False) == pytest.approx(20.0)
