@@ -89,3 +89,34 @@ def test_the_old_shape_is_what_printed_the_warning():
     result = _run("old")
     assert "created: True" in result.stdout
     assert "leaked shared_memory" in result.stderr
+
+
+def test_releasing_a_block_whose_segment_is_already_gone_does_not_talk_to_the_tracker(monkeypatch):
+    """Owner, 2026-11-26: the terminal printed `KeyError: '//status_state<pid>'` from the resource tracker at exit.
+
+    Every block here is created with `track=False` on a modern interpreter - it was never registered - and `release`'s
+    "already gone" path unregistered it anyway. The tracker answers that with a KeyError in its own process, which is the
+    traceback nobody could place.
+    """
+    import multiprocessing.resource_tracker as tracker
+
+    from src.ui import shared_flag
+
+    calls = []
+    monkeypatch.setattr(tracker, "unregister", lambda name, rtype: calls.append((name, rtype)))
+
+    block = shared_flag.create("/test_release_untracked", 8)
+    try:
+        # Unlink behind the flag's back: this is the FileNotFoundError path, the one that used to call the tracker.
+        import os
+        from multiprocessing import shared_memory
+
+        name = block._name
+        # `track=False` here too: this helper is not what the test is about, and a tracked attach would register (and
+        # then unregister) the name itself, filling `calls` with the test's own noise.
+        shared_memory.SharedMemory(name=name, track=False).unlink()
+        shared_flag.release(block)
+    finally:
+        pass
+
+    assert calls == [], "a block this process never registered must not be unregistered"

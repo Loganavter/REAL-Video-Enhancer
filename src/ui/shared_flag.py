@@ -44,17 +44,28 @@ def register(getter) -> None:
         atexit.register(_run_cleanups)
 
 
+#: Whether this interpreter REGISTERS the blocks it creates with `multiprocessing`'s resource tracker. `track=` arrived
+#: in 3.13; where it exists every block here is created untracked, and `release` must then say nothing to the tracker.
+#: It used to unregister anyway on the "the segment is already gone" path, which printed, at exit,
+#: `KeyError: '//status_state<pid>'` - the tracker refusing to forget a name this process never gave it
+#: (owner, 2026-11-26: the traceback in the terminal).
+_TRACKED = True
+
+
 def _open(name: str, create: bool, size: int = 1):
     """`SharedMemory` without the resource tracker where the interpreter supports it.
 
-    `track=` arrived in 3.13; the front end runs 3.13 while the bundled backend interpreter is 3.12, and both import
+    `track=` arrived in 3.13; the front end runs 3.14 while the bundled backend interpreter is 3.12, and both import
     this module, so the fallback keeps the old signature working there (`release` then drops the registration itself).
     """
+    global _TRACKED
     kwargs = {"create": True, "size": int(size)} if create else {}
     try:
-        return shared_memory.SharedMemory(name=name, track=False, **kwargs)
+        segment = shared_memory.SharedMemory(name=name, track=False, **kwargs)
     except TypeError:  # Python < 3.13: no `track` parameter
         return shared_memory.SharedMemory(name=name, **kwargs)
+    _TRACKED = False
+    return segment
 
 
 def create(name: str, size: int = 1):
@@ -89,8 +100,11 @@ def release(flag) -> None:
         pass  # the flag is released either way
     except Exception:
         pass
-    # The name was already gone. On an interpreter without `track=` the creation registered it, and CPython's `unlink`
-    # raises BEFORE it unregisters - drop the registration here so the tracker does not report a leak at exit.
+    # The name was already gone. On an interpreter WITHOUT `track=` the creation registered it, and CPython's `unlink`
+    # raises BEFORE it unregisters - drop that registration so the tracker does not report a leak at exit. Where the
+    # blocks are created untracked there is nothing to drop, and asking anyway is what printed the KeyError.
+    if not _TRACKED:
+        return
     try:
         from multiprocessing import resource_tracker
 
