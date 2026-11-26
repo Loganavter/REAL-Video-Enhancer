@@ -73,6 +73,9 @@ class PreviewState:
     zoom: float = 1.0
     compare: bool = False
     playhead: float = 0.0
+    #: A FRAME IS ON THE SCREEN NOW (`pane.has_frame()`), as opposed to `has_picture()`'s "a host can answer". The bar's
+    #: claims follow this one: an empty pane has no mode to ring (owner, 2026-11-26).
+    picture: bool = False
     #: Where the PICTURE is: the media time of the frame on screen. The playhead is where the host stands (the requested
     #: time while a press is unanswered); this one lags while the decoder catches up, and it is what the scrubber paints
     #: as played. `None` means "unknown", and the painter then falls back to the playhead.

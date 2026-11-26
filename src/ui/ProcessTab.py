@@ -2398,6 +2398,11 @@ class ProcessTab:
             has_frame = bool(pane.has_frame()) if callable(getattr(pane, "has_frame", None)) else False
         except Exception:
             has_frame = False
+        # TWO facts, not one. `has_picture` is "a host exists or a frame is up" and it feeds the controller's PHASE (a
+        # press on a queue item must be answerable before its first frame). `picture` is "a frame is on the screen NOW" and
+        # it is what the BAR may claim: an empty pane has no mode, so no checked ring (owner, 2026-11-26: "при пустом
+        # экране можно зажать пустое место и курсор реально сменится" + "убирать обводку ... показывать в превью ещё
+        # нечего").
         has_picture = bool(has_frame or owners or rendering)
         playing = bool(not self._preview_paused and has_picture)
         try:
@@ -2436,6 +2441,7 @@ class ProcessTab:
         controller.observe(
             is_playing=playing,
             has_picture=has_picture,
+            picture=bool(has_frame),
             playhead=max(0.0, playhead),
             played=max(0.0, played),
             fill_source=fill_source,

@@ -556,7 +556,7 @@ def test_the_ring_is_suppressed_while_the_pane_has_nothing_to_show(controls):
         "an empty pane must not claim a mode")
 
     controls.set_state(PreviewState(phase=PreviewPhase.READY, mode="single", duration=10.0, produced=5.0, playhead=1.0,
-                                    source_frames=100, output_frames=100))
+                                    source_frames=100, output_frames=100, picture=True))
     assert mode.property("outlineAllowed") is True
     assert ring.applies(SimpleNamespace(states=frozenset(mode.region_states("_main")), widget=mode)) is True
 

@@ -363,7 +363,7 @@ class PreviewControls(QWidget):
         # The ring is a claim about the CURRENT mode; with nothing on the pane there is no mode to claim. One property
         # write per pass, read by `CheckedOutlineLayer.applies` (the painter's own gate).
         for outlined in self._outline_buttons:
-            outlined.setProperty("outlineAllowed", bool(state.has_picture()))
+            outlined.setProperty("outlineAllowed", bool(state.picture))
         for spec in ACTIONS:
             button = self._buttons.get(spec.id)
             if button is None:
