@@ -32,6 +32,10 @@ compare mode refuses a picture that names no moment (it must not inherit the pre
 `set_frame_planes` remain as thin compatibility adapters that pass through the same guards - the planes path is the
 YUV playback path's cheap one (no QImage, no `to_ndarray`, colour conversion in the fragment shader). The SOURCE half
 has its own guarded API, `set_source(SourcePicture)`, and only the page's one synchroniser calls it.
+
+What reaches the renderer is NOT decided here: `src/ui/preview/pair.py` owns the painted pair - a compare mode paints a
+pair or holds the last one, one documented hard limit is the only way a half is shown alone, and nothing else in the
+tree calls `renderer.set_frame`/`set_original`. This file keeps the identity guards, the geometry and the hand-over.
 """
 
 from __future__ import annotations
@@ -49,6 +53,7 @@ from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager
 from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
 
 from src.ui.video import telemetry
+from src.ui.preview.pair import CommittedPair, Half, PairWriter
 from src.ui.preview.source_register import ResultPicture, SourcePicture
 from src.ui.widgets.playback_strip import (
     PlaybackTimeReadout,
@@ -117,37 +122,13 @@ VIEW_MODES = ("single", "sbs", "split")
 #: mouse, narrow enough that a press meant for the picture (pan/compare) stays one.
 SPLIT_GRAB_PX = 9
 
-#: A compare mode shows ONE moment, not two: a repaint is allowed only while the two halves are within this. One and a
+#: A compare mode shows ONE moment, not two: a source this far from the result is still the same picture. One and a
 #: half frames at 24 fps, and the number is a MEASURED trade-off, not a preference: at half a frame the exact source
 #: arrives ~20 ms after its result, the gate holds, and the hold times out on the paints whose source is slower still
 #: (`pair_off` 20-27 of 27 in the bad seconds); at one and a half the gate paints a one-frame-old neighbour instead
-#: (`pair_sub` 7-9 of 20-27, `pair_ahead` 0 - a constant lag, never a wobble). The real fix is pairing by TIME in the
-#: pane (a result queue and a source queue, painted when both hold the same moment), not a wider or narrower gate.
+#: (`pair_sub` 7-9 of 20-27, `pair_ahead` 0 - a constant lag, never a wobble). It is the pane's own tolerance now;
+#: WHEN a pair may paint at all is the policy of `src/ui/preview/pair.py`, not a number here.
 PAIR_SYNC_SLACK_S = 0.0625
-
-#: ...but never held longer than this. A decoder that never answers, or a pair that is systematically a frame apart,
-#: must not freeze the picture: a small mismatch is better than a still image.
-PAIR_SYNC_HOLD_S = 0.25
-
-#: How close two names must be to be the same moment, in milliseconds. The keys are both `round(time * 1000)`, so this
-#: absorbs the rounding of two independently derived timestamps and nothing else.
-PAIR_MATCH_MS = 2
-
-#: A jump bigger than this in the result's own clock is a SEEK, not playback: the pair queues are flushed so a stale
-#: half can never be paired with a fresh one. Measured live 2026-11-26 (split, seek during playback): the transition
-#: painted `delta_frames=-80.06` twice - the valve firing while both the old and the new moments sat in the queues.
-PAIR_JUMP_S = 0.5
-
-#: How long the valve is held back after a SEEK (the queues were flushed, so the old source half is stale by definition).
-#: Long enough for a keyframe rewind plus a couple of frames (~200 ms measured), short enough that a dead decoder cannot
-#: freeze the picture: past this the valve paints whatever it has and says so in the log.
-PAIR_JUMP_WAIT_S = 1.0
-
-#: How many result and source pictures the pair queue may hold while a partner is missing. The rule is GStreamer's
-#: `GstAggregator`: every input keeps its own queue, the aggregate step runs only when ALL inputs have a buffer, and a pad
-#: that misses the bounded wait has its buffers SKIPPED rather than shifting the pair (`gstaggregator.c`:
-#: `gst_aggregator_check_pads_ready`, `gst_aggregator_wait_and_check`, `gst_aggregator_pad_skip_buffers`).
-PAIR_QUEUE_MAX = 8
 
 #: Half a frame at the scene's 24 fps: the pane REFUSES a source snapshot further than this from the result's own
 #: moment. The register already answers with a bounded match, so this is the second, independent guard - and it is why
@@ -222,15 +203,13 @@ class VideoPreviewSurface(QRhiWidget):
         self._dragging_split = False
         #: When the pointer last left the divider (monotonic), or None while it is on/near it: the fade's clock.
         self._divider_left_at: float | None = None
-        #: When the pair gate started holding a paint (monotonic), or None while a paint is allowed.
-        self._pair_blocked_at: float | None = None
-        #: When a seek flushed the queues (monotonic); the valve stands down for `PAIR_JUMP_WAIT_S` after it.
-        self._pair_await_fresh_at: float | None = None
-        #: The pair queue: `milliseconds -> picture`. The renderer is handed a RESULT and a SOURCE of the same moment,
-        #: whichever arrived first, instead of the newest of each - that is what removes "one frame ahead, one frame
-        #: behind" at the seam (owner, 2026-11-26).
-        self._result_queue: dict[int, tuple] = {}
-        self._source_queue: dict[int, tuple] = {}
+        #: The ONE writer of the painted pair (`preview/pair.py`): the pane offers it halves, it decides what the
+        #: renderer holds, and it is the only code in the tree that calls `set_frame`/`set_original`. The pair policy
+        #: (a compare mode paints a pair or holds the last one; `MAX_PAIR_STALE_S` is the only way a half shows alone)
+        #: lives there, in words and in one place. What the renderer holds - and which picture is on screen, not which
+        #: half arrived last - is its state: `painted_pair()` is the only way to ask, because a repaint can come from
+        #: anywhere (the compositor, a HUD fade, a resize) and must draw the pair that belonged together.
+        self._pair = PairWriter(self._renderer)
         #: The generation of the result on screen. A new render/file/seek starts the next one; a result from an older
         #: generation is REFUSED (keep the last picture) instead of painting over the new one.
         self._result_generation = 0
@@ -241,11 +220,6 @@ class VideoPreviewSurface(QRhiWidget):
         #: True when a result was refused: the half is a GAP. The last picture stays on screen, but nothing may pair
         #: across the refusal.
         self._result_gap = False
-        #: The time of the pair the RENDERER holds - not of the newest halves. A repaint can come from anywhere (the
-        #: compositor, a HUD fade, a resize); those must draw the last pair that belonged together, not a half-updated
-        #: one, or the very flicker the gate exists to remove comes back through the side door.
-        self._committed_result_time: float | None = None
-        self._committed_source_time: float | None = None
         #: The fade needs repaints, and a paused pane has no other clock. 30 ms is smooth at this size and stops as soon
         #: as the rule reaches its rest alpha.
         self._divider_timer = None
@@ -341,8 +315,8 @@ class VideoPreviewSurface(QRhiWidget):
         * a picture with NO moment while a compare mode requires a pair is refused - it must not inherit the previous
           pane moment and be paired with a stale source.
 
-        A refusal keeps the last picture and marks the half as a GAP; nothing is queued for it, so no pair can form
-        across it. The refusal is visible in the log with the register's own numbers.
+        A refusal keeps the last picture and marks the half as a GAP; nothing is offered to the pair writer for it, so no
+        pair can form across it. The refusal is visible in the log with the register's own numbers.
         """
         if result is None:
             self._accept_result(None, None, int(self._result_generation))
@@ -379,7 +353,7 @@ class VideoPreviewSurface(QRhiWidget):
         return 0.5 * max(1e-3, float(self._result_frame_seconds))
 
     def _refuse_result(self, moment: float | None, generation: int, reason: str) -> None:
-        """Keep the last picture, mark the half as a GAP, and say why. Nothing is queued for a refused result."""
+        """Keep the last picture, mark the half as a GAP, and say why. Nothing is offered for a refused result."""
         self._result_gap = True
         if telemetry.level() >= 1:
             telemetry.event("result refused", why=reason,
@@ -391,22 +365,21 @@ class VideoPreviewSurface(QRhiWidget):
     def _accept_result(self, moment: float | None, image: QImage | None, generation: int, *,
                        planes_frame: PreviewFrame | None = None, index: int | None = None,
                        seq: int | None = None, gui_ms: float | None = None) -> None:
-        """Store an accepted result and hand the renderer its pair. The one place the pane's clock is written."""
+        """Store an accepted result and offer it to the pair writer. The one place the pane's clock is written."""
         cleared = image is None and planes_frame is None
         if cleared:
             self._frame = None
             self._planes_size = None
             self._pending_frame_obj = None
-            # A CLEAR means the pane is empty: the queued results of the picture it used to show are not answers for
-            # an empty pane, and neither is its source. Keeping them meant a late source could re-key itself by its own
-            # moment (`shown_moment()` is None here, so `set_source`'s guard is skipped by construction) and paint a
-            # half back onto a pane that was told to be empty (audit 2026-11-27 §6.1b, probe G2).
-            self._result_queue.clear()
             self._original = None
             self._original_shown = None
             self._original_time = None
-            self._source_queue.clear()
-            self._cleared_empty = True
+            # A CLEAR means the pane is EMPTY: the painter drops the pair and refuses a source offered for a moment
+            # from before the clear. Keeping a queue across it meant a late source re-keyed itself by its own moment
+            # (`shown_moment()` is None here, so `set_source`'s guard was skipped by construction) and painted half a
+            # picture back onto a pane told to be empty (audit 2026-11-27 §6.1b, probe G2).
+            self._pair.clear()
+            self.update()
         elif planes_frame is not None:
             self._frame = None
             self._planes_size = (int(planes_frame.width), int(planes_frame.height))
@@ -417,10 +390,6 @@ class VideoPreviewSurface(QRhiWidget):
             # image, and the two shapes must never both claim the same frame.
             self._planes_size = None
             self._pending_frame_obj = None
-        if not cleared:
-            # A picture is on the pane again: the explicit "told to be empty" state is over, and a source offer may
-            # paint again (subject to its own moment/generation guard).
-            self._cleared_empty = False
         if int(generation) > self._result_generation:
             # A new render/file/seek: the cadence and the "older than" baseline belong to the previous generation.
             self._result_generation = int(generation)
@@ -441,11 +410,18 @@ class VideoPreviewSurface(QRhiWidget):
         elif seq is not None:
             self._shown = ("seq", int(seq))
         self._shown_time = None if moment is None else float(moment)
-        # NOT handed to the renderer here: `_request_frame_paint` commits the PAIR (see `_commit_pair`).
-        self._enqueue(self._result_queue, moment,
-                      (self._frame, getattr(self, "_shown", None), moment, index,
-                       self._pending_frame_obj))
-        self._request_frame_paint()
+        if not cleared:
+            # The picture is OFFERED, not painted: what reaches the renderer (a pair, a hold or the stale-limit half) is
+            # the pair writer's decision, made behind the pane's one render gate below.
+            self._pair.offer_result(Half(
+                frame=self._pending_frame_obj if planes_frame is not None else self._preview_frame(
+                    self._frame, index=index, pts=moment),
+                moment=moment,
+                generation=int(generation),
+                image=self._frame,
+                name=getattr(self, "_shown", None),
+            ))
+            self._request_frame_paint()
         telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=moment,
                              generation=int(generation))
 
@@ -511,10 +487,8 @@ class VideoPreviewSurface(QRhiWidget):
         return self._frame is not None or self._planes_size is not None
 
     def oldest_result_time(self) -> float | None:
-        """The oldest result still waiting for a partner - the next picture the queue can paint."""
-        if not self._result_queue:
-            return None
-        return min(self._result_queue) / 1000.0
+        """The oldest result still waiting for a partner - the next picture the writer can paint."""
+        return self._pair.oldest_result_time()
 
     def committed_time(self) -> float | None:
         """The media time of the pair the RENDERER holds - the picture actually on screen, not the newest arrival.
@@ -524,7 +498,16 @@ class VideoPreviewSurface(QRhiWidget):
         frame, the newest frame moved by the same amount, and the pair never closed (measured 2026-11-26, split during
         inference: `playhead=0.417 newest=0.375`, every paint a timeout).
         """
-        return getattr(self, "_committed_result_time", None)
+        return self._pair.committed_time()
+
+    def painted_pair(self) -> CommittedPair | None:
+        """What the renderer holds: both halves of one moment, or the one half the pair policy allows.
+
+        The pane's answer to "what is on screen", derived from the pair writer's own state - never from a flag kept
+        beside it (a predicate that answered "in sync" about a picture with no source half is exactly the lie the audit
+        removed, 2026-11-27 §6.1).
+        """
+        return self._pair.painted()
 
     def shown_time(self) -> float | None:
         """The media time of the picture on screen, when the publisher named it."""
@@ -629,8 +612,14 @@ class VideoPreviewSurface(QRhiWidget):
         telemetry.event("draw", **fields)
 
     def _log_draw_two(self, result: QImage | None, original: QImage | None, *,
-                      present: bool | None = None) -> None:
-        """The compare modes paint both halves in ONE pass: name both pictures in one line."""
+                      present: bool | None = None, source_moment: float | None = None,
+                      source_name: tuple[str, int] | None = None) -> None:
+        """The compare modes paint both halves in ONE pass: name both pictures in one line.
+
+        `source_moment`/`source_name` are the identity of the picture the RENDERER holds. They are passed in because
+        `_original` is the newest ACCEPTED snapshot, which during a hold is the one the pane refused: a draw line that
+        named it would print a picture nobody can see.
+        """
         if present is None:
             present = result is not None and not result.isNull()
         if not present:
@@ -654,6 +643,12 @@ class VideoPreviewSurface(QRhiWidget):
         if original is not None and not original.isNull():
             fields.update({f"original_{k}": v for k, v in self._identity_fields(original=True).items()})
             fields["original_fp"] = self._fingerprint(original)
+            # The PAINTED picture's own name wins over the newest snapshot's (`_identity_fields` read `_original_*`):
+            # during a hold the newest snapshot is the one the pane refused and nobody can see.
+            if source_moment is not None:
+                fields["original_t"] = f"{float(source_moment):.3f}"
+            if source_name is not None:
+                fields["original_idx"] = int(source_name[1])
         fields["wall"] = telemetry.wall()
         telemetry.event("draw", **fields)
 
@@ -665,10 +660,14 @@ class VideoPreviewSurface(QRhiWidget):
         REFUSED and the pane keeps a gap - never the previous picture, which would be a neighbour of the moment the
         result is showing. That refusal is the compare's identity rule at its last line: a producer cannot hand over a
         picture it merely believes belongs here.
+
+        A gap is not a blank: the pair already painted stays on screen (`preview/pair.py`). Only a pane that was told to
+        be EMPTY refuses a source outright, because there is no moment on it that a picture could belong to (audit
+        2026-11-27 §6.1b).
         """
         if snapshot is not None:
             moment = self.shown_moment()
-            if self._cleared_empty:
+            if self._pair.cleared:
                 # The pane was told to be EMPTY and nothing has been published since: a late source for a moment
                 # before the clear must not re-key itself (`shown_moment()` is None, so the check below cannot see it)
                 # and paint half a picture onto an empty pane (audit 2026-11-27 §6.1b).
@@ -719,15 +718,15 @@ class VideoPreviewSurface(QRhiWidget):
         result, i.e. the same apparent scale with no second zoom to keep in sync.
         """
         if snapshot is None:
-            if self._original is None and not self._source_queue:
+            if self._original is None:
                 return
             self._original = None
             self._original_shown = None
             self._original_time = None
             self._original_changed = False
-            # FAIL CLOSED: a source that does not answer for the pane's moment must not be paired with a new result by
-            # the hold's valve later either. The gap is the honest picture; the old one is a neighbour's.
-            self._source_queue.clear()
+            # The GAP is handed over, not acted on: in a compare mode the pair already painted stays on screen (that is
+            # what stops a strip drag blanking the left half), while `single` drops its LMB flash at once.
+            self._pair.offer_source(None)
             self._request_frame_paint()
             return
         moment = float(snapshot.moment)
@@ -775,12 +774,16 @@ class VideoPreviewSurface(QRhiWidget):
                                     frame=f"{target.width()}x{target.height()}",
                                     diff_pct=f"{relative * 100.0:.2f}")
         self._original = picture
-        # The pair queue is keyed by the moment the pane is STANDING ON, not by the producer's own name: the snapshot
-        # has already been accepted as that moment's picture (within half a frame), so the result waiting for it must
-        # find it. The picture's own moment still travels in the payload, so the draw line stays honest.
-        key = self.shown_moment()
-        key = moment if key is None else key
-        self._enqueue(self._source_queue, key, (self._original, moment, index))
+        # Offered by its OWN moment, not by the pane's: the writer pairs a source with the result of the same moment
+        # within the tolerance the pane states, so a picture that merely believes it belongs here cannot be drawn as a
+        # neighbour. The picture's own moment travels in the payload, so the draw line stays honest.
+        self._pair.offer_source(Half(
+            frame=self._preview_frame(picture, index=index, pts=moment),
+            moment=moment,
+            generation=int(snapshot.generation),
+            image=picture,
+            name=None if index is None else ("frame", int(index)),
+        ))
         self._request_frame_paint()
 
     def set_view_mode(self, mode: str) -> None:
@@ -809,16 +812,19 @@ class VideoPreviewSurface(QRhiWidget):
         self._hud_dirty = True
         # Both textures get re-uploaded once: `single` may have left the source in the shared one, and the compare
         # modes keep the result there. Cheap (one upload) and it removes a whole class of "stale half" readings. The
-        # renderer owns those flags and the mode they depend on, so it hears the mode change before any frame arrives.
+        # The renderer owns those flags and the mode they depend on, so it hears the mode change before any frame
+        # arrives; the pair writer hears it too, because what a mode may paint is the writer's policy.
         self._renderer.set_view_mode(mode)
+        self._pair.set_view_mode(mode)
         if mode != "single":
             self._request_standing_original()
         # RE-FEED the renderer, do not just ask for a repaint: a mode change made while the job that owned the pictures
         # had already released its RHI resources left the result half BLACK - the pane still held the picture (and its
         # size, which is why the rects were right) but the renderer's texture was gone and a repaint re-drew nothing
-        # (owner, 2026-11-26: in sbs the right half stayed empty until a new frame arrived). Handing the newest pair over
-        # again marks the upload dirty and rebuilds it.
-        self._commit_newest()
+        # (owner, 2026-11-26: in sbs the right half stayed empty until a new frame arrived). Handing the painted pair
+        # over again marks the upload dirty and rebuilds it.
+        if self._pair.refresh():
+            self.update()
 
     def split_fraction(self) -> float:
         """Where the `split` divider sits, as a share of the picture's width (0..1)."""
@@ -850,244 +856,19 @@ class VideoPreviewSurface(QRhiWidget):
             return False
         return abs(position.x() - x) <= float(scaled_px(SPLIT_GRAB_PX))
 
-    def _enqueue(self, queue: dict, media_time, payload) -> None:
-        """Keep one picture in a pair queue, bounded: a picture whose partner never comes is dropped, not accumulated."""
-        if media_time is None:
-            return
-        self._flush_on_jump(float(media_time))
-        queue[int(round(float(media_time) * 1000.0))] = payload
-        while len(queue) > PAIR_QUEUE_MAX:
-            del queue[min(queue)]
-
-    def _flush_on_jump(self, moment: float) -> None:
-        """Drop both queues when the picture jumps - a seek must not pair the old moment with the new one.
-
-        Playback advances by a frame at a time and never trips this; a press on the timeline does, and the pane then
-        keeps showing the LAST consistent pair until the new moment's partner arrives (the hold's own window), instead of
-        the valve painting `result=new source=old` after 500 ms (the `delta_frames=-80` transition measured live).
-        """
-        keys = list(self._result_queue) + list(self._source_queue)
-        if self._committed_result_time is not None:
-            # The committed moment is the picture ON SCREEN even when both queues are empty (a pair was painted and
-            # pruned), and a seek away from it is exactly the case that must flush.
-            keys.append(int(round(float(self._committed_result_time) * 1000.0)))
-        if not keys:
-            return
-        # Compared against EVERYTHING the queues hold, not against the committed time: after the result of the new
-        # moment has already been queued (the flush ran for it), its partner arrives and must NOT trip the flush again -
-        # that threw away the very picture the pair was waiting for (caught by the regression test the first time it
-        # ran, 2026-11-26).
-        nearest = min(abs(key / 1000.0 - float(moment)) for key in keys)
-        if nearest <= PAIR_JUMP_S:
-            return
-        self._result_queue.clear()
-        self._source_queue.clear()
-        self._pair_blocked_at = None
-        self._pair_release_count = 0
-        # ...and the valve is NOT allowed to paint the old source beside the new result: `_original` still holds the
-        # picture of the moment we just left, so `_commit_newest` would pair the two across the jump. The pane keeps the
-        # last consistent pair on screen until the new moment's partner arrives (bounded below, so a dead decode cannot
-        # freeze it for ever).
-        self._pair_await_fresh_at = time.monotonic()
-
-    def _pick_pair(self):
-        """The newest result that HAS a partner, as `(result_key, source_key)`; `None` while one is missing.
-
-        GStreamer's aggregator rule, ported: the aggregate step runs only when every input has a buffer, and a pad that
-        misses the wait has its buffers skipped rather than shifting the pair. A result older than the newest source by
-        more than the tolerance will never get a partner, so it is dropped here instead of holding the picture.
-        """
-        if not self._result_queue or not self._source_queue:
-            return None
-        # EXACT, in milliseconds: the two keys are the same moment rounded independently, so a difference of more than a
-        # couple of milliseconds is a different frame. The queue can afford this because it WAITS for the partner instead
-        # of substituting a neighbour - which is the whole point of it (measured 2026-11-26: with the gate's 1.5-frame
-        # tolerance the queue happily paired a frame with its predecessor, `delta_frames=-1.01` on 71 of 154 paints).
-        slack = PAIR_MATCH_MS
-        newest_source = max(self._source_queue)
-        for key in sorted(self._result_queue, reverse=True):
-            nearest = min(self._source_queue, key=lambda candidate: abs(candidate - key))
-            if abs(nearest - key) <= slack:
-                return key, nearest
-            if key < newest_source - slack:
-                del self._result_queue[key]
-        return None
-
-    def pair_in_sync(self) -> bool:
-        """True when the two halves are the same picture (or there is only one picture to show).
-
-        In a compare mode, NO source half is not "in sync": it is half a picture, and answering True here was the lie
-        that opened the gate for exactly the state it exists to prevent (audit 2026-11-27, `video_preview.py:997` - the
-        compare committed the result alone and this said the halves agreed). `single` has one surface by definition.
-        """
-        if self._view_mode == "single":
-            return True
-        if self._original is None:
-            return False
-        # TIME, not frame numbers: the tail's index and the source decoder's index do not share a base even with both on
-        # content time (measured 2026-11-26: every paint refused when the gate compared indices), while the timestamps
-        # agree to within the drift the slack below covers.
-        result = getattr(self, "_shown_time", None)
-        source = getattr(self, "_original_time", None)
-        if result is None or source is None:
-            # An unnamed picture cannot be compared, so it must not be held: the publisher decides, not the gate.
-            return True
-        return abs(float(result) - float(source)) <= PAIR_SYNC_SLACK_S
-
-    def _commit_newest(self) -> None:
-        """Hand the renderer the NEWEST of each half - `single`, and the timeout valve when no pair can be completed."""
-        shown = getattr(self, "_shown", None)
-        index = None if shown is None else shown[1]
-        if self._frame is not None:
-            self._renderer.set_frame(self._preview_frame(self._frame, index=index, pts=self._shown_time))
-        elif getattr(self, "_pending_frame_obj", None) is not None:
-            # The planes path: the producer's own `PreviewFrame` IS the result (no QImage exists for it).
-            self._renderer.set_frame(self._pending_frame_obj)
-        else:
-            self._renderer.set_frame(None)
-        self._renderer.set_original(self._preview_frame(self._original, index=index, pts=self._original_time))
-        self._committed_result_time = getattr(self, "_shown_time", None)
-        self._committed_source_time = getattr(self, "_original_time", None)
-        self._pair_blocked_at = None
-        self._pair_release_count = 0
-        self.update()
-
-    def _commit_source_only(self) -> None:
-        """Hand the renderer the SOURCE half alone, for a compare mode whose result does not exist yet."""
-        index = None
-        self._renderer.set_frame(None)
-        if self._original is not None:
-            self._renderer.set_original(self._preview_frame(self._original, index=index, pts=self._original_time))
-        self._committed_result_time = None
-        self._committed_source_time = None if self._original_time is None else float(self._original_time)
-        self._pair_blocked_at = None
-        self.update()
-
-    def _commit_pair(self) -> bool:
-        """Hand the renderer a RESULT and a SOURCE of the same moment; False when one of them has not arrived yet.
-
-        The RENDERER is what draws, so it is what must hold a matched pair: keeping `_frame`/`_original` as the newest
-        for geometry and the readout is free, but handing the renderer a half whose partner has not arrived means every
-        repaint from outside the gate (a compositor frame, the divider's fade) shows the mismatch. Painting the pair -
-        whichever half arrived first - is what removes "one frame ahead, one frame behind" at the seam.
-        """
-        pair = self._pick_pair()
-        if pair is None:
-            return False
-        result_key, source_key = pair
-        entry = self._result_queue[result_key]
-        picture, source_time, source_index = self._source_queue[source_key]
-        result_image, _shown, result_time = entry[0], entry[1], entry[2]
-        planes = entry[4] if len(entry) > 4 else None
-        if result_image is not None:
-            self._renderer.set_frame(self._preview_frame(result_image, index=source_index, pts=result_time))
-        elif planes is not None:
-            self._renderer.set_frame(planes)
-        else:
-            # Defensive: an entry with neither an image nor planes carries no picture at all. Dropping it is right - the
-            # renderer keeps the last result - while `set_frame(None)` cleared the half (see `set_frame`).
-            del self._result_queue[result_key]
-            del self._source_queue[source_key]
-            return False
-        self._renderer.set_original(self._preview_frame(picture, index=source_index, pts=source_time))
-        self._committed_result_time = None if result_time is None else float(result_time)
-        self._committed_source_time = None if source_time is None else float(source_time)
-        self._pair_await_fresh_at = None
-        # Everything at or before the committed pair is spent: the queues stay small and the next pick starts after it.
-        for key in [key for key in self._result_queue if key <= result_key]:
-            del self._result_queue[key]
-        for key in [key for key in self._source_queue if key <= source_key]:
-            del self._source_queue[key]
-        self._pair_blocked_at = None
-        self._pair_release_count = 0
-        self.update()
-        return True
-
-    def pair_paint_ready(self, now: float | None = None) -> bool:
-        """Whether a repaint may happen NOW: in sync, or the hold window has run out."""
-        if self.pair_in_sync():
-            return True
-        blocked = getattr(self, "_pair_blocked_at", None)
-        if blocked is None:
-            return False
-        moment = time.monotonic() if now is None else float(now)
-        return (moment - blocked) >= PAIR_SYNC_HOLD_S
-
     def _request_frame_paint(self) -> None:
-        """Hand the renderer a pair that belongs together, or hold until it does.
+        """The pane's ONE render gate: every accepted picture ends here, and the pair writer makes the decision.
 
-        Without the gate each half repainted on its own arrival, so a fast GPU showed the result at T+1 beside the source
-        at T for one frame, then both at T+1 - a 40 ms window of mismatched halves, repeated, which is the flicker the
-        owner reports. The gate holds the newer half until its partner arrives; the timer is the way out when it never does.
+        A second painter is how the compare's defects came back four times (rules §2/§5), so this method stays the only
+        door - it now carries no policy of its own. `preview/pair.py` owns it: a compare mode paints a pair or holds the
+        last one, `MAX_PAIR_STALE_S` is the only way a half is shown alone, and the writer is the only code that calls
+        `renderer.set_frame`/`set_original`.
         """
-        if self._view_mode == "single":
-            self._commit_newest()
-            return
-        if self._original is None:
-            # A compare mode paints a PAIR or nothing. This branch used to call `_commit_newest()` - so at every source
-            # gap, and before the very first source frame, the pane handed the renderer the upscaled result ALONE and
-            # then committed the pair a frame later (owner, 2026-11-27: "оригинал не отрисовывается одновременно с
-            # апскейлом в режиме side by side"). The pair that is already on screen stays until a source for the new
-            # moment arrives; the hold window is the only way out, because a source that never comes must not blank
-            # the whole pane for ever (that is the defect the source-only branch above already answers).
-            blocked = getattr(self, "_pair_blocked_at", None)
-            now = time.monotonic()
-            if self._has_picture():
-                if blocked is None:
-                    self._pair_blocked_at = now
-                    return
-                if (now - float(blocked)) < PAIR_SYNC_HOLD_S:
-                    return
-            self._commit_newest()
-            return
-        if not self._has_picture():
-            # No result at all (a queue item with nothing produced, a preview whose tick stopped): the pair gate would
-            # wait for a half that cannot arrive, and the pane would stay blank while the source sat decoded in hand
-            # (owner, 2026-11-26: "очень долго ждем оригинал на side by side"). Show the source.
-            self._commit_source_only()
-            return
-        if self._commit_pair():
-            return
-        if getattr(self, "_pair_blocked_at", None) is None:
-            self._pair_blocked_at = time.monotonic()
-            if telemetry.level() >= 2:
-                telemetry.event("pair hold", result=round(float(getattr(self, "_shown_time", 0.0) or 0.0), 3),
-                                source=round(float(getattr(self, "_original_time", 0.0) or 0.0), 3))
-            from PySide6.QtCore import QTimer
-
-            QTimer.singleShot(int(PAIR_SYNC_HOLD_S * 1000) + 1, self._release_pair_paint)
-
-    def _release_pair_paint(self) -> None:
-        """The hold window ran out: REPEAT the pair already on screen, and commit a mismatch only after a second window.
-
-        Showing the mismatched halves is the flicker itself; a picture that repeats for another 120 ms is not visible.
-        The second window is the hard stop - a decoder that never answers must not freeze the pane, and a small
-        mismatch is better than a still image.
-        """
-        if getattr(self, "_pair_blocked_at", None) is None:
-            return
-        fresh = getattr(self, "_pair_await_fresh_at", None)
-        if fresh is not None and (time.monotonic() - float(fresh)) < PAIR_JUMP_WAIT_S:
-            # A seek just happened: hold the old (consistent) pair a little longer rather than paint the new result
-            # beside the source of the moment we left. Past `PAIR_JUMP_WAIT_S` the valve is allowed again, so a dead
-            # source still cannot freeze the pane for ever.
-            from PySide6.QtCore import QTimer
-
-            QTimer.singleShot(int(PAIR_SYNC_HOLD_S * 1000) + 1, self._release_pair_paint)
-            return
-        self._pair_release_count = getattr(self, "_pair_release_count", 0) + 1
-        if self._pair_release_count < 2:
-            from PySide6.QtCore import QTimer
-
-            QTimer.singleShot(int(PAIR_SYNC_HOLD_S * 1000) + 1, self._release_pair_paint)
-            self.update()          # the committed pair again: no advance, and nothing to mismatch
-            return
-        self._pair_release_count = 0
-        if telemetry.level() >= 2:
-            telemetry.event("pair release", result=round(float(getattr(self, "_shown_time", 0.0) or 0.0), 3),
-                            source=round(float(getattr(self, "_original_time", 0.0) or 0.0), 3))
-        # The timeout's valve: a picture that cannot be paired is still shown, and the log says the pair was missed.
-        self._commit_newest()
+        self._pair.set_tolerance(self.source_half_frame_s())
+        # A hand-over is what asks for the repaint: the writer hands nothing while it holds the last pair, and a gap
+        # notification must not repaint (or re-upload) a picture that has not changed.
+        if self._pair.paint():
+            self.update()
 
     def divider_alpha(self, now: float | None = None) -> float:
         """The divider's alpha right now: 1 while the pointer is on it, 0 after `DIVIDER_FADE_S` away from it."""
@@ -1195,11 +976,14 @@ class VideoPreviewSurface(QRhiWidget):
             self._request_standing_original()
 
     def set_background_colour(self, colour) -> None:
-        """The opaque colour the pane shows where no frame is drawn (the page's surface token)."""
+        """The opaque colour the pane shows where no frame is drawn (the page's surface token).
+
+        A colour is not a picture: a theme change must not re-open a pane that was told to be empty (the old body reset
+        the "told to be empty" latch here, which let a late source repaint a cleared pane after a theme flip).
+        """
         from PySide6.QtGui import QColor as _QColor
 
         self._clear_colour = _QColor(colour)
-        self._cleared_empty = False
         self.update()
 
     def set_strip_visible(self, visible: bool) -> None:
@@ -1616,11 +1400,33 @@ class VideoPreviewSurface(QRhiWidget):
                 return (int(planes_size[0]), int(planes_size[1]))
             # BEFORE THE FIRST RESULT the source is the only picture: let it define the box, or the fit has no size to
             # work with (scale 1.0) and a 1440-wide source is drawn at native size, clipped to a corner of the half.
-            source = self._original
-            if source is not None and not source.isNull():
-                return (source.width(), source.height())
+            source = self._source_size()
+            if source is not None:
+                return source
             return (0, 0)
         return (image.width(), image.height())
+
+    def _source_size(self) -> tuple[int, int] | None:
+        """The pixel size of the source half the RENDERER holds, or None when it holds none.
+
+        Read from the pair writer, not from `_original`: while a strip drag leaves the newest snapshot a frame behind,
+        `_original` is the picture the pane REFUSED and the renderer is still painting the last matched pair. The
+        geometry must describe what is on screen, or the held source is laid out from a picture nobody can see.
+        """
+        pair = self._pair.painted()
+        if pair is not None and pair.source is not None and pair.source.frame is not None:
+            frame = pair.source.frame
+            width = getattr(frame, "width", None)
+            height = getattr(frame, "height", None)
+            if width and height:
+                return (int(width), int(height))
+            image = pair.source.image
+            if image is not None and not image.isNull():
+                return (image.width(), image.height())
+        newest = self._original
+        if newest is not None and not newest.isNull():
+            return (newest.width(), newest.height())
+        return None
 
     def _fit_scale(self) -> float:
         width, height = self._image_size()
@@ -1679,8 +1485,8 @@ class VideoPreviewSurface(QRhiWidget):
         at its own aspect (a source with a different aspect letterboxes inside its half instead of being stretched to
         it). The pan is the result's, so panning either half shows the same region on both.
         """
-        picture = self._original
-        if picture is None or picture.isNull():
+        size = self._source_size()
+        if size is None:
             return QRectF()
         if self._view_mode != "sbs":
             return self._frame_rect()
@@ -1694,10 +1500,11 @@ class VideoPreviewSurface(QRhiWidget):
         # SCALE and each picture at its own aspect, so the box is the result's drawn size and a source with a different
         # aspect is fitted INTO that box (it letterboxes there instead of overflowing its half).
         result = self._frame_rect()
+        width, height = size
         box_w, box_h = result.width(), result.height()
         if box_w <= 0.0 or box_h <= 0.0:
-            box_w, box_h = picture.width() * scale, picture.height() * scale
-        source_aspect = picture.width() / float(picture.height() or 1)
+            box_w, box_h = width * scale, height * scale
+        source_aspect = width / float(height or 1)
         box_aspect = box_w / float(box_h or 1)
         if abs(source_aspect - box_aspect) / box_aspect <= 0.01:
             drawn_w, drawn_h = box_w, box_h
@@ -1767,20 +1574,23 @@ class VideoPreviewSurface(QRhiWidget):
         are the same `_view_rect`/`_original_clip_rect` the compare modes always used, and the HUD vertices are
         `_hud_vertices` unchanged. `target` is the CURRENT paint's render target - a resize replaces it, so it is
         passed per frame instead of cached.
+
+        The source half is laid out from the picture the RENDERER holds (`_source_size`), not from the newest snapshot:
+        while the writer holds the last matched pair through a source gap, the half on screen is the held one.
         """
-        original = self._original
+        source = self._source_size()
         return PreviewScene(
             target=target,
             rhi=self.rhi(),
             mode=self._view_mode,
             result_mvp=tuple(self._mvp_floats(self._frame_rect())),
-            original_mvp=None if original is None else tuple(self._mvp_floats(self._original_rect())),
+            original_mvp=None if source is None else tuple(self._mvp_floats(self._original_rect())),
             tint=tuple(self._tint),
             nearest=self.samples_nearest(),
             result_rect=self._frame_rect(),
             result_clip=self._view_rect(),
             original_clip=self._original_clip_rect(),
-            show_original=bool(self._showing_original and original is not None),
+            show_original=bool(self._showing_original and source is not None),
             hud_vertices=tuple(self._hud_vertices()),
             viewport=(float(self.width()), float(self.height())),
             dpr=float(self.devicePixelRatioF() or 1.0),
@@ -1812,13 +1622,19 @@ class VideoPreviewSurface(QRhiWidget):
                 self._logged_geometry = geometry
             return
         # Both halves in one pass: one line names both pictures (a new original, a new box, or every paint at level 2).
-        original = self._original if drawn.drew_original else None
+        # The picture named is the one the RENDERER holds (the pair writer's source), not the newest snapshot: while a
+        # drag leaves the arrival a frame behind, `_original` is a picture the pane refused and nobody can see.
+        painted = self._pair.painted()
+        source = None if painted is None else painted.source
+        original = None if source is None else source.image
         if drawn.drew_original and (self._original_changed or geometry_changed or telemetry.level() >= 2):
             # `present` from the WIDGET, not inferred from `_frame`: a planes (YUV) result has no QImage, so the
             # inference in `_log_draw_two` answered "no picture" and EVERY paint with a source on the live path wrote
             # nothing - the draw log was blind exactly where the compare runs (measured 2026-11-26: the fit paint, with
             # no source yet, was logged; the same paint with a source was not, which is what made a zoom look untraceable).
-            self._log_draw_two(self._frame, original, present=bool(original) or self._has_picture())
+            self._log_draw_two(self._frame, original, present=bool(original) or self._has_picture(),
+                               source_moment=None if source is None else source.moment,
+                               source_name=None if source is None else source.name)
             self._original_changed = False
             self._logged_geometry = geometry
         elif geometry_changed or telemetry.level() >= 2:
@@ -1870,6 +1686,7 @@ class VideoPreviewSurface(QRhiWidget):
             self.update()
 
     def releaseResources(self) -> None:  # noqa: N802 - Qt spelling
+        self._pair.release()
         self._renderer.release()
 
     def render(self, command_buffer) -> None:  # noqa: N802 - Qt spelling
@@ -1877,12 +1694,13 @@ class VideoPreviewSurface(QRhiWidget):
         target = self.renderTarget()
         if target is None or self.rhi() is None:
             return
-        if self._view_mode != "single" and self._original is not None:
+        painted = self._pair.painted()
+        if self._view_mode != "single" and painted is not None and painted.source is not None:
             # What this PAINT actually shows, both halves: the only number that can tell a consistent pair from a
             # flicker. The selection log says what was chosen; this says what reached the screen together. The COUNTER
             # is unconditional (two integer ops, and it rides the level-1 aggregate); the per-paint line is level 2.
-            result = getattr(self, "_committed_result_time", None)
-            source = getattr(self, "_committed_source_time", None)
+            result = painted.moment
+            source = painted.source.moment
             if result is not None and source is not None:
                 delta_frames = (float(source) - float(result)) * 24.0
                 telemetry.note_pair(delta_frames=delta_frames)
@@ -2000,8 +1818,7 @@ class VideoPreviewSurface(QRhiWidget):
                 bottom = min(strip_top, picture.bottom())
                 if bottom > top:
                     rects.append((middle - 0.5, top, 1.0, bottom - top, divider))
-        elif (self._view_mode == "split" and self._original is not None
-              and not self._original.isNull()):
+        elif self._view_mode == "split" and self._source_size() is not None:
             picture = self._frame_rect()
             top = max(0.0, picture.top())
             bottom = min(strip_top, picture.bottom())

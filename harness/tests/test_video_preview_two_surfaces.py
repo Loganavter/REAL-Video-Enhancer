@@ -345,7 +345,9 @@ def test_a_compare_with_no_result_paints_the_source_alone(surface):
     surface.set_view_mode("sbs")
     surface.set_original(_picture(*FRAME_SIZE, colour="#402060"), media_time=0.0)
 
-    assert surface._pair_blocked_at is None, "no result is not a blocked pair: the source is committed instead"
+    painted = surface.painted_pair()
+    assert painted is not None and painted.result is None, "no result is not a held pair: the source is committed"
+    assert painted.lone_half == "source", "and the one picture is named as such, not sold as a pair"
     assert surface._renderer._original is not None, "the renderer got the source half"
 
     calls: list[str] = []
@@ -367,12 +369,14 @@ def test_a_compare_with_a_result_still_paints_the_pair(surface):
     surface.set_frame(_picture(*FRAME_SIZE), media_time=1.0)
     surface.set_original(_picture(*FRAME_SIZE, colour="#402060"), media_time=1.0)
     surface.set_view_mode("sbs")
-    surface._commit_newest()
+    surface._pair.refresh()                      # what a mode change does: re-hand what the renderer holds
 
     assert surface._has_picture()
     assert surface._renderer._frame is not None, "the pair path keeps the RESULT in the renderer"
     assert surface._renderer._original is not None, "and the source beside it"
-    assert surface._pair_blocked_at is None
+    painted = surface.painted_pair()
+    assert painted is not None and painted.result is not None and painted.source is not None
+    assert painted.lone_half is None, "both halves of one moment: not a held half"
     assert surface._view_mode == "sbs" and surface._renderer._mode == "sbs"
 
 
@@ -557,7 +561,9 @@ def test_set_result_refuses_an_older_generation_and_keeps_the_last_picture(surfa
     assert surface._frame.pixelColor(1, 1) == QColor("#402060"), "the last picture stays"
     assert surface.shown_moment() == pytest.approx(1.0), "and so does its moment"
     assert surface._result_gap is True, "the half is a GAP after a refusal"
-    assert 1042 not in surface._result_queue, "a refused result is never queued for a pair"
+    held = surface._pair._pending_result
+    assert held is not None and held.moment == pytest.approx(1.0), (
+        "the picture waiting for a partner is the ACCEPTED one: a refused result is never offered for a pair")
 
 
 def test_set_result_refuses_a_late_frame_within_one_generation(surface):
@@ -629,14 +635,17 @@ def test_a_compare_mode_never_hands_the_renderer_a_lone_result(surface):
         "the pair is what reaches the renderer, together")
 
 
-def test_pair_in_sync_refuses_to_call_half_a_picture_synced(surface):
-    """`pair_in_sync()` answering True with no source half is the lie that let the gate commit the result alone."""
+def test_a_half_painted_pair_is_not_a_pair(surface):
+    """A predicate answering "in sync" about a picture with no source half was the lie that let the old gate commit the
+    result alone; the pane now reports the painted pair, and one half is not one."""
     surface.set_view_mode("sbs")
     surface.set_frame(_picture(*FRAME_SIZE), media_time=1.0)
     surface.set_original(None)
-    assert surface.pair_in_sync() is False, "one half is not a synced pair"
+    assert surface.painted_pair() is None, "one half is not a pair: a result with no source paints nothing"
     surface.set_original(_picture(*FRAME_SIZE), media_time=1.0)
-    assert surface.pair_in_sync() is True, "two halves of one moment are"
+    painted = surface.painted_pair()
+    assert painted is not None and painted.source is not None and painted.lone_half is None, (
+        "two halves of one moment are")
 
 
 def test_a_cleared_pane_stays_cleared_when_a_late_source_arrives(surface):
@@ -654,7 +663,10 @@ def test_a_cleared_pane_stays_cleared_when_a_late_source_arrives(surface):
 
     surface.set_result(None)                                  # the pane is told to be empty
     assert surface._frame is None
-    assert surface._result_queue == {}, "the cleared pane keeps no queued results of the picture it no longer shows"
+    painted = surface.painted_pair()
+    assert painted is not None and painted.result is None and painted.source is None, (
+        "the cleared pane keeps no half of the picture it no longer shows")
+    assert surface._pair._pending_result is None, "and nothing queued for a pair"
 
     surface.set_source(SourcePicture(moment=0.5, picture=_picture(*FRAME_SIZE), origin="decoder", generation=0))
     assert surface._original is None, "a late source may not paint onto a pane that is empty"

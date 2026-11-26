@@ -464,53 +464,62 @@ def test_a_compare_mode_paints_only_when_the_two_halves_are_one_moment(surface):
     """Owner, 2026-11-26: "нам бы как-нибудь синхронить сик когда отображается одновременно два кадра ... прямо мерцание".
 
     Each half used to repaint on its own arrival, so a fast GPU showed the result at T+1 beside the source at T for ~40 ms
-    and then both at T+1. The gate holds the newer half until its partner lands, with a timeout for the case where it
-    never does.
+    and then both at T+1. The pair writer holds the newer half until its partner lands (`preview/pair.py`), and its one
+    hard limit - not a valve timer - is what stops a dead source freezing the pane.
     """
     import time as _time
 
-    from src.ui.widgets.video_preview import PAIR_SYNC_HOLD_S, PAIR_SYNC_SLACK_S
+    from src.ui.preview.pair import MAX_PAIR_STALE_S
+    from src.ui.widgets.video_preview import PAIR_SYNC_SLACK_S
 
     source = QImage(640, 360, QImage.Format.Format_RGBA8888)
     source.fill(QColor("#204060"))
-    surface.set_original(source, media_time=5.0)
     surface.set_view_mode("split")
-    def result_image() -> QImage:
-        picture = QImage(640, 360, QImage.Format.Format_RGBA8888)
-        picture.fill(QColor("#204060"))
-        return picture
+    clock_keeper = _Clock(_time.monotonic())
+    surface._pair._clock = clock_keeper
 
-    surface.set_frame(result_image(), media_time=5.0)
+    surface.set_frame(source, media_time=5.0)
+    assert surface.painted_pair() is None, "a result with no source is not painted at all"
+    surface.set_original(source, media_time=5.0)
+    first = surface.painted_pair()
+    assert first is not None and first.source is not None, "the same moment on both sides is the normal case"
+    assert first.moment == pytest.approx(5.0) and first.source.moment == pytest.approx(5.0)
 
-    assert surface.pair_in_sync(), "the same moment on both sides is the normal case"
-    assert surface.pair_paint_ready()
-
-    # ONE frame apart is accepted: a live tail's names are derived from the output file's grid while the compare's source
-    # keeps its own stored PTS, and the two drift by a fraction of a frame. The eye still sees one moment.
+    # ONE frame ahead, no source yet: the painted pair stays, and it is the one from 5.0.
     frame_seconds = 1.0 / 24.0
-    surface.set_frame(result_image(), media_time=5.0 + frame_seconds)
-    assert surface.pair_in_sync(), "a fraction of a frame apart is the same picture"
-    assert surface.pair_paint_ready()
-
-    # TWO frames apart is a different moment, and a paint now would be the flicker: hold it.
-    surface.set_frame(result_image(), media_time=5.0 + 2 * frame_seconds)
-    assert not surface.pair_in_sync()
-    assert not surface.pair_paint_ready(), "a pair two frames apart is the flicker: hold it"
-    assert not surface.pair_paint_ready(now=_time.monotonic() + PAIR_SYNC_HOLD_S / 2.0)
-
-    # The source lands: the pair is whole again and the paint is allowed.
-    surface.set_original(source, media_time=5.0 + 2 * frame_seconds)
-    assert surface.pair_in_sync()
-    assert surface.pair_paint_ready()
-
-    # Never held for ever: a decoder that does not answer must not freeze the picture.
-    surface.set_frame(result_image(), media_time=5.0 + 4 * frame_seconds)
-    blocked = _time.monotonic()
-    surface._pair_blocked_at = blocked
-    assert not surface.pair_paint_ready(now=blocked)
-    assert surface.pair_paint_ready(now=blocked + PAIR_SYNC_HOLD_S + 0.001), "the hold window is the way out"
     assert frame_seconds < PAIR_SYNC_SLACK_S < 2 * frame_seconds, (
-        "the slack is a fraction over ONE frame (the timestamps' own drift) and under two (a different moment)")
+        "the pane's tolerance is a fraction over ONE frame and under two")
+    surface.set_frame(source, media_time=5.0 + frame_seconds)
+    assert surface.painted_pair() is first, "a result whose source has not arrived does not paint"
+
+    # TWO frames ahead is a different moment, and a source two frames off is not its partner.
+    surface.set_frame(source, media_time=5.0 + 2 * frame_seconds)
+    surface.set_original(source, media_time=5.0 + 2 * frame_seconds)
+    second = surface.painted_pair()
+    assert second is not first and second.moment == pytest.approx(5.0 + 2 * frame_seconds)
+    assert second.source is not None and second.source.moment == pytest.approx(5.0 + 2 * frame_seconds), (
+        "the pair advances as one moment, never as a half")
+
+    # Never held for ever: past the hard limit a decoder that does not answer may leave half a picture, and the log
+    # says which half and why (`pair stale` in `test_pair_writer.py` proves the line).
+    surface.set_frame(source, media_time=5.0 + 4 * frame_seconds)
+    assert surface.painted_pair() is second
+    clock_keeper.now += MAX_PAIR_STALE_S + 0.001
+    surface.set_frame(source, media_time=5.0 + 5 * frame_seconds)
+    released = surface.painted_pair()
+    assert released is not None and released.source is None, "the hard limit is the one way a half shows alone"
+    assert released.lone_half == "result"
+    assert released.moment == pytest.approx(5.0 + 5 * frame_seconds)
+
+
+class _Clock:
+    """A monotonic clock the test drives, so the hard limit costs no wall time."""
+
+    def __init__(self, now: float) -> None:
+        self.now = float(now)
+
+    def __call__(self) -> float:
+        return self.now
 
 
 def test_one_wheel_nudge_steps_from_the_fitted_scale_not_from_one_to_one(surface):
@@ -544,48 +553,39 @@ def test_one_wheel_nudge_steps_from_the_fitted_scale_not_from_one_to_one(surface
     assert surface.zoom() == pytest.approx(fitted, rel=0.01), "Fit restores the fitted view"
 
 
-def test_a_seek_flushes_the_pair_and_never_pairs_across_the_jump(surface):
+def test_a_seek_never_pairs_the_new_result_with_the_old_moment(surface):
     """The regression that came back twice: at a SEEK the pane must not paint the new result beside the old source.
 
     `ade25e74` clocked the compare's supply on the picture ON SCREEN - right for playback, wrong for a seek, where the
-    renderer still holds the OLD picture while the result queue has already jumped: the supply kept decoding around the
-    old moment, the prune dropped the new frames, no pair could form and the 500 ms valve painted
-    `result=20.0 source=10.0` (measured live 2026-11-26: `delta_frames=-80.06`). This pins both halves of the fix: the
-    queues are flushed on a jump, and the valve stands down for a window afterwards.
+    renderer still holds the OLD picture while the result has already jumped: the supply kept decoding around the old
+    moment, the prune dropped the new frames, no pair could form and the valve painted `result=20.0 source=10.0`
+    (measured live 2026-11-26: `delta_frames=-80.06`). The pair writer makes that transition unrepresentable: a source
+    is a partner only within half a frame of the result's own moment, so the old pair stays until 13.0's source lands.
     """
-    import time as _time
-
-    from src.ui.widgets.video_preview import PAIR_JUMP_WAIT_S, PAIR_SYNC_HOLD_S
-
     picture = QImage(320, 180, QImage.Format.Format_RGBA8888)
     picture.fill(QColor("#204060"))
-    surface.set_original(picture, media_time=10.0)
-    surface.set_frame(picture, media_time=10.0)
     surface.set_view_mode("split")
-    assert surface.pair_in_sync() and surface._pick_pair() is not None, "a matching pair is the normal case"
-    assert surface._commit_pair(), "the pair paints"
+    surface.set_frame(picture, media_time=10.0)
+    surface.set_original(picture, media_time=10.0)
+    painted = surface.painted_pair()
+    assert painted is not None and painted.source is not None, "a matching pair is the normal case"
+    assert painted.moment == pytest.approx(10.0) and painted.source.moment == pytest.approx(10.0)
 
     # SEEK: the result jumps three seconds ahead while the renderer still holds the old picture.
     surface.set_frame(picture, media_time=13.0)
+    assert surface.painted_pair() is painted, "the old pair holds: the new result has no partner yet"
 
-    assert not surface._source_queue, "the old source half is not kept across the jump"
-    assert surface._pick_pair() is None, "nothing may pair the new result with the old moment"
-    assert surface._pair_await_fresh_at is not None
+    # An OLD moment's source answering the ask one more time is not a partner for the new result (the pane refuses it
+    # by its own half-frame guard, and the painted pair survives).
+    surface.set_original(picture, media_time=10.0)
+    assert surface.painted_pair() is painted
 
-    # The valve must stay shut for its window: the picture keeps the last consistent pair instead of jumping halves.
-    surface._pair_blocked_at = _time.monotonic()
-    surface._release_pair_paint()
-    assert surface._committed_result_time == pytest.approx(10.0), (
-        "within the seek window the valve must NOT commit the new result beside the old source")
-    assert (surface._committed_source_time or 0.0) == pytest.approx(10.0)
-
-    # The new moment's source arrives: the pair completes and paints together (the pane commits it itself, so by the
-    # time this returns the queues are pruned and the committed pair is the new moment).
+    # The new moment's source lands: the pair completes at the new moment, both halves of one picture.
     surface.set_original(picture, media_time=13.0)
-    assert surface._committed_result_time == pytest.approx(13.0), (
-        "the seek's own moment is painted once its source lands")
-    assert surface._committed_source_time == pytest.approx(13.0)
-    assert PAIR_JUMP_WAIT_S > PAIR_SYNC_HOLD_S, "the valve's stand-down must exceed one hold window"
+    painted = surface.painted_pair()
+    assert painted.moment == pytest.approx(13.0), "the seek's own moment is painted once its source lands"
+    assert painted.source is not None and painted.source.moment == pytest.approx(13.0)
+    assert painted.lone_half is None
 
 
 def test_an_empty_publication_does_not_clear_the_result_half(surface):
@@ -600,14 +600,14 @@ def test_an_empty_publication_does_not_clear_the_result_half(surface):
     surface.set_original(picture, media_time=1.0)
     surface.set_frame(picture, media_time=1.0)
     surface.set_view_mode("sbs")
-    assert surface._commit_pair(), "a sane pair paints"
+    assert surface.painted_pair() is not None and surface.painted_pair().source is not None, "a sane pair paints"
 
     before = surface._frame
 
-    # An empty publication that still names a moment: nothing is enqueued, the picture stays.
+    # An empty publication that still names a moment: nothing is offered, the picture stays.
     surface.set_frame(None, media_time=1.25)
     assert surface._frame is before, "an unnamed picture must not replace the result"
-    assert not surface._result_queue, "and nothing may be queued for it"
+    assert surface._pair._pending_result is None, "and nothing may be offered for it"
 
     # An explicit clear (no name) still clears.
     surface.set_frame(None)
