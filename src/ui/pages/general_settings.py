@@ -9,9 +9,11 @@ counts that gate records.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (QAbstractScrollArea, QHBoxLayout, QSizePolicy,
+from PySide6.QtWidgets import (QAbstractScrollArea, QGridLayout, QHBoxLayout, QSizePolicy,
     QSpacerItem, QVBoxLayout, QWidget)
 import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CustomLineEdit` for a
@@ -91,6 +93,32 @@ INFO_TAG_INSET_Y_PX = 3
 INFO_PILL_RADIUS_PX = 9
 INFO_BAR_HEIGHT_PX = 6
 
+#: The pipeline ribbon's own DESIGN geometry (variant A), read off the mockup's own rules: `::before{margin-bottom:8px}`
+#: under the rail, `.s-val{margin-top:4px}`, `.s-sub{margin-top:2px}`, and the 12 px column the chevron sits in.
+INFO_RAIL_HEIGHT_PX = 2
+INFO_RAIL_GAP_PX = 8
+INFO_VALUE_GAP_PX = 4
+INFO_SUB_GAP_PX = 2
+INFO_ARROW_COLUMN_PX = 12
+INFO_FOOTER_GAP_PX = 12
+INFO_FOOTER_KV_GAP_PX = 6
+
+#: The five stages in the order the renderer runs them, each with the share of the ribbon's width it takes. The upscale
+#: stage carries the longest value (a model name plus its scale), so it is the widest - the mockup's `2.2fr`. The
+#: names are catalogue KEYS (`i18n.translate`), never painted text.
+INFO_STAGE_ORDER = (("Interpolate", 10), ("Decompress", 10), ("Denoise", 10), ("Deblur", 10), ("Upscale", 22))
+
+#: The catalogue key a stored quality preset paints itself from: `settings['quality_preset']` ("best"/"fast") is the
+#: VALUE the backend is handed; the two keys are the labels the Quality Preset row shows.
+INFO_PRESET_LABELS = {"best": "Best quality", "fast": "Fast"}
+
+#: The footer's three facts, in the mockup's order. The keys are catalogue entries.
+INFO_FOOTER_LABELS = ("Backend", "Preset", "Reuse")
+
+#: The pane's one sentence for the idle state (the mockup's). The plan is true with no video loaded; the three filled
+#: blocks are not, so this line is what the reader gets instead of a labelled skeleton.
+INFO_IDLE_NOTE = "No video loaded. Nothing will run until a stage is on and an input file is chosen."
+
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
@@ -148,6 +176,40 @@ def _upscale_tag(resolution_in: str, resolution_out: str) -> int | None:
     if width_ratio != height_ratio or width_ratio <= 1:
         return None
     return width_ratio
+
+
+@dataclass(frozen=True)
+class PipelineStage:
+    """One stage of the configured pipeline, as the ribbon states it.
+
+    `key` is the catalogue key the name is painted from (`"Interpolate"`, `"Upscale"`, ... - the same words the General
+    tab's rows use). `model` is the model the user selected - the text the combo shows, which
+    `getCurrentRenderOptions` maps through `getModels` to the file the backend is handed - and `factor` is the
+    multiplier the render applies (interpolation times, the requested upscale scale). Both stay empty/``None`` when the
+    stage does not run, so a stage that was switched off cannot leave its old parameter on screen.
+    """
+
+    key: str
+    enabled: bool = False
+    model: str = ""
+    factor: int | None = None
+
+
+@dataclass(frozen=True)
+class PipelineFacts:
+    """The configured pipeline: the stages in render order, then the settings-backed footer facts.
+
+    Frozen and comparable on purpose - `ProcessTab` holds the last facts it handed over and only repaints the pane when
+    this value changes, so the 100 ms tick costs one tuple compare on an idle second. Every field is a fact the render
+    command actually reads: a stage's switch and parameter, `render_options.backend`, `settings['quality_preset']`,
+    `settings['temporal_reuse']` and `settings['temporal_reuse_statistic']`.
+    """
+
+    stages: tuple[PipelineStage, ...] = ()
+    backend: str = ""
+    preset: str = ""
+    reuse: bool = False
+    by_cel: bool = False
 
 
 class GeneralSettingsPage:
@@ -665,8 +727,9 @@ class GeneralSettingsPage:
         self.widget_26.setObjectName(u"widget_26")
         sizePolicy5.setHeightForWidth(self.widget_26.sizePolicy().hasHeightForWidth())
         self.widget_26.setSizePolicy(sizePolicy5)
-        # The video-info pane: three stacked toolkit blocks (transition headline, facts grid, run card) that size
-        # themselves. No ceiling and no floor here - the pane's vertical policy is Fixed, so its height is the content's
+        # The video-info pane: the pipeline plan (a card that speaks with no clip loaded) over three stacked toolkit
+        # blocks (transition headline, facts grid, run card) that size themselves. No ceiling and no floor here - the
+        # pane's vertical policy is Fixed, so its height is the content's
         # (the old 190 px floor made a short body always reach the same position; owner, 2026-11-26).
         self.horizontalLayout_22 = QHBoxLayout(self.widget_26)
         self.horizontalLayout_22.setObjectName(u"horizontalLayout_22")
@@ -738,13 +801,19 @@ class GeneralSettingsPage:
     # -- video-info pane (variant A: transition headline, facts grid, run card) ----------------------
 
     def _build_video_info_pane(self) -> None:
-        """Build the pane once: the three filled blocks, hidden until a video is chosen.
+        """Build the pane once: the pipeline plan (a card of its own), then the three filled blocks.
 
         Everything here is a toolkit control (`SurfacePanel`, `Text`, `ProgressBar`) in plain box layouts - no QSS, no
-        custom paint, no hand-drawn rectangle. The states are built together and toggled by `set_video_info`, so a
-        language switch or a scale change only re-states text and design numbers, never rebuilds the tree.
+        custom paint, no hand-drawn rectangle. The states are built together and toggled by `set_video_info` /
+        `set_pipeline`, so a language switch or a scale change only re-states text and design numbers, never rebuilds
+        the tree.
+
+        The PLAN card is separate from the three filled blocks because the two answer different questions: the pipeline
+        is what the user configured (true before any video exists - the mockup's idle state), while the headline, the
+        facts table and the run card describe a loaded clip and a run.
         """
         self._video_values: dict[str, tuple[str, str]] | None = None
+        self._pipeline: PipelineFacts | None = None
         self._run_frame = 0
         self._run_total = 0
         self._run_percent = 0.0
@@ -763,6 +832,85 @@ class GeneralSettingsPage:
         self.videoInfoLayout = QVBoxLayout(self.videoInfoPane)
         self.videoInfoLayout.setContentsMargins(0, 0, 0, 0)
         self.videoInfoLayout.setSpacing(scaled_px(INFO_BLOCK_GAP_PX))
+
+        # -- the plan: the pipeline ribbon (variant A), a card of its own above the fill ------------------
+        self.infoPipelineCard = SurfacePanel(self.videoInfoPane, background_token="surface.list",
+                                             radius=scaled_px(INFO_CARD_RADIUS_PX))
+        self.infoPipelineCard.setObjectName("videoInfoPipelineCard")
+        pipeline_layout = QVBoxLayout(self.infoPipelineCard)
+        pipeline_layout.setContentsMargins(0, 0, 0, 0)
+        pipeline_layout.setSpacing(0)
+
+        ribbon_host = QWidget(self.infoPipelineCard)
+        # A GRID, not a row of per-stage boxes: the mockup's rhythm is three DIFFERENT gaps (rail->name 8, name->value 4,
+        # value->sub 2), and a grid states them once as row heights instead of a spacer per stage (`QSpacerItem` may not
+        # come back to this page - `harness/tests/test_toolkit_native.py::test_no_new_spacer_items`). Every stage shares
+        # the same rows, so two stage names can never sit at different heights.
+        self.infoRibbonLayout = QGridLayout(ribbon_host)
+        self.infoRibbonLayout.setContentsMargins(0, 0, 0, 0)
+        self.infoRibbonLayout.setHorizontalSpacing(0)
+        self.infoRibbonLayout.setVerticalSpacing(0)
+        #: stage key -> its four painted parts, so a repaint only re-states text and tokens.
+        self.infoStages: dict[str, dict] = {}
+        #: the chevrons between the stages, kept only to re-size their column with the factor.
+        self.infoArrows: list[Text] = []
+        for index, (stage_key, share) in enumerate(INFO_STAGE_ORDER):
+            rail = SurfacePanel(ribbon_host, background_token="separator.color")
+            rail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            name = Text(parent=ribbon_host, elide=True)
+            name.setObjectName(f"videoInfoStage{stage_key}")
+            apply(name, CAPTION_PT)
+            value = Text(parent=ribbon_host, elide=True)
+            apply(value, CAPTION_PT, family=INFO_MONO_FAMILY)
+            sub = Text(parent=ribbon_host, elide=True, color_token="label.text.muted")
+            apply(sub, CAPTION_PT, family=INFO_MONO_FAMILY)
+            # `Ignored` horizontally: a model name is long and a stage is ~80 px, so the label takes what the row gives
+            # it and elides - its own text must never become the page's minimum width (`test_general_tab_fit`).
+            narrow = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            for widget in (name, value, sub):
+                widget.setSizePolicy(narrow)
+            # Column 2i holds the stage's four lines, column 2i+1 the chevron that separates it from the next stage.
+            column = 2 * index
+            self.infoRibbonLayout.addWidget(rail, 0, column)
+            self.infoRibbonLayout.addWidget(name, 2, column)
+            self.infoRibbonLayout.addWidget(value, 4, column)
+            self.infoRibbonLayout.addWidget(sub, 6, column)
+            self.infoRibbonLayout.setColumnStretch(column, share)
+            self.infoStages[stage_key] = {"rail": rail, "name": name, "value": value, "sub": sub}
+            if index < len(INFO_STAGE_ORDER) - 1:
+                arrow = Text(parent=ribbon_host, text=u"\u203a", color_token="label.text.muted",
+                             alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+                apply(arrow, CAPTION_PT)
+                # Its own narrow column, as the mockup's `12px` grid column between two stages.
+                arrow.setFixedWidth(scaled_px(INFO_ARROW_COLUMN_PX))
+                self.infoArrows.append(arrow)
+                self.infoRibbonLayout.setColumnMinimumWidth(column + 1, scaled_px(INFO_ARROW_COLUMN_PX))
+                self.infoRibbonLayout.addWidget(arrow, 2, column + 1)
+        pipeline_layout.addWidget(ribbon_host)
+
+        self.infoPipelineRule = SurfacePanel(self.infoPipelineCard, background_token="separator.color")
+        self.infoPipelineRule.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        pipeline_layout.addWidget(self.infoPipelineRule)
+
+        foot_host = QWidget(self.infoPipelineCard)
+        self.infoFooterLayout = QHBoxLayout(foot_host)
+        #: catalogue key -> (its label, its value, the pair's host widget) - the host is what hides with the fact.
+        self.infoFooterValues: dict[str, tuple[Text, Text, QWidget]] = {}
+        for label_key in INFO_FOOTER_LABELS:
+            pair = QWidget(foot_host)
+            pair_layout = QHBoxLayout(pair)
+            pair_layout.setContentsMargins(0, 0, 0, 0)
+            label = Text(parent=pair, color_token="label.text.muted")
+            apply(label, CAPTION_PT)
+            value = Text(parent=pair, elide=True)
+            apply(value, CAPTION_PT, family=INFO_MONO_FAMILY)
+            pair_layout.addWidget(label)
+            pair_layout.addWidget(value)
+            self.infoFooterLayout.addWidget(pair)
+            self.infoFooterValues[label_key] = (label, value, pair)
+        self.infoFooterLayout.addStretch(1)
+        pipeline_layout.addWidget(foot_host)
+        self.videoInfoLayout.addWidget(self.infoPipelineCard)
 
         # -- the filled state: three stacked blocks -------------------------------------------------
         self.infoFilled = QWidget(self.videoInfoPane)
@@ -916,6 +1064,26 @@ class GeneralSettingsPage:
 
         self.videoInfoLayout.addWidget(self.infoFilled)
 
+        # The idle line under the plan (the mockup's): shown only while the plan is up and no clip is loaded. Built here
+        # so it is a sibling of the cards, and `setVisible` is the only thing a re-render does to it.
+        self.infoIdleNote = Text(parent=self.videoInfoPane, color_token="label.text.muted", word_wrap=True)
+        self.infoIdleNote.setObjectName("videoInfoIdleNote")
+        apply(self.infoIdleNote, CAPTION_PT)
+        self.infoIdleNote.setVisible(False)
+        self.videoInfoLayout.addWidget(self.infoIdleNote)
+
+    def set_pipeline(self, facts: PipelineFacts | None) -> None:
+        """State the configured pipeline - the ribbon's ONE input, fed by `ProcessTab` from the settings the run reads.
+
+        `None` means "nothing states a plan yet" (no render surface to read it from) and hides the card. A later
+        language switch or scale change repaints from the stored facts, so the labels follow the catalogue while the
+        pipeline itself does not move - the same rule the three filled blocks already follow.
+        """
+        if facts == self._pipeline:
+            return
+        self._pipeline = facts
+        self._render_video_info(self._info_language or i18n.current_language())
+
     def set_video_info(self, values: dict[str, tuple[str, str]] | None) -> None:
         """Fill the pane. `values` is keyed by the `INFO_LABELS` keys ("FPS:", "Resolution:", ...) and each value is
         (input, output); None restores the nine-row placeholder. A language switch re-renders from the stored values."""
@@ -1039,20 +1207,26 @@ class GeneralSettingsPage:
         return " · ".join(parts)
 
     def _render_video_info(self, language: str | None = None) -> None:
-        """Repaint the pane from the STORED values at ``language`` - the placeholder when there are none.
+        """Repaint the pane from the STORED values at ``language`` - the plan alone when there are none.
 
         This is the only writer of the pane's text. A language switch calls it again, so the row names follow the
         catalogue while every value stays byte-identical (the regression the old line-rewriting relabel guarded).
         """
         self._info_language = i18n.current_language() if language is None else language
         language = self._info_language
+        self._render_pipeline(language)
+        # Rebuilt on every pass so it is already correct when a clip is dropped and the note comes back.
+        self.infoIdleNote.setText(i18n.translate(INFO_IDLE_NOTE, language))
         if self._video_values is None:
-            # Nothing to describe: the pane is invisible rather than a labelled skeleton (owner, 2026-11-26: "зачем мы
-            # это рисуем пока не выбрано ни одно видео? Какой-то рудимент"). The host paints nothing of its own, so a
-            # hidden card collapses the block completely.
+            # Nothing to describe: the three filled blocks are invisible rather than a labelled skeleton (owner,
+            # 2026-11-26: "зачем мы это рисуем пока не выбрано ни одно видео? Какой-то рудимент"). The host paints
+            # nothing of its own, so a hidden card collapses the block completely. The PLAN stays: it is what the user
+            # configured, and with no clip loaded it is the whole answer.
             self.infoFilled.setVisible(False)
+            self.infoIdleNote.setVisible(self._pipeline is not None)
             return
 
+        self.infoIdleNote.setVisible(False)
         self.infoFilled.setVisible(True)
         get = self._video_values.get
         resolution_in, resolution_out = get("Resolution:", ("", ""))
@@ -1085,6 +1259,70 @@ class GeneralSettingsPage:
         self.infoTagPlate.setVisible(bool(factor))
         self._render_run_status(language)
 
+    def _render_pipeline(self, language: str | None = None) -> None:
+        """Paint the ribbon and its footer from the stored facts - the only writer of the plan's text.
+
+        Every stage the plan does not name is drawn in its OFF form (muted, `off`), because the ribbon's job is to show
+        the whole path: a reader must see that Decompress sits between interpolation and denoise even when it does not
+        run. An enabled stage states its own parameter - and only its own, so switching one off cannot leave its old
+        model or factor on screen.
+        """
+        facts = self._pipeline
+        self.infoPipelineCard.setVisible(facts is not None)
+        if facts is None:
+            return
+
+        by_key = {stage.key: stage for stage in facts.stages}
+        for key, widgets in self.infoStages.items():
+            stage = by_key.get(key) or PipelineStage(key=key)
+            widgets["name"].setText(i18n.translate(key, language))
+            widgets["rail"].set_background_token("accent" if stage.enabled else "separator.color")
+            if stage.enabled:
+                value, sub = self._stage_state(stage, language)
+            else:
+                value, sub = i18n.translate("off", language), ""
+            widgets["value"].setText(value)
+            widgets["sub"].setText(sub)
+            widgets["sub"].setVisible(bool(sub))
+            for widget in (widgets["name"], widgets["value"]):
+                widget.setColorToken(None if stage.enabled else "label.text.muted")
+
+        for label_key, (label, value_widget, host) in self.infoFooterValues.items():
+            label.setText(i18n.translate(label_key, language))
+            text, visible = self._footer_state(facts, label_key, language)
+            value_widget.setText(text)
+            host.setVisible(visible)
+
+    @staticmethod
+    def _stage_state(stage: PipelineStage, language: str | None) -> tuple[str, str]:
+        """The `(value, sub)` an ENABLED stage states: its parameter, never a placeholder.
+
+        A model and a factor on one stage is the upscale case (`model` over `scale ×N`); a model alone is deblur/denoise/
+        decompress; a factor alone is interpolation (`×2`); neither is a switch with no parameter.
+        """
+        if stage.model and stage.factor is not None:
+            return (stage.model, f"{i18n.translate('scale', language)} ×{stage.factor}")
+        if stage.model:
+            return (stage.model, "")
+        if stage.factor is not None:
+            return (f"×{stage.factor}", "")
+        return (i18n.translate("on", language), "")
+
+    @staticmethod
+    def _footer_state(facts: PipelineFacts, key: str, language: str | None) -> tuple[str, bool]:
+        """`(value, visible)` for one footer fact - a fact that is not on/selected is not painted at all."""
+        if key == "Backend":
+            return (facts.backend, bool(facts.backend))
+        if key == "Preset":
+            label = INFO_PRESET_LABELS.get(facts.preset, facts.preset)
+            return (i18n.translate(label, language) if label else "", bool(label))
+        # "Reuse": the switch, plus `by cel` only while that is the statistic the render compares on (the command's
+        # own rule: `--temporal_reuse_statistic coarse` is passed only while reuse is on).
+        value = i18n.translate("on", language)
+        if facts.by_cel:
+            value = f"{value} · {i18n.translate('by cel', language)}"
+        return (value, facts.reuse)
+
     def _render_run_status(self, language: str | None = None) -> None:
         """Paint the run card: frame counter and ETA on one line, the bar, then fps/status/elapsed."""
         total = self._run_total or _as_int(self._video_values.get("Frame Count:", ("", ""))[1]
@@ -1112,7 +1350,7 @@ class GeneralSettingsPage:
         tag_y = scaled_px(INFO_TAG_INSET_Y_PX)
 
         self.videoInfoLayout.setSpacing(gap)
-        for card in (self.infoFactsCard, self.infoRunCard):
+        for card in (self.infoFactsCard, self.infoRunCard, self.infoPipelineCard):
             card.set_radius(radius)
         self.infoTransitionLayout.setContentsMargins(inset, inset, inset, inset)
         self.infoTransitionLayout.setSpacing(scaled_px(INFO_COLUMN_GAP_PX))
@@ -1128,6 +1366,24 @@ class GeneralSettingsPage:
             line.setFixedWidth(hairline)
         self.infoRunLayout.setContentsMargins(inset, inset, inset, inset)
         self.infoRunLayout.setSpacing(scaled_px(INFO_RUN_GAP_PX))
+
+        # The plan's ribbon: the rail is a painted 2 px line like every other hairline on this pane, and the three
+        # gaps inside a stage are the mockup's own (rail->name 8, name->value 4, value->sub 2) - grid rows 1/3/5.
+        rail = max(1, scaled_px(INFO_RAIL_HEIGHT_PX))
+        self.infoRibbonLayout.setContentsMargins(inset, inset, inset, 0)
+        for row, height in ((1, INFO_RAIL_GAP_PX), (3, INFO_VALUE_GAP_PX), (5, INFO_SUB_GAP_PX)):
+            self.infoRibbonLayout.setRowMinimumHeight(row, max(0, scaled_px(height)))
+        for widgets in self.infoStages.values():
+            widgets["rail"].setFixedHeight(rail)
+        for arrow in self.infoArrows:
+            arrow.setFixedWidth(scaled_px(INFO_ARROW_COLUMN_PX))
+        for column in range(1, 2 * len(INFO_STAGE_ORDER), 2):
+            self.infoRibbonLayout.setColumnMinimumWidth(column, scaled_px(INFO_ARROW_COLUMN_PX))
+        self.infoPipelineRule.setFixedHeight(hairline)
+        self.infoFooterLayout.setContentsMargins(inset, cell_inset, inset, cell_inset)
+        self.infoFooterLayout.setSpacing(scaled_px(INFO_FOOTER_GAP_PX))
+        for pair in self.infoFooterValues.values():
+            pair[2].layout().setSpacing(scaled_px(INFO_FOOTER_KV_GAP_PX))
 
     def _apply_scale(self) -> None:
         """Resolve this page's design numbers at the factor in force now.

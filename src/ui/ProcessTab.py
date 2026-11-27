@@ -434,6 +434,10 @@ class ProcessTab:
         #: The run-card tuple last handed to the pane (`_run_card_values`), so the 100 ms tick only repaints a card
         #: when one of its numbers moved; `("idle",)` after the reset, so the reset itself happens once.
         self._run_card_state = None
+        #: The pipeline facts last handed to the video-info ribbon, and whether a coalesced repaint is already queued
+        #: (see `_install_pipeline_feed`). Same gate as the run card: one repaint per actual change.
+        self._pipeline_state = None
+        self._pipeline_refresh_pending = False
         #: The crop the CURRENT job's backend reported (`BORDERS w/h/x/y`), or ``None`` until a render says.
         #: The LMB compare decodes the source with this box, so it shows the same framing the renderer used.
         self._source_crop = None
@@ -533,6 +537,9 @@ class ProcessTab:
         # get default backend
         self.QConnect()
         self.populateModels(self.page_handles.general.backendComboBox.currentText())
+        # The pane's plan card states what the pipeline does; the options that define it are wired here, once, and the
+        # first state is handed over before the window is painted (see `_install_pipeline_feed`).
+        self._install_pipeline_feed()
         self.setStatus("Idle")
         # The glue just hid the pause/kill pair and populated the model combos; the row's hint and the General tab's
         # content are final now, so the page takes one more policy pass (the footer height is read from that row).
@@ -626,6 +633,129 @@ class ProcessTab:
         frame, total, percent, eta, fps, status, elapsed = values
         page.set_run_status(frame=frame, total=total, percent=percent, eta=eta,
                             fps=fps, status=status, elapsed=elapsed)
+
+    # -- the pipeline ribbon (variant A): the plan the pane states above the run's facts -----------------
+
+    def _install_pipeline_feed(self) -> None:
+        """Point every control that changes the configured pipeline at the video-info ribbon - one wiring, once.
+
+        The pane owns the drawing (`GeneralSettingsPage.set_pipeline`); this glue owns the values, read here from the
+        same widgets `getCurrentRenderOptions` reads and the same `Settings` `build_command` reads, so the ribbon cannot
+        state a pipeline the render would not run.
+
+        The signal handlers coalesce onto the NEXT event-loop turn on purpose: the settings-backed facts (quality
+        preset, frame reuse, by cel) are written by `SettingsTab`'s own slot from the same signal, and reading them
+        inside the emission would report the value from before the click. A turn later every handler has run and the
+        store says what the user chose.
+        """
+        general = self.page_handles.general
+        for signal in (
+            general.interpolateCheckBox.toggled,
+            general.decompressCheckBox.toggled,
+            general.denoiseCheckBox.toggled,
+            general.deblurCheckBox.toggled,
+            general.upscaleCheckBox.toggled,
+            general.frameReuse.toggled,
+            general.celReuse.toggled,
+            general.interpolateModelComboBox.currentTextChanged,
+            general.decompressModelComboBox.currentTextChanged,
+            general.denoiseModelComboBox.currentTextChanged,
+            general.deblurModelComboBox.currentTextChanged,
+            general.upscaleModelComboBox.currentTextChanged,
+            general.backendComboBox.currentTextChanged,
+            general.qualityPresetComboBox.currentIndexChanged,
+            general.interpolationMultiplierSpinBox.valueChanged,
+            general.upscaleScaleSpinBox.valueChanged,
+        ):
+            signal.connect(self._schedule_pipeline_refresh)
+        self._schedule_pipeline_refresh()
+
+    def _schedule_pipeline_refresh(self, *_args) -> None:
+        """Coalesce a burst of option changes into one ribbon repaint (see `_install_pipeline_feed`)."""
+        if getattr(self, "_pipeline_refresh_pending", False):
+            return
+        from PySide6.QtCore import QTimer
+
+        self._pipeline_refresh_pending = True
+        QTimer.singleShot(0, self._update_pipeline_ribbon)
+
+    def pipeline_facts(self, general=None, settings=None):
+        """The configured pipeline as the ribbon states it: the plan `RenderOptions` will carry, plus the settings.
+
+        ``general`` is the widget surface (`page_handles.general`) and ``settings`` the store; both default to this
+        tab's own, and a caller that models a configuration passes its own (the tests do). Everything read here is a
+        value the render command reads:
+
+        * a stage's switch and its parameter - the checkbox, the model combo's selection (which
+          `getCurrentRenderOptions` maps through `getModels` to the file the backend gets) and the multiplier spin box;
+        * the backend, as the token the command passes (`build_command` folds `pytorch (cuda|rocm|xpu|mps)` to
+          ``"pytorch"``, which is the same first word);
+        * ``quality_preset``, ``temporal_reuse`` and ``temporal_reuse_statistic`` - the three settings
+          `build_command` turns into `--quality_preset`, `--no_temporal_reuse` and `--temporal_reuse_statistic coarse`.
+        """
+        from .pages.general_settings import PipelineFacts, PipelineStage
+
+        general = self.page_handles.general if general is None else general
+        settings = self.settings if settings is None else settings
+
+        def chosen(checkbox, combo) -> str:
+            """The model a stage will run, or "" when it will not run at all.
+
+            The checkbox is the switch and the combo's text is the selection; the combo also carries the backend's
+            "None" entry, which is the absence of a model rather than one.
+            """
+            if not checkbox.isChecked():
+                return ""
+            text = str(combo.currentText() or "").strip()
+            return "" if text in ("", "None") else text
+
+        interpolate = chosen(general.interpolateCheckBox, general.interpolateModelComboBox)
+        decompress = chosen(general.decompressCheckBox, general.decompressModelComboBox)
+        denoise = chosen(general.denoiseCheckBox, general.denoiseModelComboBox)
+        deblur = chosen(general.deblurCheckBox, general.deblurModelComboBox)
+        upscale = chosen(general.upscaleCheckBox, general.upscaleModelComboBox)
+        times = int(round(float(general.interpolationMultiplierSpinBox.value()))) if interpolate else None
+        scale = int(round(float(general.upscaleScaleSpinBox.value()))) if upscale else None
+
+        stored = getattr(settings, "settings", {}) or {}
+        allowed = getattr(settings, "allowedSettings", {}) or {}
+        # The command's own rule: an unknown stored preset is "best", never whatever the file happens to say.
+        preset = str(stored.get("quality_preset", "best"))
+        if preset not in allowed.get("quality_preset", (preset,)):
+            preset = "best"
+        reuse = str(stored.get("temporal_reuse", "True")) != "False"
+        by_cel = reuse and str(stored.get("temporal_reuse_statistic", "mean_abs")) == "coarse"
+
+        return PipelineFacts(
+            stages=(
+                PipelineStage("Interpolate", bool(interpolate), "", times),
+                PipelineStage("Decompress", bool(decompress), decompress),
+                PipelineStage("Denoise", bool(denoise), denoise),
+                PipelineStage("Deblur", bool(deblur), deblur),
+                PipelineStage("Upscale", bool(upscale), upscale, scale),
+            ),
+            # The backend token `--backend` carries (`getModels` splits the same first word).
+            backend=str(general.backendComboBox.currentText() or "").split(" ")[0].strip().lower(),
+            preset=preset,
+            reuse=reuse,
+            by_cel=by_cel,
+        )
+
+    def _update_pipeline_ribbon(self) -> None:
+        """Hand the pane the configured pipeline ONCE per change (the same gate as the run card).
+
+        Defensive on purpose: a double built with `object.__new__` (or a page without a plan surface) has no widget
+        surface to read, and the tick must not fail because of a block it has nothing to say about.
+        """
+        self._pipeline_refresh_pending = False
+        page = self._general_settings_page()
+        if page is None or getattr(self, "page_handles", None) is None or getattr(self, "settings", None) is None:
+            return
+        facts = self.pipeline_facts()
+        if facts == getattr(self, "_pipeline_state", None):
+            return
+        self._pipeline_state = facts
+        page.set_pipeline(facts)
 
     def populateModels(self, backend) -> dict:
         """
@@ -3764,6 +3894,10 @@ class ProcessTab:
         # "finished"; the render clock can, and that is what returns the card to its idle state instead of freezing the
         # last job's numbers on screen.
         self._update_run_card()
+        # The plan card rides the same tick: the option signals already schedule a repaint, and this catches a change
+        # that arrived without one (a programmatic combo reset while a job runs). It is a compare of the facts the pane
+        # already holds, so an idle second paints nothing.
+        self._update_pipeline_ribbon()
 
     def build_command(self, renderOptions: RenderOptions):
         """The backend command for one job.
