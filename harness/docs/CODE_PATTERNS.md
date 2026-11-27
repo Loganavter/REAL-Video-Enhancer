@@ -67,6 +67,12 @@ renderer does, exactly one function may write it, and a test must fail when a se
 Cheap enforcement, in the spirit of BlinkTable's `test_strip_single_renderer.py` / `test_single_upload_queue.py`: grep-based
 or AST tests that fail on the second owner existing at all, not on it misbehaving.
 
+A worked example with three owners in sequence: **the scrubber's thumb has one authority at a time** - the pointer while a
+drag is live, then the last seek it emitted (closed by the picture arriving within three frames, by a forward ask being
+passed, by a refusal past the reach, or by a 3 s bound), then the state's playhead. Reading it as one question is what
+fixed "the thumb stays at 16 % while the fill runs to 98 %": the press landed, the moves never became asks, so a stuck
+`_scrubbing` owned the thumb and the state fought it (`src/ui/preview/timeline.py`, 2026-11-27).
+
 ## 3. A token at landing sites, never at attempt sites
 
 A refused action must be a no-op. Measured here (2026-11-27): a press the pane could not serve bumped the result generation
@@ -137,6 +143,10 @@ test, watch it fail, restore, watch it pass. Six fixes on 2026-11-27 carry that 
 - `state:` on a hidden widget reports its last geometry — a click on a hidden control silently does nothing. Assert the
   effect (`checked`, a log line), never the absence of an error.
 - The seek-reader tests rewrite tracked `scratch/seek-reader-*.txt`; restore them before committing.
+- **A state pass must not reshape the overlay a gesture is using.** The preview bars rewrote their geometry and their mask
+  on every state push - 10 Hz, plus once per seek - which is a window-system change under the pointer during a drag. Write
+  the mask/geometry only when the answer changes (`PreviewControls._place`); a drag is the one moment a window must not be
+  restructured. Measured offscreen as "re-shaped the overlay 5 times" in one burst.
 - **Never edit a shell script while it is running.** Bash reads a script incrementally from the file, so an edit that
   shifts lines makes the running process execute bytes from the wrong offset: on 2026-11-27 `live_matrix.sh` was patched
   while its own run was in stage B and the second half of that run died with `checked: command not found` /
