@@ -24,7 +24,7 @@ reachable only through `getattr(..., None)` and failed silently. The window now 
 
 from __future__ import annotations
 
-from PySide6.QtCore import QCoreApplication, QMetaObject, QSize, Qt
+from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, QSize, Qt
 from PySide6.QtGui import QIcon, QPalette
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSpacerItem,
     QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
@@ -36,6 +36,7 @@ from sli_ui_toolkit.widgets import Button, SurfacePanel
 from src.ui import toolkit_theme
 from src.ui import i18n
 from src.ui.scale_follower import ScaleFollower
+from src.ui.settings_store import window_rect, window_was_maximized
 from src.ui.pages.home_page import HomePagePage
 from src.ui.pages.more_page import MorePagePage
 from src.ui.pages.proc_page import ProcPagePage
@@ -136,6 +137,76 @@ def fit_size(size: QSize, available) -> QSize:
     return QSize(min(size.width(), available.width()), min(size.height(), available.height()))
 
 
+def fit_window_rect(rect: QRect, available, minimum: QSize | None = None) -> QRect:
+    """``rect`` clamped INTO ``available``: its size through `fit_size`, its position back on the screen.
+
+    The size half is `fit_size()` itself - one clamp, not a second copy of it. The position half is what it cannot
+    state: a rect saved on a monitor that is now gone must land ON a remaining screen instead of off its edge
+    (BlinkTable's `fit_into`, `src/utils/geometry.py`). ``available=None`` keeps the position and applies only the
+    minimum, the same "no screen information" convention as `fit_size()`.
+
+    `minimum` is `window_minimum_size()` by default and is applied AFTER the fit, because a usability floor outranks
+    a screen bound. When the screen is smaller than that floor the window cannot fit at all: it is then pinned to the
+    available rect's top-left corner rather than moved further off it.
+    """
+    if minimum is None:
+        minimum = window_minimum_size()
+    size = fit_size(rect.size(), available)
+    width = max(size.width(), minimum.width())
+    height = max(size.height(), minimum.height())
+    x, y = rect.x(), rect.y()
+    if available is not None:
+        x = max(available.left(), min(x, available.left() + available.width() - width))
+        y = max(available.top(), min(y, available.top() + available.height() - height))
+    return QRect(x, y, width, height)
+
+
+def restore_window_geometry(window, settings=None, available=None) -> bool:
+    """Apply the saved size/position/state to `window`; return whether the last close was maximized.
+
+    `settings` defaults to `window.settings` (the app sets it before `MainWindowShell.build`), `available` to the
+    window's screen rect. Nothing saved means EXACTLY the pre-persistence behaviour - the design size resolved through
+    `window_default_size()`, clamped by `fit_size()` and left for the window manager to place - which is also the path
+    every test that builds the shell without a store takes. A saved rect is applied with `setGeometry` so the POSITION
+    survives, after `fit_window_rect` has clamped it on screen and raised it to `window_minimum_size()`.
+
+    The maximized state is set ON the window here, never by showing it: the caller shows the window once, after the
+    warm pass. Qt keeps the geometry set before the state as `normalGeometry()`, so unmaximizing returns to the saved
+    rect rather than to the maximized one.
+    """
+    if available is None:
+        available = _available_window_rect(window)
+    if settings is None:
+        settings = getattr(window, "settings", None)
+    values = getattr(settings, "settings", None) if settings is not None else None
+    stored = window_rect(values) if isinstance(values, dict) else None
+    if stored is None:
+        window.resize(fit_size(window_default_size(), available))
+    else:
+        window.setGeometry(fit_window_rect(QRect(*stored), available))
+    maximized = isinstance(values, dict) and window_was_maximized(values)
+    if maximized:
+        window.setWindowState(window.windowState() | Qt.WindowState.WindowMaximized)
+    return maximized
+
+
+def save_window_geometry(window, settings=None) -> None:
+    """Persist the window's NORMAL rect and maximized state to the settings owner, at close time.
+
+    Read from the LIVE window, never from a copy taken at build: the user may have resized or maximized it. Closed
+    maximized/fullscreen, only the flag is written and the saved normal rect stays untouched - writing the
+    screen-sized geometry as "normal" is exactly how an app forgets the size the user chose. `window.geometry()` is
+    the space `restore_window_geometry` writes back.
+    """
+    if settings is None:
+        settings = getattr(window, "settings", None)
+    if settings is None:
+        return
+    maximized = window.isMaximized() or window.isFullScreen()
+    rect = None if maximized else window.geometry().getRect()
+    settings.writeWindowGeometry(rect, maximized)
+
+
 # The page-attribute copy lived here until 2026-11-23: it copied every public attribute of each page onto the window,
 # recursively. The typed handles in `src/ui/pages/handles.py` replace it and no shim re-creates the old surface - a
 # name that comes back through a compatibility copy is a name nobody declares again.
@@ -144,7 +215,8 @@ def fit_size(size: QSize, available) -> QSize:
 class MainWindowShell:
     """Builds the main window's chrome and the five nav pages into a `QMainWindow`."""
 
-    def build(self, window):
+    def build(self, window, available=None):
+        """Build the chrome and pages into `window`; `available` overrides the screen rect (tests)."""
         # The interface language is configured HERE, by the window's owner, not only in `main()`: three entry points
         # build this window (the app's `main`, the live harness, the tests) and they used to differ - a live instance
         # ran in English whatever `settings.txt` said, and the first switch answered "i18n root not configured"
@@ -164,7 +236,9 @@ class MainWindowShell:
         # splitter: skipped 'sizePolicy12.setHeightForWidth(self.dynamic_tensorrt_engine.sizePolicy().hasHeightForWidth())' (['dynamic_tensorrt_engine'] live outside this page)
         if not window.objectName():
             window.setObjectName(u"MainWindow")
-        window.resize(fit_size(window_default_size(), _available_window_rect(window)))
+        # The size/position the user left the window in, when one was saved; otherwise exactly the design size clamped
+        # to the screen, which is what every launch did before persistence (see `restore_window_geometry`).
+        restore_window_geometry(window, available=available)
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)

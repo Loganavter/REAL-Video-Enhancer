@@ -30,6 +30,10 @@ from src.ui.settings_store import Settings
 #: * `language,en` (2026-11-24) - the interface language (`src/ui/settings_store.py`);
 #: * `output_file_path,` (2026-11-27) - the output path the USER chose, empty when nothing was chosen
 #:   (`src/ui/output_path.py`). The 30 lines above are the pre-move bytes, unchanged and in the pre-move order.
+#:
+#: Five more, appended the same way (2026-11-28): the window's saved NORMAL geometry and its maximized flag
+#: (`src/ui/shell/window.py` restores them, the window's owner writes them on close). Empty coordinates mean "never
+#: saved" - a first launch still opens at the design size. The 32 lines above stay byte-identical.
 SETTINGS_BYTES = ('precision,auto\n'
  'tensorrt_optimization_level,5\n'
  'dynamic_tensorrt_engine,False\n'
@@ -61,7 +65,12 @@ SETTINGS_BYTES = ('precision,auto\n'
  'temporal_reuse,True\n'
  'temporal_reuse_statistic,mean_abs\n'
  'language,en\n'
- 'output_file_path,\n')
+ 'output_file_path,\n'
+ 'window_x,\n'
+ 'window_y,\n'
+ 'window_width,\n'
+ 'window_height,\n'
+ 'window_was_maximized,False\n')
 
 
 def make(tmp_path):

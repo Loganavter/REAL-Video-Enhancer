@@ -41,6 +41,44 @@ def validate_language(value: str | None) -> str:
     return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
 
 
+#: The four keys of the window's saved NORMAL rect, in the order the writer emits them. Empty means "never saved":
+#: a first launch keeps today's behaviour (the design size, placed by the window manager) instead of inheriting a
+#: made-up position. The maximized flag is separate (`MAXIMIZED_KEY`) because a window that is closed maximized must
+#: keep the rect it had before, not the screen-sized one it shows - writing the maximized geometry as "normal" is how
+#: an app forgets the size the user chose.
+WINDOW_RECT_KEYS: tuple[str, str, str, str] = ("window_x", "window_y", "window_width", "window_height")
+
+#: The window state key: "True" when the last close happened maximized/fullscreen.
+MAXIMIZED_KEY: str = "window_was_maximized"
+
+
+def window_rect(settings) -> tuple[int, int, int, int] | None:
+    """The saved normal rect `(x, y, width, height)`, or `None` when nothing usable is stored.
+
+    A mapping in, a plain tuple out: this module stays importable without PySide6, and the window owner applies the
+    clamp (`src/ui/shell/window.py`). A completely blank block is "never saved" and stays quiet - the normal first
+    launch. A block that is present but not four integers (a hand edit, another build's line) is reported and reads
+    as `None`, so the window opens at its default size instead of raising at start.
+    """
+    values = {key: str(settings.get(key, "")).strip() for key in WINDOW_RECT_KEYS}
+    if not any(values.values()):
+        return None
+    try:
+        x, y, width, height = (int(values[key]) for key in WINDOW_RECT_KEYS)
+    except (TypeError, ValueError):
+        log(f"window geometry: {values} is not four integers; using the default window size")
+        return None
+    if width <= 0 or height <= 0:
+        log(f"window geometry: {values} is not a usable size; using the default window size")
+        return None
+    return x, y, width, height
+
+
+def window_was_maximized(settings) -> bool:
+    """Whether the last close happened maximized (or fullscreen). Anything but "True" reads as a normal window."""
+    return str(settings.get(MAXIMIZED_KEY, "")).strip() == "True"
+
+
 def log(message: str) -> None:
     """Write one diagnostic line through the app's logger, resolved lazily.
 
@@ -130,6 +168,15 @@ class Settings:
             # derived path is never written here. `output_folder_location` above stays as the DIRECTORY fallback an
             # older `settings.txt` already carries, so an existing installation keeps its folder.
             "output_file_path": "",
+            # The window's last NORMAL geometry (`src/ui/shell/window.py` reads it at build, the window's owner writes
+            # it on close). Empty = never saved, i.e. the pre-2026-11-28 behaviour: the design size, placed by the
+            # window manager. Appended like `language` and `output_file_path` so an existing file gains them at the
+            # end and no line the user hand-edited moves.
+            "window_x": "",
+            "window_y": "",
+            "window_width": "",
+            "window_height": "",
+            "window_was_maximized": "False",
         }
         self.allowedSettings = {
             "encoder_command": "ANY",
@@ -184,6 +231,14 @@ class Settings:
             "temporal_reuse_statistic": ("mean_abs", "coarse"),
             "language": SUPPORTED_LANGUAGES,
             "output_file_path": "ANY",
+            # Screen coordinates may be negative (a monitor left of the primary one) and the size is whatever the
+            # user chose, so the file accepts any string here; `window_rect()` is the validator that turns a stored
+            # value into four integers or reports it and falls back.
+            "window_x": "ANY",
+            "window_y": "ANY",
+            "window_width": "ANY",
+            "window_height": "ANY",
+            "window_was_maximized": ("True", "False"),
         }
         self.settings = self.defaultSettings.copy()
         #: Keys the file carries that this build does not know (a newer build's line, a hand edit). A diagnostic, never
@@ -262,6 +317,21 @@ class Settings:
             None
         """
         self.settings[setting] = value
+        self.writeOutCurrentSettings()
+
+    def writeWindowGeometry(self, rect, maximized: bool) -> None:
+        """Persist the window's NORMAL rect and state in ONE write.
+
+        `rect` is `(x, y, width, height)` for a window closed in its normal state, or `None` when it was closed
+        maximized/fullscreen - then the previously saved rect is left exactly as it is and only the flag changes (the
+        window "remembers" the size it returns to when unmaximized). One `writeOutCurrentSettings()` call, not one per
+        key: `writeSetting()` rewrites the whole file, and the close path must not write it five times.
+        """
+        if rect is not None:
+            x, y, width, height = (int(value) for value in rect)
+            for key, value in zip(WINDOW_RECT_KEYS, (x, y, width, height)):
+                self.settings[key] = str(value)
+        self.settings[MAXIMIZED_KEY] = "True" if maximized else "False"
         self.writeOutCurrentSettings()
 
     def writeDefaultSettings(self):

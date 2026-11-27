@@ -1202,6 +1202,12 @@ class MainWindow(QMainWindow):
         from src.ui.dialogs.toolkit_dialogs import confirm
 
         if confirm(self, "Are you sure you want to exit?"):
+            # Remember the size/position/state at the moment the window actually closes, read from the live window
+            # (`src/ui/shell/window.py` owns the clamp on the way back in). Saved before `shutdown()` because that is
+            # the last moment the window still has its real geometry.
+            from src.ui.shell.window import save_window_geometry
+
+            save_window_geometry(self, self.settings)
             FileHandler.removeFolder(TEMP_DOWNLOAD_PATH)
             self.shutdown()
             event.accept()
