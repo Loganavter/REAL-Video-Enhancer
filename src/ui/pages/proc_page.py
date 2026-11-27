@@ -544,7 +544,10 @@ class ProcPagePage:
         self.tab_5 = self.tab_5_page.build()
         self.processSettingsContainer.addTab(self.tab_5, "")
         self.verticalLayout_24.addWidget(self.processSettingsContainer)
-        self.verticalLayout_21.addWidget(self.widget_2)
+        # The settings block TAKES the column's leftover height (stretch 1), and the transport row keeps its own height
+        # at the bottom: the content area reaches the row instead of stopping at its hint and leaving a gap
+        # (owner, 2026-11-28: "почему-то окно контента не уехало вслед за виджетом вниз ... не растянулось").
+        self.verticalLayout_21.addWidget(self.widget_2, 1)
         # NO panel behind the transport row (owner, 2026-11-27: "нужно ещё линию под контролами убрать - она инфу
         # дублирует"). The row is a control strip, not a card: its `surface.page` fill showed as a rounded band under the
         # buttons and the progress bar, carrying nothing.
@@ -637,8 +640,7 @@ class ProcPagePage:
         # card already states the frame counter, the percent, the remaining time, fps and the elapsed clock, so the
         # line was a duplicate under the controls. `ProcessTab` no longer produces it.
         #
-        # The column's leftover height goes here, not into the row: a stretched row is dead padding under a control.
-        self.verticalLayout_21.addStretch(1)
+        # (The column's leftover height is already carried by the stretch added above the row.)
         self.verticalLayout_7.addWidget(self.bottomMenuSubContainer)
         self.gridLayout_3.addWidget(self.processContainer, 0, 1, 1, 1)
         # The body is complete, so it becomes the scroll surface's widget and the surface fills the page. The page
@@ -845,8 +847,9 @@ class ProcPagePage:
         else:
             self.renderRowFooterLayout.removeWidget(self.widget_13)
             if self.widget_13.parentWidget() is not self.bottomMenuSubContainer:
-                # Index 1 is the row's shipped place: right after the tab host (`widget_2`).
-                self.verticalLayout_21.insertWidget(1, self.widget_13)
+                # Appended, not inserted at index 1: the stretch above the row owns index 1, and the row must stay the
+                # column's LAST item so it keeps sitting on the bottom edge.
+                self.verticalLayout_21.addWidget(self.widget_13)
             footer.hide()
             margins = self.gridLayout_3.contentsMargins()
             self.gridLayout_3.setContentsMargins(

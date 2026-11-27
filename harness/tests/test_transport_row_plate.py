@@ -122,3 +122,39 @@ def test_the_row_cannot_stretch_to_swallow_the_columns_leftover_height(qapp):
             f"the row hint should hug its 55 px controls, got {row.sizeHint().height()}")
     finally:
         window.close()
+
+
+def test_the_row_stays_anchored_to_the_columns_bottom(qapp):
+    """The row is the LAST item of the column, with the leftover space above it.
+
+    Owner, 2026-11-28: "привязка вниз уехала у виджета управления запуском" - the first cut of the plate wave put the
+    stretch AFTER the row, so the row rode up under the info card and the column's empty space sat below it. The
+    anchor is a layout fact, so it is pinned as one: the row's index is the last, and a stretch precedes it.
+    """
+    from src.ui.layout_policy import STACK
+
+    shell, window = _shell(qapp)
+    try:
+        page = shell.procPage_page
+        layout = page.bottomMenuSubContainer.layout()
+        row = page.widget_13
+
+        assert layout.indexOf(row) == layout.count() - 1, (
+            "the transport row must be the column's last item, not a middle one")
+        # The leftover height belongs to the SETTINGS BLOCK (owner, 2026-11-28: the content area did not stretch down
+        # to the row), so the layout states it on that widget; a spacer would leave the content at its hint and put
+        # the empty band between the settings and the row.
+        assert not [i for i in range(layout.count()) if layout.itemAt(i).spacerItem() is not None], (
+            "no spacer: the settings block itself takes the stretch")
+        assert layout.stretch(layout.indexOf(page.widget_2)) == 1, (
+            "the settings block must carry the column's stretch factor")
+
+        # The stacked round-trip (the row moves into the sticky footer and back) must not lose the anchor: it used to
+        # re-insert at index 1, which would put the row before the stretch.
+        page._apply_render_row(STACK)
+        page._apply_render_row("side")
+        _settle(qapp)
+        assert layout.indexOf(row) == layout.count() - 1, (
+            "returning from stacked mode must append the row, not insert it above the stretch")
+    finally:
+        window.close()
