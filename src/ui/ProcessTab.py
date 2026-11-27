@@ -1715,8 +1715,13 @@ class ProcessTab:
     ):
         self.createPausedSharedMemory()
 
-        for renderOptions in renderQueue.pending_jobs():
-            
+        # One row at a time, from the LIVE list: a row added while this pass runs is rendered by the same pass, in
+        # order (owner, 2026-11-26: "добавить возможность пополнять очередь во время работы"). The old loop iterated
+        # `pending_jobs()` - a snapshot taken once - so a mid-run row was never seen by that pass. `take_next_pending`
+        # also marks the row `rendering` (status + start time) in the same critical section as the scan. The pass
+        # still ends when nothing is pending; a row added after it ended needs a start, as before.
+        while (renderOptions := renderQueue.take_next_pending()) is not None:
+
             self.isPreview = renderOptions.isPreview
             self.currentRenderOptions = renderOptions
             # A job's crop belongs to THAT job: the next render's box arrives in its own log, and until it
@@ -1739,7 +1744,8 @@ class ProcessTab:
             if not self.isPreview and self._preview_paused:
                 self._preview_paused = False
                 self._sync_preview_transport()
-            renderQueue.mark_rendering(renderOptions)
+            # `take_next_pending` already marked the row rendering (status and start time are written in the same
+            # critical section as the scan); the list only has to repaint the new state.
             self.refreshQueueRows()
 
             # The display block is allocated once for the render pass at the pane's box (see `run`), and its size is

@@ -814,7 +814,7 @@ class MainWindow(QMainWindow):
             pass
         if not renderQueue:
             renderQueue = self.renderQueue
-        if len(renderQueue.queue) == 0:
+        if not renderQueue.getQueue():
             NotificationOverlay("Render queue is empty!", self, timeout=1500)
             return
         self.page_handles.proc.startRenderButton.setEnabled(False)
@@ -831,7 +831,8 @@ class MainWindow(QMainWindow):
         # WIDGETS only: `children()` also returns plain `QObject`s, and the i18n relay (`src/ui/i18n._PageRelay`) is
         # one - `child.setEnabled` on it raised AttributeError and killed `startRender` before the first frame
         # (measured live 2026-11-24, found by a preview that answered nothing at all).
-        for child in enabled_widget_children(self.page_handles.general.generalSettings):
+        general = self.page_handles.general
+        for child in enabled_widget_children(general.generalSettings):
             child.setEnabled(False)
         for child in enabled_widget_children(self.page_handles.advanced.advancedSettings):
             child.setEnabled(False)
@@ -843,17 +844,33 @@ class MainWindow(QMainWindow):
         for child in enabled_widget_children(self.page_handles.encoder.encoderSettings):
             child.setEnabled(False)
         self.page_handles.proc.RenderedPreviewControlsContainer.setEnabled(False)
-        self.page_handles.general.scrollArea_4.setEnabled(True)
-        self.page_handles.general.scrollAreaWidgetContents_4.setEnabled(False)
-        self.page_handles.general.widget_5.setEnabled(True)
-        self.page_handles.general.outputFileContainer.setEnabled(True)
-        self.page_handles.general.openOutputFolderButton.setEnabled(True)
-        self.page_handles.general.outputFileContainer.setEnabled(True)
+        general.scrollArea_4.setEnabled(True)
+        # The settings form is locked through its SECTIONS, not by disabling the scroll contents: the contents also
+        # hold the two rows that stay usable during a render - the input row (choose the next file) and the Add row
+        # (`widget_25`). A child cannot be enabled under a disabled parent, so the parent has to stay enabled and the
+        # sections below it carry the lock (owner, 2026-11-26: the queue accepts new rows while a job runs).
+        general.scrollAreaWidgetContents_4.setEnabled(True)
+        for child in enabled_widget_children(general.scrollAreaWidgetContents_4):
+            child.setEnabled(False)
+        # ... except the two rows that make "add to the queue while a job runs" reachable: the file row (choose the
+        # next input) and the Add row. Their containers are the generated `inputFileContainer`/`widget_25`, reached
+        # through the controls the handles already expose rather than adding two more names to the page's edge. The
+        # path FIELD stays read-only: a typed path never went through the probe, so the only way to load a file is
+        # the Select button, which does.
+        for row in (general.inputFileSelectButton.parentWidget(),
+                    general.addToRenderQueueButton.parentWidget()):
+            if row is not None:
+                row.setEnabled(True)
+        general.widget_5.setEnabled(True)
+        general.outputFileContainer.setEnabled(True)
+        general.openOutputFolderButton.setEnabled(True)
+        general.outputFileContainer.setEnabled(True)
 
     def enableProcessPage(self):
         from src.ui.widget_tree import enabled_widget_children
 
-        for child in enabled_widget_children(self.page_handles.general.generalSettings):
+        general = self.page_handles.general
+        for child in enabled_widget_children(general.generalSettings):
             child.setEnabled(True)
         for child in enabled_widget_children(self.page_handles.advanced.advancedSettings):
             child.setEnabled(True)
@@ -861,7 +878,11 @@ class MainWindow(QMainWindow):
         for child in enabled_widget_children(self.page_handles.encoder.encoderSettings):
             child.setEnabled(True)
         self.page_handles.proc.RenderedPreviewControlsContainer.setEnabled(True)
-        self.page_handles.general.scrollAreaWidgetContents_4.setEnabled(True)
+        # Undo `disableProcessPage`'s section-by-section lock (it keeps two rows usable mid-run, so the contents stay
+        # enabled and every section under them was disabled one by one).
+        general.scrollAreaWidgetContents_4.setEnabled(True)
+        for child in enabled_widget_children(general.scrollAreaWidgetContents_4):
+            child.setEnabled(True)
 
     def loadVideo(self, inputFile, multi_file=False):
         if "{MULTIPLE_FILES}" in inputFile.strip().replace(" ", ""):
