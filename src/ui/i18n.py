@@ -98,6 +98,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Discord Rich Presence": "Активность в Discord",
         "Open RVE Folder": "Открыть папку RVE",
         "Language": "Язык",
+        "Font Family": "Шрифт",
+        "Default": "По умолчанию",
         "- 2.6: Supports older CUDA enabled GPUs": "- 2.6: поддерживает старые GPU с CUDA",
         "- 2.8: Supports all RTX cards, faster and recomended.": "- 2.8: все карты RTX, быстрее и рекомендовано.",
         "- 2.9: Experimental.": "- 2.9: экспериментальная.",

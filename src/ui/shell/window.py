@@ -227,6 +227,11 @@ class MainWindowShell:
             i18n.ensure_configured()
         except Exception as _i18n_exc:  # a language is a preference, not a precondition
             print(f"[window] interface language failed: {type(_i18n_exc).__name__}: {_i18n_exc}", flush=True)
+        # The saved interface face, applied before a single page exists: every widget resolves its font through
+        # `UiFont`, so this is the restart half of the switch (the live half is the RVE Settings row wired further
+        # down). It is also the ONE apply path - `typography.apply_font_family` validates against this machine's
+        # families and refuses an unreadable value by name instead of asking Qt for a face nobody has.
+        font_family = self._apply_saved_font_family(window)
         sizePolicy12 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         sizePolicy12.setHorizontalStretch(0)
         sizePolicy12.setVerticalStretch(0)
@@ -431,6 +436,10 @@ class MainWindowShell:
         )
         self.page_handles.menu.pages.show("proc")
         window.page_handles = self.page_handles
+        # The RVE Settings row shows the face actually in force, and a live pick goes through the SAME apply path the
+        # startup restore used. The index is set BEFORE the connection: restoring a saved value must not look like a
+        # user choice (and must not rewrite `settings.txt` while the window opens).
+        self._install_font_family_row(window, font_family)
         QMetaObject.connectSlotsByName(window)
         # The window paints the page colour itself. Every surface inside is token-painted, and a surface that fails to
         # paint (a missing token, a widget built before the theme) then shows the DESKTOP through a compositing WM -
@@ -615,6 +624,49 @@ class MainWindowShell:
         self._window = window
         i18n.bind_page(self, window)
         i18n.install(window)
+
+    def _apply_saved_font_family(self, window) -> str:
+        """Apply the stored interface family (or the app's default face) and return what is in force.
+
+        The value lives in the settings owner the app puts on `window` before building; a bare `QMainWindow` (the
+        tests, the live harness) has none and opens in the default. Validation is against the families this machine
+        reports, because a `settings.txt` can come from another host: an unknown face is refused and named in the log
+        by `typography.apply_font_family`, never handed to Qt and never a reason for the window not to open.
+        """
+        settings = getattr(window, "settings", None)
+        values = getattr(settings, "settings", None)
+        stored = values.get("font_family") if isinstance(values, dict) else None
+        from src.ui.typography import apply_font_family, available_families
+
+        return apply_font_family(stored, available_families())
+
+    def _install_font_family_row(self, window, family: str) -> None:
+        """Point the RVE Settings combo at the face in force and wire a live choice to the one apply path.
+
+        Reached through the page object rather than `page_handles`, the same way the render-settings page is reached:
+        `page_handles` names controls the glue reads, and this row's reader is the shell itself. A live change asks
+        `UiFont.set_family`, whose `font_changed` repaints the built tree - no page is rebuilt.
+        """
+        combo = self.settingsPage_page.tab_4_page.font_family
+        combo.setCurrentIndex(max(0, combo.findData(family)))
+        combo.currentIndexChanged.connect(lambda _index: self._font_family_chosen(window))
+
+    def _font_family_chosen(self, window) -> None:
+        """Apply and persist the family the user picked in the RVE Settings row.
+
+        The first entry's data is ``""`` (the app's own face), which is a real choice and must be applied and saved
+        exactly like a named family - only a missing item (``None``) is a no-op.
+        """
+        combo = self.settingsPage_page.tab_4_page.font_family
+        family = combo.itemData(combo.currentIndex())
+        if family is None:
+            return
+        from src.ui.typography import apply_font_family, available_families
+
+        applied = apply_font_family(family, available_families())
+        settings = getattr(window, "settings", None)
+        if settings is not None and settings.settings.get("font_family") != applied:
+            settings.writeSetting("font_family", applied)
 
     def retranslate(self, language: str | None = None) -> None:
         # The product name, not the Qt context: the field used to read "MainWindow" in the title bar of BOTH languages

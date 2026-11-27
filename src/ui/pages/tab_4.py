@@ -17,7 +17,7 @@ import resources_rc
 # The page builds the toolkit's own controls: `Text` where the Designer had a `QLabel`, `CheckBox` where it had a
 # `QCheckBox`, `Button` where it had a `QPushButton`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.widgets import Button, CheckBox, ComboBox, SurfacePanel, Text
-from src.ui.typography import apply, BODY_PT
+from src.ui.typography import apply, available_families, BODY_PT
 from src.ui.pages.handles import AppSettingsHandles
 from src.ui import i18n
 
@@ -116,6 +116,32 @@ class Tab4Page:
         self.language.setCurrentIndex(max(0, self.language.findData(i18n.current_language())))
         self.languageLayout.addWidget(self.language)
         self.verticalLayout_20.addLayout(self.languageLayout)
+        # The interface font family, the language row's sibling. The combo lists what this machine can actually
+        # render, the bundled face first (`src/ui/typography.py::available_families`); the item data and the text are
+        # the same family name, because unlike a language code a family has no separate endonym. Applying and
+        # persisting it is the shell's one builder (`src/ui/shell/window.py`), which also restores it at startup: the
+        # page builds the control, the owner of the setting applies it through `UiFont`.
+        self.fontFamilyLayout = QHBoxLayout()
+        self.fontFamilyLayout.setSpacing(10)
+        self.fontFamilyLayout.setContentsMargins(0, 0, 0, 0)
+        self.fontFamilyLabel = Text()
+        self.fontFamilyLabel.setObjectName(u"fontFamilyLabel")
+        apply(self.fontFamilyLabel, BODY_PT)
+        self.fontFamilyLayout.addWidget(self.fontFamilyLabel)
+        self.fontFamilyLayout.addStretch(1)
+        self.font_family = ComboBox()
+        self.font_family.setObjectName(u"font_family")
+        # QComboBox's own policy: as wide as its longest item, exactly as tall as its hint - the same statement as
+        # the language row, so the two neighbouring controls cannot drift apart.
+        self.font_family.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        # The first entry is the app's own default face - an empty value means "no family override", so `UiFont`
+        # follows the face the theme states. The bundled face is the first INSTALLED family after it
+        # (`available_families`), so it is always reachable even on a host whose font listing lags.
+        self.font_family.addItem(QCoreApplication.translate("MainWindow", u"Default", None), "")
+        for _family in available_families():
+            self.font_family.addItem(_family, _family)
+        self.fontFamilyLayout.addWidget(self.font_family)
+        self.verticalLayout_20.addLayout(self.fontFamilyLayout)
         self.widget_29 = QWidget(self.GUIOptionsContainer)
         self.widget_29.setObjectName(u"widget_29")
         self.verticalLayout_35 = QVBoxLayout(self.widget_29)
@@ -156,6 +182,8 @@ class Tab4Page:
         self.label_23.setText(QCoreApplication.translate("MainWindow", u"Discord Rich Presence", None))
         self.discord_rich_presence.setText("")
         self.languageLabel.setText(QCoreApplication.translate("MainWindow", u"Language", None))
+        self.fontFamilyLabel.setText(QCoreApplication.translate("MainWindow", u"Font Family", None))
+        self.font_family.setItemText(0, QCoreApplication.translate("MainWindow", u"Default", None))
         self.openRVEFolderBtn.setText(QCoreApplication.translate("MainWindow", u"Open RVE Folder", None))
         # A tooltip is a catalogue document assembled from parts (`src/ui/i18n.py::tooltip`): it is rebuilt here with
         # the labels, not left at the language the page was built in.

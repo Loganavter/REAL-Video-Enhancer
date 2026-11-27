@@ -89,6 +89,51 @@ def font(
     )
 
 
+def available_families() -> tuple[str, ...]:
+    """Every family this machine can render, the bundled face FIRST.
+
+    The bundle's files are registered application fonts, so `QFontDatabase` normally lists them; ``ensure()`` is called
+    again here because a live harness or a test may build the shell without ``toolkit_boot.ensure()`` (it is idempotent
+    and returns the same tuple). The bundle's own names are kept even where Qt's listing lags, so the face the app
+    ships with is always offered.
+    """
+    from PySide6.QtGui import QFontDatabase
+    from PySide6.QtWidgets import QApplication
+
+    from . import bundled_fonts
+
+    if QApplication.instance() is None:
+        # No Qt application yet: there is no list to read, and asking `QFontDatabase` would abort the process.
+        return ()
+    families = [family for family in bundled_fonts.ensure() if family]
+    for family in QFontDatabase.families():
+        if family and family not in families:
+            families.append(family)
+    return tuple(families)
+
+
+def apply_font_family(family: str | None, available=None) -> str:
+    """Switch the live interface face through ``UiFont`` and return the family actually in force.
+
+    This is the ONE application path for a family: ``UiFont.set_family`` pins the override and emits ``font_changed``,
+    and both kinds of widget follow it - a toolkit ``Text`` re-resolves its own face, and a widget that went through
+    :func:`apply` is re-applied by ``UiFont``. An already-built window therefore repaints in the new face without a
+    rebuild. The builder (:mod:`src.ui.shell.window`) calls this for the saved value at startup and the RVE Settings
+    row calls it for a live choice; nothing else may touch the family.
+
+    ``family`` is validated first (:func:`settings_store.validate_font_family`): blank or unknown falls back to the
+    app's default face (an empty override, so ``UiFont`` follows ``QApplication.font()`` again), with the refused name
+    in the log, so a garbled ``settings.txt`` cannot ask Qt for a missing face.
+    """
+    from sli_ui_toolkit.ui.managers import UiFont
+
+    from .settings_store import validate_font_family
+
+    resolved = validate_font_family(family, available)
+    UiFont.get_instance().set_family(resolved or None)
+    return resolved
+
+
 def _is_toolkit_text(widget) -> bool:
     """True for the toolkit ``Text`` painted label - the widget that resolves its own face.
 

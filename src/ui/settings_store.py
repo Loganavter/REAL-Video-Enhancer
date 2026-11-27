@@ -41,6 +41,32 @@ def validate_language(value: str | None) -> str:
     return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
 
 
+#: The interface face the app opens in when nothing else is chosen: EMPTY means "follow the application's own face",
+#: which is the face `toolkit_theme.install` states and the one every layout pin in this tree was measured against.
+#: The bundle is still always offered and always available: `src/ui/bundled_fonts.py` registers Fira Mono from
+#: ``src/ui/fonts/`` at startup, and `typography.available_families()` keeps it first among the installed families.
+DEFAULT_FONT_FAMILY: str = ""
+
+
+def validate_font_family(value: str | None, available=None) -> str:
+    """`value` when it names a usable family, :data:`DEFAULT_FONT_FAMILY` otherwise.
+
+    `available` is the collection of family names the machine reports
+    (``src/ui/typography.py::available_families``). ``None`` means the caller cannot enumerate them yet - the value is
+    only trimmed then, because "is this face installed" is a question about the host, and this module is the settings
+    owner, not a font registry. A value that is present but not in `available` is REFUSED and logged by name, then
+    replaced by the default (the application face): a `settings.txt` from another machine, or a hand edit, must not ask
+    Qt for a face nobody has and must never cost the window.
+    """
+    family = (value or "").strip()
+    if not family:
+        return DEFAULT_FONT_FAMILY
+    if available is not None and family not in available:
+        log(f"font family: {family!r} is not installed; keeping the default face")
+        return DEFAULT_FONT_FAMILY
+    return family
+
+
 #: The four keys of the window's saved NORMAL rect, in the order the writer emits them. Empty means "never saved":
 #: a first launch keeps today's behaviour (the design size, placed by the window manager) instead of inheriting a
 #: made-up position. The maximized flag is separate (`MAXIMIZED_KEY`) because a window that is closed maximized must
@@ -177,6 +203,11 @@ class Settings:
             "window_width": "",
             "window_height": "",
             "window_was_maximized": "False",
+            # The interface face (`src/ui/shell/window.py` applies it at build, the RVE Settings row switches it live).
+            # Appended like `language` and the window block so an existing `settings.txt` gains it at the end and no
+            # line the user hand-edited moves. Empty = the application's own face, the default the app has always
+            # opened in; `validate_font_family` turns a blank or unknown stored value into it.
+            "font_family": DEFAULT_FONT_FAMILY,
         }
         self.allowedSettings = {
             "encoder_command": "ANY",
@@ -239,6 +270,11 @@ class Settings:
             "window_width": "ANY",
             "window_height": "ANY",
             "window_was_maximized": ("True", "False"),
+            # A family name is whatever the host has: the file cannot enumerate families, so any string is accepted
+            # here and `validate_font_family` (against `typography.available_families`) is the gate that turns an
+            # unknown one into the default face. Writing out-of-list values back would block a family the user chose
+            # on this machine, which is the one thing this row exists for.
+            "font_family": "ANY",
         }
         self.settings = self.defaultSettings.copy()
         #: Keys the file carries that this build does not know (a newer build's line, a hand edit). A diagnostic, never
@@ -289,6 +325,11 @@ class Settings:
                     # anyway - this way the current session agrees with the next one).
                     if key == "language":
                         value = validate_language(value)
+                    # A blank `font_family` is "nothing chosen" and reads as the default face now; a non-blank
+                    # unknown one is judged at build time, where the installed families are known
+                    # (`src/ui/shell/window.py`), and refused there with its name in the log.
+                    if key == "font_family":
+                        value = validate_font_family(value)
                     if key not in self.defaultSettings:
                         # Ignored, not fatal - and NOT written back: dropping the line would also drop whatever the
                         # build that wrote it needs. The writer decides the file's shape and never writes an unknown key.
