@@ -1,9 +1,9 @@
 # The Logs block: emitter audit and policy
 
 The Logs tab (`src/ui/pages/tab_5.py` -> `ConsoleView`) is a **pure consumer**. `ProcessTab.renderToPipeThread`
-reads the backend child's merged stdout/stderr line by line (`src/ui/ProcessTab.py:909`), runs every line through
+reads the backend child's merged stdout/stderr line by line (`src/ui/ProcessTab.py:1874`), runs every line through
 `src/ui/render_log.py:RenderLogFilter`, and appends what survives to `renderLogLines`; `syncRenderConsole`
-(`src/ui/ProcessTab.py:1983`) paints them. The app's own `src/Util.log()` writes `log.txt`, not the block. So a
+(`src/ui/ProcessTab.py:3706`) paints them. The app's own `src/Util.log()` writes `log.txt`, not the block. So a
 policy for the block belongs at the backend emitters, and that is where this change puts it.
 
 One shared module, `backend/src/utils/LogPolicy.py`, is imported by both processes (`src/Util.py` loads it by path
@@ -37,48 +37,48 @@ frame/body call; **250f** = every 250 rendered frames.
 
 | line | what it prints | frequency | level now |
 |---|---|---|---|
-| 83/85 | `borders: ...` / machine `BORDERS ...` record | job | info |
+| 89/101 | `borders: ...` / machine `BORDERS ...` record | job | info |
 | 278/281/285 | working directory, invalid input | job | info |
-| 303 | **new** `phase: video probe N ms (WxH, frames, fps)` | job | info |
+| 325 | **new** `phase: video probe N ms (WxH, frames, fps)` | job | info |
 | 326/348/351 | 10-bit / 8-bit pipe decisions | job | info |
-| 357 | `Detecting borders` | job | info |
-| 368 | `Detected borders: ...` | job | info |
-| 379 | `Using backend: ...` | job | info |
-| 385 | **new** `phase: model load upscale '<name>' N ms` | job | info |
-| 387 | `Using Upscaling Model: ...` | job | info |
-| 399/402 | `Using Extra Restoration Model` + **new** `phase: model load restoration '<name>' N ms` | job, per model | info |
-| 409/411 | **new** `phase: model load interpolation '<name>' N ms` + `Using Interpolation Model` | job | info |
-| 415 | `debug: after hotReload ...` (was `DEBUG after hotReload`) | job | **debug** |
+| 396 | `Detecting borders` | job | info |
+| 408 | `Detected borders: ...` | job | info |
+| 418 | `Using backend: ...` | job | info |
+| 427 | **new** `phase: model load upscale '<name>' N ms` | job | info |
+| 429 | `Using Upscaling Model: ...` | job | info |
+| 441/444 | `Using Extra Restoration Model` + **new** `phase: model load restoration '<name>' N ms` | job, per model | info |
+| 451/453 | **new** `phase: model load interpolation '<name>' N ms` + `Using Interpolation Model` | job | info |
+| 457 | `debug: after hotReload ...` (was `DEBUG after hotReload`) | job | **debug** |
 | 423-430 | override/model scale/config lines | job | info |
-| 454 | **new** `phase: reader open N ms` | job | info |
-| 494 | **new** `phase: writer/encoder init N ms` | job | info |
+| 515 | **new** `phase: reader open N ms` | job | info |
+| 555 | **new** `phase: writer/encoder init N ms` | job | info |
 | 519-545 | display / seek channel setup | job | info |
 | 573-635 | reuse gate, auto-gate and correction config | job | info |
-| 675 | **new** `phase: backend init N ms (backend, device, precision); N s since process start` | job | info |
+| 786 | **new** `phase: backend init N ms (backend, device, precision); N s since process start` | job | info |
 | 725-730 | tile probe stats / reason / failure | job | info |
 | 764-779 | int8 probe stats / verdict / failure | job | info |
 | 839/976/987/1001/1010/1021 | auto-gate calibration and tuner summaries | job | info |
 | 1042/1046/1374/1382 | reuse/correction/calibration failures | job (on failure) | info |
 | 1115/1117 | run report written / failed | job | info |
 | 1165/1226/1232/1252/1254 | seek request/preview lines | req | info |
-| 1428 | `startup: first frame enqueued N s after process start` | job (guarded by `JobPhases`) | info |
-| 1436 | `reuse: ...` progress | 250f, **now rate-limited to <=1/s** | info |
-| 1461 | `render loop: N s for M frames (N ms/frame), total ...` | job (guarded) | info |
+| 1788 | `startup: first frame enqueued N s after process start` | job (guarded by `JobPhases`) | info |
+| 1796 | `reuse: ...` progress | 250f, **now rate-limited to <=1/s** | info |
+| 1822 | `render loop: N s for M frames (N ms/frame), total ...` | job (guarded) | info |
 | 1465/1467/1487/1503 | temporal-reuse, tuner, tile and seek-reader summaries | job | info |
-| 1473 | `profile over N frames: gate ... model wall ... unaccounted ...` | job | **debug** |
+| 1834 | `profile over N frames: gate ... model wall ... unaccounted ...` | job | **debug** |
 | 1512 | pyinstrument dump (inside a `"""` block, dead) | never | - |
-| 1566/1574/1679 | `Setting up ...` | job | info |
+| 1938/1946/2051 | `Setting up ...` | job | info |
 | 1611/1617 | int8 calibration frames / forced fit | job | info |
 | 1637/1648/1651 | determinism diagnostics (`RVE_DIAG_*`) | job, env-gated | info |
-| 1652 | `debug: after assign ...` (was `DEBUG after assign`) | job | **debug** |
+| 2024 | `debug: after assign ...` (was `DEBUG after assign`) | job | **debug** |
 | 1692/1695 | scene detection on/off | job | info |
 
 ### `backend/src/utils/Util.py`
 
 | line | what it prints | frequency | level now |
 |---|---|---|---|
-| 66 | `warnAndLog()` -> `WARNING: ...` | on warning | info |
-| 75 | `log_error()` -> `ERROR: ...` | on error | info |
+| 67 | `warnAndLog()` -> `WARNING: ...` | on warning | info |
+| 76 | `log_error()` -> `ERROR: ...` | on error | info |
 | 134 | `log(message, show_backend, level)` - the one backend emitter | every backend line | info; **debug gated here** |
 | 15-20 | `PROCESS_START` / `process_uptime()` (new, not a line) | - | - |
 
@@ -86,7 +86,7 @@ frame/body call; **250f** = every 250 rendered frames.
 
 | line | what it prints | frequency | level now |
 |---|---|---|---|
-| 138 | `FPS: N Current Frame: N ETA: h:mm:ss` (in-place `\r`) | 2/s | info (the pane drops the copy and shows FPS/ETA from the same line) |
+| 146 | `FPS: N Current Frame: N ETA: h:mm:ss` (in-place `\r`) | 2/s | info (the pane drops the copy and shows FPS/ETA from the same line) |
 
 ### `backend/src/pytorch/compact/int8_body.py`
 
@@ -96,9 +96,9 @@ frame/body call; **250f** = every 250 rendered frames.
 | 474/478/486 | calibration/grid notes | job | info |
 | 628/637 | non-contiguous input, `RVE_DEBUG_INPUT` dump | once, env-gated | info |
 | 661 | `int8 body GPU: N ms/frame (last 8), frame N` | 8f | **debug** |
-| 678 | `int8 phases: head ... quantise ... hops ... tail ... SUM ... BODY-TOTAL ...` | 8f | **debug** |
-| 689 | `int8 tail: dequant ... conv ... shuffle ... residual ... SUM ... ms` | 8f (per tail call) | **debug** |
-| 706 | `int8 head FUSED: ...` | once | info |
+| 679 | `int8 phases: head ... quantise ... hops ... tail ... SUM ... BODY-TOTAL ...` | 8f | **debug** |
+| 690 | `int8 tail: dequant ... conv ... shuffle ... residual ... SUM ... ms` | 8f (per tail call) | **debug** |
+| 707 | `int8 head FUSED: ...` | once | info |
 | 723/776/818/826/843/851 | branch notes / certification / refusals | job | info |
 
 ### `backend/src/pytorch/TensorRTHandler.py`
@@ -122,9 +122,9 @@ without the `BACKEND: ` prefix the pane's phase colouring and any prefix-keyed r
 
 | line | what it prints | frequency | pane filter | policy verdict |
 |---|---|---|---|---|
-| 558 | `fp16 INPUT shape/dtype/mean...` | once, `RVE_DEBUG_INPUT=1` | not dropped | debug-only already |
-| 592 | `fp16 engine GPU: N ms/frame (last 8); alloc_retries N` | 8f | dropped (`_PER_FRAME`) | candidate for `debug` |
-| 640 | `host timeline: upload ... model-call ... total ... ms` | first 3 + 8f | dropped (`_PER_FRAME`) | candidate for `debug` |
+| 563 | `fp16 INPUT shape/dtype/mean...` | once, `RVE_DEBUG_INPUT=1` | not dropped | debug-only already |
+| 597 | `fp16 engine GPU: N ms/frame (last 8); alloc_retries N` | 8f | dropped (`_PER_FRAME`) | candidate for `debug` |
+| 646 | `host timeline: upload ... model-call ... total ... ms` | first 3 + 8f | dropped (`_PER_FRAME`) | candidate for `debug` |
 | 662-767 | `int8: start/built/refused/calibration/grid/sanity` | job | not dropped | info |
 
 These per-frame rows never reach the block today because the pane filter drops them. They are the remaining
@@ -134,15 +134,15 @@ emitter-level debt: the same `debug` gate should be applied when that file is ne
 
 | line | what it prints | frequency | level now |
 |---|---|---|---|
-| 124/670 | `reuse frame=N depth=N share=...` | frame, only `RVE_DEBUG_DEPTH=1` | debug-only already |
+| 128/675 | `reuse frame=N depth=N share=...` | frame, only `RVE_DEBUG_DEPTH=1` | debug-only already |
 | 1034-1040 | `[tuner] ...` | job, only `RVE_TUNER_DEBUG=1` | debug-only already |
 
 ### Other backend prints that can reach the pane
 
 | file:line | what | frequency |
 |---|---|---|
-| `backend/src/utils/SceneDetect.py:149` | `Transition Mismatch ... skipping` | per mismatch |
-| `backend/src/FFmpegBuffers.py:759` | `Failed to read FFmpeg log file` | job failure |
+| `backend/src/utils/SceneDetect.py:150` | `Transition Mismatch ... skipping` | per mismatch |
+| `backend/src/FFmpegBuffers.py:811` | `Failed to read FFmpeg log file` | job failure |
 | `backend/src/utils/Frame.py:39` | `Initialized Frame PyTorch utils` | once |
 | `backend/src/utils/Util.py:63` | `Failed to remove file!` | on failure |
 | `backend/src/utils/GetFFMpeg.py:18-30` | download progress | startup only |
