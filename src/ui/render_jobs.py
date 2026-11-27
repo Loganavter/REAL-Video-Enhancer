@@ -13,6 +13,8 @@ The three states the owner asked for:
 
 from __future__ import annotations
 
+import pathlib
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget
@@ -58,6 +60,21 @@ def state_text(state, *, now: float | None = None) -> str:
     estimate = elapsed / progress
     return (f"{percentage(state)}% {short_duration(elapsed)} of {short_duration(estimate)}. "
             f"Duration: {short_duration(state.produced_seconds())} of {short_duration(state.source_seconds)}")
+
+
+def missing_input(jobs) -> str:
+    """The first job whose input cannot be read, named for the reader - or an empty string when every job has one.
+
+    `""` (nothing chosen) and a path that is not a file are both refusals: the backend cannot probe either, and its
+    failure reads as a crash. A directory is not a file here either, so a mistyped folder is refused the same way.
+    """
+    for job in jobs or ():
+        path = str(getattr(job, "inputFile", "") or "").strip()
+        if not path:
+            return "a job has no input file"
+        if not pathlib.Path(path).is_file():
+            return f"the input file is missing: {pathlib.Path(path).name}"
+    return ""
 
 
 def queue_row_painter(queue):

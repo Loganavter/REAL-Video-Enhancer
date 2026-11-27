@@ -845,6 +845,15 @@ class MainWindow(QMainWindow):
         if not renderQueue.getQueue():
             NotificationOverlay("Render queue is empty!", self, timeout=1500)
             return
+        # An input that cannot be read is refused HERE: the backend's probe of an empty/unreadable path used to raise
+        # (ZeroDivisionError on a zero fps) and the pane reported a traceback for what is really "no file chosen".
+        from src.ui.render_jobs import missing_input
+
+        why = missing_input(renderQueue.getQueue())
+        if why:
+            log(f"render refused: {why}")
+            NotificationOverlay(f"Cannot start: {why}", self, timeout=2500)
+            return
         self.page_handles.proc.startRenderButton.setEnabled(False)
         self.page_handles.proc.VideoPreview.setVisible(False)
         self.page_handles.proc.previewLabel.setVisible(True)

@@ -159,8 +159,10 @@ class FFMpegInfoWrapper(VideoInfo):
         return [int(width), int(height)]
 
     def get_fps(self) -> float:
-        fps = re.search(r"(\d+\.?\d*) fps", self.ffmpeg_output_stripped).groups()[0]
-        return float(fps)
+        # An unreadable file has no "N fps" line: answer 0.0 instead of raising out of the probe. Every caller already
+        # treats a zero fps as "unknown" (`get_duration_seconds` returns 0.0, the output count falls back).
+        match = re.search(r"(\d+\.?\d*) fps", self.ffmpeg_output_stripped or "")
+        return float(match.group(1)) if match else 0.0
     
     def check_color_opt(self, color_opt:str) -> str | None:
         if self.stream_line:
@@ -277,7 +279,12 @@ class OpenCVInfo(VideoInfo):
         return self.cap.isOpened() and self.cap.get(cv2.CAP_PROP_FRAME_COUNT) 
 
     def get_duration_seconds(self) -> float:
-        duration = self.cap.get(cv2.CAP_PROP_FRAME_COUNT) / self.get_fps()
+        # A probe of an UNREADABLE file answers 0.0, never a crash: the fps is 0 when the file could not be opened (an
+        # empty path, a container with no video stream), and dividing by it raised ZeroDivisionError out of the probe
+        # path - the app then showed `Rendering failed: ... Traceback` for what is really "this input cannot be read"
+        # (measured 2026-11-27).
+        fps = float(self.get_fps() or 0.0)
+        duration = (float(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0) / fps) if fps > 0.0 else 0.0
 
         if self.start_time is not None and self.end_time is not None:
             duration = self.end_time - self.start_time
