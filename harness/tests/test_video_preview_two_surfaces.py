@@ -144,16 +144,52 @@ def test_the_pane_has_no_seek_surface_and_the_picture_takes_every_press(surface)
     surface.set_progress(10.0, 10.0, playhead=3.0, duration=10.0)
     bottom = QPointF(PANE_SIZE[0] * 0.25, PANE_SIZE[1] - 20.0)     # where the deleted strip's track sat
 
+    centre = QPointF(PANE_SIZE[0] * 0.5, PANE_SIZE[1] * 0.5)       # on the picture
     for mode in VIEW_MODES:
         surface.set_view_mode(mode)
         _press(surface, bottom)
         if mode == "single":
             assert surface._showing_original is True, "single's press is the LMB compare, exactly as above the band"
         else:
-            assert surface._panning is True, "a compare mode's press drags the picture; it does not seek"
+            # The gesture zone is the PICTURE (owner, 2026-11-27: zoom and pan answered over the empty pane too): a press
+            # on the letterbox band is not a pan, and a press on the picture still is.
+            assert surface._panning is False, "a press on the empty band is not the picture's gesture"
+            _release(surface, bottom)
+            # inside the RESULT's half and away from the seam (the seam itself is the divider's control, not a pan)
+            _press(surface, QPointF(PANE_SIZE[0] * 0.75, PANE_SIZE[1] * 0.5))
+            assert surface._panning is True, "a compare mode's press on the picture drags it; it does not seek"
         _release(surface, bottom)
+        _release(surface, centre)
         assert surface._panning is False and surface._showing_original is False
         assert surface.view_mode() == mode
+
+
+def test_the_empty_pane_is_not_a_gesture_zone(surface):
+    """Owner, 2026-11-27: "зум и панорамирование работает даже на частях виджета, где нет картинки".
+
+    The pane letterboxes its picture (and each `sbs` half letterboxes its own), so a wheel over the empty area zoomed a
+    picture the pointer was not on. The zone is the picture: outside it the wheel is ignored and a press does not pan.
+    """
+    from PySide6.QtGui import QWheelEvent
+
+    def wheel(widget, point):
+        event = QWheelEvent(QPointF(point), widget.mapToGlobal(QPointF(point)), QPoint(0, 0), QPoint(0, 120),
+                            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
+                            False)
+        QApplication.sendEvent(widget, event)
+        return event
+
+    surface.set_view_mode("sbs")
+    surface.set_frame(_picture(*FRAME_SIZE))
+    surface.set_original(_picture(*FRAME_SIZE), media_time=0.0)
+    inside = QPointF(PANE_SIZE[0] * 0.5, PANE_SIZE[1] * 0.5)
+    outside = QPointF(2.0, 2.0)                                  # the pane's empty corner
+
+    before = surface.zoom()
+    wheel(surface, outside)
+    assert surface.zoom() == pytest.approx(before), "a wheel over the empty pane must not zoom"
+    wheel(surface, inside)
+    assert surface.zoom() != pytest.approx(before), "a wheel over the picture zooms, as it always did"
 
 
 def test_the_pane_protocol_is_one_surface_and_the_raster_fallback_is_named():

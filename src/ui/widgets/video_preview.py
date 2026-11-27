@@ -1015,6 +1015,10 @@ class VideoPreviewSurface(QRhiWidget):
     # -- interaction -----------------------------------------------------
 
     def wheelEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        if not self._over_picture(event.position()):
+            # Outside the picture there is nothing to zoom: the empty pane is not the gesture's zone (owner, 2026-11-27).
+            event.ignore()
+            return
         angle = event.angleDelta().y()
         pixels = event.pixelDelta().y()
         if telemetry.level() >= 2:
@@ -1050,8 +1054,8 @@ class VideoPreviewSurface(QRhiWidget):
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         position = event.position()
         if event.button() == Qt.MouseButton.MiddleButton:
-            if not self._has_drawn_picture():
-                event.accept()                        # nothing to pan: no pan, no cursor, no claim
+            if not self._has_drawn_picture() or not self._over_picture(position):
+                event.ignore()                        # nothing to pan there: no pan, no cursor, no claim
                 return
             self._panning = True
             self._pan_anchor = position
@@ -1072,8 +1076,8 @@ class VideoPreviewSurface(QRhiWidget):
             # панарамирование со сменой курсора на руку"). The middle button keeps working everywhere for the habit it
             # already built, and the divider (above) stays the one control that takes a press before the picture does.
             if self._view_mode != "single":
-                if not self._has_drawn_picture():
-                    event.accept()                    # an empty compare surface takes the press and claims nothing
+                if not self._has_drawn_picture() or not self._over_picture(position):
+                    event.ignore()                    # outside the picture the press is not a pan
                     return
                 self._panning = True
                 self._pan_anchor = position
@@ -1334,6 +1338,22 @@ class VideoPreviewSurface(QRhiWidget):
         half = self.width() / 2.0
         height = float(self.height())
         return QRectF(0.0, 0.0, half, height), QRectF(half, 0.0, half, height)
+
+    def _over_picture(self, position) -> bool:
+        """Whether a point lands on a PICTURE (the gesture zone), not on the pane's empty area.
+
+        `single`/`split`: the result's drawn rect. `sbs` with a pair: the result's rect or the original's own (the source
+        is fitted into the result's box inside its half, so its rect is the one to test, not the half). A pane with no
+        picture has no gesture zone at all.
+        """
+        try:
+            if self._frame_rect().contains(position):
+                return True
+            if self._view_mode == "sbs" and self._pair_on_screen():
+                return self._original_rect().contains(position)
+            return False
+        except Exception:
+            return False
 
     def _pair_on_screen(self) -> bool:
         """Whether both halves of a moment are in hand - the compare layout's precondition.
