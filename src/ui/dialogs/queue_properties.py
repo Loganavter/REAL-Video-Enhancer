@@ -34,11 +34,16 @@ window forever; there is no background thread because the window is a one-shot r
 The RVE tab is not probed: it is the queue item's own record (``RenderOptions`` + ``JobState``) and, when one exists
 next to the output, the run report (``<output>.report.json``). The report is the only honest source for "what this run
 cost" and "which settings it actually used" - the live settings can differ from what a past run used, so without a
-report those rows are em dashes, not the live values.
+report those rows are em dashes, not the live values. The tab's **Result** section names the run's outcome (Finished /
+Failed / Rendering / Not yet started) and, for a failure, the reason the queue recorded: a finished item is the one a
+user opens this window to inspect, and the timestamps alone never said whether the run succeeded. The Files section
+reads the output's size from disk the same way it reads the input's, so a run that has not written its output yet
+shows an em dash with a reason rather than ``0 B``.
 """
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -1154,6 +1159,48 @@ def _queue_section(row: int, row_count: int) -> PropertySection:
     return PropertySection("Queue", (PropertyRow("Position", f"{int(row) + 1} of {int(row_count)}"),))
 
 
+#: The words the window uses for a job's state. They are the queue's own statuses in a human's words, and the hover
+#: line (`src/render_jobs.state_text`) says the same states on the row itself.
+_STATE_LABELS = {
+    "pending": "Not yet started",
+    "rendering": "Rendering",
+    "done": "Finished",
+    "failed": "Failed",
+}
+
+
+def _result_section(job) -> PropertySection:
+    """How this item's run ended: its completion state, and the failure's own reason when there is one.
+
+    A finished item is the one a user opens the window to inspect, so the state is a row of its own - the timestamps
+    section says WHEN the run ended, never WHETHER it succeeded. A failed item carries the reason the queue recorded
+    (`JobState.error`, the same sentence the row's hover line appends); an item that never ran says so.
+    """
+    state = getattr(job, "state", None)
+    rows: list[PropertyRow] = []
+    if state is None:
+        rows.append(PropertyRow(
+            "State", reason="this queue item carries no job state, so its run has no recorded outcome"
+        ))
+        return PropertySection("Result", tuple(rows))
+
+    status = str(getattr(state, "status", "") or "")
+    label = _STATE_LABELS.get(status)
+    if label is None:
+        rows.append(PropertyRow(
+            "State", reason=f"the queue recorded an unknown state ({status or 'empty'})"
+        ))
+    else:
+        rows.append(PropertyRow("State", label))
+
+    if status == "failed":
+        error = str(getattr(state, "error", "") or "").strip()
+        rows.append(PropertyRow(
+            "Failure", error, "" if error else "the run failed and the queue recorded no reason"
+        ))
+    return PropertySection("Result", tuple(rows))
+
+
 def _timestamps_section(job, report) -> PropertySection:
     """When the item entered the queue and what its run took. An item that never ran reads em dashes, not zeros."""
     state = getattr(job, "state", None)
@@ -1227,6 +1274,22 @@ def _files_section(job) -> PropertySection:
             rows.append(PropertyRow("Input size", format_bytes(stat.st_size)))
     output = getattr(job, "outputPath", None)
     rows.append(PropertyRow("Output path", str(output), "" if output else "this queue item carries no output path"))
+    if not output:
+        rows.append(PropertyRow("Output size", reason="there is no output path to read a size from"))
+    else:
+        # Read the size now, like the input's: a finished run's output is on disk, and a run that has not written it is
+        # not "0 B" - it is unmeasured, with the reason saying so.
+        try:
+            stat = os.stat(str(output))
+        except OSError as error:
+            reason = (
+                f"the output file is not there ({output})"
+                if error.errno == errno.ENOENT
+                else f"the output file could not be read: {output} ({error.strerror or error})"
+            )
+            rows.append(PropertyRow("Output size", reason=reason))
+        else:
+            rows.append(PropertyRow("Output size", format_bytes(stat.st_size)))
     return PropertySection("Files", tuple(rows))
 
 
@@ -1266,9 +1329,10 @@ def _report_section(report, report_path: str, reason: str) -> PropertySection:
 
 
 def _rve_sections(job, row: int, row_count: int, report, report_path: str, report_reason: str) -> tuple:
-    """The RVE tab: the queue's own record - position, timestamps, files, models, coefficients, the run report."""
+    """The RVE tab: the queue's own record - position, outcome, timestamps, files, models, coefficients, the report."""
     return (
         _queue_section(row, row_count),
+        _result_section(job),
         _timestamps_section(job, report),
         _files_section(job),
         _models_section(job),
