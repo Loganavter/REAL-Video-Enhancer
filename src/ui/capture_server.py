@@ -31,6 +31,13 @@ legacy slot keeps working for every existing client (`ui_live.py shot`, `live.sh
 
 Why not a socket: the app may block its event loop in a modal dialog or a long paint; a file poll keeps the protocol
 trivial and crash-safe (an unparsed request is answered, not mistaken for a page list).
+
+**A control verb runs on the GUI thread, so it may never open a modal.** Every verb is dispatched from that thread's
+timer, so a dialog entered by a verb parks the whole channel, not just the one request: measured 2026-11-27,
+`start:render` clicked into `ProcessTab.run`'s overwrite question and afterwards `state:` and `grab:` timed out too
+while the process still looked alive. The rule is therefore mechanical, not stylistic: a verb that would trigger a
+question asks a non-modal predicate first, refuses with the dialog's own sentence, and lets the caller decide. See
+`start_render_job` / `ProcessTab.would_ask_for_overwrite`.
 """
 
 from __future__ import annotations
@@ -202,6 +209,14 @@ def start_render_job(window) -> dict:
     a queue item could only ever read `kind=none`. The verb drives the SAME control the user presses
     (`startRenderButton.click()`, the entry the preview verb already uses), never a second start path, and refuses when
     the render is not idle - the button is a play/pause/resume toggle, so a click while running would silently PAUSE.
+
+    **A control verb runs on the GUI thread, so it may never open a modal.** Measured 2026-11-27 on a leased display:
+    this verb clicked, `ProcessTab.run` ran synchronously, `checkForOverwrite` -> `askForOverwrite` opened the overwrite
+    question, and because nobody can dismiss a dialog on an unattended display the GUI thread parked in it - the verb
+    answered nothing and EVERY later verb (`state:`, `grab:`) timed out too, while the process still looked alive.
+    The click therefore only happens when that question would NOT appear: `ProcessTab.would_ask_for_overwrite` /
+    `overwrite_prompt_path` is asked FIRST, and a would-be prompt is refused with the dialog's own sentence as the
+    error. The caller decides (remove the file, choose another output, or ask a person).
     """
     report = {"stamp": None, "kind": "job", "started": False, "method": None, "render_state": None,
               "queue_rows": None, "output": None, "error": None}
@@ -223,6 +238,23 @@ def start_render_job(window) -> dict:
     button = getattr(proc, "startRenderButton", None)
     if button is None:
         report["error"] = "no startRenderButton on this page"
+        return report
+    # The modal gate. Local import: the channel is also used without a tab (harness scripts), and this is the only verb
+    # that needs the tab's overwrite half.
+    from .ProcessTab import OVERWRITE_QUESTION, overwrite_prompt_path
+
+    try:
+        blocking_output = overwrite_prompt_path(queue)
+    except Exception as exc:
+        # Never click on an answer we could not read: a refusal is recoverable, a wedged GUI thread is not.
+        report["error"] = (f"could not check the output paths for an overwrite prompt: "
+                           f"{type(exc).__name__}: {exc}")
+        return report
+    if blocking_output is not None:
+        report["error"] = OVERWRITE_QUESTION
+        report["output"] = blocking_output
+        print(f"capture-server: start:render refused, {blocking_output} exists "
+              f"(the button would open a modal on the GUI thread)", flush=True)
         return report
     button.click()
     report["started"] = True
@@ -1164,6 +1196,10 @@ def install(window) -> None:
         caller then polls `state:preview` for the pane and `state:preview_timeline` for the bar. `job:pause` and
         `job:resume` are deliberately absent: those are the same toggle in other states, and a probe that needs them can
         say so instead of guessing which way a click will flip this time.
+
+        When an output file already exists the button would open the overwrite modal, which a headless display can never
+        dismiss: `start_render_job` refuses instead (`started: false`, the question as `error`, the path as `output`)
+        and this verb keeps answering, as does every verb after it.
         """
         wanted = (action or "render").strip() or "render"
         if wanted not in ("render", "start"):
