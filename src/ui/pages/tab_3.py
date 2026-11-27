@@ -56,6 +56,27 @@ def _row_checkbox(parent) -> CheckBox:
     return box
 
 
+def _gpu_tooltip(backend: str, count: int) -> str:
+    """A GPU-id row's tooltip document for one device count.
+
+    The title is a catalogue part; the reason line is state the page reports (0 devices, exactly one, or a choice),
+    so the count decides it. Both the build-time pass and `apply_gpu_counts` go through here, which is why a language
+    switch keeps whatever reason the row is showing instead of falling back to the "choose an id" text.
+    """
+    title = f"{backend} GPU ID -"
+    if count == 0:
+        return i18n.tooltip(
+            title,
+            f"This backend reports no GPU: {backend} was not detected, so there is no id to choose.",
+        )
+    if count == 1:
+        return i18n.tooltip(
+            title,
+            f"This backend reports one GPU (id 0): there is nothing to choose.",
+        )
+    return i18n.tooltip(title, f"Sets what GPU is used for {backend}")
+
+
 class Tab3Page:
     """`tab_3` - placed by its parent with `addTab`."""
 
@@ -84,12 +105,6 @@ class Tab3Page:
         self.precision.addItem("")
         self.precision.addItem("")
         self.precision.setObjectName(u"precision")
-        self.precision.setToolTip(i18n.tooltip(
-            'Precision:',
-            '- Auto: Defaults to float16 if the GPU is supported (RTX 20 series and up)',
-            '- Float16: Faster inference and less VRAM usage.',
-            '- Float32: Slower inference and more VRAM usage, supported on more GPUS.'
-        ))
         self.precisionSettingsContainer.addWidget(self.precision)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer)
         self.tensorRTOptLevelSettingsContainer = QHBoxLayout()
@@ -107,11 +122,6 @@ class Tab3Page:
         self.tensorrt_optimization_level.addItem("")
         self.tensorrt_optimization_level.addItem("")
         self.tensorrt_optimization_level.setObjectName(u"tensorrt_optimization_level")
-        self.tensorrt_optimization_level.setToolTip(i18n.tooltip(
-            'TensorRT Optimization Level:',
-            '- Lower means less optimization, but faster engine generation time.',
-            '- Higher means more optimization, but slower engine generation time.'
-        ))
         self.tensorRTOptLevelSettingsContainer.addWidget(self.tensorrt_optimization_level)
         self.verticalLayout_12.addLayout(self.tensorRTOptLevelSettingsContainer)
         self.horizontalLayout_67 = QHBoxLayout()
@@ -124,12 +134,6 @@ class Tab3Page:
         self.horizontalLayout_67.addItem(self.horizontalSpacer_34)
         self.auto_hdr_mode = _row_checkbox(self.renderSettingsContainer)
         self.auto_hdr_mode.setObjectName(u"auto_hdr_mode")
-        self.auto_hdr_mode.setToolTip(i18n.tooltip(
-            'Auto HDR Mode',
-            '- Auto enables HDR mode if RVE detects that the video that is being rendered is HDR. This will cause slower rendering if the video is HDR.',
-            '- HDR is only color tested on x264 and x265 encoders.',
-            '- The preview colors may be distorted as the preview itself is not HDR.'
-        ))
         sizePolicy12 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         sizePolicy12.setHorizontalStretch(0)
         sizePolicy12.setVerticalStretch(0)
@@ -147,10 +151,6 @@ class Tab3Page:
         self.tensorRTOptLevelSettingsContainer_3.addItem(self.horizontalSpacer_31)
         self.dynamic_tensorrt_engine = _row_checkbox(self.renderSettingsContainer)
         self.dynamic_tensorrt_engine.setObjectName(u"dynamic_tensorrt_engine")
-        self.dynamic_tensorrt_engine.setToolTip(i18n.tooltip(
-            'TensorRT Dynamic Engine:',
-            '- Enables TensorRT to build for many different resolutions in one engine.'
-        ))
         sizePolicy12.setHeightForWidth(self.dynamic_tensorrt_engine.sizePolicy().hasHeightForWidth())
         self.dynamic_tensorrt_engine.setSizePolicy(sizePolicy12)
         self.tensorRTOptLevelSettingsContainer_3.addWidget(self.dynamic_tensorrt_engine)
@@ -165,9 +165,6 @@ class Tab3Page:
         self.precisionSettingsContainer_2.addItem(self.horizontalSpacer_15)
         self.uhd_mode = _row_checkbox(self.renderSettingsContainer)
         self.uhd_mode.setObjectName(u"uhd_mode")
-        self.uhd_mode.setToolTip(i18n.tooltip(
-            'Saves VRAM and speeds up inference at resolutions above 1080p by calculating flow at a lower resolution. (GMFSS/GIMM)'
-        ))
         self.precisionSettingsContainer_2.addWidget(self.uhd_mode)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_2)
         self.precisionSettingsContainer_4 = QHBoxLayout()
@@ -181,10 +178,6 @@ class Tab3Page:
         # step gutter (22 px) where the adapter pinned 29 px and 20 px - toolkit metrics, reported in DONE.md.
         self.ncnn_gpu_id = Stepper(self.renderSettingsContainer, alignment=SPIN_ALIGNMENT)
         self.ncnn_gpu_id.setObjectName(u"ncnn_gpu_id")
-        self.ncnn_gpu_id.setToolTip(i18n.tooltip(
-            'NCNN GPU ID -',
-            'Sets what GPU is used for NCNN'
-        ))
         self.ncnn_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_4.addWidget(self.ncnn_gpu_id)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_4)
@@ -196,10 +189,6 @@ class Tab3Page:
         self.precisionSettingsContainer_3.addWidget(self.label_43)
         self.pytorch_gpu_id = Stepper(self.renderSettingsContainer, alignment=SPIN_ALIGNMENT)
         self.pytorch_gpu_id.setObjectName(u"pytorch_gpu_id")
-        self.pytorch_gpu_id.setToolTip(i18n.tooltip(
-            'PyTorch GPU ID -',
-            'Sets what GPU is used for PyTorch'
-        ))
         self.pytorch_gpu_id.setMinimumSize(QSize(0, 0))
         self.precisionSettingsContainer_3.addWidget(self.pytorch_gpu_id)
         self.verticalLayout_12.addLayout(self.precisionSettingsContainer_3)
@@ -241,31 +230,21 @@ class Tab3Page:
         * ``2+`` -> the stepper is live over ``0 .. count - 1``, which is what the field actually is (a MAXIMUM id).
 
         Called again after a settings reset keeps the same statement; `setValue` clamps to the range, so a stale
-        stored id cannot survive on a machine with fewer devices.
+        stored id cannot survive on a machine with fewer devices. The counts are remembered so a language switch
+        rebuilds each row's tooltip with the same reason it showed before the switch.
         """
+        self._gpu_counts = (ncnn_gpu_count, pytorch_gpu_count)
         self._apply_gpu_row(self.label_45, self.ncnn_gpu_id, "NCNN", ncnn_gpu_count)
         self._apply_gpu_row(self.label_43, self.pytorch_gpu_id, "PyTorch", pytorch_gpu_count)
 
     @staticmethod
     def _apply_gpu_row(label, stepper, backend: str, count: int) -> None:
-        """One row's answer for one backend: the control state, its range and the reason in its tooltip."""
+        """One row's answer for one backend: the control state and its range."""
         count = max(0, int(count))
         label.setEnabled(count > 0)
         stepper.setEnabled(count > 1)
         stepper.setMaximum(max(0, count - 1))
-        title = f"{backend} GPU ID -"
-        if count == 0:
-            tooltip = i18n.tooltip(
-                title,
-                f"This backend reports no GPU: {backend} was not detected, so there is no id to choose.",
-            )
-        elif count == 1:
-            tooltip = i18n.tooltip(
-                title,
-                f"This backend reports one GPU (id 0): there is nothing to choose.",
-            )
-        else:
-            tooltip = i18n.tooltip(title, f"Sets what GPU is used for {backend}")
+        tooltip = _gpu_tooltip(backend, count)
         label.setToolTip(tooltip)
         stepper.setToolTip(tooltip)
 
@@ -297,3 +276,38 @@ class Tab3Page:
         self.uhd_mode.setText("")
         self.label_45.setText(QCoreApplication.translate("MainWindow", u"NCNN GPU ID", None))
         self.label_43.setText(QCoreApplication.translate("MainWindow", u"PyTorch GPU ID", None))
+        # Tooltips are catalogue documents assembled from parts (`src/ui/i18n.py::tooltip`), so they are rebuilt with
+        # the labels: a `setToolTip` left in `build()` keeps the language the page was built in. The two GPU rows use
+        # the counts the glue last reported, so the switch re-words the reason rather than replacing it.
+        self.precision.setToolTip(i18n.tooltip(
+            'Precision:',
+            '- Auto: Defaults to float16 if the GPU is supported (RTX 20 series and up)',
+            '- Float16: Faster inference and less VRAM usage.',
+            '- Float32: Slower inference and more VRAM usage, supported on more GPUS.'
+        ))
+        self.tensorrt_optimization_level.setToolTip(i18n.tooltip(
+            'TensorRT Optimization Level:',
+            '- Lower means less optimization, but faster engine generation time.',
+            '- Higher means more optimization, but slower engine generation time.'
+        ))
+        self.auto_hdr_mode.setToolTip(i18n.tooltip(
+            'Auto HDR Mode',
+            '- Auto enables HDR mode if RVE detects that the video that is being rendered is HDR. This will cause slower rendering if the video is HDR.',
+            '- HDR is only color tested on x264 and x265 encoders.',
+            '- The preview colors may be distorted as the preview itself is not HDR.'
+        ))
+        self.dynamic_tensorrt_engine.setToolTip(i18n.tooltip(
+            'TensorRT Dynamic Engine:',
+            '- Enables TensorRT to build for many different resolutions in one engine.'
+        ))
+        self.uhd_mode.setToolTip(i18n.tooltip(
+            'Saves VRAM and speeds up inference at resolutions above 1080p by calculating flow at a lower resolution. (GMFSS/GIMM)'
+        ))
+        ncnn_count, pytorch_count = getattr(self, "_gpu_counts", None) or (2, 2)
+        self.ncnn_gpu_id.setToolTip(_gpu_tooltip("NCNN", ncnn_count))
+        self.pytorch_gpu_id.setToolTip(_gpu_tooltip("PyTorch", pytorch_count))
+        # The labels carry the same tooltip only once the glue has reported device counts (`apply_gpu_counts` sets
+        # both); restating them here is what keeps that row's explanation in the new language too.
+        if getattr(self, "_gpu_counts", None) is not None:
+            self.label_45.setToolTip(_gpu_tooltip("NCNN", ncnn_count))
+            self.label_43.setToolTip(_gpu_tooltip("PyTorch", pytorch_count))
