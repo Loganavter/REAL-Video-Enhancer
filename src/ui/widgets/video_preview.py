@@ -1017,6 +1017,9 @@ class VideoPreviewSurface(QRhiWidget):
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt spelling
         position = event.position()
         if event.button() == Qt.MouseButton.MiddleButton:
+            if not self._has_drawn_picture():
+                event.accept()                        # nothing to pan: no pan, no cursor, no claim
+                return
             self._panning = True
             self._pan_anchor = position
             event.accept()
@@ -1036,6 +1039,9 @@ class VideoPreviewSurface(QRhiWidget):
             # панарамирование со сменой курсора на руку"). The middle button keeps working everywhere for the habit it
             # already built, and the divider (above) stays the one control that takes a press before the picture does.
             if self._view_mode != "single":
+                if not self._has_drawn_picture():
+                    event.accept()                    # an empty compare surface takes the press and claims nothing
+                    return
                 self._panning = True
                 self._pan_anchor = position
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -1044,6 +1050,9 @@ class VideoPreviewSurface(QRhiWidget):
             # LMB = "show the original": the surface asks the host for the source frame at the playhead and draws it as
             # soon as `set_original` arrives. The request carries the media time, so the host decodes one frame, not a
             # stream - the renderer's own original is never involved (plan: 3b, GUI-only).
+            if not self._has_drawn_picture():
+                event.accept()                        # no picture to compare against and nothing to pan
+                return
             self._showing_original = True
             # LMB drag pans (owner, 2026-11-24: "вместо СКМ перевесить на ЛКМ драг"; BlinkTable's `drag_pan` is the
             # reference). The press still ASKS for the original immediately - holding the button to compare is a
@@ -1497,6 +1506,16 @@ class VideoPreviewSurface(QRhiWidget):
     def _has_picture(self) -> bool:
         """Whether the RESULT half carries a picture at all - an image, or the planes of a YUV frame."""
         return self._frame is not None or getattr(self, "_planes_size", None) is not None
+
+    def _has_drawn_picture(self) -> bool:
+        """Whether the pane is drawing ANYTHING - the result half, or a compare mode holding only its source.
+
+        A gesture that promises to move the view is a claim about the pane's state, and an empty pane has none: the
+        compare press used to arm a pan and show `ClosedHandCursor` over nothing, and `pan_by` then clamped to zero
+        (owner, 2026-11-26: "при пустом экране можно зажать пустое место и курсор реально сменится - это неверно").
+        The pair writer's painted half is the other fact: a compare mode with only the source on screen IS a picture.
+        """
+        return self._has_picture() or self._pair.painted() is not None
 
     def initialize(self, command_buffer) -> None:  # noqa: N802 - Qt spelling
         """Start the telemetry session, then hand the resource lifetime to the renderer.
