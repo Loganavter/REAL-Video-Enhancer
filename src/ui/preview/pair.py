@@ -131,6 +131,8 @@ class PairWriter:
         #: deadline a late source is measured against: a picture of that moment (or older) belongs to the pane that no
         #: longer exists, while a pane that had no moment at all has nothing a source could be "late" for.
         self._cleared_moment: float | None = None
+        #: Whether a result has been seen since the mode was (re)entered. See `paint()`'s lone-source branch.
+        self._result_seen = False
 
     # -- configuration ---------------------------------------------------
 
@@ -153,6 +155,9 @@ class PairWriter:
             # silently (the valve paints the result alone and says `pair stale`). A pair carried over from an earlier
             # compare session is kept: it is a picture that WAS a pair, and it is replaced by the first new one.
             pair = self._committed
+            # Did this pane have a result at all? If it did, the source that arrives next belongs to a picture the pane
+            # already had, so it waits for a new pair instead of painting alone.
+            self._result_seen = pair is not None and pair.result is not None
             if pair is None or pair.result is None or pair.source is None or not self._pairs(pair.result, pair.source):
                 if telemetry.level() >= 2:
                     telemetry.event("pair enter", mode=str(mode),
@@ -180,6 +185,9 @@ class PairWriter:
         """A result the pane accepted. It waits for a source of its own moment; `paint()` decides when it shows."""
         self._cleared = False
         self._cleared_moment = None
+        #: A result has been seen in this session of the mode: from here on a lone source is never painted, because the
+        #: result it belongs with is on its way (the pair policy's "the upscale, then the original" order again).
+        self._result_seen = True
         self._generation = max(self._generation, int(half.generation))
         if (self._pending_result is not None and not _same(self._pending_result, half)
                 and telemetry.level() >= 2):
@@ -262,10 +270,14 @@ class PairWriter:
                 self._lone_result = False
                 return self._paint(committed.result, source, moment=committed.moment,
                                    generation=int(committed.generation))
-            if committed is None or committed.result is None:
-                # No result exists at all: the source is the one picture there is, and a pane that waits for a result
-                # that may never come is blank while a decoded picture sits in hand (owner, 2026-11-26: "очень долго
-                # ждем оригинал на side by side").
+            if (committed is None or committed.result is None) and not self._result_seen:
+                # No result exists at all AND none has ever been seen: the source is the one picture there is, and a
+                # pane that waits for a result that may never come is blank while a decoded picture sits in hand
+                # (owner, 2026-11-26: "очень долго ждем оригинал на side by side").
+                #
+                # `_result_seen` is the guard that keeps the opposite order out: once a result has existed, a source
+                # alone is waiting for its partner, not the only picture there is (measured 2026-11-27: after a seek
+                # the source painted alone and the owner saw the original with an empty right half).
                 self._pending_source = None
                 telemetry.event("pair lone", half="source", why="no-result-on-screen",
                                 moment=_moment(source.moment), generation=int(source.generation))
@@ -306,6 +318,9 @@ class PairWriter:
         self._flash = None
         self._lone_result = False
         self._hold_started = None
+        # A clear is a FRESH pane: the "source is the only picture there is" state applies again (a compare mode opened
+        # before its first result), and a source arriving next may paint alone.
+        self._result_seen = False
         self._paint(None, None, moment=None, generation=int(self._generation), force=True)
         # `painted()` answers "what is on screen"; after a clear that is NOTHING, not a pair whose halves happen to be
         # None. The empty object invited exactly the kind of read this module exists to remove (a caller asking

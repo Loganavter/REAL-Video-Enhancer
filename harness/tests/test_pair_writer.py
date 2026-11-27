@@ -270,6 +270,38 @@ def test_entering_a_compare_mode_paints_no_half_and_the_first_pair_arrives_with_
     assert painted.result is not None and painted.source is not None and painted.moment == pytest.approx(5.5)
 
 
+def test_after_a_mode_entry_a_source_alone_waits_for_its_result():
+    """The mirror image of the mode-switch fix: entering a compare mode DROPS the single-mode result, so the source that
+    arrives next has no partner yet - and painting it alone shows the original with an empty right half (measured
+    2026-11-27, the owner's screenshot after a seek). A source alone paints only on a pane that never had a result.
+    """
+    writer, sink, clock = _writer(mode="sbs")
+    writer.offer_result(_half(4.0))
+    writer.offer_source(_half(4.0))
+    assert writer.paint() is True and writer.painted().lone_half is None
+
+    writer.set_view_mode("single")
+    writer.set_view_mode("sbs")                       # the entry drops the single-mode picture
+    sink.calls.clear()
+
+    writer.offer_source(_half(4.5))                   # the source of the moment this seek asked for
+    assert writer.paint() is False, "a source with no result is held, not painted"
+    assert sink.calls == [], f"nothing may reach the renderer yet: {sink.calls}"
+
+    writer.offer_result(_half(4.5))
+    assert writer.paint() is True
+    assert writer.painted().lone_half is None and writer.painted().moment == pytest.approx(4.5)
+
+
+def test_a_pane_that_never_had_a_result_still_shows_its_source():
+    """A compare opened before its first result (a queue item): the source IS the picture there is."""
+    writer, sink, clock = _writer(mode="sbs")
+    writer.offer_source(_half(1.0))
+    assert writer.paint() is True
+    painted = writer.painted()
+    assert painted is not None and painted.lone_half == "source", "the one picture in hand is shown"
+
+
 # --- a clear is a clear ------------------------------------------------------------------------------
 
 

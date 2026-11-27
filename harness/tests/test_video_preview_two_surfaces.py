@@ -680,6 +680,26 @@ def test_a_half_painted_pair_is_not_a_pair(surface):
         "two halves of one moment are")
 
 
+def test_an_empty_publication_does_not_clear_the_painted_pair(surface):
+    """Owner, 2026-11-27: after a seek the pair broke - the original painted with an EMPTY right half.
+
+    A decoder publishes an empty frame while it seeks (`preview: frame gui_ms=-` with no index and no moment), and the
+    pane treated that as "clear": the painted pair was dropped, the compare had no result to pair with, and the source
+    (asked at press time since `dde970ca`) painted ALONE. Only the explicit `set_result(None)` may empty a pane.
+    """
+    surface.set_view_mode("sbs")
+    surface.set_result(ResultPicture(moment=1.0, picture=_picture(*FRAME_SIZE), generation=0))
+    surface.set_source(SourcePicture(moment=1.0, picture=_picture(*FRAME_SIZE), origin="decoder", generation=0))
+    painted = surface.painted_pair()
+    assert painted is not None and painted.source is not None, "a pair is on screen before the tick"
+
+    surface.set_result(ResultPicture(moment=None, picture=None, generation=1))     # the seek's empty tick
+
+    assert surface.painted_pair() is not None, (
+        "an empty publication is 'nothing this tick', not 'clear': dropping the pair here is what left one half alone")
+    assert surface.painted_pair().moment == pytest.approx(1.0), "the picture on screen did not change"
+
+
 def test_a_cleared_pane_stays_cleared_when_a_late_source_arrives(surface):
     """A pane told to be empty must not be repainted by a leftover source (CODE_PATTERNS §12: a clear is a clear).
 

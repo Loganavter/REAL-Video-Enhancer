@@ -303,12 +303,13 @@ class VideoPreviewSurface(QRhiWidget):
             return
         moment = None if result.moment is None else float(result.moment)
         generation = int(result.generation)
-        if result.picture is None and moment is not None:
-            # An EMPTY publication that still names a moment: "nothing this tick", not "clear" (the empty right half of
-            # sbs after a finished render was exactly this shape).
-            return
         if result.picture is None:
-            self._accept_result(None, None, generation)
+            # An EMPTY publication is "nothing this tick", NEVER "clear". The explicit `set_result(None)` (no object at
+            # all) is the only way to empty the pane. A decoder publishes an empty frame at a seek, and treating it as a
+            # clear dropped the painted pair: the compare then had no result to pair with, the source that arrived a
+            # moment later (asked at press time since `dde970ca`) painted ALONE, and the owner saw the original with an
+            # empty right half - the mirror image of the same defect (measured 2026-11-27: `frame gui_ms=-` then
+            # `pair lone half=source why=no-result-on-screen` and `draw mode=sbs half=lone:source`).
             return
         reason = self._result_refusal(moment, generation)
         if reason is not None:
