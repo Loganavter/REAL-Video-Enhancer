@@ -351,7 +351,13 @@ class VideoPreviewSurface(QRhiWidget):
     def _accept_result(self, moment: float | None, image: QImage | None, generation: int, *,
                        planes_frame: PreviewFrame | None = None, index: int | None = None,
                        seq: int | None = None, gui_ms: float | None = None) -> None:
-        """Store an accepted result and offer it to the pair writer. The one place the pane's clock is written."""
+        """Store an accepted result and offer it to the pair writer. The one place the pane's clock is written.
+
+        THE pane's result write: `_frame`/`_planes_size`/`_pending_frame_obj`, `_shown`/`_shown_time`, `_result_moment`/
+        `_result_frame_seconds`/`_result_generation` and the result half of `_result_gap` are decided here and nowhere
+        else (`harness/tests/test_preview_picture_ownership.py` fails on a second writer). The clear below also drops
+        the source half; `_apply_source_picture` is the one method that DECIDES a source picture.
+        """
         cleared = image is None and planes_frame is None
         if cleared:
             self._frame = None
@@ -713,6 +719,11 @@ class VideoPreviewSurface(QRhiWidget):
 
     def _apply_source_picture(self, snapshot: SourcePicture | None, *, index: int | None = None) -> None:
         """Store the accepted picture and hand the renderer the pair it belongs to.
+
+        THE pane's source write: `_original`, `_original_shown`, `_original_time` and `_original_changed` are decided
+        here and nowhere else, except the clear in `_accept_result` that drops them with the result (a clear is a clear,
+        CODE_PATTERNS §12). A second writer of any of them is a second owner of the compare's left half - the test
+        `harness/tests/test_preview_picture_ownership.py` fails on one.
 
         The source is **stretched up to the rendered frame's size with nearest-neighbour** (`FastTransformation`): the
         cheapest interpolation there is, and the only one that adds no information. The comparison then shows two
