@@ -22,7 +22,7 @@ from __future__ import annotations
 __all__ = ["paint_pair", "sync_compare_source"]
 
 
-def sync_compare_source(tab) -> None:
+def sync_compare_source(tab, *, paint: bool = False) -> None:
     """Hand the pane the register's picture FOR THE MOMENT IT IS SHOWING, or nothing.
 
     The only presentation path for the compare's source half. `shown_moment()` is the result's own moment (the
@@ -53,9 +53,12 @@ def sync_compare_source(tab) -> None:
     if register is not None:
         snapshot = register.picture_for(moment, tab._source_tolerance(),
                                         generation=int(getattr(tab, "_result_generation", 0)))
-        if snapshot is None:
-            # WHICH filter refused it, at level 1: a hold with 24 pictures in the register and no line saying whether
-            # the generation or the tolerance was the gate is how the 2026-11-27 defect stayed unattributed for hours.
+        if snapshot is None and paint:
+            # WHICH filter refused it, at level 1 - and ONLY for a PAINT. This function is also called from the
+            # source-feed offer path (`_sync_compare_source`), so logging every miss made the counter measure the fill's
+            # questions rather than the picture: one window had 1020 gap lines for 3 genuinely missing painted moments
+            # (measured 2026-11-27). `paint=True` comes from `paint_pair`, the one path where a result has just been
+            # painted and the pane needs its other half NOW.
             why = getattr(register, "last_refusal", None)
             if why:
                 try:
@@ -89,4 +92,5 @@ def paint_pair(tab, playhead: float | None = None) -> None:
     """
     # The same one path as `sync_compare_source`, without the delegator hop: the tab's `_source_paint_pair` exists to
     # BE this call, so it calls the module directly rather than looping through its own `_sync_compare_source`.
-    sync_compare_source(tab)
+    # `paint=True`: this call happens because a result was just painted, so a miss here is a gap on screen.
+    sync_compare_source(tab, paint=True)
