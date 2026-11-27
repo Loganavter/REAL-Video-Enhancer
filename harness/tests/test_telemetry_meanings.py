@@ -8,11 +8,12 @@ not expect, and the readers are the live proofs this project ships against. This
   instead of counting draw lines.
 * 5.7 - `pool=` used to mean decoded frames and now meant the whole source register; the field is renamed (`held=`)
   and `newest=` says in its own name that it is generation-filtered (`held_newest=`).
-* 5.10 - two "since process start" numbers used two different zeros; there is now ONE zero and every line says which.
+* 5.10 - two "since process start" numbers use two different zeros; the dictionary now names both, so a reader
+  cannot carry one number into the other's table (the backend one-clock fix belongs to the RenderVideo lane).
 * 5.11 - a `key=value` record with no escaping could not carry a reason containing a colon and a space; values are
   quoted and `telemetry.parse` is the documented reader.
 
-No Qt widget is needed for 5.4/5.7/5.11 beyond importing the tab's method; 5.10 is a contract over the writer's text.
+No Qt widget is needed for 5.4/5.7/5.11 beyond importing the tab's method; 5.10 is a contract over the reader's dictionary.
 """
 
 from __future__ import annotations
@@ -178,33 +179,18 @@ def test_an_older_generation_reads_as_a_dash_and_the_docs_say_so(fresh):
     assert "held_newest" in doc and "generation" in doc
 
 
-# --- 5.10: one zero, and every "since" line names it ----------------------------------------------------------------
+# --- 5.10: the reader names the zero (the backend reconciliation is the RenderVideo lane's) --------------------------
 
 
-def _since_lines():
-    """The whole `log(...)` call at each 'process start' site (the number and its label span continuation lines)."""
-    import ast
-
-    source = (_ROOT / "backend/src/RenderVideo.py").read_text(encoding="utf-8")
-    calls = []
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "log":
-            segment = ast.get_source_segment(source, node) or ""
-            if "process start" in segment:
-                calls.append(segment)
-    return source, calls
-
-
-def test_every_since_process_start_line_uses_one_clock():
-    """`Util.PROCESS_START` and `RenderVideo._T0` were set at two imports (torch sits between them), so two numbers
-    with one label could not be subtracted and `startup:` could be SMALLER than `phase: backend init`."""
-    source, lines = _since_lines()
-    assert lines, "the lines this test pins are gone"
-    assert "_T0 =" not in source, "a second zero is still alive in RenderVideo"
-    for line in lines:
-        assert "process_uptime()" in line, f"a 'process start' number uses another zero: {line.strip()}"
-        assert "Util import" in line, f"the line does not name its zero: {line.strip()}"
-        assert "_T0" not in line, f"the line still subtracts the second zero: {line.strip()}"
+def test_the_dictionary_names_which_zero_each_since_number_used():
+    """`phase: backend init` counts from Util's import; `startup:`/`render loop:` count from RenderVideo's own `_T0`,
+    set after the torch imports. A reader must not carry one into the other's table, so the dictionary says both.
+    """
+    doc = (_ROOT / "harness/docs/LIVE-TESTING.md").read_text(encoding="utf-8")
+    assert "Util.py" in doc and "PROCESS_START" in doc, "the phase line's zero is not named"
+    assert "RenderVideo.py" in doc and "_T0" in doc, "the startup/render-loop zero is not named"
+    assert "cannot be subtracted" in doc, "the dictionary does not say the two numbers are not comparable"
+    assert "backend lane" in doc, "the dictionary does not say which lane owns the one-clock fix"
 
 
 # --- 5.11: a value with `=`, `:` and a space round-trips through the documented parser ------------------------------

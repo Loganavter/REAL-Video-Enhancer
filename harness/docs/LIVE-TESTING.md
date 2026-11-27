@@ -199,12 +199,19 @@ preview: seek refused press=1 reason="queue-decode-failed: boom happened = exit 
 
 ### The backend's own `since process start` lines
 
-`phase: backend init … s since process start`, `startup: first frame enqueued … s after process start` and
-`render loop: … total … s since process start` all use **one** zero: `process_uptime()` from `backend/src/utils/Util.py`,
-whose `PROCESS_START` is set when the entry point imports `Util` (the first backend module it imports). Every such line
-says `(Util import)` so the zero is in the line, not in the reader's memory. The numbers can be subtracted. Before
-2026-11-27 the first line used that zero while the other two used `RenderVideo._T0`, set after the torch/tensorrt
-imports - two origins under one label, and `startup:` could be smaller than `phase: backend init`.
+There are **two** zeros behind that one label today, and a reader must know which a number used:
+
+* `phase: backend init … s since process start` is measured from `backend/src/utils/Util.py`'s `PROCESS_START`, set when
+  the entry point imports `Util` (its first backend import) - the closest mark to "the process exists" that a phase line
+  can use.
+* `startup: first frame enqueued … s after process start` and `render loop: … total … s since process start` are
+  measured from `backend/src/RenderVideo.py`'s own `_T0`, set at THAT module's import - after the torch/tensorrt
+  imports, so it is a **later** zero.
+
+The two cannot be subtracted: `startup:` can be SMALLER than `phase: backend init` even though the first frame comes
+later. Read each number against its own zero, and do not carry a `startup:` value into a table whose other rows are
+`phase:` values. The one-clock reconciliation belongs to the backend lane (`RenderVideo.py` is not this document's to
+change); until it lands, this split is the honest description of the record.
 
 ## The same surface as an MCP server (`harness/mcp-server/app`)
 
