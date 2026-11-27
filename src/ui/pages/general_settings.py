@@ -119,7 +119,11 @@ INFO_FOOTER_KV_GAP_PX = 6
 #: The five stages in the order the renderer runs them, each with the share of the ribbon's width it takes. The upscale
 #: stage carries the longest value (a model name plus its scale), so it is the widest - the mockup's `2.2fr`. The
 #: names are catalogue KEYS (`i18n.translate`), never painted text.
-INFO_STAGE_ORDER = (("Interpolate", 10), ("Decompress", 10), ("Denoise", 10), ("Deblur", 10), ("Upscale", 22))
+#: (stage key, column share). The shares follow the LABEL width, not the stage's importance: at the shipped 485 px
+#: card, four 12 px chevrons leave ~437 px, and an equal split gave "Interpolate" 70 px - it elided to "Interpo…" on
+#: the live window. Measured caption widths: Interpolate ~62 px, Decompress ~72, Denoise/Deblur ~55, and Upscale
+#: needs room for a model file name, which elides by design.
+INFO_STAGE_ORDER = (("Interpolate", 13), ("Decompress", 13), ("Denoise", 9), ("Deblur", 9), ("Upscale", 14))
 
 #: The catalogue key a stored quality preset paints itself from: `settings['quality_preset']` ("best"/"fast") is the
 #: VALUE the backend is handed; the two keys are the labels the Quality Preset row shows.
@@ -1126,6 +1130,10 @@ class GeneralSettingsPage:
         # so it is a sibling of the cards, and `setVisible` is the only thing a re-render does to it.
         self.infoIdleNote = Text(parent=self.videoInfoPane, color_token="label.text.muted", word_wrap=True)
         self.infoIdleNote.setObjectName("videoInfoIdleNote")
+        # `Ignored` horizontally: `word_wrap=True` alone wrapped nothing, because the widget's own size hint was the whole
+        # sentence - it took that width, the pane clipped it, and the reader got "…an input file is chos" on the live
+        # window (2026-11-28). A word-wrapped label must be told it does NOT get a vote on the row's width.
+        self.infoIdleNote.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         apply(self.infoIdleNote, CAPTION_PT)
         self.infoIdleNote.setVisible(False)
         self.videoInfoLayout.addWidget(self.infoIdleNote)
