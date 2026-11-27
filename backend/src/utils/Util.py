@@ -171,7 +171,10 @@ def guard_render_thread(job, *, path: str = "RenderVideo.render", exit_process=N
         # The summary line FIRST: the GUI reads the merged stdout line by line and keys on this
         # prefix (`ProcessTab.renderToPipeThread`) to end the job and show a failed state.
         try:
-            log(f"RENDER FAILED: {type(error).__name__}: {error}")
+            # The prefix is the GUI's contract (`ProcessTab` ends the job on `"RENDER FAILED" in line`); the path comes
+            # AFTER it and names WHICH thread died - the wrapper now guards the reader and the writer too, and a
+            # failure line that cannot say whose it is leaves the next reader guessing (backend audit 2026-11-27, 5.10).
+            log(f"RENDER FAILED: {type(error).__name__}: {error} [{path}]")
         except Exception:
             pass
         try:

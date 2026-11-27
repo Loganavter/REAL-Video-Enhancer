@@ -748,8 +748,21 @@ class Render:
             kwargs={"path": "RenderVideo.render"},
             name="render",
         )
-        self.ffmpegReadThread = Thread(target=self.readBuffer.read_frames_into_queue)
-        self.ffmpegWriteThread = Thread(target=self.writeBuffer.write_out_frames)
+        # Guarded like the render loop: a raising reader or writer leaves the process ALIVE with the pipe wedged - the
+        # GUI then polls a live backend at 0 FPS forever (the 2026-11-22 "render that never ends"). The guard exits the
+        # process non-zero in the same call and names the thread in its one summary line.
+        self.ffmpegReadThread = Thread(
+            target=guard_render_thread,
+            args=(self.readBuffer.read_frames_into_queue,),
+            kwargs={"path": "FFmpegRead.read_frames_into_queue"},
+            name="reader",
+        )
+        self.ffmpegWriteThread = Thread(
+            target=guard_render_thread,
+            args=(self.writeBuffer.write_out_frames,),
+            kwargs={"path": "FFmpegWrite.write_out_frames"},
+            name="writer",
+        )
         self.sharedMemoryThread = Thread(
             target=self.informationHandler.writeOutInformation
         )
