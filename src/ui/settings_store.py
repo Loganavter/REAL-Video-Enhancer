@@ -107,6 +107,11 @@ class Settings:
             # one translated language the app ships. Appended, not prepended: an existing `settings.txt` keeps its
             # first 30 lines and gains this one at the end on the next write, so nothing a user hand-edited moves.
             "language": DEFAULT_LANGUAGE,
+            # The output path the USER chose (`src/ui/output_path.py` owns reading and writing it). Empty means
+            # "nothing chosen": the General page then shows a path derived from the input file and the options, and a
+            # derived path is never written here. `output_folder_location` above stays as the DIRECTORY fallback an
+            # older `settings.txt` already carries, so an existing installation keeps its folder.
+            "output_file_path": "",
         }
         self.allowedSettings = {
             "encoder_command": "ANY",
@@ -158,6 +163,7 @@ class Settings:
             "temporal_reuse": ("True", "False"),
             "temporal_reuse_statistic": ("mean_abs", "coarse"),
             "language": SUPPORTED_LANGUAGES,
+            "output_file_path": "ANY",
         }
         self.settings = self.defaultSettings.copy()
         if not os.path.isfile(self.settingsFile):

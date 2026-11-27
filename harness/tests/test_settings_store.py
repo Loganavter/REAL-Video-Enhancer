@@ -24,10 +24,12 @@ from src.ui.settings_store import Settings
 
 #: The file the pre-move class wrote for `default_output_folder="/fixed/Videos"` and nothing else.
 #:
-#: One line was added on 2026-11-24, deliberately: `language,en` is a new setting (`src/ui/settings_store.py`, the
-#: interface language). The other 30 lines are unchanged and in the pre-move order - the key is APPENDED rather than
-#: prepended exactly so an existing `settings.txt` keeps its layout and gains one line at the end, instead of every
-#: line a user ever hand-edited moving one position down.
+#: Two lines were added deliberately, and both are APPENDED rather than prepended so an existing `settings.txt` keeps
+#: its layout and gains them at the end instead of every line a user ever hand-edited moving one position down:
+#:
+#: * `language,en` (2026-11-24) - the interface language (`src/ui/settings_store.py`);
+#: * `output_file_path,` (2026-11-27) - the output path the USER chose, empty when nothing was chosen
+#:   (`src/ui/output_path.py`). The 30 lines above are the pre-move bytes, unchanged and in the pre-move order.
 SETTINGS_BYTES = ('precision,auto\n'
  'tensorrt_optimization_level,5\n'
  'dynamic_tensorrt_engine,False\n'
@@ -58,7 +60,8 @@ SETTINGS_BYTES = ('precision,auto\n'
  'encoder_command,\n'
  'temporal_reuse,True\n'
  'temporal_reuse_statistic,mean_abs\n'
- 'language,en\n')
+ 'language,en\n'
+ 'output_file_path,\n')
 
 
 def make(tmp_path):

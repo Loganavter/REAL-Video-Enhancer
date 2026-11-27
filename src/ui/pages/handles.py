@@ -187,7 +187,6 @@ class OutputSettingsHandles:
     """The Output Settings tab (`src/ui/pages/tab_2.py`)."""
 
     output_folder_location: "CustomLineEdit"
-    select_output_folder_location_btn: "Button"
     scene_change_detection_enabled: "CheckBox"
     scene_change_detection_method: "ComboBox"
     scene_change_detection_threshold: "DoubleSpinBox"

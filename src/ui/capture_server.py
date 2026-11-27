@@ -1126,7 +1126,13 @@ def install(window) -> None:
             window.loadVideo(path)
         out = "/tmp/opencode/live-queue-out"
         _os.makedirs(out, exist_ok=True)
-        window.page_handles.general.outputFileText.setText(out)
+        # Through the owner (`src/ui/output_path.py`), which is the only writer of the path field. The field carries a
+        # PATH, so the folder's own row keeps its name: `addToRenderQueue` takes `dirname(field)` for a batch, and the
+        # bare folder used to send the outputs one level up, to `/tmp/opencode`.
+        from . import output_path as _output_path
+
+        _output_path.store_user_path(window.settings, _os.path.join(out, "verb-queue.mkv"))
+        _output_path.show_path(window.page_handles.general, _os.path.join(out, "verb-queue.mkv"))
 
         def add(ticks: int = 0) -> None:
             probe = getattr(window, "_batchProbe", None)

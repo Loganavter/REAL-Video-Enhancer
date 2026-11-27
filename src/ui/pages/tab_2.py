@@ -18,7 +18,7 @@ import resources_rc
 # `QLineEdit`, `Button` for a `QPushButton`, `CheckBox` for a `QCheckBox`, `ComboBox` for a `QComboBox` and
 # `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
-from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, SurfacePanel,
+from sli_ui_toolkit.widgets import (CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, SurfacePanel,
     SurfaceScrollArea, Text)
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT
@@ -113,13 +113,12 @@ class Tab2Page:
         self.horizontalLayout_19.addItem(self.horizontalSpacer_11)
         self.output_folder_location = CustomLineEdit(self.outputFileLocationContianer)
         self.output_folder_location.setObjectName(u"output_folder_location")
+        # A READ-ONLY MIRROR of the General page's output path (`src/ui/output_path.py::mirror_directory` writes it).
+        # It used to be a second, persisted way to set the folder - and the one whose option handler overwrote the path
+        # the user had chosen, which is the owner's report of 2026-11-26. A second editor here is the defect this row
+        # no longer has, so the picker beside it is gone too.
+        self.output_folder_location.setReadOnly(True)
         self.horizontalLayout_19.addWidget(self.output_folder_location)
-        self.select_output_folder_location_btn = Button(parent=self.outputFileLocationContianer, text="",
-            variant="surface", content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
-        self.select_output_folder_location_btn.setObjectName(u"select_output_folder_location_btn")
-        self.select_output_folder_location_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.horizontalLayout_19.addWidget(self.select_output_folder_location_btn)
         self.verticalLayout_25.addWidget(self.outputFileLocationContianer)
         self.sceneChangeDetectionSettingContainer = QWidget(self.scrollAreaWidgetContents_3)
         self.sceneChangeDetectionSettingContainer.setObjectName(u"sceneChangeDetectionSettingContainer")
@@ -230,7 +229,6 @@ class Tab2Page:
         self.verticalLayout_17.addWidget(self.VideoSettingsContainer)
         self._handles = OutputSettingsHandles(
             output_folder_location=self.output_folder_location,
-            select_output_folder_location_btn=self.select_output_folder_location_btn,
             scene_change_detection_enabled=self.scene_change_detection_enabled,
             scene_change_detection_method=self.scene_change_detection_method,
             scene_change_detection_threshold=self.scene_change_detection_threshold,
@@ -259,7 +257,6 @@ class Tab2Page:
 
     def retranslate(self, language: str | None = None) -> None:
         self.encoderLabel_3.setText(QCoreApplication.translate("MainWindow", u"Output folder directory", None))
-        self.select_output_folder_location_btn.setText(QCoreApplication.translate("MainWindow", u"Select Output Folder", None))
         self.label_20.setText(QCoreApplication.translate("MainWindow", u"Scene Change Detection Enabled", None))
         self.scene_change_detection_enabled.setText("")
         self.label_37.setText(QCoreApplication.translate("MainWindow", u"Scene Change Detection Method", None))

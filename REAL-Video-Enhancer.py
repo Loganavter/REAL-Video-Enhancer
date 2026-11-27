@@ -46,6 +46,9 @@ from src.ui.ProcessTab import ProcessTab
 from src.ui.DownloadTab import DownloadTab
 from src.ui.SettingsTab import SettingsTab, Settings
 from src.ui.use_cases import startup as startup_io
+# The output path's one owner: the string the field shows, the string a render writes to, and the directory fallback
+# (`src/ui/output_path.py` holds the rules; this module only wires them to widgets and to the settings file).
+from src.ui import output_path as output_path_io
 from src.ui.use_cases import models as model_io
 from src.ui.HomeTab import HomeTab
 from src.Backendhandler import BackendHandler
@@ -469,52 +472,68 @@ class MainWindow(QMainWindow):
             scale = int(self.page_handles.general.upscaleScaleSpinBox.value())
         return scale
 
+    def _output_path_tags(self):
+        """`_<model display name>` for each enabled stage, in the order a file name has always carried them."""
+        general = self.page_handles.general
+        stages = (
+            (general.interpolateCheckBox, general.interpolateModelComboBox),
+            (general.decompressCheckBox, general.decompressModelComboBox),
+            (general.denoiseCheckBox, general.denoiseModelComboBox),
+            (general.upscaleCheckBox, general.upscaleModelComboBox),
+        )
+        return tuple(
+            f"_{getModelDisplayName(combo.currentText())}"
+            for checked, combo in stages
+            if checked.isChecked()
+        )
+
+    def _outputDerivation(self, outputDirectory, inputFile=None):
+        """The values a default output path is derived from, read off the widgets.
+
+        This is the WIRING (which combo, which spin box); the path arithmetic and the rule that decides whether the
+        field may be touched at all live in `src/ui/output_path.py`.
+        """
+        general = self.page_handles.general
+        interpolateModelName = general.interpolateModelComboBox.currentText()
+        interpolateTimes = (
+            1 if general.sloMoModeCheckBox.isChecked()
+            else self.getInterpolationMultiplier(interpolateModelName)
+        )
+        scale = self.getUpscaleModelScale(general.upscaleModelComboBox.currentText())
+        return output_path_io.Derivation(
+            input_file=general.inputFileText.text() if inputFile is None else inputFile,
+            directory=outputDirectory,
+            tags=self._output_path_tags(),
+            container=self.settings.settings["video_container"],
+            fps=round(interpolateTimes * self.videoFps, 0),
+            width=scale * self.videoWidth,
+            height=scale * self.videoHeight,
+        )
+
+    def derivedOutputFile(self, inputFile, outputDirectory):
+        """The path `inputFile` would get in `outputDirectory` - no field write, no settings write.
+
+        The queue's batch add needs one answer per file in the folder; the field shows the folder's own answer (the
+        `{FILE_NAME}` placeholder), and asking this instead of `setDefaultOutputFile` keeps a user's path out of the
+        loop - it used to hand every queued file the same output when the field carried one.
+        """
+        if not self.isVideoLoaded:
+            return None
+        return output_path_io.derive(self._outputDerivation(outputDirectory, inputFile=inputFile))
+
     def setDefaultOutputFile(self, inputFile, outputDirectory):
+        """Derive the output path for `inputFile` in `outputDirectory` and show it when the user has not chosen one.
+
+        Called from every option change (`updateVideoGUIDetails`). It is the one place an option change may reach the
+        path field, and it never replaces a path the user set (`src/ui/output_path.py::apply_default`) - which was the
+        owner's report: the derived path used to overwrite the choice made in the previous session.
+
+        Returns the path the field now carries, or `None` when no video is loaded.
         """
-        Sets the default output file for the video enhancer.
-        Parameters:
-        - useDefaultVideoPath (bool): Flag indicating whether to use the default video path for the output file.
-        Returns:
-        None
-        """
-
-        # check if there is a video loaded
-        if self.isVideoLoaded:
-            if inputFile.strip().replace(" ", "") == "{MULTIPLE_FILES}":
-                inputFile = " { FILE_NAME } "
-
-            upscaleModelName = self.page_handles.general.upscaleModelComboBox.currentText()
-            decompressModelName = self.page_handles.general.decompressModelComboBox.currentText()
-            denoiseModelName = self.page_handles.general.denoiseModelComboBox.currentText()
-            interpolateModelName = self.page_handles.general.interpolateModelComboBox.currentText()
-            
-            interpolateTimes = self.getInterpolationMultiplier(interpolateModelName) if not self.page_handles.general.sloMoModeCheckBox.isChecked() else 1
-            scale = self.getUpscaleModelScale(upscaleModelName)
-            container = self.settings.settings["video_container"]
-
-            file_name = os.path.splitext(os.path.basename(inputFile))[0]
-            base_file_name = (
-                f"{file_name}"
-                + ("" if not self.page_handles.general.interpolateCheckBox.isChecked() else f"_{getModelDisplayName(interpolateModelName)}")
-                + ("" if not self.page_handles.general.decompressCheckBox.isChecked() else f"_{getModelDisplayName(decompressModelName)}")
-                + ("" if  not self.page_handles.general.denoiseCheckBox.isChecked() else f"_{getModelDisplayName(denoiseModelName)}")
-                + ("" if  not self.page_handles.general.upscaleCheckBox.isChecked() else f"_{getModelDisplayName(upscaleModelName)}")
-                + f"_{round(interpolateTimes * self.videoFps, 0)}fps"
-                + f"_{scale * self.videoWidth}x{scale * self.videoHeight}"
-            )
-            output_file = os.path.join(
-                outputDirectory,
-                f"{base_file_name}.{container}",
-            )
-            iteration = 0
-            while os.path.isfile(output_file):
-                output_file = os.path.join(
-                    outputDirectory,
-                    f"{base_file_name}_({iteration}).{container}",
-                )
-                iteration += 1
-            self.page_handles.general.outputFileText.setText(output_file)
-            return output_file
+        if not self.isVideoLoaded:
+            return None
+        return output_path_io.apply_default(
+            self.page_handles.general, self._outputDerivation(outputDirectory), self.settings)
 
     def updateVideoGUIDetails(self):
         isInterpolate = self.page_handles.general.interpolateCheckBox.isChecked()
@@ -546,7 +565,15 @@ class MainWindow(QMainWindow):
         # So the container follows `isUpscale` alone, not the whole "upscale body" group (owner's question, 2026-11-22).
         self.page_handles.general.qualityPresetContainer.setVisible(isUpscale)
         self.settings.readSettings()
-        self.setDefaultOutputFile(self.page_handles.general.inputFileText.text(), self.settings.settings["output_folder_location"])
+        # The one call site for an option change. It shows a derived path only while the user has not chosen one; a
+        # stored choice wins, and its directory is the one the fallback stops moving away from.
+        self.setDefaultOutputFile(
+            self.page_handles.general.inputFileText.text(),
+            output_path_io.directory_for(
+                self.page_handles.general.outputFileText.text(),
+                self.settings.settings["output_folder_location"],
+            ),
+        )
         self.updateVideoGUIText()
         self.page_handles.proc.startTimeSpinBox.setMaximum(self.videoLength)
         self.page_handles.proc.endTimeSpinBox.setMaximum(self.videoLength)
@@ -759,8 +786,9 @@ class MainWindow(QMainWindow):
                         "is_hdr": videoHandler.is_hdr, "bit_depth": videoHandler.bit_depth,
                     })
 
-                # set output_path for checking
-                default_output_path = self.setDefaultOutputFile(video, output_path)
+                # The per-file answer (no field write): a batch of N files must get N output names even when the field
+                # carries one path the user chose.
+                default_output_path = self.derivedOutputFile(video, output_path)
 
                 # check if file already exists in renderQueue
                 if any(item.outputPath == default_output_path for item in self.renderQueue.getQueue()):
@@ -1114,21 +1142,30 @@ class MainWindow(QMainWindow):
        
     # output file button
     def openOutputFolder(self):
-        """
-        Opens home folder or the same folder as the input file only if the input file is a single file,
-        sets the directory that is selected to the self.outputFolder variable
-        sets the outputFileText to the output directory
+        """The Select Output Folder button: the ONE explicit "use this directory" action.
 
-        It will also read the input file name, and generate an output file based on it.
+        It may replace even a path the user typed (`src/ui/output_path.py::apply_chosen`) - the user just asked - and
+        it persists the directory under the old key so a restart with no stored path still knows the folder. The file
+        NAME is then derived from the input and the options, in that folder.
+
+        Two defects of the old body went with it: it joined the dialog's folder onto an already-absolute path, and with
+        no video loaded `setDefaultOutputFile` returned `None`, so `os.path.join(folder, None)` raised `TypeError` on
+        a button that is only enabled once a video is loaded.
         """
+        general = self.page_handles.general
+        current = output_path_io.directory_for(
+            general.outputFileText.text(), output_path_io.stored_directory(self.settings, self.homeDir))
         outputFolder = QFileDialog.getExistingDirectory(
             self,
             caption="Select Output Directory",
-            dir=str(os.path.dirname(self.page_handles.general.inputFileText.text())) if (self.isVideoLoaded and len(self.batchVideos) == 0 and os.path.exists(os.path.dirname(self.page_handles.general.inputFileText.text()))) else self.homeDir,
+            dir=current,
         )
-        self.page_handles.general.outputFileText.setText(
-            os.path.join(outputFolder, self.setDefaultOutputFile(self.page_handles.general.inputFileText.text(), outputFolder))
-        )
+        if not outputFolder:
+            return
+        if not self.isVideoLoaded:
+            output_path_io.store_directory(self.settings, outputFolder)
+            return
+        output_path_io.apply_chosen(general, self._outputDerivation(outputFolder), self.settings)
 
     def shutdown(self):
         """Every exit path ends here: `app.quit()` never delivers `closeEvent`.
