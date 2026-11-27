@@ -228,7 +228,17 @@ def _generated_names(tree: ast.Module) -> list[str]:
 
 
 def _bare_wrappers(tree: ast.Module) -> list[str]:
-    """`self.x = QWidget(...)`/`QFrame(...)` where nothing is ever called on `self.x` but `setObjectName`."""
+    """`self.x = QWidget(...)`/`QFrame(...)` where nothing is ever called on `self.x` but `setObjectName`.
+
+    A widget handed to a scroll area is not one of these: `area.setWidget(self.x)` is the call `QScrollArea` requires
+    of its content widget, so that widget exists because Qt asks for it, not because the Designer left a wrapper level
+    behind. Without this half, retiring the content widget's Designer `setGeometry` (2026-11-28, the last
+    `raw-chrome-px` pins) read as a NEW bare wrapper on five pages - the count must describe the tree's shape, not
+    which dead statements happen to sit beside it.
+    """
+    handed_to_an_area = {argument.attr for call in ast.walk(tree)
+                         if isinstance(call, ast.Call) and getattr(call.func, "attr", "") == "setWidget"
+                         for argument in call.args if isinstance(argument, ast.Attribute)}
     found = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
@@ -238,6 +248,8 @@ def _bare_wrappers(tree: ast.Module) -> list[str]:
             continue
         called = getattr(value.func, "id", getattr(value.func, "attr", ""))
         if called not in ("QWidget", "QFrame"):
+            continue
+        if target.attr in handed_to_an_area:
             continue
         used = {sub.func.attr for sub in ast.walk(tree)
                 if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)

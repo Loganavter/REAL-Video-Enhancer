@@ -9,7 +9,7 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QObject, QRect, QSize)
+from PySide6.QtCore import (QCoreApplication, QObject, QSize)
 from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
 import resources_rc
@@ -103,7 +103,10 @@ class Tab6Page:
         self.scrollArea_7.setWidgetResizable(True)
         self.encoderSettings = QWidget()
         self.encoderSettings.setObjectName(u"encoderSettings")
-        self.encoderSettings.setGeometry(QRect(0, 0, 453, 581))
+        # No `setGeometry`: the Designer's 453x581 preview rect is overwritten by the resizable area on the first
+        # layout (measured with this tab current: 442x490 at 1.0, 933x994 at 2.0 - the column's width and the group's
+        # height). It never reached the screen, so it is not a design length (`raw-chrome-px` in
+        # `harness/scripts/ui_gates.py`).
         self.verticalLayout_40 = QVBoxLayout(self.encoderSettings)
         self.verticalLayout_40.setObjectName(u"verticalLayout_40")
         self.widget_34 = QWidget(self.encoderSettings)
@@ -144,7 +147,9 @@ class Tab6Page:
         self.scrollArea_6.setWidgetResizable(True)
         self.scrollAreaWidgetContents_6 = QWidget()
         self.scrollAreaWidgetContents_6.setObjectName(u"scrollAreaWidgetContents_6")
-        self.scrollAreaWidgetContents_6.setGeometry(QRect(0, 0, 918, 48))
+        # No `setGeometry`: the Designer's 918x48 preview rect is overwritten by the resizable area on the first
+        # layout (measured with this tab current: 404x50 at 1.0, 895x98 at 2.0 - the row's own scaled height). It never
+        # reached the screen, so it is not a design length (`raw-chrome-px` in `harness/scripts/ui_gates.py`).
         self.horizontalLayout_54 = QHBoxLayout(self.scrollAreaWidgetContents_6)
         self.horizontalLayout_54.setObjectName(u"horizontalLayout_54")
         self.EncoderCommand = CustomLineEdit(self.scrollAreaWidgetContents_6)

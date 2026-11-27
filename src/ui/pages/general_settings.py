@@ -9,7 +9,7 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
+from PySide6.QtCore import (QCoreApplication, QSize, Qt)
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractScrollArea, QHBoxLayout, QSizePolicy,
     QSpacerItem, QVBoxLayout, QWidget)
@@ -225,7 +225,10 @@ class GeneralSettingsPage:
         self.scrollArea_4.setWidgetResizable(True)
         self.scrollAreaWidgetContents_4 = QWidget()
         self.scrollAreaWidgetContents_4.setObjectName(u"scrollAreaWidgetContents_4")
-        self.scrollAreaWidgetContents_4.setGeometry(QRect(0, 0, 470, 1040))
+        # No `setGeometry`: the Designer's 470x1040 preview rect is overwritten by the resizable area on the first
+        # layout (measured after settle: 470x1025 at 1.0, 961x1952 at 2.0 - the width is the viewport's, the height is
+        # the rows' own). A pinned rect here is dead text, not a design length the interface honours
+        # (`raw-chrome-px` in `harness/scripts/ui_gates.py`).
         self.verticalLayout_32 = QVBoxLayout(self.scrollAreaWidgetContents_4)
         self.verticalLayout_32.setObjectName(u"verticalLayout_32")
         self.inputFileContainer = QWidget(self.scrollAreaWidgetContents_4)
@@ -376,7 +379,10 @@ class GeneralSettingsPage:
         sizePolicy8.setHeightForWidth(self.interpolateModelComboBox.sizePolicy().hasHeightForWidth())
         self.interpolateModelComboBox.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.interpolateModelComboBox.setMinimumSize(QSize(0, 0))
-        self.interpolateModelComboBox.setSizeIncrement(QSize(230, 0))
+        # The Designer's `setSizeIncrement(QSize(230, 0))` is gone: `QWidget.sizeIncrement` only governs the steps of
+        # a user's interactive resize of a TOP-LEVEL window, and this combo is laid out by its row at every factor
+        # (measured 230x0 at 1.0 and 2.0 before this line was removed, with the combo's geometry unchanged either
+        # way). It is not a design length the interface honours, so it is retired rather than scaled.
         self.horizontalLayout_45.addWidget(self.interpolateModelComboBox)
         self.verticalLayout_38.addWidget(self.widget_28)
         self.interpolationContainer2 = QWidget(self.interpolationContainer)

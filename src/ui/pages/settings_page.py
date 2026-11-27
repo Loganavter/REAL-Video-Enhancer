@@ -9,7 +9,7 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
+from PySide6.QtCore import (QCoreApplication, QSize, Qt)
 from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
 import resources_rc
@@ -48,11 +48,18 @@ class SettingsPagePage:
         self.scrollArea = SurfaceScrollArea(self.settingsPage, surface_token=None, content_inset=1,
             scrollbar_width=STOCK_SCROLLBAR_WIDTH)
         self.scrollArea.setObjectName(u"scrollArea")
-        self.scrollArea.setMaximumSize(QSize(16777215, 112312))
+        # "No maximum" as the sentinel Qt defines for it, not the Designer's 112312. Both dimensions were already
+        # unbounded in intent; 16777215 (`QWIDGETSIZE_MAX`) is the number that says so, and it is exempt in
+        # `harness/scripts/ui_gates.py`. Measured: 16777215x112312 at 1.0 and at 2.0, and the scroll area's layout
+        # width/height is the viewport either way, so the geometry does not move.
+        self.scrollArea.setMaximumSize(QSize(16777215, 16777215))
         self.scrollArea.setWidgetResizable(True)
         self.scrollAreaWidgetContents = QWidget()
         self.scrollAreaWidgetContents.setObjectName(u"scrollAreaWidgetContents")
-        self.scrollAreaWidgetContents.setGeometry(QRect(0, 0, 1026, 652))
+        # No `setGeometry`: the Designer's 1026x652 preview rect is overwritten by the resizable area on the first
+        # layout (measured after settle: 1045x852 at 1.0, 989x842 at 2.0 - viewport both axes, the tab host decides
+        # the height). A pinned rect is dead text, not a design length (`raw-chrome-px` in
+        # `harness/scripts/ui_gates.py`).
         self.verticalLayout_18 = QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_18.setObjectName(u"verticalLayout_18")
         # RVE's `QTabBar::tab` rule, stated as the host's own constants instead of QSS the painter would ignore: the
