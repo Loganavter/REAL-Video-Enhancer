@@ -531,7 +531,10 @@ class ProcPagePage:
         self.processSettingsContainer.addTab(self.tab_5, "")
         self.verticalLayout_24.addWidget(self.processSettingsContainer)
         self.verticalLayout_21.addWidget(self.widget_2)
-        self.widget_13 = SurfacePanel(self.bottomMenuSubContainer, background_token="surface.page")
+        # NO panel behind the transport row (owner, 2026-11-27: "нужно ещё линию под контролами убрать - она инфу
+        # дублирует"). The row is a control strip, not a card: its `surface.page` fill showed as a rounded band under the
+        # buttons and the progress bar, carrying nothing.
+        self.widget_13 = SurfacePanel(self.bottomMenuSubContainer, background_token=None)
         self.widget_13.setObjectName(u"widget_13")
         self.widget_13.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
         #: The typed name for the render row (Start/progress row): in stacked mode it moves into the sticky
