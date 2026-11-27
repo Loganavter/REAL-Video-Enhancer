@@ -54,13 +54,16 @@ def sync_compare_source(tab, *, paint: bool = False) -> None:
         snapshot = register.picture_for(moment, tab._source_tolerance(),
                                         generation=int(getattr(tab, "_result_generation", 0)))
         if snapshot is None and paint:
-            # WHICH filter refused it, at level 1 - and ONLY for a PAINT. This function is also called from the
-            # source-feed offer path (`_sync_compare_source`), so logging every miss made the counter measure the fill's
-            # questions rather than the picture: one window had 1020 gap lines for 3 genuinely missing painted moments
-            # (measured 2026-11-27). `paint=True` comes from `paint_pair`, the one path where a result has just been
-            # painted and the pane needs its other half NOW.
+            # WHICH filter refused it, at level 1 - and ONLY for a PAINT, once per PAINTED RESULT. This function is also
+            # called from the source-feed offer path (`_sync_compare_source`), so logging every miss made the counter
+            # measure the fill's questions rather than the picture: one window had 1020 gap lines for 3 genuinely missing
+            # painted moments (measured 2026-11-27). `paint=True` comes from `paint_pair`, the one path where a result has
+            # just been painted and the pane needs its other half NOW - and that path runs more than once per painted
+            # result (the pane's own repaint and the decoder's arrival both reach it), so the moment is deduped: one
+            # line per result, not per call. The set lives on the tab and is dropped when the result generation moves,
+            # because a new generation is a new picture and its miss is news again.
             why = getattr(register, "last_refusal", None)
-            if why:
+            if why and _first_gap_for(tab, why):
                 try:
                     from ...video import telemetry
 
@@ -80,6 +83,33 @@ def sync_compare_source(tab, *, paint: bool = False) -> None:
             legacy(None)
         else:
             legacy(snapshot.picture, media_time=snapshot.moment)
+
+
+def _first_gap_for(tab, why: dict) -> bool:
+    """True the first time THIS painted moment is reported missing; False for its repeats.
+
+    A gap is a property of a picture, not of a call: `paint_pair` runs for the pane's repaint and again when the
+    decoder lands, so an undeduped counter reports the same missing moment several times and the number stops meaning
+    "how many painted moments had no source". The key is the moment plus the generation it was wanted in; the set is
+    capped so a long job cannot grow it without bound.
+    """
+    try:
+        key = (int(why.get("wanted_generation") or 0), float(why.get("wanted")))
+    except Exception:
+        return True
+    seen = getattr(tab, "_compare_gap_seen", None)
+    generation = key[0]
+    if not isinstance(seen, set) or getattr(tab, "_compare_gap_generation", None) != generation:
+        seen = set()
+        tab._compare_gap_seen = seen
+        tab._compare_gap_generation = generation
+    if key in seen:
+        return False
+    seen.add(key)
+    if len(seen) > 8192:
+        seen.clear()
+        seen.add(key)
+    return True
 
 
 def paint_pair(tab, playhead: float | None = None) -> None:

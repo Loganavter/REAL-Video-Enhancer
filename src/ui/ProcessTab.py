@@ -92,12 +92,19 @@ def parse_borders_line(line: object) -> tuple[int, int, int, int] | None:
 #: ceiling against a 24 fps stream), so three frames ahead cost 37 ms once and 12.5 ms per 41.7 ms after that - ~30 % of
 #: one core, and in exchange the frame the pane is about to show is already decoded when the result arrives, so both
 #: halves change in ONE repaint (owner, 2026-11-26: "нам в теории наоборот с запасом надо сделать сразу").
-#: How far ahead of the playhead the source half is kept, in frames. ONE: the decoder's read position ends where the
-#: last walk ended, so a 3-frame lead put it ~2 frames PAST the pane's next moment - and the next ask then walked
-#: forward from there, never covering the frame on screen (`compare gap wanted=14.056`, `decode rewind/step
-#: target=14.056` absent, measured 2026-11-27). With one frame the read position stays one ahead, each ask covers the
-#: moment on screen plus one, and the arrival-driven fill keeps up.
-COMPARE_LEAD_FRAMES = 1
+#: How far ahead of the playhead the source half is kept, in frames.
+#:
+#: TWELVE, not one (measured 2026-11-27). A one-frame lead is not a buffer: the fill walks to `playhead + 1 frame`,
+#: stands down because both ends are held, the playhead then advances past it and every paint is a CATCH-UP - the source
+#: was delivered AFTER the result it belongs to in 300 of 300 painted moments of one window, and the walks grew to 58
+#: frames (`step target=13.013 walked=58`). Twelve frames (half a second at 24 fps) absorb the tail's burst shape (the
+#: largest paint-to-paint jump measured in that window was 0.333 s) and give the decoder a walk it finishes in ~150 ms
+#: while the playhead advances 1.6 frames.
+#:
+#: A bigger lead is not free and was measured: three frames with the OLD ask rules walked past the pane's next moment
+#: (`compare gap wanted=14.056`), because those rules asked at the LEAD EDGE instead of at the playhead. The buffer
+#: only works with the current rule (the playhead is always part of an ask), which is why this is a pair of facts.
+COMPARE_LEAD_FRAMES = 12
 
 #: How long one source ask counts as "in flight". A span of `COMPARE_LEAD_FRAMES` costs ~40 ms of decode, so this is a
 #: retry deadline, not a throttle: an ask nothing answers is re-sent on the next tick after it, which keeps a paused
@@ -110,7 +117,9 @@ COMPARE_FILL_WINDOW_S = 0.08
 #: skips frames, so consecutive ones can be six frames apart) and the pool is pruned to this window, so a six-frame jump
 #: against a 0.25 s window emptied it on every skip and no pair ever closed (measured 2026-11-26). The frames are decoded
 #: at the pane's box (1.5 MB), so a second of them is 36 MB - the cap is a memory budget, not a scheduling knob.
-COMPARE_POOL_FRAMES = 24
+#: Raised to two seconds' worth WITH the twelve-frame lead: a pool smaller than the lead would evict the lead's own
+#: head on every walk (the eviction rule protects the anchor, so the lead frames are the first to go).
+COMPARE_POOL_FRAMES = 48
 
 
 class _FrameRelay(QObject):
@@ -3351,11 +3360,14 @@ class ProcessTab:
             # per playhead step, and at the rewind price the pair ran at a quarter of real time with the halves arriving
             # apart (owner, 2026-11-26: "прям видно как сначала один рисуется, а затем другой"). Forward motion is the
             # one case that can be cheap, so only it skips the seek; a scrub backwards still rewinds.
-            register = getattr(self, "_source_register", None)
-            landed = (register.newest_moment(generation=int(getattr(self, "_result_generation", 0)))
-                      if register is not None else None)
-            step_forward = (landed is not None
-                            and 0.0 <= float(seconds) - float(landed) <= 0.6)
+            # FORWARD OR REWIND IS THE DECODER'S ANSWER, not the register's. It used to be decided here from
+            # `register.newest_moment()` - a fact about what the GUI has already OFFERED, which lags the decoder's own
+            # read position by the queued-signal backlog. The result was that every ask looked "behind", took the
+            # keyframe rewind, and published only the target's frame: measured 2026-11-27, `held` stayed at 1-3 while
+            # the playhead ran two seconds ahead, `rewind` 12 times per window and every paint a `compare gap
+            # why=tolerance nearest_moment=0.0`. `_step_and_publish` already falls back to the rewind when the target is
+            # behind its read position, so `seek=False` states "cheap if you can" and lets the owner of the read position
+            # answer. `tail_s` is the compare's lead: a rewind to the lead edge still hands over the frame on screen.
             # EXACT only for a press: its target is a frame's own name, and "the frame before it" is the desync the
             # exactness rule was written for. The register's asks walk a live grid (the tail's content times are derived,
             # not the source's stored PTS), and a target a fraction of a frame off the grid made the walk miss, run to the
@@ -3363,8 +3375,9 @@ class ProcessTab:
             # for two seconds, then `arrivals=0` while the asks kept coming. Half a frame of slack picks the same frame.
             exact = not bool(getattr(self, "_compare_from_tick", False))
             decoder.request_frame(max(0.0, float(seconds)), exact=exact,
-                                  seek=not step_forward,
-                                  span=bool(span))
+                                  seek=False,
+                                  span=bool(span),
+                                  tail_s=self._compare_lead())
         except Exception as exc:
             log(f"original frame failed: {exc}")
 

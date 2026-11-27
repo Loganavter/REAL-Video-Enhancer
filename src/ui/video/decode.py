@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QMetaObject, QObject, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QMetaObject, QObject, QThread, Qt, QTimer, Signal, Slot
 
 from .clock import PlaybackClock
 from .frames import FORMATS, FrameRef, frame_pts, pack_frame, stream_color_tags
@@ -38,6 +38,13 @@ from .frames import FORMATS, FrameRef, frame_pts, pack_frame, stream_color_tags
 #: Microsecond seek unit: `av.time_base` is 1/1000000 and `container.seek()` without `stream=` reads
 #: its offset in that unit.
 _MICROS = 1_000_000
+
+#: How far ahead of its read position the decoder will still decode FORWARD before choosing the keyframe rewind, in
+#: seconds. Twelve frames at 24 fps is the compare's own lead, so a lead-sized ask steps; anything longer than that is
+#: a jump (a cold start, a scrub, a tail that outran the decoder) and the rewind is cheaper. Measured crossover on this
+#: 1440p HEVC source: ~12.5 ms a decoded frame forward against a ~176 ms keyframe rewind, so the two meet around a
+#: second - the constant is set below that to keep the normal lead ask on the cheap branch.
+FORWARD_WALK_LIMIT_S = 0.75
 
 #: Text used by the surface to tell "no decoder here" from "this file is broken".
 NO_PYAV = "PyAV is not installed: the file player needs `pip install av`"
@@ -152,9 +159,24 @@ class VideoDecoder(QObject):
         self._pending_seek: float | None = None
         #: A one-off decode request ("the original at this PTS"), independent of the play position.
         self._request: float | None = None
+        self._pumps = 0
+        #: Where a walk's time goes: `next()` (the codec) against `_pack()` (the scaler + the RGB copy). The two have
+        #: different fixes - one is the source's size, the other is how many frames we ask the scaler for - and only
+        #: the split can say which one is the wall (measured 2026-11-27: a walk of 14 frames cost 0.9 s).
+        self._decode_ms = 0.0
+        self._pack_ms = 0.0
+        #: The thread that built the decoder. `_pump` is queued to the object's own thread, and "which thread answered"
+        #: is the difference between a slow decode and a decode running on the GUI thread (see the pump trace).
+        self._gui_thread = QThread.currentThread()
+        self._opened_at = time.monotonic()
         self._pump_pending = False
 
         self._clock = PlaybackClock()
+
+    def _since_open(self) -> int:
+        """Milliseconds since the decoder was built: the ONE clock both the caller's and the pump's lines carry, so
+        "the decoder is slow" and "the decoder is asked late" can be told apart from one log."""
+        return int((time.monotonic() - self._opened_at) * 1000.0)
 
     # -- lifecycle ---------------------------------------------------------------------------------
 
@@ -288,7 +310,7 @@ class VideoDecoder(QObject):
         self._trace_on = bool(on)
 
     def request_frame(self, seconds: float, *, exact: bool = False, seek: bool = True,
-                      span: bool = False) -> None:
+                      span: bool = False, tail_s: float = 0.0) -> None:
         """Decode and publish one frame at `seconds` without moving the play position.
 
         This is the LMB "show the original" path and the compare modes' second surface. `seek=False` decodes FORWARD
@@ -302,12 +324,13 @@ class VideoDecoder(QObject):
         if self._container is None:
             self.error.emit("request_frame() called before open()")
             return
-        self._request = (self._clamp(seconds), bool(exact), bool(seek), bool(span))
+        self._request = (self._clamp(seconds), bool(exact), bool(seek), bool(span), max(0.0, float(tail_s)))
         self._kick()
         if self._trace_on:
             # Emitted on the CALLER's thread (the GUI): "the request reached the decoder" is the fact the stall probe
             # needs - the pump's own trace says whether it then ran. The signal is queued, so this is safe.
-            self.trace.emit(f"request at={float(seconds):.3f} seek={int(bool(seek))} span={int(bool(span))}")
+            self.trace.emit(f"request at={float(seconds):.3f} seek={int(bool(seek))} span={int(bool(span))} "
+                            f"ms={self._since_open()}")
 
     def stream_size(self) -> tuple[int, int] | None:
         """The CODED picture size, before any `max_size` fit.
@@ -344,6 +367,15 @@ class VideoDecoder(QObject):
     def _pump(self) -> None:
         """One tick, in the decoder's own thread: honour a request/seek, then advance playback."""
         self._pump_pending = False
+        self._pumps += 1
+        if self._trace_on:
+            # THE PUMP'S OWN CENSUS. A request that is traced but never turns into a walk/rewind line is either
+            # overwritten in the single slot or never pumped at all, and those two need different fixes; this line is
+            # what tells them apart (2026-11-27: 150-200 `request` lines per window against 10-40 walks, and nothing in
+            # the log said whether the pump ran).
+            self.trace.emit(f"pump n={self._pumps} request={int(self._request is not None)} "
+                            f"playing={int(self._playing)} at={float(self._decode_pts - self._origin):.3f} "
+                            f"gui={int(QThread.currentThread() is self._gui_thread)} ms={self._since_open()}")
         if self._container is None:
             return
 
@@ -351,12 +383,18 @@ class VideoDecoder(QObject):
         # while playing has to put the play position back afterwards).
         while True:
             if self._request is not None:
-                (target, exact, seek, span), self._request = self._request, None
+                request, self._request = self._request, None
+                target, exact, seek, span, *rest = request
+                tail_s = float(rest[0]) if rest else 0.0
                 resume_at = self._clock.position(time.monotonic())
                 if seek:
-                    self._seek_and_publish(target, announce=False, exact=exact)
+                    self._seek_and_publish(target, announce=False, exact=exact, tail_s=tail_s)
                 else:
-                    self._step_and_publish(target, exact=exact, span=span)
+                    # The DECODER decides forward vs rewind: it owns the read position, and `_step_and_publish` falls
+                    # back to the rewind when the target is behind it. The caller must not answer that question from a
+                    # register reading - see `ProcessTab._on_original_requested` (measured 2026-11-27: the register
+                    # lagged the GUI's queue, every ask looked "behind" and every ask paid a keyframe rewind).
+                    self._step_and_publish(target, exact=exact, span=span, tail_s=tail_s)
                 if self._playing:
                     self._pending_seek = resume_at
                 continue
@@ -403,10 +441,15 @@ class VideoDecoder(QObject):
         if self._frame_iter is None:
             return None
         try:
+            started = time.monotonic()
             decoded = next(self._frame_iter)
+            self._decode_ms += (time.monotonic() - started) * 1000.0
         except StopIteration:
             return None
-        return self._pack(decoded)
+        started = time.monotonic()
+        packed = self._pack(decoded)
+        self._pack_ms += (time.monotonic() - started) * 1000.0
+        return packed
 
     def _pack(self, decoded) -> FrameRef:
         raw = frame_pts(decoded)
@@ -418,7 +461,12 @@ class VideoDecoder(QObject):
         # for a source file, so a compare's own decoder keeps the source's absolute times).
         pts = raw - self._origin
         index = int(round(pts / self._interval)) if self._fps > 0 else self._packed
-        return pack_frame(self._fit(decoded), index, self._pixel_format, pts=pts,
+        # ONE resample, not two. `_fit` scaled the picture (YUV -> YUV) and `pack_frame` then converted it to the
+        # requested pixel format - two full passes over the pixels to produce one picture. `pack_frame(size=)` does
+        # both in a single swscale call, and the split instrument says the resample is the wall, not the codec:
+        # measured 2026-11-27 on the owner's 1440p source, 38.8 ms of every 66.7 ms frame was the pack against
+        # 27.8 ms of decode. `size` keeps the aspect and never upscales, the same rules `_fit` applied.
+        return pack_frame(decoded, index, self._pixel_format, pts=pts, size=self._max_size,
                           color_space=self._color_space, color_range=self._color_range)
 
     def _fit(self, frame):
@@ -456,7 +504,8 @@ class VideoDecoder(QObject):
 
     # -- seeking -----------------------------------------------------------------------------------
 
-    def _seek_and_publish(self, target: float, *, announce: bool = True, exact: bool = False) -> None:
+    def _seek_and_publish(self, target: float, *, announce: bool = True, exact: bool = False,
+                          tail_s: float = 0.0) -> None:
         """Keyframe rewind, decode forward, publish the frame the target names.
 
         Two rounding rules, and the caller chooses the one its counterpart uses:
@@ -505,7 +554,13 @@ class VideoDecoder(QObject):
         # publishing all of it would hand the caller hundreds of pictures in one tick. The frames that matter are the
         # ones at/after the ask's target (the target's own frame and its neighbours): everything older belongs to the
         # playback that has already passed it. Same rule as the forward step, applied where it is safe.
-        walked_tail = [f for f in getattr(self, "_rewind_walk", []) if float(f.pts) >= target - self._interval]
+        # `tail_s` is the caller's own span BACK from the target: the compare asks a LEAD past the moment on screen
+        # (so the next paint has its source already decoded), and a rewind to that target walks over the moment on
+        # screen on the way - withholding it was how a rewind left the pane's own frame missing while the read position
+        # jumped past it (measured 2026-11-27: `compare gap wanted=0.584 nearest=0.0 held=1` on every paint). Bounded
+        # by the caller's lead, never by the GOP.
+        near = max(self._interval, float(tail_s))
+        walked_tail = [f for f in getattr(self, "_rewind_walk", []) if float(f.pts) >= target - near]
         for frame in walked_tail:
             self.frame_ready.emit(frame)
         if published is not None and not any(frame is published for frame in walked_tail):
@@ -517,7 +572,8 @@ class VideoDecoder(QObject):
         if announce:
             self.seeked.emit(float(target))
 
-    def _step_and_publish(self, target: float, *, exact: bool = False, span: bool = False) -> None:
+    def _step_and_publish(self, target: float, *, exact: bool = False, span: bool = False,
+                          tail_s: float = 0.0) -> None:
         """Publish the frame at `target` by decoding forward from the read position (no keyframe rewind).
 
         The cheap half of `_seek_and_publish`: the LAST frame at or before the target for a playback step, the FIRST at
@@ -526,10 +582,23 @@ class VideoDecoder(QObject):
         the first frame is known - a wrong-way jump has no cheap answer.
         """
         position = self._decode_pts - self._origin
-        if self._at_eof or target < position - 0.5 * self._interval:
-            self._seek_and_publish(target, announce=False, exact=exact)
+        # FORWARD OR REWIND is a COST decision, and the decoder is the only place that knows the read position.
+        #
+        # A gap of a few frames is cheapest decoded forward (~12.5 ms a frame on this 1440p source, measured); a gap of
+        # a second or more is cheapest answered by the keyframe rewind (~176 ms plus the walk from the keyframe). The
+        # cold start is the case that made this rule necessary: a render's first result arrives at ~3.5 s while the
+        # source decoder has just been opened at 0, and a forward walk from 0 costs 84 frames - the pane painted its
+        # first result ALONE because its source could not arrive inside the pair valve (`half=lone:result` at 3.337 /
+        # 3.504 / 4.087, measured 2026-11-27). The limit is a measured crossover, not a picture bound: both branches
+        # deliver the same frame, one of them is simply faster.
+        if self._at_eof or target < position - 0.5 * self._interval \
+                or target > position + FORWARD_WALK_LIMIT_S:
+            self._seek_and_publish(target, announce=False, exact=exact, tail_s=tail_s)
             return
         walked: list[FrameRef] = []
+        started = time.monotonic()
+        self._decode_ms = 0.0
+        self._pack_ms = 0.0
         while True:
             frame = self._take()
             if frame is None:
@@ -558,9 +627,15 @@ class VideoDecoder(QObject):
         # decides what to SHOW from them, and the decoder's job is not to withhold a picture it already paid for.
         self._at_eof = False
         if self._trace_on:
+            # `ms` is the walk's own cost: the difference between "the decoder is slow" and "the decoder was asked
+            # late" is invisible without it, and the two need opposite fixes (measured 2026-11-27: 33 walks took most
+            # of a 45 s window, which only this number can confirm).
             self.trace.emit(f"step target={float(target):.3f} "
                             f"landed={'-' if not walked else format(float(walked[-1].pts), '.3f')} "
-                            f"walked={len(walked)} exact={int(bool(exact))}")
+                            f"walked={len(walked)} exact={int(bool(exact))} "
+                            f"walk_ms={round((time.monotonic() - started) * 1000.0, 1)} "
+                            f"decode_ms={round(self._decode_ms, 1)} pack_ms={round(self._pack_ms, 1)} "
+                            f"ms={self._since_open()}")
 
     def _rewind(self, target: float) -> None:
         # A frame held from the old position belongs to that position, not to this one. `target` is the caller's clock

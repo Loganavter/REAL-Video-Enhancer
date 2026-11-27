@@ -986,8 +986,8 @@ def test_the_compare_decoder_is_really_opened_and_then_asked(monkeypatch):
         def pause(self) -> None:
             self.pauses += 1
 
-        def request_frame(self, seconds, *, exact=True, seek=True, span=False) -> None:
-            asked.append((round(float(seconds), 3), bool(exact), bool(seek), bool(span)))
+        def request_frame(self, seconds, *, exact=True, seek=True, span=False, tail_s=0.0) -> None:
+            asked.append((round(float(seconds), 3), bool(exact), bool(seek), bool(span), float(tail_s)))
 
     class _FakeThread(QThread):
         """A real QThread (a decoder can only be moved onto one) whose loop never starts."""
@@ -1016,6 +1016,12 @@ def test_the_compare_decoder_is_really_opened_and_then_asked(monkeypatch):
     assert asked, "the pane's ask never reached the decoder"
     assert asked[-1][0] == pytest.approx(2.5)
     assert asked[-1][3] is False, "a single answered frame is a seek, not a span"
+    assert asked[-1][2] is False, (
+        "the ask says `seek=False`: the decoder owns the read position and answers forward-vs-rewind itself. Deciding "
+        "it here from the register's newest made every ask take a keyframe rewind because the register lags the GUI "
+        "queue (measured 2026-11-27: held stayed at 1-3 while the playhead ran 2 s ahead)")
+    assert asked[-1][4] == pytest.approx(tab._compare_lead()), (
+        "the tail is the compare's lead: a rewind to the lead edge still hands over the frame on screen")
 
 
 def test_the_register_answers_only_within_the_tolerance_never_the_nearest():
@@ -1615,12 +1621,18 @@ def test_a_new_generation_clears_the_register_and_stamps_results():
     assert pane._shown_time == pytest.approx(2.0)
 
 
-def test_a_register_cleared_mid_playback_asks_for_the_playhead_itself_not_ahead_of_it():
-    """After a decoder restart / a register clear, asking AHEAD walks away from the frame the pane is showing.
+def test_a_register_cleared_mid_playback_asks_at_the_lead_edge_which_covers_the_playhead():
+    """After a decoder restart / a register clear the ask goes PAST the playhead by the lead, never BEHIND it.
 
-    Measured live 2026-11-27: `compare gap why=tolerance wanted=16.600` (frame 398 at 23.976 fps) with 397 and 399 held,
-    while `compare put pts=16.6` proves that frame had been offered before the register was emptied. The fill must take
-    the playhead's own picture first (`span=False`); the lead starts on the next arrival.
+    This supersedes the earlier rule ("a register that does not reach the playhead asks for the playhead, not for the
+    lead beyond it"), which was written when a walk published only its LAST frame and consumed the rest: an ask past the
+    playhead then skipped the playhead's own picture entirely. The walk now publishes EVERY frame it decodes
+    (`test_video_decoder.py::...intermediate...`), so a target past the playhead covers the playhead on the way and
+    leaves the buffer the NEXT paint needs.
+
+    Measured 2026-11-27, ask-at-the-playhead: of 300 painted moments, the source was already in the register at paint
+    time for ZERO - each walk ended where the playhead had been when the ask was made, so the source was structurally
+    one burst behind (the owner's "затерся, а апскейл справа больше не появлялся").
     """
     pane = _Pane()
     pane.mode = "sbs"
@@ -1639,5 +1651,8 @@ def test_a_register_cleared_mid_playback_asks_for_the_playhead_itself_not_ahead_
     tab._source_fill_pending = None
     tab._tick_second_surface()
 
-    assert asked[-1] == pytest.approx(5.1), (
-        "a register that does not reach the playhead must ask for the playhead's own frame, not for the lead beyond it")
+    lead = tab._compare_lead()
+    assert asked[-1] == pytest.approx(5.1 + lead), (
+        "a missing playhead asks at the LEAD EDGE: the walk publishes every frame it passes, so the playhead's own "
+        "picture is covered on the way and the next result has its source already decoded")
+    assert asked[-1] >= 5.1, "an ask is never BEHIND the moment on screen"

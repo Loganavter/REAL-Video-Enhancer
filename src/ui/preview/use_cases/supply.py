@@ -157,9 +157,19 @@ def source_fill(tab, playhead: float) -> None:
     # moment the result paints"). Measured 2026-11-27: 1020 gap lines for 3 genuinely missing painted moments.
     register.last_refusal = None
     if not strict and moving and not paused:
-        # The pane's frame is missing: ask AT it over a span, so one walk from the read position covers it (and the
-        # rewind path publishes the target's own tail if the read position has already passed it).
-        target = playhead
+        # The pane's frame is missing: ask PAST it by the lead, not AT it.
+        #
+        # Asking AT the playhead is what the earlier finding demanded (`8ef9493f`: "a register that does not reach the
+        # playhead asks for the playhead, not for the lead beyond it") - and that was right for the decoder of the time,
+        # which published only the LAST frame of a walk and CONSUMED the rest, so an ask past the playhead skipped it.
+        # The walk now publishes EVERY frame it decodes (`358a50bc`, streamed in `192f6388`), so a target past the
+        # playhead covers the playhead on the way and leaves the buffer the pane needs at the NEXT paint.
+        #
+        # Measured 2026-11-27 with the ask AT the playhead: in a window of 300 painted moments the source was already
+        # in the register at paint time for ZERO of them - every walk ended exactly where the playhead had been when the
+        # ask was made, and the next result painted a moment further on, so the source was structurally one burst
+        # behind. The lead is what turns "decode what was just shown" into "decode what is about to be shown".
+        target = playhead + tab._compare_lead()
         span = True
     elif not covered and moving and not paused:
         # Playback with nothing held for this moment: ask AHEAD, over a span, so one decode covers the stretch the

@@ -211,6 +211,53 @@ def test_a_forward_step_publishes_the_first_frame_at_or_after_an_exact_target():
     assert rewinds == [], "forward motion is decoded in sequence, never rewound"
 
 
+def test_a_far_forward_gap_seeks_instead_of_walking_every_frame():
+    """A cold start must pay a keyframe seek, not decode from wherever the reader happens to stand.
+
+    The render's first result arrives at ~3.5 s while the source decoder has just been opened at 0: a forward walk from
+    0 costs ~84 frames, and the pane painted its first result ALONE because the source could not arrive inside the pair
+    valve (`half=lone:result` at 3.337 / 3.504 / 4.087, measured 2026-11-27). Both branches hand over the same frame;
+    the rewind is the cheaper one as soon as the gap is longer than the compare's own lead.
+    """
+    step = 1.0 / 24.0
+    decoder, published = _decoder_with([], position=0.0)
+    rewinds = []
+    decoder._seek_and_publish = lambda target, **kw: rewinds.append(round(target, 3))
+
+    decoder._step_and_publish(3.5, exact=False, tail_s=0.5)          # a cold start, 84 frames ahead
+    assert rewinds == [3.5], "a jump of seconds forward is answered by the keyframe rewind"
+
+    rewinds.clear()
+    decoder._step_and_publish(0.5, exact=False, tail_s=0.5)          # the compare's own lead
+    assert rewinds == [], "a lead-sized ask stays on the cheap forward path"
+
+
+def test_a_rewind_to_the_lead_edge_still_publishes_the_frames_before_it():
+    """The compare asks a LEAD past the moment on screen; a rewind to that target must not swallow that moment.
+
+    Measured 2026-11-27: the fill asks `playhead + lead`, the read position was behind, the request took the keyframe
+    rewind, and the walk from the keyframe to `target` was published only from `target - one frame`. The pane's own
+    frame (one lead before the target) was decoded and thrown away, so `held` stayed at 1-3 while the playhead ran two
+    seconds ahead and every paint logged `compare gap why=tolerance nearest_moment=0.0`.
+
+    The bound is the caller's `tail_s` (its lead), never the GOP: publishing a whole GOP would hand the caller hundreds
+    of pictures in one tick, which is why the old bound existed in the first place.
+    """
+    step = 1.0 / 24.0
+    frames = [_Frame(0.5 + i * step) for i in range(12)]      # a 0.5 s walk from the keyframe
+    decoder, published = _decoder_with(frames, position=0.0)
+    decoder._rewind = lambda target: None                     # the walk is already in `_take`
+    decoder._interval = step
+
+    decoder._seek_and_publish(0.5 + 11 * step, announce=False, exact=False, tail_s=4 * step)
+
+    pts = [round(f.pts - 0.5, 4) for f in published]
+    assert pts, "the rewind published nothing"
+    assert all(p >= 4 * step - 1e-6 for p in pts), (
+        f"the rewind must publish back to the caller's lead (4 frames), got {pts}")
+    assert min(pts) < 9 * step, "and it must reach BACK past the target's own frame - the moment on screen is there"
+
+
 def test_a_target_behind_the_read_position_falls_back_to_the_rewind():
     """A scrub back, or a press on an earlier frame: the cheap path has no answer there, and must not pretend."""
     decoder, published = _decoder_with([_Frame(5.0)], position=5.0)
