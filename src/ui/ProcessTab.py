@@ -1488,7 +1488,26 @@ class ProcessTab:
             return
         register.offer(float(named), image, "block",
                        generation=int(getattr(self, "_result_generation", 0)))
+        self._drain_register_trace(register)
         self._sync_compare_source()
+
+    def _drain_register_trace(self, register) -> None:
+        """Log the register's level-2 trace (offers, evictions) through the pane's telemetry.
+
+        The register is Qt-free and records strings; this is the only place they become log lines. Without it a missing
+        key at the lookup instant is unattributable: the decoder's offers are logged (`compare put`), the source feed's
+        are not, and an eviction says nothing at all (2026-11-27).
+        """
+        try:
+            from .video import telemetry
+
+            if telemetry.level() < 2:
+                return
+            register.trace(True)
+            for event in register.take_trace():
+                telemetry.event("compare register", what=event)
+        except Exception:
+            pass
 
     def _tick_display(self) -> None:
         """One 100 ms tick of the export feed: ask, read at most one new `seq`, paint (GUI thread)."""
@@ -1570,6 +1589,17 @@ class ProcessTab:
                 seq = getattr(reader, "seq", None)
                 media_time = getattr(reader, "media_time", None)
             _pane_result(self, pane, media_time, image, seq=seq)
+            if media_time is not None:
+                # ASK on the RESULT's clock, from the result's own arrival: the 10 Hz tick samples the pane's moment
+                # between two results, so it asked for the PREVIOUS picture and the register never held the one on
+                # screen (`compare gap wanted=13.388`, with NO offer of 13.388 in the whole window - measured
+                # 2026-11-27). Here the moment is the picture just painted, and the fill's pending guard still keeps
+                # one ask in flight. NOT from `paint_pair`: that is a paint-path callback and asking there re-enters
+                # the paint (set_source -> update -> paint) - it crashed the suite.
+                try:
+                    self._source_fill(float(media_time))
+                except Exception:
+                    pass
             if media_time is not None:
                 # The picture's own time IS the pane's position. Without this the feed's pane left the position at
                 # 0.0 and Play then started the file at its beginning instead of where the render stood (measured

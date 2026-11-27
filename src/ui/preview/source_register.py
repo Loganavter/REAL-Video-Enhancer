@@ -68,6 +68,17 @@ class SourceRegister:
         self._anchor: float | None = None
         #: Why the last `picture_for` answered nothing (`{"why": "generation"|"tolerance"|"empty", ...}`), or None.
         self.last_refusal: dict | None = None
+        #: Level-2 trace of evictions and offers, drained by the owner (`take_trace`) - the register is Qt-free, so it
+        #: records strings and the tab logs them.
+        self._trace = False
+        self._trace_events: list[str] = []
+
+    def trace(self, on: bool = True) -> None:
+        self._trace = bool(on)
+
+    def take_trace(self) -> list[str]:
+        events, self._trace_events = self._trace_events, []
+        return events
 
     # -- writing ---------------------------------------------------------
 
@@ -95,6 +106,8 @@ class SourceRegister:
             return None
         held = SourcePicture(float(moment), picture, str(origin), int(generation))
         self._held[key] = held
+        if self._trace:
+            self._trace_events.append(f"offer pts={held.moment:.3f} origin={held.origin} gen={held.generation}")
         self._prune()
         self.generation += 1
         return held
@@ -119,7 +132,11 @@ class SourceRegister:
             candidates = [key for key in self._held if key != anchor_key]
             if not candidates:
                 break                              # nothing but the anchored picture: capacity 1 keeps it
-            del self._held[min(candidates)]
+            victim = min(candidates)
+            if self._trace:
+                held = self._held[victim]
+                self._trace_events.append(f"evict pts={held.moment:.3f} origin={held.origin} anchor={anchor:.3f}")
+            del self._held[victim]
 
 
     def clear(self) -> None:

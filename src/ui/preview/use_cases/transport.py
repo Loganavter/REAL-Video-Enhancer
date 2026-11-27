@@ -261,6 +261,9 @@ def on_original_frame(tab, frame) -> None:
                                  generation=int(getattr(tab, "_result_generation", 0)))
         if arrived is not None:
             tab._compare_fill_note_arrival()
+        drain = getattr(tab, "_drain_register_trace", None)
+        if callable(drain):
+            drain(register)
     if telemetry.level() >= 2:
         telemetry.event("compare put", pts=round(float(pts), 3),
                         pool=len(register) if register is not None else 0)
