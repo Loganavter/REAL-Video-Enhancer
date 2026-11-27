@@ -1015,7 +1015,7 @@ class VideoPreviewSurface(QRhiWidget):
         # would slide the result's content out from under a pointer that is not on it - and the mirrored point keeps
         # the source pixel under the cursor put, which is exactly what the gesture promises.
         anchor = QPointF(event.position())
-        if self._view_mode == "sbs":
+        if self._view_mode == "sbs" and self._pair_on_screen():
             left, right = self._half_rects()
             if left.contains(event.position()):
                 anchor = QPointF(float(right.left()) + (event.position().x() - float(left.left())),
@@ -1684,8 +1684,10 @@ class VideoPreviewSurface(QRhiWidget):
         if self._view_mode == "sbs":
             middle = self.width() / 2.0
             picture = self._frame_rect()
-            # A seam belongs to a PICTURE: an empty pane draws nothing at all (its own pin asserts exactly that).
-            if floor > 0 and not picture.isEmpty():
+            # A seam belongs to a PAIR - and to a PICTURE: an empty pane draws nothing at all, and a pane with ONE
+            # picture is not divided (the owner's screenshot, 2026-11-27: a line down the middle of a single upscale
+            # while `sbs` waited for its source). The layout and the HUD ask the same question.
+            if floor > 0 and not picture.isEmpty() and self._pair_on_screen():
                 top = max(0.0, picture.top())
                 bottom = min(floor, picture.bottom())
                 if bottom > top:

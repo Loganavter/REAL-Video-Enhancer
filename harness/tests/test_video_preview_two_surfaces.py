@@ -217,6 +217,22 @@ def test_sbs_puts_the_result_right_and_the_original_left_at_one_scale(surface):
     assert surface._hud_vertices() == [], "single paints no boundary at all"
 
 
+def test_a_seam_belongs_to_a_pair_not_to_the_mode_name(surface):
+    """The owner's screenshot, 2026-11-27: a line down the middle of a SINGLE upscale while `sbs` waited for its source.
+
+    The layout already draws one picture full-size when only one is in hand; the HUD must ask the same question, or the
+    pane claims a division it does not have - the "a datum asserting a conclusion" class this pane keeps re-learning.
+    """
+    surface.set_view_mode("sbs")
+    surface.set_frame(_picture(*FRAME_SIZE))
+    assert not surface._pair_on_screen()
+    assert surface._hud_vertices() == [], "one picture is not divided"
+
+    surface.set_original(_picture(*FRAME_SIZE), media_time=0.0)      # the partner arrives: now the seam is honest
+    assert surface._pair_on_screen()
+    assert len(surface._hud_vertices()) == 1 * 6 * 6, "a pair gets its seam"
+
+
 def test_sbs_letterboxes_each_picture_at_its_own_aspect(surface):
     """The source and the render normally share an aspect, but a render can change dimensions. Then the source keeps
     its own proportions inside its half instead of being stretched to it, and it still shows at the result's
