@@ -135,7 +135,14 @@ def source_fill(tab, playhead: float) -> None:
         step = playhead - float(previous)
         moving = 0.0 < step <= 4.0 * interval     # a tick or two of slip still counts as playback, not a jump
     tab._source_fill_last = playhead
-    if register.picture_for(playhead, 1.5 * interval, generation=generation) is None and moving and not paused:
+    # 1.5 frames: the fill's "is this moment worth a decode" is deliberately LOOSER than the pane's half-frame
+    # identity bound. Matching the pane's bound exactly was tried and measured WORSE (delivered-at-the-moment 32/91 vs
+    # 88/101): it turned every neighbour into a hole, the fill asked at the playhead on every result, every ask became a
+    # keyframe rewind (~176 ms), and the decoder spent the window rewinding instead of leading (`decode rewind` 37 in
+    # one window against 20). A looser coverage test with a strict presenter is the trade that keeps the decoder
+    # leading; the hole to fix is on the PRODUCER side (the source channel publishes on a 2-frame step).
+    covered = register.picture_for(playhead, 1.5 * interval, generation=generation) is not None
+    if not covered and moving and not paused:
         # Playback with nothing held for this moment: ask AHEAD, over a span, so one decode covers the stretch the
         # pane is about to show. A single frame here cannot win a race against the next tick - UNLESS the register does
         # not even REACH the playhead (a fresh decoder after a restart, a register cleared by a mode/owner change):
@@ -148,14 +155,17 @@ def source_fill(tab, playhead: float) -> None:
         # is what the counters showed - `nearest_moment` one frame AFTER the wanted one, and that wanted frame never
         # delivered at all. Asking ahead there fetches the future and leaves the hole; ask AT the playhead, which is
         # behind the read position, so the decoder takes its rewind path.
-        skipped_playhead = newest is not None and float(newest) > playhead + 1.5 * interval
+        # ONE frame ahead is already a hole at the moment on screen: that is what the counters showed (`wanted=14.056`,
+        # `nearest_moment=14.097` - its neighbour, one frame ahead, and `decode rewind/step target=14.056` never
+        # happened). The ask must go to the playhead (a rewind) whenever the pool holds nothing at or BEFORE it.
+        skipped_playhead = newest is not None and float(newest) > playhead + 0.5 * interval
         if not reaches_playhead or skipped_playhead:
             target = playhead
             span = False
         else:
             target = playhead + tab._compare_lead()
             span = True
-    elif register.picture_for(playhead, 1.5 * interval, generation=generation) is None:
+    elif not covered:
         # Nothing in the register answers for THIS playhead (an empty register, a seek, a jump back): ask at it, and
         # take the single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder
         # stands.
