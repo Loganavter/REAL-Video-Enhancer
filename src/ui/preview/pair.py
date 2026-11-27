@@ -141,13 +141,29 @@ class PairWriter:
         self._mode = str(mode)
         self._hold_started = None
         self._lone_result = False
-        if mode != "single" and self._committed is not None:
-            # `single` is one surface, so what it painted is not a pair: entering a compare mode the writer does not
-            # claim it as one (the renderer still shows it until the first pair arrives - the user just switched modes
-            # and the source was asked for - but `painted()` stops answering "a pair" about one half).
+        if mode != "single":
+            # ENTERING A COMPARE MODE PAINTS NO HALF AT ALL. `single` is one surface, so what it painted is not a pair;
+            # handing that picture to the compare would draw "the upscale, then the original" - the exact order the
+            # owner named on 2026-11-26 ("прям видно как сначала один рисуется, а затем другой") and the reason this
+            # module exists. Measured 2026-11-27 with the old behaviour: a switch to sbs mid-render produced 1-9
+            # `half=lone:result` paints, each corrected only when the source finally landed (0.24-1.1 s later).
+            #
+            # So the pane waits, EMPTY, for the first real pair - the source was asked for on the same switch, and
+            # `MAX_PAIR_STALE_S` still bounds the wait, so a decoder that never answers cannot freeze a blank pane
+            # silently (the valve paints the result alone and says `pair stale`). A pair carried over from an earlier
+            # compare session is kept: it is a picture that WAS a pair, and it is replaced by the first new one.
             pair = self._committed
-            if pair.result is None or pair.source is None or not self._pairs(pair.result, pair.source):
+            if pair is None or pair.result is None or pair.source is None or not self._pairs(pair.result, pair.source):
+                if telemetry.level() >= 2:
+                    telemetry.event("pair enter", mode=str(mode),
+                                    dropped=None if pair is None or pair.result is None else _moment(pair.moment),
+                                    why="no-pair-yet")
+                # An EMPTY pane is `_committed = None`, not an empty `CommittedPair`: "no pair on screen" must read
+                # as `None` to every caller (`painted_pair()`), which is the defect the empty-object version caused.
+                self._sink.set_frame(None)
+                self._sink.set_original(None)
                 self._committed = None
+                self._hold_started = None
 
     def set_tolerance(self, seconds: float) -> None:
         """The largest source distance that is still the same picture, in seconds (the pane's half frame)."""

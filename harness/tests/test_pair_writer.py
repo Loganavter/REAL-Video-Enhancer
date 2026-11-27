@@ -221,9 +221,53 @@ def test_the_pane_honours_the_hard_limit_with_a_dead_source():
         assert hands == []
         clock.advance(MAX_PAIR_STALE_S + 0.01)
         surface.set_result(ResultPicture(moment=3.0 + 1.0 / 24.0, picture=_picture(), generation=1))
-    assert [kind for kind, _frame in hands] == ["frame", "orig"], f"after the limit a half may paint: {hands}"
-    assert hands[-1] == ("orig", None), "the half painted alone is the RESULT: the source is what went missing"
+    # The half that paints after the limit is the RESULT; the source half stays empty. (The hand-over is not required
+    # to touch BOTH textures: `_paint` only re-hands a half whose payload changed, so an already-empty source is
+    # skipped - the STATE is the assertion, not the call shape.)
+    assert any(kind == "frame" for kind, _ in hands), f"after the limit the result must paint: {hands}"
+    assert all(frame is None for kind, frame in hands if kind == "orig"), "and the source half stays empty"
+    painted = surface._pair.painted()
+    assert painted is not None and painted.lone_half == "result"
     assert line_has(_stale(lines), half="result", why="no-source-within-hold")
+
+
+# --- entering a compare mode ---------------------------------------------------------------------------
+
+
+def test_entering_a_compare_mode_paints_no_half_and_the_first_pair_arrives_with_its_source():
+    """A switch from `single` must not paint the upscale alone - the owner's own complaint (2026-11-26).
+
+    The order "the upscale, then the original" is what this module exists to remove, and the mode switch was the one
+    place still producing it: `single` holds a result with no source, and handing that picture to the compare drew
+    `half=lone:result` until the source landed. Measured 2026-11-27 on the owner's gesture: 1-9 such paints per switch,
+    each corrected only 0.24-1.1 s later.
+
+    The pane now waits EMPTY for the first pair. RED-BEFORE: with the old branch the pane hands the single-mode result
+    as the first comparison picture (`assert [("frame", ...)] == []`).
+    """
+    writer, sink, clock = _writer(mode="single")
+    sink.calls.clear()
+    writer.offer_result(_half(5.0))                 # the single-mode picture on screen
+    assert writer.paint() is True
+    assert ("frame", ("frame", "5.0000")) in sink.calls, f"single hands the result: {sink.calls}"
+
+    sink.calls.clear()
+    writer.set_view_mode("sbs")                     # the switch
+    assert sink.calls == [("frame", None), ("orig", None)], (
+        f"a compare mode starts empty, never on one half: {sink.calls}")
+    assert writer.painted() is None, "an empty pane is no pair at all - not an empty pair object"
+
+    # The first result is HELD, not painted alone...
+    sink.calls.clear()
+    writer.offer_result(_half(5.5))
+    assert writer.paint() is False and sink.calls == [], f"a lone result must not paint: {sink.calls}"
+
+    # ...and the pair paints the moment its source arrives.
+    writer.offer_source(_half(5.5))
+    assert writer.paint() is True
+    painted = writer.painted()
+    assert painted is not None and painted.lone_half is None
+    assert painted.result is not None and painted.source is not None and painted.moment == pytest.approx(5.5)
 
 
 # --- a clear is a clear ------------------------------------------------------------------------------
