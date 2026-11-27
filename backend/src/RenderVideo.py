@@ -1,5 +1,5 @@
 import time as _time
-from threading import Thread
+from threading import Thread, current_thread
 
 # Process-relative clock: the wall-clock "Time to complete render" starts in the writer
 # thread, so it hides everything before it (interpreter/import, engine build or deserialize,
@@ -38,6 +38,7 @@ from .utils.DisplayChannel import (
     ETA_UNSET,
     PHASE_BUILDING_ENGINE,
     PHASE_DONE,
+    PHASE_FAILED,
     PHASE_FINALISING,
     PHASE_PREPARING,
     PHASE_RENDERING,
@@ -771,7 +772,7 @@ class Render:
         )
         self.ffmpegWriteThread = Thread(
             target=guard_render_thread,
-            args=(self.writeBuffer.write_out_frames,),
+            args=(self._run_writer,),
             kwargs={"path": "FFmpegWrite.write_out_frames"},
             name="writer",
         )
@@ -1200,6 +1201,10 @@ class Render:
                 # the configured value is not what ran: the tuner overwrites the gate's threshold
                 "temporal_reuse_threshold_effective": getattr(gate, "threshold", None) if gate else None,
                 "int8_fit": getattr(self, "int8FitPreset", None),
+                # The Best/Fast switch is a run setting like the fit it resolves to: the Properties window's
+                # report rows read it from here (`queue_properties._REPORT_ROWS`), and without it the window
+                # could only say "this run report does not record quality preset".
+                "quality_preset": getattr(self, "qualityPreset", None),
             },
             "phases_ms_per_frame": phases,
             "gate": None if gate is None else {
@@ -1252,6 +1257,9 @@ class Render:
         and the log cannot disagree about how much is left. A detached channel is a no-op, and a failure in
         the slot must never take a render down - the log line is already written by its own path.
         """
+        # Remembered here so the failure paths can report the frame the render actually reached: an exception
+        # unwinds the loop's local counter, and a FAILED record that resets it to 0 is a second lie.
+        self._frames_rendered = int(frames_rendered)
         channel = getattr(self, "statusChannel", None)
         if channel is None:
             return
@@ -1560,6 +1568,23 @@ class Render:
             self._names_handle = None
 
     def render(self):
+        """Run the render loop and settle the status slot truthfully.
+
+        A failing render used to end the process with the slot still saying `Rendering` (or `Finalising`):
+        the guard in `utils.Util` ends the process, and nothing wrote a failed phase. The loop is wrapped
+        here so the slot's last word is `Failed`, with the reason in the log, before the process goes.
+        """
+        frames_rendered = 0
+        try:
+            frames_rendered = self._render_loop()
+            self._finish_render(frames_rendered)
+        except BaseException as error:
+            log(f"phase: failed: {type(error).__name__}: {error}")
+            self._write_status(getattr(self, "_frames_rendered", frames_rendered), phase=PHASE_FAILED)
+            raise
+
+    def _render_loop(self) -> int:
+        """Move frames from the reader to the writer until the reader is drained; return the frame count."""
         frames_rendered = 0
         # The engines are built and the reader/writer are up: this thread only moves frames now.
         self._write_status(0, phase=PHASE_RENDERING)
@@ -1611,7 +1636,9 @@ class Render:
                         transition=sceneDetect,
                     )
                     if not interpolated_frames:
-                        return
+                        # Nothing more to interpolate: end the render through the normal close path instead of
+                        # returning from inside the loop, which left the writer's pipe and the slot unattended.
+                        return frames_rendered
                     
                     for interpolated_frame in interpolated_frames:
 
@@ -1816,7 +1843,10 @@ class Render:
                         pass
             else:
                 sleep(1)
-        self._write_status(frames_rendered, phase=PHASE_DONE)
+        return frames_rendered
+
+    def _finish_render(self, frames_rendered: int) -> None:
+        """After the reader drained: log the summary, write the report, close the encoder, release the blocks."""
         first = getattr(self, "_t_first_frame", None)
         if first is not None and self._phases.first("render-loop"):
             log(f"render loop: {_time.time() - first:.2f} s for {frames_rendered} frames "
@@ -1857,7 +1887,7 @@ class Render:
                 log(f"frame names: {len(self._out_src_pts)} pictures named by their source time -> {_out}.srcpts")
         except Exception as exc:
             log(f"frame names: not closed ({exc})")
-        self.writeBuffer.writeQueue.put(None)
+        self._close_encoder_and_settle(frames_rendered)
         # Detach the GUI-owned blocks: closing never unlinks a segment we did not create. A block the
         # backend created as a fallback (the window had not attached yet) is removed by close().
         for _block in (self.displayChannel, self.seekState, getattr(self, "statusChannel", None),
@@ -1883,7 +1913,86 @@ class Render:
         profiler.stop()
         print(profiler.output_text(unicode=True, color=True))
         """
-    
+
+    def _writer_failed(self, reason: str) -> None:
+        """Write the one `Failed` record for an encoder-side failure and log the same reason."""
+        if getattr(self, "_encoder_failed", False):
+            return
+        self._encoder_failed = True
+        log(f"phase: failed: {reason}")
+        self._write_status(getattr(self, "_frames_rendered", 0), phase=PHASE_FAILED)
+
+    def _run_writer(self) -> None:
+        """The writer thread's body: run the encoder writer, and mark the render Failed if it fails.
+
+        `FFmpegWrite.write_out_frames` reports its own ffmpeg exit through `onErroredExit`, which leaves
+        the process (`os._exit`) - so the slot would never learn about it. The instance's call is wrapped
+        here for the duration of the writer: the failure is written to the slot first, then the original
+        prints the ffmpeg log and ends the process. An exception that escapes the writer is marked the
+        same way and re-raised, so the guard still writes its one `RENDER FAILED` line and leaves.
+        """
+        buffer = self.writeBuffer
+        original = getattr(buffer, "onErroredExit", None)
+
+        def _mark_and_report() -> None:
+            process = getattr(buffer, "writeProcess", None)
+            code = getattr(process, "returncode", None)
+            reason = (f"ffmpeg exited with code {code}" if code
+                      else "the encoder failed; the ffmpeg log below says why")
+            self._writer_failed(reason)
+            if original is not None:
+                original()
+
+        if original is not None:
+            buffer.onErroredExit = _mark_and_report
+        try:
+            buffer.write_out_frames()
+        except BaseException as error:
+            self._writer_failed(f"writer: {type(error).__name__}: {error}")
+            raise
+        finally:
+            if original is not None:
+                buffer.onErroredExit = original
+
+    def _await_writer_exit(self) -> str | None:
+        """Wait until the writer thread has reaped ffmpeg; return why it failed, or None on success.
+
+        The writer (`FFmpegWrite.write_out_frames`) closes the pipe, waits for the encoder process and
+        only then returns, so joining that thread is the point at which the file is really finished. A
+        writer that recorded `errorReason` on the buffer wins; otherwise a non-zero `writeProcess.returncode`
+        is the reason. Joining from the writer thread itself is a no-op - that call has no wait to do.
+        """
+        thread = getattr(self, "ffmpegWriteThread", None)
+        if thread is not None and thread is not current_thread():
+            thread.join()
+        buffer = getattr(self, "writeBuffer", None)
+        reason = getattr(buffer, "errorReason", None)
+        if reason:
+            return str(reason)
+        process = getattr(buffer, "writeProcess", None)
+        code = getattr(process, "returncode", 0)
+        if code:
+            return f"ffmpeg exited with code {code}"
+        return None
+
+    def _close_encoder_and_settle(self, frames_rendered: int) -> str | None:
+        """Close the writer's pipe, wait for the encoder, then write Done - or Failed with its reason.
+
+        Until this method returns, ffmpeg is still draining the pipe and finalising the container, so the
+        pane must read `Finalising`. The old code wrote `Done` (which the pane shows as Idle) before the
+        sentinel that lets the writer close the pipe and wait for the encoder, so the pane could say Idle
+        while the file was still being finished. `Done` now follows the writer thread's own exit.
+        """
+        self._write_status(frames_rendered, phase=PHASE_FINALISING)
+        self.writeBuffer.writeQueue.put(None)
+        reason = self._await_writer_exit()
+        if reason is None:
+            self._write_status(frames_rendered, phase=PHASE_DONE)
+            return None
+        log(f"phase: failed: {reason}")
+        self._write_status(frames_rendered, phase=PHASE_FAILED)
+        return reason
+
     def upscalePytorchObject(self, modelPath=None):
         from .pytorch.UpscaleTorch import UpscalePytorch
         return UpscalePytorch(
