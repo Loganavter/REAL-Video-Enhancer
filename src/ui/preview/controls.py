@@ -3,10 +3,11 @@
 Layout E (owner-approved mockup, 2026-11-25; produced pill removed 2026-11-26):
 
 * **top** - no common backing bar. The three view modes and the zoom row (`-` Fit `1:1` `+`) are each a CAPSULE (one
-  SurfacePanel behind the group's ghost Buttons), and fullscreen is a standalone Button. A group's first/last buttons
-  round their outer corners by the plate's radius minus its inset, so the capsule's corners share one shape; the
-  checked view mode also wears an accent ring, so the current mode reads as a ring, not only as a fill. The compare is
-  NOT a button: holding LMB on the picture is the gesture.
+  SurfacePanel behind the group's ghost Buttons), and fullscreen is a standalone Button. The three mode buttons wear
+  the SAME rounded outline (one recipe for the group, owner 2026-11-28), while the zoom row keeps the nested one: its
+  first/last buttons round their outer corners by the plate's radius minus its inset, so the capsule's corners share
+  one shape. The checked view mode also wears an accent ring, so the current mode reads as a ring, not only as a fill.
+  The compare is NOT a button: holding LMB on the picture is the gesture.
 * **bottom** - video transport only: play/pause, step, content time `m:ss.mmm / m:ss.mmm`, and the scrubber. The
   run's own numbers (frame, percent, ETA, fps, status, elapsed) are the video-info pane's run card, not a repeat here.
 
@@ -38,14 +39,50 @@ from .timeline import PreviewTimeline, format_content_time
 #: Design px: the bars' inset from the pane edge, their gap, and their heights.
 BAR_MARGIN = 12
 BAR_GAP = 8
-TOP_HEIGHT = 32
+#: The top bar holds the group capsules, and a plate needs room for its pad above and below its buttons. It is one
+#: design point taller than the 32 it was, on each side, so both backings grow by that point (owner, 2026-11-28:
+#: "сделать обе подложки ... на 1 пункт больше по размеру").
+TOP_HEIGHT = 34
 BOTTOM_HEIGHT = 42
-#: Design px: a group capsule's plate radius, and the inset that separates its buttons from the plate (the same number
-#: is the gap between the buttons). A nested button's outer corner is the difference, so its arc shares the plate's
-#: centre and the gutter stays even at the top, bottom and outer edge.
+#: Design px: a group capsule's plate radius, the gutter between its buttons, and the pad it keeps around them.
+#: `GROUP_INSET` is the gutter *and* the base of the radius nesting: a nested button's outer corner is the difference
+#: `GROUP_RADIUS - GROUP_INSET`, so its arc shares the plate's centre and the corner stays even. `CAPSULE_PAD` is the
+#: plate's own padding - one design point more than the gutter, so each plate is `2 * scaled_px(1)` wider and taller
+#: than with the old pad while the buttons keep their size (owner, 2026-11-28).
 GROUP_RADIUS = 10
 GROUP_INSET = 2
+CAPSULE_PAD = GROUP_INSET + 1
 NESTED_RADIUS = GROUP_RADIUS - GROUP_INSET
+
+#: How a capsule's buttons are rounded inside their plate. The recipe belongs to the GROUP and is chosen once when the
+#: capsule is built - never per index in the loop that adds the buttons.
+#: `NESTED` - only the first and last buttons round their OUTER corners, the inner edges stay flat, so the row reads as
+#: one capsule with a single outline.
+#: `UNIFORM` - every button carries the SAME four radii, so each member reads as an identical pill inside the plate
+#: (owner, 2026-11-28: "у выбора сравнения кнопок 3х сделать идентичные скругленную обводку, а не каждую по
+#: отдельности настраивать").
+CORNER_NESTED = "nested"
+CORNER_UNIFORM = "uniform"
+
+
+def group_corner_radii(count: int, recipe: str = CORNER_NESTED) -> list[tuple[int, int, int, int] | None]:
+    """One capsule's corner recipe for every button: design px, tl/tr/br/bl, computed once for the whole group.
+
+    `_add_group` builds its buttons from this list, so a member's shape is a property of its capsule, not of its index.
+    A lone button gets `None` - the toolkit's own radius - because there is no neighbour to nest against.
+    """
+    if count <= 1:
+        return [None]
+    if recipe == CORNER_UNIFORM:
+        return [(NESTED_RADIUS, NESTED_RADIUS, NESTED_RADIUS, NESTED_RADIUS)] * count
+    if recipe != CORNER_NESTED:
+        raise ValueError(f"unknown corner recipe: {recipe!r}")
+    radii: list[tuple[int, int, int, int] | None] = [(0, 0, 0, 0)] * count
+    radii[0] = (NESTED_RADIUS, 0, 0, NESTED_RADIUS)
+    radii[-1] = (0, NESTED_RADIUS, NESTED_RADIUS, 0)
+    return radii
+
+
 #: The time readout keeps a stable width, so a changing number cannot reflow the row.
 TIME_MIN_WIDTH = 148
 
@@ -185,13 +222,20 @@ class PreviewControls(QWidget):
         return button
 
     def _add_group(self, layout: QHBoxLayout, name: str, spec_ids: tuple[str, ...], *,
-                   outline_checked: bool = False) -> SurfacePanel:
+                   corner_recipe: str = CORNER_NESTED, outline_checked: bool = False) -> SurfacePanel:
         """A group capsule: one toolkit surface behind ghost buttons - the backing the owner asked for.
 
         The group is ONE unit for the overflow too: a capsule with half its buttons in a menu and half on the bar is
-        not a control a person can read. The first and last buttons round their OUTER corners by the plate's radius
-        minus the inset, so those arcs are concentric with the plate and the gutter reads even; the inner side stays
-        flat, which makes the row read as one capsule.
+        not a control a person can read. The corners come from `group_corner_radii`, so the shape of every member is
+        decided once for the capsule (`corner_recipe`), not per index: `UNIFORM` is the mode row's identical pills,
+        `NESTED` is the zoom row's one-outline capsule.
+
+        The plate's padding is `CAPSULE_PAD` (one design point more than the gutter, owner 2026-11-28): the row's
+        margins carry that value and the gutter between the buttons stays `GROUP_INSET`, so the plate widens by exactly
+        one point on each side while the buttons keep their size and their distance. The top bar grew by the same point
+        on each side (`TOP_HEIGHT`), so each plate is two design points wider AND two design points taller than before;
+        at scale 1.0 it renders the full 3 design px of horizontal pad and what the 34-px bar leaves vertically around
+        a 30-px button.
         """
         # The plate wears the STANDALONE surface button's own fill and stroke (the fullscreen button's variant), not the
         # flyout colour: the modes and the zoom row are the same kind of control as the button beside them, and the owner
@@ -202,19 +246,10 @@ class PreviewControls(QWidget):
                              border_token="button.dialog.default.border",
                              radius=scaled_px(GROUP_RADIUS))
         row = QHBoxLayout(panel)
-        inset = scaled_px(GROUP_INSET)
-        row.setContentsMargins(inset, inset, inset, inset)
-        row.setSpacing(inset)
-        last = len(spec_ids) - 1
-        for index, spec_id in enumerate(spec_ids):
-            radii = None
-            if last > 0:
-                radii = (
-                    NESTED_RADIUS if index == 0 else 0,
-                    NESTED_RADIUS if index == last else 0,
-                    NESTED_RADIUS if index == last else 0,
-                    NESTED_RADIUS if index == 0 else 0,
-                )
+        pad = scaled_px(CAPSULE_PAD)
+        row.setContentsMargins(pad, pad, pad, pad)
+        row.setSpacing(scaled_px(GROUP_INSET))
+        for spec_id, radii in zip(spec_ids, group_corner_radii(len(spec_ids), corner_recipe)):
             row.addWidget(self._prepare_button(self._specs[spec_id], panel, corner_radii=radii,
                                                outline_when_checked=outline_checked))
         self._group_panels[name] = panel
@@ -232,7 +267,8 @@ class PreviewControls(QWidget):
     def _build_top(self) -> None:
         layout = self.top_bar._row                   # noqa: SLF001
         layout.addStretch(1)
-        self._add_group(layout, "view_mode", ("mode_single", "mode_sbs", "mode_split"), outline_checked=True)
+        self._add_group(layout, "view_mode", ("mode_single", "mode_sbs", "mode_split"),
+                        corner_recipe=CORNER_UNIFORM, outline_checked=True)
         self._add_group(layout, "zoom", ("zoom_out", "zoom_fit", "zoom_one", "zoom_in"))
 
         # The overflow affordance for a narrow pane: the lowest-priority tools collapse here instead of shrinking.

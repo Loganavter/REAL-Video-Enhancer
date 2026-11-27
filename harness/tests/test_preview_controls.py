@@ -598,28 +598,33 @@ def test_the_checked_mode_wears_the_accent_ring_and_the_ring_follows_the_check(c
 
 
 def test_the_group_buttons_nest_their_corners_into_the_plate(controls):
-    """First/last outer corner = plate radius - inset, so both arcs share one centre and the gutter is even."""
-    from src.ui.preview.controls import GROUP_INSET, GROUP_RADIUS, NESTED_RADIUS
+    """Owner, 2026-11-28: one identical outline for the three modes, and a taller/wider plate.
+
+    The corner recipe belongs to the CAPSULE, so all three mode buttons carry the same four radii and no index is
+    special-cased; the zoom row is the other recipe (outer corners only). The plate's pad is `CAPSULE_PAD` - one design
+    point more than the gutter - while the buttons keep their distance and their size.
+    """
+    from src.ui.preview.controls import CAPSULE_PAD, GROUP_INSET, GROUP_RADIUS, NESTED_RADIUS
 
     plate = controls._group_panels["view_mode"]
-    inset = scaled_px(GROUP_INSET)
+    pad = scaled_px(CAPSULE_PAD)
+    gutter = scaled_px(GROUP_INSET)
     assert plate.radius() == scaled_px(GROUP_RADIUS)
     row = plate.layout()
     margins = row.contentsMargins()
-    assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (inset, inset, inset, inset)
-    assert row.spacing() == inset
+    assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (pad, pad, pad, pad)
+    assert row.spacing() == gutter, "the pad grew, the gutter between the buttons did not"
 
+    # One recipe, four equal radii per button, the same value on every mode.
+    assert CAPSULE_PAD == GROUP_INSET + 1
+    mode_ids = ("mode_single", "mode_sbs", "mode_split")
+    radii = [controls.button(spec_id)._design_corner_radii for spec_id in mode_ids]
+    assert radii == [(NESTED_RADIUS,) * 4] * 3
     outer = scaled_px(GROUP_RADIUS) - scaled_px(GROUP_INSET)
-    assert inset + outer == plate.radius(), "the button arc is not concentric with the plate"
-    first, middle, last = (controls.button(spec_id) for spec_id in ("mode_single", "mode_sbs", "mode_split"))
-    assert first._corner_radii_px == (outer, 0, 0, outer)
-    assert middle._corner_radii_px == (0, 0, 0, 0), "the middle button must keep its outer edge flat"
-    assert last._corner_radii_px == (0, outer, outer, 0)
+    assert controls.button("mode_single")._corner_radii_px == (outer,) * 4
 
     # The nested radius is design px, so the toolkit rescales it with the interface: the design value is the
     # difference of the two plate numbers, never a preset that only fits at 1.0.
-    assert first._design_corner_radii == (NESTED_RADIUS, 0, 0, NESTED_RADIUS)
-    assert last._design_corner_radii == (0, NESTED_RADIUS, NESTED_RADIUS, 0)
     assert NESTED_RADIUS + GROUP_INSET == GROUP_RADIUS
 
 
