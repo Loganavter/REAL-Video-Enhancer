@@ -201,6 +201,44 @@ def page_request_error(wanted: str, known_pages) -> str | None:
             f"or a verb such as state:, click:, preview:, render:, queue:, start:")
 
 
+def grab_answer(window, spec: str, root: str) -> dict:
+    """`grab:<path>` grabs the WINDOW; `grab:<path>@<objectName>` grabs ONE WIDGET - and always ANSWERS.
+
+    The second form exists because a picture's quality cannot be measured through a window crop. A QRhi surface is
+    REFUSED, not attempted: `QWidget.grab()`/`grabFramebuffer()` wait for a paint on the thread serving the request, so a
+    paused pane parks the whole channel (measured 2026-11-24 and again 2026-11-27). Every failure - no such widget, an
+    exception from a stale C++ object, a failed save - comes back as an `error` in the answer, never as silence.
+    """
+    report = {"stamp": _stamp(), "kind": "grab", "path": None, "saved": False, "widget": None, "size": None,
+              "error": None}
+    try:
+        target, _, widget_name = spec.partition("@")
+        target = target.strip() or os.path.join(root, f"grab-{_stamp()}.png")
+        report["path"] = target
+        report["widget"] = widget_name.strip() or None
+        os.makedirs(os.path.dirname(target) or root, exist_ok=True)
+        subject = window
+        if widget_name:
+            found = window.findChild(QWidget, widget_name.strip())
+            if found is None:
+                report["error"] = f"no widget named {widget_name.strip()!r}"
+                return report
+            subject = found
+        grab_frame = (getattr(subject, "grabFramebuffer", None)
+                      or getattr(subject, "grabFrame", None))
+        if callable(grab_frame) or _is_rhi_widget(subject):
+            report["error"] = ("a QRhiWidget's frame cannot be grabbed from this channel: its frame call waits for a "
+                               "paint on the thread serving the request, so a paused pane parks the channel. Use "
+                               "window_screenshot for screen truth, or the pane's draw telemetry for geometry.")
+            return report
+        pixmap = subject.grab()
+        report["saved"] = bool(pixmap.save(target))
+        report["size"] = [pixmap.width(), pixmap.height()]
+    except Exception as exc:                       # a verb answers, always
+        report["error"] = f"{type(exc).__name__}: {exc}"
+    return report
+
+
 def _is_rhi_widget(widget) -> bool:
     """Is this a QRhi surface? A class check, because the frame method's NAME has moved between Qt versions."""
     try:
@@ -1470,57 +1508,11 @@ def install(window) -> None:
             print(f"capture-server: rhi -> {report}", flush=True)
             return
         if wanted.startswith("grab:"):
-            # `grab:<path>` grabs the WINDOW; `grab:<path>@<objectName>` grabs ONE WIDGET. The second form exists
-            # because a picture's quality cannot be measured through a window crop: the pane's position in the window
-            # is not exposed by any verb (`state:` reports progress and the strip, not geometry), so a pixel gate on the
-            # preview would otherwise have to guess where the pane is (measured 2026-11-25).
-            spec = wanted[len("grab:"):].strip()
-            target, _, widget_name = spec.partition("@")
-            target = target.strip() or os.path.join(root, f"grab-{_stamp()}.png")
-            os.makedirs(os.path.dirname(target) or root, exist_ok=True)
-            subject = window
-            if widget_name:
-                found = window.findChild(QWidget, widget_name.strip())
-                if found is None:
-                    _finish({"stamp": _stamp(), "kind": "grab", "path": target, "saved": False,
-                             "error": f"no widget named {widget_name.strip()!r}"})
-                    return
-                subject = found
-            # A QRhiWidget cannot be grabbed with `QWidget.grab()`: the call blocks waiting for a frame that only the
-            # widget's own render loop produces (measured 2026-11-25: the request timed out after 30 s). Its picture
-            # is `grabFrame()`, which is also what the RHI pixel gate uses.
-            # The name is `grabFramebuffer` in PySide6 6.12 (there is no `grabFrame`): checking the wrong one made this
-            # guard fall through to `QWidget.grab()` on the pane, which waits for a frame in a NESTED event loop - the
-            # channel kept answering `state:` while the grab never returned (measured 2026-11-27: 8 s and 20 s timeouts
-            # with no refusal line). A type check plus both names, because a subclass may be either.
-            grab_frame = (getattr(subject, "grabFramebuffer", None)
-                          or getattr(subject, "grabFrame", None))
-            is_rhi = callable(grab_frame) or _is_rhi_widget(subject)
-            if is_rhi and widget_name:
-                # REFUSED, not attempted: `grabFrame()` WAITS for a paint, and this handler runs on the very GUI thread
-                # that would have to paint - a paused pane therefore deadlocks the whole channel (measured 2026-11-26:
-                # `grab:...@previewLabel` answered nothing for 40 s; the wheel request that followed answered normally,
-                # so it was a nested wait, not a slow render). Nudging with `update()` does not help: the wait is inside
-                # the Qt call. The two honest instruments are the framebuffer (`window_screenshot`) and the pane's own
-                # telemetry (`preview: draw ... px= rect= scale=`, which is what the geometry defects were measured
-                # with).
-                _finish({"stamp": _stamp(), "kind": "grab", "path": target, "saved": False,
-                         "widget": widget_name.strip(),
-                         "error": "a QRhiWidget's frame cannot be grabbed from this channel: grabFrame() waits for a "
-                                  "paint on the thread serving the request, so a paused pane deadlocks it. Use "
-                                  "window_screenshot for screen truth, or the pane's draw telemetry for geometry."})
-                print(f"capture-server: grab {widget_name.strip()} -> refused (QRhiWidget)", flush=True)
-                return
-            else:
-                pixmap = subject.grab()
-                saved = pixmap.save(target)
-                size = [pixmap.width(), pixmap.height()]
-            _finish({"stamp": _stamp(), "kind": "grab", "path": target, "saved": bool(saved),
-                     "widget": widget_name.strip() or None, "size": size})
-            # `pixmap` does not exist on the `grabFrame` branch (a NameError after `_finish` killed the poll loop's
-            # handler on every RHI grab - measured 2026-11-26). The answer's own size is the one to print.
-            print(f"capture-server: grab {widget_name.strip() or 'window'} -> {target} "
-                  f"({size[0]}x{size[1]})", flush=True)
+            # The whole branch is one function so a failure ANOTHER WAY answers with its reason: a verb that returns
+            # without an answer leaves the client waiting (measured 2026-11-27: `grab:...@previewLabel` timed out with no
+            # answer file and no log line at all, while `state:` kept answering - the channel was fine, the handler just
+            # said nothing on a path nobody had wrapped).
+            _finish(grab_answer(window, wanted[len("grab:"):].strip(), root))
             return
         if wanted.startswith("probe_at:"):
             from PySide6.QtCore import QPoint

@@ -275,3 +275,32 @@ def test_the_grab_guard_recognises_an_rhi_surface_by_its_Qt6_frame_method():
     # Either name is enough for the refusal branch in the handler; the type check covers the real widget.
     assert callable(getattr(_Qt6Rhi(), "grabFramebuffer", None))
     assert callable(getattr(_OlderRhi(), "grabFrame", None))
+
+
+def test_the_grab_verb_always_answers_even_when_the_widget_is_gone():
+    """A verb that returns without an answer leaves the client waiting; the grab branch must answer EVERY way.
+
+    Measured 2026-11-27: `grab:...@previewLabel` produced no answer file and no log line at all while `state:` kept
+    answering - the handler said nothing on a path nobody had wrapped. `grab_answer` now returns a report for every
+    outcome, including an exception raised by a stale C++ object.
+    """
+    from types import SimpleNamespace
+
+    from src.ui.capture_server import grab_answer
+
+    class _Window:
+        def findChild(self, *args):                    # no such widget
+            return None
+
+    report = grab_answer(_Window(), "/tmp/opencode/x.png@nope", "/tmp/opencode")
+    assert report["error"] and "no widget named" in report["error"]
+    assert report["saved"] is False
+
+    class _Boom:
+        def findChild(self, *args):
+            raise RuntimeError("Internal C++ object already deleted.")
+
+    report = grab_answer(_Boom(), "/tmp/opencode/x.png@previewLabel", "/tmp/opencode")
+    assert report["error"] and "RuntimeError" in report["error"], "an exception must come back as an answer"
+    assert grab_answer(SimpleNamespace(), "/tmp/opencode/x.png", "/tmp/opencode")["error"] is None, (
+        "the window form still grabs")
