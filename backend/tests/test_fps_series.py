@@ -118,6 +118,18 @@ for _name in ("torch", "cv2"):
         sys.modules[_name] = types.ModuleType(_name)
         _STUBBED.append(_name)
 
+#: The RVE logger's state BEFORE this module imports `RenderVideo`: importing the app module installs the app's own
+#: in-place logging handler, and a test that pops the module again leaves that handler behind. The next module that
+#: asserts on the logger (`backend/tests/unit_tests/test_progress_line.py`) then finds a handler built by a DIFFERENT
+#: module identity (`backend.src.utils.Util` vs `src.utils.Util`), so its `isinstance` check fails - measured
+#: 2026-11-28: the file passes alone and fails right after this one. Snapshot and restore, so a test file cannot
+#: change the process's logging for the ones that follow.
+import logging as _logging
+
+_RVE_LOGGER = _logging.getLogger("RVE")
+_SAVED_HANDLERS = list(_RVE_LOGGER.handlers)
+_SAVED_PROPAGATE = _RVE_LOGGER.propagate
+
 _RENDER_VIDEO = pytest.importorskip("backend.src.RenderVideo")
 
 if _STUBBED:
@@ -126,6 +138,13 @@ if _STUBBED:
     for _name in _STUBBED:
         sys.modules.pop(_name, None)
     sys.modules.pop("backend.src.RenderVideo", None)
+
+# Restore IMMEDIATELY, not in a fixture: pytest imports every test module during COLLECTION, before any test runs, so a
+# fixture teardown would come too late - `test_progress_line` would already have asserted against the handler this
+# import installed from the OTHER module identity (`backend.src.utils.Util` vs `src.utils.Util`). Measured 2026-11-28:
+# that file passed alone and failed in the full suite once this import existed.
+_RVE_LOGGER.handlers[:] = _SAVED_HANDLERS
+_RVE_LOGGER.propagate = _SAVED_PROPAGATE
 
 
 def _report(profile: dict) -> dict:
