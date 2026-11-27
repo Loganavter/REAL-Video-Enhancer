@@ -111,11 +111,15 @@ class SourceRegister:
             if anchor is None:
                 del self._held[min(self._held)]
                 continue
-            victim = max(
-                self._held,
-                key=lambda key: (abs(self._held[key].moment - anchor), key),
-            )
-            del self._held[victim]
+            # Protect the picture that ANSWERS the anchor; otherwise drop the OLDEST. "Farthest from the anchor" threw
+            # away the LEAD - the frames the pane is about to need - while spent frames behind the playhead stayed, so
+            # the pool looked full (`held=24`) and sat one to three frames behind the result for the whole render
+            # (measured live 2026-11-27: `compare ask newest=18.101 playhead=18.143`, `pair_hold` on every other tick).
+            anchor_key = self._key(anchor)
+            candidates = [key for key in self._held if key != anchor_key]
+            if not candidates:
+                break                              # nothing but the anchored picture: capacity 1 keeps it
+            del self._held[min(candidates)]
 
 
     def clear(self) -> None:

@@ -105,6 +105,15 @@ def source_fill(tab, playhead: float) -> None:
         if newest is not None and newest >= float(pending[0]) - 0.5 * interval:
             tab._source_fill_pending = None
         elif aged < COMPARE_FILL_WINDOW_S:
+            try:
+                from ...video import telemetry
+
+                if telemetry.level() >= 2:
+                    telemetry.event("compare fill blocked", aged_ms=round(aged * 1000.0, 1),
+                                    target=round(float(pending[0]), 3),
+                                    newest=None if newest is None else round(float(newest), 3))
+            except Exception:
+                pass
             return
         else:
             tab._source_fill_pending = None      # a request nothing answered: ask again
@@ -172,6 +181,15 @@ def source_fill(tab, playhead: float) -> None:
         # second time - and "somebody holds it" is the whole answer, whoever the owner is.
         return
     tab._source_fill_pending = (float(target), time.monotonic())
+    try:
+        from ...video import telemetry
+
+        if telemetry.level() >= 2:
+            telemetry.event("compare ask", target=round(float(target), 3), span=int(bool(span)),
+                            playhead=round(playhead, 3), newest=None if newest is None else round(float(newest), 3),
+                            held=len(register))
+    except Exception:
+        pass
     stats = getattr(tab, "_compare_fill_stats", None)
     if stats is not None:
         stats["asks"] += 1
