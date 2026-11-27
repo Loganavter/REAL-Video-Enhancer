@@ -1374,11 +1374,12 @@ class ProcessTab:
         self._compare_fill_report()
 
     def _compare_fill_report(self) -> None:
-        """One line per second of the compare's supply: asks, frames that came back, and what the pool holds.
+        """One line per second of the compare's supply: asks, frames that came back, and what the register holds.
 
         The pair's own counters say the halves disagree; they cannot say whether the source was never ASKED or asked and
-        never answered. This is that line, and it is how a frozen pool (asks climbing, arrivals flat) is told apart from a
-        clock that picks the wrong frame.
+        never answered. This is that line, and it is how a frozen register (asks climbing, arrivals flat) is told apart
+        from a clock that picks the wrong frame. `held` is the whole register; `held_newest` is filtered to the result's
+        generation, so a dash means "nothing from this generation", not "the register is empty".
         """
         stats = getattr(self, "_compare_fill_stats", None)
         if stats is None:
@@ -1396,12 +1397,16 @@ class ProcessTab:
             ph = "-"
         newest = None
         if register is not None:
+            # Generation-FILTERED on purpose (only a picture from this result's generation can answer the pane), so the
+            # field is `held_newest`: `held=24 held_newest=-` means "24 pictures, none of them this generation", not an
+            # empty register. `held` is the WHOLE register (both producers, capacity 32, no time window) - the old
+            # `pool=` meant decoder frames in a +-0.5 s window before 6c8f54b8, so a note written then cannot be quoted
+            # against today's number (telemetry audit 2026-11-27, 5.7).
             newest = register.newest_moment(generation=int(getattr(self, "_result_generation", 0)))
-            newest = None if newest is None else round(float(newest), 3)
-        telemetry.event("compare fill", asks=stats["asks"], arrivals=stats["arrivals"], pool=held,
+            newest = "-" if newest is None else round(float(newest), 3)
+        telemetry.event("compare fill", asks=stats["asks"], arrivals=stats["arrivals"], held=held,
                         held_block=by_origin.get("block", 0), held_decoder=by_origin.get("decoder", 0),
-                        playhead=ph, newest=newest, target=stats.get("target"), span=stats.get("span"),
-                        pool_min=None)
+                        playhead=ph, held_newest=newest, target=stats.get("target"), span=stats.get("span"))
         stats["asks"] = 0
         stats["arrivals"] = 0
 

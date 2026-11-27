@@ -72,13 +72,22 @@ run is still the final word for the shipped platform.
 ```
 # preview telemetry session 2026-11-24T20:45:41 level=1 pid=3103220
 preview: session file=/…/preview-log.txt pane_w=504 pane_h=721 dpr=1.0 mode=single
-preview: stats frames=24 paints=27 up=24 up_ms=0.01/0.02/1.34 pass_ms=0.40/0.52/0.98 gui_ms=0.62/0.71/0.98 int_ms=41.2/44.0/90.1 shown=f209 pair_off=0/27 pair_lone=0 pair_sub=2 pair_ahead=1 pair_behind=1 seek_ms=38.4/… window_s=1.0
+preview: stats frames=24 paints=27 up=24 up_ms=0.01/0.02/1.34 pass_ms=0.40/0.52/0.98 gui_ms=0.62/0.71/0.98 int_ms=41.2/44.0/90.1 shown=f209 pair_off=0/27 pair_lone=0 pair_sub=2 pair_ahead=1 pair_behind=1 seek_ms=38.4/… mb=1.2 window_s=1.0
+preview: compare fill asks=0 arrivals=2 held=27 held_block=0 held_decoder=27 playhead=3.560 held_newest=3.583 target=- span=-
+preview: draw mode=sbs half=pair result_t=3.560 result_idx=208 result_moment=3.560 generation=3 … original_t=3.560 … record=delta
 preview: seek press fraction=0.4210 produced=0.3800 target_s=3.542 target_frame=208
 preview: seek decide press=7 route=display target_s=3.542 target_frame=208 produced=0.3800 edge_s=7.845 answerable=1 generation=3
 preview: seek turnaround_ms=38.9 target_frame=208 press=7 landed_time=3.560 delta_s=+0.018 landed_seq=208 target_gen=3 landed_gen=3
 preview: frame seq=208 t=3.560 gen=3 gui_ms=-
 preview: hold on playhead=12.500
 ```
+
+`preview: draw` is a **DELTA record** at the default levels: the pane writes one only when the accepted picture or the
+geometry changes, so a quiet pane writes none and its absence means "no change", NOT "no paint". At level 2 it is one
+line per paint. The line says which it is: `record=delta` below level 2, `record=paint` at level 2. **Count paints with
+`stats paints=`, never by counting `draw` lines** - a cleared pane repaints through the empty-pane draw and writes no
+`draw` line, so `0 draw lines` is its healthy state. A row that depends on the ABSENCE of a draw line must say so in its
+own text (the live matrix's rows do).
 
 `pair_off` is paints whose halves were more than a frame and a half apart **in the pane's own cadence** (the counter used a hard-coded 24 fps until 2026-11-27, which read a two-frame gap at 60 fps as 0); `pair_lone` counts paints that showed ONE half and are in `pair_off`'s denominator, so a pane painting alone reads as such instead of as a perfect pair.
 
@@ -113,7 +122,13 @@ What the fields mean, so a line can be read without the source:
 * `frames` - pictures the pane ACCEPTED (`set_frame`, plus `set_original` for a compare mode's source half). Counted in
   one place only; a `frames=2` line is two pictures, not one picture twice.
 * `paints` - completed render passes, including the empty pane's clear. A cadence with `frames=0` means "the pane was
-  repainted and nothing fed it".
+  repainted and nothing fed it". This is a **per-window** counter: it is reset at every `stats` line, so the paints a
+  window received are the SUM of that window's `paints=` values (the live matrix's `window_paints`). It is the only
+  honest answer to "did anything repaint" - a count of `draw` lines is not.
+* `draw` - a DELTA record at levels 0/1 (one line per picture or geometry change; none for a cleared pane's repaint)
+  and one line per paint at level 2. `record=delta`/`record=paint` says which. `rect=` (the drawn picture's box) is
+  written by the compare-mode (`half=pair`) draws only; single-mode draws carry no `rect`, and the matrix reads a
+  rect from the CURRENT session only, never from an earlier run in the same file.
 * `up` / `up_ms` - uploads and the cost of the **enqueue call** (`QRhiResourceUpdateBatch.uploadTexture`), which is
   microseconds: the copy itself happens inside the pass, so `up_ms` is not the hand-off cost - `pass_ms` is. `up` counts
   every upload, including a re-upload on resize and the compare mode's second picture, so `up > frames` is normal.
@@ -124,7 +139,6 @@ What the fields mean, so a line can be read without the source:
   at the call site and handed to the pane. A dash is meaningful: the live feed builds its picture on the display
   thread, so the GUI thread had nothing to time.
 * `int_ms` - interval between paints: median/p95/max. On an idle pane it measures repaint-on-demand, not video cadence.
-* `drop` - frames the queue discarded (oldest for the live stream, late for the playback grid).
 * `seek_ms` - press -> the picture that ANSWERS the request. A turnaround under `MIN_SEEK_MS` (1 ms) is logged as
   `seek instant`, and on the shipped reader that can no longer happen: it means the producer could not name a
   generation and the old "any named picture" rule closed the seek on whatever was already in flight.
@@ -149,6 +163,48 @@ What the fields mean, so a line can be read without the source:
   the display channel's sequence. **Neither is the renderer's frame counter** - that counter named a frame the pane was
   not showing once, and a `landed == target` from it proved nothing.
 * `shown` - `f<n>` (a decoder's frame) or `seq<n>` (the display channel's sequence). A dash means no picture yet.
+
+### The compare's supply line (`compare fill`)
+
+One line per second of the compare's source supply, written by `ProcessTab._compare_fill_report`:
+
+* `asks` / `arrivals` - counts **since the previous line** (the window is the line's own second; the line carries no
+  `window_s`, so do not compare `asks` across lines of different cadence).
+* `held` - every picture in the source **register**: both producers, capacity 32, no time window. This is the field
+  renamed from `pool=`, which before `6c8f54b8` meant only decoded frames pruned to a +-0.5 s window - a note written
+  before that commit and a line written after it quote different quantities, which is why the name changed rather than
+  the number.
+* `held_block` / `held_decoder` - `held` split by producer (`block` = the render's own pictures, `decoder` = the
+  comparison decoder). `held_block=24` while a render is alive and `0` after it is a healthy end of render.
+* `held_newest` - the newest moment held **for the result's current generation**; the field was `newest=` and the filter
+  was invisible, so `held=24 held_newest=-` read as an empty pool. It is not: 24 pictures are held, none of them from
+  this generation. A dash is that answer, not a measurement failure.
+* `playhead` - the picture the pane has ACCEPTED (not the seek's requested position).
+* `target` / `span` - the LAST ask of the window (they are not cleared when the line is written), so `asks=0 target=3.542`
+  prints a request that may be stale.
+
+### Reading a record back
+
+Fields are `key=value` tokens separated by spaces. A value that carries a space, a quote or a backslash is
+double-quoted and escaped, and a newline is written as the two characters `\n`, so one record is always one line:
+
+```
+preview: seek refused press=1 reason="queue-decode-failed: boom happened = exit 1"
+```
+
+`telemetry.parse(line)` is the reader that survives that (`{"_event": "seek refused", "press": "1", "reason":
+"queue-decode-failed: boom happened = exit 1"}`); `_event` is the record's kind. Splitting the line on spaces and calling
+`dict(part.split("=", 1))` - what the old `awk`-style readers did - truncates that reason to
+`queue-decode-failed:`.
+
+### The backend's own `since process start` lines
+
+`phase: backend init … s since process start`, `startup: first frame enqueued … s after process start` and
+`render loop: … total … s since process start` all use **one** zero: `process_uptime()` from `backend/src/utils/Util.py`,
+whose `PROCESS_START` is set when the entry point imports `Util` (the first backend module it imports). Every such line
+says `(Util import)` so the zero is in the line, not in the reader's memory. The numbers can be subtracted. Before
+2026-11-27 the first line used that zero while the other two used `RenderVideo._T0`, set after the torch/tensorrt
+imports - two origins under one label, and `startup:` could be smaller than `phase: backend init`.
 
 ## The same surface as an MCP server (`harness/mcp-server/app`)
 
