@@ -6,6 +6,10 @@ effect, not by comment:
 
 * a REFUSED strip press is a no-op (audit §6.3, `b33df4c1`) - the result generation and the compare register are
   untouched, and an accepted press mints the ONE token exactly once;
+* the route ANSWERS (audit §6.4) - True from an accepting route, False from every refusal path - and that answer is what
+  the adapter, the session and the controller read, so a refused press no longer parks the marker on a request nothing
+  will answer until the 1.5 s deadline gives up on it. Proven red-before by reverting the three source files: the six
+  tests of that section went red and the rest of the file stayed green (2026-11-27);
 * the decoder's picture arrival writes the compare's `arrivals` counter (audit §6 / `rules.md` §6).
 
 Every extracted function also has one test that fails if its body is replaced by `pass`, so the delegation cannot go
@@ -52,6 +56,10 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QThread  # noqa: E402
 
+from src.ui.preview.backends import HostPlaybackBackend  # noqa: E402
+from src.ui.preview.controller import PreviewController  # noqa: E402
+from src.ui.preview.session import PreviewSession  # noqa: E402
+from src.ui.preview.state import PreviewBackendKind, PreviewCommand  # noqa: E402
 from src.ui.preview.use_cases import job, seek, transport  # noqa: E402
 
 sys.path[:] = _ORIGINAL_SYS_PATH
@@ -189,6 +197,7 @@ def test_an_accepted_press_mints_the_token_exactly_once_per_press():
     """A drag emits many presses; each accepted one mints ONE token, and no press mints more than one."""
     session = _Session()
     bumped = []
+    answers = []
 
     def next_generation():
         bumped.append(1)
@@ -214,8 +223,9 @@ def test_an_accepted_press_mints_the_token_exactly_once_per_press():
     )
 
     for fraction in (0.1, 0.2, 0.3):
-        seek.on_preview_seek(tab, fraction)
+        answers.append(seek.on_preview_seek(tab, fraction))
 
+    assert answers == [True, True, True], "an accepted press reports its acceptance to the session"
     assert len(bumped) == 3, "one mint per accepted press (a drag is three presses, not one and not six)"
     assert tab._result_generation == 3
     assert [ticket.route for ticket in session.tickets] == ["tail", "tail", "tail"]
@@ -406,3 +416,193 @@ def test_on_job_finished_starts_a_preview_job_from_its_own_file():
     job.on_job_finished(tab)
 
     assert calls == ["restore", ("play", "/out/preview.mkv")]
+
+
+# --- audit §6.4: the press route answers, and the answer travels -----------------------------------
+#
+# Before the fix the route recorded a refusal on the ticket and in the log but returned nothing, and the adapter above
+# it answered True "whenever a handler exists". So the session and the controller read an ACCEPTED press, the marker
+# stood on a request nothing would answer, and 1.5 s later the deadline wrote `gave up` (audit §6.4, `session.py:52`).
+# The three tests below pin the ANSWER at its three layers: the route, the adapter, and the session/controller seam.
+
+def _refused(tab, fraction: float, reason: str):
+    """A press the route refuses: False, and the record says why (the ticket's reason is what the status line shows)."""
+    assert seek.on_preview_seek(tab, fraction) is False, f"{reason}: the route reported an acceptance"
+    ticket = tab._press
+    assert ticket is not None and ticket.open is False and ticket.reason == reason, (
+        f"{reason}: the record must name the reason, got {None if ticket is None else ticket.reason!r}")
+
+
+def test_a_refused_press_answers_false_for_every_refusal_the_audit_names():
+    """No block / no process / unknown clip length: the three refusals §6.4 names, each one an ANSWER.
+
+    Breaks it: the pre-fix shape of `use_cases/seek.py` (every refusal a bare `return`), which makes this test see
+    `None` instead of `False` - the state the adapter above read as "accepted".
+    """
+    # A preview without a usable block: its tail is all there is, and this press cannot reach it.
+    session = PreviewSession()
+    no_block = _owner(isPreview=True, _press_session=lambda: session,
+                      _clip_duration=lambda owner=None: 10.0)
+    _refused(no_block, 0.4, "preview-without-a-block")
+
+    # A preview whose block is attached but whose render is gone: nothing would render that one frame.
+    no_process = _owner(isPreview=True, _display=SimpleNamespace(attached=True), renderProcess=None,
+                        _press_session=lambda: PreviewSession(),
+                        _clip_duration=lambda owner=None: 10.0)
+    no_process._request_display_seek = lambda fraction, hold: seek.request_display_seek(
+        no_process, fraction, hold=hold)
+    _refused(no_process, 0.4, "no-process-or-unknown-length")
+
+    # An export with a live render but an unknown clip length: a share cannot become seconds.
+    unknown_clip = _owner(isPreview=False, _display=SimpleNamespace(attached=True),
+                          renderProcess=_Process(alive=True), _press_session=lambda: PreviewSession(),
+                          _clip_duration=lambda owner=None: 0.0,
+                          _update_display_wanted=lambda: None, _display_seek_pending=True)
+    unknown_clip._request_display_seek = lambda fraction, hold: seek.request_display_seek(
+        unknown_clip, fraction, hold=hold)
+    _refused(unknown_clip, 0.4, "no-render-and-no-file-decoder")
+
+
+def test_the_decoder_route_answers_an_acceptance_and_watches_the_asked_time():
+    """The other accepting route (the tail's is above): a finished file's own decoder takes the press and says so."""
+    session = _Session()
+    decoder = SimpleNamespace(fps=24.0, duration=10.0, seeks=[], seek=lambda seconds: decoder.seeks.append(float(seconds)))
+    tab = _owner(
+        _preview_decoder=decoder,
+        _preview_duration=10.0,
+        _press_session=lambda: session,
+        _next_result_generation=lambda: 1,
+        _clip_duration=lambda owner=None: 10.0,
+    )
+
+    assert seek.on_preview_seek(tab, 0.5) is True
+
+    assert decoder.seeks == pytest.approx([5.0])
+    assert session.tickets[-1].route == "decoder"
+    assert session.watches == pytest.approx([5.0]), "the landing watch asks the time the decoder was given"
+
+
+def test_the_host_adapter_answers_what_the_route_decided_and_false_without_a_handler():
+    """`_HostBackend.seek_to` used to answer True whenever a handler EXISTED (audit §6.4) - now it answers the route."""
+
+    class Page:
+        def __init__(self, answer) -> None:
+            self.answer = answer
+            self.asked: list[float] = []
+
+        def _clip_duration(self) -> float:
+            return 20.0
+
+        def _on_preview_seek(self, fraction: float):
+            self.asked.append(float(fraction))
+            return self.answer
+
+    accepting = Page(True)
+    assert HostPlaybackBackend(accepting).seek_to(4.0) is True
+    assert accepting.asked == pytest.approx([0.2]), "the press still reaches the page in its own share of the clip"
+
+    refusing = Page(False)
+    assert HostPlaybackBackend(refusing).seek_to(4.0) is False, "a refused press must not be reported as accepted"
+    assert refusing.asked == pytest.approx([0.2]), "the refusal is still recorded: the press DID reach the route"
+
+    no_handler = SimpleNamespace(_clip_duration=lambda: 20.0)
+    assert HostPlaybackBackend(no_handler).seek_to(4.0) is False, "no handler is an answer too, and it is not 'accepted'"
+
+
+def test_the_session_reads_the_route_answer_through_the_adapter_and_names_the_reason():
+    """The shipped path TODAY: `ProcessTab._on_preview_seek` is a one-line delegator that returns nothing.
+
+    The adapter must not read that silence as an acceptance or as a refusal: the record the route writes is the
+    answer (an accepted press leaves its ticket open, a refusal closes it with a reason), and the session's status
+    line carries that reason instead of its generic "nothing can show X s".
+    """
+    session = PreviewSession()
+    tail = SimpleNamespace(produced_seconds=10.0, seeks=[], seek=lambda target: tail.seeks.append(float(target)))
+    accepted_page = _owner(
+        _live_tail=tail,
+        _preview_session_existing=lambda: session,
+        _press_session=lambda: session,
+        _next_result_generation=lambda: 1,
+        _clip_duration=lambda owner=None: 10.0,
+        _live_timeline=lambda edge: 10.0,
+    )
+
+    class Delegator:
+        """`ProcessTab._on_preview_seek` as it is in this tree: it routes the press and answers nothing."""
+
+        def __init__(self, owner) -> None:
+            self.owner = owner
+
+        def _clip_duration(self) -> float:
+            return 10.0
+
+        def _preview_session_existing(self) -> PreviewSession:
+            return session
+
+        def _on_preview_seek(self, fraction: float) -> None:
+            seek.on_preview_seek(self.owner, fraction)
+
+    session.bind(clock=HostPlaybackBackend(Delegator(accepted_page)), duration=10.0, reach=10.0,
+                 frame_interval=1 / 24)
+
+    assert session.seek_to(5.0) is True, "the tail took the press: the record says so even without a returned answer"
+    assert tail.seeks == pytest.approx([5.0])
+    assert session.refusal() is None
+
+    refused_session = PreviewSession()
+    refused_page = _owner(isPreview=True, _preview_session_existing=lambda: refused_session,
+                          _press_session=lambda: refused_session,
+                          _clip_duration=lambda owner=None: 10.0)
+
+    class RefusingDelegator(Delegator):
+        def _preview_session_existing(self) -> PreviewSession:
+            return refused_session
+
+    refused_session.bind(clock=HostPlaybackBackend(RefusingDelegator(refused_page)), duration=10.0, reach=10.0,
+                         frame_interval=1 / 24)
+
+    assert refused_session.seek_to(5.0) is False, "a refused press is not an accepted one"
+    assert refused_session.refusal() == "preview-without-a-block", (
+        "the session's one status line carries the ROUTE's reason, not the generic 'nothing can show 5.000 s'")
+
+
+def test_the_controller_playhead_does_not_stand_on_a_refused_press(qapp):
+    """The user-visible half of §6.4: a refused press must not move the marker (and must say why on the status line).
+
+    Breaks it: `_HostBackend.seek_to` returning True whenever the handler exists (the pre-fix line) - the playhead then
+    moves to 4.0 s on a press nothing answered, which is the marker standing on the request until `gave up`.
+    """
+
+    class Page:
+        def __init__(self) -> None:
+            self.answer = False
+            self.asked: list[float] = []
+
+        def _clip_duration(self) -> float:
+            return 20.0
+
+        def _on_preview_seek(self, fraction: float) -> bool:
+            self.asked.append(float(fraction))
+            return self.answer
+
+    page = Page()
+    controller = PreviewController()
+    controller.register_backend(PreviewBackendKind.LIVE_TAIL, HostPlaybackBackend(page))
+    controller.set_backend(PreviewBackendKind.LIVE_TAIL)
+    controller.observe(is_playing=True, has_picture=True, playhead=2.0, played=2.0,
+                       duration=20.0, produced=20.0, fps=24.0, seek_ceiling=20.0)
+    lines: list[str] = []
+    controller.status.connect(lines.append)
+
+    controller.dispatch(PreviewCommand.SEEK_TO, 4.0)
+
+    assert page.asked == pytest.approx([0.2]), "the press still reached the page"
+    assert controller.state().playhead == pytest.approx(2.0), (
+        "the playhead stood on a refused target - the marker parks on the request until the deadline gives up")
+    assert controller.session().refusal() is not None
+    assert [line for line in lines if "refused" in line], f"a refused press must say so, got {lines}"
+
+    page.answer = True
+    controller.dispatch(PreviewCommand.SEEK_TO, 6.0)
+    assert controller.state().playhead == pytest.approx(6.0), "an accepted press still stands on its request"
+

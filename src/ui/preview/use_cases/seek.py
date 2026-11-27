@@ -4,6 +4,10 @@ What this module owns:
 
 * routing a press/drag to the object that can answer it (queue item, live tail, finished-file decoder, the renderer's
   on-demand block), and refusing when no route can;
+* the ANSWER of that routing (`on_preview_seek` -> bool). Audit §6.4: the route recorded its refusal on the ticket and
+  in the log but answered nothing, so the adapter above it reported every press as accepted and the marker stood on a
+  request nothing would answer until the 1.5 s deadline abandoned it. A route that cannot take the press now says so to
+  its caller; the record and the log keep exactly the shape they had;
 * the result-generation bump: it happens ONLY where a route actually asks (`bump_generation`), never at the top of the
   press. That is the fix for audit §6.3 (commit `b33df4c1`): a refused press used to bump `_result_generation` and clear
   the compare register while nothing on screen moved, so every source offer was refused as the wrong generation until
@@ -32,7 +36,7 @@ def _log(message: str) -> None:
     log(message)
 
 
-def on_preview_seek(tab, fraction: float) -> None:
+def on_preview_seek(tab, fraction: float) -> bool:
     """A press or drag on the strip seeks whoever owns the picture - the ROUTE is all that is decided here.
 
     Live, that is the tail: it repositions inside what the renderer has already written, and the next poll
@@ -46,6 +50,12 @@ def on_preview_seek(tab, fraction: float) -> None:
     The REACH is not checked here: `PreviewSession.seek_to` has already refused a target past it before this
     method is called (plan P1 - the clamp lives in one place). The press record is the session's too: this method
     asks for the ticket for the press it is routing and fills in the route facts only the page knows.
+
+    Returns True when a route ACCEPTED the press and False on every refusal path. The answer is the whole point of
+    audit §6.4: the refusal used to live only on the ticket and in the log, while the adapter above
+    (`backends._HostBackend.seek_to`) answered "accepted" to the session and the controller, so the marker stood on a
+    request nothing would answer until the deadline abandoned it. The ticket calls and the log lines below are
+    unchanged - this is about the ANSWER, not the record.
 
     The generation is minted by a route that asks, never by the attempt (audit §6.3, fix `b33df4c1`).
     """
@@ -113,9 +123,10 @@ def on_preview_seek(tab, fraction: float) -> None:
             except Exception as exc:
                 ticket.refused(f"queue-decode-failed: {exc}")
                 _log(f"queue pane: seek failed ({exc})")
-        else:
-            ticket.refused("queue-has-no-duration")
-        return
+                return False
+            return True                # the queue item's decoder took the press
+        ticket.refused("queue-has-no-duration")
+        return False
     live = getattr(tab, "_live_tail", None)
     produced = tab._live_produced_fraction()
     clip = tab._clip_duration()
@@ -139,17 +150,17 @@ def on_preview_seek(tab, fraction: float) -> None:
         # press is one request and a hold on the picture it yields.
         if tab._request_display_seek(fraction, hold=True):
             bump_generation()
-            return
+            return True                # the renderer will render that one frame
         ticket.refused("no-process-or-unknown-length")
         _log("seek: refused - the running render cannot answer that press (no process, or the clip length is unknown)")
-        return
+        return False
     if live is not None:
         edge = float(getattr(live, "produced_seconds", 0.0) or 0.0)
         if edge <= 0.0:
             ticket.decide(route="tail", answerable=False, why="nothing-written-yet")
             ticket.refused("nothing-written-yet")
             _log("seek: refused - nothing is written yet")
-            return                      # nothing is written yet, so there is nothing to seek to
+            return False                # nothing is written yet, so there is nothing to seek to
         target = fraction * tab._live_timeline(edge)
         # The tail maps a strip share onto ITS timeline (the clip length, or the flushed edge when it is unknown),
         # so the asked time it must be judged against is this one, not the ticket's whole-clip target.
@@ -158,7 +169,7 @@ def on_preview_seek(tab, fraction: float) -> None:
         live.seek(target)
         ticket.decide(route="tail", answerable=True)
         _log(f"seek: tail asked for {target:.3f}s (published edge {edge:.3f}s)")
-        return
+        return True                    # the tail took the target
     decoder = getattr(tab, "_preview_decoder", None)
     duration = float(getattr(tab, "_preview_duration", 0.0) or 0.0)
     if decoder is not None and duration > 0:
@@ -169,7 +180,7 @@ def on_preview_seek(tab, fraction: float) -> None:
         tab._press_session().watch(fraction * duration)
         decoder.seek(fraction * duration)
         _log(f"seek: decoder asked for {fraction * duration:.3f}s")
-        return
+        return True                    # the file's own decoder took the target
     # EXPORT, third route: no tail and no file decoder, but a renderer is alive and publishing into the pane's
     # block. The strip's share becomes a newest-wins request - `(seconds, generation + 1)` - and the renderer
     # decodes that one frame through the model path and publishes it without writing it to the export. A request
@@ -177,21 +188,22 @@ def on_preview_seek(tab, fraction: float) -> None:
     # A PREVIEW with no usable block keeps today's refusal: its tail is all there is.
     if bool(getattr(tab, "isPreview", False)):
         ticket.refused("preview-without-a-block")
-        return
+        return False                   # a preview's tail is all there is, and this press cannot reach it
     # An export press used to pass `hold=False` - "its feed keeps painting the moving band" - which is exactly what
     # the owner saw: the newest upscaled frame painted over his request and the marker dragged to the produced edge,
     # pause notwithstanding (2026-11-24). A press on a PAUSED pane parks on the requested picture; while playing it
     # stays a live follow, and the answer is one publication in the stream.
     if tab._request_display_seek(fraction, hold=bool(getattr(tab, "_preview_paused", False))):
         bump_generation()
-    else:
-        # Nobody will answer: the render has finished (or never started), and an export has no file decoder behind
-        # the pane. Refusing keeps the pane honest - it also clears the pending flag, because a parked pane that
-        # waits forever for a picture is the "video became unavailable after the render" the owner reported
-        # (2026-11-25). Reported instead of silent: the press was logged as decided and then vanished.
-        ticket.refused("no-render-and-no-file-decoder")
-        tab._display_seek_pending = False
-        tab._update_display_wanted()
+        return True                    # the export's feed took the request
+    # Nobody will answer: the render has finished (or never started), and an export has no file decoder behind
+    # the pane. Refusing keeps the pane honest - it also clears the pending flag, because a parked pane that
+    # waits forever for a picture is the "video became unavailable after the render" the owner reported
+    # (2026-11-25). Reported instead of silent: the press was logged as decided and then vanished.
+    ticket.refused("no-render-and-no-file-decoder")
+    tab._display_seek_pending = False
+    tab._update_display_wanted()
+    return False
 
 
 def request_display_seek(tab, fraction: float, *, hold: bool) -> bool:

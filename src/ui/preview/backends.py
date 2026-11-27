@@ -15,8 +15,9 @@ The rules this module keeps, unchanged from the handlers they replace:
   it rather than re-implementing the owner selection - this is the "do not rewrite the tail/decoder logic" line.
 * **Seek is clamped ONCE, in `PreviewSession`.** The controller hands the session the reach and the session refuses a
   target past it before any owner is asked; the adapters carry no ceiling of their own (a second clamp here is exactly
-  the drift plan P1 removes). An adapter converts a time to the page's share and answers False when the page cannot
-  take the press - it never snaps the target somewhere else.
+  the drift plan P1 removes). An adapter converts a time to the page's share and returns the ROUTE's answer - True when
+  a route took the press, False when it refused (audit §6.4; "a handler exists" is not an answer) - and it never snaps
+  the target somewhere else.
 * **Position/produced/duration are readings**, not cached state: the tail publishes its own edge, the decoder its own
   duration, and the page knows the clip's length.
 """
@@ -163,16 +164,55 @@ class _HostBackend:
         decoder / export display), records the press and pauses a held pane. Re-implementing that here would be the
         second seek semantics the plan forbids. The REACH is not decided here: `PreviewSession` has already refused a
         target past it, so this only maps seconds to the page's share of the clip.
+
+        The ANSWER is the route's, not "a handler exists" (audit §6.4): the handler returns True when a route took the
+        press and False on every refusal path, and that is what the session and the controller read. Answering True for
+        a refused press left the marker standing on a request nothing would answer until the deadline abandoned it.
         """
         duration = self.duration
         handler = getattr(self._host, "_on_preview_seek", None)
         if callable(handler) and duration > 0.0:
             try:
-                handler(max(0.0, min(1.0, float(seconds) / duration)))
+                answer = handler(max(0.0, min(1.0, float(seconds) / duration)))
             except Exception:
                 return False
-            return True
+            if answer is None:
+                # A host whose press route does not carry the answer back yet (`ProcessTab._on_preview_seek` is a
+                # one-line delegator; returning the value is a separate change on the page). The RECORD the route
+                # writes is the same answer: a route that accepted the press leaves its ticket open, every refusal
+                # path closes it with a reason. Read, never decided, here.
+                answer = self._recorded_press_answer()
+            if answer is None:
+                # Neither an answer nor a record: this host has no press route to speak of, so nothing refused the
+                # press. Only the two callers that hand a bare handler report this shape, and every real route
+                # (use_cases/seek.py) writes a record.
+                return True
+            return bool(answer)
         return self._direct_seek(seconds)
+
+    def _recorded_press_answer(self) -> bool | None:
+        """What the page's press record says the route just did: True accepted, False refused, None no record.
+
+        `PreviewSession.ticket` is the record every route in `use_cases/seek.py` claims before it decides anything
+        (`press()`), then either leaves open (accepted) or closes through `refused(reason)` (refused). Reading it is
+        reading the ANSWER the route already wrote - the fallback exists only for a host whose delegator does not
+        return it, and it disappears once the page carries the value. `_preview_session_existing` is asked first
+        because it is the page's read that never creates a session; `_press_session` is the routing accessor and is
+        only reached on a host that does not have the read.
+        """
+        host = self._host
+        try:
+            reader = getattr(host, "_preview_session_existing", None)
+            session = reader() if callable(reader) else None
+            if session is None:
+                session_of = getattr(host, "_press_session", None)
+                session = session_of() if callable(session_of) else None
+            ticket = getattr(session, "ticket", None)
+        except Exception:
+            return None
+        if ticket is None:
+            return None
+        return bool(getattr(ticket, "open", False))
 
     def _direct_seek(self, seconds: float) -> bool:
         return False

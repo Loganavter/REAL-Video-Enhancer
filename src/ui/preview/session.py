@@ -297,10 +297,13 @@ class PreviewSession:
 
     def seek_to(self, seconds: float, *, clock=None, duration: float | None = None,
                 reach: float | None = None, frame_interval: float | None = None) -> bool:
-        """The one seek: clamp, open one ticket, ask the clock. True when the clock took the target.
+        """The one seek: clamp, open one ticket, ask the clock. True when the clock TAKES the target.
 
-        Omitted inputs fall back to the ones `bind()` recorded. A target past the reach is NOT clamped to the reach:
-        it is refused with one reason and opens no ticket, so the pane never claims a time nothing can show.
+        The clock is the page's press route (`backends._HostBackend.seek_to`), and since audit §6.4 its answer is the
+        route's own: False for every refusal path, with that path's reason carried into `refusal()` (not the generic
+        "nothing can show X s" the session would otherwise print over it). Omitted inputs fall back to the ones
+        `bind()` recorded. A target past the reach is NOT clamped to the reach: it is refused with one reason and
+        opens no ticket, so the pane never claims a time nothing can show.
         """
         if clock is not None:
             self._clock = clock
@@ -327,7 +330,13 @@ class PreviewSession:
         if not _clock_seek(self._clock, target):
             reason = f"nothing can show {target:.3f} s"
             self._pending = False
-            ticket.refused(reason)
+            # A route that refused already closed the ticket with ITS reason (`ticket.refused(...)` in the use case);
+            # `refused()` here then answers False and the record keeps that reason. The session's one status line
+            # must carry the reason the reader can act on ("preview-without-a-block"), not the generic fallback -
+            # audit §6.4's complaint was that the three layers that say "this press worked" disagreed, and the
+            # wording was the only one of them the log never showed.
+            if not ticket.refused(reason) and ticket.reason:
+                reason = str(ticket.reason)
             self._refuse(reason, past_reach=False)
             return False
         self._refusal = None

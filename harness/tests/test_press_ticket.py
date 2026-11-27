@@ -107,3 +107,39 @@ def test_a_streaming_picture_is_named_once_per_press_and_is_not_an_outcome(monke
     assert kind == "seek stream"
     assert (fields["seq"], fields["t"], fields["not_the_answer"]) == (98, "4.046", 1)
     assert ticket.open, "a streaming frame does not end the press - only its own answer does"
+
+
+def test_a_refusal_names_its_reason_on_the_record_and_a_later_refusal_cannot_rewrite_it(monkeypatch):
+    """The record is the ANSWER a route leaves behind (audit §6.4).
+
+    `PreviewSession.seek_to` closes a ticket with its generic "nothing can show X s" once the clock says no, so the
+    route's own reason must survive that call: it is the wording the session's one status line prints, and
+    "preview-without-a-block" is the one a reader can act on.
+    """
+    lines = _capture(monkeypatch)
+    ticket = PressTicket(target_s=4.0, target_frame=96)
+    ticket.decide(route="display", answerable=False, why="target-past-produced-edge")
+
+    assert ticket.refused("preview-without-a-block") is True
+    assert ticket.reason == "preview-without-a-block"
+    assert lines.events[-1][0] == "seek refused"
+    assert lines.events[-1][1]["reason"] == "preview-without-a-block"
+
+    assert ticket.refused("nothing can show 4.000 s") is False, "one outcome per press"
+    assert ticket.reason == "preview-without-a-block", "the route's reason is the one the status line carries"
+    assert sum(1 for kind, _fields in lines.events if kind == "seek refused") == 1, "no second refusal line"
+
+
+def test_an_accepted_press_stays_open_which_is_what_the_adapter_reads_as_an_acceptance(monkeypatch):
+    """The other half of the same record: a route that takes the press leaves its ticket OPEN.
+
+    A host whose delegator does not return the answer (`ProcessTab._on_preview_seek` today) is answered by this
+    record; `ticket.open` must therefore mean exactly "no refusal, no outcome yet", not "decided but silent".
+    """
+    _capture(monkeypatch)
+    accepted = PressTicket(target_s=2.0, target_frame=48)
+    accepted.decide(route="tail", answerable=True)
+
+    assert accepted.open is True
+    assert accepted.refused("nothing can show 2.000 s") is True
+    assert accepted.open is False and accepted.reason == "nothing can show 2.000 s"
