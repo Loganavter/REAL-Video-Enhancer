@@ -401,6 +401,8 @@ def probe(clip: str, model_path: str, width: int, height: int, frames: int = 16,
             from .Frame import Frame
             frame = Frame("tensorrt", width, height, "cuda", 0, False, "float16",
                           high_bitdepth=False)
+            # identity: a probe frame wraps a tensor for the engine; it is not a picture from the reader, so it has no
+            # source time to carry (and must not invent one).
             frame.set_frame_tensor(x, copy=True)
             out = engine_ref(frame)
             if out is None:

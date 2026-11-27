@@ -571,6 +571,23 @@ class Frame:
         return np_frame
 
     
+    def carry_identity_from(self, source: "Frame") -> "Frame":
+        """Take `source`'s identity: this frame is the SAME picture, one stage further.
+
+        The reader is the only code that can name a picture's presentation time (`FFmpegBuffers` sets `pts` from the
+        source's own packet list, `-fps_mode passthrough` included). Everything downstream - an upscale, a reuse
+        correction, a cached copy - receives that same picture and must hand it on under the same name. When it does
+        not, the renderer's fallback (a pipe counter) silently becomes the export's media time: a gapped or VFR source
+        exports short and the pane compares against a number nobody sent (backend audit, 2026-11-27).
+
+        A stage that SYNTHESISES a picture (interpolation sits between two sources) must not call this - it names its
+        own time or leaves `pts` None and says why.
+        """
+        if not isinstance(source, Frame):
+            raise TypeError(f"carry_identity_from expects a Frame, got {type(source).__name__}")
+        self.pts = source.pts
+        return self
+
     def clone(self) -> "Frame":
         new_frame = Frame(
             backend=self.backend,
@@ -591,6 +608,7 @@ class Frame:
         new_frame.yuv10_output = self.yuv10_output
         new_frame.yuv10_matrix = getattr(self, "yuv10_matrix", "bt709")
         new_frame.yuv8_output = getattr(self, "yuv8_output", False)
+        new_frame.carry_identity_from(self)
         return new_frame
     
     def get_dummy_frame(self) -> "Frame":

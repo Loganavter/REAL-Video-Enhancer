@@ -195,6 +195,8 @@ class InterpolateRIFENCNN:
             timestep = (n + 1) * 1.0 / (self.interpolateFactor)
             frame = self.render.process_bytes(self.frame0, img1.get_frame_bytes(), timestep)
             retFrame = Frame(self.backend, self.width, self.height, img1.device, gpu_id=img1.gpu_id, hdr_mode=self.hdr_mode, dtype=img1.dtype)
+            # identity: an interpolated picture sits BETWEEN two sources - its time is synthesised from `timestep` by
+            # whoever asked for the interpolation, never copied from either end.
             retFrame.set_frame_bytes(frame)
             yield retFrame
         self.frame0 = img1

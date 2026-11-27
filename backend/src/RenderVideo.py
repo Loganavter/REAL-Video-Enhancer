@@ -1140,6 +1140,7 @@ class Render:
                       high_bitdepth=cached.high_bitdepth)
         frame.yuv10_output = cached.yuv10_output
         frame.yuv8_output = cached.yuv8_output
+        frame.carry_identity_from(cached)
         # same stream as the correction's ops, so the ordering is preserved without a device barrier
         frame.set_frame_tensor(corrected, sync=False)
         return frame
@@ -1458,6 +1459,8 @@ class Render:
             source = self.readBuffer
             frame = Frame(source.backend, source.width, source.height, source.device, source.gpu_id,
                           source.hdr_mode, source.dtype, high_bitdepth=source.high_bitdepth)
+            # identity: the seek path names this picture from the reader's own `last_pts` (below), not from a source
+            # frame - the request is NOT the frame's time, and copying one here would look authoritative and be wrong.
             frame.yuv10_input = bool(source.high_bitdepth and not source.hdr_mode)
             frame.set_frame_bytes(chunk)
             _t_bytes = _perf_counter()

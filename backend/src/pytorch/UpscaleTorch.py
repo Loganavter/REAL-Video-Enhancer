@@ -158,7 +158,7 @@ class UpscalePytorch:
         self._slot_streams = []
         self._slot_busy = []
         self._slot_i = 0
-        self._pending = []          # [(tensor, event)] results not yet emitted
+        self._pending = []          # [(tensor, event, pts)] results not yet emitted, with the source's own time
         self._slot_models_ready = False
         self.tile_reuse = tile_reuse
         self.tile_threshold = tile_threshold
@@ -446,6 +446,7 @@ class UpscalePytorch:
         through flush(), which RenderVideo calls when the reader ends.
         """
         dtype = image.dtype
+        image_pts = image.pts     # `del image` below: the source's own time must outlive it
         gpu_id = image.gpu_id
         device = image.device
         _t0 = time.perf_counter()
@@ -472,17 +473,18 @@ class UpscalePytorch:
         event = torch.cuda.Event()
         event.record(stream)
         self._slot_busy[slot] = True
-        self._pending.append((out, event))
+        self._pending.append((out, event, image_pts))
 
         if len(self._pending) <= self.num_streams - 1:
             # first passes: nothing has completed a full lap yet -> keep latency honest by
             # returning nothing and letting RenderVideo skip the frame
             return None
-        result, ev = self._pending.pop(0)
+        result, ev, result_pts = self._pending.pop(0)
         ev.synchronize()
         retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale,
                          device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                          high_bitdepth=self.high_bitdepth)
+        retFrame.pts = result_pts      # the source frame's own time, carried through the N-1 frame pipeline
         # 10-bit output ships the pipe as yuv420p10le, HDR included: the packer converts with the source's matrix
         # (`bt2020` under HDR) instead of handing ffmpeg rgb48le, which is 6 bytes/pixel for a frame the encoder stores
         # at 3 (measured 2026-11-23: 37.3 vs 18.7 MB/frame, writer 15.5 vs 6.9 ms/frame).
@@ -506,11 +508,12 @@ class UpscalePytorch:
         """Emit frames still inside the pipeline. Returns a list of Frame objects."""
         frames = []
         while self._pending:
-            result, ev = self._pending.pop(0)
+            result, ev, result_pts = self._pending.pop(0)
             ev.synchronize()
             f = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale,
                       device=self.device, gpu_id=getattr(self, "gpu_id", 0), hdr_mode=self.hdr_mode,
                       dtype=self.dtype, high_bitdepth=self.high_bitdepth)
+            f.pts = result_pts
             f.yuv10_output = bool(self.high_bitdepth) and self._pack_yuv()
             f.yuv10_matrix = self._pipe_matrix()
             f.yuv8_output = self.yuv8_output
@@ -620,6 +623,7 @@ class UpscalePytorch:
             retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale, device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                              high_bitdepth=self.high_bitdepth)
             # 10-bit output hands ffmpeg ready-made yuv420p10le instead of RGB (HDR included, with the HDR matrix)
+            retFrame.carry_identity_from(imageChunk)
             retFrame.yuv10_output = bool(self.high_bitdepth) and self._pack_yuv()
             retFrame.yuv10_matrix = self._pipe_matrix()
             retFrame.yuv8_output = self.yuv8_output
