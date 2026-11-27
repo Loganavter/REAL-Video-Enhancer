@@ -1015,13 +1015,15 @@ class ProcessTab:
         The question is `would_ask_for_overwrite`'s subject - the same predicate a control verb asks instead of
         opening this modal (`capture_server.start_render_job`). Asking the predicate here is what makes the two
         answers agree by construction rather than by two copies of `os.path.isfile`.
+
+        A "No" does NOTHING: the question is asked before any state change (the window asks first, `run` asks first
+        for a direct caller), so the old `onRenderCompletion()` + `guiChangesOnRenderCompletion()` pair - which existed
+        to undo the page lock and the transport's "running" that had already been applied - has no work left. Owner,
+        2026-11-28: "ещё лучше сам путь изменить - убрать лишние вызовы на случай No или же Yes".
         """
         if would_ask_for_overwrite(outputPath):
             self.isOverwrite = self.questionToOverride()
-            if not self.isOverwrite:
-                self.onRenderCompletion()
-                self.guiChangesOnRenderCompletion()
-                return False
+            return bool(self.isOverwrite)
         return True
 
     def checkForOverwrite(self, renderQueue: RenderQueue):
@@ -1033,7 +1035,20 @@ class ProcessTab:
     def run(
         self,
         renderQueue: RenderQueue,
+        *,
+        confirm_overwrite: bool = True,
     ):
+        """Run the queue. `confirm_overwrite=False` means the caller already asked the person.
+
+        The window asks BEFORE it touches the page (`startRender`), so the modal no longer arrives after the UI has
+        switched to "rendering"; this flag keeps the direct callers (and the tests) on the old single-call contract.
+        """
+        # THE QUESTION FIRST, for every caller: nothing below this line may run before the person has said yes. It
+        # used to sit after the transport was switched to "running" and the pane's playback was stopped, so a "No" had
+        # to undo a state nobody had asked for (and the window's own path had already disabled the page).
+        if confirm_overwrite and not self.checkForOverwrite(renderQueue):
+            return
+
         self.return_codes = [] # reset return codes
         self.userKilled = False # reset userkilled
         #: One sentence per FAILED job, built where the job dies (`describe_exit`), so the popup at the end of the pass
@@ -1061,9 +1076,6 @@ class ProcessTab:
         self._render_started_mono = monotonic()
         self.setStatus("Preparing")
         self._set_render_controls("running")
-
-        if not self.checkForOverwrite(renderQueue):
-            return
 
         self.startDiscordRPC()
         self.settings.readSettings()

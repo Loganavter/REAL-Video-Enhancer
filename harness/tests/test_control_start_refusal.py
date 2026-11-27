@@ -230,7 +230,11 @@ def test_a_persons_press_still_asks_the_modal(tmp_path, answer: bool):
     assert tab.asked == ["shown"], "the person's path must still open the dialog"
     assert allowed is answer
     if not answer:
-        assert tab.finished == 2, "declining still ends the render the way it always did (both hooks)"
+        # Owner, 2026-11-28: "убрать лишние вызовы на случай No". The completion/restore pair existed to undo the page
+        # lock and the transport's "running" that the OLD order applied before asking. With the question first there
+        # is no state to undo, so declining must call neither hook.
+        assert tab.finished == 0, (
+            "declining changes nothing, so it restores nothing: the completion hooks must not run")
 
 
 def test_the_click_path_still_reaches_the_question():

@@ -854,13 +854,22 @@ class MainWindow(QMainWindow):
             log(f"render refused: {why}")
             NotificationOverlay(f"Cannot start: {why}", self, timeout=2500)
             return
+        # ASK BEFORE MUTATING ANYTHING (owner, 2026-11-28: the overwrite notice "жестко ебашит интерфейс что тот
+        # подвисает"). The confirmation used to arrive AFTER this method had already disabled the page, hidden the
+        # QRhi preview and told the transport the job was running - so the person saw the UI switch to "rendering" and
+        # stall (hiding a QRhiWidget rebuilds its surface; on Wayland that is exactly where `eglSwapBuffers failed`
+        # comes from) only then to be asked whether to render at all. A question about whether to start must not change
+        # the state it is asking about: the modal now comes first, and a "No" leaves the window exactly as it was.
+        if not self.processTab.checkForOverwrite(renderQueue):
+            return
         self.page_handles.proc.startRenderButton.setEnabled(False)
         self.page_handles.proc.VideoPreview.setVisible(False)
         self.page_handles.proc.previewLabel.setVisible(True)
 
         self.disableProcessPage()
-        
-        self.processTab.run(renderQueue)
+
+        # The confirmation was answered above; asking again here would open the modal a second time.
+        self.processTab.run(renderQueue, confirm_overwrite=False)
 
     def disableProcessPage(self):
         from src.ui.widget_tree import enabled_widget_children
