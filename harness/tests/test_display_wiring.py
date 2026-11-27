@@ -1606,3 +1606,31 @@ def test_a_new_generation_clears_the_register_and_stamps_results():
     _pane_result(tab, pane, 2.0, "picture")
     assert pane._result_generation == generation, "the result reaches the pane stamped with the SAME generation"
     assert pane._shown_time == pytest.approx(2.0)
+
+
+def test_a_register_cleared_mid_playback_asks_for_the_playhead_itself_not_ahead_of_it():
+    """After a decoder restart / a register clear, asking AHEAD walks away from the frame the pane is showing.
+
+    Measured live 2026-11-27: `compare gap why=tolerance wanted=16.600` (frame 398 at 23.976 fps) with 397 and 399 held,
+    while `compare put pts=16.6` proves that frame had been offered before the register was emptied. The fill must take
+    the playhead's own picture first (`span=False`); the lead starts on the next arrival.
+    """
+    pane = _Pane()
+    pane.mode = "sbs"
+    pane.frames.append(QImage(2, 2, QImage.Format.Format_RGB888))
+    tab = _tab(pane=pane, preview=False, paused=False, alive=True, reader=_Reader())
+    tab.currentRenderOptions = SimpleNamespace(videoFrameCount=100, videoFps=10, inputFile="/tmp/clip.mkv")
+    tab.max_value = 100
+    asked = []
+    tab._on_original_requested = lambda seconds, **_: asked.append(float(seconds))
+
+    tab.currentFrame = 50
+    tab._tick_second_surface()                       # establishes the previous playhead; asks at it
+
+    tab.currentFrame = 51                            # playback: one step forward
+    tab._source_register.clear()                     # a decoder restart / an owner change wiped the register
+    tab._source_fill_pending = None
+    tab._tick_second_surface()
+
+    assert asked[-1] == pytest.approx(5.1), (
+        "a register that does not reach the playhead must ask for the playhead's own frame, not for the lead beyond it")

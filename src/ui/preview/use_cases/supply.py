@@ -128,9 +128,19 @@ def source_fill(tab, playhead: float) -> None:
     tab._source_fill_last = playhead
     if register.picture_for(playhead, 1.5 * interval, generation=generation) is None and moving and not paused:
         # Playback with nothing held for this moment: ask AHEAD, over a span, so one decode covers the stretch the
-        # pane is about to show. A single frame here cannot win a race against the next tick.
-        target = playhead + tab._compare_lead()
-        span = True
+        # pane is about to show. A single frame here cannot win a race against the next tick - UNLESS the register does
+        # not even REACH the playhead (a fresh decoder after a restart, a register cleared by a mode/owner change):
+        # asking ahead then walks away from the one moment the pane is showing, and nothing ever fills it - measured
+        # live 2026-11-27: `compare gap why=tolerance wanted=16.600` (frame 398 at 23.976) with 397 and 399 held, while
+        # `compare put pts=16.6` proves the frame HAD been offered before the register was emptied. The playhead's own
+        # picture comes first; the lead starts on the next arrival.
+        reaches_playhead = newest is not None and float(newest) >= playhead - interval
+        if not reaches_playhead:
+            target = playhead
+            span = False
+        else:
+            target = playhead + tab._compare_lead()
+            span = True
     elif register.picture_for(playhead, 1.5 * interval, generation=generation) is None:
         # Nothing in the register answers for THIS playhead (an empty register, a seek, a jump back): ask at it, and
         # take the single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder

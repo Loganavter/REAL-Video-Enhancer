@@ -490,6 +490,10 @@ def test_playback_asks_ahead_but_a_jump_asks_for_one_frame():
     assert owner._asked == [(pytest.approx(5.0), False)], f"asked {owner._asked}"
 
     owner._source_fill_pending = None
+    # The playhead's own frame is in hand (the register reaches it), which is what "playback asks ahead" presumes: with
+    # the register behind the playhead the fill asks for the PLAYHEAD first (a cleared register must not walk away from
+    # the picture on screen - measured 2026-11-27, `compare gap why=tolerance wanted=16.099 nearest=16.058`).
+    owner._source_register.offer(5.0 + interval, object(), "decoder")
     supply.source_fill(owner, 5.0 + interval)            # a tick later: playback
     assert owner._asked[-1] == (pytest.approx(5.0 + interval + LEAD), True), (
         f"a continuous playhead was not kept a lead ahead: {owner._asked}")
