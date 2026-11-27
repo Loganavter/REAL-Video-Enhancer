@@ -115,7 +115,23 @@ def source_fill(tab, playhead: float) -> None:
     # picture the pane was showing (owner, 2026-11-27: the original blinked a couple of times with playback never
     # started). The register's own anchor rule now protects that picture; this one stops the waste at the ask.
     paused = bool(getattr(tab, "_preview_paused", False))
-    if register.picture_for(playhead, 1.5 * interval, generation=generation) is None:
+    # IS THE PLAYHEAD MOVING, or did it JUMP? Both are "not paused", and the difference decides what to ask for: a
+    # continuous advance (~a frame per tick) is playback and needs the LEAD, or every ask chases a moment that has
+    # already moved on - measured live 2026-11-27 in the owner's session: the source lagged 21 frames, 29 results were
+    # refused as older than the picture, and the hold expired 41 times, leaving 41 sbs draws without an original.
+    # A jump (a scrub, a press) is one moment and gets exactly one frame.
+    previous = getattr(tab, "_source_fill_last", None)
+    moving = False
+    if previous is not None:
+        step = playhead - float(previous)
+        moving = 0.0 < step <= 4.0 * interval     # a tick or two of slip still counts as playback, not a jump
+    tab._source_fill_last = playhead
+    if register.picture_for(playhead, 1.5 * interval, generation=generation) is None and moving and not paused:
+        # Playback with nothing held for this moment: ask AHEAD, over a span, so one decode covers the stretch the
+        # pane is about to show. A single frame here cannot win a race against the next tick.
+        target = playhead + tab._compare_lead()
+        span = True
+    elif register.picture_for(playhead, 1.5 * interval, generation=generation) is None:
         # Nothing in the register answers for THIS playhead (an empty register, a seek, a jump back): ask at it, and
         # take the single frame that answers. A seek's answer is one picture, not a burst from wherever the decoder
         # stands.

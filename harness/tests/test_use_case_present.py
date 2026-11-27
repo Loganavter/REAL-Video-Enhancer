@@ -473,3 +473,27 @@ def test_pair_required_follows_the_pane_own_mode():
     assert modes.pair_required(_owner(pane=_LegacyPane(moment=5.0))) is False, (
         "a pane without a view mode claims a pair requirement")
     assert modes.pair_required(SimpleNamespace(page_handles=None)) is False
+
+
+def test_playback_asks_ahead_but_a_jump_asks_for_one_frame():
+    """A CONTINUOUS playhead asks the LEAD; a JUMP asks one frame. Both are `paused=False`, so motion is the difference.
+
+    Measured live 2026-11-27 in the owner's session: during a preview render the source lagged 21 frames behind the
+    result, 29 results were refused as older than the picture, the hold expired 41 times and 41 sbs draws carried no
+    original. A single-frame ask cannot win that race - by the time the answer lands the playhead is at the next moment -
+    so playback must ask ahead while a scrub keeps its one picture.
+    """
+    owner = _owner(pane=_Pane(moment=5.0, mode="sbs"), register=_register_with({}), paused=False)
+    interval = 1.0 / 24.0
+
+    supply.source_fill(owner, 5.0)                       # nothing before it: a jump, one frame
+    assert owner._asked == [(pytest.approx(5.0), False)], f"asked {owner._asked}"
+
+    owner._source_fill_pending = None
+    supply.source_fill(owner, 5.0 + interval)            # a tick later: playback
+    assert owner._asked[-1] == (pytest.approx(5.0 + interval + LEAD), True), (
+        f"a continuous playhead was not kept a lead ahead: {owner._asked}")
+
+    owner._source_fill_pending = None
+    supply.source_fill(owner, 9.0)                       # a jump of four seconds: one frame at the new moment
+    assert owner._asked[-1] == (pytest.approx(9.0), False), f"a jump asked for a burst: {owner._asked}"
