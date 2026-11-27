@@ -419,6 +419,11 @@ fi
 
 # --- row 3: playing, sbs, steady ------------------------------------------------------------------------------------
 
+# The preview job has FINISHED by the time this row runs, so the pane stands at the END of the file (6.0 of 6.0 s) and a
+# play press there has nothing to advance - measured 2026-11-27: `preview_play checked=- and the playhead stayed at 6.0`.
+# Park it at ~10 % of the bar first, then play.
+ctrl "click:preview_timeline@20,10" 10 > "$ART/row3-park.json"
+sleep 0.4
 ctrl "click:preview_play" 10 > "$ART/row3-play.json"
 sleep 1
 # Did the transport actually start? A click on a hidden or disabled control answers no error and does nothing (the trap
