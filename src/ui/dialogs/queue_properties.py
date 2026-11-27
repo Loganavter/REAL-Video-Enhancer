@@ -39,23 +39,34 @@ Failed / Rendering / Not yet started) and, for a failure, the reason the queue r
 user opens this window to inspect, and the timestamps alone never said whether the run succeeded. The Files section
 reads the output's size from disk the same way it reads the input's, so a run that has not written its output yet
 shows an em dash with a reason rather than ``0 B``.
+
+The report's speed is a CURVE, not an average (owner, 2026-11-28: *"а в чем великий смысл тут у колонки Phases?
+Показали бы уж лучше какой-нибудь график обработки"*). The tab paints ``report["fps_series"]`` - the backend's sparse
+``(frame, seconds)`` samples turned into window rates - in a small ``QWidget`` above the document (``FpsChart``); the
+per-phase averages that used to be a row are its tooltip. A report written before that series existed shows one
+"Processing speed" row with the reason, exactly like every other unmeasured fact here.
 """
 
 from __future__ import annotations
 
 import errno
 import json
+import math
 import os
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from .toolkit_dialogs import TOOLKIT_AVAILABLE, ToolkitDialog, _action_row, _tk_button
 
 if TOOLKIT_AVAILABLE:  # pragma: no branch - the toolkit is what the window is made of
+    from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager
+    from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
     from sli_ui_toolkit.ui.widgets.text.engine.markdown import (
         HeadingBlock,
         InlineKind,
@@ -159,10 +170,17 @@ class PropertySection:
 
 @dataclass(frozen=True)
 class PropertiesTab:
-    """One tab's document: a title for the tab strip and its grouped rows."""
+    """One tab's document: a title for the tab strip and its grouped rows.
+
+    ``fps_series`` (RVE only) is the run's speed curve, painted as a chart above the document - it replaces the
+    per-phase average row that used to sit in the report, and ``fps_tooltip`` carries those averages instead, so
+    the numbers are still one hover away.
+    """
 
     title: str
     sections: tuple[PropertySection, ...]
+    fps_series: "FpsSeries | None" = None
+    fps_tooltip: str = ""
 
 
 @dataclass(frozen=True)
@@ -191,7 +209,29 @@ class QueueProperties:
                     if not row.value and row.reason:
                         value = f"{value} ({row.reason})"
                     lines.append(f"{row.label}: {value}")
+            if tab.fps_series is not None and tab.fps_tooltip:
+                # The chart itself cannot be copied; its tooltip (the per-phase averages it replaced) can, so
+                # Copy all is not less informative than the window it copies.
+                lines.extend(["", tab.fps_tooltip])
         return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class FpsSeries:
+    """The run's speed over time, ready to paint: seconds on the x axis, windowed fps on the y axis.
+
+    Produced by the backend (`backend/src/utils/FpsSeries.py`) and read here through `_report_fps_series`; the
+    lists are equal-length and monotonic, starting at ``(0, 0.0, 0.0)``. ``fps[0]`` is the synthetic start's
+    placeholder - a rate needs a window - and every later point is ``delta_frames / delta_seconds``.
+    """
+
+    frames: tuple[int, ...]
+    seconds: tuple[float, ...]
+    fps: tuple[float, ...]
+
+    @property
+    def duration(self) -> float:
+        return self.seconds[-1] if self.seconds else 0.0
 
 
 @dataclass(frozen=True)
@@ -939,6 +979,37 @@ def _report_phases(report) -> dict:
     return phases if isinstance(phases, dict) else {}
 
 
+def _report_fps_series(report) -> "FpsSeries | None":
+    """The report's speed curve, or None when it recorded none (every report written before the curve existed).
+
+    Validated here rather than trusted: a report is a file on disk a user can edit or a half-written run can leave,
+    and a chart built from mismatched lists or a NaN would paint garbage or divide by zero. A series needs at least
+    two points - a curve of one point has no window and no line.
+    """
+    series = (report or {}).get("fps_series")
+    if not isinstance(series, dict):
+        return None
+    frames, seconds, rates = series.get("frames"), series.get("seconds"), series.get("fps")
+    if not all(isinstance(values, (list, tuple)) for values in (frames, seconds, rates)):
+        return None
+    count = min(len(frames), len(seconds), len(rates))
+    if count < 2:
+        return None
+    try:
+        parsed = FpsSeries(
+            frames=tuple(int(frames[index]) for index in range(count)),
+            seconds=tuple(float(seconds[index]) for index in range(count)),
+            fps=tuple(float(rates[index]) for index in range(count)),
+        )
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in parsed.seconds + parsed.fps):
+        return None
+    if any(later <= earlier for earlier, later in zip(parsed.seconds, parsed.seconds[1:])):
+        return None
+    return parsed
+
+
 def _report_frames(report):
     run = (report or {}).get("run")
     if isinstance(run, dict):
@@ -1309,7 +1380,11 @@ def _phases_text(phases: dict) -> str:
 
 
 def _report_section(report, report_path: str, reason: str) -> PropertySection:
-    """What the run report says a finished run used and cost - labelled with the report's own file name."""
+    """What the run report says a finished run used and cost - labelled with the report's own file name.
+
+    The per-phase averages are NOT a row here any more: they move to the speed chart's tooltip, and a report that
+    has no curve says why in one row instead (the same idiom as every other missing fact).
+    """
     title = f"From the run report — {os.path.basename(report_path)}" if report is not None else "From the run report"
     rows: list[PropertyRow] = []
     for label, key, render in _REPORT_ROWS:
@@ -1318,13 +1393,11 @@ def _report_section(report, report_path: str, reason: str) -> PropertySection:
             rows.append(PropertyRow(label, reason=reason or f"this run report does not record {label.lower()}"))
         else:
             rows.append(PropertyRow(label, render(value)))
-    phases = _report_phases(report) if report is not None else {}
-    phases_text = _phases_text(phases)
-    rows.append(PropertyRow(
-        "Phases (ms/frame)",
-        phases_text,
-        "" if phases_text else reason or "this run report records no per-phase cost",
-    ))
+    if _report_fps_series(report) is None:
+        rows.append(PropertyRow(
+            "Processing speed",
+            reason=reason or "this run report records no per-frame speed series",
+        ))
     return PropertySection(title, tuple(rows))
 
 
@@ -1365,13 +1438,18 @@ def build_queue_properties(
     if int(selected_count) > 1:
         subtitle += f" · {int(selected_count)} rows selected — showing row {int(row) + 1}"
 
+    series = _report_fps_series(report)
+    phases_text = _phases_text(_report_phases(report)) if report is not None else ""
+    tooltip = f"Per-phase cost (ms/frame) — {phases_text}" if phases_text else ""
+
     return QueueProperties(
         name=_display_name(path) if path else "(no file)",
         subtitle=subtitle,
         probe_caption=f"probe: {result.source or 'no probe answered'}",
         tabs=(
             PropertiesTab("MediaInfo", _media_sections(result)),
-            PropertiesTab("RVE", _rve_sections(job, row, row_count, report, report_path, report_reason)),
+            PropertiesTab("RVE", _rve_sections(job, row, row_count, report, report_path, report_reason),
+                          fps_series=series, fps_tooltip=tooltip),
         ),
     )
 
@@ -1401,6 +1479,146 @@ def _row_cells(row: PropertyRow):
     if not row.value and row.reason:
         value_spans.append(InlineSpan(InlineKind.ITALIC, f"  {row.reason}"))
     return ((InlineSpan(InlineKind.BOLD, row.label),), tuple(value_spans))
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# The run's speed, painted
+# --------------------------------------------------------------------------------------------------------------------
+#: The chart's box in DESIGN px: 120 px shows a stall or a ramp at a glance without pushing the document out of the
+#: window. Resolved through `scaled_px()` where the widget is built, like every other metric in this tree.
+FPS_CHART_HEIGHT_PX = 120
+#: The narrowest the chart may get: below this the y labels and the curve collide.
+FPS_CHART_MIN_WIDTH_PX = 320
+#: Plot insets in DESIGN px: room for the y tick labels on the left, the `m:ss` ticks below, and a little air.
+FPS_CHART_LEFT_PX = 40
+FPS_CHART_RIGHT_PX = 10
+FPS_CHART_TOP_PX = 10
+FPS_CHART_BOTTOM_PX = 18
+#: The tick labels' size and the curve's stroke, in DESIGN px.
+FPS_CHART_LABEL_PX = 9
+FPS_CHART_LINE_PX = 2
+
+#: What the chart paints, by role: the curve is the theme's accent, the axes and labels are muted (a chart is a
+#: fact, not a control, so it must not compete with the buttons). Read at PAINT time, never at import.
+FPS_CHART_TOKENS = {"line": "accent", "axis": "separator.color", "label": "label.text.muted"}
+_FPS_CHART_FALLBACKS = {"line": "#0078d4", "axis": "#b0b0b0", "label": "#7f7f7f"}
+
+
+def _chart_token(role: str) -> QColor:
+    """One chart colour from the active theme. The fallback keeps the window readable where no theme is loaded."""
+    try:
+        return QColor(ThemeManager.get_instance().get_color(FPS_CHART_TOKENS[role]))
+    except Exception:   # no theme manager on this interpreter: a neutral colour beats a crashed Properties window
+        return QColor(_FPS_CHART_FALLBACKS[role])
+
+
+def _fps_label(value: float) -> str:
+    """A y tick: whole numbers above 10, one decimal below, so a 3 fps stall does not read as `3`."""
+    value = max(0.0, float(value))
+    return f"{value:.0f}" if value >= 10.0 else f"{value:.1f}"
+
+
+def _clock_label(seconds: float) -> str:
+    """An x tick as ``m:ss`` - language-neutral, and the unit the report's seconds are already in."""
+    total = max(0, int(round(float(seconds))))
+    minutes, rest = divmod(total, 60)
+    return f"{minutes}:{rest:02d}"
+
+
+class FpsChart(QWidget):
+    """The run's processing rate over time: one accent polyline, muted axes, y in fps and x as ``m:ss``.
+
+    A ``QWidget`` + ``paintEvent`` on purpose - no chart dependency and no ``QChart``, which would be a second
+    graphics stack in an app that paints everything with the toolkit. The widget replaces the per-phase AVERAGE row:
+    it shows where the run slowed down, which an average cannot.
+
+    Colours are read at paint time and the widget repaints on ``theme_changed``, so the accent follows a light/dark
+    switch without rebuilding the window.
+    """
+
+    def __init__(self, series: FpsSeries, parent=None) -> None:
+        super().__init__(parent)
+        self._series = series
+        self.setFixedHeight(scaled_px(FPS_CHART_HEIGHT_PX))
+        self.setMinimumWidth(scaled_px(FPS_CHART_MIN_WIDTH_PX))
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        ThemeManager.get_instance().theme_changed.connect(self._on_theme_changed)
+
+    def series(self) -> FpsSeries:
+        """What this chart draws (the model's own copy, so a test can compare the two)."""
+        return self._series
+
+    def set_series(self, series: FpsSeries) -> None:
+        self._series = series
+        self.update()
+
+    def _on_theme_changed(self) -> None:
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt spelling
+        series = self._series
+        if len(series.seconds) < 2:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        left = float(scaled_px(FPS_CHART_LEFT_PX))
+        right = float(max(left + 2.0, self.width() - scaled_px(FPS_CHART_RIGHT_PX)))
+        top = float(scaled_px(FPS_CHART_TOP_PX))
+        bottom = float(max(top + 2.0, self.height() - scaled_px(FPS_CHART_BOTTOM_PX)))
+
+        # The y range is the run's OWN range: the start point's rate is a placeholder, not a measurement, so it does
+        # not drag the floor to zero. A flat run gets a one-unit box instead of a division by zero.
+        values = series.fps[1:]
+        low = min(values)
+        high = max(values)
+        if high <= low:
+            high = low + 1.0
+        span = series.seconds[-1] if series.seconds[-1] > 0.0 else 1.0
+
+        axis = _chart_token("axis")
+        painter.setPen(QPen(axis, 1))
+        painter.drawLine(QPointF(left, top), QPointF(left, bottom))
+        painter.drawLine(QPointF(left, bottom), QPointF(right, bottom))
+
+        font = painter.font()
+        font.setPixelSize(max(1, scaled_px(FPS_CHART_LABEL_PX)))
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        text_height = float(metrics.height())
+        painter.setPen(QPen(_chart_token("label"), 1))
+        y_label_width = left - scaled_px(4)
+        painter.drawText(QRectF(0.0, top - text_height / 2.0, y_label_width, text_height),
+                         int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                         f"{_fps_label(high)} fps")
+        painter.drawText(QRectF(0.0, bottom - text_height / 2.0, y_label_width, text_height),
+                         int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                         _fps_label(low))
+        x_label_top = bottom + scaled_px(2)
+        painter.drawText(QRectF(left, x_label_top, float(scaled_px(80)), text_height),
+                         int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop), _clock_label(0.0))
+        end_label = _clock_label(series.seconds[-1])
+        end_width = float(metrics.horizontalAdvance(end_label)) + 2.0
+        painter.drawText(QRectF(right - end_width, x_label_top, end_width, text_height),
+                         int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop), end_label)
+
+        def y_at(rate: float) -> float:
+            return bottom - (bottom - top) * ((rate - low) / (high - low))
+
+        def point(index: int) -> QPointF:
+            return QPointF(left + (right - left) * (series.seconds[index] / span), y_at(series.fps[index]))
+
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(_chart_token("line"), max(1.0, float(scaled_px(FPS_CHART_LINE_PX))),
+                            Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        # The measured points only: `fps[0]` is the synthetic start (no window yet), and drawing it would plunge the
+        # line to zero below the plot. The first WINDOW's rate covers the start, so the line enters at the left edge
+        # at that rate; the clip keeps any future series inside its box.
+        painter.setClipRect(QRectF(left, top, right - left, bottom - top))
+        path = QPainterPath(QPointF(left, y_at(series.fps[1])))
+        for index in range(1, len(series.seconds)):
+            path.lineTo(point(index))
+        painter.drawPath(path)
 
 
 class QueuePropertiesDialog(ToolkitDialog):
@@ -1449,11 +1667,23 @@ class QueuePropertiesDialog(ToolkitDialog):
             tab_style=tab_style(),
         )
         self.documents: dict = {}
+        self.charts: dict = {}
+        self.chart = None
         for tab in self.properties.tabs:
             page = QWidget(self.tabs)
             layout = QVBoxLayout(page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.setSpacing(0)
+            if tab.fps_series is not None:
+                # Above the document, not inside it: the document is ONE painted `Text` (selection spans every
+                # table), and the row this replaces sat at the bottom of a scrolling page - possibly off-screen.
+                # The chart is the first thing the RVE tab shows, and the tooltip keeps the phase averages.
+                chart = FpsChart(tab.fps_series, page)
+                if tab.fps_tooltip:
+                    chart.setToolTip(tab.fps_tooltip)
+                layout.addWidget(chart)
+                self.charts[tab.title] = chart
+                self.chart = chart
             scroll = OverlayScrollArea(page, reserve_scrollbar_space=False, corner_radius=0)
             # `Text(mode="document")` is the toolkit's painted document: one surface that owns selection across all
             # the tables, which is why the rows are blocks and not one widget per line.

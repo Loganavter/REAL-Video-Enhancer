@@ -37,40 +37,40 @@ frame/body call; **250f** = every 250 rendered frames.
 
 | line | what it prints | frequency | level now |
 |---|---|---|---|
-| 90/102 | `borders: ...` / machine `BORDERS ...` record | job | info |
+| 91/103 | `borders: ...` / machine `BORDERS ...` record | job | info |
 | 278/281/285 | working directory, invalid input | job | info |
-| 326 | **new** `phase: video probe N ms (WxH, frames, fps)` | job | info |
+| 327 | **new** `phase: video probe N ms (WxH, frames, fps)` | job | info |
 | 326/348/351 | 10-bit / 8-bit pipe decisions | job | info |
-| 397 | `Detecting borders` | job | info |
-| 409 | `Detected borders: ...` | job | info |
-| 419 | `Using backend: ...` | job | info |
-| 428 | **new** `phase: model load upscale '<name>' N ms` | job | info |
-| 430 | `Using Upscaling Model: ...` | job | info |
-| 442/445 | `Using Extra Restoration Model` + **new** `phase: model load restoration '<name>' N ms` | job, per model | info |
-| 452/454 | **new** `phase: model load interpolation '<name>' N ms` + `Using Interpolation Model` | job | info |
-| 458 | `debug: after hotReload ...` (was `DEBUG after hotReload`) | job | **debug** |
+| 398 | `Detecting borders` | job | info |
+| 410 | `Detected borders: ...` | job | info |
+| 420 | `Using backend: ...` | job | info |
+| 429 | **new** `phase: model load upscale '<name>' N ms` | job | info |
+| 431 | `Using Upscaling Model: ...` | job | info |
+| 443/446 | `Using Extra Restoration Model` + **new** `phase: model load restoration '<name>' N ms` | job, per model | info |
+| 453/455 | **new** `phase: model load interpolation '<name>' N ms` + `Using Interpolation Model` | job | info |
+| 459 | `debug: after hotReload ...` (was `DEBUG after hotReload`) | job | **debug** |
 | 423-430 | override/model scale/config lines | job | info |
-| 516 | **new** `phase: reader open N ms` | job | info |
-| 556 | **new** `phase: writer/encoder init N ms` | job | info |
+| 517 | **new** `phase: reader open N ms` | job | info |
+| 557 | **new** `phase: writer/encoder init N ms` | job | info |
 | 519-545 | display / seek channel setup | job | info |
 | 573-635 | reuse gate, auto-gate and correction config | job | info |
-| 787 | **new** `phase: backend init N ms (backend, device, precision); N s since process start` | job | info |
+| 788 | **new** `phase: backend init N ms (backend, device, precision); N s since process start` | job | info |
 | 725-730 | tile probe stats / reason / failure | job | info |
 | 764-779 | int8 probe stats / verdict / failure | job | info |
 | 839/976/987/1001/1010/1021 | auto-gate calibration and tuner summaries | job | info |
 | 1042/1046/1374/1382 | reuse/correction/calibration failures | job (on failure) | info |
 | 1115/1117 | run report written / failed | job | info |
 | 1165/1226/1232/1252/1254 | seek request/preview lines | req | info |
-| 1815 | `startup: first frame enqueued N s after process start` | job (guarded by `JobPhases`) | info |
-| 1823 | `reuse: ...` progress | 250f, **now rate-limited to <=1/s** | info |
-| 1852 | `render loop: N s for M frames (N ms/frame), total ...` | job (guarded) | info |
+| 1865 | `startup: first frame enqueued N s after process start` | job (guarded by `JobPhases`) | info |
+| 1873 | `reuse: ...` progress | 250f, **now rate-limited to <=1/s** | info |
+| 1902 | `render loop: N s for M frames (N ms/frame), total ...` | job (guarded) | info |
 | 1465/1467/1487/1503 | temporal-reuse, tuner, tile and seek-reader summaries | job | info |
-| 1864 | `profile over N frames: gate ... model wall ... unaccounted ...` | job | **debug** |
+| 1914 | `profile over N frames: gate ... model wall ... unaccounted ...` | job | **debug** |
 | 1512 | pyinstrument dump (inside a `"""` block, dead) | never | - |
-| 2047/2055/2160 | `Setting up ...` | job | info |
+| 2097/2105/2210 | `Setting up ...` | job | info |
 | 1611/1617 | int8 calibration frames / forced fit | job | info |
 | 1637/1648/1651 | determinism diagnostics (`RVE_DIAG_*`) | job, env-gated | info |
-| 2133 | `debug: after assign ...` (was `DEBUG after assign`) | job | **debug** |
+| 2183 | `debug: after assign ...` (was `DEBUG after assign`) | job | **debug** |
 | 1692/1695 | scene detection on/off | job | info |
 
 ### `backend/src/utils/Util.py`
