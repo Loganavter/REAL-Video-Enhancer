@@ -109,6 +109,7 @@ class TemporalReuse:
         self.processed += 1
         tiles = self._tiles(frame.get_frame_tensor())
         reuse = False
+        worst_tile = None
         if (self._prev_tiles is not None
                 and self._chain < self.max_chain
                 and tiles.shape == self._prev_tiles.shape):
@@ -121,8 +122,12 @@ class TemporalReuse:
             self.depth_counts[self._chain] = self.depth_counts.get(self._chain, 0) + 1
             if os.environ.get("RVE_DEBUG_DEPTH"):
                 import logging as _lg
-                _lg.getLogger("RVE").warning("reuse frame=%d depth=%d share=%.5f",
-                                             self.processed - 1, self._chain, delta)
+                # This branch used to read a `delta` that does not exist in this scope: the debug flag that exists
+                # to show WHY a frame was reused raised a NameError instead (pyflakes, 2026-11-27). Log the number the
+                # decision was made on.
+                _lg.getLogger("RVE").warning("reuse frame=%d depth=%d tile_delta=%.5f threshold=%.5f",
+                                             self.processed - 1, self._chain,
+                                             -1.0 if worst_tile is None else worst_tile, self.threshold)
         else:
             self._chain = 0
         return reuse

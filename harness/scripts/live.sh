@@ -76,7 +76,11 @@ app_env() {
 wait_ready() {
     # `seconds` is seconds, and the tick is half of one: the counter is compared against twice the budget, not against
     # the budget itself (the old body counted half-seconds against a seconds bound, so a 40 s wait was really 20 s).
-    local seconds="${1:-40}" waited=0 budget=$(( seconds * 2 ))
+    local seconds="${1:-40}" waited=0
+    # Second statement on purpose: `local seconds=... budget=$((seconds * 2))` expands the arithmetic BEFORE the
+    # assignment runs, so under `set -u` it died with "seconds: unbound variable" on the first boot after it was
+    # introduced (measured 2026-11-27, the live run that was meant to prove something else).
+    local budget=$(( seconds * 2 ))
     while [ "$waited" -lt "$budget" ]; do
         [ -f "$CONTROL/ready" ] && return 0
         sleep 0.5
@@ -144,7 +148,12 @@ cmd_up() {
     echo "$CONTROL" > "$STATE/control_dir"
     echo "live: booting the app on $display (control $CONTROL)"
     # shellcheck disable=SC2046
-    env $(app_env "$display") RVE_UI_CAPTURE_SERVER="$CONTROL" PYTHONPATH="$ROOT:$ROOT/src:$TOOLKIT" RVE_TOOLKIT_PATH="$TOOLKIT" \
+    # The walk is scheduled at RVE_UI_CAPTURE_DELAY_MS (40 s by default, so a person's capture run settles first) and
+    # `ready` is written AFTER it. A harness boot must not wait 40 s for its own channel, and once `wait_ready` had a
+    # real timeout the two budgets raced: the wait expired exactly when the walk began (measured 2026-11-27). Short
+    # delay here, unchanged budget in `wait_ready`.
+    env $(app_env "$display") RVE_UI_CAPTURE_SERVER="$CONTROL" RVE_UI_CAPTURE_DELAY_MS="${RVE_UI_CAPTURE_DELAY_MS:-500}" \
+        PYTHONPATH="$ROOT:$ROOT/src:$TOOLKIT" RVE_TOOLKIT_PATH="$TOOLKIT" \
         PYTHONDONTWRITEBYTECODE=1 "$VENV/bin/python" -u "$ROOT/harness/scripts/live_boot.py" \
         > "$STATE/app.log" 2>&1 &
     echo $! > "$STATE/app.pid"

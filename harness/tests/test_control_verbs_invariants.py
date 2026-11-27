@@ -555,6 +555,42 @@ def _ask_wait(root: Path, request_id: str, timeout: float) -> dict:
     return json.loads(answer.read_text(encoding="utf-8"))
 
 
+def test_render_does_not_press_a_transport_that_would_pause(qapp, window_factory, tmp_path, monkeypatch):
+    """A press while the glue says "running" is pauseRender, not run() - and after a failed job that raises.
+
+    Measured live 2026-11-27: the backend of a `render:` died, the glue stayed "running", the next `render:` pressed the
+    transport, `pauseRender` raised `AttributeError: 'NoneType' object has no attribute 'buf'` inside the slot, and the
+    verb answered NOTHING (the channel itself stayed healthy - every later `state:` answered). The verb must refuse and
+    name the state.
+    """
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"clip")
+    window = window_factory()
+    window.row_to_add = _Row(str(tmp_path / "render-out.mkv"))
+    root = _channel(window, tmp_path, monkeypatch)
+    window.tab._render_state = "running"
+
+    payload = _ask(root, "t1", f"render:{clip}")
+
+    assert payload["started"] is False and payload["finished"] is False, payload
+    assert "start state" in (payload.get("error") or ""), payload
+    assert window.presses == 0, "the transport was pressed while it meant pause"
+
+
+def test_a_raising_deferred_step_answers_instead_of_leaving_the_request_silent():
+    """`dispatch` wraps the synchronous handler only; a timer step runs later, outside that try."""
+    from src.ui.capture_server import _guarded_step
+
+    answers: list[str] = []
+
+    def exploding():
+        raise AttributeError("'NoneType' object has no attribute 'buf'")
+
+    _guarded_step(answers.append, exploding)()
+
+    assert answers == ["AttributeError while exploding: 'NoneType' object has no attribute 'buf'"]
+
+
 def test_capture_answers_its_request_id(qapp, window_factory, tmp_path, monkeypatch):
     """`capture:` wrote `done` and no answer at all: a client publishing `requests/<id>` waited for ever."""
     window = window_factory()

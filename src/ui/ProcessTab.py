@@ -906,13 +906,21 @@ class ProcessTab:
             log("No render process!")
 
     def pauseRender(self):
-        shmbuf = self.pausedSharedMemory.buf
+        # No paused buffer means no job to pause: a press after a failed render used to raise AttributeError inside the
+        # slot and leave the transport dead (measured live 2026-11-27). A refusal to pause is not a crash.
+        shmbuf = getattr(getattr(self, "pausedSharedMemory", None), "buf", None)
+        if shmbuf is None:
+            log("pause ignored: no render is paused-able (no paused buffer)")
+            return
         shmbuf[0] = 1  # 1 = True
         self._set_render_controls("paused")
         self.setStatus("Paused")
 
     def resumeRender(self):
-        shmbuf = self.pausedSharedMemory.buf
+        shmbuf = getattr(getattr(self, "pausedSharedMemory", None), "buf", None)
+        if shmbuf is None:
+            log("resume ignored: no paused buffer")
+            return
         shmbuf[0] = 0  # 0 = False
         from time import monotonic
 

@@ -1,6 +1,11 @@
 import numpy as np
 import os
 import cv2
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:      # the runtime import is lazy (inside __init__, where the backend is chosen)
+    import ncnn
 class InferenceSceneChangeDetectEfficientNetNCNN:
     """
     NCNN-based scene change detector using EfficientNet.

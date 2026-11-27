@@ -357,6 +357,26 @@ def start_render_job(window) -> dict:
     return report
 
 
+def _guarded_step(finish, step):
+    """Wrap a timer-driven step so a raise ANSWERS a named error instead of leaving the request silent.
+
+    `dispatch` wraps the synchronous handler, but a verb that answers from a `QTimer` runs LATER, outside that try. An
+    exception there is printed by Qt and the request is never answered: measured live 2026-11-27 - `render:` pressed
+    the transport while the app still said "running", `pauseRender` raised AttributeError inside the slot, and the verb
+    answered nothing while every later request worked (the channel was healthy; the request was orphaned).
+    """
+    def run(*args, **kwargs):
+        try:
+            return step(*args, **kwargs)
+        except Exception as exc:                  # noqa: BLE001 - the answer is the point
+            try:
+                finish(f"{type(exc).__name__} while {getattr(step, '__name__', 'a deferred step')}: {exc}")
+            except Exception:
+                pass
+            return None
+    return run
+
+
 def _start_button(window):
     """The queue's Start control, or None when this window has none (a simplified window in a test)."""
     proc = getattr(getattr(window, "page_handles", None), "proc", None)
@@ -2007,7 +2027,13 @@ def install(window) -> None:
                     seen_toasts.append(text)
             return seen_toasts
 
+        answered = False
+
         def finish(error: str | None = None) -> None:
+            nonlocal answered
+            if answered:
+                return                                # one request, one answer: a second path must not overwrite it
+            answered = True
             result["seconds"] = round(time.time() - started_at, 1)
             result["queued"] = len(getattr(window.renderQueue, "queue", []) or [])
             result["backend"] = backend_of()
@@ -2086,9 +2112,24 @@ def install(window) -> None:
                 watch = PreviewWatch(output_of_last_item() or "", time.monotonic(), timeout_s=RENDER_TIMEOUT_S,
                                      what="render")
                 watch.previous_child = _preview_child(window)
+                # The transport is a TOGGLE: a press while a job is running/paused calls pause/resume, never run().
+                # Live 2026-11-27: after a failed backend the glue still said "running", the click reached
+                # `pauseRender`, and the app raised AttributeError inside the slot (no paused buffer exists). Refuse,
+                # and name the state, instead of pressing a button that means something else.
+                transport = _preview_render_state(window)
+                if transport not in (None, "idle"):
+                    result["started"] = False
+                    finish(f"the transport is not in its start state ({transport}): a press now would pause/resume "
+                           f"the job that is still there. Press start:render after it ends.")
+                    return
                 result["started"] = True
-                window.page_handles.proc.startRenderButton.click()
-                QTimer.singleShot(250, wait_finish)
+                try:
+                    window.page_handles.proc.startRenderButton.click()
+                except Exception as exc:
+                    result["started"] = False
+                    finish(f"the press raised {type(exc).__name__}: {exc}")
+                    return
+                QTimer.singleShot(250, _guarded_step(finish, wait_finish))
                 return
             if ticks > 100:                      # 100 * 100 ms = 10 s
                 finish("the queue stayed empty after Add to Render Queue")
@@ -2099,7 +2140,7 @@ def install(window) -> None:
             select_a_backend()
             select_a_model()
             window.page_handles.general.addToRenderQueueButton.click()
-            QTimer.singleShot(200, press_start)
+            QTimer.singleShot(200, _guarded_step(finish, press_start))
 
         def wait_loaded(ticks: int = 0) -> None:
             loaded = bool(_video_info_text(window).strip()) or getattr(window, "videoLength", 1) != 1
@@ -2109,10 +2150,10 @@ def install(window) -> None:
             if ticks > 150:                      # 15 s
                 press_add()                      # let the app refuse on its own terms; its error is the evidence
                 return
-            QTimer.singleShot(100, lambda: wait_loaded(ticks + 1))
+            QTimer.singleShot(100, _guarded_step(finish, lambda: wait_loaded(ticks + 1)))
 
         window.page_handles.general.inputFileText.setText(video)
-        QTimer.singleShot(300, wait_loaded)
+        QTimer.singleShot(300, _guarded_step(finish, wait_loaded))
 
     def preview(video: str, request_id: str | None = None) -> None:
         """START the preview render the Render Preview button starts (`RenderOptions.isPreview = True`).

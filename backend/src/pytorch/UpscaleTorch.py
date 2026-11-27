@@ -546,6 +546,7 @@ class UpscalePytorch:
     @torch.inference_mode()
     def _call_single(self, image: Frame) -> Frame:
         dtype = image.dtype
+        image_pts = image.pts     # `del image` below (line ~566): the source's own time must outlive the frame object
         gpu_id = image.gpu_id
         device = image.device
         # host timeline of the whole inference window, no synchronisation of our own
@@ -623,7 +624,7 @@ class UpscalePytorch:
             retFrame = Frame(self.backend, self.videoWidth * self.scale, self.videoHeight * self.scale, device=device, gpu_id=gpu_id, hdr_mode=self.hdr_mode, dtype=dtype,
                              high_bitdepth=self.high_bitdepth)
             # 10-bit output hands ffmpeg ready-made yuv420p10le instead of RGB (HDR included, with the HDR matrix)
-            retFrame.carry_identity_from(imageChunk)
+            retFrame.pts = image_pts      # the source frame's own time, captured before `del image`
             retFrame.yuv10_output = bool(self.high_bitdepth) and self._pack_yuv()
             retFrame.yuv10_matrix = self._pipe_matrix()
             retFrame.yuv8_output = self.yuv8_output
