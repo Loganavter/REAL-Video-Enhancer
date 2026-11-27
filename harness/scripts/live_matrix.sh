@@ -421,14 +421,25 @@ fi
 
 ctrl "click:preview_play" 10 > "$ART/row3-play.json"
 sleep 1
+# Did the transport actually start? A click on a hidden or disabled control answers no error and does nothing (the trap
+# this script exists for), so the row reads the CONTROL's own state and the pane's playhead instead of assuming play.
+PLAY_BEFORE="$(json_get "$(ctrl state:previewLabel 10)" progress "-")"
+PLAY_BTN="$(json_get "$(cat "$ART/row3-play.json" 2>/dev/null)" checked "-")"
 MARK3=$(log_mark)
 sleep 3
+PLAY_AFTER="$(json_get "$(ctrl state:previewLabel 10)" progress "-")"
 WINDOW3="$(log_since "$MARK3")"
 read -r OFF3 TOTAL3 <<<"$(printf '%s\n' "$WINDOW3" | pair_off)"
 PAIRS3="$(printf '%s\n' "$WINDOW3" | pair_lines | wc -l)"
 if [ "$OFF3" = "-" ]; then
-    row "playing, sbs, steady" "every painted pair carries the source; delta_frames=0" \
-        "$PAIRS3 pair draws, no stats line (RVE_PREVIEW_LOG<1?)" "$ART/row3-window.txt" UNPROVEN
+    if [ "$PLAY_BEFORE" = "$PLAY_AFTER" ]; then
+        row "playing, sbs, steady" "every painted pair carries the source; delta_frames=0" \
+            "the transport did not start: preview_play checked=$PLAY_BTN and the playhead stayed at $PLAY_AFTER over 3 s" \
+            "$ART/row3-window.txt" UNPROVEN
+    else
+        row "playing, sbs, steady" "every painted pair carries the source; delta_frames=0" \
+            "$PAIRS3 pair draws, no stats line (RVE_PREVIEW_LOG<1?)" "$ART/row3-window.txt" UNPROVEN
+    fi
 elif [ "$OFF3" = "0" ] && [ "${TOTAL3:-0}" -gt 0 ]; then
     row "playing, sbs, steady" "every painted pair carries the source; delta_frames=0" \
         "pair_off=0/$TOTAL3 over 3 s, $PAIRS3 pair draws" "$ART/row3-window.txt" OK
