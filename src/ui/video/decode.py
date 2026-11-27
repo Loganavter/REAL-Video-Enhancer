@@ -486,15 +486,6 @@ class VideoDecoder(QObject):
             self._held = None
         if published is not None:
             self.frame_ready.emit(published)
-        try:
-            from . import telemetry
-
-            if telemetry.level() >= 2:
-                telemetry.event("decode rewind", target=round(float(target), 3),
-                                landed=None if published is None else round(float(published.pts), 3),
-                                exact=int(bool(exact)), announce=int(bool(announce)))
-        except Exception:
-            pass
         if announce:
             self.seeked.emit(float(target))
 
@@ -538,15 +529,6 @@ class VideoDecoder(QObject):
         for frame in walked:
             self.frame_ready.emit(frame)
         self._at_eof = False
-        try:
-            from . import telemetry
-
-            if telemetry.level() >= 2:
-                telemetry.event("decode step", target=round(float(target), 3),
-                                landed=None if not walked else round(float(walked[-1].pts), 3),
-                                walked=len(walked), exact=int(bool(exact)))
-        except Exception:
-            pass
 
     def _rewind(self, target: float) -> None:
         # A frame held from the old position belongs to that position, not to this one. `target` is the caller's clock

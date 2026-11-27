@@ -117,6 +117,7 @@ def source_fill(tab, playhead: float) -> None:
             return
         else:
             tab._source_fill_pending = None      # a request nothing answered: ask again
+
     span = True
     # A PAUSED pane asks for one picture at its moment and never for a lead. The lead is a playback cost (the
     # decoder's ~8 frames/s latency is hidden only when the playhead is moving); with a still playhead it decodes
