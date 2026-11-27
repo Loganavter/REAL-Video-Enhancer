@@ -159,6 +159,20 @@ _OUTPUT_STATUS = {
         "control_dir": {"type": "string"},
         "app_pid": {"type": ["integer", "null"]},
         "log_tail": {"type": "string"},
+        "lease": {"type": ["string", "null"],
+                  "description": "the leased display's id, reported only while the app is actually running"},
+        "state_dir": {"type": "string", "description": "the state tree this answer was read from"},
+        "stale": {"type": ["string", "null"],
+                  "description": "why a recorded pid is not a running instance (the pid and the leftover lease)"},
+        "already_running": {"type": "boolean"},
+        "reclaimed": {"type": ["object", "null"],
+                      "description": "records of a dead instance the boot cleared, with the lease it released"},
+        "stopped_pid": {"type": ["integer", "null"]},
+        "cleared_pid": {"type": ["integer", "null"],
+                        "description": "the pid record removed, whether or not it was still alive"},
+        "terminated": {"type": "boolean"},
+        "xvfb_pid": {"type": ["integer", "null"]},
+        "lease_released": {"type": "boolean"},
     },
     "required": ["running", "control_dir"],
     "additionalProperties": True,
@@ -175,9 +189,10 @@ TOOLS: list[dict] = [
         "handler": "instance_status",
         "title": "Live instance status",
         "description": (
-            "Reports whether a private RVE instance is running, which X display it leases, where its control channel "
-            "lives and the last lines of its log. Use it first: every other tool acts on that instance, and a call "
-            "without one fails with a hint to boot it. Does not start or stop anything."
+            "Reports whether a private RVE instance is running, which X display it leases, its pid and lease id, where "
+            "its control channel lives and the last lines of its log - read from the instance's own state files, so it "
+            "answers about the app live.sh started even when the checkout's state pointer is stale. Use it first: every "
+            "other tool acts on that instance. Does not start or stop anything."
         ),
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         "outputSchema": _OUTPUT_STATUS,
@@ -189,8 +204,9 @@ TOOLS: list[dict] = [
         "title": "Boot a private instance",
         "description": (
             "Starts Xvfb on a free display (:90 and up, never the user's :0) and the real RVE window, then waits for "
-            "its control channel. Safe to call twice: an already running instance is reported instead of duplicated. "
-            "Do not use it to test packaging or startup timing - it bypasses backend probing on purpose."
+            "its control channel. Safe to call twice: an already running instance is reported instead of duplicated, "
+            "and a stale record from an earlier boot has its lease released before the new one starts. Do not use it to "
+            "test packaging or startup timing - it bypasses backend probing on purpose."
         ),
         "inputSchema": {
             "type": "object",
@@ -209,8 +225,9 @@ TOOLS: list[dict] = [
         "handler": "instance_stop",
         "title": "Stop the private instance",
         "description": (
-            "Stops the app and (if this server started it) its Xvfb, by PID from the state files - never by pattern, "
-            "because a pattern kill matches the shell that runs it. Leaves the app's own files untouched."
+            "Stops the app recorded in the instance's state files and releases the display lease it held, by PID - "
+            "never by pattern, because a pattern kill matches the shell that runs it. A stale pid record is cleared "
+            "without touching any other process. Leaves the app's own files untouched."
         ),
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         "outputSchema": _OUTPUT_STATUS,
