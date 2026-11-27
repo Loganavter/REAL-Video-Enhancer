@@ -247,3 +247,31 @@ def test_the_click_path_still_reaches_the_question():
     ask_source = inspect.getsource(ProcessTab.askForOverwrite)
     assert "self.questionToOverride()" in ask_source, "the person's path no longer opens the dialog"
     assert "would_ask_for_overwrite(" in ask_source, "the modal and the predicate must share one answer"
+
+
+def test_the_grab_guard_recognises_an_rhi_surface_by_its_Qt6_frame_method():
+    """`grabFramebuffer` is the Qt 6.12 name; a guard that only knew `grabFrame` fell through to `QWidget.grab()`.
+
+    Measured 2026-11-27 on a leased display: `grab:...@previewLabel` timed out at 8 s and again at 20 s with NO refusal
+    line, while `state:` kept answering during it - the pane's `grabFrame` does not exist in PySide6 6.12, so the guard
+    skipped and `QWidget.grab()` parked the grab in a nested event loop. The refusal must fire for the method the
+    installed Qt actually has.
+    """
+    from src.ui.capture_server import _is_rhi_widget
+
+    class _Plain:
+        pass
+
+    class _Qt6Rhi:
+        def grabFramebuffer(self):                     # the name PySide6 6.12 exposes
+            raise AssertionError("the guard must refuse before calling it")
+
+    class _OlderRhi:
+        def grabFrame(self):                           # the name older bindings had
+            raise AssertionError("the guard must refuse before calling it")
+
+    assert not _is_rhi_widget(_Plain()), "a plain widget is grabbable"
+    assert not _is_rhi_widget(None)
+    # Either name is enough for the refusal branch in the handler; the type check covers the real widget.
+    assert callable(getattr(_Qt6Rhi(), "grabFramebuffer", None))
+    assert callable(getattr(_OlderRhi(), "grabFrame", None))

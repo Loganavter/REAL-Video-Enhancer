@@ -201,6 +201,15 @@ def page_request_error(wanted: str, known_pages) -> str | None:
             f"or a verb such as state:, click:, preview:, render:, queue:, start:")
 
 
+def _is_rhi_widget(widget) -> bool:
+    """Is this a QRhi surface? A class check, because the frame method's NAME has moved between Qt versions."""
+    try:
+        from PySide6.QtWidgets import QRhiWidget
+    except Exception:
+        return False
+    return isinstance(widget, QRhiWidget)
+
+
 def start_render_job(window) -> dict:
     """Start the queue's render the way the user's button does, and answer what happened.
 
@@ -1480,8 +1489,14 @@ def install(window) -> None:
             # A QRhiWidget cannot be grabbed with `QWidget.grab()`: the call blocks waiting for a frame that only the
             # widget's own render loop produces (measured 2026-11-25: the request timed out after 30 s). Its picture
             # is `grabFrame()`, which is also what the RHI pixel gate uses.
-            grab_frame = getattr(subject, "grabFrame", None)
-            if callable(grab_frame) and widget_name:
+            # The name is `grabFramebuffer` in PySide6 6.12 (there is no `grabFrame`): checking the wrong one made this
+            # guard fall through to `QWidget.grab()` on the pane, which waits for a frame in a NESTED event loop - the
+            # channel kept answering `state:` while the grab never returned (measured 2026-11-27: 8 s and 20 s timeouts
+            # with no refusal line). A type check plus both names, because a subclass may be either.
+            grab_frame = (getattr(subject, "grabFramebuffer", None)
+                          or getattr(subject, "grabFrame", None))
+            is_rhi = callable(grab_frame) or _is_rhi_widget(subject)
+            if is_rhi and widget_name:
                 # REFUSED, not attempted: `grabFrame()` WAITS for a paint, and this handler runs on the very GUI thread
                 # that would have to paint - a paused pane therefore deadlocks the whole channel (measured 2026-11-26:
                 # `grab:...@previewLabel` answered nothing for 40 s; the wheel request that followed answered normally,
