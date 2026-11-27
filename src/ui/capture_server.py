@@ -2042,4 +2042,8 @@ def install(window) -> None:
             json.dump({"stamp": stamp, "pages": names}, done_file)
         os.replace(tmp, done_path)
 
-    QTimer.singleShot(delay, lambda: warm(0))
+    if not always_on:
+        # The walk belongs to the capture mode only. Scheduled unconditionally, it walked every page forty seconds
+        # after a bare `=1` boot - under the owner's hands, and over the `ready` file the flag had already written
+        # (measured 2026-11-27 by the walk-contract test: "ready (no warm-up walk)" then "ready (1 pages)").
+        QTimer.singleShot(delay, lambda: warm(0))

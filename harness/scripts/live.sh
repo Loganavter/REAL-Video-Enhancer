@@ -74,11 +74,16 @@ app_env() {
 }
 
 wait_ready() {
-    local seconds="${1:-40}" waited=0
-    while [ "$waited" -lt "$seconds" ]; do
+    # `seconds` is seconds, and the tick is half of one: the counter is compared against twice the budget, not against
+    # the budget itself (the old body counted half-seconds against a seconds bound, so a 40 s wait was really 20 s).
+    local seconds="${1:-40}" waited=0 budget=$(( seconds * 2 ))
+    while [ "$waited" -lt "$budget" ]; do
         [ -f "$CONTROL/ready" ] && return 0
         sleep 0.5
-        waited=$((waited / 2 + 1))
+        # One tick is half a second, so the counter advances by ONE: `waited / 2 + 1` never leaves 1 (0 -> 1 -> 1 ->
+        # ...), which made this loop a hang instead of a timeout for every caller that waited on a boot that never
+        # came (control audit, 2026-11-27).
+        waited=$((waited + 1))
         [ -f "$STATE/app.pid" ] && ! kill -0 "$(cat "$STATE/app.pid")" 2>/dev/null && {
             echo "live: the app exited while waiting; last log lines:" >&2
             tail -20 "$STATE/app.log" >&2

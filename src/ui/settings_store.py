@@ -143,8 +143,10 @@ class Settings:
                 "sudo_scene_detect",
             ),
             "scene_change_detection_enabled": ("True", "False"),
+            # The control's own range, 1.0-10.0, and nothing else: the domain used to be 0.1-9.9, so the spinbox
+            # offered 10.0 (silently dropped by the writer) and the file could hold 0.5 (unreachable on screen).
             "scene_change_detection_threshold": [
-                str(num / 10) for num in range(1, 100)
+                str(num / 10) for num in range(10, 101)
             ],
             "discord_rich_presence": ("True", "False"),
             "video_quality": ("Low", "Medium", "High", "Very_High", "Ultra", "Lossless"),
@@ -166,12 +168,17 @@ class Settings:
             "output_file_path": "ANY",
         }
         self.settings = self.defaultSettings.copy()
+        #: Keys the file carries that this build does not know (a newer build's line, a hand edit). A diagnostic, never
+        #: merged into `settings`: the old length check treated one of them as corruption and replaced every value.
+        self.ignoredKeys: set[str] = set()
         if not os.path.isfile(self.settingsFile):
             self.writeDefaultSettings()
         self.readSettings()
-        # check if the settings file is corrupted
-        if len(self.defaultSettings) != len(self.settings):
-            self.writeDefaultSettings()
+        # The file is ours to extend, not to police. A key this build does not know is ignored and the known ones keep
+        # what the user chose; only a key MISSING from the file falls back to its default (settings audit 2026-11-27:
+        # `len(defaults) != len(settings)` wiped five custom values because of one foreign line).
+        for key in self.defaultSettings:
+            self.settings.setdefault(key, self.defaultSettings[key])
 
     def readSettings(self):
         """
@@ -194,6 +201,11 @@ class Settings:
                     # anyway - this way the current session agrees with the next one).
                     if key == "language":
                         value = validate_language(value)
+                    if key not in self.defaultSettings:
+                        # Ignored, not fatal - and NOT written back: dropping the line would also drop whatever the
+                        # build that wrote it needs. The writer decides the file's shape and never writes an unknown key.
+                        self.ignoredKeys.add(key)
+                        continue
                     self.settings[key] = value
             except (
                 ValueError
@@ -229,22 +241,21 @@ class Settings:
         self.writeOutCurrentSettings()
 
     def writeOutCurrentSettings(self):
-        """
-        Writes the current settings to a file.
+        """Write the current settings, atomically, and only for keys the defaults know.
 
-        Parameters:
-            self (Settings): The instance of the Settings class.
-
-        Returns:
-            None
+        Two guards, both learned the hard way (settings audit, 2026-11-27): the file is written through a temporary and
+        replaced, so no reader sees half a file; and an unknown key is SKIPPED instead of calling
+        `writeDefaultSettings()` from inside the write loop, which used to leave memory at the defaults and the file at
+        the user's values.
         """
-        with open(self.settingsFile, "w") as file:
-            for key, value in self.settings.items():
-                if key in self.defaultSettings:  # check if the key is valid
-                    if (
-                        value in self.allowedSettings[key]
-                        or self.allowedSettings[key] == "ANY"
-                    ):  # check if it is in the allowed settings dict
-                        file.write(f"{key},{value}\n")
-                else:
-                    self.writeDefaultSettings()
+        lines = []
+        for key, value in self.settings.items():
+            if key not in self.defaultSettings:
+                continue
+            allowed = self.allowedSettings[key]
+            if allowed == "ANY" or value in allowed:
+                lines.append(f"{key},{value}\n")
+        temporary = f"{self.settingsFile}.tmp"
+        with open(temporary, "w") as file:
+            file.writelines(lines)
+        os.replace(temporary, self.settingsFile)

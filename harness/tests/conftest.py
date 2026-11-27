@@ -35,6 +35,15 @@ for _path in (_ROOT, os.path.join(_ROOT, "backend")):
 # real display. `setdefault` keeps a caller's explicit choice (e.g. a private Xvfb for a capture).
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# `src/Util.py` imports py-cpuinfo, which the app's venv carries and this interpreter does not: without a stub,
+# `from src.ui.SettingsTab import ...` is a collection ERROR rather than a test. Only `brand_raw` is ever read.
+if "cpuinfo" not in sys.modules:
+    import types as _types
+
+    _cpuinfo = _types.ModuleType("cpuinfo")
+    _cpuinfo.get_cpu_info = lambda: {"brand_raw": "unknown"}
+    sys.modules["cpuinfo"] = _cpuinfo
+
 #: ``faulthandler.dump_traceback_later`` default, overridable so the hang probe can use 1 s.
 HANG_SECONDS = 300
 

@@ -67,13 +67,18 @@ def hide_int8_preset_if_unsupported(parent, settings) -> None:
     if available:
         log(f"quality preset: Fast (int8) available - {reason}")
         return
-    index = combo.findText("Fast")
-    if index >= 0:
+    # The key, never the label: the item's text is translated ("Быстрое" under `ru`), so `findText("Fast")` missed it
+    # on the one translated language - the int8 preset stayed offered, the log said it was hidden, and the stored key
+    # was rewritten to `best` while the combo still showed Fast (settings audit, 2026-11-27).
+    index = combo.findData("fast")
+    removed = index >= 0
+    if removed:
         combo.removeItem(index)
-    log(f"quality preset: Fast (int8) hidden - {reason}")
+    log(f"quality preset: Fast (int8) {'hidden' if removed else 'was not offered'} - {reason}")
     if settings.settings.get("quality_preset") == "fast":
         settings.writeSetting("quality_preset", "best")
-        combo.setCurrentText("Best quality")
+        best = combo.findData("best")
+        combo.setCurrentIndex(0 if best < 0 else best)
     applyQualityPresetTooltip(
         combo, extra="Not offered on this card: it needs NVIDIA tensor cores (GTX 16-series / RTX or newer).")
 

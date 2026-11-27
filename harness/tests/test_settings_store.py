@@ -99,15 +99,50 @@ def test_a_comma_in_a_value_is_not_a_separator(tmp_path):
     assert reread.settings["encoder_command"] == command
 
 
-def test_an_unknown_key_in_the_file_is_dropped_and_the_file_rewritten(tmp_path):
-    """An older/newer build's extra line must not survive a read: the length check is the migration."""
+def test_an_unknown_key_in_the_file_is_ignored_and_the_file_is_left_alone(tmp_path):
+    """An older/newer build's extra line must not cost the configuration.
+
+    The store used to answer it with the length check: thirty-three keys against thirty-two defaults read as
+    corruption, replaced every value with its default and rewrote the file (settings audit 2026-11-27 measured five
+    custom values - precision, encoder, preset, language, output path - lost to one `from_the_future,1` line).
+    """
     make(tmp_path)
     path = tmp_path / "settings.txt"
     path.write_text(read(tmp_path) + "from_the_future,1\n", encoding="utf-8")
 
     reread = make(tmp_path)
     assert "from_the_future" not in reread.settings
-    assert read(tmp_path) == SETTINGS_BYTES
+    assert reread.ignoredKeys == {"from_the_future"}
+    assert "from_the_future,1" in read(tmp_path), "the file belongs to whoever wrote it, not to this key list"
+
+
+def test_one_foreign_line_keeps_every_value_the_user_chose(tmp_path):
+    settings = make(tmp_path)
+    settings.writeSetting("precision", "float32")
+    settings.writeSetting("quality_preset", "fast")
+    settings.writeSetting("encoder", "libx265")
+    path = tmp_path / "settings.txt"
+    path.write_text(read(tmp_path) + "from_the_future,1\n", encoding="utf-8")
+
+    reread = make(tmp_path)
+
+    assert reread.settings["precision"] == "float32"
+    assert reread.settings["quality_preset"] == "fast"
+    assert reread.settings["encoder"] == "libx265"
+
+
+def test_a_foreign_line_mid_session_does_not_split_memory_from_disk(tmp_path):
+    """The re-read happens at four places while the app runs; the next ordinary write must not reset the dict."""
+    settings = make(tmp_path)
+    settings.writeSetting("precision", "float32")
+    path = tmp_path / "settings.txt"
+    path.write_text(read(tmp_path) + "from_the_future,1\n", encoding="utf-8")
+
+    settings.readSettings()
+    settings.writeSetting("video_quality", "High")
+
+    assert settings.settings["precision"] == "float32"
+    assert "precision,float32" in read(tmp_path)
 
 
 def test_a_value_outside_the_allowed_set_is_kept_in_memory_but_never_written(tmp_path):
