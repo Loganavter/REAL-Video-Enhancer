@@ -304,6 +304,10 @@ class VideoDecoder(QObject):
             return
         self._request = (self._clamp(seconds), bool(exact), bool(seek), bool(span))
         self._kick()
+        if self._trace_on:
+            # Emitted on the CALLER's thread (the GUI): "the request reached the decoder" is the fact the stall probe
+            # needs - the pump's own trace says whether it then ran. The signal is queued, so this is safe.
+            self.trace.emit(f"request at={float(seconds):.3f} seek={int(bool(seek))} span={int(bool(span))}")
 
     def stream_size(self) -> tuple[int, int] | None:
         """The CODED picture size, before any `max_size` fit.
