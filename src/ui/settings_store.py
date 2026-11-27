@@ -105,6 +105,39 @@ def window_was_maximized(settings) -> bool:
     return str(settings.get(MAXIMIZED_KEY, "")).strip() == "True"
 
 
+#: The preview splitter's two saved splits, one per layout mode (`src/ui/pages/proc_page.py` writes them and reads them
+#: back). The value is a DESIGN length - the extent of the pane the mode anchors: the process column's width in `side`
+#: (the boundary's distance from the body's left edge) and the preview band pane's height in `stack` (its distance from
+#: the top edge). Storing screen px would make one drag mean a different split at the next UI factor; every read goes
+#: through `scaled_px`, like the column's own 500 design px.
+PREVIEW_SPLIT_SIDE_KEY: str = "preview_split_side"
+PREVIEW_SPLIT_STACK_KEY: str = "preview_split_stack"
+PREVIEW_SPLIT_KEYS: tuple[str, str] = (PREVIEW_SPLIT_SIDE_KEY, PREVIEW_SPLIT_STACK_KEY)
+
+
+def preview_split(value, key: str = "") -> int | None:
+    """The saved split in ``value`` as DESIGN px, or ``None`` when it is not a usable length (the default split).
+
+    Empty is the normal "never dragged" state and stays quiet - the first launch has no choice to restore. Anything
+    else must be a positive whole number of design px: a hand edit, another build's line or a locale's decimal
+    separator is reported by name and reads as "nothing saved", so a settings file can never cost the page its
+    boundary or an exception at build. The mode's floors are the page's business (they depend on the factor and the
+    viewport), so this validator answers only "is this a length at all".
+    """
+    text = str("" if value is None else value).strip()
+    if not text:
+        return None
+    try:
+        split = int(text)
+    except (TypeError, ValueError):
+        log(f"preview split: {key or 'value'} {text!r} is not a number of pixels; keeping the default split")
+        return None
+    if split <= 0:
+        log(f"preview split: {key or 'value'} {split} is not a usable length; keeping the default split")
+        return None
+    return split
+
+
 def log(message: str) -> None:
     """Write one diagnostic line through the app's logger, resolved lazily.
 
@@ -208,6 +241,11 @@ class Settings:
             # line the user hand-edited moves. Empty = the application's own face, the default the app has always
             # opened in; `validate_font_family` turns a blank or unknown stored value into it.
             "font_family": DEFAULT_FONT_FAMILY,
+            # The preview splitter's two saved splits, one per layout mode (`src/ui/pages/proc_page.py`). Empty = the
+            # design split: the policy's column in `side`, the 16:9 band above the column in `stack`. Appended like the
+            # window block so an existing `settings.txt` gains them at the end and no line the user hand-edited moves.
+            PREVIEW_SPLIT_SIDE_KEY: "",
+            PREVIEW_SPLIT_STACK_KEY: "",
         }
         self.allowedSettings = {
             "encoder_command": "ANY",
@@ -275,6 +313,11 @@ class Settings:
             # unknown one into the default face. Writing out-of-list values back would block a family the user chose
             # on this machine, which is the one thing this row exists for.
             "font_family": "ANY",
+            # The splitter's saved split is a design length (`preview_split` is the validator that turns a stored value
+            # into a positive int or reports it and falls back); a mode's floors are the page's, so the file accepts any
+            # string here and never blocks a split the user chose.
+            PREVIEW_SPLIT_SIDE_KEY: "ANY",
+            PREVIEW_SPLIT_STACK_KEY: "ANY",
         }
         self.settings = self.defaultSettings.copy()
         #: Keys the file carries that this build does not know (a newer build's line, a hand edit). A diagnostic, never
@@ -330,6 +373,10 @@ class Settings:
                     # (`src/ui/shell/window.py`), and refused there with its name in the log.
                     if key == "font_family":
                         value = validate_font_family(value)
+                    # A garbage split is reported once, here, and reads as "never dragged": the page then applies the
+                    # design split instead of parsing a bad number on every layout pass.
+                    if key in PREVIEW_SPLIT_KEYS and preview_split(value, key) is None:
+                        value = ""
                     if key not in self.defaultSettings:
                         # Ignored, not fatal - and NOT written back: dropping the line would also drop whatever the
                         # build that wrote it needs. The writer decides the file's shape and never writes an unknown key.

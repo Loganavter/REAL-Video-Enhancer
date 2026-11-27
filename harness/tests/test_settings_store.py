@@ -36,6 +36,10 @@ from src.ui.settings_store import Settings
 #: saved" - a first launch still opens at the design size. The 32 lines above stay byte-identical.
 #: `font_family,` follows the same rule (2026-11-28): empty means "the application's own face", the default the app
 #: has always opened in (`src/ui/settings_store.py::validate_font_family`).
+#:
+#: Two more, appended the same way (2026-11-28): the preview splitter's per-mode splits, in DESIGN px
+#: (`src/ui/pages/proc_page.py` writes them on a drag, `preview_split` validates them). Empty means "never dragged" -
+#: the page then applies the design split: the policy's column in `side`, the 16:9 band above the column in `stack`.
 SETTINGS_BYTES = ('precision,auto\n'
  'tensorrt_optimization_level,5\n'
  'dynamic_tensorrt_engine,False\n'
@@ -73,7 +77,9 @@ SETTINGS_BYTES = ('precision,auto\n'
  'window_width,\n'
  'window_height,\n'
  'window_was_maximized,False\n'
- 'font_family,\n')
+ 'font_family,\n'
+ 'preview_split_side,\n'
+ 'preview_split_stack,\n')
 
 
 def make(tmp_path):
