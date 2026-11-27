@@ -183,14 +183,15 @@ def test_an_older_generation_reads_as_a_dash_and_the_docs_say_so(fresh):
 
 
 def test_the_dictionary_names_which_zero_each_since_number_used():
-    """`phase: backend init` counts from Util's import; `startup:`/`render loop:` count from RenderVideo's own `_T0`,
-    set after the torch imports. A reader must not carry one into the other's table, so the dictionary says both.
+    """One zero, named. This test first pinned the SPLIT (two zeros, not subtractable, backend lane owns the fix) because
+    that is what the code did; the backend lane landed the one-clock change on 2026-11-27, so the contract is now the
+    opposite: the dictionary must say the numbers share `Util`'s mark, and must not still describe two origins.
     """
     doc = (_ROOT / "harness/docs/LIVE-TESTING.md").read_text(encoding="utf-8")
-    assert "Util.py" in doc and "PROCESS_START" in doc, "the phase line's zero is not named"
-    assert "RenderVideo.py" in doc and "_T0" in doc, "the startup/render-loop zero is not named"
-    assert "cannot be subtracted" in doc, "the dictionary does not say the two numbers are not comparable"
-    assert "backend lane" in doc, "the dictionary does not say which lane owns the one-clock fix"
+    assert "Util.py" in doc, "the process zero is not named"
+    assert "SAME zero since 2026-11-27" in doc, "the dictionary does not say the lines share one zero"
+    assert "can be subtracted now" in doc, "the dictionary does not say the numbers are comparable"
+    assert "cannot be subtracted" not in doc, "the dictionary still describes the old, split clocks"
 
 
 # --- 5.11: a value with `=`, `:` and a space round-trips through the documented parser ------------------------------

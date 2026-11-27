@@ -205,13 +205,14 @@ There are **two** zeros behind that one label today, and a reader must know whic
   the entry point imports `Util` (its first backend import) - the closest mark to "the process exists" that a phase line
   can use.
 * `startup: first frame enqueued … s after process start` and `render loop: … total … s since process start` are
-  measured from `backend/src/RenderVideo.py`'s own `_T0`, set at THAT module's import - after the torch/tensorrt
-  imports, so it is a **later** zero.
+  measured from the SAME zero since 2026-11-27: `RenderVideo` used to keep its own `_T0`, set at that module's import
+  after torch/tensorrt, so the two labels named seconds from different origins and `startup:` could read SMALLER than
+  `phase: backend init`. That clock is gone; every "since process start" line says `(Util import)` and is measured from
+  `utils/Util.py`'s mark.
 
-The two cannot be subtracted: `startup:` can be SMALLER than `phase: backend init` even though the first frame comes
-later. Read each number against its own zero, and do not carry a `startup:` value into a table whose other rows are
-`phase:` values. The one-clock reconciliation belongs to the backend lane (`RenderVideo.py` is not this document's to
-change); until it lands, this split is the honest description of the record.
+All three numbers can be subtracted now, because they share one zero. Do not carry a number across dates without
+checking which label it carries: a pre-2026-11-27 `startup:`/`render loop:` line is a RenderVideo-import measurement,
+not a process-start one.
 
 ## The same surface as an MCP server (`harness/mcp-server/app`)
 

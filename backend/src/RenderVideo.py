@@ -4,9 +4,13 @@ from threading import Thread
 # Process-relative clock: the wall-clock "Time to complete render" starts in the writer
 # thread, so it hides everything before it (interpreter/import, engine build or deserialize,
 # ffmpeg + NVENC init) and the flush at the end. On a 94-frame clip that fixed part is
-# ~1.5 s, i.e. 16 ms/frame - large enough to be misread as per-frame overhead, which is
-# exactly what happened to the budget table. These marks split it out.
-_T0 = _time.time()
+# ~1.5 s, i.e. 16 ms/frame - large enough to be misread as per-frame overhead.
+#
+# ONE zero for every "since process start" line: `utils.Util.process_uptime()`. This module used to keep its own `_T0`,
+# set AFTER the torch/tensorrt imports, so `startup:` and `phase: backend init` were seconds from different origins under
+# one label and could not be subtracted (startup: could read SMALLER than phase:). Util is the first backend module the
+# entry point imports, so its mark is the closest honest "the process exists" a phase line can use (telemetry audit
+# 2026-11-27, 5.10). A line that says "since process start" now means the same thing everywhere.
 
 #: How long the streaming publishes stand aside after a seek's picture went out, seconds. The pane polls at ~10 Hz;
 #: 250 ms covers two polls, so the stamped picture is read instead of being overwritten by the next stream frame.
@@ -773,7 +777,7 @@ class Render:
         self.renderThread.start()
         log(f"phase: backend init {(_perf_counter() - _t_init) * 1000.0:.0f} ms "
             f"(backend {self.backend}, device {self.device}, precision {self.precision}); "
-            f"{process_uptime():.2f} s since process start")
+            f"{process_uptime():.2f} s since process start (Util import)")
 
         if output_to_mpv:
             MPVOut = MPVOutput(self.writeBuffer, width=self.width*self.upscaleTimes, height=self.height*self.upscaleTimes,fps=self.fps*self.interpolateFactor, outputFrameChunkSize=self.outputFrameChunkSize)
@@ -1742,8 +1746,8 @@ class Render:
                 if not hasattr(self, "_t_first_frame"):
                     self._t_first_frame = _time.time()
                     if self._phases.first("first-frame"):
-                        log(f"startup: first frame enqueued {self._t_first_frame - _T0:.2f} s "
-                            f"after process start (interpreter, engine, ffmpeg/NVENC init)")
+                        log(f"startup: first frame enqueued {process_uptime():.2f} s "
+                            f"after process start (Util import; interpreter, engine, ffmpeg/NVENC init)")
                 if (self.temporalReuse is not None and hasattr(self, "_profile")
                         and self._profile["frames"] % 250 == 0):
                     # visible during the render, not only in the summary: a cancelled encode used to say nothing.
@@ -1778,7 +1782,7 @@ class Render:
         if first is not None and self._phases.first("render-loop"):
             log(f"render loop: {_time.time() - first:.2f} s for {frames_rendered} frames "
                 f"({1000.0 * (_time.time() - first) / max(1, frames_rendered):.2f} ms/frame), "
-                f"total {_time.time() - _T0:.2f} s since process start")
+                f"total {process_uptime():.2f} s since process start (Util import)")
         if self.temporalReuse is not None:
             log(self.temporalReuse.stats())
         if getattr(self, "autoTuner", None) is not None:
