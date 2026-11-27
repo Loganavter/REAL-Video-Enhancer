@@ -1448,7 +1448,16 @@ class VideoPreviewSurface(QRhiWidget):
         The source half is laid out from the picture the RENDERER holds (`_source_size`), not from the newest snapshot:
         while the writer holds the last matched pair through a source gap, the half on screen is the held one.
         """
+        # A COMPARE MODE DRAWS TWO HALVES ONLY WHEN THEY ARE ONE COMMITTED PAIR. The writer holds (paints nothing) while
+        # a result waits for its source, and the renderer used to keep drawing the standing source texture beside the
+        # retained result - two pictures of DIFFERENT moments presented as a pair (measured live 2026-11-27: `half=held`
+        # with the left half a wide frame and the right a close-up of the same scene, the owner's "пара не та"). The
+        # held state shows ONE picture - the one that was on screen - until a pair commits.
         source = self._source_size()
+        if self._view_mode != "single":
+            rounded = self._pair.painted()
+            if rounded is None or rounded.source is None:
+                source = None
         return PreviewScene(
             target=target,
             rhi=self.rhi(),
