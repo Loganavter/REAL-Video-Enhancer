@@ -67,6 +67,12 @@ ACTION_ICON_PX = 32
 INFO_LABELS = ("FPS:", "Resolution:", "Frame Count:", "Encoder:", "Container:", "Color Space:",
                "Pixel Format:", "Is HDR:", "Bit Depth:")
 
+#: The two facts the Encoder cell can report, named by the settings key each is read from. `encoder` is the row's
+#: setting and is the truth while the app generates the command line; `encoder_command` is the command the user typed,
+#: which is what EXECUTES once it exists (`src/ui/SettingsTab.py::publishEncoderSource`).
+ENCODER_SOURCE_ROW = "encoder"
+ENCODER_SOURCE_COMMAND = "encoder_command"
+
 #: The pane's values are aligned digits that must not jitter while a run counts, so they keep one monospace face.
 INFO_MONO_FAMILY = "Fira Mono"
 
@@ -148,6 +154,13 @@ class GeneralSettingsPage:
     """`generalSettings` - placed by its parent with `addTab`."""
 
     page_id = "generalSettings"
+
+    #: The user-owned command line the pane must report instead of the Encoder row's setting ("" = the row is the
+    #: fact). Declared at class level so a pane that has not rendered anything yet answers `encoder_source()` sanely.
+    _encoder_command = ""
+    #: The language the pane was last painted in: a late `set_encoder_command` re-renders in the SAME one instead of
+    #: guessing from the app's current language (they differ for the moment a language switch is in flight).
+    _info_language: str | None = None
 
     def build(self):
         """Build the widget tree and return the page root."""
@@ -932,11 +945,44 @@ class GeneralSettingsPage:
         """The nine rows as the plain text the control probe reads ("FPS: 24.0 -> 24.0" per line), or "" when empty."""
         if self._video_values is None:
             return ""
+        _, encoder_value = self.encoder_source()
         lines = []
         for key in INFO_LABELS:
             value_in, value_out = self._video_values.get(key, ("", ""))
+            if key == "Encoder:":
+                # The probe reads what the pane reports - one source for both (F5), not the row's key when the
+                # user's command is what runs.
+                value_out = encoder_value
             lines.append(f"{key} {value_in} -> {value_out}".rstrip())
         return "\n".join(lines)
+
+    def set_encoder_command(self, command: str = "") -> None:
+        """Declare which encoder fact will run: `""` = the Encoder row's setting, else the user's command line.
+
+        `MainWindow.updateVideoGUIText` paints the row from `settings['encoder']`, and that is the truth only while
+        the app generates the command. Once the user has typed one, the field is what executes (`SettingsTab` stops
+        regenerating it) and the row's key is not - the pane then reported an encoder the run would not use
+        (settings audit 2026-11-27, F5). `src/ui/SettingsTab.py::publishEncoderSource` owns the ownership flag and
+        hands it here; the pane names the setting it read in the cell's label and tooltip.
+        """
+        command = (command or "").strip()
+        if command == self._encoder_command:
+            return
+        self._encoder_command = command
+        if self._video_values is not None:
+            self._render_video_info(self._info_language)
+
+    def encoder_source(self) -> tuple[str, str]:
+        """`(the settings key read, the value reported)` - the Encoder cell's one source of truth.
+
+        `("encoder", <row value>)` while the app generates the command line, `("encoder_command", <the command>)` while
+        the user owns it. The label, the value, the tooltip and `video_info_text()` all read this pair, so the pane
+        cannot state one encoder in its cell and another in the probe's text.
+        """
+        if self._encoder_command:
+            return (ENCODER_SOURCE_COMMAND, self._encoder_command)
+        row = (self._video_values or {}).get("Encoder:", ("", ""))[1]
+        return (ENCODER_SOURCE_ROW, str(row))
 
     def set_run_status(self, *, frame: int | None = None, total: int | None = None,
                        percent: float | None = None, eta: str | None = None, fps: str | None = None,
@@ -1003,6 +1049,8 @@ class GeneralSettingsPage:
         This is the only writer of the pane's text. A language switch calls it again, so the row names follow the
         catalogue while every value stays byte-identical (the regression the old line-rewriting relabel guarded).
         """
+        self._info_language = i18n.current_language() if language is None else language
+        language = self._info_language
         if self._video_values is None:
             # Nothing to describe: the pane is invisible rather than a labelled skeleton (owner, 2026-11-26: "зачем мы
             # это рисуем пока не выбрано ни одно видео? Какой-то рудимент"). The host paints nothing of its own, so a
@@ -1019,10 +1067,23 @@ class GeneralSettingsPage:
         self.infoSizeOut.setText(resolution_out or u"\u2014")
         self.infoMetaIn.setText(self._meta_line(fps_in, frames_in, language))
         self.infoMetaOut.setText(self._meta_line(fps_out, frames_out, language))
+        source_key, encoder_value = self.encoder_source()
         for key, widget in self.infoFactLabels.items():
-            widget.setText(self._fact_name(key, language))
+            name = self._fact_name(key, language)
+            if key == "Encoder:" and source_key == ENCODER_SOURCE_COMMAND:
+                # Name the setting the cell read, so the pane says WHICH of the two encoder facts it reports: the
+                # user's command line, not the row above it (F5).
+                name = f"{name} ({ENCODER_SOURCE_COMMAND})"
+            widget.setText(name)
         for key, widget in self.infoFactValues.items():
-            widget.setText(get(key, ("", ""))[1] or u"\u2014")
+            if key == "Encoder:":
+                widget.setText(encoder_value or u"\u2014")
+            else:
+                widget.setText(get(key, ("", ""))[1] or u"\u2014")
+        encoder_cell = self.infoFactValues.get("Encoder:")
+        if encoder_cell is not None:
+            encoder_cell.setToolTip(
+                f"{source_key}: {encoder_value}" if encoder_value else source_key)
 
         factor = _upscale_tag(resolution_in, resolution_out)
         self.infoTag.setText(f"{factor}x {i18n.translate('upscale', language)}" if factor else "")
