@@ -1,9 +1,9 @@
 # The Logs block: emitter audit and policy
 
 The Logs tab (`src/ui/pages/tab_5.py` -> `ConsoleView`) is a **pure consumer**. `ProcessTab.renderToPipeThread`
-reads the backend child's merged stdout/stderr line by line (`src/ui/ProcessTab.py:1959`), runs every line through
+reads the backend child's merged stdout/stderr line by line (`src/ui/ProcessTab.py:2023`), runs every line through
 `src/ui/render_log.py:RenderLogFilter`, and appends what survives to `renderLogLines`; `syncRenderConsole`
-(`src/ui/ProcessTab.py:3791`) paints them. The app's own `src/Util.log()` writes `log.txt`, not the block. So a
+(`src/ui/ProcessTab.py:3855`) paints them. The app's own `src/Util.log()` writes `log.txt`, not the block. So a
 policy for the block belongs at the backend emitters, and that is where this change puts it.
 
 One shared module, `backend/src/utils/LogPolicy.py`, is imported by both processes (`src/Util.py` loads it by path

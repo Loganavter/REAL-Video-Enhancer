@@ -8,7 +8,7 @@ from multiprocessing import shared_memory
 
 from PySide6 import QtGui
 from PySide6.QtGui import QPixmap, QPainter, QPainterPath, QColor
-from PySide6.QtCore import QObject, QSize, Qt, QUrl, Slot
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QUrl, Slot
 
 from .RenderQueue import RenderQueue
 from ..render_jobs import short_duration
@@ -833,20 +833,81 @@ class ProcessTab:
     def installQueueRows(self) -> None:
         """Queue rows carry a job's state: a thin progress bar, the percentage, and a hover line.
 
-        The rows are painted by the host - `TextListWidget` stays a text list (see `src/ui/render_jobs.py`).
+        The rows are painted by the host - `TextListWidget` stays a text list (see `src/ui/render_jobs.py`). One
+        painter factory feeds BOTH views of the queue: the Render Queue tab's list and the video-info pane's compact
+        card, so the two can never drift into two renderers. The card's pin is wired here too, because selecting an
+        inner tab is the page's glue business, not the page's (the page does not know `processSettingsContainer`).
         """
         from .queue_rows import queue_row_painter, queue_tooltip
 
-        widget = self.page_handles.queue.renderQueueListWidget
-        widget.set_row_painter(queue_row_painter(self.parent.renderQueue))
-        widget.set_row_tooltip_provider(queue_tooltip(self.parent.renderQueue))
+        queue = self.parent.renderQueue
+        paint = queue_row_painter(queue)
+        tip = queue_tooltip(queue)
+        panels = [self.page_handles.queue.renderQueueListWidget]
+        page = self._general_settings_page()
+        if page is not None:
+            panels.append(page.infoQueueList)
+            page.infoQueuePin.clicked.connect(self._show_render_queue_tab)
+        for panel in panels:
+            panel.set_row_painter(paint)
+            panel.set_row_tooltip_provider(tip)
+        self._sync_queue_preview()
+
+    def _show_render_queue_tab(self) -> None:
+        """The pane's pin: select the Render Queue inner tab.
+
+        The index is resolved by identity (`_queue_tab_index`, set in `QConnect`; `indexOf` here for a tab host
+        built after this wiring), never written as a literal: inserting a tab must not make the pin open another
+        page. A host that does not carry the tab (`-1`) makes the press a no-op, not an exception.
+        """
+        host = self.page_handles.proc.processSettingsContainer
+        index = getattr(self, "_queue_tab_index", None)
+        if index is None:
+            index = host.indexOf(self.page_handles.proc.renderQueueTab)
+        if index >= 0:
+            host.setCurrentIndex(index)
+
+    def _on_gui_thread(self) -> bool:
+        """Whether the caller may touch widgets (the render pass calls `refreshQueueRows` from its worker thread)."""
+        thread = getattr(getattr(self, "parent", None), "thread", None)
+        if not callable(thread):
+            return True                       # a glue double in a test has no window thread to compare with
+        try:
+            return QThread.currentThread() == thread()
+        except Exception:                     # a deleted C++ object cannot own a widget write anyway
+            return False
+
+    def _sync_queue_preview(self) -> None:
+        """Mirror the live model's NAMES into the pane's compact queue card - GUI thread only.
+
+        The tab's list is written by the model itself (`RenderQueue.add` appends to its widget); the compact card
+        is a second VIEW of that same model, so it mirrors the model's rows rather than reading the tab's painted
+        text (no string parsing, no second writer). The mirror is a widget write, so it stays on the GUI thread:
+        the render pass calls `refreshQueueRows` from a worker, and the 100 ms tick replays this there.
+        """
+        if not self._on_gui_thread():
+            return
+        page = self._general_settings_page()
+        queue = getattr(getattr(self, "parent", None), "renderQueue", None)
+        if page is None or queue is None:
+            return
+        page.set_queue_preview_names([getattr(job, "inputFile", "") for job in queue.getQueue()])
 
     def refreshQueueRows(self) -> None:
-        """Repaint the queue after a state change (a tick, a finish): the painter reads the model, no row rebuild."""
+        """Repaint the queue after a state change (a tick, a finish): the painter reads the model, no row rebuild.
+
+        Both views answer here - the tab's list and the pane's compact card - because this is the one refresh call a
+        state change already makes. `update()` is safe from the render thread; the name mirror is not, and
+        `_sync_queue_preview` keeps it on the GUI thread.
+        """
         try:
             self.page_handles.queue.renderQueueListWidget.update()
         except Exception:
             pass
+        page = self._general_settings_page()
+        if page is not None:
+            page.refresh_queue_preview_rows()
+        self._sync_queue_preview()
 
     def installQueueMenu(self) -> None:
         """The queue's right-click menu - the replacement for the three buttons the page used to carry.
@@ -873,6 +934,9 @@ class ProcessTab:
                 queue.clear()
             elif action_id == "queue.properties":
                 self.openQueueProperties()
+            # A menu action mutates the model directly (the tab's list is refreshed by the model itself), so this is
+            # the GUI-thread point where the pane's compact card catches up at once instead of on the next tick.
+            self.refreshQueueRows()
 
         def on_context_menu(point) -> None:
             # A FRESH menu per request: the toolkit's popup surface destroys itself when it hides, so reusing one
@@ -3910,6 +3974,9 @@ class ProcessTab:
         # that arrived without one (a programmatic combo reset while a job runs). It is a compare of the facts the pane
         # already holds, so an idle second paints nothing.
         self._update_pipeline_ribbon()
+        # The pane's compact queue card mirrors the model on the same clock: a row added by the window's own Add
+        # button (outside this glue) lands there within one tick, and an unchanged queue costs one list compare.
+        self._sync_queue_preview()
 
     def build_command(self, renderOptions: RenderOptions):
         """The backend command for one job.
