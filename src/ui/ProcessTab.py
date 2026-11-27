@@ -13,7 +13,14 @@ from PySide6.QtCore import QObject, QSize, Qt, QUrl, Slot
 from .RenderQueue import RenderQueue
 from ..render_jobs import short_duration
 from .render_failure import describe_exit, describe_failure
-from .render_log import LogLine, RenderLogFilter
+from .render_log import (
+    BuildHistory,
+    LiveStatus,
+    LogLine,
+    RenderLogFilter,
+    annotate_build_line,
+    engine_build_history_path,
+)
 from .video import telemetry
 from . import shared_flag
 from . import i18n
@@ -420,11 +427,23 @@ class ProcessTab:
         #: The curated lines (`LogLine`: text + level) behind `renderTextOutputList`; the console paints these.
         self.renderLogLines: list[LogLine] | None = None
         self._log_filter = RenderLogFilter()
+        #: The once-a-second status row the tick appends and `_log_status_entry` remembers, so the next second
+        #: REPLACES it instead of stacking another one (a 30-minute render leaves one row, not 1800).
+        self._live_status = LiveStatus()
+        self._log_status_entry: LogLine | None = None
+        #: The GPU the backend named (`Using Device: ...`), read from the stream for the engine-build estimate's slot.
+        self._gpu_name = ""
+        #: The recorded build durations (`engine-build-times.json` beside `settings.txt`), loaded on the first build
+        #: line and kept for the process; `None` until then.
+        self._build_history: BuildHistory | None = None
         self.isOverwrite = False
         self.outputVideoHeight = None
         self.outputVideoWidth = None
         self.currentFrame = 0
         self.fps = 0
+        #: The slot's fps BEFORE rounding: the run card prints the integer, the log's status line needs the fraction
+        #: (0.53 fps is a 1.9 s/frame engine, and `1 fps` beside `1.0 s/frame` would be a lie of rounding).
+        self.fps_value = 0.0
         self.eta = 0
         self.max_value = 0
         self.isPreview = False
@@ -1491,6 +1510,7 @@ class ProcessTab:
             fps = float(fps or 0.0)
         except (TypeError, ValueError):
             fps = 0.0
+        self.fps_value = max(0.0, fps)
         if fps > 0:
             self.fps = int(round(fps))
         eta = status.get("eta_seconds")
@@ -2036,6 +2056,9 @@ class ProcessTab:
             textOutput = []
             self._log_filter = RenderLogFilter()
             self.renderLogLines = []
+            #: A new job's first tick may write its status row at once; the previous job's second is not this one's.
+            self._live_status.reset()
+            self._log_status_entry = None
             render_failure = ""
             self._backend_last_error = ""
             self._backend_reason = ""
@@ -2058,6 +2081,9 @@ class ProcessTab:
                     if terminal_log is not None:
                         terminal_log.write(line)
                     line = str(line.strip())
+                    if line.startswith("Using Device:"):
+                        # The engine-build history is keyed per GPU, and this is the one line that names it.
+                        self._gpu_name = line.split(":", 1)[1].strip()
                     if "BORDERS" in line:
                         # The crop the backend actually handed its reader, kept with this job so the LMB
                         # compare decodes the same rectangle. Parsed here, before the log filter, because the
@@ -2089,7 +2115,7 @@ class ProcessTab:
                     # The pane gets the EVENTS, not the telemetry: per-frame timings, the live progress line it already
                     # shows as FPS/ETA, and the setup chatter repeats are dropped here (src/ui/render_log.py explains
                     # each class and the numbers behind them).
-                    for entry in self._log_filter.feed(line):
+                    for entry in self._log_filter.feed(self._annotate_build_line(line)):
                         textOutput.append(entry.text)
                         self.renderLogLines.append(entry)
                     self.renderTextOutputList = textOutput.copy()
@@ -3788,6 +3814,75 @@ class ProcessTab:
     def modelNameToFile(self):
         pass
 
+    def _engine_history(self) -> BuildHistory:
+        """The recorded build durations, loaded once per process from beside `settings.txt`."""
+        history = self._build_history
+        if history is None:
+            settings = getattr(self, "settings", None)
+            path = engine_build_history_path(getattr(settings, "settingsFile", None))
+            history = self._build_history = BuildHistory.load(path)
+        return history
+
+    def _annotate_build_line(self, line: str) -> str:
+        """A TensorRT build start gains the recorded estimate; a build finish is timed on the way through.
+
+        Runs on the reader thread with the rest of the stream; the rule itself lives in `render_log` so it is
+        testable without Qt (`render_log.annotate_build_line`). Only lines that can be a build line pay for it.
+        """
+        if "TensorRT engine" not in line and "TensorRT plan" not in line:
+            return line
+        try:
+            return annotate_build_line(
+                line,
+                self._engine_history(),
+                now=time.monotonic(),
+                gpu=getattr(self, "_gpu_name", ""),
+            )
+        except Exception as exc:
+            # The estimate is a convenience: a broken history file must not cost the render its log line.
+            log(f"engine build estimate unavailable ({exc}); the line is shown as printed")
+            return line
+
+    def _append_status_line(self) -> None:
+        """The curated once-a-second line: `1.9 s/frame · 0.53 fps · ETA 0:12:10 · frame 120/493`.
+
+        The owner's ask (2026-11-28): "лучше бы там условно раз в секунду писали сколько к/с обработано за это время
+        и ETA оставшееся". Every number is one this tick already carries (`_sync_render_status` wrote them); the
+        backend's own `FPS: ... ETA:` line stays filtered, so the pane never states the same pair twice.
+
+        Exactly ONE status row lives in the pane: the previous one is removed before the new one is appended, so a
+        30-minute render (1800 seconds) leaves one row, not 1800, and the events keep their room. The console lays out
+        only the rows whose text changed (`set_lines` measured at ~2.5 ms for 3000 rows, once a second - the cost that
+        froze the pane came from a full rebuild ten times a second). It stops with the job, because the tick reads
+        `_render_started_mono` - the same flag that returns the run card to idle.
+        """
+        entries = getattr(self, "renderLogLines", None)
+        if self._render_started_mono is None or entries is None:
+            return
+        live = getattr(self, "_live_status", None)
+        if live is None:
+            live = self._live_status = LiveStatus()
+        fps = float(getattr(self, "fps_value", 0.0) or getattr(self, "fps", 0) or 0.0)
+        entry = live.maybe_line(
+            time.monotonic(),
+            fps=fps,
+            eta=str(self.eta or ""),
+            frame=int(self.currentFrame or 0),
+            total=int(self.max_value or 0),
+        )
+        if entry is None:
+            return
+        previous = getattr(self, "_log_status_entry", None)
+        if previous is not None:
+            if previous.text == entry.text:
+                return                              # a paused pane: the same row is already on screen
+            for index in range(len(entries) - 1, -1, -1):
+                if entries[index] is previous:
+                    del entries[index]
+                    break
+        entries.append(entry)
+        self._log_status_entry = entry
+
     def syncRenderConsole(self) -> None:
         """Push the render log into the console INCREMENTALLY.
 
@@ -3842,6 +3937,10 @@ class ProcessTab:
                 lines.append(ConsoleLine(text, None, True))
             elif level == "phase":
                 lines.append(ConsoleLine(text, QColor(accent), True))
+            elif level == "status":
+                # Ambient, not an event: the curated progress row is italic in the pane's default colour, so the
+                # events (plain) and the phases (accent, bold) keep their ranks without a third colour token.
+                lines.append(ConsoleLine(text, None, False, True))
             else:
                 lines.append(ConsoleLine(text))
         return lines
@@ -3885,6 +3984,9 @@ class ProcessTab:
             # The numbers the run card shows come from the render-status slot (the backend writes them
             # beside its log lines); nothing here parses the backend's stdout for them any more.
             self._sync_render_status()
+            # The curated once-a-second line rides the same tick and the numbers just read (see
+            # `_append_status_line`): the pane answers "how fast, how long left" in one row a second.
+            self._append_status_line()
             self.page_handles.proc.progressBar.setRange(
                 0,
                 # only set the range to multiply the frame count if the method is interpolate
