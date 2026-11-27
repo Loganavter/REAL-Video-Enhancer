@@ -36,6 +36,13 @@ ICON_BUTTON_ICON_PX = 30
 #: named once here and passed to `Button(content_padding=...)` unscaled.
 ICON_BUTTON_CONTENT_PADDING = (10, 5, 10, 5)
 
+#: The settings rows' descriptive labels wrap instead of stating their whole text as a minimum width. At 2.0
+#: `label_28` alone asked 1265 px inside a 971 px viewport, so the scroller's content grew to 1421 px and the page
+#: got a horizontal scrollbar. `word_wrap=True` makes the floor the widest word; the labels that share a row with
+#: icon buttons also state `AlignVCenter` on their layout item, so their box stays at the text height (today's
+#: 17 px at 1.0) while still growing to the wrapped height at 2.0. Without that alignment a Preferred-policy label
+#: fills the icon button's 36 px row and the 1.0 geometry moves.
+
 # Layer B3 (2026-11-21): the two widget classes this page no longer builds stock. `OverlayScrollArea` is the
 # `QScrollArea` counterpart whose surface is transparent - the page's rule is `QScrollArea{background:transparent}`,
 # and `SurfaceScrollArea` always paints a token plate (`surface.background` #2c313c or, with `surface_token=None`,
@@ -143,7 +150,7 @@ class DownloadPagePage:
         self.label_4.setObjectName(u"label_4")
         apply(self.label_4, DISPLAY_PT, underline=True)
         self.verticalLayout_11.addWidget(self.label_4)
-        self.low_storage_label = Text(parent=self.backendSelectContainer)
+        self.low_storage_label = Text(parent=self.backendSelectContainer, word_wrap=True)
         self.low_storage_label.setObjectName(u"low_storage_label")
         apply(self.low_storage_label, None, bold=True)
         # The stock label was red through this stylesheet; a toolkit label ignores QSS, so the colour is stated on the
@@ -227,9 +234,9 @@ class DownloadPagePage:
         self.downloadRecommendedBtn.setIcon(icon7)
         self.downloadRecommendedBtn.setIconSize(icon_size)
         self.horizontalLayout_37.addWidget(self.downloadRecommendedBtn)
-        self.label_25 = Text(parent=self.pytorchBackendInstallerContainer_5)
+        self.label_25 = Text(parent=self.pytorchBackendInstallerContainer_5, word_wrap=True)
         self.label_25.setObjectName(u"label_25")
-        self.horizontalLayout_37.addWidget(self.label_25)
+        self.horizontalLayout_37.addWidget(self.label_25, 0, Qt.AlignmentFlag.AlignVCenter)
         self.gridLayout_9.addWidget(self.pytorchBackendInstallerContainer_5, 0, 0, 1, 1)
         self.horizontalLayout_46.addLayout(self.gridLayout_9)
         self.verticalLayout_13.addLayout(self.horizontalLayout_46)
@@ -258,9 +265,9 @@ class DownloadPagePage:
         self.uninstallNCNNBtn.setIcon(icon6)
         self.uninstallNCNNBtn.setIconSize(icon_size)
         self.horizontalLayout_9.addWidget(self.uninstallNCNNBtn)
-        self.label_10 = Text(parent=self.pytorchBackendInstallerContainer_4)
+        self.label_10 = Text(parent=self.pytorchBackendInstallerContainer_4, word_wrap=True)
         self.label_10.setObjectName(u"label_10")
-        self.horizontalLayout_9.addWidget(self.label_10)
+        self.horizontalLayout_9.addWidget(self.label_10, 0, Qt.AlignmentFlag.AlignVCenter)
         self.verticalLayout_13.addWidget(self.pytorchBackendInstallerContainer_4)
         self.pytorchBackendInstallerContainer = QWidget(self.scrollAreaWidgetContents_2)
         self.pytorchBackendInstallerContainer.setObjectName(u"pytorchBackendInstallerContainer")
@@ -287,7 +294,7 @@ class DownloadPagePage:
         self.uninstallTorchBtn.setIcon(icon6)
         self.uninstallTorchBtn.setIconSize(icon_size)
         self.horizontalLayout_6.addWidget(self.uninstallTorchBtn)
-        self.label_6 = Text(parent=self.pytorchBackendInstallerContainer)
+        self.label_6 = Text(parent=self.pytorchBackendInstallerContainer, word_wrap=True)
         self.label_6.setObjectName(u"label_6")
         sizePolicy.setHeightForWidth(self.label_6.sizePolicy().hasHeightForWidth())
         self.label_6.setSizePolicy(sizePolicy)
@@ -318,9 +325,9 @@ class DownloadPagePage:
         self.uninstallTensorRTBtn.setIcon(icon6)
         self.uninstallTensorRTBtn.setIconSize(icon_size)
         self.horizontalLayout_24.addWidget(self.uninstallTensorRTBtn)
-        self.label_8 = Text(parent=self.pytorchBackendInstallerContainer_2)
+        self.label_8 = Text(parent=self.pytorchBackendInstallerContainer_2, word_wrap=True)
         self.label_8.setObjectName(u"label_8")
-        self.horizontalLayout_24.addWidget(self.label_8)
+        self.horizontalLayout_24.addWidget(self.label_8, 0, Qt.AlignmentFlag.AlignVCenter)
         self.verticalLayout_13.addWidget(self.pytorchBackendInstallerContainer_2)
         self.directMLBackendInstallerContainer = QWidget(self.scrollAreaWidgetContents_2)
         self.directMLBackendInstallerContainer.setObjectName(u"directMLBackendInstallerContainer")
@@ -347,9 +354,9 @@ class DownloadPagePage:
         self.uninstallDirectMLBtn.setIcon(icon6)
         self.uninstallDirectMLBtn.setIconSize(icon_size)
         self.horizontalLayout_8.addWidget(self.uninstallDirectMLBtn)
-        self.label_28 = Text(parent=self.directMLBackendInstallerContainer)
+        self.label_28 = Text(parent=self.directMLBackendInstallerContainer, word_wrap=True)
         self.label_28.setObjectName(u"label_28")
-        self.horizontalLayout_8.addWidget(self.label_28)
+        self.horizontalLayout_8.addWidget(self.label_28, 0, Qt.AlignmentFlag.AlignVCenter)
         self.verticalLayout_13.addWidget(self.directMLBackendInstallerContainer)
         # A settings column is a list of ROWS: the layout's leftover height is not theirs to share. Every container here
         # is a plain `QWidget`, whose default Preferred vertical policy grows, so the box layout handed it the slack and

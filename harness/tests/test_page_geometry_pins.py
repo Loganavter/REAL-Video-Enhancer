@@ -23,6 +23,10 @@ Three outcomes, and the reason each is the right one:
 
 Everything is offscreen and builds the real `MainWindowShell`; the compiled resource blob is stubbed because a test tree
 has no build step for it.
+
+One more shape lives here (2026-11-28): the Download page's own horizontal extent at both factors. At 2.0 the settings
+content asked 1421 px inside a 971 px viewport because six descriptive labels stated their full text as a minimum
+width; they wrap now, so the content takes its viewport at 1.0 and 2.0 and the scroller's horizontal maximum is zero.
 """
 
 from __future__ import annotations
@@ -36,7 +40,13 @@ pytest.importorskip("PySide6")
 pytest.importorskip("sli_ui_toolkit")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QAbstractScrollArea,
+    QApplication,
+    QMainWindow,
+    QStackedWidget,
+    QWidget,
+)
 
 from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px  # noqa: E402
 
@@ -68,6 +78,28 @@ RETIRED_CONTENT_RECTS = {
 
 #: The two transport controls whose ceiling is a design length (`render_row_geometry` pins the row itself).
 TRANSPORT_BUTTONS = ("startRenderButton", "killRenderButton")
+
+#: The download page's scroller: the settings rows live inside it and the 2.0 overflow was its horizontal bar.
+DOWNLOAD_SCROLL_AREA = "scrollArea_2"
+
+#: Every descriptive label inside the download page's settings rows. At 2.0 their single-line text wants more
+#: width than the 971 px viewport, so each one wraps; the row containers also carry the two icon buttons.
+DOWNLOAD_WRAPPED_LABELS = (
+    "low_storage_label",
+    "label_25",
+    "label_10",
+    "label_6",
+    "label_8",
+    "label_28",
+)
+
+#: `label_28`'s row is the widest child the 2.0 measurement named (`directMLBackendInstallerContainer`, 1421 px).
+DOWNLOAD_WIDEST_ROW = "directMLBackendInstallerContainer"
+
+#: Measured at `WINDOW_SIZE` with the fix: 1027 px at 1.0 (today's number) and the 2.0 viewport that the offending
+#: content asked 1421 px for. Both contents are exactly their viewport and neither scrolls sideways.
+DOWNLOAD_CONTENT_AT_1_0 = 1027
+DOWNLOAD_VIEWPORT_AT_2_0 = 971
 
 
 def _settle(app: QApplication, turns: int = 3) -> None:
@@ -231,3 +263,96 @@ def test_every_retired_pin_follows_the_factor_or_says_why_it_does_not(qapp: QApp
         f"interpolateModelComboBox.sizeIncrement is {increment_one} at 1.0 and {increment_two} at 2.0; the Designer's "
         "(230, 0) was retired because a layout-managed combo never resizes by increment, and reintroducing it - scaled "
         "or not - would state a step nothing reads")
+
+
+def _download_scroller(app: QApplication, window: QMainWindow) -> tuple[QWidget, QAbstractScrollArea]:
+    """Reveal the download page and return its root with the scroller the settings rows live in."""
+    stack = window.page_handles.menu.stackedWidget
+    index = next(
+        (i for i in range(stack.count()) if stack.widget(i).objectName() == "downloadPage"),
+        None,
+    )
+    assert index is not None, "the download page is no longer a page of the nav stack"
+    stack.setCurrentIndex(index)
+    _settle(app, 8)
+    page = stack.widget(index)
+    area = page.findChild(QAbstractScrollArea, DOWNLOAD_SCROLL_AREA)
+    assert area is not None, f"the download page no longer holds a {DOWNLOAD_SCROLL_AREA} scroller"
+    return page, area
+
+
+def test_the_download_page_fits_its_viewport_at_both_factors(qapp: QApplication):
+    """At 2.0 the settings content asked 1421 px inside a 971 px viewport; both sides of the bar are now zero.
+
+    The old code is what makes this test red: the same build at 2.0 reported `scrollArea_2` with a 450 px horizontal
+    scrollbar and a 1421 px content widget, because `label_28` alone had a 1265 px single-line `minimumSizeHint`
+    (and the rows for `label_6`/`label_8` asked 988/1000 px). Wrapping those labels makes each minimum the widest
+    WORD, so the content takes the viewport's width instead of defining its own.
+    """
+    from src.ui import toolkit_boot, toolkit_theme
+
+    toolkit_boot.ensure()
+    toolkit_theme.install(qapp)
+    scale = UiScale.get_instance()
+    factor_before = scale.factor()
+    measured: dict[float, dict] = {}
+    windows: dict[float, QMainWindow] = {}
+    try:
+        for factor in (1.0, 2.0):
+            window = _shell(qapp, factor)
+            windows[factor] = window
+            page, area = _download_scroller(qapp, window)
+            content = area.widget()
+            viewport = area.viewport()
+            labels = []
+            for name in DOWNLOAD_WRAPPED_LABELS:
+                label = page.findChild(QWidget, name)
+                assert label is not None, f"the download page no longer holds {name}"
+                labels.append({
+                    "name": name,
+                    "width": label.width(),
+                    "height": label.height(),
+                    "needed_height": label.heightForWidth(label.width()),
+                    "minimum_width": label.minimumSizeHint().width(),
+                })
+            widest = page.findChild(QWidget, DOWNLOAD_WIDEST_ROW)
+            assert widest is not None, f"the download page no longer holds {DOWNLOAD_WIDEST_ROW}"
+            measured[factor] = {
+                "page": page.width(),
+                "viewport": viewport.width(),
+                "content": content.width(),
+                "hmax": area.horizontalScrollBar().maximum(),
+                "labels": labels,
+                "widest_row_minimum": widest.minimumSizeHint().width(),
+            }
+    finally:
+        for window in windows.values():
+            window.close()
+        scale.set_factor(factor_before)
+
+    one, two = measured[1.0], measured[2.0]
+
+    # 1.0 is today's number: the content was 1027 px inside a 1027 px viewport and never scrolled sideways.
+    assert (one["content"], one["viewport"], one["hmax"]) == (DOWNLOAD_CONTENT_AT_1_0,
+                                                             DOWNLOAD_CONTENT_AT_1_0, 0), (
+        f"at 1.0 the download content is {one['content']} px in a {one['viewport']} px viewport with "
+        f"horizontalScrollBar.maximum()={one['hmax']}; the shipped number is "
+        f"{DOWNLOAD_CONTENT_AT_1_0} px and no horizontal scroll")
+
+    # 2.0 is the defect: the content must take the viewport (971 px), not define 1421 px of its own.
+    assert (two["content"], two["viewport"], two["hmax"]) == (DOWNLOAD_VIEWPORT_AT_2_0,
+                                                             DOWNLOAD_VIEWPORT_AT_2_0, 0), (
+        f"at 2.0 the download content is {two['content']} px in a {two['viewport']} px viewport with "
+        f"horizontalScrollBar.maximum()={two['hmax']}; before the wrap it was 1421 px in 971 px with a 450 px "
+        "scrollbar")
+
+    # The named offenders: every row's minimum (widest word + the two icon buttons) fits the visible box.
+    assert two["widest_row_minimum"] <= two["viewport"], (
+        f"{DOWNLOAD_WIDEST_ROW} still needs {two['widest_row_minimum']} px in a {two['viewport']} px viewport at 2.0")
+    clipped = [row for row in two["labels"] if row["height"] < row["needed_height"]]
+    assert not clipped, (
+        "these wrapped labels are shorter than their text at 2.0 - the layout clipped the second line instead of "
+        f"letting the row grow: {clipped}")
+    too_wide = [row for row in two["labels"] if row["minimum_width"] > two["viewport"]]
+    assert not too_wide, (
+        f"wrapped labels still state a minimum wider than the {two['viewport']} px viewport at 2.0: {too_wide}")
