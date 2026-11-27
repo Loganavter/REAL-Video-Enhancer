@@ -1,9 +1,6 @@
-import os
-
-from PySide6.QtWidgets import QMainWindow, QFileDialog
-from ..constants import PLATFORM, HOME_PATH
-from ..Util import currentDirectory, checkForWritePermissions, open_folder, log
-from .QTcustom import RegularQTPopup
+from PySide6.QtWidgets import QMainWindow
+from ..constants import PLATFORM
+from ..Util import currentDirectory, open_folder, log
 # `settings.txt` has its own owner since P3 of the seam plan (`src/ui/settings_store.py`). Re-exported because the
 # window's entry point and `ProcessTab` import `Settings` from this module, and that edge is not this move's subject.
 from .settings_store import Settings
@@ -12,6 +9,7 @@ from ..VideoInfo import VideoLoader
 from ..video_probe import is_probeable_input
 from .pages.handles import WindowHandles
 from . import i18n
+from . import output_path
 
 # the combo box shows user words, the backend wants flag values.
 # this is the single place where the two are mapped.
@@ -111,7 +109,10 @@ class SettingsTab:
             "video_pixel_format": self.page_handles.encoder.video_pixel_format,
             "video_quality": self.page_handles.encoder.video_quality,
         }
-        self.settings = Settings()
+        # ONE settings object for the window and this tab. Two instances over one file was a lost-update hazard, and
+        # the output path is the fact it would have eaten: the window writes the path the user typed, the tab writes
+        # every other row, and whichever wrote last serialised its own stale copy of the path.
+        self.settings = getattr(parent, "settings", None) or Settings()
         log("Settings: " + str(self.settings.settings))
         self.connectSettingText() # has to be in this order, otherwise settings wont stick because they get reset.
         self.connectWriteSettings()
@@ -298,9 +299,15 @@ class SettingsTab:
                 str(self.page_handles.encoder.video_quality.currentData()),
             )
         )
-        self.page_handles.output.output_folder_location.textChanged.connect(
-            lambda: self.writeOutputFolder()
-        )
+        # The Encoder page's "Output folder directory" row is a READ-ONLY mirror of the path field
+        # (`src/ui/output_path.py::mirror_directory`), refreshed here because the field is the only owner. It used to be
+        # a second, persisted way to set the folder - and the one that silently overwrote the path on every option
+        # change, which is the owner's report of 2026-11-26.
+        self.page_handles.general.outputFileText.textChanged.connect(self.refreshOutputDirectory)
+        # `textEdited`, not `textChanged`: only a real user edit makes the path theirs. A programmatic `setText`
+        # (a derived default, a restore, the reset button) must never claim ownership - the same distinction the
+        # encoder command line above makes, for the same reason.
+        self.page_handles.general.outputFileText.textEdited.connect(self.onOutputPathEdited)
 
         self.page_handles.settings.resetSettingsBtn.clicked.connect(self.resetSettings)
 
@@ -428,22 +435,24 @@ class SettingsTab:
         self.page_handles.general.celReuse.setEnabled(
             self.page_handles.general.frameReuse.isChecked())
 
-    def writeOutputFolder(self):
-        outputlocation = self.page_handles.output.output_folder_location.text()
-        if not (os.path.exists(outputlocation) and os.path.isdir(outputlocation)):
-            RegularQTPopup(
-                "No videos folder\nSetting default output folder to home directory."
-            )
-            outputlocation = HOME_PATH
-        if not checkForWritePermissions(outputlocation):
-            RegularQTPopup(
-                "No permissions to export here!\nSetting default output folder to home directory."
-            )
-            outputlocation = HOME_PATH
+    def onOutputPathEdited(self, text: str) -> None:
+        """The user typed in the path field: from now on it is theirs, and it is persisted.
 
-        self.settings.writeSetting(
-            "output_folder_location",
-            str(outputlocation),
+        Clearing the field hands the name back to the derivation (`store_user_path("")`) - the next option change
+        fills it from the directory default again, which is the only case where a derived path may appear.
+        """
+        output_path.store_user_path(self.settings, text)
+
+    def refreshOutputDirectory(self, *_args) -> None:
+        """Keep the Encoder page's READ-ONLY row equal to the path field's directory.
+
+        The row's own `textChanged` handler is gone, so nothing can be typed or written into it to become a second
+        answer; this is the only writer, and the path field is the only source.
+        """
+        output_path.mirror_directory(
+            self.page_handles.general,
+            self.page_handles.output.output_folder_location,
+            self.settings,
         )
 
     def resetSettings(self):
@@ -452,6 +461,10 @@ class SettingsTab:
             self.settings.readSettings()
             self.connectSettingText()
             self.parent.switchToSettingsPage()
+        # The reset dropped the stored path; the field must drop it too, or the page keeps showing a choice the
+        # settings file no longer has and the next option change would be refused by a path nobody chose.
+        output_path.reset_path(self.page_handles.general, self.settings)
+        self.refreshOutputDirectory()
 
     def connectSettingText(self):
         if PLATFORM == "darwin":
@@ -486,12 +499,9 @@ class SettingsTab:
         self.page_handles.encoder.video_quality.setCurrentIndex(
             max(0, self.page_handles.encoder.video_quality.findData(self.settings.settings["video_quality"]))
         )
-        self.page_handles.output.output_folder_location.setText(
-            self.settings.settings["output_folder_location"]
-        )
-        self.page_handles.output.select_output_folder_location_btn.clicked.connect(
-            self.selectOutputFolder
-        )
+        # The Encoder row follows the PATH, never the other way round (`output_folder_location` is only the fallback
+        # for a user with no stored path - it is not a control any more).
+        self.refreshOutputDirectory()
         self.page_handles.render_settings.uhd_mode.setChecked(self.settings.settings["uhd_mode"] == "True")
         self.page_handles.render_settings.ncnn_gpu_id.setValue(int(self.settings.settings["ncnn_gpu_id"]))
         self.page_handles.render_settings.pytorch_gpu_id.setValue(
@@ -525,20 +535,3 @@ class SettingsTab:
             max(0, self.page_handles.general.qualityPresetComboBox.findData(
                 self.settings.settings["quality_preset"]))
         )
-
-    def selectOutputFolder(self):
-        outputFile = QFileDialog.getExistingDirectory(
-            parent=self.parent,
-            caption="Select Folder",
-            dir=os.path.expanduser("~"),
-        )
-        outputlocation = outputFile
-        if os.path.exists(outputlocation) and os.path.isdir(outputlocation):
-            if checkForWritePermissions(outputlocation):
-                self.settings.writeSetting(
-                    "output_folder_location",
-                    str(outputlocation),
-                )
-                self.page_handles.output.output_folder_location.setText(outputlocation)
-            else:
-                RegularQTPopup("No permissions to export here!")
