@@ -384,8 +384,6 @@ class ProcPagePage:
             content_padding=(8, 5, 8, 5), corner_radius=10, size=(40, 40), icon_size=26)
         self.previewPauseButton.setObjectName(u"previewPauseButton")
         self.previewPauseButton.setChecked(True)
-        self.previewPauseButton.setToolTip(QCoreApplication.translate(
-            "MainWindow", u"Paused: the preview holds this frame. Press to follow the render.", None))
         self.previewPauseButton.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         # Straight into the pane's own column, aligned left: a wrapper `QWidget` around one button would be a bare
         # container (the toolkit-native ratchet counts them, and proc_page has no budget for a new one).
@@ -439,10 +437,6 @@ class ProcPagePage:
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 0))
         self.renderPreviewBtn.setObjectName(u"renderPreviewBtn")
-        self.renderPreviewBtn.setToolTip(i18n.tooltip(
-            'Render Preview:',
-            '- Renders a small portion of the video to show the results (most useful for upscaling)'
-        ))
         apply(self.renderPreviewBtn, None)
         # QPushButton's own policy (as wide as it needs, exactly as tall as its hint): the toolkit button is happy to
         # fill the cell, which turns a row button into a slab when the column is taller than its contents.
@@ -646,8 +640,6 @@ class ProcPagePage:
             content_align=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
             content_padding=(8, 2, 8, 2), corner_radius=8, size=(0, 0))
         self.previewBandToggle.setObjectName(u"previewBandToggle")
-        self.previewBandToggle.setToolTip(QCoreApplication.translate(
-            "MainWindow", u"Collapse the preview band", None))
         self.previewBandToggle.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.previewBandToggle.hide()
         # The policy's state: the mode, the column it asked for, and whether the band is collapsed. `ProcPageHandles`
@@ -855,6 +847,16 @@ class ProcPagePage:
         """The collapse toggle's one action: flip the band and re-run the policy."""
         self.set_preview_collapsed(not self._preview_collapsed)
 
+    def _apply_preview_band_tooltip(self) -> None:
+        """State the chevron's tooltip from the band's state and the language in force.
+
+        The glyph and its tooltip name the ACTION the press performs, so both are (state, language) - one writer for
+        the two callers that can change either (`set_preview_collapsed`, `retranslate`).
+        """
+        self.previewBandToggle.setToolTip(QCoreApplication.translate(
+            "MainWindow",
+            u"Expand the preview band" if self._preview_collapsed else u"Collapse the preview band", None))
+
     def set_preview_collapsed(self, collapsed: bool) -> None:
         """Collapse or expand the preview band; a no-op when the state already matches."""
         collapsed = bool(collapsed)
@@ -863,9 +865,7 @@ class ProcPagePage:
         self._preview_collapsed = collapsed
         # The glyph is the ACTION the press performs, like the preview's own pause/play button.
         self.previewBandToggle.setText(u"\u25b8" if collapsed else u"\u25be")
-        self.previewBandToggle.setToolTip(QCoreApplication.translate(
-            "MainWindow",
-            u"Expand the preview band" if collapsed else u"Collapse the preview band", None))
+        self._apply_preview_band_tooltip()
         self._apply_layout_policy()
 
     def retranslate(self, language: str | None = None) -> None:
@@ -877,6 +877,19 @@ class ProcPagePage:
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.renderQueueTab), QCoreApplication.translate("MainWindow", u"Render Queue", None))
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.advancedSettings), QCoreApplication.translate("MainWindow", u"Advanced", None))
         self.processSettingsContainer.setTabText(self.processSettingsContainer.indexOf(self.tab_5), QCoreApplication.translate("MainWindow", u"Logs", None))
+        # The preview chrome's tooltips are catalogue documents too, and `setToolTip` at build time only covers the
+        # language in force then: a switch left them English (measured 2026-11-27: 27 of 30 tooltips stayed English
+        # while their labels followed). They are rebuilt from their parts here, like every label above.
+        self.renderPreviewBtn.setToolTip(i18n.tooltip(
+            'Render Preview:',
+            '- Renders a small portion of the video to show the results (most useful for upscaling)'
+        ))
+        # The chevron states the ACTION the press performs, so its text is the band's state, not a fixed string. The
+        # legacy pause button is hidden by `ProcessTab` but still owned by this page (kept for an A/B), so its tooltip
+        # follows the same pass.
+        self._apply_preview_band_tooltip()
+        self.previewPauseButton.setToolTip(QCoreApplication.translate(
+            "MainWindow", u"Paused: the preview holds this frame. Press to follow the render.", None))
         # The labels are what the strip measures: re-run the answer once they are the real ones.
         self._tab_strip.refresh()
         self.startRenderButton.setText("")
