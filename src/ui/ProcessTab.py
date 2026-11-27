@@ -564,35 +564,10 @@ class ProcessTab:
         """
         self.status = str(text)
 
-    def setProgressDetail(self, text: str) -> None:
-        try:
-            self.page_handles.proc.progressDetail.setText(str(text))
-        except Exception:
-            pass
-
-    def progressDetailText(self) -> str:
-        """`42% · 12m3s elapsed · 16m40s left · frame 1234/5678` - empty while idle.
-
-        The three words are catalogue keys (`i18n.tr`, keyed by the English source string) because the tick rebuilds
-        this line every 100 ms: a literal here put `elapsed`/`left`/`frame` back on screen one tick after a switch to
-        `ru` (measured 2026-11-24). The fragments keep their own spaces exactly as the literals did (`" elapsed"`,
-        `" left"`, `"frame "` - the space is part of the key), so the English line and every number in it stay byte for
-        byte what 1.0 wrote.
-        """
-        if self._render_started_mono is None and not self.max_value:
-            return ""
-        total = max(1, int(self.max_value or 0))
-        done = max(0, min(total, int(self.currentFrame or 0)))
-        parts = [f"{int(round(100.0 * done / total))}%"]
-        if self._render_started_mono is not None:
-            from time import monotonic
-
-            elapsed = max(0.0, monotonic() - self._render_started_mono)
-            parts.append(short_duration(elapsed) + i18n.tr(" elapsed"))
-        if self.eta:
-            parts.append(str(self.eta) + i18n.tr(" left"))
-        parts.append(i18n.tr("frame ") + f"{done}/{total}")
-        return " · ".join(parts)
+    # There is no `setProgressDetail`/`progressDetailText` any more: the caption line under the transport row was
+    # removed by the owner (2026-11-28: "подписи надо убрать было"), and the run card is the ONE place that states the
+    # frame counter, percent, remaining time, fps and elapsed clock. Two writers of the same numbers is exactly how
+    # they drift apart.
 
     def _general_settings_page(self):
         """The video-info pane's owner object, or None on an unbuilt tree.
@@ -607,8 +582,8 @@ class ProcessTab:
     def _run_card_values(self) -> tuple:
         """The run card's numbers as ONE comparable tuple, from the state this tick already carries.
 
-        `("idle",)` means no render is live - `_render_started_mono` is the same flag `progressDetailText` reads for
-        "there is nothing to show". Otherwise: (frame, total, percent, eta, fps, status, elapsed). Nothing here asks
+        `("idle",)` means no render is live - `_render_started_mono` is the flag that tells the card so. Otherwise:
+        (frame, total, percent, eta, fps, status, elapsed). Nothing here asks
         the backend or re-reads a label: `currentFrame`/`max_value`/`fps`/`eta` are what `_sync_render_status` just
         wrote, the percent is that same frame/total pair, and `elapsed` is the clock the detail line uses, in the
         card's `h:mm:ss` shape (the mockup's "0:00:08 elapsed").
@@ -2058,7 +2033,6 @@ class ProcessTab:
         log("preview: keeping the last painted frame at the end of the job")
         self.parent.enableProcessPage()
         self._render_started_mono = None
-        self.setProgressDetail("")
         # The run card goes back to its placeholder HERE. The 100 ms tick is the card's normal feeder, but the tick ends
         # WITH the job (`UpdateGUIThread.finished` is this method), so a card that was counting when the render finished
         # kept `493 / 493 · 100 % · Rendering` on screen for ever - measured live 2026-11-26, the one thing the offscreen
@@ -3783,7 +3757,6 @@ class ProcessTab:
             except Exception:
                 pass
             self.page_handles.proc.progressBar.setValue(self.currentFrame)
-            self.setProgressDetail(self.progressDetailText())
 
         # The pane's run card takes the numbers `_sync_render_status` just wrote (`currentFrame`/`max_value`/`fps`/
         # `eta`/`status`), and is repainted only when one moved (see `_update_run_card`). It stands OUTSIDE the console

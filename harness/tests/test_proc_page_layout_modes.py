@@ -126,7 +126,7 @@ def test_the_bottom_strip_stays_visible_at_the_minimum_window_height(qapp, proce
         assert page.pageScroll.verticalScrollBar().maximum() == 0, (
             "the process page scrolls at its own minimum height - the bottom strip would be pushed under the edge")
         viewport = _viewport(page)
-        for widget, name in ((page.renderRow, "render row"), (page.progressDetail, "progress detail")):
+        for widget, name in ((page.renderRow, "render row"),):
             bottom = widget.mapTo(viewport, widget.rect().bottomLeft()).y()
             assert bottom <= viewport.height(), f"the {name} ends at {bottom} in a {viewport.height()} px viewport"
     finally:

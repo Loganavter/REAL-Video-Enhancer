@@ -133,11 +133,6 @@ class Tab2Page:
         self.horizontalLayout_17.addItem(self.horizontalSpacer_3)
         self.scene_change_detection_enabled = _row_checkbox(self.sceneChangeDetectionSettingContainer)
         self.scene_change_detection_enabled.setObjectName(u"scene_change_detection_enabled")
-        self.scene_change_detection_enabled.setToolTip(i18n.tooltip(
-            'Scene Change Detection Enabled:',
-            '- Enabled: Attempts to detect when scenes change in a video.',
-            'When running an interpolation, it will avoide interpolating over these scene changes.'
-        ))
         self.horizontalLayout_17.addWidget(self.scene_change_detection_enabled)
         self.verticalLayout_25.addWidget(self.sceneChangeDetectionSettingContainer)
         self.widget_12 = QWidget(self.scrollAreaWidgetContents_3)
@@ -159,12 +154,6 @@ class Tab2Page:
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.addItem("")
         self.scene_change_detection_method.setObjectName(u"scene_change_detection_method")
-        self.scene_change_detection_method.setToolTip(i18n.tooltip(
-            'Scene Change Detection Method',
-            '- mean: fastest, least accurate',
-            '- mean (segmented): fast, prone to overdetection',
-            '- pyscenedetect: slow, accuate (Recommended)'
-        ))
         self.horizontalLayout_27.addWidget(self.scene_change_detection_method)
         self.verticalLayout_25.addWidget(self.widget_12)
         self.widget_7 = QWidget(self.scrollAreaWidgetContents_3)
@@ -186,12 +175,6 @@ class Tab2Page:
                                       step_button_width=20, field_height=29,
             alignment=SPIN_ALIGNMENT)
         self.scene_change_detection_threshold.setObjectName(u"scene_change_detection_threshold")
-        self.scene_change_detection_threshold.setToolTip(i18n.tooltip(
-            'Scene Change Detection Threshold',
-            '- Lower number: higher chance of detecting scene changes, with risk of overdetection.',
-            '- Higher number: lower chance of detecting scene changes, with risk of underdetection.',
-            '- Recommended: 2-3 for real life, 4 for animation.'
-        ))
         self.scene_change_detection_threshold.setDecimals(1)
         # Qt's `setMinimum`/`setMaximum` are the one range spelling the toolkit field does not answer (`DoubleSpinBox`
         # carries `setRange` only), so the Designer's two statements are the one call they compose to.
@@ -211,10 +194,6 @@ class Tab2Page:
         self.horizontalLayout_25.addItem(self.horizontalSpacer_10)
         self.auto_border_cropping = _row_checkbox(self.widget_9)
         self.auto_border_cropping.setObjectName(u"auto_border_cropping")
-        self.auto_border_cropping.setToolTip(i18n.tooltip(
-            'Audo Border Cropping:',
-            '- Will automatically remove black bars if they are present throughout a video, can increase performance.'
-        ))
         self.horizontalLayout_25.addWidget(self.auto_border_cropping)
         self.verticalLayout_25.addWidget(self.widget_9)
         # A settings column is a list of ROWS: the layout's leftover height is not theirs to share. Every container here
@@ -267,3 +246,26 @@ class Tab2Page:
         self.label_30.setText(QCoreApplication.translate("MainWindow", u"Scene Change Detection Threshold", None))
         self.label_48.setText(QCoreApplication.translate("MainWindow", u"Auto Border Cropping", None))
         self.auto_border_cropping.setText("")
+        # Tooltips are catalogue documents assembled from parts (`src/ui/i18n.py::tooltip`), so they are rebuilt in
+        # the same pass as the labels: a `setToolTip` left in `build()` keeps the language the page was built in.
+        self.scene_change_detection_enabled.setToolTip(i18n.tooltip(
+            'Scene Change Detection Enabled:',
+            '- Enabled: Attempts to detect when scenes change in a video.',
+            'When running an interpolation, it will avoide interpolating over these scene changes.'
+        ))
+        self.scene_change_detection_method.setToolTip(i18n.tooltip(
+            'Scene Change Detection Method',
+            '- mean: fastest, least accurate',
+            '- mean (segmented): fast, prone to overdetection',
+            '- pyscenedetect: slow, accuate (Recommended)'
+        ))
+        self.scene_change_detection_threshold.setToolTip(i18n.tooltip(
+            'Scene Change Detection Threshold',
+            '- Lower number: higher chance of detecting scene changes, with risk of overdetection.',
+            '- Higher number: lower chance of detecting scene changes, with risk of underdetection.',
+            '- Recommended: 2-3 for real life, 4 for animation.'
+        ))
+        self.auto_border_cropping.setToolTip(i18n.tooltip(
+            'Audo Border Cropping:',
+            '- Will automatically remove black bars if they are present throughout a video, can increase performance.'
+        ))

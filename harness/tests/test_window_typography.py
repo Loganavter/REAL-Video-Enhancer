@@ -48,7 +48,7 @@ TEXT_GROUPS = {
     "label_4": DISPLAY_PX,           # download page heading (25 pt, underlined)
     "encoderLabel_4": BODY_PX,       # a body label (12 pt)
     "label_41": GROUP_TITLE_PX,      # a section heading (15 pt)
-    "progressDetail": CAPTION_PX,    # a process readout (10 pt)
+    "videoInfoRemaining": CAPTION_PX,  # the run card's caption line (10 pt)
 }
 CONTROL_NAME = "uninstallAppBtn"     # a toolkit Button: RVE's control scale (12 design px)
 

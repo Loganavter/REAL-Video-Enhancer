@@ -91,9 +91,6 @@ class Tab4Page:
         self.horizontalLayout_12.addItem(self.horizontalSpacer_5)
         self.discord_rich_presence = _row_checkbox(self.discordRPCSettingsContainer)
         self.discord_rich_presence.setObjectName(u"discord_rich_presence")
-        self.discord_rich_presence.setToolTip(i18n.tooltip(
-            'Show REAL Video Enhancer in discord.'
-        ))
         self.horizontalLayout_12.addWidget(self.discord_rich_presence)
         self.verticalLayout_20.addWidget(self.discordRPCSettingsContainer)
         # The interface language. A layout, not a wrapper QWidget: the row is a line of content, and the page already
@@ -160,3 +157,8 @@ class Tab4Page:
         self.discord_rich_presence.setText("")
         self.languageLabel.setText(QCoreApplication.translate("MainWindow", u"Language", None))
         self.openRVEFolderBtn.setText(QCoreApplication.translate("MainWindow", u"Open RVE Folder", None))
+        # A tooltip is a catalogue document assembled from parts (`src/ui/i18n.py::tooltip`): it is rebuilt here with
+        # the labels, not left at the language the page was built in.
+        self.discord_rich_presence.setToolTip(i18n.tooltip(
+            'Show REAL Video Enhancer in discord.'
+        ))

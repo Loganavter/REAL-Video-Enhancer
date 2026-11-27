@@ -657,7 +657,6 @@ def _completion_tab(pane, monkeypatch):
     tab.page_handles.proc.previewPauseButton = None
     tab.page_handles.general = SimpleNamespace(outputFileText=_Text(), inputFileText=_Text())
     tab.parent = SimpleNamespace(enableProcessPage=lambda: None, startRender=lambda: None)
-    tab.setProgressDetail = lambda text: None
     tab.setStatus = lambda status: None
     tab.syncRenderConsole = lambda: None
     tab._restoreQueueAfterPreview = lambda: None

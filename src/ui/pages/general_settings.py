@@ -877,6 +877,9 @@ class GeneralSettingsPage:
         apply(self.infoFrameLine, CAPTION_PT, family=INFO_MONO_FAMILY)
         self.infoRemainingLine = Text(parent=run_line, color_token="label.text.muted",
                                       alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        # Named for the control surface and for the typography test: this is the caption-scale text the shell builds
+        # (the transport row's own caption line was removed 2026-11-28, so the run card is the surviving example).
+        self.infoRemainingLine.setObjectName("videoInfoRemaining")
         apply(self.infoRemainingLine, CAPTION_PT, family=INFO_MONO_FAMILY)
         run_line_layout.addWidget(self.infoFrameLine)
         run_line_layout.addStretch(1)

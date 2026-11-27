@@ -67,11 +67,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Start Time (seconds)": "Начало (секунды)",
         "End Time (seconds)": "Конец (секунды)",
         "Render Preview": "Предпросмотр рендера",
-        # --- The progress-detail line (`src/ui/ProcessTab.py::progressDetailText`) ---------------------------
-        # Also rebuilt on every tick, so also keyed at the write site. These are FRAGMENTS: the writer appends the
-        # number first and the fragment after it, so the space belongs to the key (`" elapsed"`, `" left"`) and the
-        # frame label is the prefix `"frame "`. The bare words are deliberately not keys - the writer never passes
-        # them, and a bare-word entry would answer for nothing.
+        # --- The run card's line fragments (`src/ui/pages/general_settings.py::_meta_line` and the run card) -----
+        # Rebuilt on every tick, so also keyed at the write site. These are FRAGMENTS: the writer appends the number
+        # first and the fragment after it, so the space belongs to the key (`" elapsed"`, `" left"`) and the frame label
+        # is the prefix `"frame "`. The bare words are deliberately not keys - the writer never passes them, and a
+        # bare-word entry would answer for nothing. (They used to feed the `progressDetail` line under the transport
+        # row as well; that line was removed 2026-11-28, the run card is the only reader.)
         " elapsed": " прошло",
         " left": " осталось",
         "frame ": "кадр ",

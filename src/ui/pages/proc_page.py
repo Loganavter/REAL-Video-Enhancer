@@ -53,6 +53,10 @@ SPIN_ALIGNMENT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 #: a design value, so every resolve goes through `scaled_px()`/`layout_decision()` at apply time, never at import.
 PROCESS_COLUMN_PX = COLUMN_DESIGN_PX
 
+#: The transport row's own plate radius, in DESIGN px - the same 10 the video-info card uses, so the column reads as
+#: one family of surfaces instead of cards plus a square band.
+TRANSPORT_PLATE_RADIUS_PX = 10
+
 #: The floating collapse toggle's inset from the page viewport's top-right corner, in DESIGN px.
 OVERLAY_INSET_PX = 8
 
@@ -472,7 +476,11 @@ class ProcPagePage:
         self.verticalLayout_7.setSpacing(0)
         self.verticalLayout_7.setObjectName(u"verticalLayout_7")
         self.verticalLayout_7.setContentsMargins(0, 10, 0, 0)
-        self.bottomMenuSubContainer = SurfacePanel(self.processContainer, background_token="dialog.background")
+        # NO fill on the column body: the only thing that ever showed of it was the band behind the transport row
+        # (owner, 2026-11-28: "сделай подложку скругленной и убери снизу лишний пад"). The row carries its own rounded
+        # plate now (`widget_13`), so a full-height `dialog.background` under it would paint a square band with dead
+        # space below the controls.
+        self.bottomMenuSubContainer = SurfacePanel(self.processContainer, background_token=None)
         self.bottomMenuSubContainer.setObjectName(u"bottomMenuSubContainer")
         sizePolicy6 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Preferred)
         sizePolicy6.setHorizontalStretch(0)
@@ -528,7 +536,12 @@ class ProcPagePage:
         # NO panel behind the transport row (owner, 2026-11-27: "нужно ещё линию под контролами убрать - она инфу
         # дублирует"). The row is a control strip, not a card: its `surface.page` fill showed as a rounded band under the
         # buttons and the progress bar, carrying nothing.
-        self.widget_13 = SurfacePanel(self.bottomMenuSubContainer, background_token=None)
+        # The transport row IS the plate: rounded like every other card on this page (owner, 2026-11-28), sized to its
+        # controls - it must not stretch to swallow the column's leftover height, which is what put dead padding under
+        # the buttons (`verticalLayout_21`'s trailing stretch takes that space instead).
+        self.widget_13 = SurfacePanel(self.bottomMenuSubContainer, background_token="dialog.background",
+                                      radius=scaled_px(TRANSPORT_PLATE_RADIUS_PX))
+        self.widget_13.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
         self.widget_13.setObjectName(u"widget_13")
         self.widget_13.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
         #: The typed name for the render row (Start/progress row): in stacked mode it moves into the sticky
@@ -605,13 +618,13 @@ class ProcPagePage:
         # is the one it is always in.
         self.horizontalLayout_32.addWidget(self.progressBar)
         self.verticalLayout_21.addWidget(self.widget_13)
-        # The bar itself paints no label, so the numbers live on their own line right under it: percentage, elapsed,
-        # remaining and the frame counter (owner, 2026-11-22: "under the huge progress bar there is no way to learn the
-        # progress in percent or minutes, how much has passed").
-        self.progressDetail = Text(parent=self.bottomMenuSubContainer)
-        self.progressDetail.setObjectName(u"progressDetail")
-        apply(self.progressDetail, CAPTION_PT)
-        self.verticalLayout_21.addWidget(self.progressDetail)
+        # There is no status line here. A `progressDetail` caption lived under the row (2026-11-22) and then under the
+        # render card, and the owner has now removed it for good (2026-11-28: "подписи надо убрать было"): the run
+        # card already states the frame counter, the percent, the remaining time, fps and the elapsed clock, so the
+        # line was a duplicate under the controls. `ProcessTab` no longer produces it.
+        #
+        # The column's leftover height goes here, not into the row: a stretched row is dead padding under a control.
+        self.verticalLayout_21.addStretch(1)
         self.verticalLayout_7.addWidget(self.bottomMenuSubContainer)
         self.gridLayout_3.addWidget(self.processContainer, 0, 1, 1, 1)
         # The body is complete, so it becomes the scroll surface's widget and the surface fills the page. The page
@@ -676,7 +689,6 @@ class ProcPagePage:
             processSettingsContainer=self.processSettingsContainer,
             renderQueueTab=self.renderQueueTab,
             progressBar=self.progressBar,
-            progressDetail=self.progressDetail,
             VideoPreview=self.VideoPreview,
             RenderedPreviewControlsContainer=self.RenderedPreviewControlsContainer,
             renderPreviewBtn=self.renderPreviewBtn,
@@ -819,7 +831,7 @@ class ProcPagePage:
         else:
             self.renderRowFooterLayout.removeWidget(self.widget_13)
             if self.widget_13.parentWidget() is not self.bottomMenuSubContainer:
-                # Index 1 is the row's shipped place: after the tab host (`widget_2`), before `progressDetail`.
+                # Index 1 is the row's shipped place: right after the tab host (`widget_2`).
                 self.verticalLayout_21.insertWidget(1, self.widget_13)
             footer.hide()
             margins = self.gridLayout_3.contentsMargins()

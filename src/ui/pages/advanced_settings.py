@@ -157,9 +157,6 @@ class AdvancedSettingsPage:
         self.horizontalLayout_42.addItem(self.horizontalSpacer)
         self.benchmarkModeCheckBox = _row_checkbox(self.benchmarkModeContainer)
         self.benchmarkModeCheckBox.setObjectName(u"benchmarkModeCheckBox")
-        self.benchmarkModeCheckBox.setToolTip(i18n.tooltip(
-            'Perform processing without outputing new video. This tests the raw performance of the inference.'
-        ))
         # The Designer's `setStyleSheet(u"")` states no rule; a toolkit check box paints itself, so it is dropped
         # rather than kept as dead text.
         self.horizontalLayout_42.addWidget(self.benchmarkModeCheckBox)
@@ -193,11 +190,6 @@ class AdvancedSettingsPage:
         self.horizontalLayout_16.addItem(self.horizontalSpacer_8)
         self.tilingCheckBox = _row_checkbox(self.tilingContainer)
         self.tilingCheckBox.setObjectName(u"tilingCheckBox")
-        self.tilingCheckBox.setToolTip(i18n.tooltip(
-            'Split up processing upscaled frames into chunks.',
-            'Lowers VRAM usage, but also slows down render.',
-            'Only use when render failes due to VRAM limits.'
-        ))
         self.horizontalLayout_16.addWidget(self.tilingCheckBox)
         self.verticalLayout_16.addWidget(self.tilingContainer)
         self.tileSizeContainer = QWidget(self.upscaleContainer)
@@ -254,10 +246,6 @@ class AdvancedSettingsPage:
         self.horizontalLayout_53.addItem(self.horizontalSpacer_26)
         self.dynamicScaledOpticalFlowCheckBox = _row_checkbox(self.sloMoModeContainer_5)
         self.dynamicScaledOpticalFlowCheckBox.setObjectName(u"dynamicScaledOpticalFlowCheckBox")
-        self.dynamicScaledOpticalFlowCheckBox.setToolTip(i18n.tooltip(
-            'Scales optical flow based on the difference between frames.',
-            'Helps with anime interpolation.'
-        ))
         self.horizontalLayout_53.addWidget(self.dynamicScaledOpticalFlowCheckBox)
         self.interpolateContainer.addWidget(self.sloMoModeContainer_5)
         self.sloMoModeContainer_4 = QWidget(self.interpolateContainer_2)
@@ -272,10 +260,6 @@ class AdvancedSettingsPage:
         self.horizontalLayout_52.addItem(self.horizontalSpacer_25)
         self.ensembleCheckBox = _row_checkbox(self.sloMoModeContainer_4)
         self.ensembleCheckBox.setObjectName(u"ensembleCheckBox")
-        self.ensembleCheckBox.setToolTip(i18n.tooltip(
-            'Ensembles flow, can produce better results.',
-            'Only compadible with older RIFE models and GMFSS'
-        ))
         self.horizontalLayout_52.addWidget(self.ensembleCheckBox)
         self.interpolateContainer.addWidget(self.sloMoModeContainer_4)
         self.verticalLayout_33.addWidget(self.interpolateContainer_2, 0, Qt.AlignmentFlag.AlignTop)
@@ -330,3 +314,21 @@ class AdvancedSettingsPage:
         self.dynamicScaledOpticalFlowCheckBox.setText("")
         self.label_68.setText(QCoreApplication.translate("MainWindow", u"Ensemble (Pytorch/TensorRT Only)", None))
         self.ensembleCheckBox.setText("")
+        # Tooltips are catalogue documents assembled from parts (`src/ui/i18n.py::tooltip`), so they are rebuilt in
+        # this pass: a `setToolTip` left in `build()` keeps the language the page was built in.
+        self.benchmarkModeCheckBox.setToolTip(i18n.tooltip(
+            'Perform processing without outputing new video. This tests the raw performance of the inference.'
+        ))
+        self.tilingCheckBox.setToolTip(i18n.tooltip(
+            'Split up processing upscaled frames into chunks.',
+            'Lowers VRAM usage, but also slows down render.',
+            'Only use when render failes due to VRAM limits.'
+        ))
+        self.dynamicScaledOpticalFlowCheckBox.setToolTip(i18n.tooltip(
+            'Scales optical flow based on the difference between frames.',
+            'Helps with anime interpolation.'
+        ))
+        self.ensembleCheckBox.setToolTip(i18n.tooltip(
+            'Ensembles flow, can produce better results.',
+            'Only compadible with older RIFE models and GMFSS'
+        ))

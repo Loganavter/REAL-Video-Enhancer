@@ -192,19 +192,6 @@ class Tab6Page:
         self.encoder.addItem("")
         self.encoder.addItem("")
         self.encoder.setObjectName(u"encoder")
-        self.encoder.setToolTip(i18n.tooltip(
-            'Encoder:',
-            '- Compression algorithm for video, most common is libx264',
-            '- Any encoder without a device label is a CPU encoder.',
-            '- Lossy Encoders:',
-            '- libx264 (mkv, mp4, mov, avi)',
-            '- libx265 (mkv, mp4, mov)',
-            '- vp9 (mkv, webm)',
-            '- av1 (mkv, mp4, webm)',
-            '- Lossless Encoders:',
-            '- prores (mkv, mov)',
-            '- ffv1 (mkv, avi)'
-        ))
         self.encoder.setMinimumSize(QSize(0, 0))
         self.horizontalLayout_15.addWidget(self.encoder)
         self.verticalLayout_26.addWidget(self.widget_17)
@@ -227,10 +214,6 @@ class Tab6Page:
         self.video_encoder_speed.addItem("")
         self.video_encoder_speed.addItem("")
         self.video_encoder_speed.setObjectName(u"video_encoder_speed")
-        self.video_encoder_speed.setToolTip(i18n.tooltip(
-            'Encoder Speed:',
-            '- Speed at which the encoder processes the video, Slower processing time means Better results for the file size.'
-        ))
         self.video_encoder_speed.setMinimumSize(QSize(0, 0))
         self.horizontalLayout_36.addWidget(self.video_encoder_speed)
         self.verticalLayout_26.addWidget(self.widget_16)
@@ -276,13 +259,6 @@ class Tab6Page:
         self.video_container.addItem("")
         self.video_container.addItem("")
         self.video_container.setObjectName(u"video_container")
-        self.video_container.setToolTip(i18n.tooltip(
-            'Video Container',
-            '- Changes the video container in the default output file generated container.',
-            '- mkv is recomended due to its extensive support for different formats.',
-            'WARNING: Changing this MAY break encoder compadibility.',
-            'Please look at the audio and video encoder tooltips for compadibility.'
-        ))
         self.horizontalLayout_44.addWidget(self.video_container)
         self.verticalLayout_26.addWidget(self.widget_27)
         self.widget_21 = QWidget(self.widget_15)
@@ -305,14 +281,6 @@ class Tab6Page:
         self.video_pixel_format.addItem("")
         self.video_pixel_format.addItem("")
         self.video_pixel_format.setObjectName(u"video_pixel_format")
-        self.video_pixel_format.setToolTip(i18n.tooltip(
-            'Pixel Format',
-            '- Defines how color information is stored for each pixel in a video frame.',
-            '- yuv420p: Most common, removes the most information. (mkv, mp4, mov, avi, webm)',
-            '- yuv422p: In between 420p and 444p. (mkv, mov, mp4)',
-            '- yuv444p: Keeps the most information. (mkv, mov, mp4)',
-            '- yuv 420/422/444 p10le: 10 bit version of each. (MKV and MP4 containers only) (mkv, mov, mp4)'
-        ))
         self.video_pixel_format.setMinimumSize(QSize(0, 0))
         self.horizontalLayout_35.addWidget(self.video_pixel_format)
         self.verticalLayout_26.addWidget(self.widget_21)
@@ -410,3 +378,38 @@ class Tab6Page:
         self.video_pixel_format.setItemText(3, u"yuv420p (10 bit)")
         self.video_pixel_format.setItemText(4, u"yuv422p (10 bit)")
         self.video_pixel_format.setItemText(5, u"yuv444p (10 bit)")
+        # Tooltips are catalogue documents assembled from parts (`src/ui/i18n.py::tooltip`), so they are rebuilt in
+        # this pass: a `setToolTip` left in `build()` keeps the language the page was built in. The encoder command's
+        # tooltip is already rebuilt above through `_encoder_command_tooltip.set_help`.
+        self.encoder.setToolTip(i18n.tooltip(
+            'Encoder:',
+            '- Compression algorithm for video, most common is libx264',
+            '- Any encoder without a device label is a CPU encoder.',
+            '- Lossy Encoders:',
+            '- libx264 (mkv, mp4, mov, avi)',
+            '- libx265 (mkv, mp4, mov)',
+            '- vp9 (mkv, webm)',
+            '- av1 (mkv, mp4, webm)',
+            '- Lossless Encoders:',
+            '- prores (mkv, mov)',
+            '- ffv1 (mkv, avi)'
+        ))
+        self.video_encoder_speed.setToolTip(i18n.tooltip(
+            'Encoder Speed:',
+            '- Speed at which the encoder processes the video, Slower processing time means Better results for the file size.'
+        ))
+        self.video_container.setToolTip(i18n.tooltip(
+            'Video Container',
+            '- Changes the video container in the default output file generated container.',
+            '- mkv is recomended due to its extensive support for different formats.',
+            'WARNING: Changing this MAY break encoder compadibility.',
+            'Please look at the audio and video encoder tooltips for compadibility.'
+        ))
+        self.video_pixel_format.setToolTip(i18n.tooltip(
+            'Pixel Format',
+            '- Defines how color information is stored for each pixel in a video frame.',
+            '- yuv420p: Most common, removes the most information. (mkv, mp4, mov, avi, webm)',
+            '- yuv422p: In between 420p and 444p. (mkv, mov, mp4)',
+            '- yuv444p: Keeps the most information. (mkv, mov, mp4)',
+            '- yuv 420/422/444 p10le: 10 bit version of each. (MKV and MP4 containers only) (mkv, mov, mp4)'
+        ))
