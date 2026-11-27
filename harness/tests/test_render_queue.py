@@ -7,6 +7,10 @@ scrolling, which is why the lock is here and not `setEnabled(False)` on the page
 
 The widget is stubbed at exactly the compat surface the manager calls, so this runs on the portable interpreter without
 PySide6; the real selection gestures are covered by the toolkit's own list tests.
+
+The render lock (2026-11-26): a running pass takes its rows by status from the live list, so `add` is allowed to append
+while it runs - that is how the queue is topped up during a job. Remove/reorder still refuse, because they move rows the
+pass may already be holding.
 """
 
 from __future__ import annotations
@@ -115,7 +119,13 @@ def test_moving_down_keeps_the_selection_on_the_same_items():
     assert [rows.items[row] for row in rows.selected] == ["a"]
 
 
-def test_a_locked_queue_refuses_mutations_but_still_reports_its_rows():
+def test_a_locked_queue_refuses_mutations_but_still_accepts_an_append():
+    """The render lock stops rows MOVING under a running pass, not rows ARRIVING.
+
+    A pass takes its rows by status from the live list (`take_next_pending`), so an append changes nothing it already
+    holds - and adding work to a queue while a job runs is the owner's request (2026-11-26). Removing and reordering
+    still refuse: those move the ground under the consumer.
+    """
     queue, rows = _queue("a", "b")
     rows.setSelectedRows([0])
     queue.set_locked(True)
@@ -124,7 +134,8 @@ def test_a_locked_queue_refuses_mutations_but_still_reports_its_rows():
     assert queue.removeSelected() == 0
     assert queue.moveSelected("down") is False
     queue.add(_option("c"))
-    assert rows.items == ["a", "b"], "the running render's list must not change underneath it"
+    assert rows.items == ["a", "b", "c"], "a row added mid-run lands at the end, and nothing it held moved"
+    assert [job.inputFile for job in queue.pending_jobs()] == ["a", "b", "c"]
 
     queue.set_locked(False)
     assert queue.moveSelected("down") is True

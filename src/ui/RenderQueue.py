@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -338,10 +339,21 @@ class RenderQueue:
     the actions live in the right-click menu and operate on everything selected - which is what makes a rubber-band
     selection worth having.
 
-    `locked` is the render lock: while a render walks this queue, its items are being consumed by the writer thread, so
-    removing or reordering them would change the list under it. A locked queue still SCROLLS - the old
-    `disableProcessPage` disabled the whole page, which froze the list mid-render, and a log of finished files is
-    exactly what a user scrolls through then.
+    Two different locks live here, and they answer different questions:
+
+    * ``locked`` is the RENDER lock. While a pass walks this queue, removing or reordering a row moves the ground under
+      the consumer, so ``removeSelected``/``moveSelected`` refuse while it is set. It does **not** close the queue:
+      a row added mid-run is the owner's request (2026-11-26, "добавить возможность пополнять очередь во время
+      работы"), and an append changes no row the consumer already holds. The pass takes rows by STATUS from the live
+      list (``take_next_pending``), so one added while it runs is simply the next one.
+    * ``_lock`` is a thread lock. ``queue`` and ``inputNameList`` are written by the GUI thread (add, remove, move,
+      clear) and read by the render thread (``take_next_pending``, the job-state writers). Every access goes through
+      it: a lock on one side only is the race it exists to prevent. It is re-entrant because a Qt signal fired by
+      ``qlistwidget.addItem``/``setItems`` inside a critical section runs on the same thread and asks the queue for
+      its rows again.
+
+    A locked queue still SCROLLS - the old `disableProcessPage` disabled the whole page, which froze the list
+    mid-render, and a log of finished files is exactly what a user scrolls through then.
     """
 
     def __init__(self, qlistwidget: "TextListWidget"):
@@ -349,34 +361,40 @@ class RenderQueue:
         self.inputNameList = []  # this list links up 1:1 with the queue, storing input names allow for index searching
         self.qlistwidget = qlistwidget
         self.locked = False
+        self._lock = threading.RLock()
 
     def set_locked(self, locked: bool) -> None:
-        self.locked = bool(locked)
+        with self._lock:
+            self.locked = bool(locked)
 
     def is_locked(self) -> bool:
-        return bool(self.locked)
+        with self._lock:
+            return bool(self.locked)
 
     def add(self, renderable: RenderOptions):
-        if self.locked:
-            return
-        if getattr(renderable, "state", None) is None:
-            renderable.state = JobState(source_seconds=float(getattr(renderable, "videoFrameCount", 0) or 0)
-                                        / max(1.0, float(getattr(renderable, "videoFps", 1) or 1)))
-        self._stamp_added(renderable)
-        self.queue.append(renderable)
-        self.qlistwidget.addItem(renderable.inputFile)
-        self.inputNameList.append(renderable.inputFile)
+        """Append a row. Allowed while a pass runs: that is what "add to the queue during a render" is."""
+        with self._lock:
+            self._ensure_state(renderable)
+            self._stamp_added(renderable)
+            self.queue.append(renderable)
+            self.qlistwidget.addItem(renderable.inputFile)
+            self.inputNameList.append(renderable.inputFile)
 
     def addToStart(self, renderable: RenderOptions):
-        if self.locked:
-            return
+        """Insert a row at the top. Also allowed mid-run: the next ``take_next_pending`` picks it up first."""
+        with self._lock:
+            self._ensure_state(renderable)
+            self._stamp_added(renderable)
+            self.queue.insert(0, renderable)
+            self.qlistwidget.insertItem(0, renderable.inputFile)
+            self.inputNameList.insert(0, renderable.inputFile)
+
+    @staticmethod
+    def _ensure_state(renderable: RenderOptions) -> None:
+        """Give the row its job state (and the source duration the hover line reads) - once."""
         if getattr(renderable, "state", None) is None:
             renderable.state = JobState(source_seconds=float(getattr(renderable, "videoFrameCount", 0) or 0)
                                         / max(1.0, float(getattr(renderable, "videoFps", 1) or 1)))
-        self._stamp_added(renderable)
-        self.queue.insert(0, renderable)
-        self.qlistwidget.insertItem(0, renderable.inputFile)
-        self.inputNameList.insert(0, renderable.inputFile)
 
     @staticmethod
     def _stamp_added(renderable: RenderOptions) -> None:
@@ -390,18 +408,48 @@ class RenderQueue:
         state.added_wall = _wallclock()
 
     def clear(self):
-        self.queue.clear()
-        self.inputNameList.clear()
-        self.qlistwidget.clear()
+        with self._lock:
+            self.queue.clear()
+            self.inputNameList.clear()
+            self.qlistwidget.clear()
 
     def getQueue(self) -> list[RenderOptions]:
-        return self.queue
+        """A COPY of the rows, taken under the lock.
+
+        Callers walk it while the render thread may be taking the next row, so handing out the live list would let a
+        snapshot be built from a list that changed mid-iteration. The queue's own methods are the only writers.
+        """
+        with self._lock:
+            return list(self.queue)
 
     def pending_jobs(self) -> list[RenderOptions]:
-        """Jobs still to render - a finished row stays in the list as history, it is not run again."""
-        return [item for item in self.queue if getattr(getattr(item, "state", None), "status", "pending") == "pending"]
+        """Jobs still to render - a finished row stays in the list as history, it is not run again.
 
-    def mark_rendering(self, renderable: RenderOptions) -> None:
+        A one-shot snapshot, kept for callers that want the whole set (counts, tests). The render pass does NOT use
+        it: it takes one row at a time with `take_next_pending`, so a row added mid-run is seen.
+        """
+        with self._lock:
+            return [item for item in self.queue
+                    if getattr(getattr(item, "state", None), "status", "pending") == "pending"]
+
+    def take_next_pending(self) -> RenderOptions | None:
+        """The next row still to render, marked `rendering`, or None when nothing is pending.
+
+        The scan, the check and the mark are ONE critical section: two consumers cannot take the same row, and a row
+        appended while the pass runs is seen by the next call (there is no snapshot to go stale). A row removed
+        before its turn is simply no longer in the list, so it is not resurrected; a row removed while it is being
+        rendered is detached from the list but keeps rendering - its own `mark_finished` then writes to a state no row
+        shows, which is harmless.
+        """
+        with self._lock:
+            for renderable in self.queue:
+                if getattr(getattr(renderable, "state", None), "status", "pending") == "pending":
+                    self._mark_rendering_locked(renderable)
+                    return renderable
+            return None
+
+    def _mark_rendering_locked(self, renderable: RenderOptions) -> None:
+        """`mark_rendering`'s body, for callers already holding `_lock`."""
         state = getattr(renderable, "state", None)
         if state is None:
             return
@@ -410,21 +458,27 @@ class RenderQueue:
         state.started_mono = _monotonic()
         state.started_wall = _wallclock()
 
+    def mark_rendering(self, renderable: RenderOptions) -> None:
+        with self._lock:
+            self._mark_rendering_locked(renderable)
+
     def update_progress(self, renderable: RenderOptions, fraction: float) -> None:
-        state = getattr(renderable, "state", None)
-        if state is None or state.status != "rendering":
-            return
-        state.progress = max(0.0, min(1.0, float(fraction)))
+        with self._lock:
+            state = getattr(renderable, "state", None)
+            if state is None or state.status != "rendering":
+                return
+            state.progress = max(0.0, min(1.0, float(fraction)))
 
     def mark_finished(self, renderable: RenderOptions, *, ok: bool = True, error: str = "") -> None:
-        state = getattr(renderable, "state", None)
-        if state is None:
-            return
-        state.status = "done" if ok else "failed"
-        state.progress = 1.0 if ok else state.progress
-        state.finished_mono = _monotonic()
-        state.finished_wall = _wallclock()
-        state.error = str(error)
+        with self._lock:
+            state = getattr(renderable, "state", None)
+            if state is None:
+                return
+            state.status = "done" if ok else "failed"
+            state.progress = 1.0 if ok else state.progress
+            state.finished_mono = _monotonic()
+            state.finished_wall = _wallclock()
+            state.error = str(error)
 
     def selectedRows(self) -> list[int]:
         rows = getattr(self.qlistwidget, "selectedRows", None)
@@ -445,47 +499,53 @@ class RenderQueue:
             self.qlistwidget.setSelectedRows(valid)
 
     def removeSelected(self) -> int:
-        """Remove every selected row (descending, so the indices stay valid); returns how many went."""
-        if self.locked:
-            return 0
-        rows = sorted({row for row in self.selectedRows() if 0 <= row < len(self.queue)}, reverse=True)
-        if not rows:
-            return 0
-        first = min(rows)
-        for row in rows:
-            del self.queue[row]
-            del self.inputNameList[row]
-        self._refresh([], current=max(0, min(first, len(self.inputNameList) - 1)))
-        return len(rows)
+        """Remove every selected row (descending, so the indices stay valid); returns how many went.
+
+        Refused while a pass runs: the consumer holds one row at a time from the live list, and deleting a row shifts
+        every index after it. Adding is allowed (`add`); removing is not.
+        """
+        with self._lock:
+            if self.locked:
+                return 0
+            rows = sorted({row for row in self.selectedRows() if 0 <= row < len(self.queue)}, reverse=True)
+            if not rows:
+                return 0
+            first = min(rows)
+            for row in rows:
+                del self.queue[row]
+                del self.inputNameList[row]
+            self._refresh([], current=max(0, min(first, len(self.inputNameList) - 1)))
+            return len(rows)
 
     def moveSelected(self, direction: str = "up") -> bool:
         """Move the selected rows one place (a block moves as a block); returns True when anything moved."""
-        if self.locked:
-            return False
-        rows = sorted({row for row in self.selectedRows() if 0 <= row < len(self.queue)})
-        if not rows:
-            return False
-        selected = set(rows)
-        moved = False
-        # Ascending for up, descending for down: each row checks the neighbour it is moving towards, so a selected
-        # block slides together instead of collapsing into one row.
-        order = rows if direction != "down" else list(reversed(rows))
-        for row in order:
-            target = row + 1 if direction == "down" else row - 1
-            if target < 0 or target >= len(self.queue) or target in selected:
-                continue
-            self.queue[row], self.queue[target] = self.queue[target], self.queue[row]
-            self.inputNameList[row], self.inputNameList[target] = (
-                self.inputNameList[target],
-                self.inputNameList[row],
-            )
-            selected.discard(row)
-            selected.add(target)
-            moved = True
-        if moved:
-            order_after = sorted(selected)
-            self._refresh(order_after, current=order_after[0])
-        return moved
+        with self._lock:
+            if self.locked:
+                return False
+            rows = sorted({row for row in self.selectedRows() if 0 <= row < len(self.queue)})
+            if not rows:
+                return False
+            selected = set(rows)
+            moved = False
+            # Ascending for up, descending for down: each row checks the neighbour it is moving towards, so a selected
+            # block slides together instead of collapsing into one row.
+            order = rows if direction != "down" else list(reversed(rows))
+            for row in order:
+                target = row + 1 if direction == "down" else row - 1
+                if target < 0 or target >= len(self.queue) or target in selected:
+                    continue
+                self.queue[row], self.queue[target] = self.queue[target], self.queue[row]
+                self.inputNameList[row], self.inputNameList[target] = (
+                    self.inputNameList[target],
+                    self.inputNameList[row],
+                )
+                selected.discard(row)
+                selected.add(target)
+                moved = True
+            if moved:
+                order_after = sorted(selected)
+                self._refresh(order_after, current=order_after[0])
+            return moved
 
     # -- the QListWidget-era names this manager answers (the toolkit control keeps the same calls) ------
 
