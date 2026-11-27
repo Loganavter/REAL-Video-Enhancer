@@ -21,7 +21,7 @@ That file is the thing to paste into a report; the app's `log.txt` stays clean.
 The lines are `key=value` so they can be pasted or parsed with `awk`:
 
     preview: stats frames=24 paints=24 up=24 up_ms=0.01/1.34 pass_ms=0.40/0.98 gui_ms=0.62/0.98 int_ms=41.2/44.0/90.1
-    preview: stats … drop=0 seek_ms=38.4/… window_s=1.0
+    preview: stats … seek_ms=38.4/… window_s=1.0
 
 `up_ms` is the enqueue call only; `pass_ms` is the pass (resource update + draws), i.e. where the copy actually happens.
 
@@ -156,6 +156,10 @@ _pair_off = 0
 #: Paints whose halves were within a frame and a half but not within half a frame: the timestamps' own drift, not a
 #: mismatch the eye would see.
 _pair_strict = 0
+#: Compare-mode paints that showed ONE half (`CommittedPair.lone_half`). They are not in `_pair_off`'s numerator and
+#: used to be missing from its denominator too, so a pane that painted the result alone every second read as perfectly
+#: paired (telemetry audit 2026-11-27).
+_pair_lone = 0
 #: Of the sub-frame paints: which side of the result the source was on. Alternating values = a wobble, one value = offset.
 _pair_ahead = 0
 _pair_behind = 0
@@ -165,7 +169,6 @@ _gui: list[float] = []
 _upload: list[float] = []
 _intervals: list[float] = []
 _pass: list[float] = []
-_drops = 0
 _last_paint: float | None = None
 _last_stats = 0.0
 _started = False
@@ -216,15 +219,26 @@ def note_upload(*, upload_ms: float | None = None, size_bytes: int | None = None
         _bytes += int(size_bytes)
 
 
-def note_pair(*, delta_frames: float) -> None:
-    """One compare-mode paint: how far apart the two halves were, in frames.
+def note_pair(*, delta_frames: float | None = None, lone_half: str | None = None) -> None:
+    """One compare-mode paint: how far apart the two halves were, in frames - or that there was one half.
 
     Level-independent on purpose: a per-paint log line costs more than the thing it measures (at 24 fps the level 2 run
     distorted the very pairing it was counting), while this counter rides the one line per second that level 1 already
     writes. `pair_off` counts paints whose halves were more than half a frame apart - the flicker, as a number.
+
+    `delta_frames` must be computed in the PANE's cadence (seconds / the pane's own frame period), never with a
+    hard-coded rate: multiplied by 24 a 60 fps clip read a two-frame desync as 0 (telemetry audit 2026-11-27).
+    `lone_half` is a paint that showed one half (`"result"` or `"source"`); it enters the denominator and a counter of
+    its own, because treating it as a perfect pair is how a pane painting alone looked healthy.
     """
-    global _pair_total, _pair_off, _pair_strict, _pair_ahead, _pair_behind
+    global _pair_total, _pair_off, _pair_strict, _pair_ahead, _pair_behind, _pair_lone
     _pair_total += 1
+    if lone_half:
+        _pair_lone += 1
+        return
+    if delta_frames is None:
+        raise ValueError("note_pair needs delta_frames or lone_half")
+
     if abs(float(delta_frames)) > 1.5:
         # "Off" is what the EYE would call a different moment: more than a frame and a half (the gate's own tolerance).
         _pair_off += 1
@@ -256,13 +270,6 @@ def note_paint(*, interval_ms: float | None = None, pass_ms: float | None = None
         if 0.0 < delta < 1000.0:
             _intervals.append(interval_ms if interval_ms is not None else delta)
     _last_paint = now
-
-
-def note_drops(count: int) -> None:
-    """Frames the queue threw away (oldest for the live stream, late for the playback grid)."""
-    global _drops
-    if count:
-        _drops += int(count)
 
 
 #: A press-to-picture turnaround below this is not a seek that happened - it is a frame that was already on its way
@@ -334,7 +341,9 @@ def snapshot() -> dict[str, object]:
         "paints": _paints,
         "uploads": _uploads,
         "bytes": _bytes,
-        "drops": _drops,
+        "pair_total": _pair_total,
+        "pair_off": _pair_off,
+        "pair_lone": _pair_lone,
         "gui_ms": list(_gui),
         "upload_ms": list(_upload),
         "interval_ms": list(_intervals),
@@ -351,12 +360,11 @@ def _reset(*, session: bool = False) -> None:
     session (a test, a restarted recorder) forgets both - otherwise the next flush after a reset would treat itself as
     the session's first and skip a window.
     """
-    global _frames, _paints, _uploads, _bytes, _drops, _last_snapshot, _started, _last_stats, _shown
+    global _frames, _paints, _uploads, _bytes, _last_snapshot, _started, _last_stats, _shown
+    global _pair_total, _pair_off, _pair_strict, _pair_ahead, _pair_behind, _pair_lone
     global _snapshot_started, _last_snapshot_at
-    global _pair_total, _pair_off, _pair_strict, _pair_ahead, _pair_behind
-    _frames = _paints = _uploads = _bytes = _drops = 0
-    _pair_total = _pair_off = 0
-    _pair_strict = _pair_ahead = _pair_behind = 0
+    _frames = _paints = _uploads = _bytes =     _pair_total = _pair_off = 0
+    _pair_strict = _pair_ahead = _pair_behind = _pair_lone = 0
     if session:
         # `shown` is a property of the PANE (what it is painting right now), not a per-window counter: clearing it on
         # every flush made an idle second report `shown=-` while the picture was still on screen (measured 2026-11-24).
@@ -435,8 +443,8 @@ def maybe_stats(now: float | None = None, *, force: bool = False) -> bool:
     line = (
         f"preview: stats frames={_frames} paints={_paints} up={_uploads} "
         f"up_ms={_summary(_upload)} pass_ms={_summary(_pass)} gui_ms={_summary(_gui)} "
-        f"int_ms={_summary(_intervals)} drop={_drops} shown={_shown_text()} "
-        f"pair_off={_pair_off}/{_pair_total} pair_sub={_pair_strict} "
+        f"int_ms={_summary(_intervals)} shown={_shown_text()} "
+        f"pair_off={_pair_off}/{_pair_total} pair_lone={_pair_lone} pair_sub={_pair_strict} "
         f"pair_ahead={_pair_ahead} pair_behind={_pair_behind} "
         f"seek_ms={_summary(_seek_ms)} "
         f"mb={_bytes / 1e6:.1f} window_s={minutes:.1f}"

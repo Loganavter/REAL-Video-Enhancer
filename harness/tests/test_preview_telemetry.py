@@ -119,7 +119,6 @@ def test_one_aggregate_line_per_second_with_the_numbers(monkeypatch, fresh):
         telemetry.note_upload(upload_ms=0.3, size_bytes=6_220_800)
         telemetry.note_paint()
         now["t"] += 0.2
-    telemetry.note_drops(2)
     telemetry.note_seek(38.4)
     assert telemetry.maybe_stats() is False, "0.8 s must not flush"
     now["t"] += 0.3
@@ -128,7 +127,8 @@ def test_one_aggregate_line_per_second_with_the_numbers(monkeypatch, fresh):
     assert which == "info"
     assert line.startswith("preview: stats frames=4 paints=4 up=4 ")
     assert "gui_ms=" in line and "up_ms=" in line and "int_ms=" in line and "pass_ms=" in line
-    assert "drop=2" in line and "seek_ms=38.40/" in line
+    assert "drop=" not in line, "a counter with no writer must not be printed"
+    assert "seek_ms=38.40/" in line
     assert "mb=24.9" in line, line       # 4 x 6.22 MB
     # the window's counters start over, so two consecutive lines describe two windows, not a running total
     now["t"] += 1.1
@@ -291,3 +291,13 @@ def test_a_new_session_restarts_the_snapshot_window(monkeypatch, fresh):
     assert telemetry.note_snapshot(**_snapshot_fields()) is False, "the new session's first call starts its own window"
     now["t"] += 1.2
     assert telemetry.note_snapshot(**_snapshot_fields()) is True
+
+def test_a_lone_half_enters_the_denominator_and_its_own_counter(fresh):
+    """A paint that shows one half is not a pair; it used to be invisible to `pair_off` altogether."""
+    telemetry.note_pair(lone_half="result")
+    telemetry.note_pair(delta_frames=0.0)
+
+    counts = telemetry.snapshot()
+    assert counts["pair_total"] == 2
+    assert counts["pair_lone"] == 1
+    assert counts["pair_off"] == 0, "a lone half is not an OFF pair, it is its own counter"

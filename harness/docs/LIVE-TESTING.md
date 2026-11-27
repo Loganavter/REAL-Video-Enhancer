@@ -72,13 +72,15 @@ run is still the final word for the shipped platform.
 ```
 # preview telemetry session 2026-11-24T20:45:41 level=1 pid=3103220
 preview: session file=/…/preview-log.txt pane_w=504 pane_h=721 dpr=1.0 mode=single
-preview: stats frames=24 paints=27 up=24 up_ms=0.01/0.02/1.34 pass_ms=0.40/0.52/0.98 gui_ms=0.62/0.71/0.98 int_ms=41.2/44.0/90.1 drop=0 shown=f209 seek_ms=38.4/… window_s=1.0
+preview: stats frames=24 paints=27 up=24 up_ms=0.01/0.02/1.34 pass_ms=0.40/0.52/0.98 gui_ms=0.62/0.71/0.98 int_ms=41.2/44.0/90.1 shown=f209 pair_off=0/27 pair_lone=0 pair_sub=2 pair_ahead=1 pair_behind=1 seek_ms=38.4/… window_s=1.0
 preview: seek press fraction=0.4210 produced=0.3800 target_s=3.542 target_frame=208
 preview: seek decide press=7 route=display target_s=3.542 target_frame=208 produced=0.3800 edge_s=7.845 answerable=1 generation=3
 preview: seek turnaround_ms=38.9 target_frame=208 press=7 landed_time=3.560 delta_s=+0.018 landed_seq=208 target_gen=3 landed_gen=3
 preview: frame seq=208 t=3.560 gen=3 gui_ms=-
 preview: hold on playhead=12.500
 ```
+
+`pair_off` is paints whose halves were more than a frame and a half apart **in the pane's own cadence** (the counter used a hard-coded 24 fps until 2026-11-27, which read a two-frame gap at 60 fps as 0); `pair_lone` counts paints that showed ONE half and are in `pair_off`'s denominator, so a pane painting alone reads as such instead of as a perfect pair.
 
 **A press is one record with a lifecycle** (`src/ui/video/press.py`), and that is the unit to read. Before it, the log
 could say where a seek was asked to go and - on the happy path - where it landed, while four of the owner's own

@@ -90,6 +90,16 @@ PAN_THRESHOLD_PX = 3.0
 #: count), and every other choice is a taste for smoothing". Its zoom is CONTINUOUS, so the blocks widen smoothly as
 #: the wheel turns; a ladder is what makes that look jerky (owner, 2026-11-25: "почему у нас зум очень неплавный? У
 #: нас заданы большие шаги" + "напомни как blinktable всегда делает nearest"). Minification (fit and below) keeps the
+def pair_distance_frames(source_s: float, result_s: float, frame_seconds: float) -> float:
+    """How far apart two moments are, in the PANE's own frames.
+
+    The unit has to be the pane's cadence, not a constant: the counter used to multiply by 24.0, so on a 60 fps clip a
+    two-frame desync read as 0.8 (0 when it rounded) and a lone-half paint never entered the denominator at all - the
+    number quoted in every live proof could not see the failure it exists for (telemetry audit 2026-11-27).
+    """
+    return (float(source_s) - float(result_s)) / max(1e-3, float(frame_seconds))
+
+
 #: LINEAR sampler: nearest there would drop pixels and shimmer.
 
 
@@ -1528,20 +1538,29 @@ class VideoPreviewSurface(QRhiWidget):
         if target is None or self.rhi() is None:
             return
         painted = self._pair.painted()
-        if self._view_mode != "single" and painted is not None and painted.source is not None:
+        if self._view_mode != "single" and painted is not None:
             # What this PAINT actually shows, both halves: the only number that can tell a consistent pair from a
             # flicker. The selection log says what was chosen; this says what reached the screen together. The COUNTER
             # is unconditional (two integer ops, and it rides the level-1 aggregate); the per-paint line is level 2.
-            result = painted.moment
-            source = painted.source.moment
-            if result is not None and source is not None:
-                delta_frames = (float(source) - float(result)) * 24.0
-                telemetry.note_pair(delta_frames=delta_frames)
-                if telemetry.level() >= 2:
-                    newest = getattr(self, "_shown_time", None)
-                    lag = "" if newest is None else round((float(newest) - float(result)) * 24.0, 2)
-                    telemetry.event("painted pair", result=round(float(result), 3), source=round(float(source), 3),
-                                    delta_frames=round(delta_frames, 2), lag_frames=lag)
+            lone = getattr(painted, "lone_half", None)
+            if lone:
+                # A paint that showed ONE half is not a pair: it enters the denominator and has its own counter, or a
+                # pane painting alone every second reads as perfectly paired (telemetry audit 2026-11-27).
+                telemetry.note_pair(lone_half=str(lone))
+            elif painted.source is not None and painted.moment is not None:
+                result = painted.moment
+                source = painted.source.moment
+                if result is not None and source is not None:
+                    period = max(1e-3, float(self._result_frame_seconds))
+                    delta_frames = pair_distance_frames(source, result, period)
+                    telemetry.note_pair(delta_frames=delta_frames)
+                    if telemetry.level() >= 2:
+                        newest = getattr(self, "_shown_time", None)
+                        lag = "" if newest is None else round(pair_distance_frames(newest, result, period), 2)
+                        telemetry.event("painted pair", result=round(float(result), 3),
+                                        source=round(float(source), 3),
+                                        delta_frames=round(delta_frames, 2), lag_frames=lag,
+                                        frame_s=round(period, 5))
         self._renderer.set_scene(self._preview_scene(target))
         self._renderer.render(command_buffer)
 
