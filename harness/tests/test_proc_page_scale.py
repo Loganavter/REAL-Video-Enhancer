@@ -170,9 +170,14 @@ def test_the_page_body_is_the_toolkits_scroll_area(qapp, process_state):
         assert area.widget() is page.pageScrollBody
         assert page.pageScrollBody.layout() is page.gridLayout_3, (
             "the columns must be laid out inside the scroll surface, not beside it")
-        # Both columns are in the scrolling body.
-        assert page.processContainer.parentWidget() is page.pageScrollBody
-        assert page.processInfoContainer.parentWidget() is page.pageScrollBody
+        # Both columns are in the scrolling body - through the splitter that now owns the boundary between them
+        # (2026-11-28: the owner asked for a draggable divider, and a `QSplitter` must own its panes).
+        assert page.preview_splitter is not None, "the preview/column boundary has no splitter"
+        for pane, name in ((page.processContainer, "column"), (page.processInfoContainer, "preview")):
+            node = pane.parentWidget()
+            while node is not None and node is not page.pageScrollBody:
+                node = node.parentWidget()
+            assert node is page.pageScrollBody, f"the {name} is not inside the scrolling body any more"
     finally:
         window.close()
 

@@ -303,7 +303,10 @@ class MainWindowShell:
         self.morePage = self.morePage_page.build()
         self.stackedWidget.addWidget(self.morePage)
         self.procPage_page = ProcPagePage()
-        self.procPage = self.procPage_page.build()
+        # The settings owner the app puts on the window before building (`self.settings = Settings()` in
+        # `REAL-Video-Enhancer.py`): the process page reads and writes the preview splitter's two saved splits through
+        # it. A window built bare (the tests, the capture harness) passes nothing, and the page keeps the design split.
+        self.procPage = self.procPage_page.build(settings=getattr(window, "settings", None))
         self.stackedWidget.addWidget(self.procPage)
         self.settingsPage_page = SettingsPagePage()
         self.settingsPage = self.settingsPage_page.build()

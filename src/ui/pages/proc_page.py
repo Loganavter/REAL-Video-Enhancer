@@ -13,14 +13,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from PySide6.QtCore import (QCoreApplication, QEvent, QObject, QPoint, QSize, Qt,
-    Signal)
+    QTimer, Signal)
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
-from src.ui.layout_policy import (BODY_INSET_PX, COLUMN_DESIGN_PX, PANE_FLOOR_PX,
+from src.ui.layout_policy import (BODY_INSET_PX, COLUMN_DESIGN_PX, PANE_FLOOR_PX, PANE_GAP_PX,
     SIDE, STACK, column_floor_for_factor, layout_decision)
+from src.ui.settings_store import PREVIEW_SPLIT_SIDE_KEY, PREVIEW_SPLIT_STACK_KEY, preview_split
 from src.ui.pages.general_settings import GeneralSettingsPage
 from src.ui.pages.tab_6 import Tab6Page
 from src.ui.pages.render_queue_tab import RenderQueueTabPage
@@ -42,7 +43,7 @@ from src.ui.widgets.tab_strip import TAB_HEIGHT, tab_button, tab_style
 # compatibility adapter.
 from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px
 from sli_ui_toolkit.widgets import (Button, DoubleSpinBox, ImageLabel, MinimalistScrollBar, OverlayScrollArea,
-                                    SurfacePanel, TabStyle, Text, ToastProgressBar, TopTabHost)
+                                    Splitter, SurfacePanel, TabStyle, Text, ToastProgressBar, TopTabHost)
 
 #: Qt's spin-box text alignment (`QAbstractSpinBox().alignment()` is AlignLeft|AlignVCenter); the toolkit field
 #: defaults to centre, which would move every value to the middle of its box.
@@ -77,6 +78,16 @@ TRANSPORT_GLYPH_HEIGHT_PX = 45
 PREVIEW_BAND_ASPECT_W = 16
 PREVIEW_BAND_ASPECT_H = 9
 
+#: The splitter's handle as a DESIGN length. `layout_policy` pays `PANE_GAP_PX` of gap between the two panes at every
+#: factor (its `side_cost`), so the handle is stated as the design value that resolves to that gap and never wider:
+#: 6 px at 1.0/1.5/2.0, 5 px at 1.25/1.75. A handle that grew with the UI would take the preview under its 320 px
+#: floor in the capped cells the policy measured (at 1.5 in the design window the column yields so the preview gets
+#: exactly 320, which leaves no pixel to spare).
+SPLIT_HANDLE_GAP_PX = PANE_GAP_PX
+
+#: How long a finished drag waits before its split reaches `settings.txt`: one write per drag, not one per pixel.
+SPLIT_SAVE_DELAY_MS = 400
+
 
 class PageLayoutState(QObject):
     """The page's layout mode, as a signal its glue can listen to.
@@ -100,7 +111,9 @@ class _PageLayoutFilter(QObject):
 
     The factor is not the only input: a user drag-resizes the window without touching the scale, and at a raised
     factor that changes which side of the 2.0 stack boundary the page is on. A `ScaleFollower` alone would leave the
-    page in the mode it happened to build with.
+    page in the mode it happened to build with. The splitter is watched too: its extent is the body's content width,
+    and a pass that ran before the body was laid out would otherwise leave the panes at the proportion Qt chose for a
+    size they no longer have.
     """
 
     def __init__(self, page: "ProcPagePage") -> None:
@@ -287,8 +300,14 @@ class ProcPagePage:
 
     page_id = "procPage"
 
-    def build(self):
-        """Build the widget tree and return the page root."""
+    def build(self, settings=None):
+        """Build the widget tree and return the page root.
+
+        ``settings`` is the settings owner (`src/ui/settings_store.Settings`), handed over by the window that builds
+        the pages - it is where the preview splitter's two per-mode splits are read and written. A page built on its
+        own (a test, the capture walker) passes nothing and keeps the design split without persisting anything.
+        """
+        self._settings = settings
         sizePolicy1 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding)
         sizePolicy1.setHorizontalStretch(0)
         sizePolicy1.setVerticalStretch(0)
@@ -470,7 +489,6 @@ class ProcPagePage:
         self.verticalLayout_37.addWidget(self.timeInVideoScrollBar)
         self.horizontalLayout_47.addWidget(self.widget_30)
         self.verticalLayout_5.addWidget(self.RenderedPreviewControlsContainer)
-        self.gridLayout_3.addWidget(self.processInfoContainer, 0, 2, 1, 1)
         self.processContainer = QWidget(self.pageScrollBody)
         self.processContainer.setObjectName(u"processContainer")
         sizePolicy5 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
@@ -481,7 +499,9 @@ class ProcPagePage:
         # The column is STATED at the factor in force, not merely capped: the owner asked for 500/750/1000 exactly, and
         # the content's own hint at 1.5 (668 px) is narrower than 750, so a maximum alone would leave the column short.
         # A narrower window is carried by the page scroll area above, not by squeezing this column.
-        self.processContainer.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
+        # The width is now the SPLIT's to state (`_apply_split_sizes`): the design 500 is the default split, and a drag
+        # moves it between the pane floors. Only the two strips INSIDE the column keep an explicit width, because their
+        # content hints (the tab strip's five labels) are wider than the column at 1.0.
         # No stylesheet: a disabled toolkit control takes its colour from its token. The rule only tinted the two stock
         # queue lists, which carry their own look until the toolkit grows a compact list.
         self.verticalLayout_7 = QVBoxLayout(self.processContainer)
@@ -500,6 +520,9 @@ class ProcPagePage:
         sizePolicy6.setHeightForWidth(self.bottomMenuSubContainer.sizePolicy().hasHeightForWidth())
         self.bottomMenuSubContainer.setSizePolicy(sizePolicy6)
         self.bottomMenuSubContainer.setMinimumSize(QSize(0, 0))
+        # The width is stated by `_apply_column_widths` from the live split (this strip was fixed to the design column
+        # before the splitter existed, and its content hint alone - the five tab labels - would win over a narrower
+        # column).
         self.bottomMenuSubContainer.setFixedWidth(scaled_px(PROCESS_COLUMN_PX))
 
         self.verticalLayout_21 = QVBoxLayout(self.bottomMenuSubContainer)
@@ -642,7 +665,9 @@ class ProcPagePage:
         #
         # (The column's leftover height is already carried by the stretch added above the row.)
         self.verticalLayout_7.addWidget(self.bottomMenuSubContainer)
-        self.gridLayout_3.addWidget(self.processContainer, 0, 1, 1, 1)
+        # The two panes are NOT placed in the grid here: the splitter that owns the boundary is built by the first
+        # policy pass (`_split_for`), which adds one item spanning the body's two content columns. Placing them first
+        # and then moving them into the splitter would be a second, transient placement of the same two widgets.
         # The body is complete, so it becomes the scroll surface's widget and the surface fills the page. The page
         # itself keeps its rect (`MainWindowShell` lays pages out for the stack's contents rect); scrolling happens
         # inside it.
@@ -678,17 +703,31 @@ class ProcPagePage:
         self._preview_collapsed = False
         self._applying_layout = False
         self._base_grid_bottom = self.gridLayout_3.contentsMargins().bottom()
+        # The boundary between the preview and the column: ONE live splitter, rebuilt when a mode needs the other
+        # orientation (Qt cannot re-orient a `QSplitter`). Its sizes are re-applied on every policy pass, so a resize
+        # and a scale change both keep the split. `_settings` is the owner the window hands over; a page built without
+        # one keeps the design split and stores nothing.
+        self._split = None
+        self._split_orientation = None
+        self._applying_split = False
+        self._pending_split: dict[str, str] = {}
+        self._split_cache: dict[str, tuple[str, int | None]] = {}
+        self._split_flush = QTimer(self.procPage)
+        self._split_flush.setSingleShot(True)
+        self._split_flush.setInterval(SPLIT_SAVE_DELAY_MS)
+        self._split_flush.timeout.connect(self._flush_split)
         self.layoutState = PageLayoutState(self.procPage)
         self.previewBandToggle.clicked.connect(self.layoutState.toggleRequested.emit)
         self.layoutState.toggleRequested.connect(self.toggle_preview_band)
         self.layoutState.reapplyRequested.connect(self._apply_layout_policy)
-        # The column's width/mode is resolved at construction and re-resolved on every factor change AND on every page
-        # resize (a window drag changes the viewport without a factor change), so `scale:<factor>` and a resize both
-        # move it without a restart.
-        self._column_scale = ScaleFollower(self.procPage, self._apply_layout_policy)
+        # The geometry is re-resolved at construction and re-applied on every factor change AND on every page resize (a
+        # window drag changes the viewport without a factor change), so `scale:<factor>` and a resize both move it
+        # without a restart. The filter is created first: the first policy pass builds the splitter, and the splitter
+        # is one of the widgets whose resize re-runs the pass.
         self._layout_filter = _PageLayoutFilter(self)
         self.procPage.installEventFilter(self._layout_filter)
         self.pageScroll.viewport().installEventFilter(self._layout_filter)
+        self._column_scale = ScaleFollower(self.procPage, self._apply_layout_policy)
         self.processSettingsContainer.setCurrentIndex(0)
         # The strip's host half (see `TabStripHost`): measures the labels, exposes an overflow the user can reach,
         # and paints the selected plate from the host's token. It must come after the labels are set, or it would
@@ -732,13 +771,22 @@ class ProcPagePage:
 
     @property
     def policy_column(self) -> int:
-        """The column width the policy last asked for (the actual width of the three column widgets)."""
+        """The column's applied width (the same number on all three column widgets).
+
+        It is the policy's answer unless the user dragged the boundary: a stored/saved split wins inside the pane
+        floors, and this property then reports the width actually in force.
+        """
         return self._policy_column
 
     @property
     def preview_collapsed(self) -> bool:
         """Whether the stacked preview band is currently collapsed."""
         return self._preview_collapsed
+
+    @property
+    def preview_splitter(self):
+        """The live splitter between the preview and the column (`None` before the first policy pass)."""
+        return self._split
 
     def _column_floor_px(self) -> int:
         """The column's content floor, from the factor - never from the live content hint.
@@ -748,6 +796,15 @@ class ProcPagePage:
         factor form is the measured 650 at 2.0/575 at 1.75 resolved through the same scale as the column.
         """
         return column_floor_for_factor(UiScale.get_instance().factor())
+
+    def _column_min_height_px(self) -> int:
+        """The stacked column's own content floor in HEIGHT: what its tab host and its row need to be whole.
+
+        The width floor above is a different question (it is the General tab's reflow); in `stack` the column is full
+        width and the boundary moves vertically, so the floor that stops a drag is this one. A column at it scrolls its
+        tab pane inside itself, which is the tab host's own designed behaviour.
+        """
+        return max(1, self.processContainer.minimumSizeHint().height())
 
     def _apply_layout_policy(self) -> None:
         """Decide `(mode, column)` from the live viewport and apply it to both panes and the page chrome.
@@ -773,8 +830,11 @@ class ProcPagePage:
             if self._preview_collapsed:
                 mode = STACK
                 column = max(0, viewport - BODY_INSET_PX)
-            self._place_panes(mode, column)
+            # The splitter first: it owns the boundary, and the sizes applied below are the ones the panes then have.
+            self._split_for(mode)
             self._apply_preview_band(mode, column)
+            self._apply_split_floors(mode)
+            column = self._apply_split_sizes(mode, column)
             self._apply_render_row(mode)
             self._layout_mode = mode
             self._policy_column = column
@@ -784,37 +844,240 @@ class ProcPagePage:
         finally:
             self._applying_layout = False
 
-    def _place_panes(self, mode: str, column: int) -> None:
-        """Put the preview and the column in the grid for `mode`, and state the column width at all three sites."""
-        grid = self.gridLayout_3
-        # Remove both first, so a mode switch cannot leave a row or a column item behind: `addWidget` alone moves a
-        # widget but the vacated cell's row can keep a minimum height from the old placement.
-        grid.removeWidget(self.processInfoContainer)
-        grid.removeWidget(self.processContainer)
-        if mode == STACK:
-            # The preview is a band above the column; both span the grid's two content columns, so neither is squeezed.
-            grid.addWidget(self.processInfoContainer, 0, 1, 1, 2)
-            grid.addWidget(self.processContainer, 1, 1, 1, 2)
-        else:
-            grid.addWidget(self.processInfoContainer, 0, 2, 1, 1)
-            grid.addWidget(self.processContainer, 0, 1, 1, 1)
-        # One column, stated once: the outer container and the two inner strips that were fixed separately before.
-        for container in (self.processContainer, self.bottomMenuSubContainer, self.widget_13):
-            container.setFixedWidth(column)
-        # The column's VERTICAL policy is a property of the mode (owner, 2026-11-24: "the render row and the status
-        # line should always be visible"). `Minimum` has no ShrinkFlag, so `qSmartMinSize` takes the column's size hint
-        # as its minimum - at the 700 px window floor the body then needed 703 px in a 672 px viewport and the page's
-        # own 31 px scroll pushed the bottom strip under the window edge. In `side` the column shares its grid row with
-        # the preview, so it can yield those 31 px to the tab pane's own scroll (`Preferred`, which has ShrinkFlag);
-        # in `stack` the column IS the page's height (the band above it is a fixed 16:9 box), so it keeps `Minimum` -
-        # its content stays whole, the page scrolls, and the sticky footer carries the render row.
-        policy = self.processContainer.sizePolicy()
+    # -- the boundary: one splitter, one owner ----------------------------------------------------------------
+
+    def _split_handle_design_px(self) -> int:
+        """The handle's DESIGN width: the gap the policy pays, resolved so the handle is never wider than it.
+
+        `layout_policy` charges `PANE_GAP_PX` between the panes at every factor (its `side_cost`), so the handle must
+        not grow with the UI: 6 px at 1.0/1.5/2.0 and 5 px at 1.25/1.75. The toolkit re-resolves a design width through
+        `scaled_px`, so the design value is the gap divided by the factor.
+        """
+        factor = max(1e-9, UiScale.get_instance().factor())
+        return max(1, int(SPLIT_HANDLE_GAP_PX / factor))
+
+    def _split_for(self, mode: str):
+        """The live splitter for `mode`, rebuilt when the mode needs the other orientation.
+
+        Qt cannot re-orient a `QSplitter`, so a mode change that needs the other axis detaches both panes, removes and
+        destroys the old splitter, and builds the right one. The page therefore never holds two splitters, and never
+        holds one whose orientation disagrees with the mode it was last applied for.
+        """
+        orientation = Qt.Orientation.Horizontal if mode == SIDE else Qt.Orientation.Vertical
+        splitter = self._split
+        if splitter is not None and self._split_orientation == orientation:
+            splitter.set_handle_width(self._split_handle_design_px())
+            return splitter
+        if splitter is not None:
+            # The panes leave first (a new parent takes them out of the splitter's own list), then the stale splitter
+            # goes: it is removed from the grid it no longer occupies and deleted on the next turn.
+            self.gridLayout_3.removeWidget(splitter)
+            for pane in (self.processContainer, self.processInfoContainer):
+                pane.setParent(self.pageScrollBody)
+            splitter.hide()
+            splitter.deleteLater()
+            self._split = None
+            self._split_orientation = None
+        splitter = Splitter(orientation, self.pageScrollBody,
+                            handle_width=self._split_handle_design_px(), children_collapsible=False)
+        splitter.setObjectName(u"previewSplitter")
+        # The child order IS the layout order. `side` keeps the column on the LEFT - the cell the grid gave it before
+        # this wave - with the preview taking the remainder; `stack` puts the preview band above the column.
+        panes = ((self.processContainer, self.processInfoContainer) if orientation == Qt.Orientation.Horizontal
+                 else (self.processInfoContainer, self.processContainer))
+        for pane in panes:
+            splitter.addWidget(pane)
+        splitter.splitterMoved.connect(self._on_split_moved)
+        # The splitter's extent is the body's content width/height: when the grid hands it a new box (a mode switch,
+        # a resize) the sizes are re-stated for that box instead of left at the proportion Qt scaled them to.
+        splitter.installEventFilter(self._layout_filter)
+        self.gridLayout_3.addWidget(splitter, 0, 1, 1, 2)
+        self._split = splitter
+        self._split_orientation = orientation
+        return splitter
+
+    def _apply_split_floors(self, mode: str) -> None:
+        """State each pane's floor and policy for `mode`; the splitter clamps a drag at them.
+
+        Nothing is clamped after the fact: `QSplitter` honours its children's minimum sizes, so a drag that would
+        collapse either side simply stops there. In `side` the floors are widths - the preview's 320 px usability floor
+        and the column's own content floor (the width the General tab needs to stop scrolling inside itself) - and the
+        panes keep the column's mode-dependent VERTICAL policy (owner, 2026-11-24: the render row and the status line
+        must always be visible). `Minimum` has no ShrinkFlag, so `qSmartMinSize` takes the column's size hint as its
+        minimum: in `side` the column shares its row with the preview and can yield to the tab pane's own scroll
+        (`Preferred`, which has ShrinkFlag), while in `stack` it IS the page's height and keeps `Minimum`. In `stack`
+        the widths are the body's, so the floors are heights: the preview's own content height (a shorter pane would
+        clip the fixed 16:9 band and its controls) and the column's own content floor.
+        """
+        preview = self.processInfoContainer
+        column = self.processContainer
+        policy = column.sizePolicy()
         wanted = QSizePolicy.Policy.Preferred if mode == SIDE else QSizePolicy.Policy.Minimum
         if policy.verticalPolicy() != wanted:
             policy.setVerticalPolicy(wanted)
-            self.processContainer.setSizePolicy(policy)
-            self.processContainer.updateGeometry()
-        self.processInfoContainer.setVisible(not self._preview_collapsed)
+            column.setSizePolicy(policy)
+            column.updateGeometry()
+        unbounded = 16777215
+        if mode == SIDE:
+            preview.setMinimumSize(QSize(PANE_FLOOR_PX, 0))
+            column.setMinimumSize(QSize(self._column_floor_px(), 0))
+        else:
+            preview.setMinimumSize(QSize(0, self._stack_preview_floor_px()))
+            column.setMinimumSize(QSize(0, self._column_min_height_px()))
+        preview.setMaximumSize(QSize(unbounded, unbounded))
+        column.setMaximumSize(QSize(unbounded, unbounded))
+        column.show()
+        preview.setVisible(not self._preview_collapsed)
+
+    def _stack_preview_floor_px(self) -> int:
+        """The stacked preview pane's height floor: its own content (the 16:9 band plus its controls).
+
+        `PANE_FLOOR_PX` is a WIDTH floor and does not describe this axis: a stacked pane shorter than its content would
+        clip the band, whose height is fixed at 16:9 of the width (`_apply_preview_band`). The floor is therefore the
+        pane's own minimum hint, never under the width floor.
+        """
+        return max(PANE_FLOOR_PX, self.processInfoContainer.minimumSizeHint().height())
+
+    def _stack_natural_split(self) -> tuple[int, int]:
+        """Today's stacked geometry: the band's pane above, the column at its own content height.
+
+        The preview pane's content height is what the 16:9 band plus the controls need (`_apply_preview_band` has just
+        fixed the band); the column's is its content at the body's width. This is the default split AND the splitter's
+        minimum height, so a stacked page is exactly as tall as it was before the boundary existed and the page scrolls
+        instead of squeezing.
+        """
+        preview = self._stack_preview_floor_px()
+        column = max(self._column_min_height_px(), self.processContainer.sizeHint().height())
+        return preview, column
+
+    def _side_column(self, policy_column: int, extent: int, gap: int) -> int:
+        """The column's width in `side`: the policy's answer (or the saved split), clamped by both panes' floors."""
+        floor = self._column_floor_px()
+        ceiling = max(floor, extent - gap - PANE_FLOOR_PX)
+        saved = self._saved_split(SIDE)
+        wanted = policy_column if saved is None else scaled_px(saved)
+        return max(floor, min(int(wanted), ceiling))
+
+    def _stack_preview_height(self, extent: int) -> int:
+        """The preview pane's height in `stack`: the default band height, or the saved split, between the floors."""
+        floor = self._stack_preview_floor_px()
+        ceiling = max(floor, extent - self._split.handleWidth() - self._column_min_height_px())
+        saved = self._saved_split(STACK)
+        wanted = floor if saved is None else scaled_px(saved)
+        return max(floor, min(int(wanted), ceiling))
+
+    def _apply_split_sizes(self, mode: str, column: int) -> int:
+        """State the split: the policy's geometry by default, the mode's saved split when one is stored.
+
+        Returns the column's applied width, which is what `policy_column` reports (all three column widgets carry it).
+        In `side` the splitter's extent is the body's content width and the preview takes the remainder; in `stack`
+        the widths are the body's, so the column's width IS the extent and only the heights are split.
+        """
+        splitter = self._split
+        if splitter is None:                     # the page has not been laid out yet: nothing to size
+            return column
+        self._applying_split = True
+        try:
+            if mode == SIDE:
+                # The body IS the viewport (the policy's whole purpose: no horizontal scroll), so the split's extent
+                # is the viewport less the body's 18 px frame - a number this pass knows, unlike the splitter's own
+                # width, which is only right after the layout that this pass may still be inside.
+                extent = self.pageScroll.viewport().width() - BODY_INSET_PX
+                if extent <= 0:
+                    extent = splitter.width()
+                gap = splitter.handleWidth()
+                applied = self._side_column(column, extent, gap)
+                self._apply_column_widths(applied)
+                splitter.setSizes([applied, max(1, extent - gap - applied)])
+                return applied
+            self._apply_column_widths(column)
+            natural_preview, natural_column = self._stack_natural_split()
+            # A collapsed band is not part of the page's height: it is hidden, its handle is hidden with it, and the
+            # column takes the whole split (this is the "collapsing reclaims the vertical space" half of the owner's
+            # rule). Reserving the hidden pane's height would make a collapsed 1.0 page scroll for a band nobody sees.
+            if self._preview_collapsed:
+                natural_total = natural_column
+            else:
+                natural_total = natural_preview + splitter.handleWidth() + natural_column
+            splitter.setMinimumHeight(natural_total)
+            extent = max(splitter.height(), natural_total)
+            applied = self._stack_preview_height(extent)
+            splitter.setSizes([applied, max(1, extent - splitter.handleWidth() - applied)])
+            return column
+        finally:
+            self._applying_split = False
+
+    def _apply_column_widths(self, column: int) -> None:
+        """State the column's width on the two strips inside it.
+
+        The column itself is sized by the splitter - that is what a drag moves - but its two inner strips state their
+        width explicitly: their content hints (the tab strip's five labels, the render row's controls) are wider than
+        the column at 1.0, and a `Minimum`/`MinimumExpanding` policy would answer that hint instead of the column.
+        """
+        column = max(0, int(column))
+        for container in (self.bottomMenuSubContainer, self.widget_13):
+            container.setFixedWidth(column)
+
+    # -- the split's persistence ------------------------------------------------------------------------------
+
+    def _saved_split(self, mode: str) -> int | None:
+        """The saved split for `mode` in DESIGN px, or `None` when nothing usable is stored (the default split).
+
+        A drag that has not reached the file yet is the current choice, so it is answered from the pending value first
+        (a resize inside the save delay must not snap the boundary back). The parse is memoised per stored string: this
+        runs on every layout pass, and a garbage value must be reported once instead of on each resize (the store's
+        reader already reports and blanks one that came from the file).
+        """
+        key = PREVIEW_SPLIT_SIDE_KEY if mode == SIDE else PREVIEW_SPLIT_STACK_KEY
+        pending = self._pending_split.get(key)
+        if pending is not None:
+            return int(pending)
+        values = getattr(self._settings, "settings", None) if self._settings is not None else None
+        if not values:
+            return None
+        raw = str(values.get(key, "") or "")
+        cached = self._split_cache.get(key)
+        if cached is not None and cached[0] == raw:
+            return cached[1]
+        parsed = preview_split(raw, key)
+        self._split_cache[key] = (raw, parsed)
+        return parsed
+
+    def _on_split_moved(self, position: int, index: int) -> None:
+        """A drag of the live boundary: follow it with the column's strips and remember the split for `mode`.
+
+        A programmatic `setSizes` emits this signal too, so the policy's own passes are filtered out - only a move the
+        user made is a choice worth storing.
+        """
+        if self._applying_split or self._split is None:
+            return
+        if self._layout_mode == SIDE:
+            column = self.processContainer.width()
+            self._apply_column_widths(column)
+            # The property states the width IN FORCE, and a drag is the one writer that can move it off the policy's
+            # answer without a new policy pass.
+            self._policy_column = column
+            self._remember_split(PREVIEW_SPLIT_SIDE_KEY, column)
+        else:
+            self._remember_split(PREVIEW_SPLIT_STACK_KEY, self.processInfoContainer.height())
+
+    def _remember_split(self, key: str, actual_px: int) -> None:
+        """Store `actual_px` as `key`'s DESIGN length; the file write coalesces with the rest of the drag."""
+        if actual_px <= 0:
+            return
+        factor = max(1e-9, UiScale.get_instance().factor())
+        self._pending_split[key] = str(max(1, int(round(actual_px / factor))))
+        self._split_flush.start()
+
+    def _flush_split(self) -> None:
+        """Write the drag's final split(s) through the settings owner - one write per drag, not one per pixel."""
+        settings = self._settings
+        pending = list(self._pending_split.items())
+        if settings is None:
+            return                       # no owner: the drag still holds for this session, through `_pending_split`
+        for key, value in pending:
+            settings.writeSetting(key, value)
+            self._pending_split.pop(key, None)
 
     def _apply_preview_band(self, mode: str, column: int) -> None:
         """In stacked mode the preview's height is 16:9 of its width; in side mode it is the pane's own hint."""
