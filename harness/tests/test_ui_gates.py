@@ -500,15 +500,18 @@ def test_a_line_shift_does_not_change_the_key(tmp_path: Path) -> None:
 
 
 def test_a_line_inserted_at_the_top_of_a_real_page_moves_no_key(tmp_path: Path) -> None:
-    """The measured tax, on the real page: +1 line at the top of `general_settings.py` used to re-key 29 entries.
+    """The measured tax, on a real page: +1 line at the top used to re-key every entry of that page.
 
-    The synthetic case above proves the key has no line in it; this one runs the real page through the real check and
-    compares the counts site by site. Only the reported line moves - the ratchet's record does not, so the change needs
-    no `--rekey`.
+    The subject is the gate's own recorded excerpt of a real page
+    (`fixtures/ui_gates/raw_chrome_px/general_settings_combo_width.py`, provenance
+    `src/ui/pages/general_settings.py:236-245 @ dfcf06e`). It used to be `general_settings.py` itself, whose 29 entries
+    were the example; the row that retired the tree's last raw-chrome pin (2026-11-28, `raw-chrome-px` 12 -> 0) took
+    every one of them, and scanning an empty page would make the count comparison below pass for the wrong reason.
     """
-    page = Path(ui_gates.__file__).resolve().parents[2] / "src" / "ui" / "pages" / "general_settings.py"
+    page = (Path(ui_gates.__file__).resolve().parents[1] / "tests" / "fixtures" / "ui_gates" / "raw_chrome_px"
+            / "general_settings_combo_width.py")
     original = ui_gates.check_raw_px([page])
-    shifted = tmp_path / "general_settings.py"
+    shifted = tmp_path / page.name
     shifted.write_text("# one line inserted above everything\n" + page.read_text(encoding="utf-8"), encoding="utf-8")
     moved = ui_gates.check_raw_px([shifted])
     assert [finding.line + 1 for finding in original] == [finding.line for finding in moved], "the report must move"

@@ -60,6 +60,18 @@ TRANSPORT_PLATE_RADIUS_PX = 10
 #: The floating collapse toggle's inset from the page viewport's top-right corner, in DESIGN px.
 OVERLAY_INSET_PX = 8
 
+#: The transport buttons' ceiling in DESIGN px - the Designer's 59x55, and the same box the toolkit `Button` is built
+#: with (`size=(59, 55)` -> `setFixedSize(scaled_px(...))`). The ceiling has to be resolved at the SAME factor, or a
+#: raw 59x55 maximum against an 88x82 minimum leaves the layout centring a 55 px box in an 82 px cell.
+TRANSPORT_BUTTON_MAX_WIDTH_PX = 59
+TRANSPORT_BUTTON_MAX_HEIGHT_PX = 55
+
+#: The transport glyphs' DESIGN box (the Designer's 40x45). A toolkit design value: `Button.setIconSize` stores it and
+#: the style bridge multiplies it once at paint time, so the page passes it UNSCALED (30 design px paints 45 at 1.5 and
+#: 60 at 2.0 - the same contract `download_page.ICON_BUTTON_ICON_PX` states).
+TRANSPORT_GLYPH_WIDTH_PX = 40
+TRANSPORT_GLYPH_HEIGHT_PX = 45
+
 #: The preview band's aspect ratio (owner, 2026-11-24): in stacked mode the preview's height is 16:9 of its width,
 #: never a share of the window. 16/9 is width/height, so the height is width * 9 / 16.
 PREVIEW_BAND_ASPECT_W = 16
@@ -564,7 +576,8 @@ class ProcPagePage:
             content_padding=(10, 5, 10, 5), corner_radius=10, size=(59, 55))
         self.startRenderButton.setObjectName(u"startRenderButton")
         self.startRenderButton.setEnabled(True)
-        self.startRenderButton.setMaximumSize(QSize(scaled_px(59), scaled_px(55)))
+        self.startRenderButton.setMaximumSize(
+            QSize(scaled_px(TRANSPORT_BUTTON_MAX_WIDTH_PX), scaled_px(TRANSPORT_BUTTON_MAX_HEIGHT_PX)))
         # The Designer pinned this button at 59x55 DESIGN px. The toolkit scales that box itself in the constructor
         # (`size=(59, 55)` -> `setFixedSize(scaled_px(...))`), so the ceiling must be stated at the same factor: a raw
         # 59x55 maximum against a 88x82 minimum left the layout centring a 55 px box in an 82 px cell and the button
@@ -578,7 +591,7 @@ class ProcPagePage:
         # checked). Checked means "a job is running"; `ProcessTab._set_render_controls` is the one writer of that state.
         self.startRenderButton.setIcon((QIcon(u":/icons/icons/play-circle.svg"),
                                         QIcon(u":/icons/icons/pause-circle.svg")))
-        self.startRenderButton.setIconSize(QSize(40, 45))
+        self.startRenderButton.setIconSize(QSize(TRANSPORT_GLYPH_WIDTH_PX, TRANSPORT_GLYPH_HEIGHT_PX))
         self.startRenderButton.setChecked(False)
         self.startRenderButton.setAutoRepeat(False)
         self.startRenderButton.setAutoExclusive(False)
@@ -595,11 +608,12 @@ class ProcPagePage:
         sizePolicy11.setVerticalStretch(0)
         sizePolicy11.setHeightForWidth(self.killRenderButton.sizePolicy().hasHeightForWidth())
         self.killRenderButton.setSizePolicy(sizePolicy11)
-        self.killRenderButton.setMaximumSize(QSize(scaled_px(59), scaled_px(55)))
+        self.killRenderButton.setMaximumSize(
+            QSize(scaled_px(TRANSPORT_BUTTON_MAX_WIDTH_PX), scaled_px(TRANSPORT_BUTTON_MAX_HEIGHT_PX)))
         icon5 = QIcon()
         icon5.addFile(u":/icons/icons/x-circle.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.killRenderButton.setIcon(icon5)
-        self.killRenderButton.setIconSize(QSize(40, 45))
+        self.killRenderButton.setIconSize(QSize(TRANSPORT_GLYPH_WIDTH_PX, TRANSPORT_GLYPH_HEIGHT_PX))
         self.onRenderButtonsContiainer.addWidget(self.killRenderButton)
         self.horizontalLayout_32.addLayout(self.onRenderButtonsContiainer)
         # NO retained boxes (owner, 2026-11-24, asked directly): keeping the boxes of the hidden pause/kill pair made

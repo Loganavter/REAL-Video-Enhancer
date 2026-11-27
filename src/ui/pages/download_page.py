@@ -9,7 +9,7 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
+from PySide6.QtCore import (QCoreApplication, QSize, Qt)
 from PySide6.QtGui import (QColor, QIcon)
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QSpacerItem,
     QVBoxLayout, QWidget)
@@ -164,7 +164,10 @@ class DownloadPagePage:
         self.scrollArea_2.setWidgetResizable(True)
         self.scrollAreaWidgetContents_2 = QWidget()
         self.scrollAreaWidgetContents_2.setObjectName(u"scrollAreaWidgetContents_2")
-        self.scrollAreaWidgetContents_2.setGeometry(QRect(0, 0, 928, 302))
+        # No `setGeometry`: the Designer emitted its 928x302 preview rect, and `setWidget` on a resizable area sizes
+        # this widget to the viewport on the first layout - measured after settle, 1027x580 at 1.0 and 1421x528 at
+        # 2.0 with that rect still in the source. The literal never reached the screen, so it is not a length the
+        # interface honours at any factor (the `raw-chrome-px` ratchet records that, `harness/scripts/ui_gates.py`).
         self.verticalLayout_13 = QVBoxLayout(self.scrollAreaWidgetContents_2)
         self.verticalLayout_13.setObjectName(u"verticalLayout_13")
         self.verticalLayout_13.setContentsMargins(0, 0, 0, 0)

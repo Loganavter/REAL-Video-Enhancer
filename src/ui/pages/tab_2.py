@@ -9,7 +9,7 @@ counts that gate records.
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
+from PySide6.QtCore import (QCoreApplication, QSize, Qt)
 from PySide6.QtWidgets import (QHBoxLayout, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
 import resources_rc
@@ -97,7 +97,9 @@ class Tab2Page:
         self.scrollArea_3.setWidgetResizable(True)
         self.scrollAreaWidgetContents_3 = QWidget()
         self.scrollAreaWidgetContents_3.setObjectName(u"scrollAreaWidgetContents_3")
-        self.scrollAreaWidgetContents_3.setGeometry(QRect(0, 0, 968, 528))
+        # No `setGeometry`: the Designer's 968x528 preview rect is overwritten by the resizable area on the first
+        # layout (measured after settle: 987x705 at 1.0, 931x629 at 2.0). The rect never reached the screen, so it is
+        # not a design length the interface honours (`raw-chrome-px` in `harness/scripts/ui_gates.py`).
         self.verticalLayout_25 = QVBoxLayout(self.scrollAreaWidgetContents_3)
         self.verticalLayout_25.setObjectName(u"verticalLayout_25")
         self.outputFileLocationContianer = QWidget(self.scrollAreaWidgetContents_3)
