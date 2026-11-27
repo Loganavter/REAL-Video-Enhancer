@@ -67,3 +67,16 @@ def test_a_missing_original_is_named_as_such(pane, draws):
     pane._log_draw_two(_image(), None, present=True)
 
     assert draws[-1]["half"] == "lone:result"
+
+
+def test_a_picture_with_no_committed_pair_is_named_held(pane, draws):
+    """Entering a compare mode KEEPS the picture that was on screen while it waits for the first pair.
+
+    Calling that retained picture "lone:result" reported a defect the user cannot see (the pane is still showing a
+    whole picture, just not yet a pair of this mode) - and the blank alternative made "ни одного кадра нет"
+    (owner, 2026-11-27). The line says `half=held`.
+    """
+    pane.set_view_mode("sbs")
+    pane._log_draw_two(_image(), _image(Qt.GlobalColor.blue), present=True, held=True)
+
+    assert draws and draws[-1]["half"] == "held"

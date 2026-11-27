@@ -144,31 +144,31 @@ class PairWriter:
         self._hold_started = None
         self._lone_result = False
         if mode != "single":
-            # ENTERING A COMPARE MODE PAINTS NO HALF AT ALL. `single` is one surface, so what it painted is not a pair;
-            # handing that picture to the compare would draw "the upscale, then the original" - the exact order the
-            # owner named on 2026-11-26 ("прям видно как сначала один рисуется, а затем другой") and the reason this
-            # module exists. Measured 2026-11-27 with the old behaviour: a switch to sbs mid-render produced 1-9
-            # `half=lone:result` paints, each corrected only when the source finally landed (0.24-1.1 s later).
+            # ENTERING A COMPARE MODE KEEPS THE PICTURE THAT IS ON SCREEN and waits for its pair - it never blanks the
+            # pane and never paints one half of a new moment. Both extremes were measured on the owner's machine
+            # (2026-11-27): handing the single-mode result to the compare showed "the upscale, then the original"
+            # (`half=lone:result`, 1-9 paints per switch), and clearing the pane for the first pair left "ни одного
+            # кадра нет" - blank until a NEW result arrived, which at the END of a finished render never happens.
             #
-            # So the pane waits, EMPTY, for the first real pair - the source was asked for on the same switch, and
-            # `MAX_PAIR_STALE_S` still bounds the wait, so a decoder that never answers cannot freeze a blank pane
-            # silently (the valve paints the result alone and says `pair stale`). A pair carried over from an earlier
-            # compare session is kept: it is a picture that WAS a pair, and it is replaced by the first new one.
+            # So: the textures are left alone (the renderer keeps drawing what it had), `painted()` stops claiming it is
+            # a pair of this mode, and the picture that WAS there becomes the pending RESULT of this mode. The source
+            # for that same moment - already asked at the switch - then completes the pair and the pane paints it; if
+            # the source never comes, `MAX_PAIR_STALE_S` still paints the result alone and says `pair stale`.
             pair = self._committed
-            # Did this pane have a result at all? If it did, the source that arrives next belongs to a picture the pane
-            # already had, so it waits for a new pair instead of painting alone.
             self._result_seen = pair is not None and pair.result is not None
             if pair is None or pair.result is None or pair.source is None or not self._pairs(pair.result, pair.source):
                 if telemetry.level() >= 2:
                     telemetry.event("pair enter", mode=str(mode),
                                     dropped=None if pair is None or pair.result is None else _moment(pair.moment),
                                     why="no-pair-yet")
-                # An EMPTY pane is `_committed = None`, not an empty `CommittedPair`: "no pair on screen" must read
-                # as `None` to every caller (`painted_pair()`), which is the defect the empty-object version caused.
-                self._sink.set_frame(None)
-                self._sink.set_original(None)
-                self._committed = None
+                # The half already on screen becomes the next pair's first half.
+                self._pending_result = None if pair is None else pair.result
+                self._pending_source = None if pair is None else pair.source
                 self._hold_started = None
+                self._lone_result = False
+                # `_committed = None`, never an empty `CommittedPair`: "no pair on screen" must read as `None` to every
+                # caller (`painted_pair()`). The RENDERER keeps its textures - that is what stops the blank pane.
+                self._committed = None
 
     def set_tolerance(self, seconds: float) -> None:
         """The largest source distance that is still the same picture, in seconds (the pane's half frame)."""

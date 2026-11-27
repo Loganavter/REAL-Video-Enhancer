@@ -599,7 +599,7 @@ class VideoPreviewSurface(QRhiWidget):
 
     def _log_draw_two(self, result: QImage | None, original: QImage | None, *,
                       present: bool | None = None, source_moment: float | None = None,
-                      source_name: tuple[str, int] | None = None) -> None:
+                      source_name: tuple[str, int] | None = None, held: bool = False) -> None:
         """The compare modes paint both halves in ONE pass: name both pictures in one line.
 
         `source_moment`/`source_name` are the identity of the picture the RENDERER holds. They are passed in because
@@ -618,7 +618,9 @@ class VideoPreviewSurface(QRhiWidget):
         has_original = original is not None and not original.isNull()
         fields: dict[str, object] = {
             "mode": self._view_mode,
-            "half": "pair" if (has_result and has_original) else ("lone:result" if has_result else "lone:source"),
+            "half": ("held" if held else
+                     ("pair" if (has_result and has_original) else
+                      ("lone:result" if has_result else "lone:source"))),
         }
         fields.update({f"result_{k}": v for k, v in self._identity_fields(original=False).items()})
         fields["result_moment"] = "-" if self._result_moment is None else f"{self._result_moment:.3f}"
@@ -1502,13 +1504,18 @@ class VideoPreviewSurface(QRhiWidget):
             # no source yet, was logged; the same paint with a source was not, which is what made a zoom look untraceable).
             self._log_draw_two(self._frame, original, present=bool(original) or self._has_picture(),
                                source_moment=None if source is None else source.moment,
-                               source_name=None if source is None else source.name)
+                               source_name=None if source is None else source.name,
+                               # A picture on screen with no committed pair is RETAINED: entering a compare mode keeps
+                               # what the pane had while it waits (`preview/pair.py`), and calling that "lone:result"
+                               # would report a defect the user cannot see. `half=held` says exactly what it is.
+                               held=self._pair.painted() is None)
             self._original_changed = False
             self._logged_geometry = geometry
         elif geometry_changed or telemetry.level() >= 2:
             # The box is the RESULT's, and a zoom/pan moves it whether or not the source half has arrived: a paused pane
             # with no source would otherwise leave a gesture with no trace at all (measured 2026-11-26).
-            self._log_draw_two(self._frame, None, present=self._has_picture())
+            self._log_draw_two(self._frame, None, present=self._has_picture(),
+                               held=self._pair.painted() is None)
             self._logged_geometry = geometry
 
     def _geometry_signature(self) -> str:

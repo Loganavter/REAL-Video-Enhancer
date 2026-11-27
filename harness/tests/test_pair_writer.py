@@ -234,16 +234,14 @@ def test_the_pane_honours_the_hard_limit_with_a_dead_source():
 # --- entering a compare mode ---------------------------------------------------------------------------
 
 
-def test_entering_a_compare_mode_paints_no_half_and_the_first_pair_arrives_with_its_source():
-    """A switch from `single` must not paint the upscale alone - the owner's own complaint (2026-11-26).
+def test_entering_a_compare_mode_keeps_the_picture_and_waits_for_its_pair():
+    """A switch from `single` neither blanks the pane nor paints one half of the new moment.
 
-    The order "the upscale, then the original" is what this module exists to remove, and the mode switch was the one
-    place still producing it: `single` holds a result with no source, and handing that picture to the compare drew
-    `half=lone:result` until the source landed. Measured 2026-11-27 on the owner's gesture: 1-9 such paints per switch,
-    each corrected only 0.24-1.1 s later.
-
-    The pane now waits EMPTY for the first pair. RED-BEFORE: with the old branch the pane hands the single-mode result
-    as the first comparison picture (`assert [("frame", ...)] == []`).
+    Two measured extremes on the owner's machine (2026-11-27): handing the single-mode result to the compare drew
+    `half=lone:result` ("the upscale, then the original", 1-9 paints per switch), and clearing the pane for the first
+    pair left "ни одного кадра нет" - blank until a NEW result arrived, which at the END of a finished render never
+    happens. The picture that is on screen stays, becomes the next pair's half, and the source that was asked for at the
+    switch completes it.
     """
     writer, sink, clock = _writer(mode="single")
     sink.calls.clear()
@@ -253,53 +251,37 @@ def test_entering_a_compare_mode_paints_no_half_and_the_first_pair_arrives_with_
 
     sink.calls.clear()
     writer.set_view_mode("sbs")                     # the switch
-    assert sink.calls == [("frame", None), ("orig", None)], (
-        f"a compare mode starts empty, never on one half: {sink.calls}")
-    assert writer.painted() is None, "an empty pane is no pair at all - not an empty pair object"
+    assert sink.calls == [], (
+        "a mode change never blanks the pane: the renderer keeps drawing the picture it had")
+    assert writer.painted() is None, "but that picture is not claimed as a pair of this mode"
 
-    # The first result is HELD, not painted alone...
-    sink.calls.clear()
-    writer.offer_result(_half(5.5))
-    assert writer.paint() is False and sink.calls == [], f"a lone result must not paint: {sink.calls}"
-
-    # ...and the pair paints the moment its source arrives.
-    writer.offer_source(_half(5.5))
+    # The source for the picture ON SCREEN completes it - nothing new is painted before that.
+    writer.offer_source(_half(5.0))
+    assert sink.calls == [], "the source alone is not a paint"
     assert writer.paint() is True
     painted = writer.painted()
     assert painted is not None and painted.lone_half is None
-    assert painted.result is not None and painted.source is not None and painted.moment == pytest.approx(5.5)
+    assert painted.moment == pytest.approx(5.0) and painted.source is not None
 
 
-def test_after_a_mode_entry_a_source_alone_waits_for_its_result():
-    """The mirror image of the mode-switch fix: entering a compare mode DROPS the single-mode result, so the source that
-    arrives next has no partner yet - and painting it alone shows the original with an empty right half (measured
-    2026-11-27, the owner's screenshot after a seek). A source alone paints only on a pane that never had a result.
+def test_entering_a_compare_mode_on_an_empty_pane_paints_nothing_and_waits():
+    """A switch with nothing on screen has no picture to keep and none to claim: the first paint is a pair or nothing.
+
+    A source that arrives on an EMPTY compare pane is the one picture there is (a compare opened before its first
+    result), so it is shown - the rule that keeps a lone half out is about a pane that HAD a result, not this one.
     """
-    writer, sink, clock = _writer(mode="sbs")
-    writer.offer_result(_half(4.0))
-    writer.offer_source(_half(4.0))
-    assert writer.paint() is True and writer.painted().lone_half is None
-
-    writer.set_view_mode("single")
-    writer.set_view_mode("sbs")                       # the entry drops the single-mode picture
+    writer, sink, clock = _writer(mode="single")
     sink.calls.clear()
+    writer.set_view_mode("sbs")
+    assert sink.calls == [], "a mode change never paints on its own"
+    assert writer.painted() is None
 
-    writer.offer_source(_half(4.5))                   # the source of the moment this seek asked for
-    assert writer.paint() is False, "a source with no result is held, not painted"
-    assert sink.calls == [], f"nothing may reach the renderer yet: {sink.calls}"
-
-    writer.offer_result(_half(4.5))
+    writer.offer_source(_half(3.0))
     assert writer.paint() is True
-    assert writer.painted().lone_half is None and writer.painted().moment == pytest.approx(4.5)
+    assert writer.painted().lone_half == "source", "the only picture there is, named as such"
 
-
-def test_a_pane_that_never_had_a_result_still_shows_its_source():
-    """A compare opened before its first result (a queue item): the source IS the picture there is."""
-    writer, sink, clock = _writer(mode="sbs")
-    writer.offer_source(_half(1.0))
-    assert writer.paint() is True
-    painted = writer.painted()
-    assert painted is not None and painted.lone_half == "source", "the one picture in hand is shown"
+    writer.offer_result(_half(3.0))
+    assert writer.paint() is True and writer.painted().lone_half is None
 
 
 # --- a clear is a clear ------------------------------------------------------------------------------
