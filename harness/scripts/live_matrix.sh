@@ -657,8 +657,10 @@ sleep 3
 WINDOW9B="$(log_since "$MARK9B")"
 HELD_BLOCK_DEAD="$(printf '%s\n' "$WINDOW9B" | fill_field held_block)"
 if [ "$STARTED" = "0" ]; then
+    # The channel's own start answer names WHY nothing started; reporting only "the glyph stayed unchecked" hides it.
+    START_ANSWER="$(cat "$ART/row9-start.json" 2>/dev/null)"
     row "export, sbs" "both halves from one owner; held_block only while the render is alive" \
-        "the export never started (startRenderButton stayed unchecked); queue: $(json_get "$(cat "$ART/row9-queue.json" 2>/dev/null)" selectedRows "-")" \
+        "no render ran: start answered started=$(json_get "$START_ANSWER" started "-") method=$(json_get "$START_ANSWER" method "-") render_state=$(json_get "$START_ANSWER" render_state "-") queue_rows=$(json_get "$START_ANSWER" queue_rows "-") error=$(json_get "$START_ANSWER" error "-")" \
         "${SHOT9:-$ART/row9-window.txt}" UNPROVEN
 elif [ "$HELD_BLOCK_LIVE" = "-" ] || [ "$HELD_BLOCK_DEAD" = "-" ]; then
     row "export, sbs" "both halves from one owner; held_block only while the render is alive" \
