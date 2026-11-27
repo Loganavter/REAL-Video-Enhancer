@@ -3066,9 +3066,14 @@ class ProcessTab:
         self._seek_pressed_at = None
         self._seek_generation = None
 
-    def _on_preview_seek(self, fraction: float) -> None:
-        """Route a press or a drag on the strip; a REFUSED press changes nothing (no token, no register). Logic: `seek`."""
-        seek.on_preview_seek(self, fraction)
+    def _on_preview_seek(self, fraction: float) -> bool:
+        """Route a press or a drag on the strip; a REFUSED press changes nothing (no token, no register). Logic: `seek`.
+
+        Returns the ROUTE's answer (audit §6.4): True when a route took the press, False on every refusal path. The
+        page is the host the adapter calls, so this value is what `PreviewSession.seek_to` and the controller read - a
+        refused press must not look accepted.
+        """
+        return bool(seek.on_preview_seek(self, fraction))
 
     def _request_display_seek(self, fraction: float, *, hold: bool) -> bool:
         """Ask the running render for one frame at `fraction`; True when the request went out. Logic: `seek`."""
