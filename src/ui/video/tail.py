@@ -47,6 +47,7 @@ import os
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from .frame_names import read_names
 from .frames import FORMATS, frame_pts, pack_frame, stream_color_tags
 from . import telemetry
 
@@ -107,6 +108,10 @@ class TailReader(QObject):
         self._open_grace_polls = max(1, int(open_grace_polls))
 
         self._path: str | None = None
+        #: The renderer's own names for the pictures it wrote (`<output>.srcpts`, one source time per OUTPUT frame).
+        #: The export is CFR, so the file's PTS is the muxer's grid, not the source moment a held picture carries; the
+        #: compare's source half is named by the source's PTS, and the two must be the same number to pair at all.
+        self._names: list[float] | None = None
         self._size = 0
         self._container = None
         self._stream = None
@@ -152,11 +157,13 @@ class TailReader(QObject):
         if not os.path.isfile(path):
             return False
         self._path = path
+        self._names = None
         return True
 
     def close(self) -> None:
         """Release the demuxer; the next `open` starts a new file."""
         self._path = None
+        self._names = None
         self._size = 0
         self._emitted = 0
         self._last_pts = None
@@ -374,6 +381,9 @@ class TailReader(QObject):
             origin = self._origin()
             shown_pts = pts - origin
             index = int(round(shown_pts * fps)) if fps > 0 else self._emitted
+            named = self._name_for(index)
+            if named is not None:
+                shown_pts = named
             self._last_pts = pts
             if self._edge_pts is None or pts > self._edge_pts:
                 self._edge_pts = pts
@@ -386,6 +396,19 @@ class TailReader(QObject):
             # The cap stopped the read, not the file: there is more written data behind the playhead.
             self._backlog = True
         return emitted
+
+    def _name_for(self, index: int) -> float | None:
+        """The SOURCE time the renderer recorded for output picture `index`, or None to keep the container's PTS.
+
+        Read once per file (the list is written when the render ends, so a live tail finds it as soon as the render
+        closes; until then the container's own PTS names the frames, which is what this reader always did).
+        """
+        if self._names is None and self._path:
+            self._names = read_names(self._path) or []
+        names = self._names or []
+        if 0 <= index < len(names):
+            return names[index]
+        return None
 
     def _interval(self) -> float:
         return 1.0 / self._fps if self._fps > 0 else 0.04

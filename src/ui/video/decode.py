@@ -160,6 +160,10 @@ class VideoDecoder(QObject):
         #: A one-off decode request ("the original at this PTS"), independent of the play position.
         self._request: float | None = None
         self._pumps = 0
+        #: The renderer's names for the pictures it wrote (`<file>.srcpts`): a CFR export fills a source gap with a
+        #: copy of the previous picture, so the file's PTS is not the source moment the picture carries. None means
+        #: "name frames by their PTS", which is what every non-render file does.
+        self._names: list[float] | None = None
         #: Where a walk's time goes: `next()` (the codec) against `_pack()` (the scaler + the RGB copy). The two have
         #: different fixes - one is the source's size, the other is how many frames we ask the scaler for - and only
         #: the split can say which one is the wall (measured 2026-11-27: a walk of 14 frames cost 0.9 s).
@@ -189,6 +193,12 @@ class VideoDecoder(QObject):
             return False
 
         self.close()
+        try:
+            from .frame_names import read_names
+
+            self._names = read_names(str(path))
+        except Exception:
+            self._names = None
         try:
             container = av.open(path, mode="r")
         except Exception as exc:  # a missing file, a container without a header, a broken codec
@@ -461,6 +471,15 @@ class VideoDecoder(QObject):
         # for a source file, so a compare's own decoder keeps the source's absolute times).
         pts = raw - self._origin
         index = int(round(pts / self._interval)) if self._fps > 0 else self._packed
+        # The name is looked up by the picture's OUTPUT ORDINAL, which is the container's own grid (`index` above) -
+        # never by `_packed`: after a seek the decoder re-reads from a keyframe and the counter no longer matches the
+        # file's frame number (measured 2026-11-27: the last frame of a 495-frame file was named 0.167, the name of
+        # frame 4, because the pack counter had restarted).
+        named = self._names[index] if self._names and 0 <= index < len(self._names) else None
+        if named is not None:
+            # The renderer's own name for this picture (see `frame_names`): the SOURCE time it carries, which is what
+            # the compare's other half is named by.
+            pts = float(named) - self._origin
         # ONE resample, not two. `_fit` scaled the picture (YUV -> YUV) and `pack_frame` then converted it to the
         # requested pixel format - two full passes over the pixels to produce one picture. `pack_frame(size=)` does
         # both in a single swscale call, and the split instrument says the resample is the wall, not the codec:

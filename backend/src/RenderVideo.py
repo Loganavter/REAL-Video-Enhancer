@@ -482,6 +482,11 @@ class Render:
         self.stamped_frames = str(os.environ.get("RVE_STAMPED_FRAMES", "1")).strip() != "0"
         self._last_source_pts = None
         self._last_payload = None
+        self._out_src_pts = []
+        #: The SOURCE time of every picture this render WRITES, in output order (duplicates included). Written next to
+        #: the output as `<output>.srcpts`: the export is CFR, so the file's own PTS cannot say which source moment a
+        #: held picture carries, and the compare needs exactly that number to pair the halves
+        #: (`src/ui/video/frame_names.py` reads it).
         self.readBuffer = FFmpegRead(  # input width
             inputFile=inputFile,
             width=self.width,
@@ -1560,6 +1565,7 @@ class Render:
                         for f in pending():
                             self.informationHandler.setFramesRendered(frames_rendered)
                             self.writeBuffer.writeQueue.put(f.get_frame_bytes())
+                            self._out_src_pts.append(self._last_source_pts)
                             frames_rendered += int(self.ceilInterpolateFactor)
                     self.informationHandler.stopWriting()
                     # The reader is drained; the writer may still be flushing. Say so instead of leaving
@@ -1594,6 +1600,7 @@ class Render:
                             )
                         self.informationHandler.setFramesRendered(frames_rendered)
                         self.writeBuffer.writeQueue.put(interpolated_frame.get_frame_bytes() if type(interpolated_frame) != bytes else interpolated_frame)
+                        self._out_src_pts.append(getattr(frame, "pts", self._last_source_pts))
                 
                 
 
@@ -1713,8 +1720,10 @@ class Render:
                     # pool behind - it never overwrites a payload still being written)
                     frame.get_frame_bytes()
                     self.writeBuffer.writeQueue.put(frame)
+                    self._out_src_pts.append(getattr(frame, "pts", None))
                 else:
                     self.writeBuffer.writeQueue.put(frame.get_frame_bytes() if type(frame) != bytes else frame)
+                    self._out_src_pts.append(getattr(frame, "pts", None))
                 self._profile["pack"] += (_perf_counter() - _t_pack) * 1000.0
                 if self.stamped_frames:
                     # The pipe is VFR in this mode (a real frame per container frame), so a PTS gap would shorten the
@@ -1730,6 +1739,8 @@ class Render:
                         if missing > 0 and self._last_payload is not None:
                             for _ in range(min(missing, 240)):
                                 self.writeBuffer.writeQueue.put(self._last_payload)
+                                # a HELD picture carries the source time of the frame it holds
+                                self._out_src_pts.append(self._last_source_pts)
                                 frames_rendered += int(self.ceilInterpolateFactor)
                                 self._write_status(frames_rendered)
                     if pts_now is not None:
@@ -1808,6 +1819,20 @@ class Render:
             if tu is not None:
                 log(tu.stats())
         self._write_run_report()
+        # The names go down BEFORE the sentinel: every picture has been queued by here, and a reader that opens the
+        # sidecar while the writer is still flushing finds a complete list rather than a truncated one.
+        try:
+            _out = str(getattr(self.writeBuffer, "outputFile", "") or "")
+            # The backend's `src` is `backend/src`: the app's `src.ui.video.frame_names` is NOT importable from here,
+            # so the format is written locally and read by the app (one format, two processes, no shared import).
+            if _out and self._out_src_pts:
+                with open(_out + ".srcpts", "w", encoding="utf-8") as _handle:
+                    for _value in self._out_src_pts:
+                        _handle.write("" if _value is None else f"{float(_value):.6f}")
+                        _handle.write("\n")
+                log(f"frame names: {len(self._out_src_pts)} pictures named by their source time -> {_out}.srcpts")
+        except Exception as exc:
+            log(f"frame names: not written ({exc})")
         self.writeBuffer.writeQueue.put(None)
         # Detach the GUI-owned blocks: closing never unlinks a segment we did not create. A block the
         # backend created as a fallback (the window had not attached yet) is removed by close().
