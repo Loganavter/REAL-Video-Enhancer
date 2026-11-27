@@ -535,6 +535,12 @@ class VideoDecoder(QObject):
             if frame is None:
                 break
             walked.append(frame)
+            # STREAM the walk: emit each frame as it is decoded, not as one burst at the end. The caller's register then
+            # advances per frame, its `pending` (one ask in flight) clears on the FIRST arrival, and the next ask is
+            # issued while the walk is still running. Emitting at the end made the register jump by 30-40 frames at once
+            # and tied the ask cadence to the walk's END (`decode step target=6.131 walked=30`, a ~0.4 s stall with the
+            # pane waiting, measured 2026-11-27).
+            self.frame_ready.emit(frame)
             if frame_at_or_after(frame.pts, target, tolerance=0.0 if exact else 0.5 * self._interval):
                 break
         if not walked:
@@ -548,14 +554,8 @@ class VideoDecoder(QObject):
             if published is not None:
                 self.frame_ready.emit(published)
             return
-        # EVERY frame of the walk, in order, whatever the caller asked `span` for. A span-less ask used to publish only
-        # the last frame and CONSUME the rest - so every intermediate moment was decoded, thrown away, and never offered;
-        # the compare's register then had a hole exactly where the result named a frame (measured 2026-11-27:
-        # `compare gap wanted=17.768 ... nearest=17.809`, with `source delivered pts=17.768` = 0 for the whole window).
-        # The caller's policy decides what to SHOW from these pictures; the decoder's job is not to withhold them. One
-        # round trip per walk still holds, so the latency argument that introduced `span` is unchanged.
-        for frame in walked:
-            self.frame_ready.emit(frame)
+        # One round trip per walk still holds (the frames were emitted above, inside the loop); the caller's policy
+        # decides what to SHOW from them, and the decoder's job is not to withhold a picture it already paid for.
         self._at_eof = False
         if self._trace_on:
             self.trace.emit(f"step target={float(target):.3f} "
