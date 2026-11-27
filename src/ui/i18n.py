@@ -82,6 +82,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fps": "к/с",
         "frames": "кадров",
         "upscale": "увеличение",
+        # The video-info pane's compact queue card (`src/ui/pages/general_settings.py`): its empty line and the pin's
+        # tooltip. Both are catalogue keys the pane translates at build/retranslate time; the four rows are data.
+        "The render queue is empty.": "Очередь рендера пуста.",
+        "Open the Render Queue tab": "Открыть вкладку очереди рендера",
         # The five inner tab labels of the process page (`processSettingsContainer`).
         "General": "Общие",
         "Encoder Options": "Параметры кодирования",

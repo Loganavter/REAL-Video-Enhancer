@@ -21,7 +21,7 @@ import resources_rc
 # `DoubleSpinBox` for a `QDoubleSpinBox`. Nothing here needs a Qt-shaped compatibility adapter.
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, ProgressBar,
-    SurfacePanel, SurfaceScrollArea, Text)
+    SurfacePanel, SurfaceScrollArea, Text, TextListWidget)
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, CAPTION_PT, GROUP_TITLE_PT
 from src.ui.pages.handles import GeneralSettingsHandles
@@ -92,6 +92,19 @@ INFO_TAG_INSET_X_PX = 6
 INFO_TAG_INSET_Y_PX = 3
 INFO_PILL_RADIUS_PX = 9
 INFO_BAR_HEIGHT_PX = 6
+
+#: The compact Render Queue card under the run card: FOUR rows of the SAME rows the Render Queue tab paints, then the
+#: list's own scrollbar. `INFO_QUEUE_ROW_HEIGHT_PX` is the tab's number (`render_queue_tab.py` builds its list with
+#: `row_height=20`) so the two views read alike at one scale. The card's height is derived, never stated: four row
+#: heights plus the list's own padding plus the card's insets (`_queue_rows_height`), so a scale change moves both.
+INFO_QUEUE_ROWS = 4
+INFO_QUEUE_ROW_HEIGHT_PX = 20
+INFO_QUEUE_PIN_SIZE_PX = 16
+INFO_QUEUE_PIN_ICON_PX = 12
+
+#: The card's two sentences, as catalogue KEYS (translated at build/retranslate time, never stored translated).
+INFO_QUEUE_EMPTY = "The render queue is empty."
+INFO_QUEUE_PIN_TOOLTIP = "Open the Render Queue tab"
 
 #: The pipeline ribbon's own DESIGN geometry (variant A), read off the mockup's own rules: `::before{margin-bottom:8px}`
 #: under the rail, `.s-val{margin-top:4px}`, `.s-sub{margin-top:2px}`, and the 12 px column the chevron sits in.
@@ -1070,6 +1083,45 @@ class GeneralSettingsPage:
 
         self.videoInfoLayout.addWidget(self.infoFilled)
 
+        # -- the compact Render Queue card: the tab's rows, four of them, under the run card -----------------
+        # The SAME list: `TextListWidget` with the tab's painter and tooltip (`src/ui/queue_rows.py`), bound by the
+        # glue to the same `RenderQueue` model - a second, smaller view of one queue, never a second renderer. It is a
+        # sibling of `infoFilled` (not a child) because a queue exists with no clip loaded, and the card must say so
+        # there instead of disappearing behind the pane's placeholder rule.
+        self._queue_preview_names: list[str] | None = None
+        self.infoQueueCard = SurfacePanel(self.videoInfoPane, background_token="surface.list",
+                                          radius=scaled_px(INFO_CARD_RADIUS_PX))
+        self.infoQueueCard.setObjectName("videoInfoQueueCard")
+        self.infoQueueLayout = QVBoxLayout(self.infoQueueCard)
+        self.infoQueueLayout.setSpacing(0)
+        # The pin's band is a LAYOUT, not a wrapper widget: a bare `QWidget` here would be the Designer's wrapper
+        # level the page may not grow (`test_no_new_bare_wrapper_widgets`). It sits at the card's top-right, above
+        # the four rows, so no row's percentage is ever painted under it.
+        self.infoQueueHeaderLayout = QHBoxLayout()
+        self.infoQueueHeaderLayout.setContentsMargins(0, 0, 0, 0)
+        self.infoQueueHeaderLayout.addStretch(1)
+        pin_icon = QIcon()
+        pin_icon.addFile(u":/icons/icons/map-pin.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
+        self.infoQueuePin = Button(pin_icon, size=(INFO_QUEUE_PIN_SIZE_PX, INFO_QUEUE_PIN_SIZE_PX),
+                                   icon_size=INFO_QUEUE_PIN_ICON_PX, parent=self.infoQueueCard)
+        self.infoQueuePin.setObjectName("videoInfoQueuePin")
+        self.infoQueueHeaderLayout.addWidget(self.infoQueuePin)
+        self.infoQueueLayout.addLayout(self.infoQueueHeaderLayout)
+        self.infoQueueList = TextListWidget(self.infoQueueCard, row_height=INFO_QUEUE_ROW_HEIGHT_PX, radius=10,
+                                            surface_token="dialog.background")
+        self.infoQueueList.setObjectName("videoInfoQueueList")
+        self.infoQueueList.setSelectionMode("single")
+        self.infoQueueList.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.infoQueueLayout.addWidget(self.infoQueueList)
+        self.infoQueueEmpty = Text(parent=self.infoQueueCard, color_token="label.text.muted", word_wrap=True)
+        self.infoQueueEmpty.setObjectName("videoInfoQueueEmpty")
+        apply(self.infoQueueEmpty, CAPTION_PT)
+        self.infoQueueLayout.addWidget(self.infoQueueEmpty)
+        self.videoInfoLayout.addWidget(self.infoQueueCard)
+        # The card opens in its EMPTY state: one muted line, no four-row hole. The first glue sync (or the first
+        # item) replaces it through `set_queue_preview_names`, the card's only content writer.
+        self.set_queue_preview_names([])
+
         # The idle line under the plan (the mockup's): shown only while the plan is up and no clip is loaded. Built here
         # so it is a sibling of the cards, and `setVisible` is the only thing a re-render does to it.
         self.infoIdleNote = Text(parent=self.videoInfoPane, color_token="label.text.muted", word_wrap=True)
@@ -1197,6 +1249,58 @@ class GeneralSettingsPage:
         self._run_state = "Idle"
         self._run_elapsed = "0:00:00"
 
+    # -- the compact queue card (four rows, a pin) ----------------------------------------------------
+
+    def _queue_rows_height(self) -> int:
+        """The list's fixed height: FOUR rows at ITS row height plus ITS own padding.
+
+        Derived from the widget, not stated: `content_height()` is `count * row_height + padding`, so subtracting the
+        rows gives back exactly the padding the toolkit resolved through `scaled_px`. The card therefore holds four
+        rows and neither a pixel more nor a pixel less, at any factor, and the sixth row scrolls inside it.
+        """
+        panel = self.infoQueueList
+        padding = panel.content_height() - panel.count() * panel.row_height()
+        return INFO_QUEUE_ROWS * panel.row_height() + padding
+
+    def queue_preview_scroll_maximum(self) -> int:
+        """The compact list's vertical scroll range - 0 while its four rows hold every item.
+
+        Reads the toolkit's own overlay area (the list builds exactly one `QAbstractScrollArea` inside itself); the
+        test asserts that more items than fit scroll rather than grow the card.
+        """
+        area = self.infoQueueList.findChild(QAbstractScrollArea)
+        return int(area.verticalScrollBar().maximum()) if area is not None else 0
+
+    def set_queue_preview_names(self, names) -> None:
+        """Mirror the render queue's rows into the compact card - the card's ONE content writer.
+
+        The glue calls this with the model's names (same list the Render Queue tab shows); it never parses a row's
+        text back into state. An unchanged queue is a no-op, so a progress tick repaints rows
+        (`refresh_queue_preview_rows`) without resetting the scroll position, and a language switch changes the one
+        sentence, never the list object.
+        """
+        names = [str(name) for name in (names or ())]
+        if names == self._queue_preview_names:
+            return
+        self._queue_preview_names = names
+        if names:
+            self.infoQueueList.setItems(names)
+            self.infoQueueEmpty.setVisible(False)
+            self.infoQueueList.setVisible(True)
+            return
+        self.infoQueueList.clear()
+        self.infoQueueList.setVisible(False)
+        self.infoQueueEmpty.setVisible(True)
+        self._render_queue_preview_text(self._info_language)
+
+    def refresh_queue_preview_rows(self) -> None:
+        """Repaint the card's rows: the painter reads the model, so a state change is an update, never a rebuild."""
+        self.infoQueueList.update()
+
+    def _render_queue_preview_text(self, language: str | None = None) -> None:
+        """The card's one sentence, from the catalogue - re-stated on every pane pass, including a language switch."""
+        self.infoQueueEmpty.setText(i18n.translate(INFO_QUEUE_EMPTY, language))
+
     @staticmethod
     def _fact_name(key: str, language: str | None) -> str:
         """A facts-grid name from the catalogue, without the row's trailing colon (the mockup's cell labels)."""
@@ -1223,6 +1327,8 @@ class GeneralSettingsPage:
         self._render_pipeline(language)
         # Rebuilt on every pass so it is already correct when a clip is dropped and the note comes back.
         self.infoIdleNote.setText(i18n.translate(INFO_IDLE_NOTE, language))
+        # The queue card's one sentence follows the same rule (a language switch must not touch its list).
+        self._render_queue_preview_text(language)
         if self._video_values is None:
             # Nothing to describe: the three filled blocks are invisible rather than a labelled skeleton (owner,
             # 2026-11-26: "зачем мы это рисуем пока не выбрано ни одно видео? Какой-то рудимент"). The host paints
@@ -1373,6 +1479,14 @@ class GeneralSettingsPage:
         self.infoRunLayout.setContentsMargins(inset, inset, inset, inset)
         self.infoRunLayout.setSpacing(scaled_px(INFO_RUN_GAP_PX))
 
+        # The queue card: the four-row body is derived from the list's own row height, and the pin's band is a layout
+        # row above it, so a scale change moves the whole card by re-running this one pass.
+        self.infoQueueCard.set_radius(radius)
+        self.infoQueueLayout.setContentsMargins(inset, inset, inset, inset)
+        self.infoQueueLayout.setSpacing(scaled_px(INFO_VALUE_GAP_PX))
+        self.infoQueueHeaderLayout.setSpacing(scaled_px(INFO_VALUE_GAP_PX))
+        self.infoQueueList.setFixedHeight(self._queue_rows_height())
+
         # The plan's ribbon: the rail is a painted 2 px line like every other hairline on this pane, and the three
         # gaps inside a stage are the mockup's own (rail->name 8, name->value 4, value->sub 2) - grid rows 1/3/5.
         rail = max(1, scaled_px(INFO_RAIL_HEIGHT_PX))
@@ -1479,6 +1593,8 @@ class GeneralSettingsPage:
         self.frameReuse.setText(QCoreApplication.translate("MainWindow", u"Reuse unchanged frames", None))
         self.celReuse.setText(QCoreApplication.translate("MainWindow", u"By cel (ignore grain, dust and scan wobble)", None))
         self.addToRenderQueueButton.setText(QCoreApplication.translate("MainWindow", u" Add to Render Queue", None))
+        # The queue card's pin states one catalogue key; the four-row list below it is data, not text.
+        self.infoQueuePin.setToolTip(i18n.tooltip(INFO_QUEUE_PIN_TOOLTIP))
         # Last: the pane re-renders from its STORED values, so the nine row names follow the catalogue while the
         # values a loaded video put there stay byte-identical.
         self._render_video_info(language)
