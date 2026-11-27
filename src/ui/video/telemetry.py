@@ -214,6 +214,10 @@ _pair_strict = 0
 #: used to be missing from its denominator too, so a pane that painted the result alone every second read as perfectly
 #: paired (telemetry audit 2026-11-27).
 _pair_lone = 0
+#: PAIRS that reached the renderer (both halves of one moment), written where the COMMIT happens:
+#: `preview/pair.py::_paint`. A paint-time counter cannot see a hold - the pane can paint a stale pair happily while
+#: every new result is held (owner, 2026-11-27). `pair_commits=0` while results advance IS the defect, in one field.
+_pair_commits = 0
 #: Of the sub-frame paints: which side of the result the source was on. Alternating values = a wobble, one value = offset.
 _pair_ahead = 0
 _pair_behind = 0
@@ -282,6 +286,17 @@ def note_upload(*, upload_ms: float | None = None, size_bytes: int | None = None
         _upload.append(float(upload_ms))
     if size_bytes:
         _bytes += int(size_bytes)
+
+
+def note_pair_commit(*, moment: float | None = None) -> None:
+    """A PAIR was committed to the renderer: both halves of one moment, not a hold and not a lone half.
+
+    Level-independent and written at the decision itself (`preview/pair.py::_paint`), because the counters that existed
+    were incremented at PAINT time: during the 2026-11-27 defect every result was held and the paint counters looked
+    normal. A counter at the decision cannot be blind to the decision.
+    """
+    global _pair_commits
+    _pair_commits += 1
 
 
 def note_pair(*, delta_frames: float | None = None, lone_half: str | None = None) -> None:
@@ -409,6 +424,7 @@ def snapshot() -> dict[str, object]:
         "pair_total": _pair_total,
         "pair_off": _pair_off,
         "pair_lone": _pair_lone,
+        "pair_commits": _pair_commits,
         "gui_ms": list(_gui),
         "upload_ms": list(_upload),
         "interval_ms": list(_intervals),
@@ -426,10 +442,11 @@ def _reset(*, session: bool = False) -> None:
     the session's first and skip a window.
     """
     global _frames, _paints, _uploads, _bytes, _last_snapshot, _started, _last_stats, _shown
-    global _pair_total, _pair_off, _pair_strict, _pair_ahead, _pair_behind, _pair_lone
+    global _pair_total, _pair_off, _pair_strict, _pair_ahead, _pair_behind, _pair_lone, _pair_commits
     global _snapshot_started, _last_snapshot_at
-    _frames = _paints = _uploads = _bytes =     _pair_total = _pair_off = 0
-    _pair_strict = _pair_ahead = _pair_behind = _pair_lone = 0
+    _frames = _paints = _uploads = _bytes = 0
+    _pair_total = _pair_off = 0
+    _pair_strict = _pair_ahead = _pair_behind = _pair_lone = _pair_commits = 0
     if session:
         # `shown` is a property of the PANE (what it is painting right now), not a per-window counter: clearing it on
         # every flush made an idle second report `shown=-` while the picture was still on screen (measured 2026-11-24).
@@ -509,7 +526,7 @@ def maybe_stats(now: float | None = None, *, force: bool = False) -> bool:
         f"preview: stats frames={_frames} paints={_paints} up={_uploads} "
         f"up_ms={_summary(_upload)} pass_ms={_summary(_pass)} gui_ms={_summary(_gui)} "
         f"int_ms={_summary(_intervals)} shown={_shown_text()} "
-        f"pair_off={_pair_off}/{_pair_total} pair_lone={_pair_lone} pair_sub={_pair_strict} "
+        f"pair_off={_pair_off}/{_pair_total} pair_commits={_pair_commits} pair_lone={_pair_lone} pair_sub={_pair_strict} "
         f"pair_ahead={_pair_ahead} pair_behind={_pair_behind} "
         f"seek_ms={_summary(_seek_ms)} "
         f"mb={_bytes / 1e6:.1f} window_s={minutes:.1f}"

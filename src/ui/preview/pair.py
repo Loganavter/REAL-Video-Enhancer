@@ -381,6 +381,10 @@ class PairWriter:
             self._sink.set_original(None if source is None else source.frame)
             handed = True
         self._committed = pair
+        if lone_half is None and result is not None and source is not None:
+            # The counter is written AT the commit, not at the paint: a hold never paints, so a paint-time counter
+            # reported a healthy pane while every result was being held (owner, 2026-11-27).
+            telemetry.note_pair_commit(moment=pair.moment)
         # Every call here IS a decision (a pair, a lone half, an empty pane, a re-hand): a hold never reaches `_paint`,
         # so the clock that measured the hold is spent by definition.
         self._hold_started = None
