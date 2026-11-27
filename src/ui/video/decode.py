@@ -478,8 +478,10 @@ class VideoDecoder(QObject):
         named = self._names[index] if self._names and 0 <= index < len(self._names) else None
         if named is not None:
             # The renderer's own name for this picture (see `frame_names`): the SOURCE time it carries, which is what
-            # the compare's other half is named by.
-            pts = float(named) - self._origin
+            # the compare's other half is named by - and it is ALREADY in the source's content time, so the output
+            # container's own start offset must NOT be subtracted from it again (that subtraction put the last frame
+            # back on 20.521 while its picture is the source's 20.604, measured 2026-11-27).
+            pts = float(named)
         # ONE resample, not two. `_fit` scaled the picture (YUV -> YUV) and `pack_frame` then converted it to the
         # requested pixel format - two full passes over the pixels to produce one picture. `pack_frame(size=)` does
         # both in a single swscale call, and the split instrument says the resample is the wall, not the codec:
