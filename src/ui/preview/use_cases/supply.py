@@ -155,6 +155,10 @@ def source_fill(tab, playhead: float) -> None:
     # never delivered (`compare ask target=18.06 playhead=18.018`, no delivery of 18.018, measured 2026-11-27).
     strict = register.picture_for(playhead, tab._source_tolerance(), generation=generation) is not None
     covered = register.picture_for(playhead, 1.5 * interval, generation=generation) is not None
+    # A PROBE is not a presentation: the `compare gap` line belongs to the painter (`present.sync_compare_source`), or
+    # the counter measures every coverage question the fill asks and cannot answer the acceptance ("zero gaps at the
+    # moment the result paints"). Measured 2026-11-27: 1020 gap lines for 3 genuinely missing painted moments.
+    register.last_refusal = None
     if not strict and moving and not paused:
         # The pane's frame is missing: ask AT it over a span, so one walk from the read position covers it (and the
         # rewind path publishes the target's own tail if the read position has already passed it).
