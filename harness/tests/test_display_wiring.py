@@ -881,6 +881,46 @@ def test_a_plain_exports_completion_stops_its_tail_before_releasing_the_block(mo
     assert tab._display is None
 
 
+def test_a_failed_render_says_what_happened_in_the_popup(monkeypatch):
+    """Owner, 2026-11-27: a render killed by the system's memory killer read as `Rendering failed! Check the logs tab!`.
+
+    The popup has to name the signal and its usual cause (and carry the backend's own last error line when there is
+    one), because the fact lived in `journalctl` and nobody looks there for a diagnosis.
+    """
+    shown: list[str] = []
+    monkeypatch.setattr("src.ui.ProcessTab.RegularQTPopup", lambda text: shown.append(str(text)))
+    monkeypatch.setattr(ProcessTab, "_set_render_controls", lambda self, state: None)
+    tab = _completion_tab(preview=False, reader=_ReleasingReader([]), tail=_Tail([]))
+    tab.return_codes = [-15]
+    tab._render_failures = ["the render process was killed by SIGTERM "
+                            "(stopped from outside - on this machine that is usually the memory killer (earlyoom))"]
+    tab._backend_last_error = ""
+
+    tab.guiChangesOnRenderCompletion()
+
+    assert len(shown) == 1, f"one popup per finished pass: {shown}"
+    text = shown[0]
+    assert text.startswith("Rendering failed: "), text
+    assert "SIGTERM" in text and "earlyoom" in text, f"the sentence must name the cause: {text}"
+    assert "check the logs" not in text.lower(), "the old text was the defect: it named nothing"
+
+
+def test_a_backend_error_line_is_kept_as_the_jobs_reason_only_when_it_is_one():
+    """The reader keeps the LAST failure line the backend printed; a command echo must never become the reason."""
+    assert ProcessTab._is_backend_error("BACKEND: FFmpeg failed to render the video.")
+    assert ProcessTab._is_backend_error("BACKEND: [Errno 32] Broken pipe")
+    assert ProcessTab._is_backend_error("BACKEND: Traceback (most recent call last):")
+    assert not ProcessTab._is_backend_error(
+        "BACKEND: CLI Arguments: ['-loglevel', 'error', 'rve-backend.py']"), (
+        "the command line echoes `-loglevel error` and would otherwise be reported as the cause")
+    assert not ProcessTab._is_backend_error("BACKEND: display: drew source frame 25 named 1.043s")
+    # A REASON beats a symptom: the sentence shows the line that names a cause, not ffmpeg's last packet complaint.
+    assert ProcessTab._is_backend_reason("BACKEND: FFmpeg failed to render the video.")
+    assert ProcessTab._is_backend_reason("BACKEND: [Errno 32] Broken pipe")
+    assert not ProcessTab._is_backend_reason("BACKEND: [out#0/rawvideo @ 0x55] Error muxing a packet")
+    assert ProcessTab._is_backend_error("BACKEND: [out#0/rawvideo @ 0x55] Error muxing a packet")
+
+
 def test_a_previews_completion_stops_the_tail_before_playback_starts(monkeypatch):
     events = []
     reader = _ReleasingReader(events)

@@ -694,13 +694,28 @@ class TextOutputPopup(ToolkitDialog):
 class RegularQTPopup(ToolkitDialog):
     """The app-wide message box: one label, one OK button, blocks like the old ``exec()`` dialog."""
 
+    #: How wide a message may make the dialog before it wraps. 400 is the old width (the one every short message was
+    #: written for); 680 fits a sentence of ~110 characters on two lines.
+    WIDE_AT_CHARS = 90
+    MAX_WIDTH = 680
+
     def __init__(self, message, parent: QWidget | None = None, *, title: str = "REAL Video Enhancer",
                  blocking: bool = True):
         super().__init__(parent=parent, title=title, min_width=400, min_height=100, modal=True)
         self.message = message
-        self.setFixedSize(400, 100)
 
-        self.label = Text(str(message), self, word_wrap=True)
+        # SIZED TO ITS TEXT. This dialog used to be `setFixedSize(400, 100)`, which clipped every message longer than
+        # two short lines - and that is WHY the failure text was "Rendering failed! Please check the logs tab!": a real
+        # diagnosis did not fit, so the callers wrote something that did (owner, 2026-11-27: a render killed by the
+        # system's memory killer read as a bare "Rendering failed", with the cut-off sentence visible in the dialog).
+        # The width is bounded so a traceback cannot cover the screen, and the label is given that width up front so
+        # `adjustSize` can compute the height from the wrapped text.
+        text = str(message)
+        width = 400 if len(text) <= self.WIDE_AT_CHARS else self.MAX_WIDTH
+        self.setFixedWidth(width)
+
+        self.label = Text(text, self, word_wrap=True)
+        self.label.setFixedWidth(width - 32)      # the layout's own margins, so no second wrap point
         self.root_layout.addWidget(self.label, 1)
 
         row = _action_row()
@@ -709,8 +724,31 @@ class RegularQTPopup(ToolkitDialog):
         row.addWidget(self.ok_button)
         self.root_layout.addLayout(row)
 
+        # The wrapped label's height is only known once it has a width, which is why the width was pinned above.
+        self._fit_to_text()
+
         if blocking:
             self.exec()
+
+    def _fit_to_text(self) -> None:
+        """Give the label exactly the height its WRAPPED text needs, then let the dialog take that height.
+
+        `adjustSize()` alone is not enough: the label's own size hint for wrapped text is a one-line guess until it is
+        told the width and the height is computed from it, and the app's typography is applied in `showEvent` - AFTER
+        the dialog was built - so the text grows a few points once it is shown. Both together clipped the tail of a real
+        message (measured live 2026-11-27: "...): [out#0/rawvideo @" with the rest invisible on a third line).
+        """
+        width = max(1, int(self.label.width()) or int(self.width()) - 32)
+        need = int(self.label.heightForWidth(width))
+        if need > 0 and need != int(self.label.height()):
+            self.label.setFixedHeight(need)
+        self.adjustSize()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().showEvent(event)
+        if not getattr(self, "_fitted_to_text", False):
+            self._fitted_to_text = True
+            self._fit_to_text()
 
 
 # --------------------------------------------------------------------------------------------------------------------

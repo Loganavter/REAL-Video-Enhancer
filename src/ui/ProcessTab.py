@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, QSize, Qt, QUrl, Slot
 
 from .RenderQueue import RenderQueue
 from ..render_jobs import short_duration
+from .render_failure import describe_exit, describe_failure
 from .render_log import LogLine, RenderLogFilter
 from .video import telemetry
 from . import shared_flag
@@ -932,6 +933,40 @@ class ProcessTab:
         finally:
             self._set_render_controls(getattr(self, "_render_state", "idle"))
 
+    @staticmethod
+    def _is_backend_reason(line: str) -> bool:
+        """Whether a backend line names the REASON, not just a symptom (a traceback, ffmpeg's summary, a broken pipe).
+
+        The popup shows one of these when the job has one; the weaker `_is_backend_error` line is only the fallback, so
+        a message ends with `FFmpeg failed to render the video.` rather than with `[out#0/rawvideo @ ...] Error muxing a
+        packet` - which is what the owner saw cut off in the first live proof (2026-11-27).
+        """
+        text = str(line or "")
+        for marker in ("RENDER FAILED", "FFmpeg failed", "Traceback", "[Errno", "Broken pipe"):
+            if marker in text:
+                return True
+        return False
+
+    @staticmethod
+    def _is_backend_error(line: str) -> bool:
+        """Whether a backend line names a FAILURE (the reader keeps the last one as the job's reason).
+
+        Only lines that carry a cause qualify: ffmpeg's `Error ...`, a Python `Traceback` / `[Errno 32]`,
+        `Traceback (most recent call last)`. The per-frame chatter never matches, so keeping the last one costs nothing
+        and does not push the failure out of the job's memory.
+        """
+        text = str(line or "").strip()
+        if not text:
+            return False
+        if "loglevel" in text or text.startswith("BACKEND: CLI Arguments"):
+            # The command line echoes `-loglevel error` and every argument: it is not a failure, and it would
+            # otherwise be the "reason" for a job that never printed one.
+            return False
+        for marker in ("Traceback", "[Errno", "Broken pipe", "FAILED", "failed", "Error", "error"):
+            if marker in text:
+                return True
+        return False
+
     def killRenderProcess(self):
         try:  # kills  render process if necessary
             self.userKilled = True
@@ -1026,6 +1061,15 @@ class ProcessTab:
     ):
         self.return_codes = [] # reset return codes
         self.userKilled = False # reset userkilled
+        #: One sentence per FAILED job, built where the job dies (`describe_exit`), so the popup at the end of the pass
+        #: can say WHAT happened instead of "check the logs" (owner, 2026-11-27: a render killed by the system's memory
+        #: killer read as a plain "Rendering failed").
+        self._render_failures = []
+        #: The backend's own last word for the job in flight: its `RENDER FAILED` summary or the last error line it
+        #: printed. Reset per job.
+        self._backend_last_error = ""
+        #: The strongest of those lines (the one that names a CAUSE), preferred for the failure sentence.
+        self._backend_reason = ""
         # The previous job's picture must not keep playing into this one's pane: a finished preview left a file
         # decoder running, and its frames would land on top of the live render (and onto the transport's state).
         self._stop_preview_playback()
@@ -1908,6 +1952,8 @@ class ProcessTab:
             self._log_filter = RenderLogFilter()
             self.renderLogLines = []
             render_failure = ""
+            self._backend_last_error = ""
+            self._backend_reason = ""
             # The backend's raw stream, kept in its own file: the tab filter decides what a person reads, this keeps
             # what the backend actually printed (owner, 2026-11-25: "логично тогда иметь условно файл logs-terminal.txt").
             terminal_log = None
@@ -1938,7 +1984,16 @@ class ProcessTab:
                         # The backend's thread wrapper wrote its one summary line: this job is over,
                         # whatever else arrives belongs to a traceback the pane should show.
                         render_failure = line[len("BACKEND: "):] if line.startswith("BACKEND: ") else line
+                        self._backend_last_error = render_failure
                         self.setStatus("Failed")
+                    elif self._is_backend_error(line):
+                        # Not the summary, but a symptom: ffmpeg's own error, a traceback's last line, a broken pipe.
+                        # Kept so an exit code that carries no text (`-15`) can still be explained in words - with the
+                        # STRONGER line (`_is_backend_reason`) preferred when the job printed one.
+                        detail = line[len("BACKEND: "):] if line.startswith("BACKEND: ") else line
+                        if self._is_backend_reason(line) or not self._backend_reason:
+                            self._backend_reason = detail
+                        self._backend_last_error = detail
                     if "it/s" in line:
                         textOutput = textOutput[:-1]
                     # FPS, ETA, the frame count and the status words are NOT parsed out of this stream any
@@ -1963,13 +2018,18 @@ class ProcessTab:
             code = self.return_codes[-1]
             ok = code in (0, 3221225477) and not render_failure
             if not ok and not render_failure:
-                render_failure = f"render process exited with code {code} before the render finished"
+                # The MEANING of the code, not the number: `-15` is "killed by SIGTERM (stopped from outside - on this
+                # machine that is usually the memory killer)", and the backend's own last error line follows it.
+                render_failure = describe_exit(code, self._backend_reason or self._backend_last_error)
                 self.setStatus("Failed")
             if not ok:
                 # Whatever the exit code, the row's hover line and the popup both read this: the
                 # mark_finished(ok=False) path IS the error surface (src/ui/render_jobs.py state_text
                 # appends state.error to the row's line).
                 log(f"render failed: {render_failure}")
+                failures = getattr(self, "_render_failures", None)
+                if failures is not None:
+                    failures.append(render_failure)
             summary = self._log_filter.hidden_summary()
             if summary is not None:
                 textOutput.append(summary.text)
@@ -2007,7 +2067,12 @@ class ProcessTab:
             log("All render processes completed successfully")
         else:
             log("Some render processes failed: Error code: " + str(self.return_codes))
-            RegularQTPopup("Rendering failed! Please check the logs tab!")
+            # WHAT, not "check the logs": the sentence names the exit code's meaning (a signal death says which signal
+            # and the usual cause) and carries the backend's own last error line. Measured on the owner's own failure
+            # (2026-11-27): `-15` was the system's memory killer, and nothing on screen said so.
+            RegularQTPopup("Rendering failed: " + describe_failure(
+                self.return_codes, getattr(self, "_render_failures", ()),
+                getattr(self, "_backend_reason", "") or getattr(self, "_backend_last_error", "")))
         # The row goes back to its idle state: start usable, the cancel pair visible but disabled.
         self._set_render_controls("idle")
         self.page_handles.general.outputFileText.setEnabled(True)
