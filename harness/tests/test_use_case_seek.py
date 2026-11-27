@@ -482,6 +482,53 @@ def test_the_decoder_route_answers_an_acceptance_and_watches_the_asked_time():
     assert session.watches == pytest.approx([5.0]), "the landing watch asks the time the decoder was given"
 
 
+def test_a_press_asks_the_compare_source_half_at_press_time_not_three_seconds_later():
+    """Owner, 2026-11-27: after a render, a seek on the strip dropped the pair for ~3.5 s.
+
+    The finished-file decoder takes 2.9-3.1 s for that press (a GOP of 2880x2160 10-bit HEVC), and the compare's source
+    half was only asked for the new moment AFTER the result landed - so the pane held the old pair, the valve expired,
+    the result painted alone and the left half stayed empty. The source needs ~0.5 s for the same target: asking it at
+    press time puts its picture in the register before the result arrives, and the pair commits in one paint.
+    """
+    session = _Session()
+    decoder = SimpleNamespace(fps=24.0, duration=10.0, seeks=[], seek=lambda seconds: decoder.seeks.append(float(seconds)))
+    fills: list[float] = []
+    tab = _owner(
+        _preview_decoder=decoder,
+        _preview_duration=10.0,
+        _press_session=lambda: session,
+        _next_result_generation=lambda: 1,
+        _clip_duration=lambda owner=None: 10.0,
+        _source_fill=lambda seconds: fills.append(float(seconds)),
+    )
+    tab.page_handles = SimpleNamespace(proc=SimpleNamespace(previewLabel=SimpleNamespace(view_mode=lambda: "sbs")))
+
+    assert seek.on_preview_seek(tab, 0.5) is True
+
+    assert fills == pytest.approx([5.0]), "the source half is asked for the SAME target, at press time"
+    assert decoder.seeks == pytest.approx([5.0]), "and the result decoder still gets its own seek"
+
+
+def test_no_press_asks_the_source_half_when_the_pane_is_not_comparing():
+    """`single` has no second half: asking would decode a picture nobody shows."""
+    session = _Session()
+    decoder = SimpleNamespace(fps=24.0, duration=10.0, seeks=[], seek=lambda seconds: decoder.seeks.append(float(seconds)))
+    fills: list[float] = []
+    tab = _owner(
+        _preview_decoder=decoder,
+        _preview_duration=10.0,
+        _press_session=lambda: session,
+        _next_result_generation=lambda: 1,
+        _clip_duration=lambda owner=None: 10.0,
+        _source_fill=lambda seconds: fills.append(float(seconds)),
+    )
+    tab.page_handles = SimpleNamespace(proc=SimpleNamespace(previewLabel=SimpleNamespace(view_mode=lambda: "single")))
+
+    assert seek.on_preview_seek(tab, 0.5) is True
+
+    assert fills == [], "a single-surface pane does not decode a compare half"
+
+
 def test_the_host_adapter_answers_what_the_route_decided_and_false_without_a_handler():
     """`_HostBackend.seek_to` used to answer True whenever a handler EXISTED (audit §6.4) - now it answers the route."""
 

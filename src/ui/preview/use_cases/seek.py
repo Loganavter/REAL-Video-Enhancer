@@ -29,6 +29,36 @@ from ..state import PreviewBackendKind
 __all__ = ["on_preview_seek", "request_display_seek"]
 
 
+def ping_source_half(tab, seconds: float) -> None:
+    """Tell the compare's SOURCE decoder the target NOW, in parallel with the result's own seek.
+
+    Measured on the owner's finished file (2026-11-27): a press at 61.7% seeks the finished-file decoder, which lands
+    2943-3112 ms later (a GOP of 2880x2160 10-bit HEVC), and the compare's source half was only asked for the new moment
+    AFTER that - so the pane held the previous pair, the pair valve expired, the result painted alone and the left half
+    stayed empty for ~3.5 s. The source decoder needs ~0.5 s for the same target, so asking it at press time puts its
+    picture in the register BEFORE the result lands and the pair commits in one paint.
+
+    A press does not change WHICH moment is wanted - only when it is asked for - so this is the same ask the fill would
+    make, moved earlier. Skipped outside a compare mode: `single` has no second half to fill.
+    """
+    pane = getattr(getattr(getattr(tab, "page_handles", None), "proc", None), "previewLabel", None)
+    mode_of = getattr(pane, "view_mode", None)
+    if not callable(mode_of):
+        return
+    try:
+        if mode_of() == "single":
+            return
+    except Exception:
+        return
+    fill = getattr(tab, "_source_fill", None)
+    if not callable(fill):
+        return
+    try:
+        fill(float(seconds))
+    except Exception as exc:      # a fill that cannot run must not eat the press
+        _log(f"seek: the source half was not asked for {float(seconds):.3f}s ({exc})")
+
+
 def _log(message: str) -> None:
     """Write one line through the app's log, imported lazily so this module imports without the app's deps."""
     from ....Util import log
@@ -165,6 +195,7 @@ def on_preview_seek(tab, fraction: float) -> bool:
         # The tail maps a strip share onto ITS timeline (the clip length, or the flushed edge when it is unknown),
         # so the asked time it must be judged against is this one, not the ticket's whole-clip target.
         bump_generation()
+        ping_source_half(tab, target)
         tab._press_session().watch(target)
         live.seek(target)
         ticket.decide(route="tail", answerable=True)
@@ -177,6 +208,7 @@ def on_preview_seek(tab, fraction: float) -> bool:
         # The same landing instrument as the tail's: the session watches the time the decoder was asked for, and
         # the frame it publishes closes the press - not the page's timeout.
         bump_generation()
+        ping_source_half(tab, fraction * duration)
         tab._press_session().watch(fraction * duration)
         decoder.seek(fraction * duration)
         _log(f"seek: decoder asked for {fraction * duration:.3f}s")
