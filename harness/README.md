@@ -16,13 +16,13 @@ harness/
     source.py     the clip manifest check (a `contaminated` clip taints every record that names it)
     verdicts.py   the verdict registry loader
     scripts/      187 instruments: probes, sweeps, benches and the record emitters
-    tests/        the suite: 147 files, 439 tests under the app's interpreter, 1741 under the system one
+    tests/        the suite: 148 files, 439 tests under the app's interpreter, 1783 under the system one
 ```
 
 ## The tests are ours too
 
 At the same base commit `backend/tests/` held one file - `unit_tests/test_frame.py`, the only test in the
-repository - and no workflow ran pytest. The 146 files that exist today were written between 2026-11-15 and
+repository - and no workflow ran pytest. The 147 files that exist today were written between 2026-11-15 and
 2026-11-20 for the same measurements the harness records, so they live here and `backend/tests/unit_tests/` keeps
 the upstream one. `harness/tests/conftest.py` puts the repository root and `backend/` on `sys.path`, which used to
 be every caller's private `PYTHONPATH`.
@@ -31,7 +31,7 @@ Two interpreters, because the environment splits the dependencies: the app's pyt
 system one has PyYAML and no torch. Both runs are green on what they can collect:
 
 ```bash
-pytest harness/tests -q                       # system: 1741 passed, 51 skipped, 1 xfailed (torch files)
+pytest harness/tests -q                       # system: 1783 passed, 51 skipped, 1 xfailed (torch files)
 <app>/python/python/bin/python3 -m pytest harness/tests -q   # 439 passed, 1 skipped (the YAML db test)
 ```
 
