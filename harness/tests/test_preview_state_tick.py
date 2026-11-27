@@ -79,7 +79,7 @@ def _tab() -> ProcessTab:
     tab.status = ""
     tab._render_started_mono = None
     tab.currentRenderOptions = None
-    for name in ("_ensure_live_tail", "_apply_seek_ceiling", "_sync_preview_transport",
+    for name in ("_ensure_live_tail", "_sync_preview_transport",
                  "_refresh_held_progress", "_tick_display", "_tick_second_surface",
                  "syncRenderConsole", "refreshQueueRows"):
         setattr(tab, name, lambda *args, **kwargs: None)

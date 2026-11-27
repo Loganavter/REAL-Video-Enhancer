@@ -1259,9 +1259,8 @@ class ProcessTab:
         # and a strip press during an export reached nothing (the seek then had two routes, neither connected).
         self._wire_preview_strip()
         # An export's feed renders any frame on demand, so the strip may seek the whole timeline instead of only the
-        # produced band (measured live, 2026-11-24: a 30 % drag during a 7.5 %-produced export did nothing). This also
-        # clears the ceiling when the allocation failed or the job is a preview (whose tail owns the edge).
-        self._apply_seek_ceiling()
+        # produced band (measured live, 2026-11-24: a 30 % drag during a 7.5 %-produced export did nothing). Nothing is
+        # pushed to the pane: the reach is derived from the owner on the next state push (`_preview_seek_ceiling`).
         log(f"display: block {DISPLAY_STATE_SHARED_MEMORY_ID} at {box[0]}x{box[1]}, "
             f"seek {SEEK_STATE_SHARED_MEMORY_ID}, status {STATUS_STATE_SHARED_MEMORY_ID}")
 
@@ -1302,39 +1301,8 @@ class ProcessTab:
             except Exception:
                 pass
         # Whoever owns the pane next (a tail, a finished file) decides its own reach: the feed's ceiling must not
-        # outlive the feed, or a live tail would accept seeks into frames nobody has written.
-        self._apply_seek_ceiling()
-
-    def _apply_seek_ceiling(self) -> None:
-        """Push the reach to a pane that still has a seek port (`set_seek_ceiling`), from what can serve a frame there.
-
-        STATUS (2026-11-27, plan P3): the SHIPPED `VideoPreviewSurface` no longer has that port - its painted strip and
-        the fraction-valued ceiling went with it - so for the window this is a no-op. It is kept because it is the seam
-        the ceiling tests drive and because a second host shape exists (audit §6.11, the raster `ImageLabel` fallback);
-        deleting it means retargeting those tests to `_preview_seek_ceiling` (which answers SECONDS, not a fraction) -
-        board row `rve-ceiling-port-retarget-2026-11-27`.
-
-
-        A usable block renders ANY timeline frame on demand (`RenderVideo._seek_preview`): an export's feed paints
-        continuously from it, and a PREVIEW's same block answers a press past the produced band with that one frame
-        (the tail only holds what the renderer has written). So the ceiling is 1.0 whenever the block is usable;
-        without one the pane keeps its produced-edge rule, which is the honest limit for a tail.
-        """
-        handles = getattr(self, "page_handles", None)
-        pane = getattr(getattr(handles, "proc", None), "previewLabel", None)
-        setter = getattr(pane, "set_seek_ceiling", None)
-        if setter is None:
-            return
-        owner = owner_of(self)
-        if owner.kind is PreviewBackendKind.QUEUE_FILE:
-            # The queue item is a finished file: every frame of it can be decoded, so the strip may address all of it.
-            reach = 1.0 if float(getattr(self, "_queue_pane_duration", 0.0) or 0.0) > 0.0 else None
-        else:
-            reach = 1.0 if owner.may_seek_any else None
-        try:
-            setter(reach)
-        except Exception:
-            pass
+        # outlive the feed, or a live tail would accept seeks into frames nobody has written. That reach is derived
+        # from the owner on the next state push (`_preview_seek_ceiling`), not pushed to the pane.
 
     def _display_pane_shown(self) -> bool:
         """Whether the pane is on screen - the one WIDGET read that is not the owner's.
@@ -2422,6 +2390,10 @@ class ProcessTab:
         reach the whole clip; a growing file's tail only has what the renderer has written, so it reaches the produced
         edge. `owner.may_seek_any` already carries the queue's own rule (a finished item is fully reachable and the
         feed stages nothing there), so no second read of the ownership flag is needed here.
+
+        This is the ONE ceiling authority. The pane has no seek port (its painted strip and the fraction-valued
+        `set_seek_ceiling` were deleted with it, audit 2026-11-27 §6.6), so nothing pushes a reach into a widget: the
+        value is published through `PreviewState.seek_ceiling` on every state push and the transport clamps with it.
         """
         from .preview.facts import reach_seconds
 
@@ -2763,7 +2735,6 @@ class ProcessTab:
             self._show_queue_item(path)
         else:
             self._take_the_empty_field()
-        self._apply_seek_ceiling()
         self._sync_preview_transport()
 
     def _queue_selection(self) -> str | None:
@@ -2827,7 +2798,6 @@ class ProcessTab:
         self._queue_pane_owns = False
         self._stop_queue_decoder()
         self._repaint_render_owner()
-        self._apply_seek_ceiling()
         self._sync_preview_transport()
 
     def _on_queue_row_changed(self, row: int) -> None:
@@ -2914,7 +2884,6 @@ class ProcessTab:
             decoder.seek(position)
         except Exception as exc:
             log(f"queue pane: seek to {position:.3f}s failed ({exc})")
-        self._apply_seek_ceiling()
 
     def _new_queue_decoder(self):
         """Build the queue decoder at the pane's box; `None` when this build has no `max_size` (an older decoder)."""
@@ -3780,9 +3749,6 @@ class ProcessTab:
         # The pane's one press session gets the tick's time: a press whose frame never arrives is abandoned at its
         # deadline (plan P4), and the marker falls back to the picture instead of standing on the request forever.
         self._tick_press_deadline()
-        # The block is allocated once per pass, before the job's own `isPreview` is known (the worker sets it), so the
-        # pane's seek reach is re-asserted here, on the GUI thread, once the owner is unambiguous.
-        self._apply_seek_ceiling()
         # Keep the transport honest for whichever painter owns the pane this tick (the tail or the file decoder): an
         # enabled button that holds nothing, or a disabled one that holds the picture, is worse than no button.
         self._sync_preview_transport()

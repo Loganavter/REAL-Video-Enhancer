@@ -252,7 +252,7 @@ def test_the_tick_feeds_the_run_card_and_idle_returns_it_to_the_placeholder(lang
     tab = object.__new__(ProcessTab)
     tab.parent = types.SimpleNamespace(shell=types.SimpleNamespace(
         procPage_page=types.SimpleNamespace(generalSettings_page=page)))
-    for name in ("_ensure_live_tail", "_tick_press_deadline", "_apply_seek_ceiling",
+    for name in ("_ensure_live_tail", "_tick_press_deadline",
                  "_sync_preview_transport", "_refresh_held_progress", "_push_preview_state",
                  "_ensure_picture_timer"):
         setattr(tab, name, lambda: None)

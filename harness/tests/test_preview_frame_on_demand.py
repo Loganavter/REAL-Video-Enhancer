@@ -75,6 +75,7 @@ sys.path[:] = _ORIGINAL_SYS_PATH
 
 #: 120 frames at 24 fps: a 5 s clip, so 30 % of the strip is 1.5 s and 12 % produced is 0.6 s.
 CLIP = SimpleNamespace(videoFrameCount=120, videoFps=24)
+CLIP_SECONDS = CLIP.videoFrameCount / CLIP.videoFps
 PRODUCED_FRAMES = 12.0
 TOTAL_FRAMES = 100.0
 PANE_SIZE = (800, 600)
@@ -114,18 +115,18 @@ class _Signal:
 
 
 class _FakePane:
-    """The pane API the page touches, recording what reached the screen and the ceiling it was given."""
+    """The pane API the page touches, recording what reached the screen.
+
+    No `set_seek_ceiling`: the pane's port is deleted (audit 2026-11-27 §6.6) and the page's reach is read from
+    `_preview_seek_ceiling`, never pushed into a widget (board row `rve-ceiling-port-retarget-2026-11-27`).
+    """
 
     def __init__(self, visible: bool = True) -> None:
         self.originalRequested = _Signal()
-        self.ceilings: list[float | None] = []
         self.frames: list = []
         self.progress: list[dict] = []
         self._progress = None
         self.visible = bool(visible)
-
-    def set_seek_ceiling(self, fraction) -> None:
-        self.ceilings.append(fraction)
 
     def isVisible(self) -> bool:  # noqa: N802 - Qt spelling
         return self.visible
@@ -259,8 +260,9 @@ def test_a_preview_press_past_the_produced_band_asks_for_exactly_one_frame():
     tab._live_tail = tail
     tab._wire_preview_strip()
 
-    tab._apply_seek_ceiling()
-    assert pane.ceilings[-1] == pytest.approx(1.0), (
+    from src.ui.preview.owner import owner_of
+
+    assert tab._preview_seek_ceiling(owner_of(tab), CLIP_SECONDS) == pytest.approx(CLIP_SECONDS), (
         "a preview whose block is usable may seek the whole timeline: the renderer can render that frame")
 
     tab._on_preview_seek(0.30)
@@ -294,9 +296,10 @@ def test_a_real_press_on_a_preview_strip_writes_one_request_into_the_real_block(
         tab = _tab(pane=surface, preview=True, paused=True, reader=reader)
         tab._live_tail = tail
         tab._wire_preview_strip()
-        tab._apply_seek_ceiling()
-        assert owner_of(tab).may_seek_any is True, (
+        assert tab._preview_seek_ceiling(owner_of(tab), CLIP_SECONDS) == pytest.approx(CLIP_SECONDS), (
             "the pane's reach is the BAR's fact now (`PreviewState.seek_ceiling`); this route reads the owner")
+        assert owner_of(tab).may_seek_any is True, (
+            "the same owner fact feeds the published reach: a usable block can render any frame")
 
         tab._on_preview_seek(0.30)
 
@@ -446,7 +449,6 @@ def test_a_preview_without_a_usable_block_still_refuses(qapp, monkeypatch):
     tab = _tab(pane=surface, preview=True, paused=True, reader=None)
     tab._live_tail = None
     tab._wire_preview_strip()
-    tab._apply_seek_ceiling()
 
     tab._on_preview_seek(0.30)
 
