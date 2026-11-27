@@ -1319,19 +1319,31 @@ class VideoPreviewSurface(QRhiWidget):
         height = float(self.height())
         return QRectF(0.0, 0.0, half, height), QRectF(half, 0.0, half, height)
 
+    def _pair_on_screen(self) -> bool:
+        """Whether both halves of a moment are in hand - the compare layout's precondition.
+
+        Read from the PANE's own pictures, not from the writer: `set_source` refuses a snapshot further than half a
+        frame from the result on screen, so a source in hand IS that result's partner. While it is missing, `sbs` keeps
+        drawing the one picture it has, at FULL size - a two-half layout with an empty half is a hole the owner reads as
+        a defect ("с дырой на месте где должен был быть оригинал", 2026-11-27), and the picture that is there is a whole
+        picture, not half of a pair (measured in the owner's own log: `draw mode=sbs half=held ... rect=950,289,950,713`
+        - the result alone in its half, the other half empty).
+        """
+        return self._has_picture() and self._original is not None and not self._original.isNull()
+
     def _view_rect(self) -> QRectF:
-        """The widget rect the RESULT is laid out in: the whole pane, or the right half in `sbs`.
+        """The widget rect the RESULT is laid out in: the whole pane, or the right half in `sbs` WITH a pair.
 
         One rect to fit, clamp and anchor into means one zoom for the result - the wheel and the middle drag address
         it even when the pointer is over the original's half.
         """
-        if self._view_mode == "sbs":
+        if self._view_mode == "sbs" and self._pair_on_screen():
             return self._half_rects()[1]
         return QRectF(0.0, 0.0, float(self.width()), float(self.height()))
 
     def _original_view_rect(self) -> QRectF:
         """The widget rect the ORIGINAL is laid out in: the left half in `sbs`; the picture's rect otherwise."""
-        if self._view_mode == "sbs":
+        if self._view_mode == "sbs" and self._pair_on_screen():
             return self._half_rects()[0]
         return self._frame_rect()
 
@@ -1393,7 +1405,7 @@ class VideoPreviewSurface(QRhiWidget):
         the other one; in `sbs` it is also why an aspect-mismatched source cannot invade the result's half.
         """
         if self._view_mode == "sbs":
-            return self._original_view_rect()
+            return self._original_view_rect() if self._pair_on_screen() else QRectF()
         if self._view_mode == "split":
             picture = self._frame_rect()
             if picture.isEmpty():
@@ -1454,10 +1466,8 @@ class VideoPreviewSurface(QRhiWidget):
         # with the left half a wide frame and the right a close-up of the same scene, the owner's "пара не та"). The
         # held state shows ONE picture - the one that was on screen - until a pair commits.
         source = self._source_size()
-        if self._view_mode != "single":
-            rounded = self._pair.painted()
-            if rounded is None or rounded.source is None:
-                source = None
+        if self._view_mode != "single" and not self._pair_on_screen():
+            source = None
         return PreviewScene(
             target=target,
             rhi=self.rhi(),

@@ -360,10 +360,14 @@ def test_a_compare_opened_on_an_EMPTY_pane_still_asks_for_the_source_and_fits_it
     surface.set_original(source, media_time=0.0)
 
     box = surface._frame_rect()
-    half = surface._half_rects()[1]
     assert not box.isEmpty(), "the source defines the box while there is no result"
-    assert half.contains(box) or abs(box.width() - half.width()) < 1.5, (
-        f"the source is FITTED into its half, not drawn at native size: box {box}, half {half}")
+    # ONE picture fills the pane, and the compare layout starts when there are TWO. A half-empty compare pane is the
+    # hole the owner reported ("с дырой на месте где должен был быть оригинал", 2026-11-27), and the same rule covers
+    # this symmetric case: the source alone is a whole picture, not half of a pair.
+    assert abs(box.width() - surface.width()) < 1.5, (
+        f"the lone picture fills the pane, not a half: box {box}, pane {surface.width()}")
+    # (the two-half layout with BOTH pictures in hand is `test_sbs_puts_the_result_right_...`; here the point is that
+    # one picture is never laid out as half of a pair)
 
 
 def test_a_compare_with_no_result_paints_the_source_alone(surface):
