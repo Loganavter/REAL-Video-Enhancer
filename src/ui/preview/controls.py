@@ -21,7 +21,7 @@ blocked (a state write must never look like a click), updates the time readout a
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtGui import QKeySequence, QPainter, QPen, QRegion, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
@@ -110,6 +110,11 @@ class PreviewControls(QWidget):
         #: The visual capsules: one SurfacePanel per group, with the specs it holds (hidden together when it empties).
         self._group_panels: dict[str, SurfacePanel] = {}
         self._group_specs: dict[str, tuple[str, ...]] = {}
+        #: The region the bars were last shaped to. The mask and the bars' geometry are written ONLY when they change:
+        #: a state pass happens 10x/second (and once per seek during a drag), and reshaping the overlay under the
+        #: pointer on every pass is a window-system change in the middle of the gesture - the one thing a drag must
+        #: not see. `_place` is still the only writer; it just says nothing when the answer is the same one.
+        self._mask = QRegion()
 
         self.top_bar = self._make_bar()
         self.bottom_bar = self._make_bar()
@@ -287,15 +292,24 @@ class PreviewControls(QWidget):
         margin = scaled_px(BAR_MARGIN)
         span = max(0, width - 2 * margin)
         self._apply_overflow(span)
-        self.top_bar.setGeometry(margin, margin, span, scaled_px(TOP_HEIGHT))
+        top_rect = QRect(margin, margin, span, scaled_px(TOP_HEIGHT))
         bottom = max(scaled_px(BOTTOM_HEIGHT), height - margin - scaled_px(BOTTOM_HEIGHT))
-        self.bottom_bar.setGeometry(margin, bottom, span, scaled_px(BOTTOM_HEIGHT))
+        bottom_rect = QRect(margin, bottom, span, scaled_px(BOTTOM_HEIGHT))
+        # Only what actually changed is written (see `_mask`): the state pass runs ten times a second and once per
+        # seek, and an unchanged layout written again is a pure churn - the bars' geometry and the overlay's mask are
+        # window-system facts, not paint state.
+        if top_rect != self.top_bar.geometry():
+            self.top_bar.setGeometry(top_rect)
+        if bottom_rect != self.bottom_bar.geometry():
+            self.bottom_bar.setGeometry(bottom_rect)
         self.top_bar.raise_()
         self.bottom_bar.raise_()
         # Only the bars take the mouse; the rest of the overlay is a hole the pane's compare/pan sees through.
-        from PySide6.QtGui import QRegion
-
-        self.setMask(QRegion(self.top_bar.geometry()) | QRegion(self.bottom_bar.geometry()))
+        mask = QRegion(top_rect) | QRegion(bottom_rect)
+        if mask == self._mask:
+            return
+        self._mask = mask
+        self.setMask(mask)
 
     def _top_specs(self) -> list[ActionSpec]:
         return list(actions_for("top"))

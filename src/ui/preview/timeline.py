@@ -15,8 +15,13 @@ played FILL number survives in `scrub_report()` for diagnosis, it is simply not 
 
 The widget is a `sli_ui_toolkit` `Slider`, so the track/thumb geometry, the keyboard edit mode (`Enter`) and the
 theme repaint are the toolkit's; only the band painting is ours (`setTrackPainter`). A press or drag emits
-`seekRequested(seconds)`; a refusal is the controller's answer, never this widget's (it keeps the thumb where the
-state puts it).
+`seekRequested(seconds)`; a refusal is the controller's answer, never this widget's (it never re-emits on a release).
+
+The THUMB has three authorities, in this order: the pointer while a drag is in flight, the seek this control emitted
+next (until the picture comes to it, the ask is past what the pane says it can show, or it stands unanswered past
+`ASK_HOLD_WINDOW_S`), and the state's playhead last. The order is the fix for `rve-timeline-drag-glue-2026-11-27`: a
+state pass used to be able to write the picture's old moment over a released drag (the thumb parked under the press
+while the picture ran on), and a drag whose release never arrived owned the thumb for the rest of the session.
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ import math
 import time
 
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPainter, QPen
 
 from sli_ui_toolkit.theme import ThemeManager
 from sli_ui_toolkit.ui.widgets.atomic.slider import Slider
@@ -47,6 +52,15 @@ RECENT_SCRUB_ACTIONS = 16
 
 #: How long after asking a position a mismatch still counts as a refusal of THAT ask, seconds.
 SNAP_BACK_WINDOW_S = 3.0
+
+#: How long an emitted ask may stand on the thumb when the state never agrees with it, seconds. Same window as the
+#: snap-back report: an ask the pane will not show is NAMED there, it is not allowed to own the thumb for ever.
+ASK_HOLD_WINDOW_S = SNAP_BACK_WINDOW_S
+
+#: How many state passes a claimed drag survives with no mouse button down before it is treated as a lost release.
+#: Two ticks (~200 ms at the page's 10 Hz): a real drag always carries the button through them, so this cannot cut a
+#: gesture short, and a release that never arrived stops owning the thumb instead of pinning it for the session.
+DRAG_LOST_TICKS = 2
 
 #: The colours the scrubber paints, by role. Nothing here is a literal RGBA; a missing token falls back neutral.
 #: `played` is the theme's ACTIVE blue (the mockup's `#4f8df0 -> #74adff`); `produced` is the same blue at
@@ -108,6 +122,15 @@ class PreviewTimeline(Slider):
         self._scrubbing = False
         #: The last value the widget ASKED for: a press and a release at one point are one seek, not two.
         self._last_emitted: int | None = None
+        #: `(track value, monotonic stamp, direction)` of the seek this control emitted and the state has not agreed
+        #: with yet. THE OWNER OF THE THUMB after a release: the visible thumb stands on what the pane was asked for,
+        #: not on whatever the last state pass says the picture is. Without it a drag that asked backward was undone
+        #: by the next tick - the thumb went back to the picture's old moment and stayed there
+        #: (`rve-timeline-drag-glue`). `direction` is +1 when the ask is AHEAD of the picture (playback will carry
+        #: the picture onto it and past it) and -1 when it is BEHIND (the decoder has to come back to it).
+        self._pending_ask: tuple[int, float, int] | None = None
+        #: State passes since the last one that saw a mouse button down while a drag was claimed (`DRAG_LOST_TICKS`).
+        self._drag_ticks_without_button = 0
         #: (seconds, monotonic stamp) of the last ASK - what the host was asked to show.
         self._asked: tuple[float, float] | None = None
         #: The last value/fill this widget APPLIED from a state: what the user sees after this control's own state.
@@ -125,11 +148,21 @@ class PreviewTimeline(Slider):
         self.sliderPressed.connect(self._on_pressed)
         self.sliderReleased.connect(self._on_released)
         self.sliderMoved.connect(self._on_moved)
+        # The same fact from the other producer: a drag whose value moves without `sliderMoved` still asks (deduped).
+        self.valueChanged.connect(self._on_value_changed)
 
     # -- state -----------------------------------------------------------------------------------
 
     def set_state(self, state: PreviewState) -> None:
-        """Adopt the state's numbers; a drag in flight owns the thumb until it is released."""
+        """Adopt the state's numbers; the thumb follows ONE authority at a time.
+
+        The order is: the pointer (a drag in flight), then the last seek this control emitted (until the state agrees
+        with it, or it is past what the pane can show, or it has stood unanswered past `ASK_HOLD_WINDOW_S`), then the
+        state's playhead. It used to be only the last of those, with a `_scrubbing` exception - so the first pass after
+        the release wrote the page's playhead into the widget, and while a press was unanswered that playhead was the
+        REQUESTED time of the press (the page keeps the marker on the request), which is why the thumb parked under the
+        press while the picture ran on.
+        """
         before_value = int(self.value())
         before_fill = float(self._played_fraction)
         self._duration = max(0.0, float(state.duration))
@@ -139,13 +172,72 @@ class PreviewTimeline(Slider):
         self._state_finished = bool(state.finished())
         self._state_fill_source = str(getattr(state, "fill_source", "") or "")
         self.setEnabled(state.has_picture() and self._duration > 0.0)
+        self._reconcile_drag()
         if not self._scrubbing:
-            self._set_silent_value(round(self._playhead_fraction * TRACK_STEPS))
+            self._set_silent_value(self._thumb_value(state))
         self.update()
         self._note_apply(state, before_value=before_value, before_fill=before_fill)
 
     def produced_fraction(self) -> float:
         return self._produced_fraction
+
+    # -- who owns the thumb ------------------------------------------------------------------------
+
+    def _thumb_value(self, state: PreviewState) -> int:
+        """The track value the thumb stands on: the last ASK while it is outstanding, else the state's playhead.
+
+        "Outstanding" ends in the three ways a seek can stop being a question: the picture reached the asked moment
+        (within a tick's worth of frames, so the two are one number again and playback drives the thumb), the ask is
+        past what the pane says it can show (a refusal - the snap-back report names it), or it has been outstanding
+        for `ASK_HOLD_WINDOW_S` (nothing answered it either). A forward ask is also answered by the picture passing
+        it: that is a seek that landed and kept playing.
+        """
+        ask = self._pending_ask
+        if ask is None or self._duration <= 0.0:
+            return round(self._playhead_fraction * TRACK_STEPS)
+        value, stamp, direction = ask
+        asked_s = float(value) / float(TRACK_STEPS) * self._duration
+        shown_s = float(self._playhead_fraction) * self._duration
+        # Three frames, not the session's two: the state arrives at 10 Hz, so a seek that landed perfectly can be a
+        # tick old by the time the bar sees it (2.4 frames at 24 fps), and "the picture is at the ask" must not hinge
+        # on which half of a tick it landed in.
+        tolerance = max(0.05, 3.0 * state.frame_interval())
+        if abs(shown_s - asked_s) <= tolerance:
+            self._pending_ask = None            # landed: the state and the thumb are the same number from here on
+            return round(self._playhead_fraction * TRACK_STEPS)
+        if direction > 0 and shown_s > asked_s:
+            # A forward ask the picture has already passed: playback answered it. (A backward ask is NOT closed by
+            # the picture being ahead - that is the ordinary state before a backward seek lands.)
+            self._pending_ask = None            # landed: the state and the thumb are the same number from here on
+            return round(self._playhead_fraction * TRACK_STEPS)
+        if asked_s > state.seekable_ceiling() + tolerance:
+            self._pending_ask = None            # the pane cannot show it: the state wins, and `snapback` says so
+            return round(self._playhead_fraction * TRACK_STEPS)
+        if (time.monotonic() - float(stamp)) > ASK_HOLD_WINDOW_S:
+            self._pending_ask = None            # nobody answered: bounded, so a dead ask cannot own the thumb
+            return round(self._playhead_fraction * TRACK_STEPS)
+        return int(value)
+
+    def _reconcile_drag(self) -> None:
+        """End a claimed drag whose release never arrived, and log it instead of silently owning the thumb.
+
+        `_scrubbing` is set by one signal and cleared by another; a release lost between them (the pointer left the
+        window, a grab was cancelled, an event went missing) left it true, and from then on no state could move the
+        thumb - the permanent pin the owner saw. The pointer itself is the fact that cannot go missing: while a real
+        drag is in flight Qt reports the left button down on every pass. `DRAG_LOST_TICKS` passes of "no button" is a
+        drag nobody is holding, so it ends - and the last ask keeps the thumb where the finger left it.
+        """
+        if not self._scrubbing:
+            self._drag_ticks_without_button = 0
+            return
+        buttons = QGuiApplication.mouseButtons()
+        held = bool(buttons & Qt.MouseButton.LeftButton)
+        self._drag_ticks_without_button = 0 if held else self._drag_ticks_without_button + 1
+        if self._drag_ticks_without_button < DRAG_LOST_TICKS:
+            return
+        self._drag_ticks_without_button = 0
+        self._scrubbing = False
+        self._note("release-lost", value=int(self.value()))
 
     def playhead_fraction(self) -> float:
         return self._playhead_fraction
@@ -171,7 +263,13 @@ class PreviewTimeline(Slider):
             "fill": {"fraction": float(self._played_fraction), "seconds": self._played_fraction * self._duration},
             "produced": {"fraction": float(self._produced_fraction), "seconds": self._produced_fraction * self._duration},
             "scrubbing": bool(self._scrubbing),
-            "asked": None if asked_s is None else {"seconds": asked_s, "age_ms": round(asked_age_ms or 0.0, 1)},
+            # `holding` is the thumb's authority, spelled out: True means the widget is standing the thumb on the
+            # ask because the state has not agreed with it yet (a released drag, or a seek in flight) - the live proof
+            # reads this instead of inferring "pinned" from a screenshot.
+            "asked": None if asked_s is None else {
+                "seconds": asked_s, "age_ms": round(asked_age_ms or 0.0, 1),
+                "holding": bool(self._pending_ask is not None),
+            },
             "finished": bool(self._state_finished),
             "paint": self._paint_summary(),
             "recent": [{key: value for key, value in entry.items() if key != "_t"} for entry in self._recent],
@@ -191,7 +289,10 @@ class PreviewTimeline(Slider):
         # for a picture that is visibly apart from the thumb under the pointer.
         painted_thumb = max(0.0, min(1.0, float(self.value()) / float(TRACK_STEPS)))
         tolerance = 1.0 / float(TRACK_STEPS)
-        glued = abs(played - painted_thumb) <= tolerance
+        # ... and `glued` is a claim about ONE number being on screen: while a drag is in flight the pointer is moving
+        # the thumb, so equal numbers are a coincidence, not a glue. It resumes when the drag ends and the picture has
+        # come to the asked moment.
+        glued = (not self._scrubbing) and abs(played - painted_thumb) <= tolerance
         if glued:
             why = None
         elif self._scrubbing:
@@ -267,10 +368,22 @@ class PreviewTimeline(Slider):
 
     def _on_pressed(self) -> None:
         self._scrubbing = True
+        self._drag_ticks_without_button = 0
         # The press ALWAYS asks: a refused press must be re-askable at the same point.
         self._emit_value(force=True)
 
     def _on_moved(self, value: int) -> None:
+        if self._scrubbing:
+            self._emit_value(value)
+
+    def _on_value_changed(self, value: int) -> None:
+        """The second producer of "the pointer moved" - the toolkit's `setValue` during a drag.
+
+        `sliderMoved` is how a drag *should* announce itself, but the base class emits it only while the toolkit's own
+        pressed flag is up; a drag whose move reaches the value and not that flag moved the thumb and asked the host
+        for nothing (in the live run the reported `value` never left the press). `_emit_value` dedupes on
+        `_last_emitted`, so whichever of the two signals arrives first IS the ask and the second is a no-op.
+        """
         if self._scrubbing:
             self._emit_value(value)
 
@@ -279,6 +392,7 @@ class PreviewTimeline(Slider):
         # back). A click that never moved asked once, at the press: asking again here sent the same seek twice and the
         # host answered it twice (two decodes, and the second one re-armed the seek marker).
         self._scrubbing = False
+        self._drag_ticks_without_button = 0
         self._emit_value()
 
     def _emit_value(self, value: int | None = None, *, force: bool = False) -> None:
@@ -289,7 +403,14 @@ class PreviewTimeline(Slider):
             return
         self._last_emitted = int(raw)
         seconds = max(0.0, min(1.0, raw / float(TRACK_STEPS))) * self._duration
-        self._asked = (float(seconds), time.monotonic())
+        asked_at = time.monotonic()
+        self._asked = (float(seconds), asked_at)
+        # The thumb stands on this value until the state AGREES with it (`_thumb_value`): after a release the ask - not
+        # the picture's last position - is what the user is looking at. The direction says which answer closes it: an
+        # ask AHEAD of the picture is answered by the picture reaching or passing it (a forward seek while playing),
+        # an ask BEHIND it only by the picture coming back (the decoder has to seek backwards).
+        ahead = 1 if float(raw) / float(TRACK_STEPS) > float(self._played_fraction) else -1
+        self._pending_ask = (int(raw), asked_at, ahead)
         # The press is the ONE moment the split is certain: the thumb goes to the asked position while the picture is
         # still where it was. Without the fill in this line the log showed a clean "apply" afterwards and nothing about
         # the 1.9 s in between (owner's log, 2026-11-26: press 15.3 %, landed after 1856 ms, no line said the picture
