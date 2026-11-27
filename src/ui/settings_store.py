@@ -19,6 +19,7 @@ the written bytes against a capture of the pre-move class.
 from __future__ import annotations
 
 import os
+import sys
 
 #: The interface languages the app ships: English and ONE translated language. The tuple lives here because this
 #: module is the settings owner and must stay importable without PySide6; `src.ui.i18n` re-exports it as its language
@@ -40,12 +41,31 @@ def validate_language(value: str | None) -> str:
     return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
 
 
+def log(message: str) -> None:
+    """Write one diagnostic line through the app's logger, resolved lazily.
+
+    This module is the store and is exercised without a window, so it imports the standard library only. The app's
+    logger (`src.Util.log`) opens and ROTATES `log.txt` at import time, so importing it here would make a test that
+    constructs a `Settings` truncate the developer's log; by the time a failed read happens in the app the module
+    is already loaded (`src.ui.SettingsTab` imports it first), and the lookup below finds the real writer. Without
+    it the line goes to stderr - visible either way, which is the point of a failure report.
+    """
+    util = sys.modules.get("src.Util") or sys.modules.get("Util")
+    writer = getattr(util, "log", None)
+    if writer is None:
+        print(message, file=sys.stderr)
+        return
+    writer(message)
+
+
 class Settings:
     def __init__(self, settings_file: str | None = None, default_output_folder: str | None = None):
-        """Read `settings.txt`, writing the defaults first when there is no file (or when it is incomplete).
+        """Read `settings.txt`, writing the defaults first when there is no file.
 
-        `settings_file` and `default_output_folder` are for tests: the app calls `Settings()` with neither, and both
-        then come from the same places as before (`currentDirectory()/settings.txt` and the platform's Videos folder).
+        A file that exists but cannot be read is not touched: the defaults stay in memory and `readError` names the
+        exception class (settings audit 2026-11-27, F9). `settings_file` and `default_output_folder` are for tests: the
+        app calls `Settings()` with neither, and both then come from the same places as before
+        (`currentDirectory()/settings.txt` and the platform's Videos folder).
         """
         if settings_file is None:
             from ..Util import currentDirectory
@@ -53,10 +73,8 @@ class Settings:
             settings_file = os.path.join(currentDirectory(), "settings.txt")
         self.settingsFile = settings_file
 
-        """
-        The default settings are set here, and are overwritten by the settings in the settings file if it exists and the legnth of the settings is the same as the default settings.
-        The key is equal to the name of the widget of the setting in the settings tab.
-        """
+        # The defaults are stated here and every key the file carries overwrites its own entry in `readSettings`; a
+        # key the file does NOT carry keeps the default. An unknown key is ignored rather than treated as damage.
         if default_output_folder is None:
             from ..Util import FileHandler
 
@@ -171,9 +189,16 @@ class Settings:
         #: Keys the file carries that this build does not know (a newer build's line, a hand edit). A diagnostic, never
         #: merged into `settings`: the old length check treated one of them as corruption and replaced every value.
         self.ignoredKeys: set[str] = set()
-        if not os.path.isfile(self.settingsFile):
+        #: The exception class name of the last read that could not produce values (a file that is not UTF-8, a
+        #: directory, a permission failure), or None when the last read succeeded. The app keeps its in-memory values
+        #: and does not rewrite the file - the same convention as `ignoredKeys`, a fact the caller can inspect instead
+        #: of an exception at launch (settings audit 2026-11-27, F9: the recovery handler caught `ValueError` around
+        #: `partition`, which cannot raise, while the failures that do happen took `Settings.__init__` down).
+        self.readError: str | None = None
+        if not os.path.exists(self.settingsFile):
             self.writeDefaultSettings()
-        self.readSettings()
+        else:
+            self.readSettings()
         # The file is ours to extend, not to police. A key this build does not know is ignored and the known ones keep
         # what the user chose; only a key MISSING from the file falls back to its default (settings audit 2026-11-27:
         # `len(defaults) != len(settings)` wiped five custom values because of one foreign line).
@@ -184,11 +209,19 @@ class Settings:
         """
         Reads the settings from the 'settings.txt' file and stores them in the 'settings' dictionary.
 
+        A file that cannot be READ keeps the values already in memory and is left exactly as it is. Two failures are
+        real, and the old handler caught neither: `open()` raises `OSError` (the path is a directory, or the process
+        may not read it) and iteration raises `UnicodeDecodeError` (the bytes are not UTF-8). The `except ValueError`
+        it had could only ever catch the decode error - and it answered that by calling `writeDefaultSettings()`,
+        i.e. by replacing the user's only copy of the file. Nothing is written on this path now; the path and the
+        exception class are logged and `readError` records the class for a caller that wants to ask.
+
         Returns:
             None
         """
-        with open(self.settingsFile, "r") as file:
-            try:
+        before = dict(self.settings)
+        try:
+            with open(self.settingsFile, "r") as file:
                 for line in file:
                     # `partition`, not `split(",")`: the encoder command is free text and legitimately contains commas
                     # (`-vf "scale=…,…"`), and a bare split raised ValueError and rewrote ALL defaults (owner, 2026-11-22:
@@ -207,11 +240,15 @@ class Settings:
                         self.ignoredKeys.add(key)
                         continue
                     self.settings[key] = value
-            except (
-                ValueError
-            ):  # writes and reads again if the settings file is corrupted
-                self.writeDefaultSettings()
-                self.readSettings()
+        except (OSError, UnicodeDecodeError) as error:
+            # A partially read file would leave a half-restored configuration; the values from before the read are
+            # the honest state (the defaults at construction, the session's dict mid-run).
+            self.settings = before
+            self.readError = type(error).__name__
+            log(f"settings: cannot read {self.settingsFile} ({type(error).__name__}: {error}); "
+                f"keeping the values already in memory and leaving the file untouched")
+            return
+        self.readError = None
 
     def writeSetting(self, setting: str, value: str):
         """

@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from typing import Callable
+
 from PySide6.QtWidgets import QMainWindow
 from ..constants import PLATFORM
 from ..Util import currentDirectory, open_folder, log
@@ -30,6 +33,74 @@ def qualityPresetValueToLabel(value: str) -> str:
         if mappedValue == value:
             return label
     return "Best quality"
+
+
+# --- the controls' side of a stored value (settings audit 2026-11-27, F4) --------------------------------
+#
+# A stored value is a string, and each control reports it through a different read: a translated combo keeps its
+# VALUE in item data (`currentData`), an encoder row shows the value as its text (`currentText`), a check box is
+# `isChecked`, a spin box is `value`. A comparator that picked one repr would compare two unrelated things, so each
+# row is paired with the read its OWN write handler uses below.
+
+def _text(control) -> str:
+    """The read of a combo/line edit whose visible text IS the value (precision, encoder, container...)."""
+    return control.currentText()
+
+
+def _field_text(control) -> str:
+    """The read of a line edit that holds a stored string (the user's command line)."""
+    return control.text()
+
+
+def _data(control) -> str:
+    """The read of a combo that carries the backend value in item data and a translated label as its text."""
+    data = control.currentData()
+    return "" if data is None else str(data)
+
+
+def _data_or_text(control) -> str:
+    """The read of a combo that may carry item data; text when it does not (the encoder row's own writer)."""
+    data = control.currentData()
+    return control.currentText() if data is None else str(data)
+
+
+def _quality_preset(control) -> str:
+    """The quality preset's writer: item data, or the label map for a combo that has none."""
+    data = control.currentData()
+    return str(data) if data else qualityPresetLabelToValue(control.currentText())
+
+
+def _checked(control) -> str:
+    return "True" if control.isChecked() else "False"
+
+
+def _coarse(control) -> str:
+    """The cel-reuse box is a choice inside the reuse switch: checked means the coarse statistic."""
+    return "coarse" if control.isChecked() else "mean_abs"
+
+
+def _number(control) -> str:
+    return str(control.value())
+
+
+@dataclass(frozen=True)
+class ControlFact:
+    """A stored key, the control that mirrors it, and the read that control's write handler uses."""
+
+    key: str
+    control: object
+    read: Callable[[object], str]
+
+
+def _same_value(stored: str, shown: str) -> bool:
+    """Equality with one numeric allowance: `5` and `5.0` are the same setting, `5` and `4` are not."""
+    if stored == shown:
+        return True
+    try:
+        return float(stored) == float(shown)
+    except ValueError:
+        return False
+
 
 # What the Best/Fast switch actually does since 2026-11-18: it selects the precision of the sixteen body
 # convolutions (fp16 engine against the int8 body). The wording is the measurement, not a promise - the
@@ -109,11 +180,10 @@ class SettingsTab:
         # Audio and subtitles are ALWAYS copied (owner, 2026-11-24: "аудио и сабы то нахуя настраивать? выкинуть
         # контролы - просто copy делать"), so they are no longer controls this glue mirrors. The settings keys stay in
         # `settings_store` for file compatibility; nothing reads them for the command any more.
-        self.ffmpeg_settings_dict = {
-            "encoder": self.page_handles.encoder.encoder,
-            "video_pixel_format": self.page_handles.encoder.video_pixel_format,
-            "video_quality": self.page_handles.encoder.video_quality,
-        }
+        #
+        # The three encoder rows used to be collected here so `updateFFMpegCommand` could write them from the widgets
+        # on every call; that write is gone (it silently replaced a stored value the combo could not display), and each
+        # row now has its own write handler in `connectWriteSettings` like every other row.
         # ONE settings object for the window and this tab. Two instances over one file was a lost-update hazard, and
         # the output path is the fact it would have eaten: the window writes the path the user typed, the tab writes
         # every other row, and whichever wrote last serialised its own stale copy of the path.
@@ -140,6 +210,10 @@ class SettingsTab:
         
 
         self.updateFFMpegCommand()
+        # The restore is over and the probe's rows are clamped: say out loud which controls could not show the value
+        # the file holds. This runs LAST on purpose - it reports the state the user actually sees, not an intermediate
+        # one (`precision` loses `float16` a few lines above; a GPU stepper is bounded by its count).
+        self.report_setting_mirror("startup")
 
     def _render_settings_page(self):
         """The Render Settings tab's owner object (`Tab3Page`), which owns the two GPU-id rows.
@@ -182,17 +256,21 @@ class SettingsTab:
         text = self.page_handles.encoder.EncoderCommand.text()
         self.encoder_command_user = bool(text.strip())
         self.settings.writeSetting("encoder_command", text if self.encoder_command_user else "")
+        # The pane's claim follows the ownership flag, not the next settings change: a typed command line is what
+        # runs from this keystroke on.
+        self.publishEncoderSource()
+        self.parent.updateVideoGUIText()
 
     def updateFFMpegCommand(self):
+        """Build the encoder command line from the settings dict - a READER, not a writer.
+
+        The three encoder rows used to be WRITTEN here (`ffmpeg_settings_dict`): every call - six signals plus the
+        launch - copied whatever the combos showed into `encoder`, `video_quality` and `video_pixel_format`. A stored
+        value one of those combos cannot display was therefore replaced by the combo's fallback before the user ever
+        saw it ("an encoder that changed by itself after an upgrade", settings audit 2026-11-27). Each of the three
+        now has its own `currentIndexChanged` handler in `connectWriteSettings`, like every other row, so the dict is
+        written by the control the user touched and read here.
         """
-        Updates the FFMpegCommand object with the current settings.
-        """
-        for key, value in self.ffmpeg_settings_dict.items():
-            # A control may carry the VALUE in item data and a translated label as its text (quality and encoder speed
-            # do): reading `currentText()` there would write "Очень высокое" into a field the builder matches on.
-            data = value.currentData() if hasattr(value, "currentData") else None
-            self.settings.writeSetting(key, data if data is not None else value.currentText())
-        
         self.out_pixel_fmt = self.settings.settings['video_pixel_format']
         pxfmtDict = {
                 "yuv420p": "yuv420p",
@@ -202,7 +280,10 @@ class SettingsTab:
                 "yuv422p (10 bit)": "yuv422p10le",
                 "yuv444p (10 bit)": "yuv444p10le",
             }
-        self.out_pixel_fmt = pxfmtDict[self.out_pixel_fmt]
+        # The dict maps the combo's ITEMS; a stored value the combo cannot show is now kept (the restore no longer
+        # overwrites it from the widget) and passed through instead of raising `KeyError` at launch. The row's
+        # disagreement is named by `setting_mirror_mismatches`, not repaired here.
+        self.out_pixel_fmt = pxfmtDict.get(self.out_pixel_fmt, self.out_pixel_fmt)
 
         input_file = self.page_handles.general.inputFileText.text()
         # Only ask the backend about a REAL file (or a URL): the field carries the batch sentinel `{ MULTIPLE_FILES }`
@@ -248,7 +329,27 @@ class SettingsTab:
         ).build_command()
         if not self.encoder_command_user:
             self.page_handles.encoder.EncoderCommand.setText(" ".join(command))
+        self.publishEncoderSource()
         self.parent.updateVideoGUIText()
+
+    def publishEncoderSource(self) -> None:
+        """Tell the General page's info pane WHICH encoder fact will run (settings audit 2026-11-27, F5).
+
+        The pane paints its Encoder cell from `settings['encoder']`, which is the truth only while the app generates
+        the command. Once the user has typed a command line the FIELD is what executes, and this glue is the one
+        place that knows it (`encoder_command_user`). One fact, one owner: the flag and the field decide, the pane
+        reports, and the pane names the setting it read (`encoder` or `encoder_command`).
+        """
+        text = self.page_handles.encoder.EncoderCommand.text() if self.encoder_command_user else ""
+        self._general_settings_page().set_encoder_command(text)
+
+    def _general_settings_page(self):
+        """The General tab's owner object, whose video-info pane carries the encoder claim (F5).
+
+        Reached through the shell like `_render_settings_page` reaches the Render tab: `page_handles` names controls,
+        not pages.
+        """
+        return self.parent.shell.procPage_page.generalSettings_page
          
 
     def connectWriteSettings(self):
@@ -378,8 +479,8 @@ class SettingsTab:
         )
         applyQualityPresetTooltip(self.page_handles.general.qualityPresetComboBox)
         hide_int8_preset_if_unsupported(self.parent, self.settings)
-        self.page_handles.general.frameReuse.setChecked(
-            self.settings.settings.get("temporal_reuse", "True") == "True")
+        # The two boxes' stored values are restored by `connectSettingText` (one restore, one owner); here they get
+        # their behaviour.
         self.page_handles.general.frameReuse.setToolTip(
             "Skip re-upscaling frames that barely changed and reuse the previous result, corrected for "
             "whatever did change - about 1.9x faster on held animation. The gate still refuses frames it "
@@ -388,8 +489,6 @@ class SettingsTab:
             lambda: self.settings.writeSetting(
                 "temporal_reuse", "True" if self.page_handles.general.frameReuse.isChecked() else "False"))
         self.page_handles.general.frameReuse.stateChanged.connect(self.onFrameReuseSwitch)
-        self.page_handles.general.celReuse.setChecked(
-            self.settings.settings.get("temporal_reuse_statistic", "mean_abs") == "coarse")
         self.page_handles.general.celReuse.setToolTip(
             "Decide reuse on the drawing instead of on the film: a 3 px low-pass with the scan's sub-pixel "
             "wobble compensated, and the reused frame is moved by that estimate. On a denoised animation this "
@@ -411,6 +510,14 @@ class SettingsTab:
         )
         self.page_handles.general.inputFileText.textChanged.connect(
             self.updateFFMpegCommand
+        )
+        # The encoder row's own write: it used to be written by `updateFFMpegCommand` from the widget on every call,
+        # including at launch, which is how a stored value the combo cannot show got replaced (§`updateFFMpegCommand`).
+        # Connected BEFORE the command builder below, so the builder reads the value the user just chose.
+        self.page_handles.encoder.encoder.currentIndexChanged.connect(
+            lambda: self.settings.writeSetting(
+                "encoder", _data_or_text(self.page_handles.encoder.encoder)
+            )
         )
         self.page_handles.encoder.encoder.currentIndexChanged.connect(
             self.updateFFMpegCommand
@@ -461,21 +568,124 @@ class SettingsTab:
         )
 
     def resetSettings(self):
-        for i in range(10): # idk why, but settings wont fully reset until like 5 button presses.
-            self.settings.writeDefaultSettings()
-            self.settings.readSettings()
-            self.connectSettingText()
-            self.parent.switchToSettingsPage()
+        """Reset once, in one defined order: the file, then the dict, then the controls.
+
+        This used to be a `for i in range(10)` loop whose own comment admitted why ("settings wont fully reset until
+        like 5 button presses"): a restore that cannot reach a row left that row's handler to write its stale value
+        back on the NEXT pass, so passes were added until the visible row happened to settle. Ten passes also meant ten
+        whole-file rewrites and ten rounds of every write handler (settings audit 2026-11-27, F6 - and the restore's
+        silence is F4).
+
+        One pass now suffices because `connectSettingText` restores with the controls' signals blocked: the file and
+        the dict are the defaults and the controls are pushed to them, without any control writing back. What could
+        not be reached is returned by the mirror report instead of being retried blindly.
+        """
+        self.settings.writeDefaultSettings()   # 1. the file holds the defaults (and so does the dict)
+        self.settings.readSettings()           # 2. the dict is what the file says
+        self.connectSettingText()              # 3. the controls are what the dict says (signals off)
         # The reset dropped the stored path; the field must drop it too, or the page keeps showing a choice the
         # settings file no longer has and the next option change would be refused by a path nobody chose.
         output_path.reset_path(self.page_handles.general, self.settings)
         self.refreshOutputDirectory()
+        # The command line is a stored setting too. It used to survive a reset in the FIELD only: the file held "",
+        # `encoder_command_user` stayed True and the field kept the old command, so the reset left a third answer.
+        self.encoder_command_user = False
+        self.updateFFMpegCommand()
+        self.parent.switchToSettingsPage()
+        return self.report_setting_mirror("reset")
+
+    def _control_facts(self) -> list[ControlFact]:
+        """Every row `connectSettingText` restores, paired with the read its own write handler uses.
+
+        `encoder_command` is conditional on purpose: while the app generates the command line the field is a
+        DERIVED value (the command the settings imply), not a copy of the stored key - it becomes the stored fact
+        only once the user owns it (`onEncoderCommandEdited`).
+        """
+        ph = self.page_handles
+        facts = [
+            ControlFact("precision", ph.render_settings.precision, _text),
+            ControlFact("tensorrt_optimization_level", ph.render_settings.tensorrt_optimization_level, _text),
+            ControlFact("encoder", ph.encoder.encoder, _data_or_text),
+            ControlFact("preview_enabled", ph.app_settings.preview_enabled, _checked),
+            ControlFact("discord_rich_presence", ph.app_settings.discord_rich_presence, _checked),
+            ControlFact("language", ph.app_settings.language, _data),
+            ControlFact("scene_change_detection_enabled", ph.output.scene_change_detection_enabled, _checked),
+            ControlFact("scene_change_detection_method", ph.output.scene_change_detection_method, _text),
+            ControlFact("scene_change_detection_threshold", ph.output.scene_change_detection_threshold, _number),
+            ControlFact("video_quality", ph.encoder.video_quality, _data),
+            ControlFact("uhd_mode", ph.render_settings.uhd_mode, _checked),
+            ControlFact("ncnn_gpu_id", ph.render_settings.ncnn_gpu_id, _number),
+            ControlFact("pytorch_gpu_id", ph.render_settings.pytorch_gpu_id, _number),
+            ControlFact("auto_border_cropping", ph.output.auto_border_cropping, _checked),
+            ControlFact("video_container", ph.encoder.video_container, _text),
+            ControlFact("video_pixel_format", ph.encoder.video_pixel_format, _text),
+            ControlFact("pytorch_version", ph.download.pytorch_version, _text),
+            ControlFact("pytorch_backend", ph.download.pytorch_backend, _text),
+            ControlFact("dynamic_tensorrt_engine", ph.render_settings.dynamic_tensorrt_engine, _checked),
+            ControlFact("auto_hdr_mode", ph.render_settings.auto_hdr_mode, _checked),
+            ControlFact("video_encoder_speed", ph.encoder.video_encoder_speed, _data),
+            ControlFact("quality_preset", ph.general.qualityPresetComboBox, _quality_preset),
+            ControlFact("temporal_reuse", ph.general.frameReuse, _checked),
+            ControlFact("temporal_reuse_statistic", ph.general.celReuse, _coarse),
+        ]
+        if self.encoder_command_user:
+            facts.append(ControlFact("encoder_command", ph.encoder.EncoderCommand, _field_text))
+        return facts
+
+    def setting_mirror_mismatches(self) -> list[tuple[str, str, str]]:
+        """Every restored row where the control does not report the stored value.
+
+        Each entry is `(key, value in `settings`, value the control reports)`. This is the assertion the settings
+        layer never had (settings audit 2026-11-27, F4): a combo without the stored item, a spin box with a lower
+        maximum, a check box whose state has no counterpart - each used to keep its own value in silence, so the
+        file, the dict a render obeys and the widget a user sees could disagree for a whole session.
+
+        A non-empty result is NOT repaired here: forcing the widget would show a value the control cannot express,
+        and rewriting the file from the widget would drop what the user chose. The caller decides; `resetSettings`
+        and `__init__` log it.
+        """
+        mismatches = []
+        for fact in self._control_facts():
+            stored = str(self.settings.settings.get(fact.key, ""))
+            shown = fact.read(fact.control)
+            if not _same_value(stored, shown):
+                mismatches.append((fact.key, stored, shown))
+        return mismatches
+
+    def report_setting_mirror(self, when: str) -> list[tuple[str, str, str]]:
+        """Log one named warning per disagreement and return the list (`setting_mirror_mismatches`)."""
+        mismatches = self.setting_mirror_mismatches()
+        for key, stored, shown in mismatches:
+            log(f"settings mirror mismatch after {when}: {key} is {stored!r} in settings.txt but its control "
+                f"reports {shown!r}; neither the file nor the control was changed")
+        return mismatches
 
     def connectSettingText(self):
+        """Push the stored values into the controls, once, with the controls' signals BLOCKED.
+
+        A restore is not a user edit: every `setCurrentText`/`setChecked` used to emit the row's write handler, which
+        wrote the widget's value straight back into the dict and the file - so a row the restore could not reach was
+        "corrected" back to the widget's stale value (that is why Reset needed ten passes). Blocking keeps the write
+        path for the user's own edits, makes one restore enough, and lets `setting_mirror_mismatches` see the result
+        instead of a self-corrected one.
+        """
         if PLATFORM == "darwin":
             index = self.page_handles.encoder.encoder.findText("av1")
             self.page_handles.encoder.encoder.removeItem(index)
 
+        blocked = [(fact.control, fact.control.signalsBlocked()) for fact in self._control_facts()]
+        for control, _was_blocked in blocked:
+            control.blockSignals(True)
+        try:
+            self._restore_settings_into_controls()
+        finally:
+            for control, was_blocked in blocked:
+                control.blockSignals(was_blocked)
+        self.onFrameReuseSwitch()
+        self.report_setting_mirror("restore")
+
+    def _restore_settings_into_controls(self) -> None:
+        """The restore's body: one statement per row, exactly the rows `_control_facts` compares."""
         self.page_handles.render_settings.precision.setCurrentText(self.settings.settings["precision"])
         self.page_handles.render_settings.tensorrt_optimization_level.setCurrentText(
             self.settings.settings["tensorrt_optimization_level"]
@@ -540,3 +750,9 @@ class SettingsTab:
             max(0, self.page_handles.general.qualityPresetComboBox.findData(
                 self.settings.settings["quality_preset"]))
         )
+        # The two reuse switches are settings rows too, restored here (they used to be set in `connectWriteSettings`,
+        # which a Reset does not re-run - so a reset left them showing the previous session's values).
+        self.page_handles.general.frameReuse.setChecked(
+            self.settings.settings.get("temporal_reuse", "True") == "True")
+        self.page_handles.general.celReuse.setChecked(
+            self.settings.settings.get("temporal_reuse_statistic", "mean_abs") == "coarse")
