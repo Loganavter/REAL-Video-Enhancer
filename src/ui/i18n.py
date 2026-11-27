@@ -268,6 +268,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # that collides with it would make the rewrite ambiguous on the way back to English.
         "Is HDR:": "Поддержка HDR:",
         "Bit Depth:": "Глубина цвета:",
+        # --- The pipeline ribbon (`src/ui/pages/general_settings.py::_render_pipeline`) ----------------------------
+        # The plan card above the headline: a stage's state word and parameter, and the footer's own labels. The stage
+        # NAMES are not repeated here - the ribbon paints "Interpolate"/"Denoise"/... through the keys the General tab's
+        # rows already state (`"Interpolate"`, `"Decompress"`, ..., `"Upscale"`), so a stage cannot read two ways.
+        "off": "выкл",
+        "on": "вкл",
+        "scale": "масштаб",
+        "by cel": "по целлу",
+        "Preset": "Пресет",
+        "Reuse": "Переиспользование",
+        "No video loaded. Nothing will run until a stage is on and an input file is chosen.": "Видео не загружено. Ничего не запустится, пока не включён хотя бы один этап и не выбран входной файл.",
     },
 }
 
