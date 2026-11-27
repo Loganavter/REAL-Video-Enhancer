@@ -24,7 +24,16 @@ This module imports neither Qt nor PyAV, on purpose: the queue policy is the hal
 like "the preview stutters", and it has to be testable on an interpreter that has neither installed
 (this repo's test interpreter has no ``av``). ``pack_frame``/``pack_planes`` need a *decoded* frame,
 but only through the duck-typed surface PyAV offers (``planes`` with ``line_size``, or ``to_ndarray``,
-plus ``time``, ``width``, ``height``), so a stub object exercises them in the tests.
+plus ``time``, ``width``, ``height``), so a stub object exercises them in the tests. numpy is
+imported lazily inside the >8-bit RGB conversion, which is the one place that needs it.
+
+The RGB24 request has TWO conversions and they are not the same arithmetic (2026-11-27): an 8-bit
+source keeps swscale (``to_ndarray(format="rgb24")``), a 10-bit source does not - swscale's 10-bit
+yuv2rgb without ``SWS_ACCURATE_RND`` truncates the depth reduction before the range expansion and
+lands white on 253 and mid-grey on 126 where H.273 says 255 and 127.5 (measured against zimg, and
+against ffmpeg's own scaler). PyAV exposes no ``sws_flags`` argument, so the >8-bit depth is
+converted here, in the same H.273 arithmetic the fragment shader uses - range affine separated from
+the matrix (``_RGB_MATRICES``/``_RANGE_CODES_10``).
 """
 
 from __future__ import annotations
@@ -43,6 +52,39 @@ SAMPLE_BYTES = {"yuv420p": 1, "yuv420p10le": 2}
 
 #: The planar formats, as a tuple, for callers that branch on "is this a planes frame".
 PLANAR_FORMATS = ("yuv420p", "yuv420p10le")
+
+#: The H.273 matrices, rows `(Y, Cb, Cr) -> R|G|B`, on luma already expanded to 0..1 and chroma
+#: centred on 0 - the range is an affine on the codes, the matrix itself is range-free (ITU-T H.273),
+#: which is exactly how the shader path splits it (`preview_renderer.yuv_uniform_floats`). These are
+#: the same numbers that module carries: it imports THIS module (a frame is what the renderer
+#: uploads), so the numbers cannot be imported the other way round, and the pin test
+#: `test_the_ten_bit_tables_are_the_ones_the_shader_uses` fails the moment the two diverge.
+_RGB_MATRICES = {
+    "bt709": ((1.0, 0.0, 1.5748), (1.0, -0.187324, -0.468124), (1.0, 1.8556, 0.0)),
+    "smpte170m": ((1.0, 0.0, 1.402), (1.0, -0.344136, -0.714136), (1.0, 1.772, 0.0)),
+    "bt470bg": ((1.0, 0.0, 1.402), (1.0, -0.344136, -0.714136), (1.0, 1.772, 0.0)),
+    "bt2020nc": ((1.0, 0.0, 1.4746), (1.0, -0.164553, -0.571353), (1.0, 1.8814, 0.0)),
+}
+
+#: The fallback when the producer could not read the tags: what this app's own writer emits.
+_DEFAULT_COLOR_SPACE = "bt709"
+_DEFAULT_COLOR_RANGE = "tv"
+
+#: `((luma offset, luma span), (chroma offset, chroma span))` at 10 bits, H.273 table 8. Limited
+#: ("tv") 10-bit is 64..940 luma and 64..960 chroma; full ("pc") is 0..1023 and 0..1023.
+_RANGE_CODES_10 = {
+    "tv": ((64.0, 876.0), (512.0, 896.0)),
+    "pc": ((0.0, 1023.0), (512.0, 1023.0)),
+}
+
+#: The planar >8-bit source formats the CPU conversion handles, with their chroma subsampling
+#: `(horizontal, vertical)`. A format that is not here keeps the scaler it used before: swscale is
+#: still the only path for the 8-bit formats, and this fix must not touch those.
+_TEN_BIT_LAYOUTS = {
+    "yuv420p10le": (2, 2),
+    "yuv422p10le": (2, 1),
+    "yuv444p10le": (1, 1),
+}
 
 
 @dataclass(frozen=True)
@@ -96,10 +138,12 @@ def pack_frame(frame, index: int, pixel_format: str = "rgb24",
                color_space: str | None = None, color_range: str | None = None) -> FrameRef:
     """A :class:`FrameRef` from one decoded PyAV-style frame, with no copy beyond the pack itself.
 
-    ``rgb24`` asks PyAV for a packed RGB picture; the planar formats ask for the three planes instead,
-    which is 1.5 bytes/pixel (8-bit) or 3 (10-bit) against RGB's 4 at the same size, at the price of
-    the colour conversion happening in the fragment shader. Scaling stays in swscale (``size``), the
-    matrix does not: a planar request never makes the scaler convert colour, only resample.
+    ``rgb24`` asks for a packed RGB picture - through the scaler for an 8-bit frame, through the H.273
+    arithmetic in :func:`rgb24_buffer` for a 10-bit one (the scaler's 10-bit yuv2rgb is ~2.5 levels
+    dark); the planar formats ask for the three planes instead, which is 1.5 bytes/pixel (8-bit) or 3
+    (10-bit) against RGB's 4 at the same size, at the price of the colour conversion happening in the
+    fragment shader. Scaling stays in swscale (``size``), the matrix does not: a planar request never
+    makes the scaler convert colour, only resample.
 
     ``pts`` overrides the frame's own timestamp; a caller uses it for a container that left the
     timestamp out (the caller knows the previous frame's time and the stream's interval).
@@ -137,9 +181,8 @@ def pack_frame(frame, index: int, pixel_format: str = "rgb24",
     width, height = int(frame.width), int(frame.height)
     pts = frame_pts(frame) if pts is None else float(pts)
     if pixel_format == "rgb24":
-        plane = frame.to_ndarray(format="rgb24")
         return FrameRef(
-            buffer=plane.tobytes(),
+            buffer=rgb24_buffer(frame, color_space=color_space, color_range=color_range),
             width=width,
             height=height,
             format="rgb24",
@@ -165,6 +208,144 @@ def pack_frame(frame, index: int, pixel_format: str = "rgb24",
         color_space=color_space,
         color_range=color_range,
     )
+
+
+def rgb24_buffer(frame, color_space: str | None = None,
+                 color_range: str | None = None) -> bytes:
+    """The RGB24 bytes of one decoded frame: H.273 arithmetic for >8-bit YUV, swscale below it.
+
+    The depth split is the whole point of this function. An 8-bit frame keeps the scaler
+    (`to_ndarray("rgb24")`), whose 16..235 codes are already right on this build's output; a 10-bit
+    frame does NOT, because swscale's fast yuv2rgb reduces the depth before the range expansion and
+    loses ~2.5 levels on the way (measured 2026-11-27 with libswscale, the library PyAV calls: tv
+    white 940 -> 253, mid-grey 502 -> 126, against H.273's 255 and 127.5). `SWS_ACCURATE_RND` fixes
+    that scaler, but PyAV exposes no `sws_flags`, so the >8-bit depth is converted here - the same
+    range-affine-then-matrix arithmetic the fragment shader uses, from the same tables.
+
+    A frame the conversion does not recognise (no format name, a packed 10-bit format, an odd plane
+    layout) falls back to the scaler rather than dropping the picture: a slightly dark preview is
+    better than a blank one, and the fallback is the behaviour every caller had before.
+    """
+    layout = _TEN_BIT_LAYOUTS.get(_frame_format_name(frame) or "")
+    if layout is not None:
+        try:
+            return _ten_bit_rgb24(frame, layout, color_space, color_range)
+        except Exception:
+            pass
+    return frame.to_ndarray(format="rgb24").tobytes()
+
+
+def _ten_bit_rgb24(frame, layout, color_space, color_range) -> bytes:
+    """Range-expand one 10-bit YUV picture and apply its matrix, in one pass per channel."""
+    numpy = _numpy()
+    hsub, vsub = layout
+    width, height = int(frame.width), int(frame.height)
+    chroma_w, chroma_h = (width + hsub - 1) // hsub, (height + vsub - 1) // vsub
+    y, cb, cr = _ten_bit_planes(frame, ((width, height), (chroma_w, chroma_h)))
+    (luma_offset, luma_span), (chroma_offset, chroma_span) = _RANGE_CODES_10[_range_name(color_range)]
+    luma = (y.astype(numpy.float32) - luma_offset) / luma_span
+    cb = _upsampled(numpy, (cb.astype(numpy.float32) - chroma_offset) / chroma_span, hsub, vsub)
+    cr = _upsampled(numpy, (cr.astype(numpy.float32) - chroma_offset) / chroma_span, hsub, vsub)
+    # The upsampler returns whole chroma samples, so an odd picture size is cropped back here.
+    cb, cr = cb[:height, :width], cr[:height, :width]
+    matrix = _RGB_MATRICES.get(str(color_space or _DEFAULT_COLOR_SPACE), _RGB_MATRICES[_DEFAULT_COLOR_SPACE])
+    channels = []
+    for row in matrix:
+        channel = row[0] * luma + row[1] * cb + row[2] * cr
+        numpy.clip(channel, 0.0, 1.0, out=channel)
+        channel *= 255.0
+        channel += 0.5                    # round half up, which is how H.273's 127.5 becomes 128
+        channels.append(channel.astype(numpy.uint8))
+    return numpy.stack(channels, axis=-1).tobytes()
+
+
+def _ten_bit_planes(frame, sizes):
+    """The three ``uint16`` planes of a planar 10-bit frame, from PyAV's own planes or `to_ndarray`.
+
+    PyAV's planes are used when they are there (no copy when the rows are packed, one repack when
+    swscale padded them), the stacked array path otherwise. Both give the code value as an integer in
+    the low 10 bits, which is the layout this app's writer emits and the one the shader divides by
+    1023 - the code must never be treated as a 16-bit sample.
+    """
+    numpy = _numpy()
+    (width, height), (chroma_w, chroma_h) = sizes
+    wanted = ((width, height), (chroma_w, chroma_h), (chroma_w, chroma_h))
+    planes = getattr(frame, "planes", None)
+    if planes is not None:
+        selected = list(planes)[:3]
+        if len(selected) == 3:
+            return tuple(_plane_codes(numpy, plane, plane_w, plane_h)
+                         for plane, (plane_w, plane_h) in zip(selected, wanted))
+    array = frame.to_ndarray(format=_frame_format_name(frame) or "yuv420p10le")
+    return (numpy.asarray(array[:height, :width]),
+            numpy.asarray(array[height:height + chroma_h, :chroma_w]),
+            numpy.asarray(array[height + chroma_h:height + 2 * chroma_h, :chroma_w]))
+
+
+def _plane_codes(numpy, plane, plane_w: int, plane_h: int):
+    """One PyAV plane as a ``(rows, cols)`` array of 10-bit codes, dropping swscale's row padding.
+
+    ``line_size`` is the ROW length in bytes; a plane that reports something the buffer cannot hold
+    is treated as tightly packed rather than trusted into a bad reshape.
+    """
+    row_bytes = int(plane_w) * 2
+    view = memoryview(plane)
+    stride = int(getattr(plane, "line_size", row_bytes) or row_bytes)
+    if stride == row_bytes or len(view) < stride * plane_h:
+        return numpy.frombuffer(view[:row_bytes * plane_h], dtype="<u2").reshape(plane_h, plane_w)
+    rows = numpy.frombuffer(view, dtype=numpy.uint8)[:stride * plane_h].reshape(plane_h, stride)
+    return numpy.ascontiguousarray(rows[:, :row_bytes]).view("<u2").reshape(plane_h, plane_w)
+
+
+def _upsampled(numpy, plane, hsub: int, vsub: int):
+    """A chroma plane at luma resolution: 2x triangle on each axis, edges replicated.
+
+    The weights are `3/4` current and `1/4` neighbour, which is the phase swscale's yuv2rgb uses
+    horizontally (checked against its own output on a one-sample chroma step); vertically the
+    symmetric triangle measured closer to zimg on real frames than the top-shifted phase did, so both
+    axes use it. Nearest replication is NOT good enough here: the pane's pixel gate measured it at
+    3.37 % of pixels more than 8 levels off on detailed frames against 1.43 % for a filtered tap
+    (2026-11-25), and the RGBA path is the one the compare's source half draws through.
+    """
+    if hsub == 2:
+        height, width = plane.shape
+        padded = numpy.empty((height, width + 2), numpy.float32)
+        padded[:, 1:-1] = plane
+        padded[:, 0], padded[:, -1] = plane[:, 0], plane[:, -1]
+        wide = numpy.empty((height, 2 * width), numpy.float32)
+        wide[:, 0::2] = 0.75 * plane + 0.25 * padded[:, :-2]
+        wide[:, 1::2] = 0.75 * plane + 0.25 * padded[:, 2:]
+        plane = wide
+    if vsub == 2:
+        height, width = plane.shape
+        padded = numpy.empty((height + 2, width), numpy.float32)
+        padded[1:-1] = plane
+        padded[0], padded[-1] = plane[0], plane[-1]
+        tall = numpy.empty((2 * height, width), numpy.float32)
+        tall[0::2] = 0.75 * plane + 0.25 * padded[:-2]
+        tall[1::2] = 0.75 * plane + 0.25 * padded[2:]
+        plane = tall
+    return plane
+
+
+def _range_name(color_range: str | None) -> str:
+    """``"pc"``/``"jpeg"``/``"full"`` select the full range, everything else the limited one.
+
+    The same rule the renderer's uniform bundle applies to a stream's tags - one spelling, so a tag
+    read by two callers cannot mean two things.
+    """
+    return "pc" if str(color_range or _DEFAULT_COLOR_RANGE).lower() in ("pc", "jpeg", "full") else "tv"
+
+
+def _numpy():
+    """numpy, imported where it is used.
+
+    At module scope it would make the queue policy (which never touches pixels) depend on it, and
+    this module is deliberately importable on a bare interpreter - the docstring's reason.
+    """
+    import numpy
+
+    return numpy
 
 
 def pack_planes(frame, pixel_format: str = "yuv420p10le") -> tuple[tuple[object, ...], tuple[int, ...]]:
