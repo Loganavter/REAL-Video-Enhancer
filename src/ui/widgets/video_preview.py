@@ -604,7 +604,16 @@ class VideoPreviewSurface(QRhiWidget):
             present = result is not None and not result.isNull()
         if not present:
             return
-        fields: dict[str, object] = {"mode": self._view_mode, "half": "pair"}
+        # `half` is a CLAIM and it is derived, not assumed: the line used to say "pair" for every compare paint, and in
+        # the owner's 14:22 session it said `half=pair` for two paints whose `result_fp` was `-` (no right half on
+        # screen). A log that asserts a pair it does not have is the same defect as a pair gate that trusts a number
+        # (owner, 2026-11-27: "затерся, а апскейл справа больше не появлялся"). Say which half is missing, always.
+        has_result = result is not None and not result.isNull()
+        has_original = original is not None and not original.isNull()
+        fields: dict[str, object] = {
+            "mode": self._view_mode,
+            "half": "pair" if (has_result and has_original) else ("lone:result" if has_result else "lone:source"),
+        }
         fields.update({f"result_{k}": v for k, v in self._identity_fields(original=False).items()})
         fields["result_moment"] = "-" if self._result_moment is None else f"{self._result_moment:.3f}"
         fields["generation"] = int(self._result_generation)
