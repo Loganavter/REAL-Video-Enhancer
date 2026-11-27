@@ -616,7 +616,10 @@ def test_the_group_buttons_nest_their_corners_into_the_plate(controls):
     assert row.spacing() == gutter, "the pad grew, the gutter between the buttons did not"
 
     # One recipe, four equal radii per button, the same value on every mode.
-    assert CAPSULE_PAD == GROUP_INSET + 1
+    # The pad is a RESERVE inside the plate, not the gutter: owner, 2026-11-28 - "подложка ... лишь идеально вмещает
+    # кнопки, а не сохраняет резервное место (нужно немного увеличить подложку)". It stays strictly larger than the
+    # gutter, so a plate never reads as a button-sized box.
+    assert CAPSULE_PAD > GROUP_INSET, "the plate must keep a reserve around its buttons"
     mode_ids = ("mode_single", "mode_sbs", "mode_split")
     radii = [controls.button(spec_id)._design_corner_radii for spec_id in mode_ids]
     assert radii == [(NESTED_RADIUS,) * 4] * 3

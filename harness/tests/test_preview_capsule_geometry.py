@@ -46,6 +46,7 @@ if "resources_rc" not in sys.modules:
     # A test tree has no compiled resource blob; the icons resolve to null QIcons and the widgets still build.
     sys.modules["resources_rc"] = types.ModuleType("resources_rc")
 
+from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager  # noqa: E402
@@ -195,58 +196,57 @@ def _assert_buttons_keep_their_size(controls: PreviewControls, name: str) -> Non
             assert button.width() == scaled_px(spec.size[0]), f"{spec_id} changed width"
 
 
-def test_both_plates_grew_by_exactly_one_design_point_per_side(controls):
-    """`CAPSULE_PAD` is one design point more than the gutter, so every plate is `2 * scaled_px(1)` bigger."""
-    old_pad = scaled_px(GROUP_INSET)
-    new_pad = scaled_px(CAPSULE_PAD)
-    assert new_pad - old_pad == scaled_px(1), "the pad must grow by one design point, resolved through scaled_px()"
-    grown = 2 * scaled_px(1)
+def test_both_plates_keep_a_reserve_around_their_buttons():
+    """The plate is bigger than "buttons + a hair": the reserve is stated and the bar can hold it.
 
-    # The pad is the plate's own padding; the gutter between the buttons did not move.
+    Owner, 2026-11-28: the plates were "лишь идеально вмещая" the buttons - a 30 px button inside a 34 px bar left
+    ONE device px of plate on each side, which reads as the buttons touching the edge. The reserve is `CAPSULE_PAD`
+    (strictly larger than the gutter) and `TOP_HEIGHT` must be able to hold button + 2*pad, or the plate is clipped
+    instead of padded - which is also what made the buttons look off-centre.
+    """
+    controls = _build()
+    pad = scaled_px(CAPSULE_PAD)
+    gutter = scaled_px(GROUP_INSET)
+    assert CAPSULE_PAD >= 5, "the reserve the owner asked for: at least five design px per side"
+    assert pad > gutter, "the plate's padding is not the gutter"
+
     for name in ("view_mode", "zoom"):
         panel = controls._group_panels[name]
         margins = panel.layout().contentsMargins()
-        assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == ((new_pad,) * 4), name
-        assert panel.layout().spacing() == old_pad, name
+        assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == ((pad,) * 4), name
+        assert panel.layout().spacing() == gutter, name
         assert panel.radius() == scaled_px(GROUP_RADIUS), name
-        assert panel.width() == _composed_width(controls, name, new_pad), name
-        assert _composed_width(controls, name, new_pad) - _composed_width(controls, name, old_pad) == grown, name
+        assert panel.width() == _composed_width(controls, name, pad), name
+
+        buttons = [controls.button(spec_id) for spec_id in controls._group_specs[name]]
         _assert_buttons_keep_their_size(controls, name)
-
-    # The bar grew by the same point on each side so the plate is actually VISIBLE two points taller: the plate is
-    # stretched to the bar's height, and the bar's height is the one that holds it.
-    old_top = scaled_px(TOP_HEIGHT - 2 * (CAPSULE_PAD - GROUP_INSET))
-    assert scaled_px(TOP_HEIGHT) - old_top == grown
-    for name in ("view_mode", "zoom"):
-        panel = controls._group_panels[name]
+        tallest = max(button.height() for button in buttons)
+        # The bar holds the plate, the plate holds the buttons with the reserve on both sides - so it is not clipped.
         assert panel.height() == scaled_px(TOP_HEIGHT), name
-        assert panel.height() - old_top == grown, name
-        assert panel.height() > max(controls.button(spec_id).height()
-                                    for spec_id in controls._group_specs[name]), name
+        assert scaled_px(TOP_HEIGHT) >= tallest + 2 * pad, (
+            f"{name}: a {tallest} px button in a {panel.height()} px plate with {pad} px pad is clipped, not padded")
+        # ... and the buttons sit CENTRED in it (what the owner saw as "не идеально по центру").
+        for button in buttons:
+            top_gap = button.mapTo(panel, QPoint(0, 0)).y()
+            assert abs(top_gap - (panel.height() - button.height()) / 2) <= 2, (
+                f"{name}: {button.objectName() or 'button'} sits at y={top_gap} in a {panel.height()} px plate")
 
 
-def test_the_growth_is_resolved_at_call_time(double_scale):
-    """At a 2.0 interface factor the same one design point is 4 device px: the pads and radii are read, never baked."""
+def test_the_reserve_is_resolved_at_call_time(double_scale):
+    """At a 2.0 interface factor the same design reserve is two device px per design px: read, never baked."""
     controls = _build(size=(1400, 1000))     # the row doubles too, so give the bar room to hold both capsules
-    old_pad = scaled_px(GROUP_INSET)
-    new_pad = scaled_px(CAPSULE_PAD)
+    pad = scaled_px(CAPSULE_PAD)
     assert scaled_px(1) == 2, "a 2.0 factor makes one design point two device px"
-    grown = 2 * scaled_px(1)
 
     for name in ("view_mode", "zoom"):
         panel = controls._group_panels[name]
         assert panel.isVisible(), f"the {name} capsule collapsed (the pane is too narrow for this test)"
-        assert panel.width() == _composed_width(controls, name, new_pad), name
-        assert _composed_width(controls, name, new_pad) - _composed_width(controls, name, old_pad) == grown, name
-        assert panel.layout().contentsMargins().left() == new_pad, name
-        # Every member of a capsule keeps the SAME size at this scale too: the growth above is the pad's, never a
-        # button's (a button's own size is the catalog's, and the toolkit resolves it at build time).
+        assert panel.width() == _composed_width(controls, name, pad), name
+        assert panel.layout().contentsMargins().left() == pad, name
         heights = {controls.button(spec_id).height() for spec_id in controls._group_specs[name]}
         assert len(heights) == 1, f"{name} stretched one member and not its siblings: {heights}"
-
-    old_top = scaled_px(TOP_HEIGHT - 2 * (CAPSULE_PAD - GROUP_INSET))
-    for name in ("view_mode", "zoom"):
-        assert controls._group_panels[name].height() - old_top == grown, name
+        tallest = heights.pop()
+        assert scaled_px(TOP_HEIGHT) >= tallest + 2 * pad, name
 
     # The outline scales with the interface: the design tuple is unchanged, the painted one doubles.
     for spec_id in MODE_IDS:
@@ -254,3 +254,5 @@ def test_the_growth_is_resolved_at_call_time(double_scale):
         assert button._design_corner_radii == (NESTED_RADIUS,) * 4
         assert button._corner_radii_px == (scaled_px(NESTED_RADIUS),) * 4
         assert scaled_px(NESTED_RADIUS) == 2 * NESTED_RADIUS, "the radius did not scale with the factor"
+
+

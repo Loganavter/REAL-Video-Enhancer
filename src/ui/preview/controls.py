@@ -42,7 +42,7 @@ BAR_GAP = 8
 #: The top bar holds the group capsules, and a plate needs room for its pad above and below its buttons. It is one
 #: design point taller than the 32 it was, on each side, so both backings grow by that point (owner, 2026-11-28:
 #: "сделать обе подложки ... на 1 пункт больше по размеру").
-TOP_HEIGHT = 34
+TOP_HEIGHT = 40
 BOTTOM_HEIGHT = 42
 #: Design px: a group capsule's plate radius, the gutter between its buttons, and the pad it keeps around them.
 #: `GROUP_INSET` is the gutter *and* the base of the radius nesting: a nested button's outer corner is the difference
@@ -51,7 +51,11 @@ BOTTOM_HEIGHT = 42
 #: than with the old pad while the buttons keep their size (owner, 2026-11-28).
 GROUP_RADIUS = 10
 GROUP_INSET = 2
-CAPSULE_PAD = GROUP_INSET + 1
+#: The plate's padding around its buttons. It is NOT the gutter: `GROUP_INSET` keeps the buttons apart, `CAPSULE_PAD`
+#: is the reserve between the buttons and the plate's edge. Owner, 2026-11-28: "сама подложка по размерам лишь идеально
+#: вмещает кнопки, а не сохраняет резервное место (нужно немного увеличить подложку)" - 3 design px read as "exactly
+#: fitting" (a 30 px button left 1 px inside a 34 px bar), so the reserve is 5 and `TOP_HEIGHT` grew with it.
+CAPSULE_PAD = 5
 NESTED_RADIUS = GROUP_RADIUS - GROUP_INSET
 
 #: How a capsule's buttons are rounded inside their plate. The recipe belongs to the GROUP and is chosen once when the
