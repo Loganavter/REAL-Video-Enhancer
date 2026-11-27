@@ -59,3 +59,7 @@ def test_the_tail_names_an_output_picture_by_the_renderers_time(tmp_path):
 
     assert reader._name_for(2) == pytest.approx(20.604)
     assert reader._name_for(3) is None, "past the list the caller keeps the container's own PTS"
+
+    # The renderer flushes a line per QUEUED picture: the list growing under the reader must be picked up.
+    write_names(output, [0.0, 0.042, 20.604, 20.479])
+    assert reader._name_for(3) == pytest.approx(20.479), "a name written since the last read is used"

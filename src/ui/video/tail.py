@@ -403,8 +403,14 @@ class TailReader(QObject):
         Read once per file (the list is written when the render ends, so a live tail finds it as soon as the render
         closes; until then the container's own PTS names the frames, which is what this reader always did).
         """
-        if self._names is None and self._path:
-            self._names = read_names(self._path) or []
+        if self._path:
+            # The renderer flushes one name per QUEUED picture, so the list grows while this reader consumes the file:
+            # a name is re-read whenever the list does not reach the frame being painted. A file that is not there yet
+            # (or one with no sidecar at all) leaves the container's PTS as the name, which is the old behaviour.
+            if self._names is None or index >= len(self._names):
+                fresh = read_names(self._path)
+                if fresh:
+                    self._names = fresh
         names = self._names or []
         if 0 <= index < len(names):
             return names[index]
