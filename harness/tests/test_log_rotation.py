@@ -54,3 +54,33 @@ def test_an_empty_or_missing_log_is_not_worth_a_generation(tmp_path):
     _write(log, "")
     assert rotate(log, generations=2) == [], "a run that never wrote a line must not push the evidence out"
     assert not (tmp_path / "log.txt.prev").exists()
+
+
+def test_the_terminal_log_rotates_once_per_run_not_once_per_job(tmp_path, monkeypatch):
+    """A render job constructs its own `TerminalLog`; four jobs used to rotate the first job's stream out of existence.
+
+    The module's own docstring promises two RUNS, the same as `log.txt`. Rotation is per process, so a job appends to
+    the run's file and the previous run survives as `.prev` (telemetry audit 2026-11-27, 5.9).
+    """
+    from src.ui import terminal_log as module
+
+    monkeypatch.setattr(module, "_ROTATED", set())
+    path = tmp_path / "logs-terminal.txt"
+    _write(path, "job 1\n")
+
+    first = module.TerminalLog(path, generations=2)
+    first.write("job 1 more\n")
+    first.close()
+
+    # That first open is the RUN boundary: whatever was in the file is the previous run and goes to `.prev`.
+    assert (tmp_path / "logs-terminal.txt.prev").read_text(encoding="utf-8") == "job 1\n"
+
+    second = module.TerminalLog(path, generations=2)
+    second.write("job 2\n")
+    second.close()
+
+    text = path.read_text(encoding="utf-8")
+    assert "job 1 more" in text, "the first job's stream must survive the second job's construction"
+    assert "job 2" in text
+    assert (tmp_path / "logs-terminal.txt.prev").read_text(encoding="utf-8") == "job 1\n", \
+        "a second job in the same run must not rotate again"

@@ -354,6 +354,7 @@ class VideoPreviewSurface(QRhiWidget):
             self._original = None
             self._original_shown = None
             self._original_time = None
+            self._shown = None
             # A CLEAR means the pane is EMPTY: the painter drops the pair and refuses a source offered for a moment
             # from before the clear. Keeping a queue across it meant a late source re-keyed itself by its own moment
             # (`shown_moment()` is None here, so `set_source`'s guard was skipped by construction) and painted half a
@@ -402,7 +403,7 @@ class VideoPreviewSurface(QRhiWidget):
             ))
             self._request_frame_paint()
         telemetry.note_frame(gui_ms=gui_ms, index=index, seq=seq, media_time=moment,
-                             generation=int(generation))
+                             generation=int(generation), cleared=cleared)
 
     def set_frame(self, image: QImage | None, *, gui_ms: float | None = None,
                   index: int | None = None, seq: int | None = None,

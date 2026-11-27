@@ -246,10 +246,13 @@ try:
     from .log_rotation import rotate
 
     rotate(_LOG_PATH, generations=2)
+    # The truncation belongs INSIDE the guard: if the rotate failed (a read-only tree, a full disk) the old log is the
+    # only copy left, and opening it "w" outside the except would erase the evidence the rotate failed to preserve -
+    # and raise during `src.Util`'s import, at that (telemetry audit 2026-11-27, 5.9).
+    with open(_LOG_PATH, "w"):
+        pass
 except Exception:
     pass                                    # a read-only tree keeps the old behaviour rather than failing to start
-with open(_LOG_PATH, "w") as f:
-    pass
 
 
 

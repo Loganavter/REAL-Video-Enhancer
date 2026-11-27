@@ -301,3 +301,16 @@ def test_a_lone_half_enters_the_denominator_and_its_own_counter(fresh):
     assert counts["pair_total"] == 2
     assert counts["pair_lone"] == 1
     assert counts["pair_off"] == 0, "a lone half is not an OFF pair, it is its own counter"
+
+
+def test_a_clear_is_not_a_picture_and_forgets_the_name(fresh):
+    """`frames` counted a clear and `shown=` kept the last picture, so an empty pane read as a pane showing a frame."""
+    telemetry.note_frame(index=3)
+    assert telemetry.snapshot()["frames"] == 1
+    assert telemetry.snapshot()["shown"] == ("frame", 3)
+
+    telemetry.note_frame(cleared=True)
+
+    assert telemetry.snapshot()["frames"] == 1, "a clear is not a picture"
+    assert telemetry.snapshot()["shown"] is None, "an empty pane must not name a frame"
+

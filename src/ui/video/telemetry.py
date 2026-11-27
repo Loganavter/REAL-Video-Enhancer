@@ -185,14 +185,25 @@ _last_snapshot_at = 0.0
 
 def note_frame(*, gui_ms: float | None = None, pts: float | None = None, index: int | None = None,
                seq: int | None = None, media_time: float | None = None,
-               generation: int | None = None) -> None:
+               generation: int | None = None, cleared: bool = False) -> None:
     """A picture was handed to the pane: `index` is a decoder's frame number, `seq` the display channel's sequence.
 
     `media_time` and `generation` are the picture's OWN names, straight from the header that carried it (or from the
     tail frame's PTS). They are printed for every picture, with or without a seek: "which frame was drawn" must be
     answerable from the log alone (owner, 2026-11-24 - the line used to say only `frame seq=98`).
+
+    `cleared=True` is the OTHER case: the pane was told to be empty. It does not count as a picture and it forgets the
+    name - `frames` used to increment and `shown=` kept naming the last picture after a clear, so an empty pane read as
+    a pane showing a frame (telemetry audit 2026-11-27, 5.3).
     """
     global _frames, _shown
+    if cleared:
+        _shown = None
+        if gui_ms is not None:
+            _gui.append(float(gui_ms))
+        if level() >= 1:
+            event("frame cleared", gen=generation)
+        return
     _frames += 1
     if index is not None:
         _shown = ("frame", int(index))
