@@ -212,6 +212,8 @@ def grab_answer(window, spec: str, root: str) -> dict:
     report = {"stamp": _stamp(), "kind": "grab", "path": None, "saved": False, "widget": None, "size": None,
               "error": None}
     try:
+        from PySide6.QtWidgets import QWidget      # the file imports it locally everywhere; this branch needed it too
+
         target, _, widget_name = spec.partition("@")
         target = target.strip() or os.path.join(root, f"grab-{_stamp()}.png")
         report["path"] = target

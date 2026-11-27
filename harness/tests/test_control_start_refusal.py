@@ -302,5 +302,24 @@ def test_the_grab_verb_always_answers_even_when_the_widget_is_gone():
 
     report = grab_answer(_Boom(), "/tmp/opencode/x.png@previewLabel", "/tmp/opencode")
     assert report["error"] and "RuntimeError" in report["error"], "an exception must come back as an answer"
-    assert grab_answer(SimpleNamespace(), "/tmp/opencode/x.png", "/tmp/opencode")["error"] is None, (
-        "the window form still grabs")
+
+    class _Pixmap:
+        def save(self, path):
+            return True
+
+        def width(self):
+            return 8
+
+        def height(self):
+            return 6
+
+    class _Grabbable:
+        def findChild(self, *args):
+            return None
+
+        def grab(self):
+            return _Pixmap()
+
+    window_form = grab_answer(_Grabbable(), "/tmp/opencode/x.png", "/tmp/opencode")
+    assert window_form["error"] is None and window_form["saved"] is True, "the window form still grabs"
+    del SimpleNamespace
