@@ -92,7 +92,12 @@ def parse_borders_line(line: object) -> tuple[int, int, int, int] | None:
 #: ceiling against a 24 fps stream), so three frames ahead cost 37 ms once and 12.5 ms per 41.7 ms after that - ~30 % of
 #: one core, and in exchange the frame the pane is about to show is already decoded when the result arrives, so both
 #: halves change in ONE repaint (owner, 2026-11-26: "нам в теории наоборот с запасом надо сделать сразу").
-COMPARE_LEAD_FRAMES = 3
+#: How far ahead of the playhead the source half is kept, in frames. ONE: the decoder's read position ends where the
+#: last walk ended, so a 3-frame lead put it ~2 frames PAST the pane's next moment - and the next ask then walked
+#: forward from there, never covering the frame on screen (`compare gap wanted=14.056`, `decode rewind/step
+#: target=14.056` absent, measured 2026-11-27). With one frame the read position stays one ahead, each ask covers the
+#: moment on screen plus one, and the arrival-driven fill keeps up.
+COMPARE_LEAD_FRAMES = 1
 
 #: How long one source ask counts as "in flight". A span of `COMPARE_LEAD_FRAMES` costs ~40 ms of decode, so this is a
 #: retry deadline, not a throttle: an ask nothing answers is re-sent on the next tick after it, which keeps a paused
@@ -121,6 +126,16 @@ class _FrameRelay(QObject):
     def __init__(self, callback) -> None:
         super().__init__()
         self._callback = callback
+
+    @Slot(str)
+    def report(self, text: str) -> None:
+        """One decoder trace line, delivered on the GUI thread (the decoder emits it from its own thread)."""
+        try:
+            from .video import telemetry
+
+            telemetry.event("decode", what=str(text))
+        except Exception:
+            pass
 
     @Slot(object)
     def deliver(self, frame) -> None:
@@ -3262,6 +3277,8 @@ class ProcessTab:
         relay = _FrameRelay(self._on_original_frame)
         self._compare_relay = relay
         decoder.frame_ready.connect(relay.deliver)
+        decoder.trace.connect(relay.report)          # queued: the pump runs on the decoder's thread
+        decoder.set_trace(True)                       # `report` drops the line when telemetry is below level 2
         decoder.error.connect(lambda message: log(f"source decoder: {message}"))
         path = getattr(self.currentRenderOptions, "inputFile", "") or ""
         if not decoder.open(str(path)):

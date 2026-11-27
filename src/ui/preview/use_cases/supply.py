@@ -105,16 +105,23 @@ def source_fill(tab, playhead: float) -> None:
         if newest is not None and newest >= float(pending[0]) - 0.5 * interval:
             tab._source_fill_pending = None
         elif aged < COMPARE_FILL_WINDOW_S:
-            try:
-                from ...video import telemetry
+            covered = register.picture_for(playhead, 1.5 * interval, generation=generation) is not None
+            if covered:
+                try:
+                    from ...video import telemetry
 
-                if telemetry.level() >= 2:
-                    telemetry.event("compare fill blocked", aged_ms=round(aged * 1000.0, 1),
-                                    target=round(float(pending[0]), 3),
-                                    newest=None if newest is None else round(float(newest), 3))
-            except Exception:
-                pass
-            return
+                    if telemetry.level() >= 2:
+                        telemetry.event("compare fill blocked", aged_ms=round(aged * 1000.0, 1),
+                                        target=round(float(pending[0]), 3),
+                                        newest=None if newest is None else round(float(newest), 3))
+                except Exception:
+                    pass
+                return
+            # The moment ON SCREEN has nothing and the pending belongs to the LEAD: the decoder keeps only the last
+            # request, so asking for the pane's frame replaces the lead ask - which the next arrival re-issues. A
+            # picture on screen outranks a lead frame: 84% of the fill's calls were blocked this way while the pane
+            # waited (`compare gap` on the owner's gesture, measured 2026-11-27).
+            tab._source_fill_pending = None
         else:
             tab._source_fill_pending = None      # a request nothing answered: ask again
 
@@ -142,8 +149,18 @@ def source_fill(tab, playhead: float) -> None:
     # keyframe rewind (~176 ms), and the decoder spent the window rewinding instead of leading (`decode rewind` 37 in
     # one window against 20). A looser coverage test with a strict presenter is the trade that keeps the decoder
     # leading; the hole to fix is on the PRODUCER side (the source channel publishes on a 2-frame step).
+    # TWO facts, not one: `strict` is the PANE's own bound (would its lookup find a picture?), `covered` is the looser
+    # 1.5-frame "is the lead worth asking for". The loose one must never suppress the strict one - that conflation sent
+    # the ask to the lead edge while the frame on screen was missing, the walk then started AFTER it, and the frame was
+    # never delivered (`compare ask target=18.06 playhead=18.018`, no delivery of 18.018, measured 2026-11-27).
+    strict = register.picture_for(playhead, tab._source_tolerance(), generation=generation) is not None
     covered = register.picture_for(playhead, 1.5 * interval, generation=generation) is not None
-    if not covered and moving and not paused:
+    if not strict and moving and not paused:
+        # The pane's frame is missing: ask AT it over a span, so one walk from the read position covers it (and the
+        # rewind path publishes the target's own tail if the read position has already passed it).
+        target = playhead
+        span = True
+    elif not covered and moving and not paused:
         # Playback with nothing held for this moment: ask AHEAD, over a span, so one decode covers the stretch the
         # pane is about to show. A single frame here cannot win a race against the next tick - UNLESS the register does
         # not even REACH the playhead (a fresh decoder after a restart, a register cleared by a mode/owner change):

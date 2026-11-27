@@ -90,12 +90,19 @@ class VideoDecoder(QObject):
     seeked = Signal(float)
     #: A human-readable failure; a decode error stops playback, it is never swallowed.
     error = Signal(str)
+    #: One line about a decode request (`step/rewind target= landed= walked=`), at level 2. A SIGNAL, not a direct
+    #: telemetry call: the pump runs on this decoder's own QThread, and writing the pane's telemetry from that thread
+    #: crashed the suite with SIGSEGV (exit -11, 2026-11-27). A queued connection delivers it on the GUI thread.
+    trace = Signal(str)
 
     def __init__(self, parent: QObject | None = None, *, pixel_format: str = "rgb24",
                  max_frames_per_tick: int = 4, codec_threads: int = 2,
                  max_size: tuple[int, int] | None = None, content_time: bool = False,
                  color_space: str | None = None, color_range: str | None = None) -> None:
         super().__init__(parent)
+        #: Off until the owner asks for the level-2 `trace` lines (see `set_trace`).
+        self._trace_on = False
+        self._rewind_walk: list[FrameRef] = []
         if pixel_format not in FORMATS:
             raise ValueError(f"unknown frame format {pixel_format!r}, expected one of {FORMATS}")
         self._pixel_format = pixel_format
@@ -275,6 +282,10 @@ class VideoDecoder(QObject):
         if not self._playing:
             self._clock.pause(now)
         self._kick()
+
+    def set_trace(self, on: bool) -> None:
+        """Enable the `trace` signal (level 2). The receiver must live in the GUI thread - the emit crosses threads."""
+        self._trace_on = bool(on)
 
     def request_frame(self, seconds: float, *, exact: bool = False, seek: bool = True,
                       span: bool = False) -> None:
@@ -460,10 +471,12 @@ class VideoDecoder(QObject):
         #: same frame forever - an infinite loop on the GUI thread (measured live 2026-11-25: the request logged and
         #: then the app stopped answering, no further line in either log).
         fallback: FrameRef | None = None
+        self._rewind_walk = []
         while True:
             frame = self._take()
             if frame is None:
                 break
+            self._rewind_walk.append(frame)
             if announce:
                 if not frame_belongs_to(frame.pts, target):
                     # First frame after the name: it belongs to the next playback tick, not to this seek's result.
@@ -484,8 +497,19 @@ class VideoDecoder(QObject):
         if published is None:
             published = fallback if fallback is not None else self._held
             self._held = None
-        if published is not None:
+        # NEVER CONSUME WITHOUT PUBLISHING, bounded: the rewind's walk starts at a keyframe and can be a whole GOP, so
+        # publishing all of it would hand the caller hundreds of pictures in one tick. The frames that matter are the
+        # ones at/after the ask's target (the target's own frame and its neighbours): everything older belongs to the
+        # playback that has already passed it. Same rule as the forward step, applied where it is safe.
+        walked_tail = [f for f in getattr(self, "_rewind_walk", []) if float(f.pts) >= target - self._interval]
+        for frame in walked_tail:
+            self.frame_ready.emit(frame)
+        if published is not None and not any(frame is published for frame in walked_tail):
             self.frame_ready.emit(published)
+        if self._trace_on:
+            self.trace.emit(f"rewind target={float(target):.3f} "
+                            f"landed={'-' if published is None else format(float(published.pts), '.3f')} "
+                            f"exact={int(bool(exact))}")
         if announce:
             self.seeked.emit(float(target))
 
@@ -529,6 +553,10 @@ class VideoDecoder(QObject):
         for frame in walked:
             self.frame_ready.emit(frame)
         self._at_eof = False
+        if self._trace_on:
+            self.trace.emit(f"step target={float(target):.3f} "
+                            f"landed={'-' if not walked else format(float(walked[-1].pts), '.3f')} "
+                            f"walked={len(walked)} exact={int(bool(exact))}")
 
     def _rewind(self, target: float) -> None:
         # A frame held from the old position belongs to that position, not to this one. `target` is the caller's clock
