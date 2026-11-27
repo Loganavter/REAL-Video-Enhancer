@@ -133,6 +133,11 @@ class PairWriter:
         self._cleared_moment: float | None = None
         #: Whether a result has been seen since the mode was (re)entered. See `paint()`'s lone-source branch.
         self._result_seen = False
+        #: Whether the SOURCE side is demonstrably alive (a picture arrived in the last second). While it is, the hard
+        #: limit holds instead of painting the result alone: at the start of a render the decoder is still walking to
+        #: the playhead, and the valve used to give up before the first source picture could arrive (measured
+        #: 2026-11-27: `pair stale ... waited_s=1.50` at media 2.083 / 2.125 / 5.208).
+        self._source_alive = False
 
     # -- configuration ---------------------------------------------------
 
@@ -169,6 +174,18 @@ class PairWriter:
                 # `_committed = None`, never an empty `CommittedPair`: "no pair on screen" must read as `None` to every
                 # caller (`painted_pair()`). The RENDERER keeps its textures - that is what stops the blank pane.
                 self._committed = None
+
+    def note_source_alive(self, alive: bool) -> None:
+        """The host's word on whether the source side is still delivering pictures.
+
+        Set from the arrival stamp (`transport.on_original_frame`) by the presenter on every sync: a source that keeps
+        arriving is a source that will complete this pair, so the hard limit stands down. Once it goes quiet the valve
+        works exactly as before - that is the case it was written for.
+        """
+        self._source_alive = bool(alive)
+        if self._source_alive and self._lone_result:
+            # A source came back: the next result is allowed to wait for its partner instead of painting alone.
+            self._lone_result = False
 
     def set_tolerance(self, seconds: float) -> None:
         """The largest source distance that is still the same picture, in seconds (the pane's half frame)."""
@@ -245,7 +262,7 @@ class PairWriter:
                                     generation=int(pending.generation))
                 return self._paint(pending, source, moment=pending.moment,
                                    generation=int(pending.generation))
-            if self._lone_result or self._hold_expired():
+            if (self._lone_result or self._hold_expired()) and not self._source_alive:
                 self._pending_result = None
                 self._lone_result = True
                 self._hold_started = None

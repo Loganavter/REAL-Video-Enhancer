@@ -255,6 +255,14 @@ def on_original_frame(tab, frame) -> None:
     # OFFER, never write the pane: the frame is one candidate for the moment it names, and `_sync_compare_source`
     # decides which candidate the pane's own moment gets. A producer that wrote directly could bypass the pane's
     # half-frame refusal; this one cannot.
+    #: When the source side last delivered a picture: the pair writer's hard limit stands down while this is fresh
+    #: (see `PairWriter.note_source_alive`). One stamp, one reader, no second clock.
+    try:
+        import time as _time
+
+        tab._source_last_arrival_mono = _time.monotonic()
+    except Exception:
+        pass
     register = getattr(tab, "_source_register", None)
     if register is not None:
         arrived = register.offer(pts, image, "decoder",

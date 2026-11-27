@@ -229,6 +229,10 @@ def source_fill(tab, playhead: float) -> None:
         # (`compare gap wanted=16.600`, no offer of 16.600 by any producer, measured 2026-11-27).
         return
     tab._source_fill_pending = (float(target), time.monotonic())
+    #: When the source side was last ASKED: an ask outlives its 80 ms pending window when the decoder has to rewind to a
+    #: keyframe (it emits nothing until the walk reaches the target), so the pair writer's hard limit must not read that
+    #: silence as a dead decoder (see `present.sync_compare_source`).
+    tab._source_last_ask_mono = time.monotonic()
     try:
         from ...video import telemetry
 

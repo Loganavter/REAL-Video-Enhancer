@@ -204,6 +204,50 @@ def test_the_hard_limit_paints_a_half_and_says_which_and_why():
     assert writer.painted().lone_half is None and sink.source is not None
 
 
+def test_a_source_that_is_still_arriving_keeps_the_hard_limit_standing_down():
+    """The owner's log, 2026-11-27: `pair stale ... waited_s=1.50` three times in the first five seconds of media.
+
+    Switching to a compare mode mid-render leaves the source decoder walking from zero to the playhead; the valve used
+    to expire before its first picture could arrive and the pane painted the result ALONE. While the source side is
+    demonstrably delivering (the host says so), the limit holds and the pane keeps the picture it had.
+    """
+    writer, sink, clock = _writer(mode="sbs")
+    writer.offer_result(_half(3.0))
+    writer.offer_source(_half(3.0))
+    assert writer.paint() is True                      # a pair, so the pane has a picture to keep
+
+    writer.note_source_alive(True)
+    writer.offer_result(_half(3.5))                    # the next moment's source is still on its way
+    assert writer.paint() is False, "the hold starts (the valve needs the hold to exist before it can expire)"
+    clock.advance(MAX_PAIR_STALE_S + 0.5)
+    sink.calls.clear()
+    assert writer.paint() is False, "the valve must not paint the result alone while the source is alive"
+    assert sink.calls == [], f"nothing new reaches the renderer: {sink.calls}"
+    assert writer.painted().moment == pytest.approx(3.0), "the pane keeps the pair it had"
+
+    # The source goes quiet: now the valve does its job (the clock has to pass the hold it started while alive).
+    writer.note_source_alive(False)
+    clock.advance(MAX_PAIR_STALE_S + 0.5)
+    assert writer.paint() is True
+    assert writer.painted() is not None and writer.painted().lone_half == "result"
+
+
+def test_a_source_coming_back_lets_the_next_result_wait_again():
+    """A lone half must not become a permanent mode: once a source arrives, the next result waits for its partner."""
+    writer, sink, clock = _writer(mode="sbs")
+    writer.offer_result(_half(2.0))
+    assert writer.paint() is False, "the hold starts"
+    clock.advance(MAX_PAIR_STALE_S + 0.1)
+    assert writer.paint() is True and writer.painted().lone_half == "result", "a dead source paints alone once"
+
+    writer.note_source_alive(True)
+    writer.offer_result(_half(2.5))
+    sink.calls.clear()
+    assert writer.paint() is False, "the lone-result mode ends when the source returns"
+    writer.offer_source(_half(2.5))
+    assert writer.paint() is True and writer.painted().lone_half is None
+
+
 def test_the_pane_honours_the_hard_limit_with_a_dead_source():
     """The same limit through the pane: after it, the result paints and the log names the half (`pair stale`)."""
     QApplication.instance() or QApplication([])

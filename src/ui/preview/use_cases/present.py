@@ -34,6 +34,33 @@ def sync_compare_source(tab, *, paint: bool = False) -> None:
     pane = getattr(getattr(getattr(tab, "page_handles", None), "proc", None), "previewLabel", None)
     if pane is None:
         return
+    # Tell the pair writer whether the source side is alive, on EVERY sync (a paint and an arrival both come through
+    # here): while it is, the hard limit holds rather than painting the result alone - at the start of a render the
+    # decoder is still walking to the playhead and the valve used to expire first (owner's log 2026-11-27: three
+    # `pair stale ... waited_s=1.50` in the first five seconds of media).
+    note_alive = getattr(pane, "note_source_alive", None)
+    if callable(note_alive):
+        try:
+            import time as _time
+
+            now = _time.monotonic()
+            arrived = getattr(tab, "_source_last_arrival_mono", None)
+            asked = getattr(tab, "_source_last_ask_mono", None)
+            fresh_arrival = arrived is not None and (now - float(arrived)) < 2.0
+            # An ASK without an arrival is a rewind in progress - the decoder is working, it is simply silent until the
+            # walk reaches the target. Only while the register has produced something in the last five seconds, so a
+            # decoder that is gone still lets the hard limit fire.
+            asking = (asked is not None and (now - float(asked)) < 3.0
+                      and arrived is not None and (now - float(arrived)) < 5.0)
+            # Neither stamp yet: the switch has just OPENED the decoder (a 1440p open costs a few hundred ms) and not a
+            # single ask has gone out. That is not a dead source - it is a source that has not been asked yet - so the
+            # hard limit waits for the first ask instead of painting the result alone in the meantime (measured
+            # 2026-11-27: `pair stale ... moment=2.000/2.125/3.500 generation=1`, all before the first arrival).
+            opening = (arrived is None and asked is None
+                       and getattr(tab, "_source_decoder", None) is not None)
+            note_alive(fresh_arrival or asking or opening)
+        except Exception:
+            pass
     moment_of = getattr(pane, "shown_moment", None)
     moment = None
     if callable(moment_of):

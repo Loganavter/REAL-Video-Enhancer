@@ -599,7 +599,8 @@ class VideoPreviewSurface(QRhiWidget):
 
     def _log_draw_two(self, result: QImage | None, original: QImage | None, *,
                       present: bool | None = None, source_moment: float | None = None,
-                      source_name: tuple[str, int] | None = None, held: bool = False) -> None:
+                      source_name: tuple[str, int] | None = None, held: bool = False,
+                      original_present: bool | None = None) -> None:
         """The compare modes paint both halves in ONE pass: name both pictures in one line.
 
         `source_moment`/`source_name` are the identity of the picture the RENDERER holds. They are passed in because
@@ -608,14 +609,20 @@ class VideoPreviewSurface(QRhiWidget):
         """
         if present is None:
             present = result is not None and not result.isNull()
-        if not present:
-            return
+        original_shown = bool(original_present) if original_present is not None else (
+            original is not None and not original.isNull())
+        if not present and not original_shown:
+            return   # nothing was drawn: no line (the caller already knows about planes, see `_on_rhi_draw`)
         # `half` is a CLAIM and it is derived, not assumed: the line used to say "pair" for every compare paint, and in
         # the owner's 14:22 session it said `half=pair` for two paints whose `result_fp` was `-` (no right half on
         # screen). A log that asserts a pair it does not have is the same defect as a pair gate that trusts a number
         # (owner, 2026-11-27: "затерся, а апскейл справа больше не появлялся"). Say which half is missing, always.
-        has_result = result is not None and not result.isNull()
-        has_original = original is not None and not original.isNull()
+        # Both halves are judged by the CALLER's verdicts, which know what the renderer actually drew: a YUV result has
+        # no QImage, and a held pair's source has no snapshot, yet both are on screen (measured 2026-11-27: lines saying
+        # `lone:source`/`lone:result` for draws whose every moment had `painted pair` behind it).
+        has_result = bool(present)
+        has_original = (bool(original_present) if original_present is not None
+                        else (original is not None and not original.isNull()))
         fields: dict[str, object] = {
             "mode": self._view_mode,
             "half": ("held" if held else
@@ -715,6 +722,9 @@ class VideoPreviewSurface(QRhiWidget):
         result, i.e. the same apparent scale with no second zoom to keep in sync.
         """
         if snapshot is None:
+            # A gap CLEARS the pane's picture. The pair already painted stays on screen through the writer (see
+            # `_pair_on_screen`), and keeping this snapshot instead would let a NEW result pair with the OLD source -
+            # the two-moments transition `test_a_seek_on_a_paused_pane_gaps_then_pairs_the_new_moment` pins.
             if self._original is None:
                 return
             self._original = None
@@ -826,6 +836,12 @@ class VideoPreviewSurface(QRhiWidget):
     def split_fraction(self) -> float:
         """Where the `split` divider sits, as a share of the picture's width (0..1)."""
         return float(self._split_fraction)
+
+    def note_source_alive(self, alive: bool) -> None:
+        """Forward the host's "the source side is still delivering" fact to the pair writer (see `PairWriter`)."""
+        note = getattr(self._pair, "note_source_alive", None)
+        if callable(note):
+            note(bool(alive))
 
     def set_split_fraction(self, fraction: float) -> None:
         """Move the `split` divider; clamped so neither picture is hidden (that is what `single` is for)."""
@@ -1329,7 +1345,12 @@ class VideoPreviewSurface(QRhiWidget):
         picture, not half of a pair (measured in the owner's own log: `draw mode=sbs half=held ... rect=950,289,950,713`
         - the result alone in its half, the other half empty).
         """
-        return self._has_picture() and self._original is not None and not self._original.isNull()
+        if self._has_picture() and self._original is not None and not self._original.isNull():
+            return True
+        # ... or the writer's committed pair, whose textures are what the renderer draws when the incoming snapshot is
+        # late (the early seconds of a render: the pair stands, the presenter reports a gap, `_original` is None).
+        painted = self._pair.painted()
+        return painted is not None and painted.result is not None and painted.source is not None
 
     def _view_rect(self) -> QRectF:
         """The widget rect the RESULT is laid out in: the whole pane, or the right half in `sbs` WITH a pair.
@@ -1524,6 +1545,7 @@ class VideoPreviewSurface(QRhiWidget):
             self._log_draw_two(self._frame, original, present=bool(original) or self._has_picture(),
                                source_moment=None if source is None else source.moment,
                                source_name=None if source is None else source.name,
+                               original_present=bool(drawn.drew_original),
                                # A picture on screen with no committed pair is RETAINED: entering a compare mode keeps
                                # what the pane had while it waits (`preview/pair.py`), and calling that "lone:result"
                                # would report a defect the user cannot see. `half=held` says exactly what it is.
@@ -1534,7 +1556,7 @@ class VideoPreviewSurface(QRhiWidget):
             # The box is the RESULT's, and a zoom/pan moves it whether or not the source half has arrived: a paused pane
             # with no source would otherwise leave a gesture with no trace at all (measured 2026-11-26).
             self._log_draw_two(self._frame, None, present=self._has_picture(),
-                               held=self._pair.painted() is None)
+                               held=self._pair.painted() is None, original_present=False)
             self._logged_geometry = geometry
 
     def _geometry_signature(self) -> str:

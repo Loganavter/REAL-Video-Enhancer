@@ -57,7 +57,9 @@ def test_both_pictures_are_a_pair(pane, draws):
 
 def test_a_missing_result_is_named_as_such(pane, draws):
     pane.set_view_mode("sbs")
-    pane._log_draw_two(None, _image(), present=True)
+    # `present` is the CALLER's planes-aware verdict on the result half (see `_on_rhi_draw`), so "no result" is
+    # `present=False` - a YUV result has no QImage and is still a picture.
+    pane._log_draw_two(None, _image(), present=False)
 
     assert draws[-1]["half"] == "lone:source", "the line said 'pair' while the right half was missing"
 
