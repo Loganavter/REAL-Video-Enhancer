@@ -914,15 +914,15 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     assert asked == [pytest.approx(5.0)], "an empty pool asks for the playhead"
 
     tab._tick_second_surface()
-    assert asked == [pytest.approx(5.0), pytest.approx(5.0)], (
-        "the moment is STILL uncovered: the pending belongs to the lead and must not silence the frame on screen "
-        "(84% of the fill's calls were blocked that way while the pane waited - measured 2026-11-27)")
+    assert asked == [pytest.approx(5.0)], (
+        "one ask in flight, and it IS the frame on screen: the decoder keeps a single request slot, so a burst of asks "
+        "collapses to the last one and the moment in the middle is lost (285 requests, 28 pump runs - 2026-11-27)")
 
     # Nothing answers: the ask is retried once its window passes, so a paused pane cannot be silenced for ever
     # (measured 2026-11-26: the split divider never appeared because the source never landed).
     tab._source_fill_pending = (5.0, time.monotonic() - 1.0)
     tab._tick_second_surface()
-    assert asked == [pytest.approx(5.0)] * 3, "an unanswered ask must be retried"
+    assert asked == [pytest.approx(5.0)] * 2, "an unanswered ask must be retried"
 
     # A burst of landed frames fills the register; the tick then asks for the FAR EDGE of the lead in one call.
     for step in range(COMPARE_LEAD_FRAMES):
@@ -949,8 +949,7 @@ def test_the_second_surface_asks_the_source_decoder_for_the_result_playhead():
     pane.mode = "single"
     tab.currentFrame = 90
     tab._tick_second_surface()
-    assert len(asked) == 5, ("single asks nothing: the two retries (the moment stayed uncovered), the lead ask and "
-                             "the jump")
+    assert len(asked) == 4, "single asks nothing: the retry, the lead ask and the jump"
 
 
 def test_the_compare_decoder_is_really_opened_and_then_asked(monkeypatch):

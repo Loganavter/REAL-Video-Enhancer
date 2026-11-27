@@ -105,23 +105,20 @@ def source_fill(tab, playhead: float) -> None:
         if newest is not None and newest >= float(pending[0]) - 0.5 * interval:
             tab._source_fill_pending = None
         elif aged < COMPARE_FILL_WINDOW_S:
-            covered = register.picture_for(playhead, 1.5 * interval, generation=generation) is not None
-            if covered:
-                try:
-                    from ...video import telemetry
+            # ONE ask in flight, and it is the frame on screen: the decoder keeps a single request slot, so a burst of
+            # asks collapses to its LAST one and the moment in the middle of the burst is lost (measured 2026-11-27:
+            # 285 requests reached the decoder, 28 pump runs executed). Blocking here is what keeps the request that
+            # matters: the strict-miss ask is always the playhead, so the pending is the pane's own frame.
+            try:
+                from ...video import telemetry
 
-                    if telemetry.level() >= 2:
-                        telemetry.event("compare fill blocked", aged_ms=round(aged * 1000.0, 1),
-                                        target=round(float(pending[0]), 3),
-                                        newest=None if newest is None else round(float(newest), 3))
-                except Exception:
-                    pass
-                return
-            # The moment ON SCREEN has nothing and the pending belongs to the LEAD: the decoder keeps only the last
-            # request, so asking for the pane's frame replaces the lead ask - which the next arrival re-issues. A
-            # picture on screen outranks a lead frame: 84% of the fill's calls were blocked this way while the pane
-            # waited (`compare gap` on the owner's gesture, measured 2026-11-27).
-            tab._source_fill_pending = None
+                if telemetry.level() >= 2:
+                    telemetry.event("compare fill blocked", aged_ms=round(aged * 1000.0, 1),
+                                    target=round(float(pending[0]), 3),
+                                    newest=None if newest is None else round(float(newest), 3))
+            except Exception:
+                pass
+            return
         else:
             tab._source_fill_pending = None      # a request nothing answered: ask again
 
