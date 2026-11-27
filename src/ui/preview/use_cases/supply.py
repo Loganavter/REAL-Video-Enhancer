@@ -144,7 +144,12 @@ def source_fill(tab, playhead: float) -> None:
         # `compare put pts=16.6` proves the frame HAD been offered before the register was emptied. The playhead's own
         # picture comes first; the lead starts on the next arrival.
         reaches_playhead = newest is not None and float(newest) >= playhead - interval
-        if not reaches_playhead:
+        # ... and the symmetric hole: the pool can be AHEAD of the frame on screen (the decoder walked past it), which
+        # is what the counters showed - `nearest_moment` one frame AFTER the wanted one, and that wanted frame never
+        # delivered at all. Asking ahead there fetches the future and leaves the hole; ask AT the playhead, which is
+        # behind the read position, so the decoder takes its rewind path.
+        skipped_playhead = newest is not None and float(newest) > playhead + 1.5 * interval
+        if not reaches_playhead or skipped_playhead:
             target = playhead
             span = False
         else:
@@ -176,9 +181,13 @@ def source_fill(tab, playhead: float) -> None:
         target = playhead + tab._compare_lead()
     else:
         return
-    if register.owner_of(target, generation=generation) is not None:
-        # Somebody already holds the very moment this ask would fetch. Asking again would decode the same picture a
-        # second time - and "somebody holds it" is the whole answer, whoever the owner is.
+    if register.owner_of(target, generation=generation) is not None and \
+            register.owner_of(playhead, generation=generation) is not None:
+        # Both ends of the ask are already held, so the decode would fetch nothing new. The PLAYHEAD has to be part of
+        # this test: the source feed is a lossy preview channel (it published a 2-frame step in the owner's sbs window:
+        # 16.558 -> 16.642 while the pane wanted 16.600), so a held LEAD EDGE says nothing about the frame on screen -
+        # and with a two-frame step the edge is held almost every tick, which made the fill stand down in silence
+        # (`compare gap wanted=16.600`, no offer of 16.600 by any producer, measured 2026-11-27).
         return
     tab._source_fill_pending = (float(target), time.monotonic())
     try:

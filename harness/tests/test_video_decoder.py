@@ -201,8 +201,13 @@ def test_a_forward_step_publishes_the_first_frame_at_or_after_an_exact_target():
 
     decoder._step_and_publish(1.09, exact=True)
 
-    assert [round(frame.pts, 3) for frame in published] == [1.125], (
+    published_pts = [round(frame.pts, 3) for frame in published]
+    assert published_pts[-1] == 1.125, (
         "an exact compare request names the frame at or AFTER its timestamp - the render's own ceil rule")
+    assert published_pts == sorted(published_pts), "a forward walk is published in order, never reordered"
+    assert len(published_pts) > 1, (
+        "the walk's INTERMEDIATE frames are published too: swallowing them left a hole in the compare's register at "
+        "every moment the walk passed (measured 2026-11-27: `compare gap wanted=16.475` never delivered)")
     assert rewinds == [], "forward motion is decoded in sequence, never rewound"
 
 

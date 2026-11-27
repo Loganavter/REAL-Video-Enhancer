@@ -124,6 +124,16 @@ class _FrameRelay(QObject):
 
     @Slot(object)
     def deliver(self, frame) -> None:
+        # The decoder's frame crossing into the GUI thread, BEFORE any crop or offer: the last place that can tell
+        # "the decoder skipped this moment" from "the offer path dropped it". Both look identical in the register
+        # (2026-11-27: `compare gap wanted=15.641` with no offer of 15.641 at all).
+        try:
+            from .video import telemetry
+
+            if telemetry.level() >= 2:
+                telemetry.event("source delivered", pts=round(float(getattr(frame, "pts", 0.0) or 0.0), 3))
+        except Exception:
+            pass
         self._callback(frame)
 
 

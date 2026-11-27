@@ -509,14 +509,6 @@ class VideoDecoder(QObject):
             walked.append(frame)
             if frame_at_or_after(frame.pts, target, tolerance=0.0 if exact else 0.5 * self._interval):
                 break
-        if span:
-            # EVERY frame of the walk, in order: a caller that keeps a buffer of decoded pictures earns its lead in one
-            # round trip. One frame per request costs a full event-loop trip each (measured 2026-11-26: a prefetcher
-            # asking frame-by-frame topped out at ~8 frames/s against a 12.5 ms decode, because the latency, not the
-            # decode, was the limit).
-            for frame in walked:
-                self.frame_ready.emit(frame)
-            return
         if not walked:
             # The frame iterator was already exhausted at the entry. A live compare walks a stream it has read past, and
             # without this flag every later step re-walks a DEAD iterator: asks kept arriving, nothing came back, for the
@@ -528,10 +520,15 @@ class VideoDecoder(QObject):
             if published is not None:
                 self.frame_ready.emit(published)
             return
-        published = walked[-1]
-        if published is not None:
-            self._at_eof = False
-            self.frame_ready.emit(published)
+        # EVERY frame of the walk, in order, whatever the caller asked `span` for. A span-less ask used to publish only
+        # the last frame and CONSUME the rest - so every intermediate moment was decoded, thrown away, and never offered;
+        # the compare's register then had a hole exactly where the result named a frame (measured 2026-11-27:
+        # `compare gap wanted=17.768 ... nearest=17.809`, with `source delivered pts=17.768` = 0 for the whole window).
+        # The caller's policy decides what to SHOW from these pictures; the decoder's job is not to withhold them. One
+        # round trip per walk still holds, so the latency argument that introduced `span` is unchanged.
+        for frame in walked:
+            self.frame_ready.emit(frame)
+        self._at_eof = False
 
     def _rewind(self, target: float) -> None:
         # A frame held from the old position belongs to that position, not to this one. `target` is the caller's clock

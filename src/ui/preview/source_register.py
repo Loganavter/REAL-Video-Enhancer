@@ -124,15 +124,10 @@ class SourceRegister:
             if anchor is None:
                 del self._held[min(self._held)]
                 continue
-            # Protect the picture that ANSWERS the anchor; otherwise drop the OLDEST. "Farthest from the anchor" threw
-            # away the LEAD - the frames the pane is about to need - while spent frames behind the playhead stayed, so
-            # the pool looked full (`held=24`) and sat one to three frames behind the result for the whole render
-            # (measured live 2026-11-27: `compare ask newest=18.101 playhead=18.143`, `pair_hold` on every other tick).
-            anchor_key = self._key(anchor)
-            candidates = [key for key in self._held if key != anchor_key]
-            if not candidates:
-                break                              # nothing but the anchored picture: capacity 1 keeps it
-            victim = min(candidates)
+            victim = max(
+                self._held,
+                key=lambda key: (abs(self._held[key].moment - anchor), key),
+            )
             if self._trace:
                 held = self._held[victim]
                 self._trace_events.append(f"evict pts={held.moment:.3f} origin={held.origin} anchor={anchor:.3f}")
