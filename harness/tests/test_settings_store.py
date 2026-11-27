@@ -34,6 +34,8 @@ from src.ui.settings_store import Settings
 #: Five more, appended the same way (2026-11-28): the window's saved NORMAL geometry and its maximized flag
 #: (`src/ui/shell/window.py` restores them, the window's owner writes them on close). Empty coordinates mean "never
 #: saved" - a first launch still opens at the design size. The 32 lines above stay byte-identical.
+#: `font_family,` follows the same rule (2026-11-28): empty means "the application's own face", the default the app
+#: has always opened in (`src/ui/settings_store.py::validate_font_family`).
 SETTINGS_BYTES = ('precision,auto\n'
  'tensorrt_optimization_level,5\n'
  'dynamic_tensorrt_engine,False\n'
@@ -70,7 +72,8 @@ SETTINGS_BYTES = ('precision,auto\n'
  'window_y,\n'
  'window_width,\n'
  'window_height,\n'
- 'window_was_maximized,False\n')
+ 'window_was_maximized,False\n'
+ 'font_family,\n')
 
 
 def make(tmp_path):
