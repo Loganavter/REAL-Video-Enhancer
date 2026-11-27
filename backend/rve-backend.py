@@ -811,6 +811,12 @@ class HandleApplication:
             raise ValueError("Tilesize must be greater than 0")
         if self.args.interpolate_factor < 0:
             raise ValueError("Interpolation factor must be greater than 0")
+        # A FRACTION cannot be honoured (it multiplies the frame rate and divides the interpolator's timestep): refuse it
+        # at the door instead of exporting a slow-motion clip or a clip blended toward its first frame (backend audit
+        # 2026-11-27, 5.13).
+        from src.utils.InterpFactor import whole_factor
+
+        self.args.interpolate_factor = whole_factor(self.args.interpolate_factor)
         if self.args.interpolate_factor == 1 and self.args.interpolate_model:
             raise ValueError(
                 "Interpolation factor must be greater than 1 if interpolation model is used.\nPlease use --interpolateFactor 2 for 2x interpolation!"
