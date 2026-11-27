@@ -17,7 +17,6 @@ from typing import Callable
 
 from PySide6.QtGui import QIcon
 
-from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from sli_ui_toolkit.widgets import Button, Layer
 
 from .state import PreviewCommand, PreviewState
@@ -59,7 +58,9 @@ class ActionSpec:
     #: the keyboard route for the verb (the pane's `WidgetShortcut`; the slider keeps its own arrows).
     shortcut: str | None = None
     variant: str = "surface"
-    #: design px; width 0 lets the toolkit size the button from its content (text buttons)
+    #: DESIGN px, and `icon_size` below too: `Button` resolves both through `scaled_px()` itself, so this file must
+    #: never pre-scale them (the same rule as the shell's `NAV_ICON_PX`, `shell/window.py:73-80`). Width 0 lets the
+    #: toolkit size the button from its content (text buttons).
     size: tuple[int, int] = (0, 30)
     bar: str = TOP
     #: overflow order: the HIGHEST priority survives a narrow pane; lower ones collapse into the "…" menu.
@@ -136,6 +137,11 @@ def build_button(spec: ActionSpec, parent=None, *,
                  extra_layers: list[Layer] | None = None) -> Button:
     """One toolkit Button from one spec. No QSS, no stock widget: the toolkit owns the visuals.
 
+    The spec's `size` and `icon_size` are DESIGN px and are handed to `Button` untouched: the toolkit multiplies them
+    (`setFixedSize(scaled_px(w), scaled_px(h))`, `scaled_px(ctx.region_icon_size_px)`) and re-applies the design values
+    on every `scale_changed`. Pre-scaling here made a 30 px mode button 120 device px at factor 2.0 instead of 60
+    (measured 2026-11-28).
+
     `corner_radii` (design px, tl/tr/br/bl) nests the button into its group capsule; `extra_layers` are the toolkit's
     own paint hooks, used for the checked ring.
 
@@ -149,8 +155,8 @@ def build_button(spec: ActionSpec, parent=None, *,
         text=spec.text,
         toggle=spec.checkable,
         variant=spec.variant,
-        icon_size=scaled_px(spec.icon_size),
-        size=(scaled_px(width) if width else 0, scaled_px(height)),
+        icon_size=spec.icon_size,
+        size=(width, height),
         corner_radii=corner_radii,
         extra_layers=extra_layers,
         parent=parent,

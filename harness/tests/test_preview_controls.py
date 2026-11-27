@@ -50,7 +50,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from sli_ui_toolkit.ui.managers.theme_manager import ThemeManager  # noqa: E402
-from sli_ui_toolkit.ui.managers.ui_scale import scaled_px  # noqa: E402
+from sli_ui_toolkit.ui.managers.ui_scale import UiScale, scaled_px  # noqa: E402
 from sli_ui_toolkit.widgets import Button  # noqa: E402
 
 from src.ui.preview.actions import ACTIONS, actions_for, build_button, enabled_for  # noqa: E402
@@ -646,6 +646,51 @@ def test_the_zoom_group_keeps_its_controls_order_and_geometry(controls):
     assert in_row.index(plate) < in_row.index(controls.overflow_button)
     bottom = [controls.bottom_bar._row.itemAt(index).widget() for index in range(controls.bottom_bar._row.count())]
     assert bottom[:3] == [controls.button("step_back"), controls.button("play"), controls.button("step_forward")]
+
+
+# --- the scale: the catalog's sizes are DESIGN px, resolved exactly once ---------------------------
+
+@pytest.fixture(params=(1.0, 2.0), ids=("scale-1.0", "scale-2.0"))
+def interface_scale(request):
+    """Build under this interface factor, then restore the process-wide singleton (it outlives the test)."""
+    scale = UiScale.get_instance()
+    previous = scale.factor()
+    scale.set_factor(request.param)
+    try:
+        yield request.param
+    finally:
+        scale.set_factor(previous)
+
+
+def test_every_button_resolves_its_design_size_exactly_once(interface_scale):
+    """A preview control's size is its SPEC's size, scaled once by the toolkit - never twice.
+
+    `ActionSpec.size` / `icon_size` are design px, and `Button` multiplies them itself
+    (`setFixedSize(scaled_px(w), scaled_px(h))`, `scaled_px(ctx.region_icon_size_px)`); `build_button` pre-scaled them
+    as well, which was invisible at factor 1.0 and made every preview button twice its size at 2.0 (measured
+    2026-11-28: a 30 px mode button came out 120 device px instead of 60). The assertions are `scaled_px(design)`
+    at BOTH factors, so the 2.0 pass fails on the old code with 120 != 60.
+    """
+    _app()
+    pane = QWidget()
+    pane.resize(1400, 1000)      # the row doubles at 2.0, so give the bar room to hold both capsules
+    pane.show()
+    controls = PreviewControls(pane, pane=pane)
+    controls.set_state(PreviewState(phase=PreviewPhase.READY, duration=20.0, produced=10.0, playhead=4.0))
+
+    for spec in ACTIONS:
+        button = controls.button(spec.id)
+        assert button is not None, spec.id
+        assert button.height() == scaled_px(spec.size[1]), (
+            f"{spec.id} at {interface_scale}: {button.height()} px, expected scaled_px({spec.size[1]})")
+        if spec.size[0]:
+            # A width-0 spec is content-sized by the toolkit (the text buttons), so only its height is pinned.
+            assert button.width() == scaled_px(spec.size[0]), (
+                f"{spec.id} at {interface_scale}: {button.width()} px, expected scaled_px({spec.size[0]})")
+        # The glyph box is design px too: the painter multiplies it (`scaled_px(region_icon_size_px)`), and a
+        # pre-scaled value here doubled the glyph with the button.
+        assert button.property("iconSizePx") == spec.icon_size, (
+            f"{spec.id} at {interface_scale}: icon box {button.property('iconSizePx')}, expected {spec.icon_size}")
 
 
 def test_a_mode_toggle_emits_set_mode_and_keeps_one_checked(controls):
