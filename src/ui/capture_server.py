@@ -36,8 +36,19 @@ trivial and crash-safe (an unparsed request is answered, not mistaken for a page
 timer, so a dialog entered by a verb parks the whole channel, not just the one request: measured 2026-11-27,
 `start:render` clicked into `ProcessTab.run`'s overwrite question and afterwards `state:` and `grab:` timed out too
 while the process still looked alive. The rule is therefore mechanical, not stylistic: a verb that would trigger a
-question asks a non-modal predicate first, refuses with the dialog's own sentence, and lets the caller decide. See
-`start_render_job` / `ProcessTab.would_ask_for_overwrite`.
+question asks a non-modal predicate first, refuses with the dialog's own sentence, and lets the caller decide. The gate
+is at the DISPATCH (`start_press_refusal`), where every verb passes, so a `click:` on the same button is refused too;
+`start_render_job` asks the same predicate for the direct `start:render` path.
+
+Two more rules this file is built around, each owned in one place:
+
+* **A verb's `finished` is the JOB's, never a control's look.** `render:` and `preview:` both complete on
+  `PreviewWatch` - the backend child's exit plus its file - because `ProcessTab.RENDER_CONTROLS` keeps the transport
+  usable in `idle`, `running` AND `paused` (measured 2026-11-25/27: `finished: true` in ~1 s while the job ran 18-20 s).
+* **One answer per request.** `dispatch` pushes the request's id while its handler runs (`_answering_id`), and a verb
+  that answers from a TIMER carries its own id explicitly (`queue`/`render`/`preview`/`capture` take it as an
+  argument). A verb that cannot answer writes a named error - silence is the one thing the contract forbids (measured
+  2026-11-27: `capture:` wrote `done` and no answer at all, and a `queue:` answer landed in another request's file).
 """
 
 from __future__ import annotations
@@ -158,6 +169,33 @@ def _dispatch_safely(dispatch, verb: str, request_id: str | None, path: str) -> 
         dispatch(verb, request_id)
     except Exception as exc:
         print(f"capture-server: {path} ({verb!r}) failed: {type(exc).__name__}: {exc}", flush=True)
+
+
+def split_request_verb(wanted: str, request_id: str | None) -> tuple[str, str | None]:
+    """The verb and its answer id, from the two request forms.
+
+    `requests/<id>` carries the id in the FILE NAME and its content is the verb verbatim (so a `#` inside it, as in
+    `preview:<clip>#model=futsuu`, is the verb's own). The legacy `request` slot carries it inside the text as
+    `verb#<id>`. Parsed BEFORE the handler runs, so the id the answer binds to is the one THIS request carries - the
+    `#` suffix used to be read inside `handle`, after the dispatch had already bound its (empty) answer id.
+    """
+    if request_id is None and "#" in wanted:
+        verb, _, tail = wanted.rpartition("#")
+        return verb.strip(), (tail.strip() or None)
+    return wanted, request_id
+
+
+def _answering_id(state: dict) -> str | None:
+    """The id of the request whose handler is on the stack RIGHT NOW (None for the legacy slot / no handler).
+
+    `dispatch` pushes the id before it runs a verb and pops it after, so a synchronous answer binds to the request that
+    asked - not to "the most recent request", which is a different value the moment a handler pumps the event loop and
+    the next request is dispatched inside it (measured 2026-11-27: a timer that was already due fired inside
+    `QApplication.processEvents()` and the outer handler's answer inherited the newer id). A verb that answers from a
+    TIMER has no handler on the stack when it answers, so it carries its own id in the payload instead.
+    """
+    stack = state.get("dispatching") or []
+    return stack[-1] if stack else None
 
 
 def _general_page(window):
@@ -289,19 +327,21 @@ def start_render_job(window) -> dict:
         report["error"] = "no startRenderButton on this page"
         return report
     # The modal gate. Local import: the channel is also used without a tab (harness scripts), and this is the only verb
-    # that needs the tab's overwrite half.
-    from .ProcessTab import OVERWRITE_QUESTION, overwrite_prompt_path
+    # that needs the tab's overwrite half. The sentence and the shape come from the shared refusal
+    # (`_start_refusal_payload`), so this path and the dispatch gate cannot drift.
+    from .ProcessTab import overwrite_prompt_path
 
     try:
         blocking_output = overwrite_prompt_path(queue)
     except Exception as exc:
         # Never click on an answer we could not read: a refusal is recoverable, a wedged GUI thread is not.
+        report["refused"] = "unreadable_queue"
         report["error"] = (f"could not check the output paths for an overwrite prompt: "
                            f"{type(exc).__name__}: {exc}")
         return report
     if blocking_output is not None:
-        report["error"] = OVERWRITE_QUESTION
-        report["output"] = blocking_output
+        report = _start_refusal_payload(blocking_output, render_state=state, queue_rows=report["queue_rows"],
+                                        kind="job")
         print(f"capture-server: start:render refused, {blocking_output} exists "
               f"(the button would open a modal on the GUI thread)", flush=True)
         return report
@@ -314,6 +354,128 @@ def start_render_job(window) -> dict:
         report["output"] = str(getattr(options, "outputPath", "") or "") or None
     except Exception:
         report["output"] = None
+    return report
+
+
+def _start_button(window):
+    """The queue's Start control, or None when this window has none (a simplified window in a test)."""
+    proc = getattr(getattr(window, "page_handles", None), "proc", None)
+    return getattr(proc, "startRenderButton", None)
+
+
+def _click_target(window, spec: str):
+    """The widget a `click:` spec names - resolved, never clicked (the same `findChild` the verb does)."""
+    from PySide6.QtWidgets import QWidget
+
+    name = (spec or "").partition("@")[0].strip()
+    if not name:
+        return None
+    finder = getattr(window, "findChild", None)
+    if not callable(finder):
+        return None
+    try:
+        return finder(QWidget, name)
+    except Exception:
+        return None
+
+
+def _reaches_start(window, widget) -> bool:
+    """Could a click on `widget` land on the Start control - it IS the button, or one of its ancestors?
+
+    A `click:` names a widget and a point inside it, so a container that holds the button is a press candidate that a
+    point-based rule cannot exclude. Refusing the ancestor is the recoverable side of the error: a false refusal costs
+    one request, a modal on the GUI thread costs every request after it.
+    """
+    button = _start_button(window)
+    if button is None or widget is None:
+        return False
+    if widget is button:
+        return True
+    finder = getattr(widget, "findChild", None)
+    namer = getattr(button, "objectName", None)
+    if not callable(finder) or not callable(namer):
+        return False
+    name = namer()
+    if not name:
+        return False
+    try:
+        return finder(type(button), name) is button
+    except Exception:
+        return False
+
+
+def verb_presses_start(window, verb: str) -> bool:
+    """Would this verb press the render queue's Start control?
+
+    The list is short and mechanical: `start:` (the direct path), `render:` (it presses the same control from its own
+    timer) and `click:` when the named widget can reach the button. Everything else cannot start a job. A verb that is
+    added later is a candidate by NAME here, not by remembering to call a guard.
+    """
+    text = (verb or "").strip()
+    if not text:
+        return False
+    if text.startswith("start:"):
+        action = text[len("start:"):].split("#")[0].strip() or "render"
+        return action in ("render", "start")
+    if text.startswith("render:"):
+        return True
+    if text.startswith("click:"):
+        return _reaches_start(window, _click_target(window, text[len("click:"):]))
+    return False
+
+
+def _start_refusal_payload(output_path: str | None, *, render_state, queue_rows, kind: str) -> dict:
+    """The one shape a refused Start press answers in - the dispatch gate, the deferred press and `start_render_job`."""
+    from .ProcessTab import OVERWRITE_QUESTION
+
+    return {"stamp": _stamp(), "kind": kind, "started": False, "method": None,
+            "render_state": render_state, "queue_rows": queue_rows, "output": output_path,
+            "error": OVERWRITE_QUESTION, "refused": "overwrite"}
+
+
+def start_press_refusal(window, verb: str, *, kind: str | None = None) -> dict | None:
+    """THE modal gate: the answer for a verb whose press would open the overwrite question, or None to let it through.
+
+    Why at the dispatch and not in one verb (measured 2026-11-27): the rule used to live in `start_render_job` alone,
+    so `click:startRenderButton@x,y` - the most natural thing a probe writes - pressed the same button unguarded, ran
+    `ProcessTab.run` synchronously, and parked the GUI thread in `confirm`; every later verb then timed out while the
+    process looked alive. `render:` had the same hole. The gate is asked where EVERY verb passes, and the predicate it
+    asks is the modal's own (`ProcessTab.would_ask_for_overwrite` through `overwrite_prompt_path`) - one predicate, not
+    a second copy of the file test in the channel.
+
+    It answers None when the press cannot open a question: the verb cannot press Start, the render is not idle (the
+    button is then pause/resume and `run()` never runs), or no queued output exists yet. An unreadable queue is a
+    refusal, because a click on an answer we could not read is the wedge this exists to prevent.
+    """
+    if not verb_presses_start(window, verb):
+        return None
+    state = _preview_render_state(window)
+    if state not in (None, "idle"):
+        return None
+    kind = kind or ("click" if (verb or "").strip().startswith("click:") else "job")
+    queue = getattr(window, "renderQueue", None)
+    try:
+        rows = len(queue.getQueue()) if queue is not None else None
+    except Exception:
+        rows = None
+    # Local import: the channel is also used without a tab (harness scripts), and only this gate needs the tab's half.
+    from .ProcessTab import OVERWRITE_QUESTION, overwrite_prompt_path
+
+    try:
+        blocking_output = overwrite_prompt_path(queue)
+    except Exception as exc:
+        report = _start_refusal_payload(None, render_state=state, queue_rows=rows, kind=kind)
+        report["refused"] = "unreadable_queue"
+        report["error"] = (f"could not check the output paths for an overwrite prompt: "
+                           f"{type(exc).__name__}: {exc}")
+        print(f"capture-server: refused {verb.strip()!r}: {report['error']}", flush=True)
+        return report
+    if blocking_output is None:
+        return None
+    report = _start_refusal_payload(blocking_output, render_state=state, queue_rows=rows, kind=kind)
+    report["error"] = OVERWRITE_QUESTION
+    print(f"capture-server: refused {verb.strip()!r}, {blocking_output} exists "
+          f"(the press would open a modal on the GUI thread)", flush=True)
     return report
 
 
@@ -453,6 +615,9 @@ PREVIEW_REFUSAL_GRACE_S = 0.6
 PREVIEW_EXIT_SETTLE_S = 5.0
 #: The verb's whole ceiling: a 4K preview of a long clip is minutes, a wedged job must not hold the channel for ever.
 PREVIEW_TIMEOUT_S = 300.0
+#: The `render:` verb's ceiling: a queue item is a FULL render, minutes to tens of minutes. The old rule allowed
+#: 9000 * 100 ms = 15 min; same number, now enforced by `PreviewWatch` instead of a tick counter.
+RENDER_TIMEOUT_S = 900.0
 #: Exit codes `ProcessTab.guiChangesOnRenderCompletion` itself counts as a finished job (the Windows ncnn fault).
 PREVIEW_OK_CODES = (0, 3221225477)
 
@@ -461,11 +626,13 @@ def preview_output_bytes(path: str) -> int | None:
     """The preview file's size when it is a REAL file with bytes in it - else None (missing, empty, unreadable).
 
     A truncate-then-grow file is the normal shape of a running render, so "exists" is never enough: a zero-byte
-    `_preview.mkv` left by the app's `FileHandler().removeFile()`/an opening writer is not a finished preview.
+    `_preview.mkv` left by the app's `FileHandler().removeFile()`/an opening writer is not a finished preview. A path
+    that is not a path at all (None from a queue row without an output) is the same answer, not an exception: the
+    watcher runs inside a timer, where a raise ends the answer chain.
     """
     try:
         size = os.path.getsize(path)
-    except OSError:
+    except (OSError, TypeError, ValueError):
         return None
     return size if size > 0 else None
 
@@ -569,6 +736,28 @@ def _preview_owner_answer(window):
     }
 
 
+def toast_texts(window) -> list[str]:
+    """Whatever the app is telling the user right now, as text.
+
+    A refusal ("Video is not loaded!", "Please select at least one model!") is delivered as a toolkit toast and reaches
+    nothing else - the app log stays silent, which is why a refused job looked like one that started and vanished. One
+    reader for both verbs (`preview:`, `render:`), so a refusal is quoted the same way wherever it is answered from.
+    """
+    try:
+        from .dialogs.toolkit_dialogs import _toast_manager_for
+
+        manager = _toast_manager_for(window)
+        texts = []
+        for toast in getattr(manager, "_toasts", {}).values():
+            label = getattr(toast, "message_label", None)
+            text = label.text() if label is not None else ""
+            if text:
+                texts.append(str(text))
+        return texts
+    except Exception:
+        return []
+
+
 def preview_state_answer(window) -> dict:
     """The whole preview state in ONE answer: `{snapshot, ticket, epoch, paint, owner}` (plan P5).
 
@@ -612,7 +801,7 @@ def preview_state_answer(window) -> dict:
 
 @dataclass
 class PreviewWatch:
-    """The `preview:` verb's completion rule: the BACKEND CHILD's exit, never the button's look.
+    """The completion rule of a render JOB: the BACKEND CHILD's exit, never the button's look.
 
     Why this is a class and not a closure: the rule it replaces answered `finished: true` in ~1.2 s while the render
     ran 18-20 s and wrote 493 frames (measured three times on 2026-11-25). The transport button is enabled in every
@@ -625,8 +814,13 @@ class PreviewWatch:
     * a refusal is the app's own answer: no child ever appeared, the glue stayed `idle` and the button stayed
       enabled - wait out the spawn and toast windows, then answer with the toast text (never with `finished`).
 
+    Two verbs apply it and only one rule exists: `preview:` (over `TEMP_DOWNLOAD_PATH/<clip>_preview.mkv`) and
+    `render:` (over the queue item's own output path) - the second had the same defect and its own copy of the button
+    rule until 2026-11-27. `what` only names the job in the sentences a failed verdict carries.
+
     Pure on purpose: `tick()` reads a window-like object and the real file, so a fake window/process/button proves
-    the rule offscreen (``harness/tests/test_control_preview_verb.py``) and the verb applies exactly that rule.
+    the rule offscreen (``harness/tests/test_control_preview_verb.py``,
+    ``harness/tests/test_control_verbs_invariants.py``) and the verbs apply exactly that rule.
     """
 
     output_path: str
@@ -637,6 +831,8 @@ class PreviewWatch:
     refusal_grace_s: float = PREVIEW_REFUSAL_GRACE_S
     exit_settle_s: float = PREVIEW_EXIT_SETTLE_S
     timeout_s: float = PREVIEW_TIMEOUT_S
+    #: "preview" or "render" - the job's name in the reason text, nothing else reads it.
+    what: str = "preview"
     seen_child: bool = False
     exited_at: float | None = None
 
@@ -662,15 +858,15 @@ class PreviewWatch:
             completed = state == "idle"
             if size is not None or completed:
                 if code not in PREVIEW_OK_CODES:
-                    return PREVIEW_FAILED, (f"the backend exited with code {code} before the render finished "
-                                            f"(the preview file holds {size or 0} bytes)")
+                    return PREVIEW_FAILED, (f"the backend exited with code {code} before the {self.what} finished "
+                                            f"(the {self.what} file holds {size or 0} bytes)")
                 if size is None and not completed:
-                    return PREVIEW_FAILED, "the backend exited cleanly but wrote no preview file"
+                    return PREVIEW_FAILED, f"the backend exited cleanly but wrote no {self.what} file"
                 return PREVIEW_FINISHED, None
             # Exited, but neither the file nor the app's completion has landed yet: the last bytes are flushed and
             # the hand-over runs after `wait()`, so give them a bounded settle window instead of a verdict now.
             if now - self.exited_at >= self.exit_settle_s:
-                return PREVIEW_FAILED, (f"the backend exited with code {code} and left no preview file at "
+                return PREVIEW_FAILED, (f"the backend exited with code {code} and left no {self.what} file at "
                                         f"{self.output_path}")
             return PREVIEW_PENDING, None
 
@@ -681,7 +877,7 @@ class PreviewWatch:
                 return PREVIEW_REFUSED, None
 
         if elapsed >= self.timeout_s:
-            return PREVIEW_FAILED, "timeout waiting for the preview render to finish"
+            return PREVIEW_FAILED, f"timeout waiting for the {self.what} render to finish"
         return PREVIEW_PENDING, None
 
 
@@ -716,7 +912,9 @@ def install(window) -> None:
     # a page when a request asks for it. The mode decides - never the raw environment again (an empty-but-exported
     # value used to land here as "explicit directory", `Mode` in one place).
     always_on = not channel.walk
-    state = {"warming": not always_on, "index": 0, "request_id": None, "walk_before": None, "empty_since": {}}
+    #: `dispatching` is the stack of request ids whose handlers are running: an answer written from inside a handler
+    #: binds to the request at the top, never to "the latest request" (`_answering_id`).
+    state = {"warming": not always_on, "index": 0, "walk_before": None, "empty_since": {}, "dispatching": []}
 
     if always_on:
         with open(ready_path, "w", encoding="utf-8") as ready_file:
@@ -750,9 +948,21 @@ def install(window) -> None:
         QTimer.singleShot(step, lambda: warm(index + 1))
 
     def dispatch(wanted: str, request_id: str | None = None) -> None:
-        """Dispatch ONE drained request, with its id bound before any handler can answer from a timer."""
-        state["request_id"] = request_id
+        """Dispatch ONE drained request: the modal gate first, then its handler with its id bound for the answers.
+
+        The id is pushed for the whole time the handler runs, so every synchronous `_finish` binds to THIS request
+        (`_answering_id`) - including one written after the handler pumped the event loop and another request was
+        dispatched inside it. A verb that answers from a timer carries the id itself (see `queue`/`render`/`preview`/
+        `capture`), because no handler is on the stack when its timer fires.
+        """
+        wanted, request_id = split_request_verb(wanted, request_id)
+        state["dispatching"].append(request_id)
         try:
+            refusal = start_press_refusal(window, wanted)
+            if refusal is not None:
+                refusal["request_id"] = request_id
+                _finish(refusal)
+                return
             handle(wanted, request_id)
         except Exception as exc:
             # This loop IS the channel, and a handler that raises also skips the reschedule below: one bad verb
@@ -764,6 +974,8 @@ def install(window) -> None:
                          "error": f"{type(exc).__name__}: {exc}"})
             except Exception:
                 pass
+        finally:
+            state["dispatching"].pop()
 
     def poll() -> None:
         if os.path.exists(os.path.join(root, "quit")):
@@ -1187,16 +1399,21 @@ def install(window) -> None:
         _finish(report)
         print(f"capture-server: drag {target}@({x1},{y1})->({x2},{y2}) selected={report['selectedRows']}", flush=True)
 
-    def queue(spec: str) -> None:
+    def queue(spec: str, request_id: str | None = None) -> None:
         """Load a folder into the queue: `queue:<folder-or-file>` - the user's own clicks, without a file dialog.
 
         A repaint artifact cannot be reproduced through `window.grab()` (it re-renders the tree and never reads the
         backing store), so the live app has to be put into the state that shows it: several rows queued, some selected.
+
+        The answer is 0.1-20 s late (the batch probe has to finish), so it carries the id the dispatch handed over: it
+        used to be published under whichever request was current when the timer fired (measured 2026-11-27: the answer
+        for `q1` was written into another request's file, and `answers/q1.json` never appeared).
         """
         import os as _os
 
         path = spec.strip()
-        report = {"stamp": _stamp(), "kind": "queue", "path": path, "error": None, "rows": 0}
+        report = {"stamp": _stamp(), "kind": "queue", "path": path, "error": None, "rows": 0,
+                  "request_id": request_id}
         if not _os.path.exists(path):
             report["error"] = "path does not exist"
             _finish(report)
@@ -1216,6 +1433,16 @@ def install(window) -> None:
         _output_path.show_path(window.page_handles.general, _os.path.join(out, "verb-queue.mkv"))
 
         def add(ticks: int = 0) -> None:
+            try:
+                _add(ticks)
+            except Exception as exc:
+                # A timer callback is outside `dispatch`'s try/except: an exception here used to end the chain with
+                # the request unanswered. A named error is an answer, silence is not.
+                report["error"] = f"{type(exc).__name__}: {exc}"
+                _finish(report)
+                print(f"capture-server: queue {path} failed: {report['error']}", flush=True)
+
+        def _add(ticks: int) -> None:
             probe = getattr(window, "_batchProbe", None)
             if probe is not None and probe.isRunning() and ticks < 200:
                 QTimer.singleShot(100, lambda: add(ticks + 1))
@@ -1466,12 +1693,9 @@ def install(window) -> None:
     def handle(wanted: str, request_id: str | None = None) -> None:
         # The legacy single file carries its id inside the verb (`state:x#abc`); a file under `requests/<id>`
         # carries it in its NAME, and its content is a verb verbatim (so `preview:<clip>#model=futsuu` keeps its
-        # own `#`). `drain_requests` passes the two forms differently and they must not be confused.
-        if request_id is None and "#" in wanted:
-            wanted, _, request_id = wanted.rpartition("#")
-            wanted = wanted.strip()
-            request_id = request_id.strip() or None
-        state["request_id"] = request_id
+        # own `#`). `dispatch` parses the legacy form before it binds the answer id; the split stays here too so a
+        # direct call (a test, a future caller) cannot answer under a different id than the one it was given.
+        wanted, request_id = split_request_verb(wanted, request_id)
         if wanted.startswith("probe:"):
             probe(wanted[len("probe:"):])
             return
@@ -1621,7 +1845,7 @@ def install(window) -> None:
             release(wanted[len("release:"):])
             return
         if wanted.startswith("queue:"):
-            queue(wanted[len("queue:"):])
+            queue(wanted[len("queue:"):], request_id)
             return
         if wanted.startswith("start:"):
             start_job(wanted[len("start:"):].strip())
@@ -1643,10 +1867,10 @@ def install(window) -> None:
             _finish({"stamp": _stamp(), "kind": "stack", "path": path})
             return
         if wanted.startswith("render:"):
-            render(wanted[len("render:"):].strip())
+            render(wanted[len("render:"):].strip(), request_id)
             return
         if wanted.startswith("preview:"):
-            preview(wanted[len("preview:"):].strip())
+            preview(wanted[len("preview:"):].strip(), request_id)
             return
         error = page_request_error(wanted, by_name)
         if error is not None:
@@ -1655,18 +1879,25 @@ def install(window) -> None:
             _finish({"stamp": _stamp(), "kind": "error", "error": error})
             print(f"capture-server: rejected {wanted!r}: {error}", flush=True)
             return
-        capture(wanted)
+        capture(wanted, request_id)
 
     def _finish(payload: dict) -> None:
-        payload.setdefault("request_id", state.get("request_id"))
-        """Publish an answer. `done` is the mailbox every older caller reads; `answers/<id>.json` is the race-free one.
+        """Publish an answer for exactly one request. `done` is the mailbox every older caller reads; `answers/<id>.json`
+        is the race-free one.
 
         One shared `done` file loses answers when two requests overlap: the waiter sees a payload of the wrong kind,
         deletes it, and then waits for an answer that was already consumed - which looks exactly like the app hanging
         (measured 2026-11-22: the owner closed the app while a probe client sat on that wait). The request may carry an
         id as `verb#<id>`; the answer is then also written to `answers/<id>.json`, and a client that knows its id never
         reads anybody else's reply.
+
+        The id comes from the payload first - a verb that answers from a timer binds it at dispatch - and only then from
+        the handler on the stack (`_answering_id`). It is never taken from a shared "current request" slot: that is how
+        a `queue:` answer was written into a `state:` probe's file (measured 2026-11-27). A payload that carries
+        `request_id: None` explicitly (a legacy request with no id) keeps None: an explicit None is an answer too.
         """
+        if "request_id" not in payload:
+            payload["request_id"] = _answering_id(state)
         answers_dir = os.path.join(root, "answers")
         request_id = payload.get("request_id")
         if request_id:
@@ -1734,19 +1965,30 @@ def install(window) -> None:
                     break
         combo.setCurrentIndex(best)
 
-    def render(video: str) -> None:
-        """Queue and START a render through the same controls the user presses.
+    def render(video: str, request_id: str | None = None) -> None:
+        """Queue and START a render through the same controls the user presses, and answer the JOB's outcome.
 
         Staged polling, not sleeps: the input field's `textChanged` runs `loadVideo`, which probes the file and can take
         seconds; pressing "Add to Render Queue" before that finishes leaves the queue empty (measured - the first
         version used a fixed 1.2 s delay and answered "the queue stayed empty").
+
+        **`finished` is the job's, not the button's** (measured 2026-11-27, and the same defect `preview:` had on
+        2026-11-25): the old rule was `startRenderButton.isEnabled() and started`, and `ProcessTab.RENDER_CONTROLS`
+        keeps that button usable in `idle`, `running` AND `paused`, so a click that did nothing - or a job that had
+        just begun - answered `finished: true` in 250-800 ms with no output and `harness/scripts/ui_render_gate.py`
+        failed every real render. The verb now applies `PreviewWatch` (the one completion rule) over the queue item's
+        own output path: FINISHED needs the backend child's exit plus its file or the app's completion, REFUSED is the
+        app's own refusal, and a failed job answers its exit code.
         """
         stamp = _stamp()
         result = {"stamp": stamp, "kind": "render", "video": video, "backend": None, "queued": 0, "started": False,
                   "finished": False, "seconds": 0.0, "output": None, "error": None}
-        # This verb answers from timers, seconds after the request: bind the answer's id now (see `preview`).
-        result["request_id"] = state.get("request_id")
+        # This verb answers from timers, seconds after the request: bind the answer's id HERE, from the argument the
+        # dispatch handed over (never from a shared slot a later request would own by answer time).
+        result["request_id"] = request_id
         started_at = time.time()
+        watch: PreviewWatch | None = None
+        seen_toasts: list[str] = []
 
         def output_of_last_item() -> str | None:
             queue = getattr(window.renderQueue, "queue", []) or []
@@ -1759,11 +2001,18 @@ def install(window) -> None:
                     return str(value)
             return None
 
+        def remember_toasts() -> list[str]:
+            for text in toast_texts(window):
+                if text not in seen_toasts:
+                    seen_toasts.append(text)
+            return seen_toasts
+
         def finish(error: str | None = None) -> None:
             result["seconds"] = round(time.time() - started_at, 1)
             result["queued"] = len(getattr(window.renderQueue, "queue", []) or [])
             result["backend"] = backend_of()
-            result["output"] = output_of_last_item()
+            if result.get("output") is None:
+                result["output"] = output_of_last_item()
             if result["output"] and os.path.exists(result["output"]):
                 result["output_bytes"] = os.path.getsize(result["output"])
             if error:
@@ -1801,17 +2050,42 @@ def install(window) -> None:
         def wait_finish(ticks: int = 0) -> None:
             if ticks % 50 == 0:                  # one sample every 5 s, so 15 per minute of a long model load
                 result.setdefault("trace", []).append({"t": round(time.time() - started_at, 1), **progress_sample()})
-            if window.page_handles.proc.startRenderButton.isEnabled() and result["started"]:
+            remember_toasts()
+            verdict, reason = watch.tick(window) if watch is not None else (
+                PREVIEW_FAILED, "nothing was pressed: the queue stayed empty")
+            if verdict == PREVIEW_FINISHED:
                 result["finished"] = True
                 finish()
                 return
-            if ticks > 9000:                     # 9000 * 100 ms = 15 min
-                finish("timeout waiting for the render to finish")
+            if verdict == PREVIEW_REFUSED:
+                # No child ever appeared and the glue stayed idle: the app refused the press, and its own toast is
+                # the reason. `started` goes back to false because nothing ran - this is the answer that used to be
+                # `finished: true` (the 250-800 ms lie).
+                result["started"] = False
+                why = "; ".join(remember_toasts()) or "no toast was shown"
+                finish(f"the app refused the render: {why}")
+                return
+            if verdict == PREVIEW_FAILED:
+                finish(reason or "the render failed")
                 return
             QTimer.singleShot(100, lambda: wait_finish(ticks + 1))
 
         def press_start(ticks: int = 0) -> None:
+            nonlocal watch
             if len(getattr(window.renderQueue, "queue", []) or []) > 0:
+                # The same modal gate the dispatch applies, asked again HERE: this press is deferred, and the queue
+                # row it renders is added by `press_add` above - so the dispatch could not see the output path yet.
+                refusal = start_press_refusal(window, "start:render")
+                if refusal is not None:
+                    result["started"] = False
+                    result["refused"] = refusal.get("refused")
+                    result["output"] = refusal.get("output")
+                    finish(refusal.get("error"))
+                    return
+                # The completion rule: the backend child's exit over the queue item's OWN output path (F1).
+                watch = PreviewWatch(output_of_last_item() or "", time.monotonic(), timeout_s=RENDER_TIMEOUT_S,
+                                     what="render")
+                watch.previous_child = _preview_child(window)
                 result["started"] = True
                 window.page_handles.proc.startRenderButton.click()
                 QTimer.singleShot(250, wait_finish)
@@ -1840,7 +2114,7 @@ def install(window) -> None:
         window.page_handles.general.inputFileText.setText(video)
         QTimer.singleShot(300, wait_loaded)
 
-    def preview(video: str) -> None:
+    def preview(video: str, request_id: str | None = None) -> None:
         """START the preview render the Render Preview button starts (`RenderOptions.isPreview = True`).
 
         `render:` cannot reach the LMB compare: a plain render leaves the preview pane empty, so pressing LMB compares
@@ -1858,11 +2132,11 @@ def install(window) -> None:
         result = {"stamp": _stamp(), "kind": "preview", "video": video, "started": False, "finished": False,
                   "seconds": 0.0, "output": None, "pane": None, "output_bytes": None, "error": None,
                   "toasts": [], "model": None}
-        # Bind the answer to THIS request now: `_finish` publishes under the id it is given, and the verb answers
-        # seconds later from a timer. Without this, a request that arrived meanwhile claims the preview's answer and
-        # the caller sees a payload of the wrong kind (measured 2026-11-23: `preview:` answered "widget not found",
-        # which belonged to a `state:` probe).
-        result["request_id"] = state.get("request_id")
+        # Bind the answer to THIS request now, from the argument the dispatch handed over: `_finish` publishes under
+        # the id it carries, and the verb answers seconds later from a timer. Without this, a request that arrived
+        # meanwhile claims the preview's answer and the caller sees a payload of the wrong kind (measured 2026-11-23:
+        # `preview:` answered "widget not found", which belonged to a `state:` probe).
+        result["request_id"] = request_id
         started_at = time.time()
         expected = os.path.join(TEMP_DOWNLOAD_PATH, f"{os.path.basename(video)}_preview.mkv")
 
@@ -1889,35 +2163,19 @@ def install(window) -> None:
                     "progress": list(getattr(pane, "_progress", ()) or ())}
 
         def render_process():
-            """The backend child lives on the ProcessTab, NOT on the window.
+            """The backend child lives on the ProcessTab: one reader for both verbs (`_preview_child`)."""
+            return _preview_child(window)
 
-            The first refusal check read `window.renderProcess`, which does not exist - so `getattr(..., None)` was
-            always None and a legitimate render was declared a refusal (measured 2026-11-23 22:05: a 12 s clip
-            rendered 300 frames in ~14 s while the verb answered "the app refused the preview").
-            """
-            tab = getattr(window, "processTab", None)
-            return getattr(tab, "renderProcess", None) if tab is not None else None
+        #: Toasts are transient (`timeout=1500`); a refusal may be answered after the spawn grace, so every poll
+        #: remembers what the app said instead of reading only the (possibly expired) live set at the end. One reader
+        #: (`toast_texts`), shared with `render:`.
+        seen_toasts: list[str] = []
 
-        def toast_texts() -> list:
-            """Whatever the app is telling the user right now.
-
-            A refusal ("Video is not loaded!", "End time must be greater than start time!", "Please select at least
-            one model!") is delivered as a toolkit toast and reaches nothing else - the app log stays silent, which is
-            why a refused preview looked like a job that started and vanished.
-            """
-            try:
-                from .dialogs.toolkit_dialogs import _toast_manager_for
-
-                manager = _toast_manager_for(window)
-                texts = []
-                for toast in getattr(manager, "_toasts", {}).values():
-                    label = getattr(toast, "message_label", None)
-                    text = label.text() if label is not None else ""
-                    if text:
-                        texts.append(str(text))
-                return texts
-            except Exception:
-                return []
+        def remember_toasts() -> list[str]:
+            for text in toast_texts(window):
+                if text not in seen_toasts:
+                    seen_toasts.append(text)
+            return seen_toasts
 
         def finish(error: str | None = None) -> None:
             result["seconds"] = round(time.time() - started_at, 1)
@@ -1936,17 +2194,8 @@ def install(window) -> None:
         #: The completion rule the verb applies - the backend child's exit, never the button's look. It is a
         #: module-level object so the offscreen test proves the very rule a live run obeys. It runs on the MONOTONIC
         #: clock (the wall clock jumps; a verdict must not), while `started_at` above stays the wall clock `seconds`
-        #: is reported from.
+        #: is reported from. `render:` applies the SAME object; there is no second watcher.
         watch = PreviewWatch(expected, time.monotonic())
-        #: Toasts are transient (`timeout=1500`); a refusal may be answered after the spawn grace, so every poll
-        #: remembers what the app said instead of reading only the (possibly expired) live set at the end.
-        seen_toasts: list[str] = []
-
-        def remember_toasts() -> list[str]:
-            for text in toast_texts():
-                if text not in seen_toasts:
-                    seen_toasts.append(text)
-            return seen_toasts
 
         def wait_finish() -> None:
             remember_toasts()
@@ -2010,7 +2259,15 @@ def install(window) -> None:
         window.page_handles.general.inputFileText.setText(video)
         QTimer.singleShot(300, wait_loaded)
 
-    def capture(wanted: str) -> None:
+    def capture(wanted: str, request_id: str | None = None) -> None:
+        """Photograph pages: a page list, `all`, or the empty verb. ALWAYS answers the request that asked.
+
+        The verb used to write only the legacy `done` mailbox, so a client that published `requests/<id>` - the
+        race-free form this file recommends - waited for `answers/<id>.json` that never existed while the PNGs were
+        written (measured 2026-11-27: `done written: True | answers/cap1.json: False | photographed: ['nav1']`).
+        `done` is still written (`ui_live.py shot` reads `stamp` and `pages` from it); the answer is the same payload
+        bound to its id.
+        """
         names = list(by_name) if wanted in {"", "all"} else [part.strip() for part in wanted.split(",") if part.strip()]
         unknown = [name for name in names if name not in by_name]
         for name in unknown:
@@ -2037,10 +2294,8 @@ def install(window) -> None:
             pixmap.save(os.path.join(out_dir, f"{name}.png"))
             layout_dump.write_page(window, name, out_dir=out_dir)
             print(f"capture-server: {name} -> {out_dir}", flush=True)
-        tmp = done_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as done_file:
-            json.dump({"stamp": stamp, "pages": names}, done_file)
-        os.replace(tmp, done_path)
+        _finish({"stamp": stamp, "kind": "capture", "pages": names, "unknown": unknown, "dir": out_dir,
+                 "request_id": request_id, "error": None if names else f"no page captured (asked for {wanted!r})"})
 
     if not always_on:
         # The walk belongs to the capture mode only. Scheduled unconditionally, it walked every page forty seconds
