@@ -681,7 +681,12 @@ def test_the_run_report_rows_are_labelled_with_the_report_file(tmp_path):
     assert report_rows["Statistic"].value == "median"
     assert report_rows["Quality preset"].value == "best"
     assert report_rows["int8 fit"].value == "fp16"
-    assert "frame 35.1" in report_rows["Phases (ms/frame)"].value
+    # The per-phase averages are no longer a row: they became the speed chart's tooltip (the curve replaces the row),
+    # and this report predates `fps_series`, so the section says the curve is missing instead of drawing one.
+    assert "Phases (ms/frame)" not in report_rows
+    assert report_rows["Processing speed"].value == ""
+    assert report_rows["Processing speed"].display_value == properties_module.EM_DASH
+    assert "speed series" in report_rows["Processing speed"].reason
 
 
 def test_without_a_report_the_report_rows_are_em_dashes_with_the_reason(tmp_path):

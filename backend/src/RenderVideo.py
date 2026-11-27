@@ -32,6 +32,7 @@ from .utils.Encoders import EncoderSettings
 from .utils.SceneDetect import SceneDetect
 from .utils.Util import log, resize_frame_bytes, guard_render_thread, process_uptime
 from .utils.LogPolicy import JobPhases, ProgressLimiter, LEVEL_DEBUG
+from .utils.FpsSeries import MAX_POINTS as MAX_FPS_POINTS, fps_series, sample_stride
 from .utils.BorderDetect import BorderDetect, cache_location
 from .utils.VideoInfo import OpenCVInfo
 from .utils.DisplayChannel import (
@@ -1171,6 +1172,40 @@ class Render:
         frame.set_frame_tensor(corrected, sync=False)
         return frame
 
+    def _sample_fps(self, frames_rendered: int, final: bool = False) -> None:
+        """Append one ``(output frame, seconds)`` point to the run's speed series.
+
+        Called once per rendered frame at most: the stride (``totalOutputFrames // 240``) decides whether this call
+        stores anything, so a whole run costs ~240 appends. The clock is read ONLY when a sample is actually taken -
+        one ``perf_counter()`` per sample, never one per frame - and the append itself is one tuple, which is far
+        below the millisecond timings this loop already measures around it.
+
+        ``final`` forces the last point in: the run's end is where a curve is most informative (the writer draining),
+        and it is never on a stride boundary.
+        """
+        prof = getattr(self, "_profile", None)
+        if prof is None:
+            return
+        samples = prof.get("fps_samples")
+        if samples is None:  # a profile built by something that did not opt into the series
+            return
+        try:
+            stride = max(1, int(prof.get("fps_stride") or 1))
+        except (TypeError, ValueError):
+            stride = 1
+        if samples and int(frames_rendered) - samples[-1][0] < stride and not final:
+            return
+        if samples and int(frames_rendered) == samples[-1][0]:
+            return  # the final point is already stored under this frame number
+        if len(samples) >= MAX_FPS_POINTS:
+            # The run outlived the frame estimate the stride was cut from: widen the window rather than grow the list.
+            prof["fps_stride"] = stride * 2
+        now = _perf_counter()
+        origin = prof.get("fps_origin")
+        if origin is None:
+            prof["fps_origin"] = origin = now
+        samples.append((int(frames_rendered), now - origin))
+
     def _run_report(self) -> dict:
         """What ran, on what, and what each stage cost - the machine-readable twin of the log summary."""
         from .utils.Provenance import stamp
@@ -1186,7 +1221,7 @@ class Render:
                                             "conv", "pack", "read", "frame")}
         named = sum(prof.get(k, 0.0) for k in ("gate", "up_wall", "read", "pack")) / n
         phases["unaccounted"] = round(prof.get("frame", 0.0) / n - named, 3) if prof.get("frames") else None
-        return {
+        report = {
             "provenance": stamp(".", model=self.upscaleModel),
             "run": {"input": getattr(self, "inputFile", None), "output": getattr(self, "outputFile", None),
                     "backend": getattr(self, "backend", None), "model": self.upscaleModel,
@@ -1220,6 +1255,13 @@ class Render:
                 "stats": auto.stats() if hasattr(auto, "stats") else None,
             },
         }
+        # The run's SPEED over time, not its average: the Properties window paints this curve instead of the
+        # phase averages (which now ride on the chart's tooltip). Omitted entirely for a run that stored no
+        # samples - the window says why rather than drawing an empty chart.
+        series = fps_series(prof)
+        if series is not None:
+            report["fps_series"] = series
+        return report
 
     def _write_run_report(self) -> None:
         if not self.reportPath:
@@ -1624,6 +1666,7 @@ class Render:
                     # The reader is drained; the writer may still be flushing. Say so instead of leaving
                     # "Rendering" on the pane until the process exits.
                     self._write_status(frames_rendered, phase=PHASE_FINALISING)
+                    self._sample_fps(frames_rendered, final=True)
                     break
 
                 for extraRestoration in self.extraRestorationModels:
@@ -1666,7 +1709,12 @@ class Render:
                                      # the three stages the old line did NOT name, which is why the
                                      # frame total sat above its own parts by 6.2 ms on 2026-11-18
                                      # (rve-frame-accounting-2026-11-19)
-                                     "up_wall": 0.0, "pack": 0.0}
+                                     "up_wall": 0.0, "pack": 0.0,
+                                     # the run's speed curve (`utils.FpsSeries`): sparse samples and the
+                                     # clock they are measured from - the profile's start, so the first
+                                     # window has a real span instead of a zero-length one.
+                                     "fps_samples": [], "fps_origin": _t_frame,
+                                     "fps_stride": sample_stride(getattr(self, "totalOutputFrames", 0))}
                 _t_gate = _perf_counter()
                 if self.upscaleModel:
                     # during auto calibration every frame is rendered: otherwise the tuner only
@@ -1809,6 +1857,8 @@ class Render:
                 # Once per rendered frame: the counters, ETA and FPS the pane shows, beside the log line
                 # the information thread keeps printing (the slot never replaces it).
                 self._write_status(frames_rendered)
+                # The speed curve's sparse point for this frame (one tuple per `fps_stride` frames).
+                self._sample_fps(frames_rendered)
                 if not hasattr(self, "_t_first_frame"):
                     self._t_first_frame = _time.time()
                     if self._phases.first("first-frame"):
