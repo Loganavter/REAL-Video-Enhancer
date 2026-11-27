@@ -329,8 +329,13 @@ class VideoPreviewSurface(QRhiWidget):
         return None
 
     def source_half_frame_s(self) -> float:
-        """Half the pane's own result cadence: the largest source distance that is still the same picture."""
+        """Half the pane's own result cadence: the largest source distance that is still THE SAME picture.
+
+        Deliberately half a frame - the committed pair's halves must name one moment. The live-render gap (the decoder
+        answers at-or-before, so it sat a whole frame behind) is fixed at the ASK, not by widening this bound.
+        """
         return 0.5 * max(1e-3, float(self._result_frame_seconds))
+
 
     def _refuse_result(self, moment: float | None, generation: int, reason: str) -> None:
         """Keep the last picture, mark the half as a GAP, and say why. Nothing is offered for a refused result."""
@@ -664,7 +669,7 @@ class VideoPreviewSurface(QRhiWidget):
             same_generation = int(snapshot.generation) == int(self._result_generation) if snapshot is not None else False
             if snapshot is not None and not same_generation:
                 snapshot = None
-            elif snapshot is not None and moment is not None and abs(float(snapshot.moment) - float(moment)) > self.source_half_frame_s():
+            elif snapshot is not None and moment is not None and abs(float(snapshot.moment) - float(moment)) > self.source_half_frame_s() + 1e-9:
                 snapshot = None
         self._apply_source_picture(snapshot)
 

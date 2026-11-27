@@ -53,6 +53,18 @@ def sync_compare_source(tab) -> None:
     if register is not None:
         snapshot = register.picture_for(moment, tab._source_tolerance(),
                                         generation=int(getattr(tab, "_result_generation", 0)))
+        if snapshot is None:
+            # WHICH filter refused it, at level 1: a hold with 24 pictures in the register and no line saying whether
+            # the generation or the tolerance was the gate is how the 2026-11-27 defect stayed unattributed for hours.
+            why = getattr(register, "last_refusal", None)
+            if why:
+                try:
+                    from ...video import telemetry
+
+                    if telemetry.level() >= 1:
+                        telemetry.event("compare gap", **{k: v for k, v in why.items() if v is not None})
+                except Exception:
+                    pass
     setter = getattr(pane, "set_source", None)
     if callable(setter):
         setter(snapshot)

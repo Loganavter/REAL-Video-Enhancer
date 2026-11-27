@@ -66,6 +66,8 @@ class SourceRegister:
         # The moment somebody last ASKED for (the pane's own, via `picture_for`). Eviction is measured from here, not
         # from "newest": see `offer`.
         self._anchor: float | None = None
+        #: Why the last `picture_for` answered nothing (`{"why": "generation"|"tolerance"|"empty", ...}`), or None.
+        self.last_refusal: dict | None = None
 
     # -- writing ---------------------------------------------------------
 
@@ -164,16 +166,49 @@ class SourceRegister:
         wanted_generation = None if generation is None else int(generation)
         best: SourcePicture | None = None
         best_distance: float | None = None
+        #: Why the last lookup answered nothing, for the instrument: a hold that cannot say which filter refused it
+        #: leaves the next reader guessing (2026-11-27: 24 pictures held, every result held, and no line said whether
+        #: the generation or the tolerance was the gate).
+        nearest_any: SourcePicture | None = None
+        nearest_any_distance: float | None = None
+        nearest_same_generation: SourcePicture | None = None
+        nearest_same_generation_distance: float | None = None
         for key in sorted(self._held):
             held = self._held[key]
+            distance = abs(float(held.moment) - moment)
+            if nearest_any_distance is None or distance < nearest_any_distance:
+                nearest_any, nearest_any_distance = held, distance
             if wanted_generation is not None and int(held.generation) != wanted_generation:
                 continue
-            distance = abs(float(held.moment) - moment)
-            if distance > tolerance:
+            if nearest_same_generation_distance is None or distance < nearest_same_generation_distance:
+                nearest_same_generation, nearest_same_generation_distance = held, distance
+            # A tolerance written as `1.0 / fps` and a moment subtracted in floats land a hair over it (2.0 - 1/24 is
+            # 0.04166666666666674 from 2.0 against a 0.041666666666666664 bound) - an exact one-frame answer must not
+            # be refused by the last bit of a double.
+            if distance > tolerance + 1e-9:
                 continue
             if best_distance is None or distance < best_distance or (
                     distance == best_distance and held.moment > best.moment):
                 best, best_distance = held, distance
+        if best is None:
+            if nearest_same_generation is None and nearest_any is not None:
+                reason = "generation"
+            elif nearest_same_generation is not None:
+                reason = "tolerance"
+            else:
+                reason = "empty"
+            self.last_refusal = {
+                "why": reason,
+                "wanted": round(float(moment), 3),
+                "tolerance": round(float(tolerance), 4),
+                "wanted_generation": wanted_generation,
+                "nearest_moment": None if nearest_any is None else round(float(nearest_any.moment), 3),
+                "nearest_generation": None if nearest_any is None else int(nearest_any.generation),
+                "nearest_distance": None if nearest_any_distance is None else round(nearest_any_distance, 4),
+                "held": len(self._held),
+            }
+        else:
+            self.last_refusal = None
         return best
 
     def owner_of(self, moment: float, generation: int | None = None) -> str | None:

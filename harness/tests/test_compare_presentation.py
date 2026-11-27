@@ -105,3 +105,39 @@ def test_the_asked_moment_survives_a_fill_ahead_of_it():
         register.offer(step, _picture(int(step * 10)), "decoder")
 
     assert register.picture_for(10.0, 0.02) is asked, "the cache dropped the answer it was being asked for"
+
+
+def test_a_miss_names_the_filter_that_refused_it():
+    """A hold must be attributable: the generation and the tolerance are different bugs with different fixes."""
+    register = SourceRegister(capacity=8)
+    register.offer(6.298, _picture(1), "block", generation=3)
+
+    assert register.picture_for(1.585, 0.02, generation=4) is None
+    refusal = register.last_refusal
+    assert refusal["why"] == "generation", refusal
+    assert refusal["nearest_moment"] == 6.298 and refusal["nearest_generation"] == 3
+
+    register.offer(1.60, _picture(2), "block", generation=4)
+    assert register.picture_for(1.585, 0.01, generation=4) is None
+    assert register.last_refusal["why"] == "tolerance", register.last_refusal
+
+
+def test_a_hit_clears_the_refusal():
+    register = SourceRegister(capacity=8)
+    register.offer(1.0, _picture(1), "decoder")
+    assert register.picture_for(1.0, 0.02) is not None
+    assert register.last_refusal is None
+
+
+def test_a_source_one_frame_behind_is_the_same_picture_and_two_are_not():
+    """The grid error of an at-or-before producer is [0, 1) frame; half a frame refused every answer (2026-11-27)."""
+    frame = 1.0 / 24.0
+    register = SourceRegister(capacity=8)
+    register.offer(2.0 - frame, _picture(1), "decoder")
+
+    assert register.picture_for(2.0, 1.0 * frame) is not None, "one frame behind is the same moment's picture"
+    assert register.picture_for(2.0, 0.5 * frame) is None, "half a frame cannot contain the producer's grid error"
+
+    far = SourceRegister(capacity=8)
+    far.offer(2.0 - 2 * frame, _picture(3), "decoder")
+    assert far.picture_for(2.0, 1.0 * frame) is None, "two frames is a different moment"

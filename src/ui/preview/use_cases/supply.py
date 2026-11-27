@@ -205,5 +205,12 @@ def warm_source_decoder(tab) -> None:
 
 
 def source_tolerance(tab) -> float:
-    """Half a frame: the largest distance at which two moments are still the same picture."""
+    """Half a source frame: the largest distance at which a decoded picture is THE SAME picture.
+
+    Kept at half a frame deliberately - the committed pair's halves must name one moment. The one-frame gap that made
+    every source un-matchable during a live render is fixed at the ASK (the half-frame bias in the caller), not by
+    widening this bound: measured live 2026-11-27, `compare gap why=tolerance nearest_distance=0.041` (exactly one
+    frame) against `tolerance=0.0209`.
+    """
     return 0.5 / max(1.0, tab._compare_fps())
+
