@@ -1,9 +1,9 @@
 # The Logs block: emitter audit and policy
 
 The Logs tab (`src/ui/pages/tab_5.py` -> `ConsoleView`) is a **pure consumer**. `ProcessTab.renderToPipeThread`
-reads the backend child's merged stdout/stderr line by line (`src/ui/ProcessTab.py:1874`), runs every line through
+reads the backend child's merged stdout/stderr line by line (`src/ui/ProcessTab.py:1842`), runs every line through
 `src/ui/render_log.py:RenderLogFilter`, and appends what survives to `renderLogLines`; `syncRenderConsole`
-(`src/ui/ProcessTab.py:3706`) paints them. The app's own `src/Util.log()` writes `log.txt`, not the block. So a
+(`src/ui/ProcessTab.py:3675`) paints them. The app's own `src/Util.log()` writes `log.txt`, not the block. So a
 policy for the block belongs at the backend emitters, and that is where this change puts it.
 
 One shared module, `backend/src/utils/LogPolicy.py`, is imported by both processes (`src/Util.py` loads it by path
@@ -37,40 +37,40 @@ frame/body call; **250f** = every 250 rendered frames.
 
 | line | what it prints | frequency | level now |
 |---|---|---|---|
-| 89/101 | `borders: ...` / machine `BORDERS ...` record | job | info |
+| 90/102 | `borders: ...` / machine `BORDERS ...` record | job | info |
 | 278/281/285 | working directory, invalid input | job | info |
-| 325 | **new** `phase: video probe N ms (WxH, frames, fps)` | job | info |
+| 326 | **new** `phase: video probe N ms (WxH, frames, fps)` | job | info |
 | 326/348/351 | 10-bit / 8-bit pipe decisions | job | info |
-| 396 | `Detecting borders` | job | info |
-| 408 | `Detected borders: ...` | job | info |
-| 418 | `Using backend: ...` | job | info |
-| 427 | **new** `phase: model load upscale '<name>' N ms` | job | info |
-| 429 | `Using Upscaling Model: ...` | job | info |
-| 441/444 | `Using Extra Restoration Model` + **new** `phase: model load restoration '<name>' N ms` | job, per model | info |
-| 451/453 | **new** `phase: model load interpolation '<name>' N ms` + `Using Interpolation Model` | job | info |
-| 457 | `debug: after hotReload ...` (was `DEBUG after hotReload`) | job | **debug** |
+| 397 | `Detecting borders` | job | info |
+| 409 | `Detected borders: ...` | job | info |
+| 419 | `Using backend: ...` | job | info |
+| 428 | **new** `phase: model load upscale '<name>' N ms` | job | info |
+| 430 | `Using Upscaling Model: ...` | job | info |
+| 442/445 | `Using Extra Restoration Model` + **new** `phase: model load restoration '<name>' N ms` | job, per model | info |
+| 452/454 | **new** `phase: model load interpolation '<name>' N ms` + `Using Interpolation Model` | job | info |
+| 458 | `debug: after hotReload ...` (was `DEBUG after hotReload`) | job | **debug** |
 | 423-430 | override/model scale/config lines | job | info |
-| 515 | **new** `phase: reader open N ms` | job | info |
-| 555 | **new** `phase: writer/encoder init N ms` | job | info |
+| 516 | **new** `phase: reader open N ms` | job | info |
+| 556 | **new** `phase: writer/encoder init N ms` | job | info |
 | 519-545 | display / seek channel setup | job | info |
 | 573-635 | reuse gate, auto-gate and correction config | job | info |
-| 786 | **new** `phase: backend init N ms (backend, device, precision); N s since process start` | job | info |
+| 787 | **new** `phase: backend init N ms (backend, device, precision); N s since process start` | job | info |
 | 725-730 | tile probe stats / reason / failure | job | info |
 | 764-779 | int8 probe stats / verdict / failure | job | info |
 | 839/976/987/1001/1010/1021 | auto-gate calibration and tuner summaries | job | info |
 | 1042/1046/1374/1382 | reuse/correction/calibration failures | job (on failure) | info |
 | 1115/1117 | run report written / failed | job | info |
 | 1165/1226/1232/1252/1254 | seek request/preview lines | req | info |
-| 1788 | `startup: first frame enqueued N s after process start` | job (guarded by `JobPhases`) | info |
-| 1796 | `reuse: ...` progress | 250f, **now rate-limited to <=1/s** | info |
-| 1822 | `render loop: N s for M frames (N ms/frame), total ...` | job (guarded) | info |
+| 1815 | `startup: first frame enqueued N s after process start` | job (guarded by `JobPhases`) | info |
+| 1823 | `reuse: ...` progress | 250f, **now rate-limited to <=1/s** | info |
+| 1852 | `render loop: N s for M frames (N ms/frame), total ...` | job (guarded) | info |
 | 1465/1467/1487/1503 | temporal-reuse, tuner, tile and seek-reader summaries | job | info |
-| 1834 | `profile over N frames: gate ... model wall ... unaccounted ...` | job | **debug** |
+| 1864 | `profile over N frames: gate ... model wall ... unaccounted ...` | job | **debug** |
 | 1512 | pyinstrument dump (inside a `"""` block, dead) | never | - |
-| 1938/1946/2051 | `Setting up ...` | job | info |
+| 2047/2055/2160 | `Setting up ...` | job | info |
 | 1611/1617 | int8 calibration frames / forced fit | job | info |
 | 1637/1648/1651 | determinism diagnostics (`RVE_DIAG_*`) | job, env-gated | info |
-| 2024 | `debug: after assign ...` (was `DEBUG after assign`) | job | **debug** |
+| 2133 | `debug: after assign ...` (was `DEBUG after assign`) | job | **debug** |
 | 1692/1695 | scene detection on/off | job | info |
 
 ### `backend/src/utils/Util.py`

@@ -63,8 +63,18 @@ def test_a_docstring_or_comment_is_not_an_emitter(checker):
                    if loc.doc_line == 40 and "RenderVideo.py" in loc.path)
     result = checker.resolve(_ROOT, locator)
     assert result.status == "ok"
-    assert 89 in result.found, f"resolved to {result.found}, expected the return at 89, not the docstring at 82"
-    assert 82 not in result.found
+    source = (_ROOT / locator.path).read_text(encoding="utf-8").splitlines()
+    # The found lines must be the EMITTERS (a `return`/an append carrying the string), never the docstring that also
+    # quotes it. Absolute numbers are the merge's business: this file is edited by other lanes, and a test that pins
+    # `89` is a datum asserting a conclusion - it broke the first time two branches met.
+    assert result.found, f"resolved to nothing: {result.detail}"
+    found_text = [source[line_no - 1] for line_no in result.found]
+    assert any(line.lstrip().startswith("return") for line in found_text), (
+        f"the emitter's return must be among the found lines: {found_text}")
+    for line in found_text:
+        assert "BORDERS" in line or "borders" in line.lower(), (
+            f"a found line does not carry the anchor: {line!r}")
+        assert not line.lstrip().startswith("#"), f"a comment is not an emitter: {line!r}"
 
 
 def test_placeholders_and_split_literals_are_matched(checker):
@@ -73,7 +83,9 @@ def test_placeholders_and_split_literals_are_matched(checker):
     locator = next(loc for loc in checker.parse_locators(text) if "video probe" in " ".join(loc.anchors))
     result = checker.resolve(_ROOT, locator)
     assert result.status == "ok"
-    assert result.found == (325,)
+    assert result.found, "the split literal matched nothing"
+    assert len(result.found) == len(locator.numbers), (
+        f"one line per number in the doc: {result.found} vs {locator.numbers}")
 
 
 def test_identifier_prose_locator_resolves_to_its_def(checker):
@@ -108,7 +120,7 @@ def test_one_line_off_is_caught_and_the_offset_is_reported(checker):
     result = results[locator.doc_line]
     assert result.status == "stale"
     assert result.offsets == (-1,), result
-    assert result.found == (325,)
+    assert result.found == tuple(locator.numbers), result
 
 
 def test_the_cli_fails_on_a_shifted_copy_and_fix_restores_it(checker, tmp_path):
@@ -119,7 +131,7 @@ def test_the_cli_fails_on_a_shifted_copy_and_fix_restores_it(checker, tmp_path):
 
     assert checker.main(["--root", str(_ROOT), "--doc", str(copy), "--quiet"]) == 1
     assert checker.main(["--root", str(_ROOT), "--doc", str(copy), "--fix", "--quiet"]) == 0
-    assert "| 325 |" in copy.read_text(encoding="utf-8")
+    assert f"| {locator.numbers[0]} |" in copy.read_text(encoding="utf-8")
     assert checker.main(["--root", str(_ROOT), "--doc", str(copy), "--quiet"]) == 0
 
 

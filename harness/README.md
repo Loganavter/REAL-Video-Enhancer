@@ -16,13 +16,13 @@ harness/
     source.py     the clip manifest check (a `contaminated` clip taints every record that names it)
     verdicts.py   the verdict registry loader
     scripts/      187 instruments: probes, sweeps, benches and the record emitters
-    tests/        the suite: 143 files, 439 tests under the app's interpreter, 1741 under the system one
+    tests/        the suite: 144 files, 439 tests under the app's interpreter, 1741 under the system one
 ```
 
 ## The tests are ours too
 
 At the same base commit `backend/tests/` held one file - `unit_tests/test_frame.py`, the only test in the
-repository - and no workflow ran pytest. The 142 files that exist today were written between 2026-11-15 and
+repository - and no workflow ran pytest. The 143 files that exist today were written between 2026-11-15 and
 2026-11-20 for the same measurements the harness records, so they live here and `backend/tests/unit_tests/` keeps
 the upstream one. `harness/tests/conftest.py` puts the repository root and `backend/` on `sys.path`, which used to
 be every caller's private `PYTHONPATH`.
