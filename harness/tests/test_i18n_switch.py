@@ -132,7 +132,7 @@ def test_the_installer_does_not_raise_on_the_real_window(i18n_state, qapp):
     assert proc.processSettingsContainer.tabText(1) == "Параметры кодирования"
 
 
-def test_a_switch_repaints_the_process_page_chrome_and_keeps_a_missing_key_english(i18n_state, qapp):
+def test_a_switch_repaints_the_process_page_chrome(i18n_state, qapp):
     """Build in English, switch to `ru` at runtime, read the real widgets - no restart, no reload."""
     i18n_state.configure_i18n("en")
     shell, _window = _build_shell(qapp)
@@ -146,15 +146,58 @@ def test_a_switch_repaints_the_process_page_chrome_and_keeps_a_missing_key_engli
     assert proc.processSettingsContainer.tabText(1) == "Параметры кодирования"
     assert proc.processSettingsContainer.tabText(4) == "Журнал"
     assert proc.label_9.text() == "Начало (секунды)"
-    # An untranslated string on the same page stays its English source: the Render Preview tooltip is an HTML blob
-    # (one of the 28 markup strings the recon counted), not something this slice translates.
+    # The tooltip is a catalogue document built from parts, and the pass used to restate only the text: the label
+    # beside the control followed a switch while its tooltip stayed in the old language (measured 2026-11-27).
     tooltip = proc.renderPreviewBtn.toolTip()
-    assert "Renders a small portion of the video" in tooltip
-    assert "Предпросмотр" not in tooltip
+    assert "Предпросмотр рендера:" in tooltip
+    assert "Renders a small portion of the video" not in tooltip
 
     i18n_state.emit_language_changed("en")
     assert proc.processSettingsContainer.tabText(1) == "Encoder Options"
     assert proc.label_9.text() == "Start Time (seconds)"
+    assert "Renders a small portion of the video" in proc.renderPreviewBtn.toolTip()
+
+
+def test_a_switch_repaints_tooltips_on_the_same_live_page(i18n_state, qapp):
+    """Tooltips are catalogue documents too, and the pass used to restate only the visible text.
+
+    Measured 2026-11-27 on the real window: after a switch to `ru`, 27 of the 30 tooltips that carry a catalogue key
+    were still English - their `setToolTip(...)` ran once, inside `build()`, and `retranslate()` never restated them.
+    A user therefore read a Russian label beside an English tooltip. The two pages pinned here are the default screen
+    (the preview chrome and the General tab); the settings tabs carry the same shape and are a separate slice.
+
+    The page objects are captured by identity before the switch: the fix must repaint them, not rebuild them.
+    """
+    i18n_state.configure_i18n("en")
+    shell, _window = _build_shell(qapp)
+
+    proc = shell.procPage_page
+    general = proc.generalSettings_page
+    pages_before = (proc, general)
+
+    assert "Renders a small portion of the video" in proc.renderPreviewBtn.toolTip()
+    assert proc.previewBandToggle.toolTip() == "Collapse the preview band"
+    assert "Increase video length instead of framerate" in general.sloMoModeCheckBox.toolTip()
+    assert "Custom output scale no matter the model" in general.upscaleScaleSpinBox.toolTip()
+
+    i18n_state.emit_language_changed("ru")
+
+    assert "Рендерит небольшой фрагмент видео" in proc.renderPreviewBtn.toolTip()
+    assert "Renders a small portion of the video" not in proc.renderPreviewBtn.toolTip()
+    assert proc.previewBandToggle.toolTip() == "Свернуть полосу превью"
+    assert "Увеличивать длительность видео" in general.sloMoModeCheckBox.toolTip()
+    assert "Свой масштаб вывода" in general.upscaleScaleSpinBox.toolTip()
+    assert (proc, general) == pages_before, "the switch must repaint the live pages, not rebuild them"
+
+    # The chevron states the ACTION the press performs, so the band's state and the language have to hold together.
+    proc.set_preview_collapsed(True)
+    assert proc.previewBandToggle.toolTip() == "Развернуть полосу превью"
+    proc.set_preview_collapsed(False)
+
+    i18n_state.emit_language_changed("en")
+    assert "Renders a small portion of the video" in proc.renderPreviewBtn.toolTip()
+    assert proc.previewBandToggle.toolTip() == "Collapse the preview band"
+    assert "Increase video length instead of framerate" in general.sloMoModeCheckBox.toolTip()
 
 
 def test_the_settings_page_headings_follow_the_switch(i18n_state, qapp):

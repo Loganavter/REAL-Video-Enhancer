@@ -423,10 +423,6 @@ class GeneralSettingsPage:
         self.horizontalLayout_31.addItem(self.horizontalSpacer_16)
         self.sloMoModeCheckBox = _row_checkbox(self.sloMoModeContainer)
         self.sloMoModeCheckBox.setObjectName(u"sloMoModeCheckBox")
-        self.sloMoModeCheckBox.setToolTip(i18n.tooltip(
-            'Increase video length instead of framerate when interpolating.',
-            'Audio and Subtitles will not be transfered to output video.'
-        ))
         self.horizontalLayout_31.addWidget(self.sloMoModeCheckBox)
         self.verticalLayout_38.addWidget(self.sloMoModeContainer)
         self.verticalLayout_32.addWidget(self.interpolationContainer)
@@ -597,10 +593,6 @@ class GeneralSettingsPage:
         self.upscaleScaleSpinBox = DoubleSpinBox(self.widget_42, single_step=0.1, decimals=1, show_step_buttons=True,
             alignment=SPIN_ALIGNMENT)
         self.upscaleScaleSpinBox.setObjectName(u"upscaleScaleSpinBox")
-        self.upscaleScaleSpinBox.setToolTip(i18n.tooltip(
-            'Upscale Scale:',
-            '- Custom output scale no matter the model. Will run AI on video frame once, and scale the image to match the multiplier. Useful for 4x models.'
-        ))
         sizePolicy5.setHeightForWidth(self.upscaleScaleSpinBox.sizePolicy().hasHeightForWidth())
         self.upscaleScaleSpinBox.setSizePolicy(sizePolicy5)
         # No `setButtonSymbols`: the gutter is not symbol-mode driven (see the interpolation multiplier above).
@@ -1192,6 +1184,10 @@ class GeneralSettingsPage:
         self.label_11.setText(QCoreApplication.translate("MainWindow", u"Interpolation Multiplier", None))
         self.label_36.setText(QCoreApplication.translate("MainWindow", u"SloMo Mode", None))
         self.sloMoModeCheckBox.setText("")
+        self.sloMoModeCheckBox.setToolTip(i18n.tooltip(
+            'Increase video length instead of framerate when interpolating.',
+            'Audio and Subtitles will not be transfered to output video.'
+        ))
         self.label_86.setText(QCoreApplication.translate("MainWindow", u"Decompress", None))
         self.decompressCheckBox.setText("")
         self.label_87.setText(QCoreApplication.translate("MainWindow", u"Decompress Model", None))
@@ -1205,6 +1201,10 @@ class GeneralSettingsPage:
         self.upscaleCheckBox.setText("")
         self.label_7.setText(QCoreApplication.translate("MainWindow", u"Upscale Model", None))
         self.label_72.setText(QCoreApplication.translate("MainWindow", u"Upscale Scale", None))
+        self.upscaleScaleSpinBox.setToolTip(i18n.tooltip(
+            'Upscale Scale:',
+            '- Custom output scale no matter the model. Will run AI on video frame once, and scale the image to match the multiplier. Useful for 4x models.'
+        ))
         self.qualityPresetLabel.setText(QCoreApplication.translate("MainWindow", u"Quality Preset", None))
         self.qualityPresetComboBox.setItemText(0, QCoreApplication.translate("MainWindow", u"Best quality", None))
         self.qualityPresetComboBox.setItemText(1, QCoreApplication.translate("MainWindow", u"Fast", None))
