@@ -14,11 +14,18 @@ Levels (`RVE_PREVIEW_LOG`):
   channel's preview dump serves. The state line is `note_snapshot`; the counters are `maybe_stats`.
 * `2` - everything above **+ one line per frame**. Use it for a short session only; at 24-60 fps it is a lot of text.
 
+A `draw` line is a **DELTA record** at levels 0/1: the pane writes one only when the picture or the geometry changes, so
+its absence means "no change", NOT "no paint". At level 2 it is written per paint. The line says which it is
+(`record=delta` / `record=paint`); count paints with `stats paints=`, never by counting `draw` lines.
+
 The lines go to the pane's OWN file - `preview-log.txt` next to the app's `log.txt` (or `RVE_PREVIEW_LOG_FILE`) -
 one line per record, flushed as it is written, with a header per process so two sessions cannot be mistaken for one.
 That file is the thing to paste into a report; the app's `log.txt` stays clean.
 
-The lines are `key=value` so they can be pasted or parsed with `awk`:
+The lines are `key=value` tokens separated by spaces. A value that carries a space, a quote or a backslash is
+double-quoted and escaped (`reason="queue-decode-failed: boom happened"`), and a newline in a value is written as the
+two characters `\n`, so one record is always one line. `telemetry.parse(line)` is the reader that survives that
+(space-splitting and `dict(part.split("=", 1))` do not: they turn the reason above into `queue-decode-failed:`):
 
     preview: stats frames=24 paints=24 up=24 up_ms=0.01/1.34 pass_ms=0.40/0.98 gui_ms=0.62/0.98 int_ms=41.2/44.0/90.1
     preview: stats … seek_ms=38.4/… window_s=1.0
@@ -131,6 +138,47 @@ def _fmt(value: float | None) -> str:
     return "-" if value is None else f"{value:.2f}"
 
 
+def _field(key: str, value) -> str:
+    """One `key=value` token, quoted when the value could be mistaken for a separator.
+
+    A bare value must not carry whitespace, a quote or a backslash; anything else is double-quoted with `\\` and `"`
+    escaped and control characters written as `\\n`/`\\r`/`\\t`, so a value can never split a record or inject a second
+    one. `parse` is the matching reader.
+    """
+    text = value if isinstance(value, str) else str(value)
+    if text and not any(character.isspace() or character in '"\\' for character in text):
+        return f"{key}={text}"
+    escaped = (text.replace("\\", "\\\\").replace('"', '\\"')
+               .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"))
+    return f'{key}="{escaped}"'
+
+
+def parse(line: str) -> dict[str, str]:
+    """Read ONE record back into its fields (`preview:` lines only; anything else answers `{}`).
+
+    The counterpart of `_field`'s quoting: `shlex` keeps a quoted value whole, so
+    `preview: seek refused press=1 reason="queue-decode-failed: boom happened"` answers
+    `{"_event": "seek refused", "press": "1", "reason": "queue-decode-failed: boom happened"}`.
+    `_event` is the record's kind (which may be two words) - the other keys are the line's own fields. A value carrying
+    a newline comes back with the escape (`\\n`) it was written as: a record is one line by construction.
+    """
+    import shlex
+
+    text = line.strip()
+    if not text.startswith("preview: "):
+        return {}
+    try:
+        tokens = shlex.split(text[len("preview: "):])
+    except ValueError:          # an unbalanced quote is a malformed record, not a crash for the reader
+        return {}
+    first = next((index for index, token in enumerate(tokens) if "=" in token), len(tokens))
+    fields: dict[str, str] = {"_event": " ".join(tokens[:first])}
+    for token in tokens[first:]:
+        key, _, value = token.partition("=")
+        fields[key] = value
+    return fields
+
+
 def wall() -> str:
     """Wall clock, seconds with milliseconds, for joining this file with the backend's.
 
@@ -142,9 +190,15 @@ def wall() -> str:
 
 
 def event(kind: str, **fields) -> None:
-    """One line per action: always written (``level="info"``), so a session leaves a trace of what was pressed."""
-    parts = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
-    _write(f"preview: {kind} {parts}".rstrip(), "info")
+    """One line per action: always written (``level="info"``), so a session leaves a trace of what was pressed.
+
+    `kind == "draw"` also carries `record=`: `delta` when the writer only calls it on a change (levels 0/1) and `paint`
+    at level 2, where it is one line per paint. A reader that counts draw lines as paints is counting changes.
+    """
+    parts = [_field(key, value) for key, value in fields.items() if value is not None]
+    if kind == "draw":
+        parts.append(_field("record", "paint" if level() >= 2 else "delta"))
+    _write(f"preview: {kind} {' '.join(parts)}".rstrip(), "info")
 
 
 # --- the aggregate ---------------------------------------------------------------------------------
@@ -394,8 +448,8 @@ def _reset(*, session: bool = False) -> None:
 
 def session_start(**fields) -> None:
     """One line once per started pane: where the file is and what the pane was at that moment."""
-    _write(f"preview: session file={log_path()} " + " ".join(f"{k}={v}" for k, v in fields.items()),
-           "info")
+    values = {"file": log_path(), **fields}
+    _write("preview: session " + " ".join(_field(key, value) for key, value in values.items()), "info")
 
 
 def note_snapshot(**fields) -> bool:
@@ -429,7 +483,7 @@ def note_snapshot(**fields) -> bool:
             text = f"{value:.3f}"
         else:
             text = str(value)
-        parts.append(f"{key}={text}")
+        parts.append(_field(key, text))
     _write("preview: snapshot " + " ".join(parts), "info")
     return True
 

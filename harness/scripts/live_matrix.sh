@@ -16,6 +16,10 @@
 # `preview-log.txt` at the checkout root, which is where the app's CWD puts it). Without that file the rows that need a
 # number print UNPROVEN rather than a guess.
 #
+# Rows read the per-window COUNTER (`preview: stats paints=`), never a count of `preview: draw` lines: at levels 0/1 a
+# draw line is a DELTA record (one per change, none for a cleared pane that repaints), so "0 draw lines" is healthy and
+# cannot answer "did anything repaint". A row whose verdict depends on the ABSENCE of a line says so in its own text.
+#
 # The script NEVER starts an X server and never kills anything: it assumes `live.sh up` already ran and talks to that
 # instance through its control dir (`$RVE_LIVE_STATE`, default /tmp/opencode/live). It also never presses a control on a
 # hidden widget (`harness/docs/CODE_PATTERNS.md` §10: a click on a hidden control silently does nothing and reads as
@@ -146,8 +150,15 @@ crop_stat() {                  # crop_stat <png> <x> <y> <w> <h> <fx>
 picture_rect() {               # the newest draw line's rect="x,y,w,h" - the picture itself, with no bar or transport
     python3 - "$1" <<'PYEOF'
 import re, sys
+# Only THIS session: the file is never truncated, and a rect from a previous run put a crop over the wrong box
+# ("no draw line yet" could never trigger after the first session had drawn). A new session starts at its header.
+lines = open(sys.argv[1], errors="replace").read().splitlines()
+start = 0
+for index, line in enumerate(lines):
+    if line.startswith("# preview telemetry session"):
+        start = index
 rect = None
-for line in open(sys.argv[1], errors="replace"):
+for line in lines[start:]:
     m = re.search(r" rect=(\d+),(\d+),(\d+),(\d+)", line)
     if m:
         rect = m.groups()
@@ -168,11 +179,11 @@ crop_out() {                   # crop_out <png> <name> <x> <y> <w> <h> -> the cr
 
 pair_lines() {                 # half=pair draws: "<result_t> <original_t|->" per line
     python3 -c '
-import sys
+import shlex, sys
 for line in sys.stdin:
     if "preview: draw" not in line or "mode=sbs" not in line or "half=pair" not in line:
         continue
-    fields = dict(part.split("=", 1) for part in line.split() if "=" in part)
+    fields = dict(part.split("=", 1) for part in shlex.split(line) if "=" in part)
     print(fields.get("result_t", "-"), fields.get("original_t", "-"))
 '
 }
@@ -204,13 +215,13 @@ else:
 
 fill_max() {                   # fill_max <field>: the HIGHEST `compare fill` value in the window (a peak, not an instant)
     python3 -c '
-import sys
+import shlex, sys
 wanted = sys.argv[1]
 best = None
 for line in sys.stdin:
     if "preview: compare fill" not in line:
         continue
-    fields = dict(part.split("=", 1) for part in line.split() if "=" in part)
+    fields = dict(part.split("=", 1) for part in shlex.split(line) if "=" in part)
     try:
         value = int(fields.get(wanted, ""))
     except ValueError:
@@ -222,7 +233,7 @@ print("-" if best is None else best)
 
 fill_field() {                 # fill_field <field>: the newest `compare fill` value
     python3 -c '
-import sys
+import shlex, sys
 wanted = sys.argv[1]
 last = None
 for line in sys.stdin:
@@ -231,9 +242,28 @@ for line in sys.stdin:
 if last is None:
     print("-")
 else:
-    fields = dict(part.split("=", 1) for part in last.split() if "=" in part)
+    fields = dict(part.split("=", 1) for part in shlex.split(last) if "=" in part)
     print(fields.get(wanted, "-"))
 ' "$1"
+}
+
+# window_paints: the paints in a window. `preview: stats paints=` is a PER-WINDOW counter (reset at each flush), so
+# the window's paints are the sum of its stats lines; "-" when no stats line is present.
+window_paints() {
+    python3 -c '
+import shlex, sys
+total = None
+for line in sys.stdin:
+    if "preview: stats" not in line:
+        continue
+    fields = dict(part.split("=", 1) for part in shlex.split(line) if "=" in part)
+    try:
+        value = int(fields.get("paints", ""))
+    except ValueError:
+        continue
+    total = value if total is None else total + value
+print("-" if total is None else total)
+'
 }
 
 # --- the table ------------------------------------------------------------------------------------------------------
@@ -355,19 +385,19 @@ QUIET_MARK=$(log_mark)
 sleep 2
 WINDOW="$(log_since "$QUIET_MARK")"
 ASKS="$(printf '%s\n' "$WINDOW" | fill_field asks)"
-POOL="$(printf '%s\n' "$WINDOW" | fill_field pool)"
+HELD="$(printf '%s\n' "$WINDOW" | fill_field held)"
 if [ -n "${L1:-}" ] && [ -n "${R1:-}" ]; then
     if python3 -c "import sys; sys.exit(0 if ($L1 > 0.02 and $R1 > 0.02) else 1)"; then
         if [ "$ASKS" = "0" ]; then
             row "paused, sbs, pair" "both halves painted; compare fill asks=0 over 2 s; no gap" \
-                "left stddev=$L1 right stddev=$R1; asks=$ASKS pool=$POOL" "$RIGHT_BEFORE" OK
+                "left stddev=$L1 right stddev=$R1; asks=$ASKS held=$HELD" "$RIGHT_BEFORE" OK
         elif [ "$ASKS" = "-" ]; then
             row "paused, sbs, pair" "both halves painted; compare fill asks=0 over 2 s; no gap" \
                 "left stddev=$L1 right stddev=$R1 (both painted); no compare fill line to read" \
                 "$RIGHT_BEFORE" UNPROVEN
         else
             row "paused, sbs, pair" "both halves painted; compare fill asks=0 over 2 s; no gap" \
-                "left stddev=$L1 right stddev=$R1; asks=$ASKS pool=$POOL" "$RIGHT_BEFORE" MISMATCH
+                "left stddev=$L1 right stddev=$R1; asks=$ASKS held=$HELD" "$RIGHT_BEFORE" MISMATCH
         fi
     else
         row "paused, sbs, pair" "both halves painted; compare fill asks=0 over 2 s; no gap" \
@@ -435,6 +465,7 @@ sleep 3
 PLAY_AFTER="$(json_get "$(ctrl state:previewLabel 10)" progress "-")"
 WINDOW3="$(log_since "$MARK3")"
 read -r OFF3 TOTAL3 <<<"$(printf '%s\n' "$WINDOW3" | pair_off)"
+PAINTS3="$(printf '%s\n' "$WINDOW3" | window_paints)"
 PAIRS3="$(printf '%s\n' "$WINDOW3" | pair_lines | wc -l)"
 if [ "$OFF3" = "-" ]; then
     if [ "$PLAY_BEFORE" = "$PLAY_AFTER" ]; then
@@ -443,14 +474,17 @@ if [ "$OFF3" = "-" ]; then
             "$ART/row3-window.txt" UNPROVEN
     else
         row "playing, sbs, steady" "every painted pair carries the source; delta_frames=0" \
-            "$PAIRS3 pair draws, no stats line (RVE_PREVIEW_LOG<1?)" "$ART/row3-window.txt" UNPROVEN
+            "$PAINTS3 paints over 3 s (stats), no stats line to read pair_off from (RVE_PREVIEW_LOG<1?)" \
+            "$ART/row3-window.txt" UNPROVEN
     fi
 elif [ "$OFF3" = "0" ] && [ "${TOTAL3:-0}" -gt 0 ]; then
     row "playing, sbs, steady" "every painted pair carries the source; delta_frames=0" \
-        "pair_off=0/$TOTAL3 over 3 s, $PAIRS3 pair draws" "$ART/row3-window.txt" OK
+        "pair_off=0/$TOTAL3 over 3 s, $PAINTS3 paints (stats); $PAIRS3 pair draw lines (delta log)" \
+        "$ART/row3-window.txt" OK
 else
     row "playing, sbs, steady" "every painted pair carries the source; delta_frames=0" \
-        "pair_off=$OFF3/$TOTAL3 over 3 s, $PAIRS3 pair draws" "$ART/row3-window.txt" MISMATCH
+        "pair_off=$OFF3/$TOTAL3 over 3 s, $PAINTS3 paints (stats); $PAIRS3 pair draw lines (delta log)" \
+        "$ART/row3-window.txt" MISMATCH
 fi
 printf '%s\n' "$WINDOW3" > "$ART/row3-window.txt"
 
@@ -468,16 +502,16 @@ if ! [[ "${OFF4B:-}" =~ ^[0-9]+$ && "${OFF4A:-}" =~ ^[0-9]+$ ]]; then
     # No `stats` line in one of the two windows: the level is too low (or the render never drew), so the row is
     # UNPROVEN rather than a shell arithmetic error. A row that cannot be observed must say so (exit 2), never crash.
     row "playing, sbs, strip drag" "the last matched pair holds; the gap is bounded; no lone half" \
-        "no stats line in a window (RVE_PREVIEW_LOG<2?)" "$ART/row4-window.txt" UNPROVEN
+        "no stats line in a window (RVE_PREVIEW_LOG<1?)" "$ART/row4-window.txt" UNPROVEN
 else
     GAIN=$((OFF4B - OFF4A))
     if [ "$GAIN" -le 0 ]; then
         row "playing, sbs, strip drag" "the last matched pair holds; the gap is bounded; no lone half" \
-            "pair_off $OFF4A/$TOTAL4A -> $OFF4B/$TOTAL4B: $(printf '%s\n' "$WINDOW4" | pair_lines | grep -c -- " -$") lone-half draws" \
+            "pair_off $OFF4A/$TOTAL4A -> $OFF4B/$TOTAL4B: $(printf '%s\n' "$WINDOW4" | pair_lines | grep -c -- " -$") lone-half draw lines (delta sample, not a paint count)" \
             "${SHOT4:-$ART/row4-window.txt}" OK
     else
         row "playing, sbs, strip drag" "the last matched pair holds; the gap is bounded; no lone half" \
-            "pair_off $OFF4A/$TOTAL4A -> $OFF4B/$TOTAL4B (+$GAIN mismatched paints); lone-half draws: $(printf '%s\n' "$WINDOW4" | pair_lines | grep -c -- " -$")" \
+            "pair_off $OFF4A/$TOTAL4A -> $OFF4B/$TOTAL4B (+$GAIN mismatched paints); lone-half draw lines: $(printf '%s\n' "$WINDOW4" | pair_lines | grep -c -- " -$") (delta sample, not a paint count)" \
             "${SHOT4:-$ART/row4-window.txt}" MISMATCH
     fi
 fi
@@ -491,6 +525,7 @@ MARK5=$(log_mark)
 ctrl "drag:preview_timeline@$(strip_drag 0.80 0.40)" 25 > "$ART/row5-seek.json"
 sleep 2
 WINDOW5="$(log_since "$MARK5")"
+PAINTS5="$(printf '%s\n' "$WINDOW5" | window_paints)"
 PAIRS5="$(printf '%s\n' "$WINDOW5" | pair_lines)"
 SAME5="$(printf '%s\n' "$PAIRS5" | python3 -c '
 import sys
@@ -511,13 +546,16 @@ read -r SAME5_N TOTAL5_N <<<"$SAME5"
 SHOT5="$(shot row5-after-seek)"
 if [ "${TOTAL5_N:-0}" -eq 0 ]; then
     row "seek on a paused pane" "a gap, then the new moment; left and right are the same moment" \
-        "no pair draw named both halves in the window" "$ART/row5-window.txt" UNPROVEN
+        "no pair draw named both halves in the window; the draw log is a DELTA at level<2, so this row cannot be observed from it ($PAINTS5 paints (stats) in the window)" \
+        "$ART/row5-window.txt" UNPROVEN
 elif [ "$SAME5_N" -eq "$TOTAL5_N" ]; then
     row "seek on a paused pane" "a gap, then the new moment; left and right are the same moment" \
-        "$SAME5_N/$TOTAL5_N pair draws have result_t == original_t" "${SHOT5:-$ART/row5-window.txt}" OK
+        "$SAME5_N/$TOTAL5_N pair draw lines have result_t == original_t; $PAINTS5 paints (stats) in the window" \
+        "${SHOT5:-$ART/row5-window.txt}" OK
 else
     row "seek on a paused pane" "a gap, then the new moment; left and right are the same moment" \
-        "$((TOTAL5_N - SAME5_N))/$TOTAL5_N pair draws name two moments" "${SHOT5:-$ART/row5-window.txt}" MISMATCH
+        "$((TOTAL5_N - SAME5_N))/$TOTAL5_N pair draw lines name two moments; $PAINTS5 paints (stats) in the window" \
+        "${SHOT5:-$ART/row5-window.txt}" MISMATCH
 fi
 printf '%s\n' "$WINDOW5" > "$ART/row5-window.txt"
 
@@ -539,6 +577,7 @@ kill -0 "$PREVIEW_PID" 2>/dev/null && echo "live_matrix: WARNING the preview job
 MARK6=$(log_mark)
 sleep 2
 WINDOW6="$(log_since "$MARK6")"
+PAINTS6="$(printf '%s\n' "$WINDOW6" | window_paints)"
 GEN6="$(printf '%s\n' "$WINDOW6" | draw_generations | tr '\n' ' ' | sed 's/ *$//')"
 PAIRS6="$(printf '%s\n' "$WINDOW6" | pair_lines)"
 FIRST6="$(printf '%s\n' "$PAIRS6" | head -1)"
@@ -546,7 +585,8 @@ FINISHED_PLAYHEAD="$(json_get "$(ctrl state:previewLabel 8)" progress.2 "")"
 SHOT6="$(shot row6-finished-file)"
 if [ -z "$GEN6" ] || [ -z "$FIRST6" ]; then
     row "render end -> finished file" "no frame of the previous file; the first pair is whole" \
-        "no sbs draw in the handover window" "${SHOT6:-$ART}" UNPROVEN
+        "no sbs draw line in the handover window; the draw log is a DELTA at level<2, so this row cannot be observed from it ($PAINTS6 paints (stats) in the window)" \
+        "${SHOT6:-$ART}" UNPROVEN
 else
     read -r R6 S6 <<<"$FIRST6"
     if [ "$S6" = "-" ]; then
@@ -596,23 +636,35 @@ for pair in "0.5s:$SHOT7A" "2s:$SHOT7B" "10s:$SHOT7C"; do
         echo "live_matrix: cleared pane not empty at $label (left ${L:-?} right ${R:-?})"
     fi
 done
-DRAWS7="$(log_since "$MARK7" | grep -c "preview: draw" || true)"
+PAINTS7="$(log_since "$MARK7" | window_paints)"
 if [ "$TOTAL7" -eq 0 ]; then
-    row "cleared pane" "empty at 2 s and at 10 s" "no screenshot" "$ART" UNPROVEN
+    row "cleared pane" "empty at 2 s and at 10 s; paints=0 over the window" "no screenshot" "$ART" UNPROVEN
 elif [ "$CLEAN" -eq "$TOTAL7" ]; then
-    row "cleared pane" "empty at 2 s and at 10 s" "$CLEAN/$TOTAL7 shots flat on both halves (0.5/2/10 s)" "$SHOT7C" OK
+    row "cleared pane" "empty at 2 s and at 10 s; paints=0 over the window" \
+        "$CLEAN/$TOTAL7 shots flat on both halves (0.5/2/10 s); $PAINTS7 paints (stats) after the switch" "$SHOT7C" OK
 else
     # Name the cause, do not just report the symptom: a producer still drawing means the tab never took the pane; zero
-    # draws with a picture on screen means the framebuffer was never repainted (the instrument's own limit).
-    if [ "${DRAWS7:-0}" -gt 0 ]; then
-        row "cleared pane" "empty at 2 s and at 10 s" \
-            "$((TOTAL7 - CLEAN))/$TOTAL7 shots still show a picture; $DRAWS7 draw(s) after the switch - a producer still paints (the tab did not take the pane)" \
-            "$SHOT7C" MISMATCH
-    else
-        row "cleared pane" "empty at 2 s and at 10 s" \
-            "$((TOTAL7 - CLEAN))/$TOTAL7 shots still show a picture, 0 draws - nothing repainted (stale framebuffer, UNPROVEN not MISMATCH)" \
-            "$SHOT7C" UNPROVEN
-    fi
+    # paints with a picture on screen means the framebuffer was never repainted (the instrument's own limit). This row
+    # judges on the per-window `stats paints=` COUNTER, never on draw-line absence: a cleared pane writes no draw line
+    # at level<2 and repaints through `_draw_empty`, so 0 draw lines is the normal, healthy value.
+    case "${PAINTS7:-}" in
+        ''|'-'|*[!0-9]*)
+            row "cleared pane" "empty at 2 s and at 10 s; paints=0 over the window" \
+                "$((TOTAL7 - CLEAN))/$TOTAL7 shots still show a picture, and no stats line in the window (RVE_PREVIEW_LOG<1?): the paint counter cannot be read (judged on paints, never on draw-line absence)" \
+                "$SHOT7C" UNPROVEN
+            ;;
+        *)
+            if [ "$PAINTS7" -gt 0 ]; then
+                row "cleared pane" "empty at 2 s and at 10 s; paints=0 over the window" \
+                    "$((TOTAL7 - CLEAN))/$TOTAL7 shots still show a picture; $PAINTS7 paint(s) in the 10 s after the switch (stats paints) - a producer still paints (the tab did not take the pane)" \
+                    "$SHOT7C" MISMATCH
+            else
+                row "cleared pane" "empty at 2 s and at 10 s; paints=0 over the window" \
+                    "$((TOTAL7 - CLEAN))/$TOTAL7 shots still show a picture, 0 paints in the window (stats) - nothing repainted (stale framebuffer, UNPROVEN not MISMATCH; a draw line's absence proves nothing, it is a delta log)" \
+                    "$SHOT7C" UNPROVEN
+            fi
+            ;;
+    esac
 fi
 ctrl "tab:processSettingsContainer@General" 10 > "$ART/row7-tab-back.json"
 
@@ -669,14 +721,14 @@ if [ "$STARTED" = "0" ]; then
         "${SHOT9:-$ART/row9-window.txt}" UNPROVEN
 elif [ "$HELD_BLOCK_LIVE" = "-" ] || [ "$HELD_BLOCK_DEAD" = "-" ]; then
     row "export, sbs" "both halves from one owner; held_block only while the render is alive" \
-        "no compare fill line (RVE_PREVIEW_LOG<1?); pair draws: $PAIRS9" "${SHOT9:-$ART/row9-window.txt}" UNPROVEN
+        "no compare fill line (RVE_PREVIEW_LOG<1?); $PAIRS9 pair draw lines (delta)" "${SHOT9:-$ART/row9-window.txt}" UNPROVEN
 elif [ "${HELD_BLOCK_LIVE:-0}" -gt 0 ] && [ "${HELD_BLOCK_DEAD:-1}" -eq 0 ]; then
     row "export, sbs" "both halves from one owner; held_block only while the render is alive" \
-        "held_block $HELD_BLOCK_LIVE (decoder $HELD_DECODER_LIVE) while alive, $HELD_BLOCK_DEAD after; $PAIRS9 pair draws" \
+        "held_block $HELD_BLOCK_LIVE (decoder $HELD_DECODER_LIVE) while alive, $HELD_BLOCK_DEAD after; $PAIRS9 pair draw lines (delta)" \
         "${SHOT9:-$ART/row9-window.txt}" OK
 else
     row "export, sbs" "both halves from one owner; held_block only while the render is alive" \
-        "held_block $HELD_BLOCK_LIVE while alive, $HELD_BLOCK_DEAD after; $PAIRS9 pair draws" \
+        "held_block $HELD_BLOCK_LIVE while alive, $HELD_BLOCK_DEAD after; $PAIRS9 pair draw lines (delta)" \
         "${SHOT9:-$ART/row9-window.txt}" MISMATCH
 fi
 printf '%s\n' "$WINDOW9" > "$ART/row9-window.txt"

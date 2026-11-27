@@ -829,7 +829,7 @@ def test_an_export_in_sbs_takes_both_halves_from_the_block_while_the_render_is_a
 
     Pins `harness/docs/CODE_PATTERNS.md` §6 and `code-patterns.md` §2: during an export the renderer publishes the SOURCE of each
     composited frame into its own block, so both halves come from one production at one media time - the decoder must
-    not spend a second decode on the moment the block already answers. The register's pool count is split by producer
+    not spend a second decode on the moment the block already answers. The register's count is split by producer
     (`held_block`/`held_decoder`) so "24 held" cannot be read as "24 source frames", and the block's pictures belong to
     the render pass: `_close_display_state` drops them when the job ends.
 
@@ -862,12 +862,12 @@ def test_an_export_in_sbs_takes_both_halves_from_the_block_while_the_render_is_a
     tab._source_fill(5.0)
     assert tab._asked == [], f"the compare decoded the moment the block owns: {tab._asked}"
 
-    # The fill line reports the pool by producer while the render is alive.
+    # The fill line reports the register by producer while the render is alive.
     tab._compare_fill_stats["at"] = 5000.0 - 2.0
     tab._compare_fill_report()
     fills = [fields for kind, fields in events if kind == "compare fill"]
     assert fills and fills[-1]["held_block"] == 1 and fills[-1]["held_decoder"] == 0, (
-        f"the pool count is not split by producer: {fills[-1] if fills else None}")
+        f"the register count is not split by producer: {fills[-1] if fills else None}")
 
     # The render ends: the block's pictures are not answers any more.
     tab._close_display_state()
@@ -877,7 +877,7 @@ def test_an_export_in_sbs_takes_both_halves_from_the_block_while_the_render_is_a
     tab._compare_fill_stats["at"] = 5000.0 - 2.0
     tab._compare_fill_report()
     fills = [fields for kind, fields in events if kind == "compare fill"]
-    assert fills[-1]["held_block"] == 0 and fills[-1]["pool"] == 0, (
+    assert fills[-1]["held_block"] == 0 and fills[-1]["held"] == 0, (
         f"a finished render still reports source pictures: {fills[-1]}")
 
     # And the pane keeps the last pair it was given (a job's end does not blank the picture).

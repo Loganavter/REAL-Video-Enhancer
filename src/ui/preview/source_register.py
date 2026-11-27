@@ -125,7 +125,7 @@ class SourceRegister:
         self._anchor = None
 
     def counts(self) -> dict[str, int]:
-        """How many pictures each producer holds, by origin - so a full `pool=` cannot be read as "the source is here"."""
+        """How many pictures each producer holds, by origin - so a full `held=` cannot be read as "the source is here"."""
         counts: dict[str, int] = {}
         for held in self._held.values():
             counts[held.origin] = counts.get(held.origin, 0) + 1
