@@ -195,6 +195,44 @@ def queue_properties_target(queue):
     return items[row], row, len(items), len(rows)
 
 
+#: The overwrite dialog's own sentence: one copy, because the control verb must refuse with the text a person would
+#: read, and the dialog's own code must not drift from it.
+OVERWRITE_QUESTION = "Output files in render queue already exist, do you want to overwrite?"
+
+
+def would_ask_for_overwrite(output_path) -> bool:
+    """Would the overwrite modal appear for this output path? A pure predicate: the path and `os.path.isfile`, no widget.
+
+    Module level and widget-free so a control verb can ask it without building the tab (`capture_server.
+    start_render_job`). `askForOverwrite` asks THIS, so the two answers cannot disagree; that agreement is pinned by
+    `harness/tests/test_control_start_refusal.py`.
+
+    The rule it exists for: a control verb runs on the GUI thread, so it may never open a modal - it asks this instead,
+    refuses, and lets the caller decide.
+    """
+    try:
+        return os.path.isfile(str(output_path or ""))
+    except (TypeError, ValueError):
+        # A non-path value cannot be an existing output file, and a verb must answer rather than raise.
+        return False
+
+
+def overwrite_prompt_path(render_queue) -> str | None:
+    """The first queue row whose output file already exists (as the path), or None when no dialog would appear.
+
+    Mirrors `ProcessTab.checkForOverwrite`, which walks EVERY row and stops at the first refusal: the modal appears for
+    the first existing output wherever it sits in the queue, so a verb that only checked `currentRenderOptions` could
+    still walk into one. A row without a path cannot open a dialog and is skipped.
+    """
+    get_rows = getattr(render_queue, "getQueue", None)
+    rows = get_rows() if callable(get_rows) else []
+    for row in rows or ():
+        path = str(getattr(row, "outputPath", "") or "")
+        if would_ask_for_overwrite(path):
+            return path
+    return None
+
+
 class _PreviewSurfacePort:
     """The page's picture verbs for `PreviewController` (view mode, zoom, compare, fullscreen).
 
@@ -917,13 +955,16 @@ class ProcessTab:
     def questionToOverride(self):
         from src.ui.dialogs.toolkit_dialogs import confirm
 
-        return confirm(
-            self.parent,
-            "Output files in render queue already exist, do you want to overwrite?",
-        )
+        return confirm(self.parent, OVERWRITE_QUESTION)
 
     def askForOverwrite(self, outputPath):
-        if os.path.isfile(outputPath):
+        """The person's path: ask the modal when the output exists, and stop the render when they say no.
+
+        The question is `would_ask_for_overwrite`'s subject - the same predicate a control verb asks instead of
+        opening this modal (`capture_server.start_render_job`). Asking the predicate here is what makes the two
+        answers agree by construction rather than by two copies of `os.path.isfile`.
+        """
+        if would_ask_for_overwrite(outputPath):
             self.isOverwrite = self.questionToOverride()
             if not self.isOverwrite:
                 self.onRenderCompletion()
