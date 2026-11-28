@@ -498,3 +498,48 @@ def test_switching_modes_keeps_each_modes_own_split(qapp, process_state, tmp_pat
             f"not the {stacked + 60} px it was dragged to")
     finally:
         window.close()
+
+
+def test_the_column_never_clips_its_settings_at_any_split(qapp):
+    """A DRAGGED split must not make the General tab overflow its viewport - the "splitter over the content" look.
+
+    Owner, 2026-11-28: "если влево максимально прижать, то снова перекрывает сплиттер". The gate that existed
+    (`test_general_tab_fit`) measured the default split only; a column at its floor or at the far right is a different
+    measurement, and the settings scroll area hides horizontal overflow (`ScrollBarAlwaysOff`), so an overflow there is
+    silently clipped at the splitter's edge.
+    """
+    shell, window = _shell(qapp, 1.0)
+    try:
+        page = shell.procPage_page
+        general = page.generalSettings_page
+        splitter = page.preview_splitter
+        assert splitter is not None
+
+        # A long path and a filled pane: the two things a real session carries and the empty page does not.
+        general.outputFileText.setText(
+            "/home/jorj/native1440_20s_2x-futsuu-anime(2).pth_24.0fps_2880x2160_(12).mkv")
+        general.set_video_info({
+            "Resolution:": ("2880x2160", "2880x2160"),
+            "FPS:": ("23.976", "23.976"),
+            "Frame Count:": ("493", "493"),
+            "Encoder:": ("libx264", "libx264"),
+            "Container:": ("mkv", "mkv"),
+            "Color Space:": ("bt709", "bt709"),
+            "Pixel Format:": ("yuv420p10le", "yuv420p10le"),
+            "Bit Depth:": ("10", "10"),
+            "Is HDR:": ("False", "False"),
+        })
+        for _ in range(4):
+            qapp.processEvents()
+
+        for position in (0, 120, 260, 2000):
+            splitter.moveSplitter(position, 1)
+            for _ in range(4):
+                qapp.processEvents()
+            viewport = general.scrollArea_4.viewport().width()
+            content = general.scrollArea_4.widget().width()
+            assert content <= viewport, (
+                f"split position {position}: the settings content is {content} px in a {viewport} px viewport - "
+                f"the splitter would cut it (the area hides horizontal overflow)")
+    finally:
+        window.close()
