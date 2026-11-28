@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import (QCoreApplication, QRect, QSize, Qt)
+from PySide6.QtCore import (QCoreApplication, QEvent, QObject, QRect, QSize, Qt)
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractScrollArea, QGridLayout, QHBoxLayout, QSizePolicy,
     QSpacerItem, QVBoxLayout, QWidget)
@@ -116,14 +116,43 @@ INFO_ARROW_COLUMN_PX = 12
 INFO_FOOTER_GAP_PX = 12
 INFO_FOOTER_KV_GAP_PX = 6
 
+#: The narrowest a stage may average before the ribbon reflows to another row, in DESIGN px: the shipped 485 px card
+#: gives five stages 413 px (485 - 2 x 12 inset - 4 x 12 chevron), i.e. 82 px each - so 82 is not a guess, it is what
+#: the shipped design already grants one of five stages, and the shipped window therefore never reflows.
+#:
+#: The captions say the same number is enough. Measured offscreen at factor 1.0 (the app's own fonts, `CAPTION_PT`):
+#: Interpolate 78, Decompress 86, Denoise 60, Deblur 52, Upscale 58 - 334 px of caption for five stages, i.e.
+#: (334 + 5 x 8 padding) / 5 = 74.8 px of average demand, and the shipped card's own cells come out 87/94/86/60/86,
+#: 8 px of headroom at the tightest. At the smallest supported factor (0.75, the app-side floor) the same captions
+#: measure 63/68/48/42/47 against a floor of 62, and five of them still fit the 485 px card's 431 px flex - the floor
+#: moves with the factor instead of reflowing the shipped window at a small one.
+#:
+#: Why an average and not a per-stage maximum: the shares are unequal by design (Deblur takes 9/58 and is the
+#: narrowest stage at 60 px in the shipped card against a 52 px caption), so a per-stage floor cannot hold five on the
+#: shipped width at all. 82 is the row-level floor: it reflows when a stage would average less than the shipped design
+#: already gives it.
+INFO_STAGE_MIN_PX = 82
+
+#: The four painted parts of a stage, in grid-row order inside one ribbon band: the rail, its 8 px gap, the name, the
+#: 4 px gap, the value, the 2 px gap, the sub line (`_apply_ribbon_rows` states the three gaps).
+INFO_RIBBON_PAINT_ROWS = (0, 2, 4, 6)
+#: The grid columns one ribbon band occupies: the four paint rows, the three gaps and the gutter under the band. A
+#: two-row ribbon is two bands - its second band's rail/name/value/sub are rows 8..14, not a reshape of the first.
+INFO_RIBBON_BAND_ROWS = 8
+#: The DESIGN gap between two ribbon bands (`INFO_RAIL_GAP_PX` inside a band): a stage stacked under another needs to
+#: read as its own row, not as a fourth line of the one above.
+INFO_ROW_GAP_PX = 10
+
 #: The five stages in the order the renderer runs them, each with the share of the ribbon's width it takes. The upscale
-#: stage carries the longest value (a model name plus its scale), so it is the widest - the mockup's `2.2fr`. The
-#: names are catalogue KEYS (`i18n.translate`), never painted text.
-#: (stage key, column share). The shares follow the LABEL width, not the stage's importance: at the shipped 485 px
-#: card, four 12 px chevrons leave ~437 px, and an equal split gave "Interpolate" 70 px - it elided to "Interpo…" on
-#: the live window. Measured caption widths: Interpolate ~62 px, Decompress ~72, Denoise/Deblur ~55, and Upscale
-#: needs room for a model file name, which elides by design.
-INFO_STAGE_ORDER = (("Interpolate", 13), ("Decompress", 13), ("Denoise", 9), ("Deblur", 9), ("Upscale", 14))
+#: stage carries the longest value (a model name plus its scale), so it keeps room for a name that elides by design.
+#: The names are catalogue KEYS (`i18n.translate`), never painted text.
+#: (stage key, column share). The shares follow the LABEL width, not the stage's importance: they are measured, not
+#: guessed. At the shipped 485 px card the four 12 px chevrons and the card's own 12 px inset leave 413 px, and the
+#: captions at factor 1.0 measure Interpolate 78, Decompress 86, Denoise 60, Deblur 52 and Upscale 58 (plus a model
+#: file name, which elides by design). Offscreen, at that card, the five stage columns come out 87/94/86/60/86 px -
+#: 8 px of headroom at the tightest, so every name is painted whole. The pre-reflow tree's 13/13/9/9/14 gave the 86 px
+#: "Decompress" a 83 px cell: it painted "Decompr…" on the shipped window, the cut the owner's screenshot shows.
+INFO_STAGE_ORDER = (("Interpolate", 13), ("Decompress", 14), ("Denoise", 10), ("Deblur", 9), ("Upscale", 12))
 
 #: The catalogue key a stored quality preset paints itself from: `settings['quality_preset']` ("best"/"fast") is the
 #: VALUE the backend is handed; the two keys are the labels the Quality Preset row shows.
@@ -227,6 +256,63 @@ class PipelineFacts:
     preset: str = ""
     reuse: bool = False
     by_cel: bool = False
+
+
+def ribbon_columns_for(available: int, minimum: int, arrow: int, stages: int) -> int:
+    """How many stages fit side by side in ``available`` px at ``minimum`` per stage - the ribbon's reflow decision.
+
+    ``n`` stages cost ``n * minimum + (n - 1) * arrow`` (the last stage on a row has no chevron after it), so the
+    answer is ``(available + arrow) // (minimum + arrow)``, clamped to ``[1, stages]``. Pure arithmetic on purpose:
+    the splitter calls it on every pixel of a drag, and a decision that needs a widget measured would make the drag
+    the expensive part. An unresolved width (0 - the first layout pass) answers the shipped one-row design.
+    """
+    if stages <= 0:
+        return 1
+    if available <= 0:
+        return stages
+    per_row = (available + max(0, arrow)) // (max(1, minimum) + max(0, arrow))
+    return max(1, min(stages, per_row))
+
+
+def ribbon_row_spans(count: int, slots: int) -> tuple[tuple[int, int], ...]:
+    """The grid columns each of ``count`` stages spans on ONE ribbon row, flush at both edges.
+
+    The grid has one stage slot per stage on its widest row (``slots``), plus the chevron column between two slots
+    (``slots * 2 - 1`` columns in all): stage slot ``i`` is column ``2 * i``. A row that holds fewer stages than the
+    grid has slots lets every stage keep one slot and hands the leftover to the TAIL stage, so the row starts flush at
+    column 0 and ends flush on the ribbon's right edge. Only the short last band is ever shorter than ``slots`` (the
+    rows above it are full), and the tail is the stage that carries a model name in its value - the one that wants the
+    leftover.
+    """
+    count = max(1, min(count, slots))
+    sizes = [1] * count
+    sizes[-1] = slots - (count - 1)
+    spans = []
+    first_slot = 0
+    for size in sizes:
+        spans.append((2 * first_slot, 2 * (first_slot + size - 1)))
+        first_slot += size
+    return tuple(spans)
+
+
+class _RibbonReflowFilter(QObject):
+    """Re-arrange the ribbon when the column it lives in changes width.
+
+    `ScaleFollower` covers the interface factor; a splitter drag or a window resize changes the ribbon's width without
+    one, and that is the case the ribbon reflows for. Watched on the ribbon's own host (the widget the grid fills), the
+    same shape `proc_page` uses for its page: the host's Resize is the exact event that says "the column moved".
+    """
+
+    def __init__(self, page: "GeneralSettingsPage") -> None:
+        super().__init__(page.generalSettings)
+        self._page = page
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            if watched.width() > 0:
+                self._page._ribbon_width_known = True
+            self._page._reflow_ribbon()
+        return False
 
 
 class GeneralSettingsPage:
@@ -865,6 +951,8 @@ class GeneralSettingsPage:
         pipeline_layout.setSpacing(0)
 
         ribbon_host = QWidget(self.infoPipelineCard)
+        # The host is the ribbon's width: the grid fills it, and its Resize is what tells the page the column moved.
+        self.infoRibbonHost = ribbon_host
         # A GRID, not a row of per-stage boxes: the mockup's rhythm is three DIFFERENT gaps (rail->name 8, name->value 4,
         # value->sub 2), and a grid states them once as row heights instead of a spacer per stage (`QSpacerItem` may not
         # come back to this page - `harness/tests/test_toolkit_native.py::test_no_new_spacer_items`). Every stage shares
@@ -875,9 +963,22 @@ class GeneralSettingsPage:
         self.infoRibbonLayout.setVerticalSpacing(0)
         #: stage key -> its four painted parts, so a repaint only re-states text and tokens.
         self.infoStages: dict[str, dict] = {}
-        #: the chevrons between the stages, kept only to re-size their column with the factor.
+        #: the chevrons between the stages, kept only to re-size their column with the factor and to move them with the
+        #: reflow (`infoArrows[i]` is the chevron after stage `i`; a row end never has one).
         self.infoArrows: list[Text] = []
-        for index, (stage_key, share) in enumerate(INFO_STAGE_ORDER):
+        #: How many stages per ribbon row the current arrangement holds, and the `(stages per row, width class)` it was
+        #: chosen at. The width class is the per-stage minimum resolved at the factor in force, so a drag at one factor
+        #: costs one rebuild per column boundary while a factor change re-arranges once (all its design numbers move).
+        self._ribbon_columns = len(INFO_STAGE_ORDER)
+        self._ribbon_reflow_key: tuple[int, int] | None = None
+        #: Whether a real width has been resolved yet. A newly built child has a placeholder geometry (100 px) and the
+        #: page is built before it is laid out, so until the host's first Resize the arrangement stays the shipped one
+        #: instead of stacking five stages in a width that means nothing.
+        self._ribbon_width_known = False
+        #: The rebuilds so far - the counter that says a splitter drag is not a per-pixel re-layout.
+        self._ribbon_rebuilds = 0
+        self._ribbon_rebuilding = False
+        for index, (stage_key, _share) in enumerate(INFO_STAGE_ORDER):
             rail = SurfacePanel(ribbon_host, background_token="separator.color")
             rail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             name = Text(parent=ribbon_host, elide=True)
@@ -892,23 +993,23 @@ class GeneralSettingsPage:
             narrow = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
             for widget in (name, value, sub):
                 widget.setSizePolicy(narrow)
-            # Column 2i holds the stage's four lines, column 2i+1 the chevron that separates it from the next stage.
-            column = 2 * index
-            self.infoRibbonLayout.addWidget(rail, 0, column)
-            self.infoRibbonLayout.addWidget(name, 2, column)
-            self.infoRibbonLayout.addWidget(value, 4, column)
-            self.infoRibbonLayout.addWidget(sub, 6, column)
-            self.infoRibbonLayout.setColumnStretch(column, share)
+            # The stage's own column, then the chevron column that separates it from the next stage. WHERE they sit is
+            # `_rebuild_ribbon`'s decision (one row of five at the shipped width, 3+2 and then 1 per row as the column
+            # narrows), never a statement here.
             self.infoStages[stage_key] = {"rail": rail, "name": name, "value": value, "sub": sub}
             if index < len(INFO_STAGE_ORDER) - 1:
                 arrow = Text(parent=ribbon_host, text=u"\u203a", color_token="label.text.muted",
                              alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
                 apply(arrow, CAPTION_PT)
-                # Its own narrow column, as the mockup's `12px` grid column between two stages.
+                # Its own narrow column, as the mockup's `12px` grid column between two stages (the width itself is
+                # stated once, in `_apply_ribbon_rows`).
                 arrow.setFixedWidth(scaled_px(INFO_ARROW_COLUMN_PX))
                 self.infoArrows.append(arrow)
-                self.infoRibbonLayout.setColumnMinimumWidth(column + 1, scaled_px(INFO_ARROW_COLUMN_PX))
-                self.infoRibbonLayout.addWidget(arrow, 2, column + 1)
+        # The shipped arrangement, placed before any width exists; the first Resize re-arranges it if the column cannot
+        # hold five (a page built in a narrow window starts stacked instead of flashing five slivers).
+        self._rebuild_ribbon(self._ribbon_columns)
+        self._ribbon_filter = _RibbonReflowFilter(self)
+        ribbon_host.installEventFilter(self._ribbon_filter)
         pipeline_layout.addWidget(ribbon_host)
 
         self.infoPipelineRule = SurfacePanel(self.infoPipelineCard, background_token="separator.color")
@@ -1412,6 +1513,134 @@ class GeneralSettingsPage:
             text, visible = self._footer_state(facts, label_key, language)
             value_widget.setText(text)
             host.setVisible(visible)
+        # A language switch only repaints text: the stage names can change width, so the count is recomputed through
+        # the one reflow path - and rebuilt only if the column could hold a different number of stages now.
+        self._reflow_ribbon()
+
+    def _ribbon_minimum_px(self) -> int:
+        """The width class: the narrowest a stage may average before the ribbon takes another row, at the live factor."""
+        return max(1, scaled_px(INFO_STAGE_MIN_PX))
+
+    def _reflow_ribbon(self) -> bool:
+        """Re-arrange the ribbon only when the number of stages a row can hold changed.
+
+        This is what the host's Resize calls, so it must be cheap: two subtractions, one division, one tuple compare.
+        A splitter drag changes the available width on every pixel but the column count only at its boundaries, so a
+        whole drag costs a rebuild per boundary instead of one per pixel. The cached key is `(stages per row, width
+        class)`; the class is the per-stage minimum at the live factor, which a factor change moves on its own (and the
+        scale pass re-states every design number anyway).
+
+        A language switch also lands here (through `_render_pipeline`): the stage names can change width, but the
+        minimum is a design number, so the count is recomputed and normally is the same - the grid is left alone and
+        only the text is repainted.
+        """
+        margins = self.infoRibbonLayout.contentsMargins()
+        available = self.infoRibbonHost.width() - margins.left() - margins.right()
+        if not self._ribbon_width_known or available <= 0:
+            # No width has been resolved yet: keep the shipped one-row design rather than stacking five slivers.
+            return False
+        minimum = self._ribbon_minimum_px()
+        columns = ribbon_columns_for(available, minimum, scaled_px(INFO_ARROW_COLUMN_PX), len(INFO_STAGE_ORDER))
+        if (columns, minimum) == self._ribbon_reflow_key:
+            return False
+        self._ribbon_reflow_key = (columns, minimum)
+        if columns == self._ribbon_columns:
+            return False
+        self._rebuild_ribbon(columns)
+        return True
+
+    def _rebuild_ribbon(self, columns: int) -> None:
+        """Place the five stages ``columns`` per ribbon row - the arrangement's ONE writer.
+
+        The grid's slots are the arrangement's: ``columns`` stage slots and the chevron column between two of them
+        (`2 * columns - 1` columns), so the widest row fills the ribbon exactly and a shorter last row lets its stages
+        span the leftover slots (`ribbon_row_spans`) - the row starts flush at column 0 and ends flush on the right
+        edge. Every band (ribbon row) owns its own four paint rows - rail, gap, name, gap, value, gap, sub, gutter -
+        so the name of a stage on the second band sits under ITS rail, never under the first band's.
+
+        Chevrons separate neighbours on the same row only: the chevron after stage ``i`` is placed only while stage
+        ``i + 1`` is on the same band, so a row end has none and the first stage of a row starts flush.
+
+        The column WEIGHTS are part of the arrangement too. The shipped one-row ribbon keeps the design's per-stage
+        shares (13/13/9/9/14, which follow the caption widths). A reflowed ribbon gives every slot the same weight:
+        the shares say how much of the SHIPPED width a stage deserves, and once the slots are regrouped they would be
+        paid twice - a stage on a 2-slot span would take its own 13/58 of the row plus a neighbour's 13/58 while the
+        next stage took 9/58. Equal slots make the row's partition alone decide a stage's width.
+        """
+        if self._ribbon_rebuilding:
+            return
+        self._ribbon_rebuilding = True
+        try:
+            layout = self.infoRibbonLayout
+            while layout.count():
+                layout.takeAt(0)
+            for arrow in self.infoArrows:
+                arrow.setHidden(True)
+            keys = list(self.infoStages)
+            for band_index, start in enumerate(range(0, len(keys), columns)):
+                band = keys[start:start + columns]
+                top = band_index * INFO_RIBBON_BAND_ROWS
+                spans = ribbon_row_spans(len(band), columns)
+                for position, key in enumerate(band):
+                    widgets = self.infoStages[key]
+                    first, last = spans[position]
+                    for row, part in zip(INFO_RIBBON_PAINT_ROWS, ("rail", "name", "value", "sub")):
+                        layout.addWidget(widgets[part], top + row, first, 1, last - first + 1)
+                    if position < len(band) - 1:
+                        arrow = self.infoArrows[keys.index(key)]
+                        layout.addWidget(arrow, top + INFO_RIBBON_PAINT_ROWS[1], last + 1, 1, 1)
+                        arrow.setHidden(False)
+            self._ribbon_columns = columns
+            self._ribbon_rebuilds += 1
+            self._apply_ribbon_rows()
+            self.videoInfoPane.updateGeometry()
+        finally:
+            self._ribbon_rebuilding = False
+
+    def _apply_ribbon_rows(self) -> None:
+        """State the geometry of the current arrangement at the factor in force: gaps, rows, chevron columns.
+
+        The heights depend on how many bands the arrangement has and the chevron columns on how many stages a row
+        holds, so this runs on every scale pass AND after every rebuild. Rows past the last band are zeroed: a ribbon
+        that lost a band must not leave its heights behind as dead space under the remaining one. (Qt never shrinks a
+        `QGridLayout`'s row count, so the rows still EXIST - the point of zeroing them is that they measure 0 and the
+        card's height is the remaining band's.)
+        """
+        layout = self.infoRibbonLayout
+        inset = scaled_px(INFO_CARD_INSET_PX)
+        layout.setContentsMargins(inset, inset, inset, 0)
+        rail = max(1, scaled_px(INFO_RAIL_HEIGHT_PX))
+        for widgets in self.infoStages.values():
+            widgets["rail"].setFixedHeight(rail)
+        bands = max(1, -(-len(self.infoStages) // max(1, self._ribbon_columns)))
+        gaps = ((1, INFO_RAIL_GAP_PX), (3, INFO_VALUE_GAP_PX), (5, INFO_SUB_GAP_PX))
+        for index in range(bands):
+            top = index * INFO_RIBBON_BAND_ROWS
+            for offset, height in gaps:
+                layout.setRowMinimumHeight(top + offset, max(0, scaled_px(height)))
+            gutter = scaled_px(INFO_ROW_GAP_PX) if index < bands - 1 else 0
+            layout.setRowMinimumHeight(top + INFO_RIBBON_BAND_ROWS - 1, gutter)
+        for row in range(bands * INFO_RIBBON_BAND_ROWS, layout.rowCount()):
+            layout.setRowMinimumHeight(row, 0)
+        # The chevron column is the mockup's 12 px rail between two stages, and the arrows carry the same width so a
+        # text label in a 12 px column cannot widen the grid.
+        arrow_px = scaled_px(INFO_ARROW_COLUMN_PX)
+        for arrow in self.infoArrows:
+            arrow.setFixedWidth(arrow_px)
+        # Every column the grid has ever held is reset first: Qt never shrinks a QGridLayout's column count, so a grid
+        # that has been through a 5-stage arrangement still carries its columns 8 and 9 - and a leftover 14/58 stretch
+        # there would eat the width of a 4-stage row it no longer belongs to.
+        shipped = self._ribbon_columns >= len(self.infoStages)
+        for column in range(layout.columnCount()):
+            layout.setColumnMinimumWidth(column, 0)
+            layout.setColumnStretch(column, 0)
+        for slot in range(max(1, self._ribbon_columns)):
+            # The shipped one-row ribbon keeps the design's per-stage shares (they follow the caption widths); a
+            # reflowed one gives every slot the same weight, because the shares already say how much of the SHIPPED
+            # width a stage deserves and a span would pay them twice.
+            layout.setColumnStretch(2 * slot, INFO_STAGE_ORDER[slot][1] if shipped else 1)
+        for column in range(1, 2 * max(1, self._ribbon_columns) - 1, 2):
+            layout.setColumnMinimumWidth(column, arrow_px)
 
     @staticmethod
     def _stage_state(stage: PipelineStage, language: str | None) -> tuple[str, str]:
@@ -1496,17 +1725,9 @@ class GeneralSettingsPage:
         self.infoQueueList.setFixedHeight(self._queue_rows_height())
 
         # The plan's ribbon: the rail is a painted 2 px line like every other hairline on this pane, and the three
-        # gaps inside a stage are the mockup's own (rail->name 8, name->value 4, value->sub 2) - grid rows 1/3/5.
-        rail = max(1, scaled_px(INFO_RAIL_HEIGHT_PX))
-        self.infoRibbonLayout.setContentsMargins(inset, inset, inset, 0)
-        for row, height in ((1, INFO_RAIL_GAP_PX), (3, INFO_VALUE_GAP_PX), (5, INFO_SUB_GAP_PX)):
-            self.infoRibbonLayout.setRowMinimumHeight(row, max(0, scaled_px(height)))
-        for widgets in self.infoStages.values():
-            widgets["rail"].setFixedHeight(rail)
-        for arrow in self.infoArrows:
-            arrow.setFixedWidth(scaled_px(INFO_ARROW_COLUMN_PX))
-        for column in range(1, 2 * len(INFO_STAGE_ORDER), 2):
-            self.infoRibbonLayout.setColumnMinimumWidth(column, scaled_px(INFO_ARROW_COLUMN_PX))
+        # gaps inside a stage are the mockup's own (rail->name 8, name->value 4, value->sub 2).
+        self._apply_ribbon_rows()
+        self._reflow_ribbon()
         self.infoPipelineRule.setFixedHeight(hairline)
         self.infoFooterLayout.setContentsMargins(inset, cell_inset, inset, cell_inset)
         self.infoFooterLayout.setSpacing(scaled_px(INFO_FOOTER_GAP_PX))
