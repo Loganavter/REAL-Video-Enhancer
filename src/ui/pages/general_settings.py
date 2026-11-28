@@ -748,8 +748,12 @@ class GeneralSettingsPage:
         self.verticalLayout_32.addWidget(self.widget_25)
         self.widget_26 = QWidget(self.scrollAreaWidgetContents_4)
         self.widget_26.setObjectName(u"widget_26")
-        sizePolicy5.setHeightForWidth(self.widget_26.sizePolicy().hasHeightForWidth())
-        self.widget_26.setSizePolicy(sizePolicy5)
+        # The same rule one level up: this host wraps the pane, and with a `Minimum` policy (no ShrinkFlag) the pane's
+        # hint became the host's minimum, i.e. the column's - the clip survived either policy alone (measured 766 px
+        # content at 1.0 ru). Both must shrink.
+        host_policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        host_policy.setHeightForWidth(False)
+        self.widget_26.setSizePolicy(host_policy)
         # The video-info pane: the pipeline plan (a card that speaks with no clip loaded) over three stacked toolkit
         # blocks (transition headline, facts grid, run card) that size themselves. No ceiling and no floor here - the
         # pane's vertical policy is Fixed, so its height is the content's
@@ -849,7 +853,12 @@ class GeneralSettingsPage:
         self.videoInfoPane = SurfacePanel(self.widget_26, background_token=None)
         self.videoInfoPane.setObjectName("videoInfoPane")
         self.videoInfoPane.setAccessibleDescription(u"")
-        info_policy = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
+        # HORIZONTAL `Ignored`, and that is the whole point of a wide label (owner, 2026-11-28: the column clipped its
+        # settings). `MinimumExpanding` has no ShrinkFlag, so `qSmartMinSize` takes this pane's SIZE HINT as its
+        # minimum - and the pipeline ribbon's grid hint is the summed text widths of five labels plus a model name
+        # (measured: 744 px at 1.0 ru inside a 470 px viewport). `Ignored` says the pane takes the width the column
+        # gives it and never votes on it; the cards below then wrap/elide inside that width.
+        info_policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         info_policy.setHeightForWidth(False)
         self.videoInfoPane.setSizePolicy(info_policy)
         self.videoInfoLayout = QVBoxLayout(self.videoInfoPane)
