@@ -16,7 +16,7 @@ harness/
     source.py     the clip manifest check (a `contaminated` clip taints every record that names it)
     verdicts.py   the verdict registry loader
     scripts/      187 instruments: probes, sweeps, benches and the record emitters
-    tests/        the suite: 163 files, 439 tests under the app's interpreter, 1886 under the system one
+    tests/        the suite: 163 files, 439 tests under the app's interpreter, 1896 under the system one
 ```
 
 ## The tests are ours too

@@ -745,6 +745,9 @@ class ProcPagePage:
         #: The boundary's gesture: the handle is under the mouse, and the settings host is frozen for its duration.
         self._split_drag = False
         self._split_frozen = False
+        #: The tab host's size while the handle is under the mouse (`_begin_split_drag` pins it, `_end_split_drag`
+        #: releases it): a pinned host is not laid out per pixel and is not invalidated, so it stays PAINTED.
+        self._split_host_size = None
         self._pending_split: dict[str, str] = {}
         self._split_cache: dict[str, tuple[str, int | None]] = {}
         self._split_flush = QTimer(self.procPage)
@@ -1090,29 +1093,38 @@ class ProcPagePage:
         if self._split_drag:
             return
         self._split_drag = True
-        # The save debounce doubles as the gesture's safety net: if the release never arrives (the window is switched
-        # away mid-drag), `_flush_split` ends the gesture instead of leaving the settings host frozen for good.
-        self._split_flush.start()
-        if self._layout_mode != SIDE:
-            # A stacked drag moves heights only - nothing writes a width there, so there is nothing to freeze.
-            return
-        # Only a host whose updates are ON is ours to freeze: one somebody else disabled is not re-enabled here.
-        if self.processSettingsContainer.updatesEnabled():
+        host = self.processSettingsContainer
+        self._split_host_size = host.size()
+        host.setFixedSize(self._split_host_size)
+        # The PREVIEW is the expensive child per step (a QRhi surface being resized and repainted); the tab is what the
+        # owner wants to keep seeing, so the preview is the one frozen - its last frame stays on screen.
+        if self.processInfoContainer.updatesEnabled():
             self._split_frozen = True
-            self.processSettingsContainer.setUpdatesEnabled(False)
+            self.processInfoContainer.setUpdatesEnabled(False)
+        # The save debounce doubles as the gesture's safety net: if the release never arrives (the window is switched
+        # away mid-drag), `_flush_split` ends the gesture.
+        self._split_flush.start()
+        # The tab host keeps its SIZE for the gesture, not its paint. An earlier cut disabled its updates
+        # (`setUpdatesEnabled(False)`) and the owner saw exactly that: "при движении сплиттера весь контент таба
+        # скрывается" - a frozen widget that is also RESIZED loses its backing store and paints nothing, so the column
+        # read as empty while the handle moved. Pinning the size instead means Qt has no reason to lay the host out or
+        # invalidate it: it keeps its last painted pixels, moves with the column (and is clipped by it), and is stated
+        # once at the new width on release.
 
     def _end_split_drag(self) -> None:
         """The gesture is over: state the one width it ended on, then let the contents paint again."""
         if not self._split_drag:
             return
         self._split_drag = False
-        # The width first, while painting is still off: the reflow then costs one layout, not a layout plus a repaint
-        # per control. Enabling updates afterwards repaints the frozen tab once, at the width it ended on.
-        self._flush_column_width()
+        # Release the pinned size FIRST, so the width below reflows the host into the column it ended on.
+        host = self.processSettingsContainer
+        host.setMinimumSize(QSize(0, 0))
+        host.setMaximumSize(QSize(16777215, 16777215))
         if self._split_frozen:
             self._split_frozen = False
-            self.processSettingsContainer.setUpdatesEnabled(True)
-            self.processSettingsContainer.update()
+            self.processInfoContainer.setUpdatesEnabled(True)
+            self.processInfoContainer.update()
+        self._flush_column_width()
 
     # -- the split's persistence ------------------------------------------------------------------------------
 
