@@ -2456,6 +2456,32 @@ class ProcessTab:
             self._live_tail_wanted = False
             log(f"preview tail failed: {exc}")
 
+    def stop_all_threads(self) -> None:
+        """Join every QThread this tab owns - the window's one exit path calls it (`shutdown`).
+
+        Owner saw `QThread: Destroyed while thread is still running` (2026-11-28). Each of these is joined on its own
+        normal path, but a quit can land between a thread's start and its finish (the 100 ms clock, the live tail, the
+        compare's source decoder), and a QThread whose Python object dies under a running thread prints exactly that.
+        Every step is best-effort: an exit must never raise on its way out.
+        """
+        worker = getattr(self, "workerThread", None)
+        if worker is not None:
+            try:
+                worker.stop()
+                worker.quit()
+                worker.wait(2000)
+            except Exception:
+                pass
+            self.workerThread = None
+        try:
+            self._stop_live_tail()
+        except Exception:
+            pass
+        try:
+            self._stop_source_decoder()
+        except Exception:
+            pass
+
     def _stop_live_tail(self) -> None:
         self._live_tail_wanted = False
         self._playback_tail = False

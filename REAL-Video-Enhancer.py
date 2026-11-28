@@ -1196,6 +1196,16 @@ class MainWindow(QMainWindow):
         if getattr(self, "_shutdown_done", False):
             return
         self._shutdown_done = True
+        # QThreads die with their object unless they are joined: the window's close is the last moment they can be.
+        # `QThread: Destroyed while thread is still running` (owner, 2026-11-28) is what an unjoined one prints.
+        try:
+            self.homeTab.stop_notes_fetch()
+        except Exception:
+            pass
+        try:
+            self.processTab.stop_all_threads()
+        except Exception:
+            pass
         if hasattr(self, "processTab"):
             try:
                 self.processTab.killRenderProcess()

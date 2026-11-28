@@ -102,3 +102,22 @@ class HomeTab:
         self._fetcher = NotesFetcher(self.parent)
         self._fetcher.fetched.connect(self.applyFetchedNotes)
         self._fetcher.start()
+
+    def stop_notes_fetch(self, timeout_ms: int = 3000) -> None:
+        """Join the fetch thread before the app goes away.
+
+        Owner saw `QThread: Destroyed while thread is still running` (2026-11-28): the fetch runs a 10 s network
+        request in a `QThread` that nothing ever waited for, so closing the window while the request was in flight let
+        the object die under its own thread. This waits for it (the request carries a timeout of its own, so the wait is
+        bounded), and is safe to call when the fetch already finished or never started.
+        """
+        fetcher = getattr(self, "_fetcher", None)
+        if fetcher is None:
+            return
+        try:
+            if fetcher.isRunning():
+                fetcher.requestInterruption()
+                fetcher.wait(timeout_ms)
+        except RuntimeError:
+            pass
+        self._fetcher = None
