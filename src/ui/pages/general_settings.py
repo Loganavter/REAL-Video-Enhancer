@@ -132,8 +132,14 @@ INFO_FOOTER_KV_GAP_PX = 6
 #:
 #: Why an average and not a per-stage maximum: the shares are unequal by design (Deblur takes 9/58 and is the
 #: narrowest stage at 60 px in the shipped card against a 52 px caption), so a per-stage floor cannot hold five on the
-#: shipped width at all. 82 is the row-level floor: it reflows when a stage would average less than the shipped design
-#: already gives it.
+#: shipped width at all.
+#:
+#: The floor is compared against the RIBBON HOST's width, which is NOT the card it sits in: the host is 448 px inside
+#: the shipped 500 px column and, after its own margins, ~428 px of usable row. Five WHOLE names need the measured
+#: 86 + 94 + 68 + 60 + 66 = 374 px plus four 12 px chevrons = 422 px, so the shipped window is 6 px short of a one-row
+#: arrangement that does not elide anything - which is why the ribbon reflows to 4+1 there, with every name whole
+#: (measured cells 97/93/72/63/72). That is the honest answer to "как минимум этапы складывались друг над другом, когда
+#: по ширине ужимают": the alternative would be five slivers with "Decompr…" in one of them.
 INFO_STAGE_MIN_PX = 82
 
 #: The four painted parts of a stage, in grid-row order inside one ribbon band: the rail, its 8 px gap, the name, the

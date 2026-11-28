@@ -22,7 +22,8 @@ The contracts pinned here, and why each is a behaviour rather than a shape:
 * **a language switch repaints TEXT.** The stage order and the number of bands are unchanged, the values stay
   byte-identical - and the grid is not rebuilt (the counter does not move).
 
-The minimum per stage is stated once (`INFO_STAGE_MIN_PX = 82`): the shipped 485 px card gives five stages 410 px after
+The minimum per stage is stated once (`INFO_STAGE_MIN_PX = 82`, measured against the RIBBON HOST and its own
+margins - ~428 px usable on the shipped window, where five whole names would need 422 px plus rounding): the host gives five stages 410 px after
 four 12 px chevrons, i.e. 82 px each - so the shipped window can never reflow, and the narrow-column case is measured
 against the same number (`test_the_column_arithmetic_reflows_at_the_stated_minimum`).
 
