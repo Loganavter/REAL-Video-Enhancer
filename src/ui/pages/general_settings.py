@@ -22,6 +22,7 @@ import resources_rc
 from sli_ui_toolkit.ui.managers.ui_scale import scaled_px
 from sli_ui_toolkit.widgets import (Button, CheckBox, ComboBox, CustomLineEdit, DoubleSpinBox, ProgressBar,
     SurfacePanel, SurfaceScrollArea, Text, TextListWidget)
+from src.ui.widgets.combo_height import COMBO_HEIGHT_PX, apply_combo_height
 from src.ui.widgets.combo_width import cap_combo_to_row
 from src.ui.typography import apply, BODY_PT, CAPTION_PT, GROUP_TITLE_PT
 from src.ui.pages.handles import GeneralSettingsHandles
@@ -38,12 +39,14 @@ STOCK_SCROLLBAR_WIDTH = 8
 SEPARATOR_HEIGHT = 3
 
 #: The settings row's height in DESIGN px (owner, 2026-11-24): the rows, the path fields, the combo boxes and the value
-#: spin boxes all state this one row. At 1.0 it is the Designer's 30; 45 at 1.5 and 60 at 2.0 come from `scaled_px()`
-#: at apply time, never from an import-time snapshot. The old constant was an absolute pin, which is what clipped a
-#: 12 pt label's line at 1.5 (wave 2 left the page body scrollable but the rows still 30 px).
-ROW_HEIGHT_PX = 30
+#: spin boxes all state this one row. It is the toolkit's combobox height (`COMBO_HEIGHT_PX`, the control's own
+#: minimum) because the row must never be shorter than the tallest control it hosts: at 30 the six combos this page
+#: capped to that row rendered 3 px below their own `minimumSizeHint` and read squashed (owner, 2026-11-28). 33 at 1.0,
+#: 50 at 1.5 and 66 at 2.0 come from `scaled_px()` at apply time, never from an import-time snapshot.
+ROW_HEIGHT_PX = COMBO_HEIGHT_PX
 
-#: A value spin box's width in DESIGN px; its height is `ROW_HEIGHT_PX` (the Designer's 75x30).
+#: A value spin box's width in DESIGN px; its height is `ROW_HEIGHT_PX` (the Designer's 75x30 field, in the row that
+#: the toolkit's 33 px combobox now sets).
 FIELD_WIDTH_PX = 75
 
 #: The page body's gap and inset in DESIGN px: the Designer's 11 between rows and around the body.
@@ -1545,8 +1548,11 @@ class GeneralSettingsPage:
             edit.setMinimumSize(QSize(0, row))
             edit.setMaximumSize(QSize(scaled_px(max_width), row))
         for combo in (self.backendComboBox, self.interpolateModelComboBox, self.decompressModelComboBox,
-                      self.denoiseModelComboBox, self.deblurModelComboBox, self.upscaleModelComboBox):
-            combo.setMaximumHeight(row)   # width follows the content, not the Designer's column
+                      self.denoiseModelComboBox, self.deblurModelComboBox, self.upscaleModelComboBox,
+                      self.qualityPresetComboBox):
+            # The combobox's height is the toolkit's number (`COMBO_HEIGHT_PX`), not this page's row literal: the row
+            # was shorter than the control's own minimum, which is what squashed six fields at 1.0 (2026-11-28).
+            apply_combo_height(combo)
         for spin in (self.interpolationMultiplierSpinBox, self.upscaleScaleSpinBox):
             spin.setMinimumSize(QSize(field_width, row))
             spin.setMaximumSize(QSize(field_width, row))

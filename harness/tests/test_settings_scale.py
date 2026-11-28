@@ -7,10 +7,11 @@ inline size as ABSOLUTE, so that body stayed at 10 pt while every label around i
 
 The pins below are the wave's contract:
 
-* every design number is resolved at construction and again on ``UiScale.scale_changed``: rows 30 -> 45 -> 60,
-  the output path's floor 25 -> 38 -> 50, the value fields 75x30 -> 112x45 -> 150x60, the separator 3 -> 4 -> 6,
-  and the design gaps 11/10/9/6 -> 16/15/14/9 -> 22/20/18/12;
-* 1.0 is unchanged - the same numbers today, so the look does not move when the feature is off;
+* every design number is resolved at construction and again on ``UiScale.scale_changed``: rows 33 -> 50 -> 66,
+  the output path's floor 25 -> 38 -> 50, the value fields 75x33 -> 112x50 -> 150x66, the separator 3 -> 4 -> 6,
+  and the design gaps 11/10/9/6 -> 16/15/14/9 -> 22/20/18/12. The row is the toolkit's combobox height (33, not the
+  Designer's 30) since 2026-11-28: a row shorter than a combo squashed six fields below their own minimum;
+* 1.0 states those numbers today, so nothing else moves when the feature is off;
 * the video-info pane's toolkit labels keep design pixel sizes (the toolkit scales them once) and its hairlines/insets
   are stated through ``scaled_px`` at apply time.
 
@@ -43,14 +44,18 @@ from src.ui.pages.tab_3 import Tab3Page  # noqa: E402
 
 FACTORS = (1.0, 1.5, 2.0)
 
-#: A settings row's design height: 30 px, the value the Designer stated as ``(..., 30)``.
-ROW_HEIGHT = {1.0: 30, 1.5: 45, 2.0: 60}
+#: A settings row's design height: the toolkit's combobox height (33 px), which the Designer's 30 could not hold.
+ROW_HEIGHT = {1.0: 33, 1.5: 50, 2.0: 66}
 
 #: The output path field's floor: the Designer's ``(0, 25)``.
 ROW_MIN_HEIGHT = {1.0: 25, 1.5: 38, 2.0: 50}
 
-#: A value spin box's design width; its height is ``ROW_HEIGHT``.
+#: A value spin box's design width; its height is ``ROW_HEIGHT`` on the General tab.
 FIELD_WIDTH = {1.0: 75, 1.5: 112, 2.0: 150}
+
+#: `tab_2`'s scene-change threshold keeps its own value-field row: the Designer's 75x30. Only the General tab's row
+#: carries the toolkit's combobox height (see ``ROW_HEIGHT``).
+TAB2_THRESHOLD_ROW = {1.0: 30, 1.5: 45, 2.0: 60}
 
 #: The separator's design height (a painted line, so it stays one pixel at 1.0 and grows with the factor).
 SEPARATOR_HEIGHT = {1.0: 3, 1.5: 4, 2.0: 6}
@@ -122,20 +127,20 @@ def _tab3(qapp, factor: float) -> Tab3Page:
 
 
 def test_at_factor_one_the_pages_state_todays_numbers(qapp):
-    """1.0 unchanged: 30 -> 30, 25 -> 25, 75x30 unchanged, the gaps and the 10/11 pt body as they are today."""
+    """1.0 states the row at the toolkit's combobox height: 33 -> 33, 25 -> 25, 75x33, the gaps and the body as today."""
     general = _general(qapp, 1.0)
     tab2 = _tab2(qapp, 1.0)
     tab3 = _tab3(qapp, 1.0)
 
     for button in (general.inputFileSelectButton, general.batchSelectButton,
                    general.outputFileSelectButton, general.openOutputFolderButton):
-        assert (button.minimumHeight(), button.maximumHeight()) == (30, 30)
-    assert (general.inputFileText.minimumHeight(), general.inputFileText.maximumHeight()) == (30, 30)
-    assert (general.outputFileText.minimumHeight(), general.outputFileText.maximumHeight()) == (30, 30)
-    assert general.backendComboBox.maximumHeight() == 30
+        assert (button.minimumHeight(), button.maximumHeight()) == (33, 33)
+    assert (general.inputFileText.minimumHeight(), general.inputFileText.maximumHeight()) == (33, 33)
+    assert (general.outputFileText.minimumHeight(), general.outputFileText.maximumHeight()) == (33, 33)
+    assert (general.backendComboBox.minimumHeight(), general.backendComboBox.maximumHeight()) == (33, 33)
     for spin in (general.interpolationMultiplierSpinBox, general.upscaleScaleSpinBox):
         assert (spin.minimumWidth(), spin.maximumWidth()) == (75, 75)
-        assert (spin.minimumHeight(), spin.maximumHeight()) == (30, 30)
+        assert (spin.minimumHeight(), spin.maximumHeight()) == (33, 33)
     assert general.line.height() == 3
     assert general.verticalLayout_32.spacing() == 11
     assert general.verticalLayout_32.contentsMargins().left() == 11
@@ -174,8 +179,9 @@ def test_general_settings_rows_and_controls_follow_the_factor(qapp, factor):
         assert edit.minimumHeight() == row and edit.maximumHeight() == row
     for combo in (general.backendComboBox, general.interpolateModelComboBox, general.decompressModelComboBox,
                   general.denoiseModelComboBox, general.deblurModelComboBox, general.upscaleModelComboBox):
-        assert combo.maximumHeight() == row, (
-            f"at factor {factor} {combo.objectName()} caps its height at {combo.maximumHeight()}, not {row}")
+        assert (combo.minimumHeight(), combo.maximumHeight()) == (row, row), (
+            f"at factor {factor} {combo.objectName()} states {combo.minimumHeight()}..{combo.maximumHeight()}, "
+            f"not the row's {row}")
 
     for spin in (general.interpolationMultiplierSpinBox, general.upscaleScaleSpinBox):
         assert (spin.minimumWidth(), spin.maximumWidth()) == (FIELD_WIDTH[factor], FIELD_WIDTH[factor])
@@ -202,7 +208,7 @@ def test_tab_2_rows_and_gaps_follow_the_factor(qapp, factor):
 
     assert tab2.output_folder_location.minimumHeight() == ROW_MIN_HEIGHT[factor]
     assert (tab2.scene_change_detection_threshold.minimumWidth(),
-            tab2.scene_change_detection_threshold.minimumHeight()) == (FIELD_WIDTH[factor], ROW_HEIGHT[factor])
+            tab2.scene_change_detection_threshold.minimumHeight()) == (FIELD_WIDTH[factor], TAB2_THRESHOLD_ROW[factor])
     for layout in (tab2.horizontalLayout_19, tab2.horizontalLayout_17, tab2.horizontalLayout_27,
                    tab2.horizontalLayout_14):
         assert layout.spacing() == ROW_GAP[factor]
@@ -248,7 +254,7 @@ def test_a_live_factor_change_reaches_every_page(qapp):
     general = _general(qapp, 1.0)
     tab2 = _tab2(qapp, 1.0)
     tab3 = _tab3(qapp, 1.0)
-    assert general.inputFileText.maximumHeight() == 30
+    assert general.inputFileText.maximumHeight() == 33
     assert general.line.height() == 3
     assert general.verticalLayout_32.spacing() == 11
     assert tab2.scene_change_detection_threshold.minimumWidth() == 75
@@ -259,7 +265,7 @@ def test_a_live_factor_change_reaches_every_page(qapp):
     for _ in range(6):
         qapp.processEvents()
 
-    assert general.inputFileText.maximumHeight() == 45
+    assert general.inputFileText.maximumHeight() == 50
     assert general.interpolationMultiplierSpinBox.minimumWidth() == 112
     assert general.line.height() == 4
     assert general.verticalLayout_32.spacing() == 16
@@ -273,7 +279,7 @@ def test_a_live_factor_change_reaches_every_page(qapp):
     for _ in range(6):
         qapp.processEvents()
 
-    assert general.inputFileText.maximumHeight() == 60
+    assert general.inputFileText.maximumHeight() == 66
     assert general.interpolationMultiplierSpinBox.minimumWidth() == 150
     assert general.line.height() == 6
     assert general.verticalLayout_32.spacing() == 22
