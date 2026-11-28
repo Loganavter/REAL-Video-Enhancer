@@ -194,3 +194,32 @@ def test_the_upscale_combo_cap_does_not_grow_across_page_returns(shell, qapp):
     assert first <= viewport, "a cap wider than the pane it lives in is not a cap"
     assert label.width() + combo.maximumWidth() <= viewport, (
         "the capped row still does not fit the pane's viewport")
+
+
+def test_the_queue_button_is_as_wide_as_its_own_text(shell, qapp):
+    """Owner, 2026-11-28: the label rendered "Add to Render Que…".
+
+    The button was built with a literal `size=(200, 35)` while its content (icon + text + paddings) is what decides how
+    wide it must be; at a raised factor the English label no longer fit and elided. `size=(0, 35)` is the toolkit's
+    "width from content, height fixed". The property pinned here is the one that matters: at 1.0 and at 1.25 the button
+    is at least as wide as its own content hint, in the longer (English) label.
+    """
+    from PySide6.QtGui import QFontMetrics
+    from sli_ui_toolkit.ui.managers.ui_scale import UiScale
+
+    _shell, window, page = shell
+    button = page.generalSettings_page.addToRenderQueueButton
+    scale = UiScale.get_instance()
+    factor_before = scale.factor()
+    try:
+        for factor in (1.0, 1.25):
+            scale.set_factor(factor)
+            window.resize(window.width(), window.height())
+            _settle(qapp)
+            needed = button.minimumSizeHint().width()
+            assert button.width() >= needed, (
+                f"at {factor} the queue button is {button.width()} px for a {needed} px content - the label would elide")
+            assert needed > 0
+    finally:
+        scale.set_factor(factor_before)
+        _settle(qapp)

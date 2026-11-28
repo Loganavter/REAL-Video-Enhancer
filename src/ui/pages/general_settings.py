@@ -731,14 +731,14 @@ class GeneralSettingsPage:
         self.addToRenderQueueButton = Button(parent=self.widget_25,
             text=QCoreApplication.translate("MainWindow", u" Add to Render Queue", None), variant="surface",
             content_align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            content_padding=(10, 5, 10, 5), corner_radius=10, size=(200, 35))
+            content_padding=(10, 5, 10, 5), corner_radius=10, size=(0, 35))
         self.addToRenderQueueButton.setObjectName(u"addToRenderQueueButton")
         sizePolicy5.setHeightForWidth(self.addToRenderQueueButton.sizePolicy().hasHeightForWidth())
         self.addToRenderQueueButton.setSizePolicy(sizePolicy5)
-        # The Designer pinned 200x35; the toolkit's hint at RVE's 12 px control font is 187x33 (text + 10/10 padding +
-        # 5/5), so the row handed it 2-5 px less. The design size is the constructor's `size=(200, 35)` now: the toolkit
-        # re-resolves it on `scale_changed` (a page `setMaximumSize(200, 35)` would have capped the scaled button at the
-        # 1.0 number and clipped it at 1.5).
+        # The Designer pinned 200x35, and 200 was NARROWER than this button's own text (owner, 2026-11-28: the label
+        # rendered "Add to Render Que…"). A button whose text is known must take its width from that text, not from a
+        # literal: `size=(0, 35)` means "width from the content, height fixed" (the toolkit's own convention - the zoom
+        # buttons use `size=(0, 30)`), so the label is never elided at any factor.
 
         # No stylesheet: a toolkit button paints itself; the deleted rule only repeated its own alignment.
         icon2 = QIcon()
