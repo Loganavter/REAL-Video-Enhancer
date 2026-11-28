@@ -62,7 +62,11 @@ ENCODER_ROW = {1.0: 50, 1.5: 75, 2.0: 100}
 ENCODER_FLOOR = {1.0: 200, 1.5: 300, 2.0: 400}
 
 #: The document default font of the changelog pane, in px (design 12 px, multiplied once by the factor).
-CHANGELOG_DEFAULT_PX = {1.0: 12, 1.5: 18, 2.0: 24}
+#: The changelog body's document font per factor. It was 12/18/24 - the toolkit's UNPINNED default, i.e. smaller than
+#: the app's body (12 pt = 16 px at 96 DPI), which is what the owner saw as "the left pane does not follow the app's
+#: typography" (2026-11-28). The pane now states the app's body size through `RichTextView.setTextPixelSize`
+#: (`label_px(BODY_PT)`), which the toolkit multiplies by the factor exactly once.
+CHANGELOG_DEFAULT_PX = {1.0: 16, 1.5: 24, 2.0: 32}
 
 #: `QWIDGETSIZE_MAX`: the height side of a max-width-only box stays unbounded.
 UNBOUNDED = 16777215

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QSpacerIte
     QWidget)
 import resources_rc
 import resources_rc
-from src.ui.typography import apply, DISPLAY_PT, GROUP_TITLE_PT
+from src.ui.typography import apply, BODY_PT, DISPLAY_PT, GROUP_TITLE_PT, label_px
 
 # Layer B3 (2026-11-21): the logo is the page's only stock pixmap label, and `ImageLabel` is its toolkit counterpart
 # (Qt-shaped already: `setPixmap`/`setScaledContents`/`setText`). The Designer's `QLabel` paints a pixmap-only label at
@@ -127,6 +127,11 @@ class HomePagePage:
         self.horizontalLayout_30.setObjectName(u"horizontalLayout_30")
         self.changeLogText = RichTextView(self.homePage, link_token="link")
         self.changeLogText.setObjectName(u"changeLogText")
+        # The body's face comes from the toolkit's metrics bus (family + interface scale); only the SIZE is the host's
+        # to state, and BOTH panes state the SAME one. Owner, 2026-11-28: the left pane did not follow the app's
+        # typography at all and the right one was a different size - `apply()` pins a toolkit `Text`'s own size and
+        # never reaches a `RichTextView`'s body, which is sized through `setTextPixelSize` (see `rich_text_view.py`).
+        self.changeLogText.setTextPixelSize(label_px(BODY_PT))
         # The document's own font must exist before the notes arrive (the pane scales with it), and it is set ONCE: the
         # same call used to live in `retranslate()`, where every language switch replaced the user's notes with a blank
         # page - and the blank document travelled through the catalogue as an untranslatable key (measured 2026-11-24).
@@ -135,7 +140,9 @@ class HomePagePage:
         self.horizontalLayout_30.addWidget(self.changeLogText)
         self.systemInfoText = RichTextView(self.homePage, link_token="link")
         self.systemInfoText.setObjectName(u"systemInfoText")
-        apply(self.systemInfoText, GROUP_TITLE_PT)
+        # Running text, not a heading: the same body size as the pane beside it (`GROUP_TITLE_PT` here was why the two
+        # panes disagreed - and `apply` never reached the body anyway).
+        self.systemInfoText.setTextPixelSize(label_px(BODY_PT))
         self.systemInfoText.setReadOnly(True)
         self.horizontalLayout_30.addWidget(self.systemInfoText)
         self.gridLayout_2.addLayout(self.horizontalLayout_30, 2, 0, 1, 1)
