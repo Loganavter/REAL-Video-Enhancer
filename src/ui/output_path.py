@@ -129,11 +129,37 @@ def derive(derivation: Derivation, exists: Callable[[str], bool] = os.path.isfil
     name = os.path.splitext(os.path.basename(source))[0] + "".join(derivation.tags)
     base = f"{name}_{round(derivation.fps, 0)}fps_{derivation.width}x{derivation.height}"
     candidate = os.path.join(derivation.directory, f"{base}.{derivation.container}")
-    iteration = 0
+    if not exists(candidate):
+        return candidate
+    # The suffix is MONOTONIC: the next name continues past the highest `_(n)` already on disk, instead of filling the
+    # first gap. Filling gaps looked like "the app forgot", and it made a second run write `_(0)` while `_(2)` sat
+    # next to it (owner, 2026-11-28: "почему он не умеет циферку в скобочках сам менять на незанятую" - the `(2)` in
+    # the name he quoted belongs to the MODEL file, while the app's own counter is the trailing `_(n)`).
+    iteration = _next_suffix(os.path.dirname(candidate), os.path.basename(candidate), base, derivation.container)
+    candidate = os.path.join(derivation.directory, f"{base}_({iteration}).{derivation.container}")
     while exists(candidate):
-        candidate = os.path.join(derivation.directory, f"{base}_({iteration}).{derivation.container}")
         iteration += 1
+        candidate = os.path.join(derivation.directory, f"{base}_({iteration}).{derivation.container}")
     return candidate
+
+
+def _next_suffix(directory: str, name: str, base: str, container: str) -> int:
+    """One past the highest `_(n)` this derivation already used in `directory` (0 when there is none).
+
+    Reads the folder once: the alternative - probing `_(0)`, `_(1)`, ... - answers a gap, which reads as a forgotten
+    counter. A folder that cannot be listed falls back to the probing loop's start, never raises.
+    """
+    prefix, suffix = f"{base}_(", f").{container}"
+    highest = -1
+    try:
+        for entry in os.listdir(directory or "."):
+            if entry.startswith(prefix) and entry.endswith(suffix):
+                digits = entry[len(prefix):-len(suffix)]
+                if digits.isdigit():
+                    highest = max(highest, int(digits))
+    except OSError:
+        return 0
+    return highest + 1
 
 
 def show_path(general, path: str) -> None:

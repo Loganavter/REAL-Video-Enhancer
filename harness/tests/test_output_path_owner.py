@@ -492,3 +492,39 @@ def test_only_the_owner_module_writes_the_path_field():
         if "outputFileText.setText(" in path.read_text(encoding="utf-8")
     )
     assert writers == ["src/ui/output_path.py"], f"second writer(s) of the output path field: {writers}"
+
+
+def test_the_suffix_continues_past_the_highest_number_not_into_a_gap(tmp_path):
+    """Owner, 2026-11-28: the counter must move on, not restart.
+
+    A second run of the same job found `_(2)` on disk and wrote `_(0)` (the loop filled the first gap), while asking
+    about an overwrite when the FIELD still carried the old name - both read as "the app forgot its own counter".
+    """
+    settings = _settings(tmp_path)
+    window = _window(tmp_path, field="", settings=settings)
+    directory = tmp_path / "out"
+    directory.mkdir()
+    input_file = window.page_handles.general.inputFileText.text()
+
+    first = window.derivedOutputFile(input_file, str(directory))      # nothing exists: the plain name
+    base = first[: -len(".mkv")]
+    __import__("pathlib").Path(first).write_bytes(b"\0")
+    __import__("pathlib").Path(f"{base}_(2).mkv").write_bytes(b"\0")
+
+    shown = window.derivedOutputFile(input_file, str(directory))
+    assert shown == f"{base}_(3).mkv", shown
+
+
+def test_the_first_collision_is_still_the_first_suffix(tmp_path):
+    """No `_(n)` on disk yet: the first collision is `_(0)`, exactly as before."""
+    settings = _settings(tmp_path)
+    window = _window(tmp_path, field="", settings=settings)
+    directory = tmp_path / "out"
+    directory.mkdir()
+    input_file = window.page_handles.general.inputFileText.text()
+
+    first = window.derivedOutputFile(input_file, str(directory))
+    base = first[: -len(".mkv")]
+    __import__("pathlib").Path(first).write_bytes(b"\0")
+
+    assert window.derivedOutputFile(input_file, str(directory)) == f"{base}_(0).mkv"

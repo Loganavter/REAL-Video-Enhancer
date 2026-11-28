@@ -815,6 +815,18 @@ class MainWindow(QMainWindow):
             NotificationOverlay(message, self, timeout=2000)
             return
 
+        # A path this app DERIVED that now exists is stale, not a choice: re-derive it, which is what bumps the
+        # `_(n)` suffix past the files already on disk. Without this the field kept the name a previous run wrote, so
+        # queueing the same job again asked "overwrite?" instead of picking the next free name (owner, 2026-11-28:
+        # "почему он не умеет циферку в скобочках сам менять на незанятую"). A path the USER chose is never touched.
+        if output_path and not output_path_io.user_set(self.settings) and os.path.isfile(output_path):
+            refreshed = self.setDefaultOutputFile(
+                input_file,
+                output_path_io.directory_for(output_path, self.settings.settings["output_folder_location"]),
+            )
+            if refreshed:
+                output_path = refreshed
+
         for renderOptions in self.renderQueue.getQueue():
             if output_path == renderOptions.outputPath:
                 NotificationOverlay("Output file already in queue!", self, timeout=1500)
