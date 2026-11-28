@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from PySide6.QtCore import (QCoreApplication, QEvent, QObject, QPoint, QSize, Qt,
     QTimer, Signal)
 from PySide6.QtGui import QColor, QIcon
-from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
+from PySide6.QtWidgets import (QApplication, QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
     QWidget)
 import resources_rc
 import resources_rc
@@ -87,6 +87,10 @@ SPLIT_HANDLE_GAP_PX = PANE_GAP_PX
 
 #: How long a finished drag waits before its split reaches `settings.txt`: one write per drag, not one per pixel.
 SPLIT_SAVE_DELAY_MS = 400
+
+#: How long a splitter move waits before its column width reaches the strips: 0 = one apply per event-loop turn.
+#: Several `splitterMoved` in one turn (a fast drag delivers batches of mouse moves) collapse into one reflow.
+SPLIT_APPLY_DELAY_MS = 0
 
 
 class PageLayoutState(QObject):
@@ -293,6 +297,29 @@ class TabStripHost(QObject):
             # `set_override_bg_color` is the toolkit's exact-base-fill spelling: a checked button with an override
             # keeps the override as its plate (the variant's checked layer is skipped) and still answers hover.
             button.set_override_bg_color(QColor(colour) if (selected and colour is not None) else None)
+
+
+class _SplitterDragFilter(QObject):
+    """See the boundary's gesture: the press that starts a drag, and the release that ends it.
+
+    `QSplitter` has no gesture signal - `splitterMoved` fires per pixel and never says "the user let go" - so the
+    handle's own mouse events are the only honest answer to "is the boundary under the mouse right now". The filter
+    never consumes an event: the toolkit's handle still gets its press/release and Qt still runs the drag.
+    """
+
+    def __init__(self, page: "ProcPagePage") -> None:
+        super().__init__(page.procPage)
+        self._page = page
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API
+        kind = event.type()
+        if kind == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._page._begin_split_drag()
+        elif kind == QEvent.Type.MouseButtonRelease:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._page._end_split_drag()
+        return False
 
 
 class ProcPagePage:
@@ -710,12 +737,26 @@ class ProcPagePage:
         self._split = None
         self._split_orientation = None
         self._applying_split = False
+        #: The column width the strips were last STATED at (`_apply_column_widths`). A drag asks for a new one every
+        #: pixel; this is what lets a repeat be recognised as a no-op instead of a layout request.
+        self._applied_column: int | None = None
+        #: The width the live drag last asked for, waiting for `_split_apply` (or the release) to state it.
+        self._pending_column: int | None = None
+        #: The boundary's gesture: the handle is under the mouse, and the settings host is frozen for its duration.
+        self._split_drag = False
+        self._split_frozen = False
         self._pending_split: dict[str, str] = {}
         self._split_cache: dict[str, tuple[str, int | None]] = {}
         self._split_flush = QTimer(self.procPage)
         self._split_flush.setSingleShot(True)
         self._split_flush.setInterval(SPLIT_SAVE_DELAY_MS)
         self._split_flush.timeout.connect(self._flush_split)
+        # The width a move asks for is stated on the next turn, not inside the signal: `splitterMoved` fires per pixel,
+        # and every one of those writes reflows the whole settings tab (rows, combos, spin boxes, the ribbon grid).
+        self._split_apply = QTimer(self.procPage)
+        self._split_apply.setSingleShot(True)
+        self._split_apply.setInterval(SPLIT_APPLY_DELAY_MS)
+        self._split_apply.timeout.connect(self._flush_column_width)
         self.layoutState = PageLayoutState(self.procPage)
         self.previewBandToggle.clicked.connect(self.layoutState.toggleRequested.emit)
         self.layoutState.toggleRequested.connect(self.toggle_preview_band)
@@ -727,6 +768,9 @@ class ProcPagePage:
         self._layout_filter = _PageLayoutFilter(self)
         self.procPage.installEventFilter(self._layout_filter)
         self.pageScroll.viewport().installEventFilter(self._layout_filter)
+        # The gesture's own two edges (press on the handle, release) are the only signal for "a drag is live"; it is
+        # installed on the handle each time the splitter is built (`_split_for`).
+        self._drag_filter = _SplitterDragFilter(self)
         self._column_scale = ScaleFollower(self.procPage, self._apply_layout_policy)
         self.processSettingsContainer.setCurrentIndex(0)
         # The strip's host half (see `TabStripHost`): measures the labels, exposes an overflow the user can reach,
@@ -888,6 +932,8 @@ class ProcPagePage:
         for pane in panes:
             splitter.addWidget(pane)
         splitter.splitterMoved.connect(self._on_split_moved)
+        # The handle is where the gesture starts and ends (`QSplitter` reports no such pair itself).
+        splitter.handle(1).installEventFilter(self._drag_filter)
         # The splitter's extent is the body's content width/height: when the grid hands it a new box (a mode switch,
         # a resize) the sizes are re-stated for that box instead of left at the proportion Qt scaled them to.
         splitter.installEventFilter(self._layout_filter)
@@ -1013,10 +1059,60 @@ class ProcPagePage:
         The column itself is sized by the splitter - that is what a drag moves - but its two inner strips state their
         width explicitly: their content hints (the tab strip's five labels, the render row's controls) are wider than
         the column at 1.0, and a `Minimum`/`MinimumExpanding` policy would answer that hint instead of the column.
+
+        A write of the width already in force is skipped: every one of them is a layout request, and the tab strip's
+        reflow it starts costs real time (measured 2.8 ms per write at 1.0, `rve-splitter-drag-cost-2026-11-28`) even
+        though nothing on screen can change.
         """
         column = max(0, int(column))
+        if column == self._applied_column:
+            return
+        self._applied_column = column
         for container in (self.bottomMenuSubContainer, self.widget_13):
             container.setFixedWidth(column)
+
+    def _flush_column_width(self) -> None:
+        """State the width the last move asked for - once per turn (or once per gesture), never per pixel."""
+        column = self._pending_column
+        self._pending_column = None
+        if column is not None:
+            self._apply_column_widths(column)
+
+    def _begin_split_drag(self) -> None:
+        """The handle is under the mouse: freeze the column's contents until it is released.
+
+        A drag asks for a new column width every pixel, and every write of it reflows the whole settings tab - dozens
+        of rows, combos, spin boxes and the ribbon grid, measured 13.6 ms per step at 1.0. None of those intermediate
+        widths is ever a state the user rests on, so the contents are frozen for the gesture (`updates` off, no width
+        writes) and stated once, on release. The panes keep following the handle: that is `QSplitter`'s own resize of
+        its children, which this page does not drive.
+        """
+        if self._split_drag:
+            return
+        self._split_drag = True
+        # The save debounce doubles as the gesture's safety net: if the release never arrives (the window is switched
+        # away mid-drag), `_flush_split` ends the gesture instead of leaving the settings host frozen for good.
+        self._split_flush.start()
+        if self._layout_mode != SIDE:
+            # A stacked drag moves heights only - nothing writes a width there, so there is nothing to freeze.
+            return
+        # Only a host whose updates are ON is ours to freeze: one somebody else disabled is not re-enabled here.
+        if self.processSettingsContainer.updatesEnabled():
+            self._split_frozen = True
+            self.processSettingsContainer.setUpdatesEnabled(False)
+
+    def _end_split_drag(self) -> None:
+        """The gesture is over: state the one width it ended on, then let the contents paint again."""
+        if not self._split_drag:
+            return
+        self._split_drag = False
+        # The width first, while painting is still off: the reflow then costs one layout, not a layout plus a repaint
+        # per control. Enabling updates afterwards repaints the frozen tab once, at the width it ended on.
+        self._flush_column_width()
+        if self._split_frozen:
+            self._split_frozen = False
+            self.processSettingsContainer.setUpdatesEnabled(True)
+            self.processSettingsContainer.update()
 
     # -- the split's persistence ------------------------------------------------------------------------------
 
@@ -1044,22 +1140,34 @@ class ProcPagePage:
         return parsed
 
     def _on_split_moved(self, position: int, index: int) -> None:
-        """A drag of the live boundary: follow it with the column's strips and remember the split for `mode`.
+        """A drag of the live boundary: remember the width it asks for and the split, for `mode`.
 
         A programmatic `setSizes` emits this signal too, so the policy's own passes are filtered out - only a move the
         user made is a choice worth storing.
+
+        The strips are NOT written here. A move fires per pixel, and each write reflows the settings tab from scratch;
+        the width is recorded as pending and stated once - at the end of the turn (`_split_apply`) or, while the handle
+        is under the mouse, once on release (`_end_split_drag`).
         """
         if self._applying_split or self._split is None:
             return
         if self._layout_mode == SIDE:
             column = self.processContainer.width()
-            self._apply_column_widths(column)
             # The property states the width IN FORCE, and a drag is the one writer that can move it off the policy's
             # answer without a new policy pass.
             self._policy_column = column
             self._remember_split(PREVIEW_SPLIT_SIDE_KEY, column)
-        else:
-            self._remember_split(PREVIEW_SPLIT_STACK_KEY, self.processInfoContainer.height())
+            if column == self._applied_column:
+                # The strips already carry it (a drag that came back to where it started, or a move held at a floor):
+                # nothing left to state, and a repeat would only be a layout request.
+                self._pending_column = None
+                self._split_apply.stop()
+                return
+            self._pending_column = column
+            if not self._split_drag:
+                self._split_apply.start()
+            return
+        self._remember_split(PREVIEW_SPLIT_STACK_KEY, self.processInfoContainer.height())
 
     def _remember_split(self, key: str, actual_px: int) -> None:
         """Store `actual_px` as `key`'s DESIGN length; the file write coalesces with the rest of the drag."""
@@ -1071,6 +1179,10 @@ class ProcPagePage:
 
     def _flush_split(self) -> None:
         """Write the drag's final split(s) through the settings owner - one write per drag, not one per pixel."""
+        # The save debounce is also the safety net for a release this page never saw (the window switched away
+        # mid-drag): a gesture still marked live here, with no button held, is ended - never left frozen.
+        if self._split_drag and not (QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
+            self._end_split_drag()
         settings = self._settings
         pending = list(self._pending_split.items())
         if settings is None:
